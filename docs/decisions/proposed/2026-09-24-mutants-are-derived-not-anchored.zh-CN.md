@@ -29,13 +29,40 @@
 **一颗牙的耐久部分是它的名字、它的算子、它的选择器，以及必须失败的那个用例。位置与替换字节每次从语法树算出来。**
 
 1. **六个作用在具名选择器上的算子**，作用域限定在一个成员内：`condition-never`（选择器指到的那条条件永不成立）、`condition-holds`（它始终成立——镜像的那个，因为写成 `return a && b` 的规则说的是“这条条件为真”，把它换成 `false` 是把规则反过来，而不是去掉）、`neutralize-term`（该条件里的一项变成它的恒等元——`&&` 下为 `true`，`||` 下为 `false`）、`replace-argument`（某个调用的第 _n_ 个实参换成声明的片段）、`replace-property`（具名对象属性的值换成声明的片段）、`drop-statement`（选择器指到的那条语句连行带缩进被删掉）。两条规则让选择器保持诚实：匹配到多于一处、或者片段同时命中两个候选的，一律拒绝而不是猜；两个“整条件”算子拒绝只命名条件一部分的片段，因为整段替换会把 mutant 悄悄放大成“这条规则的每一条理由”——一项有它自己的算子。规则用不上这些时，仍可用“成员作用域 + 最小片段”的旧形式；而**“最小”是要点**：不要消息文本、不要同级实参、一项能表达的不要写成整条语句。
-   **已推广到整个登记处（2026-09-24）：又转了 59 颗，登记处现在是 110 颗里 77 颗 derived。**六个算子能表达的每一类点位都按目标逐个转完，每转完一个目标就 sweep：`condition-never`（守卫或初始化器，共 44）、`neutralize-term`（9）、`replace-property`（9）、`replace-argument`（6）、`drop-statement`（6）、`condition-holds`（3）。转完的读数：`110 of 110 caught by the named test`，**110 颗全部由各自 `expect` 点名的用例抓住**，22 of 22 逐字节还原，171 秒。
-   过程中暴露了三个"算子点不到这个点位"的缺口，每个都用 `tests/tools/mutation-anchor.test.ts` 里的一条用例补上（现在 19 条），而不是靠讨论：
-   - **类构造函数也是成员。**`BoardAdmission` 的构造函数在打开 store 时拒绝第二个 plan，而 `uniqueMember` 只认方法声明和函数声明，那个点位当时连 `within` 都写不出来。它的名字是 `constructor`；认它之后 `a-second-plan-silently-adopts-the-run` 才转得动。
-   - **跨行写的条件仍然是一个条件。**候选过滤器比的是原始文本，而整条件检查比的是空白归一化后的文本，于是被折行 `if` 的片段先找不到候选、再匹配不上。现在两边都归一化；并且过滤器不要求片段在候选内部唯一——`b` 在 `a && (b || !b)` 里出现三次，而它仍然是指名 `b` 的选择器所指的那个条件。
-   - **守卫语句也是一种语句。**`if (...) throw ...;` 原本不在 `drop-statement` 会删的语句里，因为 `if` 是 `IfStatement` 而非表达式、声明、`return` 或 `throw`。现在它算，并且语句解析取**最内层**那个包含片段的语句——条件早就是这个规则，这也正是不让片段同时命中守卫和守卫里那条语句的原因。
-     有一处 `within` 我写错了，是 sweep 抓出来的，这也正是"转完必须 sweep、不能只信 anchors pass"的理由：`the-completion-ignores-a-cancelled-unit` 被指向 `checkDispatch` 而不是 `checkCompletion`（那个片段在两个成员里都出现），于是 anchors pass 照样通过、mutant 照样被抓——但抓它的是**整个 suite**，不是那条"报告一个被取消单元的完成"的用例。重新瞄准后，那条用例又失败了。
-     **剩下 33 颗仍是手写，且按"需要什么算子"成簇：**比较运算符被改写（`=== "none"` 变 `!== "always"`，3）、模板或 SQL 字符串里的片段（5）、可迭代对象被清空或过滤被删（4）、调用或 `new` 被替换/脱壳（6）、下标移动（`[0]`→`[1]`，2）、初始化器被换成另一个表达式（3）、条件被取反（2）、语句被改写成另一条语句（3）、两条语句挤在一行（2）、字面量被替换（1）、点位在模块顶层因而没有成员可命名（1），以及一颗一次改两处的牙（`every-task-is-frozen-at-position-zero`，故意留着）。这四簇看起来值得加算子（`replace-comparison`、`replace-fragment`、`empty-iterable`、`replace-callee`）；其余是单点位，或者用通用算子表达反而会变得有歧义的形状。
+   **已推广到整个登记处（2026-09-24）：又转了 59 颗，随后补上"现成目录点名的算子"，登记处现在是 110 颗里 95 颗 derived。**第一遍：六个算子已经能表达的每一类点位，按目标逐个转完、每转完一个就 sweep——`condition-never`（守卫或初始化器，共 44）、`neutralize-term`（9）、`replace-property`（9）、`replace-argument`（6）、`drop-statement`（6）、`condition-holds`（3）。
+   第二遍：把剩下的 33 颗按"缺什么"分类，再拿现成变异工具真正点名的东西核对（Stryker 的 supported mutators、pitest 的 mutator 列表、cargo-mutants 的 patterns、Cosmic Ray 的 operator 概念）。其中十三颗落在"每个目录都有的变异类"里，于是词汇增加了七个算子，而不是宣布这一类做不到：
+
+   | 算子                  | 现成目录里的名字                                              | 颗数 |
+   | --------------------- | ------------------------------------------------------------- | ---- |
+   | `negate-condition`    | pitest `NEGATE_CONDITIONALS`；Stryker 布尔字面量              | 2    |
+   | `negate-comparison`   | pitest `NEGATE_CONDITIONALS`；Stryker `EqualityOperator`      | 2    |
+   | `remove-conditionals` | pitest `REMOVE_CONDITIONALS`                                  | 1    |
+   | `remove-call`         | Stryker 的 filter/slice/sort 删除；pitest `VOID_METHOD_CALLS` | 2    |
+   | `replace-call`        | Stryker `MethodExpression`；pitest `CONSTRUCTOR_CALLS`        | 1    |
+   | `replace-initializer` | pitest `PRIMITIVE_RETURNS`、`INLINE_CONSTS`；Stryker 字面量类 | 5    |
+   | `replace-iterable`    | Stryker `ArrayDeclaration`；pitest `EMPTY_RETURNS`            | 3    |
+
+   凡是"变异本身决定字节"的（`false`、`true`、取反后的算子、调用的接收者、守卫的 body）都由算子算出来；只有当新值是一个**选择**时才取 mutant 的 `to`——与先前算子同一条规矩。`tests/tools/mutation-anchor.test.ts` 每个算子一条用例，并包含它各自的拒绝情形（有 `else`、body 是块、调用的不是方法、没有初始化器），现在是 30 条。
+   随之而来两处"扩宽"，与此前的性质相同——都是**真实的一颗牙转不过去**才暴露出来的点位：
+   - **绑定到名字的函数也是成员。**`evals/ooo-execution/board-worker.ts` 里 `const count = (label) => {...}` 是该文件逻辑的全部，它不是函数声明，于是那颗牙连作用域都写不出来。选择器现在接受"初始化器是箭头函数或函数表达式的变量"。
+   - **两个一模一样的调用要靠"容器"区分。**`dispatchPlan` 里 `board.candidates()` 出现两次（一次 onOffer、一次接 filter），callee 文本完全相同。`in` 现在可以指"该调用所在语句里的一段文本"（它此前已经能指 `replace-property` 的宿主对象字面量、`replace-argument` 的调用自身文本）。
+     第一遍我又写错了一处 `within`，这次是**anchors pass**（不是 sweep）抓出来的：`the-completion-ignores-a-cancelled-unit` 被指向 `checkDispatch` 而不是 `checkCompletion`（同一片段在两个成员里都有）。这是更安静的那种失败：anchors pass 照样通过、mutant 照样被抓——但抓它的是**整个 suite**，不是那条"报告一个被取消单元的完成"的用例。第二遍同类错误反而是响的：我瞄的那个守卫在 `runParentCheck`，我却写了 `instrumentCommit`，pass 直接拒绝——"0 guards in instrumentCommit match the selector"。**成员名写错，找不到时是响的、找到两处同形状时是哑的**，这就是"转完必须 sweep"不可省的理由。
+     **两遍之后的读数：**`anchors: 110 of 110 resolve, over 22 targets`；`mutants: 110 of 110 caught by the named test`，**110 颗全部由各自 `expect` 点名的用例抓住**，22 of 22 逐位元组还原，exit 0，176 秒。
+
+   **剩下手写的是 15 颗，分类这一次是量出来的、不是猜的：**
+   - 三颗是**连现成工具也表达不了**的形状：**字符串里的片段**——两条 SQL 子句（`prune-ignores-retention`、`bounded-pin-never-expires`）和一处 SQLite 单位（`the-grace-uses-a-unit-sqlite-does-not-know`）。目录只会替换整个字面量（`StringLiteral` → `""`），而 SQL 有自己的目录（SQLMutation：删子句、`AND` 换 `OR`、NULL 变异），所以这三颗诚实的方向是"子句级 SQL 算子"，不是对字节动手术；
+   - 两颗在**模块顶层**，没有成员可命名：脚本里的一个守卫（`judge-may-judge-its-own-delivery`）和 `export const CLOCK_GRACE_MS = 50`。给 `derive` 加"文件级作用域"是设计决定而不是扩宽，这里不做；
+   - 两颗动**下标**（`[0]` → `[1]`）。这一颗同时纠正本记录自己此前的说法：之前把"下标移动（2）"列为目录覆盖的类，这是错的——`FirstToLast` 是**名为 `first` 的方法**，我查过的目录里没有哪个变异数组下标；
+   - 两颗是**两条语句挤在同一行**（`fusion-rollback-not-counted`、`a-score-with-no-recorded-history-counts-as-a-reproduction`）——这是 `drop-statement` 的行纪律问题，不是变异类；
+   - 一颗把比较改写成范围判断（`=== 1` → `>= 1`），而目录里的取反（`!== 1`）**不会**实现名字所陈述的那个违规；
+   - 四颗是无算子可依的定制表达式改写：构造调用被换成同接口的手写替身（`the-status-read-path-opens-the-rounds-store`）、多行调用被换成桩事实（`a-coordinated-write-skips-its-run-fact`）、包装被拆到内层调用（`the-daemon-verb-skips-the-coordinated-path`），以及 `view-adapter-accepts-bytes`（两条语句变成一个 `return`）；
+   - 一颗 `every-task-is-frozen-at-position-zero` 一次改两处，故意留着。
+
+   其中三簇"值得加算子"，作为待决写下：子句级 SQL 变异、文件级选择器、下标算子。这里都不加，因为它们都不是**扩宽**——各自是一条新的作用域规则或一个新领域——而不加它们的代价是量出来的七颗。
+   目录里还有两件事值得带过来：
+   - **subsumption（被覆盖）。**pitest 的《Less is more》给这件事起了名：一个 mutant 若已被其他 mutant 的组合覆盖，它带来的只是运行时间，不是信心。pitest 靠"固定的默认集合"回避；本登记处是**量**它——sweep 先说出是哪条用例失败，再读那条用例确认它确实陈述了规则。这正是 37 颗牙被退役而不是留着的原因，也是"是不是每种能想到的变异都该进来"的答案是"不"的原因。
+   - **unviable mutant（编译不过的变异体）。**cargo-mutants 把这类单独计数、默认不打印；它排除测试函数与 `unsafe`，并且明确写出**为什么不生成某些变异**（`==` 换成 `<`"太容易产生假阳性"、`-a` 换成 `+a`"太容易不编译"）。本登记处**按构造就没有** unviable（每颗都有点名的用例），但理由是同一条：为一个在本仓库很少出现的形状加通用算子，产出的多半是噪音。
+     这个设计与那些工具**唯一没有借用**的一点，是"消灭"的定义。StrykerJS、pitest、cargo-mutants 把"任意一条测试失败"就算 killed；其中几个还能报告是哪条测试（`fullMutationMatrix`），但用途是找出该加强哪条断言，不是当门禁。这里只有**点名的那条**用例失败才算数，所以"被整个 suite 抓到、却没被点名用例抓到"是本登记处会报、而那些工具一个都不会报的缺陷。
 
 2. **把 133 颗 G/V/R 牙逐目标改成派生形式**，从 `src/integration/ooo-execution.ts` 开始试点：该文件在两条目标条目里共 24 颗（16 颗融合合法性推演、8 颗会话融合）；同样的名字、同样的 `expect` 用例，转换后同样 24/24 被抓——其中 19 颗派生、5 颗保留手写（下面具名）——然后在该文件里做一次真重构，证明派生出来的位置都还在，而字节锚点会在这次重构里退役。
    试点文件里那 5 颗残余，每一颗都是单个表达式或单个值，而不是整条语句或消息：`selection-ignores-a-withdrawn-acceptance`（整个 `const` 初始化式被替换）、`the-budget-is-not-cut-from-the-startable-set`（被返回表达式里的调用被删）、`next-task-is-not-the-head-of-the-legal-set`（下标 `[0]` 变 `[1]`）、`speculation-guesses-several-facts-at-once`（`length === 1` 变 `>= 1`）、`a-guess-with-no-evidence-publishes`（插入一个分支并重写消息）。

@@ -45,27 +45,56 @@ export interface Derive {
      *  `condition-never`, because a rule written as `return a && b` says "this holds" - replacing it
      *  with `false` would reverse the rule instead of removing it. */
     | "condition-holds"
+    /** The condition the selector identifies becomes its negation. The operator pitest calls Negate
+     *  Conditionals: a rule that refuses when the condition holds now refuses when it does not. */
+    | "negate-condition"
+    /** The comparison the selector identifies gets the negated comparison operator (`===` becomes
+     *  `!==`, `<` becomes `>=`). The narrower sibling of `negate-condition`, for a rule whose point is
+     *  the comparison itself. */
+    | "negate-comparison"
+    /** The guard the selector identifies is dropped and its body is kept, so the guarded code runs
+     *  whatever the condition said. pitest's Remove Conditionals. */
+    | "remove-conditionals"
+    /** The call the selector identifies becomes its receiver, so the method's work is skipped: a
+     *  `filter` that no longer filters, a `slice` that no longer cuts. pitest's Void Method Calls and
+     *  Stryker's filter/slice/sort removals. */
+    | "remove-call"
+    /** The call the selector identifies becomes the declared `to` fragment, for a call replaced by a
+     *  different source of the same shape. */
+    | "replace-call"
     /** One term of that condition becomes its identity: `true` under `&&`, `false` under `||`. */
     | "neutralize-term"
     /** Argument `arg` of the call to `call` becomes the declared `to` fragment. */
     | "replace-argument"
     /** The value of the object property named `property` becomes the declared `to` fragment. */
     | "replace-property"
+    /** The initializer of the variable named `variable` becomes the declared `to` fragment: the value
+     *  bound here is a different one, which is what `primitive returns` and `inline constant` mutate. */
+    | "replace-initializer"
+    /** The iterable of the loop the selector identifies becomes the declared `to` fragment, so the
+     *  loop runs over an empty or a shortened collection. */
+    | "replace-iterable"
     /** The statement the selector identifies is removed, with its line and its indentation: an
      *  expression, a declaration, a `return`, a `throw`, or a guard clause. */
     | "drop-statement";
-  /** Which guard: a fragment its condition's own text contains, e.g. `existing.deliveredBy`. */
+  /** Which guard or which comparison: a fragment its own text contains, e.g. `existing.deliveredBy`. */
   readonly condition?: string;
   /** Which term of it, for `neutralize-term`: the term's own text, e.g. `!task.cancelled`. */
   readonly term?: string;
-  /** Which call, for `replace-argument`: its callee as written, e.g. `startableTasks`. */
+  /** Which call, for `replace-argument`, `remove-call` and `replace-call`: its callee as written,
+   *  e.g. `startableTasks`, or `board.candidates().filter` when the receiver is what tells it apart. */
   readonly call?: string;
   /** Which argument, for `replace-argument`, counting from zero. */
   readonly arg?: number;
   /** Which property, for `replace-property`: its name as written, e.g. `sessionReusable`. */
   readonly property?: string;
-  /** For `replace-property`: a fragment of the object literal that holds it, when the same property
-   *  name is written in several literals of one member and only one of them is the site. */
+  /** Which variable, for `replace-initializer`: its name as written. */
+  readonly variable?: string;
+  /** Which loop, for `replace-iterable`: a fragment of the loop's own text, e.g. `of unknownBudget`. */
+  readonly iterable?: string;
+  /** The holder that tells two same-named sites apart: for `replace-property`, a fragment of the
+   *  object literal that holds it; for `replace-argument`, a fragment of the call's own text; for
+   *  `remove-call` and `replace-call`, a fragment of the statement the call sits in. */
   readonly in?: string;
   /** Which statement, for `drop-statement`: a fragment of the statement's own text. */
   readonly statement?: string;
@@ -214,18 +243,30 @@ function collect<T extends ts.Node>(root: ts.Node, isWanted: (node: ts.Node) => 
 
 /** The one member with this name in the file, or why it is not one site. A class constructor is a
  *  member too: its name is written `constructor`, and code that refuses a second plan while it opens
- *  the store lives there and nowhere else. */
+ *  the store lives there and nowhere else. So is a function bound to a name - `const count = (label)
+ *  => ...` names one function, and whether the formatter wrote it as a declaration is not a fact about
+ *  which rules live inside it. */
 function uniqueMember(source: ts.SourceFile, name: string): ts.Node | { reason: string } {
+  const boundFunction = (node: ts.Node): boolean =>
+    ts.isVariableDeclaration(node) &&
+    node.name.getText(source) === name &&
+    node.initializer !== undefined &&
+    (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer));
   const named = (node: ts.Node): boolean =>
     ((ts.isMethodDeclaration(node) || ts.isFunctionDeclaration(node)) &&
       node.name?.getText(source) === name) ||
+    boundFunction(node) ||
     (ts.isConstructorDeclaration(node) && name === "constructor");
   const members = collect<ts.Node>(source, named);
   if (members.length !== 1)
     return {
       reason: `member ${name} matched ${members.length} members, refusing to claim a check`,
     };
-  return members[0]!;
+  const member = members[0]!;
+  // A name bound to a function is the function's body for every purpose here, so the selectors search
+  // the body rather than the declaration that wraps it.
+  if (ts.isVariableDeclaration(member) && member.initializer) return member.initializer;
+  return member;
 }
 
 /** Argument `arg` of the one call to `call` inside the member. */
@@ -240,7 +281,10 @@ function argumentSite(
   if (to === undefined) return { reason: "replace-argument needs the mutant's `to` fragment" };
   const calls = collect<ts.CallExpression>(
     member,
-    (node) => ts.isCallExpression(node) && node.expression.getText(source) === derive.call,
+    (node) =>
+      ts.isCallExpression(node) &&
+      node.expression.getText(source) === derive.call &&
+      (derive.in === undefined || containsText(node.getText(source), derive.in)),
   );
   if (calls.length !== 1)
     return {
@@ -480,6 +524,292 @@ function neutralizedTerm(
   };
 }
 
+/** What every resolver is given: the parsed file, the one member, the selector, and the bytes a
+ *  value-substituting operator declares. */
+interface Context {
+  readonly source: ts.SourceFile;
+  readonly text: string;
+  readonly member: ts.Node;
+  readonly derive: Derive;
+  readonly to: string | undefined;
+}
+
+type Resolver = (context: Context) => Site | { reason: string };
+
+/** The inner sites of one collection, with the nested ones dropped: a guard whose body is a statement
+ *  is the guard and not the two of them, and the same rule serves conditions, statements, comparisons
+ *  and guards. */
+function innermost<T extends ts.Node>(source: ts.SourceFile, nodes: readonly T[]): T[] {
+  return nodes.filter(
+    (node) =>
+      !nodes.some(
+        (other) =>
+          other !== node &&
+          other.getStart(source) >= node.getStart(source) &&
+          other.getEnd() <= node.getEnd(),
+      ),
+  );
+}
+
+/** The one collection site the fragment identifies, or why there is not one. */
+function oneSite<T extends ts.Node>(
+  source: ts.SourceFile,
+  derive: Derive,
+  nodes: readonly T[],
+  what: string,
+): T | { reason: string } {
+  const inner = innermost(source, nodes);
+  if (inner.length !== 1)
+    return {
+      reason: `${inner.length} ${what} in ${derive.within} match the selector, refusing to claim a check`,
+    };
+  return inner[0]!;
+}
+
+/** Every comparison operator, and the one that reverses it. */
+const NEGATED_COMPARISON: Readonly<Record<string, string>> = {
+  "===": "!==",
+  "!==": "===",
+  "==": "!=",
+  "!=": "==",
+  "<": ">=",
+  "<=": ">",
+  ">": "<=",
+  ">=": "<",
+};
+
+/** The condition the selector identifies becomes its negation. A condition that is already a whole
+ *  negation drops its `!` - which is exactly the negation - and anything else is wrapped, because
+ *  removing a `!` that binds only the first operand (`!a || b`) would not negate the whole. */
+function negateCondition(context: Context): Site | { reason: string } {
+  const condition = conditionSite(context.source, context.member, context.derive);
+  if ("reason" in condition) return condition;
+  if (
+    ts.isPrefixUnaryExpression(condition) &&
+    condition.operator === ts.SyntaxKind.ExclamationToken
+  )
+    return {
+      start: condition.getStart(context.source),
+      end: condition.operand.getStart(context.source),
+      replacement: "",
+      retaken: false,
+    };
+  return {
+    start: condition.getStart(context.source),
+    end: condition.getEnd(),
+    replacement: `!(${condition.getText(context.source)})`,
+    retaken: false,
+  };
+}
+
+/** The comparison the selector identifies gets the operator that reverses it. */
+function negateComparison(context: Context): Site | { reason: string } {
+  const { source, derive } = context;
+  if (derive.condition === undefined)
+    return { reason: "negate-comparison needs a `condition` fragment naming the comparison" };
+  const fragment = derive.condition;
+  const comparing = (node: ts.Node): boolean =>
+    ts.isBinaryExpression(node) &&
+    NEGATED_COMPARISON[node.operatorToken.getText(source)] !== undefined &&
+    containsText(node.getText(source), fragment);
+  const found = oneSite(
+    source,
+    derive,
+    collect<ts.BinaryExpression>(context.member, comparing),
+    "comparisons",
+  );
+  if ("reason" in found) return found;
+  const written = found.operatorToken.getText(source);
+  const after = found.left.getEnd();
+  const gap = context.text.slice(after, found.right.getStart());
+  const at = gap.indexOf(written);
+  if (at < 0)
+    return { reason: `cannot read ${written} in ${derive.within}, refusing to claim a check` };
+  return {
+    start: after + at,
+    end: after + at + written.length,
+    replacement: NEGATED_COMPARISON[written]!,
+    retaken: false,
+  };
+}
+
+/** The guard the selector identifies goes, and its body stays: the guarded code runs whatever the
+ *  condition said. A guard with an `else` would have to choose a branch, and a block body would have
+ *  to be unindented, so both are refused rather than rewritten. */
+function removeConditionals(context: Context): Site | { reason: string } {
+  const { source, derive } = context;
+  if (derive.condition === undefined)
+    return { reason: "remove-conditionals needs a `condition` fragment naming the guard" };
+  const fragment = derive.condition;
+  const found = oneSite(
+    source,
+    derive,
+    collect<ts.IfStatement>(
+      context.member,
+      (node) => ts.isIfStatement(node) && containsText(node.expression.getText(source), fragment),
+    ),
+    "guards",
+  );
+  if ("reason" in found) return found;
+  if (found.elseStatement)
+    return { reason: `the guard in ${derive.within} has an else, refusing to choose a branch` };
+  if (ts.isBlock(found.thenStatement))
+    return {
+      reason: `the guard's body in ${derive.within} is a block, refusing to rewrite its indentation`,
+    };
+  return {
+    start: found.getStart(source),
+    end: found.getEnd(),
+    replacement: found.thenStatement.getText(source),
+    retaken: false,
+  };
+}
+
+/** The text of the nearest statement a node sits in. Two identical expressions can be written in one
+ *  member - `board.candidates()` on offer and the same call filtered - and the statement that holds
+ *  each is what tells them apart without naming a line. */
+function holderStatementText(source: ts.SourceFile, node: ts.Node): string {
+  let holder: ts.Node = node;
+  while (holder.parent && !ts.isStatement(holder)) holder = holder.parent;
+  return ts.isStatement(holder) ? holder.getText(source) : node.getText(source);
+}
+
+/** The one call the selector names, by the callee as written. */
+function callSite(context: Context): ts.CallExpression | { reason: string } {
+  const { source, derive } = context;
+  if (derive.call === undefined) return { reason: `${derive.operator} needs a \`call\` fragment` };
+  const found = oneSite(
+    source,
+    derive,
+    collect<ts.CallExpression>(
+      context.member,
+      (node) =>
+        ts.isCallExpression(node) &&
+        node.expression.getText(source) === derive.call &&
+        (derive.in === undefined || containsText(holderStatementText(source, node), derive.in)),
+    ),
+    `calls to ${derive.call}`,
+  );
+  if ("reason" in found) return found;
+  return found;
+}
+
+/** The call becomes its receiver: the method's work is skipped, and what it was called on is what is
+ *  left. Only a method call has a receiver to fall back to, so anything else is refused. */
+function removeCall(context: Context): Site | { reason: string } {
+  const call = callSite(context);
+  if ("reason" in call) return call;
+  if (!ts.isPropertyAccessExpression(call.expression))
+    return { reason: `remove-call needs a method call, and ${context.derive.call} is not one` };
+  return {
+    start: call.getStart(context.source),
+    end: call.getEnd(),
+    replacement: call.expression.expression.getText(context.source),
+    retaken: false,
+  };
+}
+
+/** The call becomes the declared fragment: a different source of the same shape. */
+function replaceCall(context: Context): Site | { reason: string } {
+  if (context.to === undefined) return { reason: "replace-call needs the mutant's `to` fragment" };
+  const call = callSite(context);
+  if ("reason" in call) return call;
+  return {
+    start: call.getStart(context.source),
+    end: call.getEnd(),
+    replacement: context.to,
+    retaken: false,
+  };
+}
+
+/** The initializer of the one variable the selector names becomes the declared fragment. */
+function replaceInitializer(context: Context): Site | { reason: string } {
+  const { source, derive } = context;
+  if (derive.variable === undefined)
+    return { reason: "replace-initializer needs a `variable` name" };
+  if (context.to === undefined)
+    return { reason: "replace-initializer needs the mutant's `to` fragment" };
+  const found = oneSite(
+    source,
+    derive,
+    collect<ts.VariableDeclaration>(
+      context.member,
+      (node) => ts.isVariableDeclaration(node) && node.name.getText(source) === derive.variable,
+    ),
+    `declarations of ${derive.variable}`,
+  );
+  if ("reason" in found) return found;
+  const initializer = found.initializer;
+  if (!initializer)
+    return { reason: `${derive.variable} has no initializer, refusing to claim a check` };
+  return {
+    start: initializer.getStart(source),
+    end: initializer.getEnd(),
+    replacement: context.to,
+    retaken: false,
+  };
+}
+
+/** The iterable of the one loop the selector identifies becomes the declared fragment: the loop body
+ *  runs over a collection that is empty, or shorter than the one the code meant. */
+function replaceIterable(context: Context): Site | { reason: string } {
+  const { source, derive } = context;
+  if (derive.iterable === undefined)
+    return { reason: "replace-iterable needs an `iterable` fragment naming the loop" };
+  if (context.to === undefined)
+    return { reason: "replace-iterable needs the mutant's `to` fragment" };
+  const fragment = derive.iterable;
+  const found = oneSite(
+    source,
+    derive,
+    collect<ts.ForOfStatement>(
+      context.member,
+      (node) => ts.isForOfStatement(node) && containsText(node.getText(source), fragment),
+    ),
+    "loops",
+  );
+  if ("reason" in found) return found;
+  return {
+    start: found.expression.getStart(source),
+    end: found.expression.getEnd(),
+    replacement: context.to,
+    retaken: false,
+  };
+}
+
+/** The operators, each one a function of the selector and the declared bytes. Adding an operator means
+ *  adding an entry here and its name to `Derive["operator"]`: nothing else in the register changes. */
+const RESOLVERS: Readonly<Record<Derive["operator"], Resolver>> = {
+  "condition-never": (context) => {
+    const condition = conditionSite(context.source, context.member, context.derive);
+    if ("reason" in condition) return condition;
+    return wholeCondition(context.source, condition, context.derive);
+  },
+  "condition-holds": (context) => {
+    const condition = conditionSite(context.source, context.member, context.derive);
+    if ("reason" in condition) return condition;
+    return wholeCondition(context.source, condition, context.derive);
+  },
+  "negate-condition": negateCondition,
+  "negate-comparison": negateComparison,
+  "remove-conditionals": removeConditionals,
+  "remove-call": removeCall,
+  "replace-call": replaceCall,
+  "replace-initializer": replaceInitializer,
+  "replace-iterable": replaceIterable,
+  "neutralize-term": (context) => {
+    const condition = conditionSite(context.source, context.member, context.derive);
+    if ("reason" in condition) return condition;
+    return neutralizedTerm(context.source, condition, context.derive);
+  },
+  "replace-argument": (context) =>
+    argumentSite(context.source, context.member, context.derive, context.to),
+  "replace-property": (context) =>
+    propertySite(context.source, context.member, context.derive, context.to),
+  "drop-statement": (context) =>
+    statementSite(context.source, context.member, context.derive, context.text),
+};
+
 /**
  * Resolve a derived mutant: the selector picks the code, the operator says what to do to it, and the
  * bytes are computed here rather than stored. Every selector is scoped to one member, and every
@@ -494,12 +824,5 @@ function deriveSite(
   const source = ts.createSourceFile("mutant.ts", text, ts.ScriptTarget.Latest, true);
   const member = uniqueMember(source, derive.within);
   if ("reason" in member) return member;
-  if (derive.operator === "replace-argument") return argumentSite(source, member, derive, to);
-  if (derive.operator === "replace-property") return propertySite(source, member, derive, to);
-  if (derive.operator === "drop-statement") return statementSite(source, member, derive, text);
-  const condition = conditionSite(source, member, derive);
-  if ("reason" in condition) return condition;
-  return derive.operator === "neutralize-term"
-    ? neutralizedTerm(source, condition, derive)
-    : wholeCondition(source, condition, derive);
+  return RESOLVERS[derive.operator]({ source, text, member, derive, to });
 }

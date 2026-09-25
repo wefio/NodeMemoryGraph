@@ -320,3 +320,265 @@ test("matchText still refuses a marker that occurs twice, and re-takes a reflowe
   const reflowed = matchText("a  &&\n  b", "a && b");
   assert.ok(!("reason" in reflowed) && reflowed.retaken);
 });
+
+test("a negated condition is the negation, and the `!` on a whole condition is the one that goes", () => {
+  const above = `function selection(binding, cancelled) {\n  if (!binding) return apply();\n  if (binding && cancelled) return null;\n  return binding;\n}\n`;
+  assert.equal(
+    selected(
+      above,
+      named("x", {
+        within: "selection",
+        operator: "negate-condition",
+        condition: "!binding",
+      }),
+    ),
+    "!",
+  );
+  assert.equal(
+    selected(
+      above,
+      named("x", {
+        within: "selection",
+        operator: "negate-condition",
+        condition: "binding && cancelled",
+      }),
+    ),
+    "binding && cancelled",
+  );
+});
+
+test("the negated condition is wrapped, not unwrapped, when the `!` binds one operand only", () => {
+  const above = `function selection(a, b) {\n  if (!a || b) return 1;\n  return 0;\n}\n`;
+  const site = locate(
+    above,
+    named("x", { within: "selection", operator: "negate-condition", condition: "!a || b" }),
+  );
+  assert.ok(!("reason" in site));
+  assert.equal(above.slice(site.start, site.end), "!a || b");
+  // The replacement is the whole condition wrapped: dropping the `!` would negate `a` alone.
+  assert.equal(site.replacement, "!(!a || b)");
+});
+
+test("a comparison is negated in place, keeping both sides and the spacing around them", () => {
+  const above = `function selection(verdict) {\n  if (verdict !== "accepted") return false;\n  return true;\n}\n`;
+  const site = locate(
+    above,
+    named("x", {
+      within: "selection",
+      operator: "negate-comparison",
+      condition: 'verdict !== "accepted"',
+    }),
+  );
+  assert.ok(!("reason" in site));
+  assert.equal(above.slice(site.start, site.end), "!==");
+  assert.equal(site.replacement, "===");
+  assert.match(
+    refusal(
+      above,
+      named("x", {
+        within: "selection",
+        operator: "negate-comparison",
+        condition: 'verdict === "absent"',
+      }),
+    ),
+    /0 comparisons in selection match the selector/,
+  );
+});
+
+test("a dropped guard keeps its body, and refuses an else or a block body rather than rewriting it", () => {
+  const above = `function selection(spec, path, content, files) {\n  if (spec.baseline[path] !== content) files[path] = content;\n  return files;\n}\n`;
+  assert.equal(
+    selected(
+      above,
+      named("x", {
+        within: "selection",
+        operator: "remove-conditionals",
+        condition: "spec.baseline[path] !== content",
+      }),
+    ),
+    "if (spec.baseline[path] !== content) files[path] = content;",
+  );
+  const withElse = `function selection(a, b) {\n  if (a) b();\n  else c();\n  return a;\n}\n`;
+  assert.match(
+    refusal(
+      withElse,
+      named("x", { within: "selection", operator: "remove-conditionals", condition: "a" }),
+    ),
+    /has an else/,
+  );
+  const withBlock = `function selection(a, b) {\n  if (a) {\n    b();\n  }\n  return a;\n}\n`;
+  assert.match(
+    refusal(
+      withBlock,
+      named("x", { within: "selection", operator: "remove-conditionals", condition: "a" }),
+    ),
+    /body in selection is a block/,
+  );
+});
+
+test("removing a call leaves its receiver, and a call that is not a method is refused", () => {
+  const above = `function selection(board, attempted, values) {\n  const legal = board.candidates().filter((id) => !attempted.has(id));\n  const plain = Number(values);\n  return [legal, plain];\n}\n`;
+  assert.equal(
+    selected(
+      above,
+      named("x", {
+        within: "selection",
+        operator: "remove-call",
+        call: "board.candidates().filter",
+      }),
+    ),
+    "board.candidates().filter((id) => !attempted.has(id))",
+  );
+  assert.match(
+    refusal(above, named("x", { within: "selection", operator: "remove-call", call: "Number" })),
+    /needs a method call/,
+  );
+});
+
+test("a call is replaced by the declared source of the same shape", () => {
+  const above = `function selection(board, input) {\n  const legal = board.candidates().filter(Boolean);\n  return legal;\n}\n`;
+  const site = locate(
+    above,
+    named(
+      "x",
+      { within: "selection", operator: "replace-call", call: "board.candidates" },
+      { to: "input.plan" },
+    ),
+  );
+  assert.ok(!("reason" in site));
+  assert.equal(above.slice(site.start, site.end), "board.candidates()");
+  assert.equal(site.replacement, "input.plan");
+});
+
+test("two calls to the same callee are told apart by the statement each sits in", () => {
+  const above = `function selection(board, attempted) {
+  const onOffer = board.candidates();
+  const legal = board.candidates().filter((id) => !attempted.has(id));
+  return [onOffer, legal];
+}
+`;
+  assert.match(
+    refusal(
+      above,
+      named(
+        "x",
+        { within: "selection", operator: "replace-call", call: "board.candidates" },
+        { to: "input.plan" },
+      ),
+    ),
+    /2 calls to board.candidates in selection match the selector/,
+  );
+  const site = locate(
+    above,
+    named(
+      "x",
+      {
+        within: "selection",
+        operator: "replace-call",
+        call: "board.candidates",
+        in: "board.candidates().filter",
+      },
+      { to: "input.plan" },
+    ),
+  );
+  assert.ok(!("reason" in site));
+  assert.equal(above.slice(site.start, site.end), "board.candidates()");
+});
+
+test("a variable's value is replaced by the declared one, and an absent one is refused", () => {
+  const above = `function selection(shape) {\n  const sessions = Math.ceil(shape.units / per);\n  return sessions;\n}\n`;
+  const site = locate(
+    above,
+    named(
+      "x",
+      { within: "selection", operator: "replace-initializer", variable: "sessions" },
+      { to: "shape.units" },
+    ),
+  );
+  assert.ok(!("reason" in site));
+  assert.equal(above.slice(site.start, site.end), "Math.ceil(shape.units / per)");
+  const absent = `function selection(shape) {\n  const sessions = shape.units;\n  return sessions;\n}\n`;
+  assert.match(
+    refusal(
+      absent,
+      named(
+        "x",
+        { within: "selection", operator: "replace-initializer", variable: "count" },
+        { to: "0" },
+      ),
+    ),
+    /0 declarations of count/,
+  );
+});
+
+test("a loop's iterable is replaced by the declared one, and the loop is named when there are several", () => {
+  const above = `function selection(budgets, other) {\n  const seen = [];\n  for (const budget of budgets) {\n    seen.push(budget);\n  }\n  for (const item of other) {\n    seen.push(item);\n  }\n  return seen;\n}\n`;
+  assert.equal(
+    selected(
+      above,
+      named(
+        "x",
+        { within: "selection", operator: "replace-iterable", iterable: "of budgets" },
+        { to: "[]" },
+      ),
+    ),
+    "budgets",
+  );
+  assert.match(
+    refusal(
+      above,
+      named(
+        "x",
+        { within: "selection", operator: "replace-iterable", iterable: "of" },
+        { to: "[]" },
+      ),
+    ),
+    /2 loops in selection match the selector/,
+  );
+});
+
+test("a call is told from another by a fragment of its own text", () => {
+  const above = `function selection() {\n  const a = clockNow("later") + clockNow("earlier");\n  return a;\n}\n`;
+  assert.equal(
+    selected(
+      above,
+      named(
+        "x",
+        {
+          within: "selection",
+          operator: "replace-argument",
+          call: "clockNow",
+          arg: 0,
+          in: '"later"',
+        },
+        { to: '"earlier"' },
+      ),
+    ),
+    '"later"',
+  );
+  assert.match(
+    refusal(
+      above,
+      named(
+        "x",
+        { within: "selection", operator: "replace-argument", call: "clockNow", arg: 0 },
+        { to: '"earlier"' },
+      ),
+    ),
+    /matched 2 sites/,
+  );
+});
+
+test("a function bound to a name is a member, and the selectors search its body", () => {
+  const above = `const selection = (values) => {\n  const spec = new RegExp("x").exec(values);\n  return spec;\n};\n`;
+  const site = locate(
+    above,
+    named(
+      "x",
+      { within: "selection", operator: "replace-initializer", variable: "spec" },
+      { to: "null" },
+    ),
+  );
+  assert.ok(!("reason" in site));
+  assert.equal(above.slice(site.start, site.end), 'new RegExp("x").exec(values)');
+});

@@ -32,14 +32,17 @@
  *
  * Where a mutant says where it applies:
  *
- *   - `derive: { within, operator, ... }` is a **selector plus an operator**: the member is named
- *     (`constructor` when the site is in a class constructor), a
- *     fragment inside it is matched (the same matcher as below, so a reflow cannot break it), and the
- *     bytes to write are computed on every run. This is the form a tooth should have. Its identity is
- *     the rule and the site it names, never the text that happens to be there today, and it is what
- *     lets a rename, a reordered condition or a lifted line leave the tooth aimed at the same rule.
- *     Selectors that match more than one site - or a fragment that fits two conditions - are refused,
- *     never guessed at.
+ *   - `derive: { within, operator, ... }` is a **selector plus an operator**: the member is named (a
+ *     method, a function declaration, a class constructor under the name `constructor`, or a function
+ *     bound to a variable), a fragment inside it is matched (the same matcher as below, so a reflow
+ *     cannot break it), and the bytes to write are computed on every run. This is the form a tooth
+ *     should have. Its identity is the rule and the site it names, never the text that happens to be
+ *     there today, and it is what lets a rename, a reordered condition or a lifted line leave the tooth
+ *     aimed at the same rule. Selectors that match more than one site - or a fragment that fits two
+ *     conditions - are refused, never guessed at. The operators are the mutation classes the tools and
+ *     the literature name (conditionals-to-false/true, negate conditionals, remove conditionals, method
+ *     call removal, constant and collection substitution), kept deliberately few: see
+ *     `tools/mutation-anchor.ts` for each one's selector and the catalogue it comes from.
  *   - `ast: { within: "<member>" }` (or `ast: { call, argCount }`) locates the site through the syntax
  *     tree. Use this in any file that is still being edited. It survives reformatting, and it refuses
  *     when the code it guards has moved out of the member it belongs to - a move that a byte anchor
@@ -86,8 +89,11 @@ const TARGETS: readonly Target[] = [
     mutants: [
       {
         name: "any-verdict-counts-as-accepted",
-        from: '  if (fact.verdict !== "accepted") return false;',
-        to: "  if (fact.verdict === null) return false;",
+        derive: {
+          within: "acceptedFact",
+          operator: "negate-comparison",
+          condition: 'fact.verdict !== "accepted"',
+        },
         expect: "acceptedFact is the single rule, and the view adapter does not grow its own",
       },
       {
@@ -101,14 +107,22 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "spec-level-alias-is-dropped",
-        from: "  for (const key of unknownKeys(spec, SPEC_FIELDS)) {",
-        to: "  for (const key of [] as string[]) {",
+        derive: {
+          within: "refuseSpecFields",
+          operator: "replace-iterable",
+          iterable: "of unknownKeys(spec, SPEC_FIELDS)",
+        },
+        to: "[] as string[]",
         expect: "refuses the aliases that would turn a byte budget into a token claim",
       },
       {
         name: "budget-inner-alias-is-dropped",
-        from: "  for (const key of unknownBudget) {",
-        to: "  for (const key of [] as string[]) {",
+        derive: {
+          within: "refuseOutOfRange",
+          operator: "replace-iterable",
+          iterable: "of unknownBudget",
+        },
+        to: "[] as string[]",
         expect: "refuses an unknown key inside budget or limits, and a range above the maximum",
       },
       {
@@ -394,9 +408,8 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "selection-ignores-a-withdrawn-acceptance",
-        ast: { within: "selection" },
-        from: "  const selectable = plan.filter((task) => task.accepted || !task.delivered);",
-        to: "  const selectable = plan;",
+        derive: { within: "selection", operator: "replace-initializer", variable: "selectable" },
+        to: "plan",
         expect:
           "an outside rejection withdraws the release of a dependent, and the round fails closed",
       },
@@ -426,12 +439,8 @@ const TARGETS: readonly Target[] = [
         expect: "a declared budget is spent by claims in flight, not by the next task's rank",
       },
       {
-        // The cut is the whole point of declaring slots: without it the budget is a comment, and a
-        // run that asked for two would start the whole legal set.
         name: "the-budget-is-not-cut-from-the-startable-set",
-        ast: { within: "startableTasks" },
-        from: "  return legal.slice(0, room);",
-        to: "  return legal;",
+        derive: { within: "startableTasks", operator: "remove-call", call: "legal.slice" },
         expect: "a declared budget is spent by claims in flight, not by the next task's rank",
       },
       {
@@ -538,12 +547,13 @@ const TARGETS: readonly Target[] = [
         expect: "the continuation is a declared constraint, not the planner's default",
       },
       {
-        // A name the protocol does not define is refused by name; reading it as "nothing was asked"
-        // is what would make the declaration decoration.
         name: "an-unknown-constraint-is-ignored",
-        ast: { within: "enabledConstraints" },
-        from: "  const unknown = named.filter((name) => !(PLAN_CONSTRAINTS as readonly string[]).includes(name));",
-        to: "  const unknown: readonly string[] = [];",
+        derive: {
+          within: "enabledConstraints",
+          operator: "replace-initializer",
+          variable: "unknown",
+        },
+        to: "[] as readonly string[]",
         expect: "a constraint the protocol does not define is refused by name, never ignored",
       },
     ],
@@ -553,12 +563,9 @@ const TARGETS: readonly Target[] = [
     suites: ["tests/integration/ooo-publication-invariants.test.ts"],
     mutants: [
       {
-        // Every declared budget publishes its own set, and the ones a one-slot run cannot offer are
-        // the whole point of declaring more. Deriving every prefix at one slot hides them.
         name: "every-budget-is-walked-at-one-slot",
-        ast: { within: "budgetViews" },
-        from: "  for (const budget of budgets) {",
-        to: "  for (const budget of budgets.slice(0, 1)) {",
+        derive: { within: "budgetViews", operator: "replace-iterable", iterable: "of budgets" },
+        to: "budgets.slice(0, 1)",
         expect: "a declared budget publishes more than one slot can, and never a claimed task",
       },
       {
@@ -669,8 +676,8 @@ const TARGETS: readonly Target[] = [
     mutants: [
       {
         name: "worker-reads-only-one-reporter-shape",
-        from: '    const spec = new RegExp(`^\u2139 ${label} (\\\\d+)$`, "m").exec(body);',
-        to: "    const spec = null;",
+        derive: { within: "count", operator: "replace-initializer", variable: "spec" },
+        to: "null",
         expect: "the worker claims, runs the named suite and delivers its digest",
       },
     ],
@@ -750,11 +757,14 @@ const TARGETS: readonly Target[] = [
       },
 
       {
-        // What may run is the board's answer, not the plan's order: dispatching the declared plan
-        // instead would run a unit whose dependencies are not accepted yet.
         name: "the-loop-dispatches-the-plan-instead-of-what-the-board-offers",
-        from: "    const legal = board.candidates().filter((id) => !attempted.has(id));",
-        to: "    const legal = input.plan.filter((id) => !attempted.has(id));",
+        derive: {
+          within: "dispatchPlan",
+          operator: "replace-call",
+          call: "board.candidates",
+          in: "board.candidates().filter",
+        },
+        to: "input.plan",
         expect: "the loop runs what the board offers, in the order the board offers it",
       },
 
@@ -780,11 +790,12 @@ const TARGETS: readonly Target[] = [
         expect: "a worker that starts its own session is not reported as fusion",
       },
       {
-        // One pass takes each unit at most once: without the record of what was attempted, a unit the
-        // board offers again after a failed worker is asked for again and again in the same pass.
         name: "the-pass-asks-a-unit-it-already-failed-again",
-        from: "    const legal = board.candidates().filter((id) => !attempted.has(id));",
-        to: "    const legal = board.candidates();",
+        derive: {
+          within: "dispatchPlan",
+          operator: "remove-call",
+          call: "board.candidates().filter",
+        },
         expect: "a unit whose worker failed is asked once in a pass",
       },
       {
@@ -807,18 +818,18 @@ const TARGETS: readonly Target[] = [
     mutants: [
       {
         name: "a-unit-ignores-the-checks-it-declares",
-        from: "        const checks = unit.checks ? checkList(unit.checks) : fallback;",
-        to: "        const checks = fallback;",
+        derive: { within: "specFrom", operator: "replace-initializer", variable: "checks" },
+        to: "fallback",
         expect: "report: both plans accept the instrument's answers, and the same composed ones",
       },
 
       {
-        // A submitted patch carries the unit's whole frozen view, so composing by overwriting the
-        // candidate with each accepted submission puts the *last* unit's untouched copies of its
-        // siblings over the work they did. Only the files a unit changed are its work.
         name: "the-parent-takes-the-last-units-whole-view",
-        from: "        if (spec.baseline[path] !== content) files[path] = content;",
-        to: "        files[path] = content;",
+        derive: {
+          within: "runParentCheck",
+          operator: "remove-conditionals",
+          condition: "spec.baseline[path] !== content",
+        },
         expect: "report: both plans accept the instrument's answers, and the same composed ones",
       },
     ],
@@ -922,11 +933,12 @@ const TARGETS: readonly Target[] = [
     ],
     mutants: [
       {
-        // Binding is what makes an entry managed, so the refusal has to read the stored fact rather
-        // than whatever the caller believes about the entry.
         name: "an-adopted-entry-takes-the-direct-path",
-        from: "  if (!binding) return request.apply();",
-        to: "  if (binding) return request.apply();",
+        derive: {
+          within: "coordinatedEntryWrite",
+          operator: "negate-condition",
+          condition: "!binding",
+        },
         expect:
           "the routing rule sends a managed entry to its run and leaves an unmanaged one alone",
       },
@@ -971,12 +983,12 @@ const TARGETS: readonly Target[] = [
         expect: "a coordinated write lands the board transition and the run's fact together",
       },
       {
-        // A cancelled run is the end of its managed entries' lifecycle, and the fence is the only
-        // thing that says so.
         name: "a-cancelled-run-still-accepts-writes",
-        ast: { within: "managedWriteRefusal" },
-        from: "  if (!cancelled) return null;",
-        to: "  if (cancelled) return null;",
+        derive: {
+          within: "managedWriteRefusal",
+          operator: "negate-condition",
+          condition: "!cancelled",
+        },
         expect: "a cancelled run takes no further lifecycle writes on what it adopted",
       },
       {
@@ -1110,11 +1122,12 @@ const TARGETS: readonly Target[] = [
         expect: "a route that declares the shared checks not applicable narrows to its own tests",
       },
       {
-        // An absent declaration means "always". Reading anything that is not the explicit
-        // "always" as a decline would silently drop the floor for every route that never asked.
         name: "an-undeclared-route-is-read-as-declining",
-        from: 'route.verify.sharedChecks === "none"',
-        to: 'route.verify.sharedChecks !== "always"',
+        derive: {
+          within: "planNarrowVerify",
+          operator: "negate-comparison",
+          condition: 'route.verify.sharedChecks === "none"',
+        },
         expect: "a change cleanly owned by one leaf route narrows to its own tests",
       },
     ],
@@ -1252,8 +1265,12 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "fusion-counts-one-session-per-unit",
-        from: "  const sessions = Math.ceil(shape.units / per);",
-        to: "  const sessions = shape.units;",
+        derive: {
+          within: "fusionAccounting",
+          operator: "replace-initializer",
+          variable: "sessions",
+        },
+        to: "shape.units",
         expect: "fusion books the shared startup once per session, not once per unit",
       },
       {
@@ -1286,14 +1303,20 @@ const TARGETS: readonly Target[] = [
     mutants: [
       {
         name: "the-window-does-not-grace-valid-from",
-        from: '    `((${alias}.valid_from IS NULL OR ${alias}.valid_from <= ${clockNow("later")})` +',
-        to: '    `((${alias}.valid_from IS NULL OR ${alias}.valid_from <= ${clockNow("earlier")})` +',
+        derive: {
+          within: "currentlyValid",
+          operator: "replace-argument",
+          call: "clockNow",
+          arg: 0,
+          in: '"later"',
+        },
+        to: '"earlier"',
         expect: "a value stamped a moment in the future is current, not missing",
       },
       {
         name: "the-window-does-not-grace-expiry",
-        from: '  return `(${alias}.expires_at IS NULL OR ${alias}.expires_at > ${clockNow("earlier")})`;',
-        to: '  return `(${alias}.expires_at IS NULL OR ${alias}.expires_at > ${clockNow("later")})`;',
+        derive: { within: "notExpired", operator: "replace-argument", call: "clockNow", arg: 0 },
+        to: '"later"',
         expect: "the freshness half widens one grace into the past and no further",
       },
       {

@@ -129,42 +129,108 @@ targets`. The target `tools/agent-verify.ts` went with its single tooth, so the 
    strings rather than by a filesystem. **Landed:** the resolver is `tools/mutation-anchor.ts` (it held
    no state, so it moved out of the sweep script and the tests can call it), with 16 cases over source
    strings and no filesystem access.
-   **Extended to the whole register (2026-09-24): 59 more teeth converted, and the register is now 77
-   derived of 110** - every class of site the six operators can express, taken target by target and
-   swept after each: `condition-never` on a guard or an initializer (44 in total), `neutralize-term` (9),
-   `replace-property` (9), `replace-argument` (6), `drop-statement` (6), `condition-holds` (3). The
-   reading after it: `110 of 110 caught by the named test`, **all 110 by the case their `expect` names**,
-   22 of 22 restored byte-identically, 171 s.
-   Three vocabulary gaps showed up as _sites the operators could not name_, and each was closed with a
-   case in `tests/tools/mutation-anchor.test.ts` (now 19 cases) rather than argued about:
-   - **A class constructor is a member.** `BoardAdmission`'s constructor refuses a second plan while it
-     opens the store, and `uniqueMember` only knew method and function declarations, so that site had no
-     `within` at all. Its name is `constructor`; matching it is what let
-     `a-second-plan-silently-adopts-the-run` convert.
-   - **A condition written across lines is one condition.** The candidate filter compared raw text while
-     the whole-condition check compared whitespace-normalized text, so a fragment of a wrapped `if` found
-     no candidate and then matched nothing. Both now normalize, and a filter does not require the
-     fragment to be unique _inside_ the candidate - `b` appears three times in `a && (b || !b)`, and that
-     is still the condition a selector naming `b` means.
-   - **A guard clause is a statement.** `if (...) throw ...;` was not among the statements
-     `drop-statement` would remove, because an `if` is an `IfStatement` rather than an expression,
-     declaration, `return` or `throw`. It is now, and statements resolve to the **innermost** one
-     containing the fragment, the rule conditions already followed - which is also what keeps a fragment
-     from matching both a guard and the statement inside it.
-     One wrong `within` was shipped and the sweep caught it, which is the argument for sweeping after a
-     conversion rather than trusting the anchors pass: `the-completion-ignores-a-cancelled-unit` was aimed
-     at `checkDispatch` instead of `checkCompletion` (the fragment occurs in both members), so the anchors
-     pass resolved, the mutant was still caught - and it was caught by the _suite_, not by the case that
-     names a completion of a cancelled unit. Re-aimed, that case fails again.
-     **What is left hand-written is 33 teeth, and they cluster by the operator they would need:** a
-     comparison rewritten (`=== "none"` to `!== "always"`, 3), a fragment inside a template or a SQL string
-     (5), an iterable emptied or a filter dropped (4), a call or `new` replaced or unwrapped (6), an index
-     moved (`[0]` to `[1]`, 2), an initializer replaced by a different expression (3), a condition negated
-     (2), a statement rewritten into another statement (3), two statements sharing one line (2), a literal
-     swapped (1), a site at module top level, where there is no member to name (1), and one tooth that
-     changes two things at once (`every-task-is-frozen-at-position-zero`, kept deliberately). Four of these
-     clusters look worth an operator (`replace-comparison`, `replace-fragment`, `empty-iterable`,
-     `replace-callee`); the rest are single sites or shapes a general operator would make ambiguous.
+   **Extended to the whole register (2026-09-24): 59 more teeth converted, then the operators the
+   catalogues name, and the register is now 95 derived of 110.** First pass: every class of site the
+   six operators already had, taken target by target and swept after each - `condition-never` on a
+   guard or an initializer (44 in total), `neutralize-term` (9), `replace-property` (9),
+   `replace-argument` (6), `drop-statement` (6), `condition-holds` (3).
+   Second pass: the 33 that were left were classified by what they would need, and the classification
+   was checked against what mutation tools actually name (Stryker's supported mutators, pitest's
+   mutator list, cargo-mutants' patterns, Cosmic Ray's operator concept). Thirteen of those sites fell
+   into mutation classes every catalogue carries, so the vocabulary grew by seven operators rather than
+   the class being declared impossible:
+
+   | operator              | what the catalogues call it                                             | teeth |
+   | --------------------- | ----------------------------------------------------------------------- | ----- |
+   | `negate-condition`    | pitest `NEGATE_CONDITIONALS`; Stryker boolean literals                  | 2     |
+   | `negate-comparison`   | pitest `NEGATE_CONDITIONALS`; Stryker `EqualityOperator`                | 2     |
+   | `remove-conditionals` | pitest `REMOVE_CONDITIONALS`                                            | 1     |
+   | `remove-call`         | Stryker's filter/slice/sort removals; pitest `VOID_METHOD_CALLS`        | 2     |
+   | `replace-call`        | Stryker `MethodExpression`; pitest `CONSTRUCTOR_CALLS`                  | 1     |
+   | `replace-initializer` | pitest `PRIMITIVE_RETURNS`, `INLINE_CONSTS`; Stryker's literal mutators | 5     |
+   | `replace-iterable`    | Stryker `ArrayDeclaration`; pitest `EMPTY_RETURNS`                      | 3     |
+
+   Each one computes its own bytes where the mutation determines them (`false`, `true`, the negated
+   operator, the call's receiver, the guard's body) and takes the mutant's `to` only where the new value
+   is a choice - the same rule the earlier operators follow. `tests/tools/mutation-anchor.test.ts` has a
+   case per operator, including each refusal (an `else`, a block body, a call that is not a method call,
+   a missing initializer), and is now 30 cases.
+   Two widenings came with them, both of the same kind as the ones before - a site the vocabulary could
+   not name, shown by a real tooth failing to convert:
+
+   - **A function bound to a name is a member.** `const count = (label) => {...}` in
+     `evals/ooo-execution/board-worker.ts` is the whole of that file's logic, and it is not a function
+     declaration, so its only tooth had no scope to name. The selector now accepts a variable whose
+     initializer is an arrow function or a function expression.
+   - **Two identical calls need a holder to tell them apart.** `dispatchPlan` calls
+     `board.candidates()` on offer and again filtered; the callee text is the same in both. `in` now
+     names a fragment of the statement the call sits in (it already named the holding object literal for
+     `replace-property` and the call's own text for `replace-argument`).
+
+   One wrong `within` was shipped in the first pass and the **anchors pass**, not the sweep, is what
+   caught it: `the-completion-ignores-a-cancelled-unit` was aimed at `checkDispatch` instead of
+   `checkCompletion` (the fragment occurs in both members). That is the quieter failure: the anchors pass
+   resolves, the mutant is caught - by the _suite_, not by the case that names a completion of a
+   cancelled unit. In the second pass the same mistake was loud instead, because the guard I aimed at is
+   in `runParentCheck` and I named `instrumentCommit`: the pass refused with "0 guards in
+   instrumentCommit match the selector". A wrong member is loud when it finds nothing and silent when it
+   finds the same shape twice, which is why the sweep after a conversion is not optional.
+   **Reading after both passes:** `anchors: 110 of 110 resolve, over 22 targets`; `mutants: 110 of 110
+caught by the named test`, **all 110 by the case their `expect` names**, 22 of 22 targets restored
+   byte-identically, exit 0 in 176 s.
+
+   **What is left hand-written is 15 teeth, and the classification is now measured rather than
+   guessed:**
+
+   - three are the same shape the tools also cannot express: a fragment **inside a string** - two SQL
+     clauses (`prune-ignores-retention`, `bounded-pin-never-expires`) and one SQLite unit
+     (`the-grace-uses-a-unit-sqlite-does-not-know`). Catalogues mutate the whole literal
+     (`StringLiteral` to `""`), and SQL has its own catalogue (SQLMutation: clause deletion, `AND` to
+     `OR`, NULL mutations), so the honest next step for these is clause-level SQL operators, not byte
+     surgery;
+   - two are at **module top level**, where there is no member to name: a guard in a script
+     (`judge-may-judge-its-own-delivery`) and `export const CLOCK_GRACE_MS = 50`. Giving `derive` a
+     file-scope mode is a design decision, not a widening, and it is not taken here;
+   - two move an **index** (`[0]` to `[1]`). This one corrects this record's own earlier list: it said
+     "index moved (2)" was among the classes the catalogues cover, and that is wrong. `FirstToLast` is a
+     method _named_ `first`; no catalogue checked here mutates an array index;
+   - two write **two statements on one line** (`fusion-rollback-not-counted`,
+     `a-score-with-no-recorded-history-counts-as-a-reproduction`) - the line discipline of
+     `drop-statement`, not a mutation class;
+   - one rewrites a comparison into a range test (`=== 1` to `>= 1`), where the catalogue's negation
+     (`!== 1`) would not realise the violation the name states;
+   - four are bespoke expression rewrites with no operator behind them: a constructor swapped for a
+     crafted substitute of the same interface (`the-status-read-path-opens-the-rounds-store`), a
+     multi-line call replaced by a stub fact (`a-coordinated-write-skips-its-run-fact`), a wrapper
+     unwrapped to its inner call (`the-daemon-verb-skips-the-coordinated-path`), and
+     `view-adapter-accepts-bytes`, where two statements become one `return`;
+   - one, `every-task-is-frozen-at-position-zero`, changes two things at once and is kept deliberately.
+
+   Three of those clusters would repay an operator and are recorded as open: clause-level SQL mutation,
+   a file-scope selector, and an index operator. None is added here, because none is a widening - each
+   is a new scoping rule or a new domain - and the measured cost of not having them is seven teeth.
+   Two things the catalogues say about the shape of this work are worth carrying:
+
+   - **Subsumption.** pitest's _Less is more_ names the effect this record's retirement criterion
+     measures: a mutant that the combination of others already subsumes adds no confidence, only
+     runtime. pitest avoids them with a fixed default set; this register measures it instead - the sweep
+     says which case fails, and the case is then read to see whether it states the rule. That is why 37
+     teeth were retired rather than kept, and why the answer to "should every conceivable mutation be
+     here" is no.
+   - **Unviable mutants.** cargo-mutants counts a mutant that does not compile separately and prints it
+     only on request; it excludes test functions and `unsafe`, and it documents outright why it does not
+     generate some mutations (`==` to `<` "too prone to generate false positives", `-a` to `+a` "too
+     prone to generate unviable cases"). This register has no unviable mutants by construction - every
+     tooth has a named case - but the argument is the same one used above for leaving the residual
+     clusters alone: a general operator over a shape that is rare here produces mostly noise.
+
+   The one thing this design does _not_ borrow from those tools is the definition of a kill. StrykerJS,
+   pitest and cargo-mutants count a mutant as killed when _any_ test fails; several can report which
+   test did it (`fullMutationMatrix`), but the purpose is to find the assertion to strengthen, not to
+   gate. Here a tooth is counted only when **the case it names** is the one that fails, which is why
+   "caught by the suite, not by the case that names the rule" is a defect this register reports and none
+   of those tools would.
+
 2. The pilot target converted and swept: same names, same cases, same catches; then a refactor inside it
    that demonstrates a derived tooth surviving what a byte anchor did not. **Landed**, with one
    correction: the demo first refactor was a rename plus a condition lifted into `const closed = spent ||
