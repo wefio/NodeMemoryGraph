@@ -59,7 +59,7 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 
 `npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`，`tests/` 面第一次被类型检查）刻意不进入任何阻塞契约，只在 CI 以 advisory 步骤运行。
 
-`verify:static` 中的 `mutation:anchors`（`tools/mutation-teeth.ts --anchors-only`）只做一件事：把 149 颗具名 mutant 的位置全部解析一遍，不跑任何用例、不写任何字节，在 0.6 秒内回答“每一颗牙是否还瞄着东西”。它进入静态契约是因为**一颗锚点失效时没有别的检查会注意到**：全量 sweep 不跑（`mutation:teeth` 不在任何 CI 作业里），而一颗匹配不到位置的牙在 sweep 报告里只是“不可应用”并被排除出分母——本轮修掉的两颗牙就是这样悄无声息地停摆的。全量 sweep 仍然不进闸门：它是分钟级、要跑用例，属于推送前的常设规则（[决策](../decisions/proposed/2026-09-24-mutants-are-derived-not-anchored.md)）。
+`verify:static` 中的 `mutation:anchors`（`tools/mutation-teeth.ts --anchors-only`）只做一件事：把 110 颗具名 mutant 的位置全部解析一遍，不跑任何用例、不写任何字节，在 1 秒内回答“每一颗牙是否还瞄着东西”。它进入静态契约是因为**一颗锚点失效时没有别的检查会注意到**：全量 sweep 不跑（`mutation:teeth` 不在任何 CI 作业里），而一颗匹配不到位置的牙在 sweep 报告里只是“不可应用”并被排除出分母——本轮修掉的两颗牙就是这样悄无声息地停摆的。全量 sweep 仍然不进闸门：它是分钟级、要跑用例，属于推送前的常设规则（[决策](../decisions/implemented/2026-09-24-mutants-are-derived-not-anchored.md)）。
 
 `verify:static` 中的 `complexity:gate` 默认以 `git merge-base HEAD origin/main` 为基线（可用 `--base <ref>` 显式覆盖）。基线必须是 merge base 而不是 `HEAD`：后者只比较未提交的工作树，于是已提交到分支的改动完全不可见 —— 在 CI 的干净检出上它永远报“无改动”，等于每个 PR 都没有被这条 gate 检查过。因此每次运行都会**陈述自己用了哪个基线**，并**点名它未能测量的改动文件**（ESLint 拒绝某路径、或文件根本无法解析，都会产出“零发现”，与“量过且干净”无法区分）。
 
