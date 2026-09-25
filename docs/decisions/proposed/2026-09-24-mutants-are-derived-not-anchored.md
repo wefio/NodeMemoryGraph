@@ -82,6 +82,35 @@ and the replacement bytes are computed from the syntax tree on every run.**
    appear_, so they are the last to move and the first to be reconsidered: where the rule already has a
    check whose form is relational or enumerative, the tooth is retired and the check is named in its
    place.
+
+   **Landed (2026-09-24): 26 of the 27 insertion-shaped teeth are gone.** Each went the same way: the
+   sweep first showed that the tooth's named case was the one that failed under it, and reading that case
+   showed the rule stated outright - a count over the store's own source (`the store runs its transaction
+boundary in exactly one place`: one BEGIN, one COMMIT and one ROLLBACK, all three inside
+   `writeTransaction`), an enumeration of the accepted set, of the fallbacks or of what a freeze left
+   behind, a refusal by name plus a raw read back (`one reader of the same ready task is given the claim,
+the second is refused` reads the owner out of the table), or the file's own hash (a read-only open
+   neither creates, migrates nor writes). One was kept in this set: `every-task-is-frozen-at-position-zero`,
+   whose named case is a register/freeze/adopt/read-back round-trip and so is weaker than "the position
+   comes from the array order, not from the request" - the same reason `a-binding-does-not-record-its-channel`
+   stays. Seven of the 26 were **orphans** - no row named them - so the rule each pinned has a check and no
+   row: `round-publication-opens-its-own-transaction` (`the round's own publication rolls back with the
+transition that made it`), `round-never-releases-its-pin` (`cancelling a round releases the pins it held,
+so nothing it referenced leaks`), `ordered-mode-becomes-any-topological-order` (`the ordered mode is the
+declared plan order and nothing else`), `the-loop-awaits-each-unit-instead-of-the-batch` and
+   `a-unit-is-dispatched-twice-in-one-batch` (`a unit's check is outstanding while an independent unit's
+worker runs`, which also asserts "each unit is dispatched once"), `a-unit-nothing-checks-is-still-a-unit`
+   (`evals/ooo-execution/families.test.ts`'s per-family "a unit nothing checks is refused rather than
+   accepted on nothing") and `the-parent-check-ignores-its-own-verdict` (`the parent check is the composed
+acceptance, and a failing check is reported as such`). Whether those seven rules deserve rows of their own
+   is the next question this reading raises, and it is a question about the ledger rather than about the
+   register.
+
+   The reading after the retirement: **110 of 110 caught by the named test, all 110 by the case their
+   `expect` names**, 22 of 22 targets restored byte-identically, 162 s; `anchors: 110 of 110 resolve, over 22
+targets`. The target `tools/agent-verify.ts` went with its single tooth, so the register is 22 entries
+   over 21 files.
+
 4. **A check that a tooth still applies becomes part of the static contract**: an anchors-only pass that
    resolves every mutant, without running a suite, in single-digit seconds, failing when a site cannot be
    resolved, resolves more than once, or when a target claims more teeth than it can apply. The
@@ -173,9 +202,11 @@ claims at once, and the store is why each handoff is directed`, whose assertions
      caught, with the reason printed (`the-pass-asks-a-unit-it-already-failed-again`, 30 s). The tool's own
      comment says a run that never ends proves nothing; the code counts it as caught and says why. That
      tension is left alone, because resolving it changes what the ledger's `proven` means.
-     **Remaining:** the I/E teeth, and the two candidates judged **not** retirable so far -
-     `every-task-is-frozen-at-position-zero` and `a-binding-does-not-record-its-channel`, whose named case is
-     a register/freeze/adopt/read-back round-trip, weaker than the rule it is asked to carry.
+     **Remaining:** the mass conversion of the swap-shaped teeth - the six operators can express them, and that
+     is the deferred half of the vocabulary work - and the one insertion-shaped tooth left standing,
+     `every-task-is-frozen-at-position-zero`, together with `a-binding-does-not-record-its-channel`: both keep
+     a named case that is a register/freeze/adopt/read-back round-trip, weaker than the rule each is asked to
+     carry.
 
 ## Acceptance criteria
 

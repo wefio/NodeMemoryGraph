@@ -150,22 +150,6 @@ const TARGETS: readonly Target[] = [
     ],
     mutants: [
       {
-        // The handle, not a PRAGMA, is what makes this read-only: restoring writability must fail the test.
-        name: "the-read-only-factory-opens-a-writable-handle",
-        ast: { call: "DatabaseSync", argCount: 2 },
-        to: "new DatabaseSync(databasePath)",
-        expect: "a read-only open neither creates, migrates nor writes",
-      },
-      {
-        // The store owns the boundary: a write reached inside a transition without its port must be
-        // refused rather than become a second BEGIN.
-        name: "nested-write-transaction-is-allowed",
-        ast: { within: "writeTransaction" },
-        from: '    if (this.openTransaction)\n      throw new Error("a write transaction is already open: join it with the port it issued");',
-        to: '    if (this.openTransaction && false)\n      throw new Error("a write transaction is already open: join it with the port it issued");',
-        expect: "a write entry reached inside a transition without a port is refused, not nested",
-      },
-      {
         // A failure the caller swallows still forbids the commit: nothing may be written up to the
         // failure and then kept by a normal return value.
         name: "swallowed-failure-still-commits",
@@ -174,25 +158,7 @@ const TARGETS: readonly Target[] = [
         to: "      void state.rollbackOnly;",
         expect: "a failure the caller swallows still forbids the commit",
       },
-      {
-        // The mechanical invariant: a hand-rolled BEGIN anywhere in the store makes a second
-        // boundary possible, and behaviour tests would not notice a path that still works.
-        name: "a-method-opens-its-own-transaction",
-        ast: { within: "removeMemoryFromChain" },
-        from: "    return this.writeTransaction(() => {",
-        to: '    this.db.exec("BEGIN IMMEDIATE");\n    return this.writeTransaction(() => {',
-        expect: "the store runs its transaction boundary in exactly one place",
-      },
-      {
-        // The claim CAS is the whole of the fence: a reader who cannot take a live claim must
-        // lose it, and the condition that says so is the only thing between two readers and the
-        // same work.
-        name: "a-live-claim-can-be-taken-by-another-agent",
-        ast: { within: "claimTaskBoardEntry" },
-        from: "           AND (\n             (claimed_by IS NULL OR claim_expires_at IS NULL OR claim_expires_at <= ?)\n             OR claimed_by = ?\n           )`,",
-        to: "           AND (\n             (claimed_by IS NULL OR claim_expires_at IS NULL OR claim_expires_at <= ?)\n             OR ? IS NOT NULL\n           )`,",
-        expect: "one reader of the same ready task is given the claim, the second is refused",
-      },
+
       {
         name: "stale-claim-may-deliver-again",
         ast: { within: "claimTaskBoardEntry" },
@@ -221,24 +187,7 @@ const TARGETS: readonly Target[] = [
         to: '        "DELETE FROM task_board_retentions WHERE 0",',
         expect: "a bounded pin stops pinning when its bound passes",
       },
-      {
-        // A run's plan is what every later decision is read against, so a second registration
-        // must not be able to replace it.
-        name: "a-second-plan-overwrites-the-frozen-one",
-        ast: { within: "insertTaskRunManifest" },
-        from: "      if (\n        String(existing.plan_digest) !== input.planDigest ||\n        String(existing.policy) !== input.policy\n      )",
-        to: "      if (\n        false &&\n        String(existing.plan_digest) !== input.planDigest &&\n        String(existing.policy) !== input.policy\n      )",
-        expect: "a run registers once, and a second plan for the same run is refused",
-      },
-      {
-        // The fact write has to join the transition the caller opened, not open a second one; the
-        // board write and the run fact of one transition stand or fall together.
-        name: "the-run-fact-opens-its-own-transaction",
-        ast: { within: "appendTaskRunFact" },
-        from: "    return port\n      ? this.withPort(port, () => this.insertTaskRunFact(input))\n      : this.writeTransaction(() => this.insertTaskRunFact(input));",
-        to: "    void port;\n    return this.writeTransaction(() => this.insertTaskRunFact(input));",
-        expect: "a board write and a run fact land together, and neither lands alone",
-      },
+
       {
         // One managed entry belongs to one run: answering with the first binding would hand a
         // second run's facts to whoever asked.
@@ -283,15 +232,7 @@ const TARGETS: readonly Target[] = [
         to: "const db = new BoardAdmission(databasePath) as unknown as DatabaseSync;",
         expect: "the query port reads a round without migrating, publishing or exposing a write",
       },
-      {
-        // The composed write must join the transition it is called in: a publication that opens its
-        // own boundary commits even when the transition around it fails.
-        name: "round-publication-opens-its-own-transaction",
-        ast: { within: "publish" },
-        from: "      },\n      port,\n    ).id;",
-        to: "      },\n    ).id;",
-        expect: "the round's own publication rolls back with the transition that made it",
-      },
+
       {
         // The cache exists to be recomputable. A rebuild that returns without writing is the
         // difference between "the sources decide" and "the schema says so".
@@ -331,13 +272,7 @@ const TARGETS: readonly Target[] = [
         expect:
           "acceptance survives the entry's own TTL, because the round retains what it references",
       },
-      {
-        name: "round-never-releases-its-pin",
-        ast: { within: "fenceRow" },
-        from: "    // The artifact is being cleared, so the round no longer relies on this entry's\n    // verdict: the pins go with the value they protected.\n    this.releaseRowRetention(row);",
-        to: "    // The artifact is being cleared, so the round no longer relies on this entry's\n    // verdict: the pins go with the value they protected.",
-        expect: "cancelling a round releases the pins it held, so nothing it referenced leaks",
-      },
+
       {
         // The borrowed view is one implementation serving two paths. Letting the offline port
         // answer from its own rule is exactly the divergence this target exists to catch.
@@ -347,24 +282,7 @@ const TARGETS: readonly Target[] = [
         to: "      accepted: () => ({}),",
         expect: "the owner's view and the offline reader report the same facts",
       },
-      {
-        // Reopening withdraws what was built from the value that no longer exists. Clearing every
-        // accepted task instead takes back work the host already accepted.
-        name: "reopening-one-task-clears-every-acceptance",
-        ast: { within: "reopen" },
-        from: "      const affected = new Set([id]);",
-        to: "      const affected = new Set(rows.map((row) => row.id));",
-        expect: "a later refusal does not withdraw the prefix that was already accepted",
-      },
-      {
-        // The first decision is the one that took effect. A second cancellation that rewrites it
-        // is a state patch overwriting a terminal fact.
-        name: "a-second-cancellation-overwrites-the-first-decision",
-        ast: { within: "cancel" },
-        from: "    const already = this.cancelled();\n    if (already !== null) return [];",
-        to: "    const already = this.cancelled();\n    if (false && already !== null) return [];",
-        expect: "a cancellation names the lease it revokes, and the batch behind it is refused",
-      },
+
       {
         // The frozen plan is the run's input, and installing a second one over it is the second
         // editable task truth the design forbids. The constructor refuses by policy digest.
@@ -382,15 +300,7 @@ const TARGETS: readonly Target[] = [
         to: '      if (false && !this.live(row)) return "stale";',
         expect: "a claim the board retires inside the verification window cannot be committed",
       },
-      {
-        // The decision is a fact in the store. Keeping it only in the process that made it is
-        // what would let a restart resume a stopped round.
-        name: "cancelling-a-round-forgets-its-reason",
-        ast: { within: "cancel" },
-        from: '        .prepare("UPDATE ooo_probe_runs SET cancel_reason=?, cancelled_at=? WHERE run_id=?")\n        .run(reason.slice(0, 1_000), new Date(this.now).toISOString(), this.runId);',
-        to: '        .prepare("UPDATE ooo_probe_runs SET cancel_reason=NULL, cancelled_at=? WHERE run_id=?")\n        .run(reason.slice(0, 1_000), new Date(this.now).toISOString(), this.runId);',
-        expect: "the terminal decision outlives the host that made it, and still refuses new work",
-      },
+
       {
         // Selection and ranking must not be able to disagree with each other. `next()` is the head of
         // `candidates()`, so a caller that starts one unit and a caller that starts several read the
@@ -531,17 +441,7 @@ const TARGETS: readonly Target[] = [
         to: "    candidate.assumptions.length >= 1 &&",
         expect: "the first experiment allows one pending fact, and a second is refused by name",
       },
-      {
-        // A missing reading is not permission to publish: the design's "不确定就等待" is the whole
-        // reason the outcome has three states instead of two.
-        name: "a-guess-with-no-evidence-publishes",
-        ast: { within: "speculationOutcome" },
-        from:
-          '      outcome: "wait",\n      sessionReusable: true,\n' +
-          "      reason: `no evidence for ${assumption.predicateId}`,",
-        to: '      outcome: "publish",\n      sessionReusable: true,\n      reason: "assumed",',
-        expect: "no evidence waits: an unknown fact never becomes a silent publish",
-      },
+
       {
         name: "an-unattested-reading-counts-as-evidence",
         derive: {
@@ -674,12 +574,6 @@ const TARGETS: readonly Target[] = [
     suites: ["tests/integration/task-semantics-model.test.ts"],
     mutants: [
       {
-        name: "ordered-mode-becomes-any-topological-order",
-        from: '  if (mode === "ordered") return [[...ids]];',
-        to: '  if (mode === "ordered" && !ids.length) return [[...ids]];',
-        expect: "the ordered mode is the declared plan order and nothing else",
-      },
-      {
         name: "fusion-rollback-not-counted",
         from: "      rollbacks += 1;\n      retries += 1;",
         to: "      retries += 1;",
@@ -721,15 +615,6 @@ const TARGETS: readonly Target[] = [
         to: "  if (false && entry.deliveredBy === agentId) {",
         expect:
           "the board drivers run the protocol end to end through the daemon that serves the store",
-      },
-      {
-        // The whole boundary is that a driver reaches the board through the daemon. A convenience
-        // import of the store is how that boundary rots, and the structural check is what catches it
-        // rather than a later round discovering a second writer.
-        name: "a-driver-falls-back-to-opening-the-store",
-        from: "const state = roundDaemon(resolve(values.daemon));",
-        to: 'const state = roundDaemon(resolve(values.daemon));\nconst store = (await import("../../src/core/store/base.ts")).NmgStoreBase;',
-        expect: "a driver refuses without a daemon, and no driver opens a database of its own",
       },
     ],
   },
@@ -781,15 +666,7 @@ const TARGETS: readonly Target[] = [
         to: "    const batch = legal.slice(0, 1);",
         expect: "a declared slot count is reached, and the claims overlap in time",
       },
-      {
-        // The batch is the unit of overlap, and the overlap that matters is a unit's *check* beside
-        // another unit's work: awaiting each unit in turn keeps a batch's claims from ever running
-        // beside each other, which is the property the C arm buys.
-        name: "the-loop-awaits-each-unit-instead-of-the-batch",
-        from: '    const held = await Promise.all(\n      batch.map((id) => (chainPath ? runChain(id) : dispatch(id).then((a) => "unit" in a))),\n    );',
-        to: '    const held: boolean[] = [];\n    for (const id of batch)\n      held.push(await (chainPath ? runChain(id) : dispatch(id).then((a) => "unit" in a)));',
-        expect: "a unit's check is outstanding while an independent unit's worker runs",
-      },
+
       {
         // What may run is the board's answer, not the plan's order: dispatching the declared plan
         // instead would run a unit whose dependencies are not accepted yet.
@@ -798,12 +675,7 @@ const TARGETS: readonly Target[] = [
         to: "    const legal = input.plan.filter((id) => !attempted.has(id));",
         expect: "the loop runs what the board offers, in the order the board offers it",
       },
-      {
-        name: "a-unit-is-dispatched-twice-in-one-batch",
-        from: "    const batch = legal.slice(0, input.slots);",
-        to: "    const batch = [...legal, ...legal].slice(0, input.slots);",
-        expect: "a unit's check is outstanding while an independent unit's worker runs",
-      },
+
       {
         // The bound is what keeps a fused run from swallowing the plan. Without it one session would
         // run every legal successor in turn. The comparison lives in `nextSessionMove` (the shared
@@ -846,32 +718,12 @@ const TARGETS: readonly Target[] = [
     suites: ["evals/ooo-execution/plan-driver.test.ts", "evals/ooo-execution/families.test.ts"],
     mutants: [
       {
-        // The slot count is declared to the board, not only promised to the loop: a driver that asks
-        // the loop for one slot while telling the board a different count cannot overlap claims.
-        name: "the-driver-declares-one-slot-whatever-the-spec-says",
-        from: "    board: gate,\n    plan: planIds,\n    slots: spec.slots,",
-        to: "    board: gate,\n    plan: planIds,\n    slots: 1,",
-        expect: "a declared slot count is reached, and the claims overlap in time",
-      },
-      {
         name: "a-unit-ignores-the-checks-it-declares",
         from: "        const checks = unit.checks ? checkList(unit.checks) : fallback;",
         to: "        const checks = fallback;",
         expect: "report: both plans accept the instrument's answers, and the same composed ones",
       },
-      {
-        name: "a-unit-nothing-checks-is-still-a-unit",
-        from: "        if (!checks)\n          throw new Error(\n            `${id}: no checks",
-        to: "        if (!checks && false)\n          throw new Error(\n            `${id}: no checks",
-        expect: "a unit nothing checks is refused rather than accepted on nothing",
-      },
-      {
-        name: "the-parent-check-ignores-its-own-verdict",
-        from: "  return {\n    verdict: verified.verdict,",
-        to: '  return {\n    verdict: "accept",',
-        expect:
-          "the parent check is the composed acceptance, and a failing check is reported as such",
-      },
+
       {
         // A submitted patch carries the unit's whole frozen view, so composing by overwriting the
         // candidate with each accepted submission puts the *last* unit's untouched copies of its
@@ -914,12 +766,7 @@ const TARGETS: readonly Target[] = [
         to: "  if (false && !legalSet.has(suggestion.taskId)) {",
         expect: "a suggestion outside the legal set is refused, however high it scores",
       },
-      {
-        name: "the-ordering-adds-a-task-to-the-set",
-        from: "  return [...legal].sort((left, right) => {",
-        to: "  return [...legal, ...best.keys()].sort((left, right) => {",
-        expect: "a suggestion outside the legal set is refused, however high it scores",
-      },
+
       {
         name: "an-unmodelled-action-is-scored",
         from: '  if (suggestion.action !== "next") {',
@@ -932,12 +779,7 @@ const TARGETS: readonly Target[] = [
         to: "    if (false && source.enabled === false) {",
         expect: "a disabled or failing source falls back to the rule policy, and says why",
       },
-      {
-        name: "a-failing-source-takes-the-decision-with-it",
-        from: "    } catch (error) {",
-        to: "    } catch (error) {\n      throw error;",
-        expect: "a disabled or failing source falls back to the rule policy, and says why",
-      },
+
       {
         name: "a-score-from-another-scope-is-reused",
         from: "  if (\n    provenance.sessionId !== projection.sessionId ||\n    provenance.branchId !== projection.branchId\n  ) {",
@@ -1045,14 +887,7 @@ const TARGETS: readonly Target[] = [
         to: "      if (false && dependency === task.taskId)",
         expect: "a freeze cannot dangle, repeat a task, or lean on itself",
       },
-      {
-        // Freezing is one transition: a batch where the store refuses one task must not leave the
-        // earlier ones frozen, or a plan exists that no caller ever proposed.
-        name: "the-plan-freezes-one-task-per-transaction",
-        from: "  return store.coordinateRunWrite(request.runId, (port) => {\n    // The array order is the plan order: the position comes from here, not from the request.\n    request.tasks.forEach((task, position) =>\n      store.freezeTaskRunTask({ ...task, runId: request.runId, position }, port),\n    );\n    return { runId: request.runId, frozen: request.tasks.length };\n  });",
-        to: "  request.tasks.forEach((task, position) =>\n    store.freezeTaskRunTask({ ...task, runId: request.runId, position }),\n  );\n  return { runId: request.runId, frozen: request.tasks.length };",
-        expect: "a refused freeze leaves the plan exactly as it was",
-      },
+
       {
         // The plan order is the array order: the position comes from that loop, so freezing every
         // task at zero would leave the stored plan's order to the task ids.
@@ -1061,15 +896,7 @@ const TARGETS: readonly Target[] = [
         to: "    request.tasks.forEach((task) =>\n      store.freezeTaskRunTask({ ...task, runId: request.runId, position: 0 }, port),\n    );",
         expect: "a run registers, freezes a plan, adopts entries, and reads it all back",
       },
-      {
-        // A cancelled run is closed: its plan is not extended behind the cancellation that every
-        // other rule in this file already honours.
-        name: "a-cancelled-run-takes-a-new-plan",
-        from: "  const refusal = managedWriteRefusal(store, request.runId);\n  if (refusal) throw new Error(refusal);",
-        to: "  const refusal: string | null = null;\n  if (refusal) throw new Error(refusal);",
-        ast: { within: "freezeRunPlan" },
-        expect: "a cancelled run takes no further plan",
-      },
+
       {
         // The binding records which channel carries the entry, which is what lets a status reader
         // resolve it without searching every channel.
@@ -1078,15 +905,7 @@ const TARGETS: readonly Target[] = [
         to: "        payload: null,",
         expect: "a run registers, freezes a plan, adopts entries, and reads it all back",
       },
-      {
-        // Creating the entry and adopting it are one transition. Two calls would leave an unmanaged
-        // entry behind when the binding is refused - the hole the run fence exists to close.
-        name: "the-entry-is-created-before-its-binding-is-checked",
-        from: "  return store.writeTransaction((port) => {\n    const entry = store.putTaskBoardEntry(request.entry, port);",
-        to: "  return store.writeTransaction(() => {\n    const entry = store.putTaskBoardEntry(request.entry);",
-        expect:
-          "adoption is part of the transition that creates the entry, so a refusal leaves no entry",
-      },
+
       {
         // A run-level cancellation is the run's fact, not a task's: the schema's empty task id is
         // what keeps it from colliding with a task that has no name.
@@ -1109,15 +928,6 @@ const TARGETS: readonly Target[] = [
         name: "an-unknown-run-can-be-cancelled",
         from: "  if (!store.taskRunManifest(request.runId))",
         to: "  if (false && !store.taskRunManifest(request.runId))",
-        expect:
-          "status is a read: an unknown run has no manifest and is not registered by being asked",
-      },
-      {
-        // A status read registers and appends nothing: a view that repaired what it could not find
-        // would make its own answer true.
-        name: "status-registers-the-run-it-cannot-find",
-        from: "    manifest: store.taskRunManifest(runId),",
-        to: '    manifest: (store.registerTaskRun({ runId, planDigest: "", policy: "", revision: "", retention: "" }), store.taskRunManifest(runId)),',
         expect:
           "status is a read: an unknown run has no manifest and is not registered by being asked",
       },
@@ -1189,20 +999,6 @@ const TARGETS: readonly Target[] = [
         to: 'if (false && sharedChecks !== undefined && sharedChecks !== "always" && sharedChecks !== "none") {',
         expect:
           "verify.sharedChecks must be a known declaration, and declining needs its own tests",
-      },
-    ],
-  },
-  {
-    // One home for the check list: the plan decides it, including a route's decline. A caller that
-    // rebuilt the floor from the constant would execute checks the plan said not to.
-    target: "tools/agent-verify.ts",
-    suites: ["tests/tools/agent-verify.test.ts"],
-    mutants: [
-      {
-        name: "the-caller-rebuilds-the-shared-floor",
-        from: "? [...narrowPlan.shared, ...(route.tests.length ? [nodeTestCheckName(route.id)] : [])]",
-        to: '? ["check", "docs:check", "format:check", "glossary:check", "lint", "package:check", "rtm:check", ...(route.tests.length ? [nodeTestCheckName(route.id)] : [])]',
-        expect: "a declining route's narrow run verifies on its own tests and nothing else",
       },
     ],
   },
