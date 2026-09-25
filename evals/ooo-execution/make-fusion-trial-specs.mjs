@@ -41,7 +41,7 @@ if (fixture.worker?.kind !== "canned") {
 
 const live = { ...fixture, worker: { kind: "pi", provider, model } };
 const control = { ...live, id: "pipeline-control" };
-const fusion = { ...live, id: "pipeline-fusion", fusion: { unitsPerSession } };
+const fusion = { ...live, id: "pipeline-fusion", fusion: { unitsPerSession, constraints: ["repair-first"] } };
 
 mkdirSync(OUT, { recursive: true });
 writeFileSync(`${OUT}/control.spec.json`, `${JSON.stringify(control, null, 2)}\n`);

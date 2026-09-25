@@ -18,13 +18,13 @@
  * it holds the claim, that the artifact file exists and is non-empty, that the digest recomputes,
  * and that the daemon recorded exactly the digest it reported.
  */
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseArgs } from "node:util";
 
 import { boardCall, roundDaemon } from "./round-client.ts";
+import { workDigest } from "../../src/integration/work-identity.ts";
 
 const DEFAULT_SUITES = [
   "tests/core/task-board-deliverable.test.ts",
@@ -113,7 +113,7 @@ const suites = (values.suites ?? DEFAULT_SUITES.join(",")).split(",").filter(Boo
   if (!existsSync(out) || statSync(out).size === 0) throw new Error(`artifact ${out} is empty`);
 
   // 4. The artifact's identity, recomputed from the bytes that were just written.
-  const digest = createHash("sha256").update(readFileSync(out)).digest("hex");
+  const digest = workDigest(readFileSync(out));
   // Two reporter shapes exist in the wild: TAP (`# pass 27`) and node's spec reporter
   // (`ℹ pass 27`). Reading only one of them made this worker report 0/0 for a 27/27 run —
   // a self-report that contradicted its own artifact. Parse both, and refuse to deliver

@@ -9,6 +9,10 @@
  * The two cases at the end are the wiring rather than the rules: an admission with no source answers
  * exactly as the rule does, and one with a source can only reorder what the shared rules already
  * made legal.
+ *
+ * The last two are the answer itself: what a caller that asks "what is legal, and why not" gets back.
+ * The causes are the selector's own gates, so the verdict and the reasons cannot come apart - and the
+ * second case is the invariant that makes that worth anything: no refusal is silent.
  */
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
@@ -21,7 +25,7 @@ import {
   type PatchTaskSpec,
   type ProbePlan,
 } from "../../src/integration/ooo-board.ts";
-import { nextTask, selectableTasks } from "../../src/integration/ooo-execution.ts";
+import { nextTask, selectableTasks, unitLegality } from "../../src/integration/ooo-execution.ts";
 import {
   orderCandidates,
   revalidateSuggestion,
@@ -30,7 +34,11 @@ import {
   type SuggestionProvenance,
   type SuggestionSource,
 } from "../../src/integration/task-advisers.ts";
-import { compileTaskUnits, dispatchTasks } from "../../src/integration/task-semantics.ts";
+import {
+  compileTaskUnits,
+  dispatchTasks,
+  type RecordedFacts,
+} from "../../src/integration/task-semantics.ts";
 
 const SCOPE = {
   sessionId: "session-1",
@@ -324,4 +332,135 @@ test("an admission with no source answers exactly as the rule does, and a source
   // The claim-side check the design names: the ranking is not a write licence.
   assert.equal(advised.refuseStaleRanking("B", ["A", "B"]), null);
   assert.match(advised.refuseStaleRanking("B", ["A"])!.reason, /no longer a legal candidate/u);
+});
+
+test("the answer names the gate a unit was refused through, and the gates are the rule's own", () => {
+  const REV = "input-v1";
+  const units = compileTaskUnits({
+    plan: [
+      ["A", REV, [], "read-only", null, null],
+      ["B", REV, [], "read-only", null, null],
+    ],
+    specs: {},
+  });
+  assert.ok(units.legal, "the fixture plan is legal");
+  const read = (facts: RecordedFacts, slots = 2) =>
+    unitLegality(dispatchTasks(units.units, facts), slots);
+  const reasons = (answer: ReturnType<typeof read>, id: string) =>
+    answer.units.find((unit) => unit.id === id)!.reasons;
+
+  // A claim in flight is named on its own unit and spends the budget for the others: a plan-level
+  // cause is attached to the unit it holds back, so an empty legal set is never a bare empty set.
+  const claimed = read({ claimed: ["A"] }, 1);
+  assert.deepEqual(claimed.legal, [], "the declared budget is spent");
+  assert.deepEqual(reasons(claimed, "A"), ["claimed"]);
+  assert.deepEqual(reasons(claimed, "B"), ["budget-spent"]);
+
+  // Each of these is one gate of the rule, and the cause is that gate's name.
+  assert.deepEqual(reasons(read({ cancellations: ["A"] }), "A"), ["cancelled"]);
+  assert.deepEqual(reasons(read({ revisions: { A: "other" } }), "A"), ["stale-input"]);
+  assert.deepEqual(reasons(read({ artifacts: { A: "artifact-a" } }), "A"), [
+    "delivered-not-accepted",
+  ]);
+
+  const writeEffect = compileTaskUnits({
+    plan: [["A", REV, [], "workspace-write", null, null]],
+    specs: {},
+  });
+  assert.ok(writeEffect.legal, "the fixture plan is legal");
+  assert.deepEqual(unitLegality(dispatchTasks(writeEffect.units, {}), 1).units[0]!.reasons, [
+    "effect-not-startable",
+  ]);
+
+  const dependent = compileTaskUnits({
+    plan: [
+      ["B", REV, [], "read-only", null, null],
+      ["A", REV, ["B"], "read-only", null, null],
+    ],
+    specs: {},
+  });
+  assert.ok(dependent.legal, "the fixture plan is legal");
+  const unmet = unitLegality(dispatchTasks(dependent.units, {}), 2);
+  assert.deepEqual(unmet.legal, ["B"], "a dependency nobody accepted is not a candidate");
+  assert.deepEqual(unmet.units.find((unit) => unit.id === "A")!.reasons, [
+    "dependency-not-accepted",
+  ]);
+
+  // A declared wait is licensed: the unit that declares it is named, and what follows stays legal.
+  const waited = compileTaskUnits({
+    plan: [
+      ["W", REV, [], "read-only", "fact-ready", null],
+      ["X", REV, [], "read-only", null, null],
+    ],
+    specs: {},
+  });
+  assert.ok(waited.legal, "the fixture plan is legal");
+  const waiting = unitLegality(dispatchTasks(waited.units, {}), 2);
+  assert.deepEqual(waiting.legal, ["X"], "a declared wait licenses what follows it");
+  assert.deepEqual(waiting.units.find((unit) => unit.id === "W")!.reasons, ["external-wait"]);
+
+  // Two pending waits are not one licence, and the unit that has no cause of its own says so.
+  const twoWaits = compileTaskUnits({
+    plan: [
+      ["W1", REV, [], "read-only", "one", null],
+      ["W2", REV, [], "read-only", "two", null],
+      ["Y", REV, [], "read-only", null, null],
+    ],
+    specs: {},
+  });
+  assert.ok(twoWaits.legal, "the fixture plan is legal");
+  const several = unitLegality(dispatchTasks(twoWaits.units, {}), 2);
+  assert.deepEqual(several.legal, [], "two pending waits are not a licence");
+  assert.deepEqual(several.units.find((unit) => unit.id === "Y")!.reasons, [
+    "several-waits-pending",
+  ]);
+
+  // The head rule holds the rest back: a stale head is not skipped, and the units behind it say so.
+  const behind = read({ revisions: { A: "other" } });
+  assert.deepEqual(behind.legal, []);
+  assert.deepEqual(behind.units.find((unit) => unit.id === "A")!.reasons, ["stale-input"]);
+  assert.deepEqual(behind.units.find((unit) => unit.id === "B")!.reasons, ["earlier-unit-blocked"]);
+});
+
+test("no refusal in the answer is silent, over the flags a plan's facts can carry", () => {
+  const REV = "input-v1";
+  const units = compileTaskUnits({
+    plan: [
+      ["A", REV, [], "read-only", null, null],
+      ["B", REV, [], "isolated-artifact", null, null],
+    ],
+    specs: {},
+  });
+  assert.ok(units.legal, "the fixture plan is legal");
+  let refusals = 0;
+  for (const claimed of [false, true])
+    for (const cancelled of [false, true])
+      for (const stale of [false, true])
+        for (const delivered of [false, true])
+          for (const slots of [1, 2]) {
+            const facts: RecordedFacts = {
+              claimed: claimed ? ["A"] : [],
+              cancellations: cancelled ? ["A"] : [],
+              revisions: stale ? { A: "other" } : {},
+              artifacts: delivered ? { A: "artifact-a" } : {},
+              sourceRevisions: { A: REV },
+            };
+            const tasks = dispatchTasks(units.units, facts);
+            const answer = unitLegality(tasks, slots);
+            assert.deepEqual(
+              answer.legal,
+              selectableTasks(tasks, slots),
+              "the answer's verdict is the rule's, whatever the flags",
+            );
+            for (const unit of answer.units) {
+              const accepted = tasks.find((task) => task.id === unit.id)!.accepted;
+              if (unit.legal || accepted) continue;
+              refusals += 1;
+              assert.ok(
+                unit.reasons.length > 0,
+                `${unit.id} is refused with no reason (slots ${String(slots)})`,
+              );
+            }
+          }
+  assert.ok(refusals > 0, "the family refuses something, so the invariant was exercised");
 });

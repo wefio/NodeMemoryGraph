@@ -7,7 +7,7 @@
 ## Executive summary
 
 `npm run test:product` 在负载下失败过一次，用例是 `demoteMemory: demotes LTG memory to STG`。上一个会话
-在 ledger 里把它记成 *flaky, not fixed* 就走开了：那个标签本身就是全部诊断，并且让这个问题沉寂了一整个
+在 ledger 里把它记成 _flaky, not fixed_ 就走开了：那个标签本身就是全部诊断，并且让这个问题沉寂了一整个
 会话。改用循环而不是跑一次之后，它在约 1/1500 次写入中复现：一条记忆以 `valid_from = …38.468Z` 写入，
 读回时 SQLite 的 `now` 是 `…38.467Z`，于是读路径的 `valid_from <= now` 为假，行不可见，调用方为一条**刚写
 入**的记忆收到 `memory <id> is not active`。这是真实缺陷，位于产品的 current-value 窗口：两个时钟读者
@@ -48,9 +48,13 @@ SQLite 没有 `milliseconds` 日期修饰符：`'+50 milliseconds'` 会让 `strf
   `memory … is not active`。
 - 把行与 SQLite 的 `now` 并列打印，看到那 1 ms 的先后：时间戳 `…38.468Z`，`now` `…38.467Z`。
 - 修复：窗口宽限，落在 `src/core/store/clock.ts`，接入四个谓词。循环：3000 次 0 失败。
-- 一个确定性测试（`tests/core/store/current-value-window.test.ts`，6 个用例）钉住两个边界；4 个具名 mutant
-  （2 个钉边界、1 个钉宽限、1 个钉 SQLite 时间单位）让这个钉子可被检查：4/4 被抓住。
+- 一个测试（`tests/core/store/current-value-window.test.ts`，6 个用例）钉住两个边界；4 个具名 mutant
+  （2 个钉边界、1 个钉宽限、1 个钉 SQLite 时间单位）让这个钉子可被检查：4/4 被抓住。它的四条边界用例里
+  有三条一开始就是确定性的，过期侧那条不是——更正见下。
 - ledger 中那一行从 "flaky, not fixed" 更正为已修复的缺陷及其复现率。
+- 2026-09：同一条用例在负载中的 CI 上失败（`Product tests and coverage`，1527 中 1 失败），而本地连跑
+  30 次全过。在写时间戳与读之间做扫描，定位到翻转点——边界后 0 ms 与 10 ms 答 "current"，20 ms 及以后答
+  "not active"——用例改成关系式。点名抓它的那个 mutant 仍然能抓住它，4/4。
 
 ## Root cause
 
@@ -67,8 +71,11 @@ SQLite 在读时提供 `now`。同一个墙上时钟的两个读者不会返回�
 ## Guardrails added
 
 - `src/core/store/clock.ts` 是 current-value 窗口宽限的唯一归属，未来的谓词有一处可读，而不必再手写一个比较。
-- `tests/core/store/current-value-window.test.ts`（6 个用例）让边界确定化：时间戳在未来半个宽限内的算生效；
-  未来一分钟的算不生效；过期侧同理；400 轮"写后立刻读"永不失败；窗口在两个边界都放宽、从不收紧。
+- `tests/core/store/current-value-window.test.ts`（6 个用例）钉住边界：时间戳在未来半个宽限内的算生效；
+  未来一分钟的算不生效；400 轮"写后立刻读"永不失败；窗口在两个边界都放宽、从不收紧；过期侧**恰好**放宽一个
+  宽限，且与同一条语句里写下的边界相比。最后这一条是"刚刚过期一刻的值仍算生效"更正后的形状——旧写法
+  在一条语句里写边界、在另一条语句里读它，于是它是一条秒表，余量就是剩下那半个宽限。这条用例不可能有行级
+  写法：行的边界由一条语句写下、由另一条语句比较，可测的是那条**关系**，不是那个时长。
 - `tools/mutation-teeth.ts` 中 4 个具名 mutant（`src/core/store/clock.ts` 拥有独立 target）让这个测试的"牙齿"
   可被检查，其中包括那个会静默排除每一行的 SQLite 时间单位。
 - ledger 的 `test:product` 行不再写 "flaky"：间歇失败要么连同复现尝试与比率一起记录，要么记为 open。
@@ -82,4 +89,7 @@ SQLite 在读时提供 `now`。同一个墙上时钟的两个读者不会返回�
   要求不可能达到的精度。
 - 来自**静默** NULL 表达式的错误答案比异常更糟：`strftime` 遇到未知修饰符会排除每一行并报 `ok: null`。
   一个 mutant 才能让这种"理论上可能"的失误变成永久可见。
+- 共享一个时钟**来源**不等于共享一次时钟**读取**。把边界写进 SQL 消掉了 JavaScript 与 SQLite 的偏差，却
+  没有碰到另一个竞态：两条语句就是两个瞬间，所以一条期望"值落在 50 ms 宽限内"的用例里装着 50 ms 的秒表。
+  这是第一条教训往下一层的同一个形状——为一个时序依赖做的修复本身又是个时序依赖，只有关系式不含秒表。
 - 贴标签很便宜，这正是它危险的原因：错误标签的代价会在之后的会话里、在别人的截止日期下出现。

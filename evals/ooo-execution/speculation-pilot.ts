@@ -14,11 +14,11 @@
 // A published candidate is verified by running the unit's own frozen check against it, in a copy of the
 // fixture directory, so the quality term is a real check result and not the model's own claim.
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
 import { patchCandidate, preparePatchWork } from "../../src/integration/ooo-patch.ts";
+import { workDigest } from "../../src/integration/work-identity.ts";
 import {
   speculationOutcome,
   type ResolvedPredicate,
@@ -71,7 +71,7 @@ writeFileSync(
     "failures unexplainable.",
   ].join("\n") + "\n",
 );
-const digestOf = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
+const digestOf = (value: string) => workDigest(value).slice(0, 16);
 const interfaceDigest = digestOf(readFileSync(`${FIXTURE}/interface.ts`, "utf8"));
 
 /** The frozen work for one attempt, always under a fresh ticket: a discarded branch's ticket is never

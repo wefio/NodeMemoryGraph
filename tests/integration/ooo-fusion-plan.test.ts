@@ -3,12 +3,15 @@
  *
  * The cases below pin the three properties the design claims - a move is a pure function of the plan
  * and its facts, an offline graph prices the best case rather than a run's state, and a floor is a
- * floor - plus the two refusals that keep a bound from turning into a schedule.
+ * floor - plus the two refusals that keep a bound from turning into a schedule, and the declaration
+ * that keeps a preference from becoming a default.
  */
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  PLAN_CONSTRAINTS,
   chainCoverFloor,
+  enabledConstraints,
   fusionGraph,
   listScheduleSessions,
   nextSessionMove,
@@ -48,6 +51,7 @@ function plan(count: number, over: Partial<SessionPlan> = {}): SessionPlan {
   return {
     tasks,
     declarations: Object.fromEntries(names.map((name) => [name, declaration()])),
+    constraints: ["repair-first"],
     ...over,
   };
 }
@@ -160,6 +164,7 @@ test("the move closes the session by name, never by guessing", () => {
   const incompatible: SessionPlan = {
     tasks: [task("one"), task("two")],
     declarations: { one: declaration(), two: declaration({ capability: "other" }) },
+    constraints: ["repair-first"],
   };
   assert.deepEqual(
     nextSessionMove({ plan: incompatible, current: "one", size: 1, bound: 2, onOffer: ["two"] }),
@@ -170,4 +175,39 @@ test("the move closes the session by name, never by guessing", () => {
 test("the same plan and the same facts yield the same move", () => {
   const input = { plan: plan(3), current: "one", size: 1, bound: 3, onOffer: ["two", "three"] };
   assert.deepEqual(nextSessionMove(input), nextSessionMove(input));
+});
+
+test("the continuation is a declared constraint, not the planner's default", () => {
+  const boundary = { current: "one", size: 1, bound: 2, onOffer: ["two"] };
+  const declared = plan(3);
+  const silent: SessionPlan = { ...declared, constraints: [] };
+
+  // The same plan and the same facts, and the only difference is which constraints the plan enabled.
+  assert.deepEqual(nextSessionMove({ plan: declared, ...boundary }), { kind: "admit", unit: "two" });
+  assert.deepEqual(nextSessionMove({ plan: silent, ...boundary }), {
+    kind: "close",
+    reason: "repair-first is not enabled, so this plan runs one unit per session",
+  });
+
+  // And the constraint that is not enabled is absent from the plan's own answer rather than assumed.
+  assert.deepEqual(enabledConstraints(declared), ["repair-first"]);
+  assert.deepEqual(enabledConstraints(silent), []);
+  assert.deepEqual(enabledConstraints({ tasks: [], declarations: {} }), []);
+  assert.deepEqual(PLAN_CONSTRAINTS, ["repair-first"], "the protocol's list is the whole list");
+});
+
+test("a constraint the protocol does not define is refused by name, never ignored", () => {
+  const unknown: SessionPlan = {
+    tasks: [task("one"), task("two")],
+    declarations: { one: declaration(), two: declaration() },
+    constraints: ["faster"],
+  };
+  assert.throws(
+    () => enabledConstraints(unknown),
+    /unknown constraint faster; the protocol defines repair-first/u,
+  );
+  assert.throws(
+    () => nextSessionMove({ plan: unknown, current: "one", size: 1, bound: 2, onOffer: ["two"] }),
+    /unknown constraint faster/u,
+  );
 });

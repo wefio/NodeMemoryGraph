@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { workDigest } from "./work-identity.ts";
 
 export interface PatchBudget {
   perFile: number;
@@ -217,7 +217,7 @@ export function preparePatchWork(input: PatchWork) {
   });
   const serialized = JSON.stringify(work);
   if (Buffer.byteLength(serialized, "utf8") > 256_000) throw new Error("snapshot budget exceeded");
-  const digest = createHash("sha256").update(serialized).digest("hex");
+  const digest = workDigest(serialized);
   return Object.freeze({ work, digest });
 }
 

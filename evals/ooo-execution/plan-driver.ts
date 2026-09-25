@@ -82,6 +82,10 @@ export interface PlanDriverSpec {
    *  chains, so this bound is what keeps a fused run from swallowing the plan. Omitted: no fusion. */
   fusion?: {
     unitsPerSession: number;
+    /** The constraints the spec enables for that fusion, by the protocol's names. A fused cell declares
+     *  `repair-first`: the move that continues a session is a declared constraint now, not the planner's
+     *  default, so a spec that asks for fusion without it would run the control arm and be read as one. */
+    constraints?: readonly string[];
     /** Per-unit session declarations. Omitted: every unit shares the run's one capability and
      *  authority, and only its own visibility decides. */
     declarations?: Readonly<Record<string, { capability?: string; authority?: string }>>;
@@ -253,6 +257,7 @@ export async function runPlan(spec: PlanDriverSpec): Promise<PlanRun> {
       declarations: Object.fromEntries(
         spec.plan.map((row) => [String(row[0]), declarationOf(String(row[0]))]),
       ),
+      ...(spec.fusion?.constraints ? { constraints: spec.fusion.constraints } : {}),
       ...(pendingBranches.length ? { pendingBranches } : {}),
     };
   };
@@ -434,6 +439,7 @@ export interface SpecFile {
    *  the control arm. */
   fusion?: {
     unitsPerSession: number;
+    constraints?: readonly string[];
     declarations?: Readonly<Record<string, { capability?: string; authority?: string }>>;
   };
   worker:
@@ -462,7 +468,15 @@ function checkList(raw: readonly { label: string; test: string }[]): DataCheck[]
 }
 
 function readSpecFile(path: string): SpecFile {
-  const file = JSON.parse(readFileSync(path, "utf8")) as SpecFile;
+  return validateSpecFile(JSON.parse(readFileSync(path, "utf8")) as SpecFile);
+}
+
+/**
+ * Refuse a spec file that cannot be run as written, by name, before any of it is believed. Exported
+ * because the refusals are the driver's contract with whoever writes a spec: a file that declares
+ * fusion without the constraint that continues a session would run the control arm.
+ */
+export function validateSpecFile(file: SpecFile): SpecFile {
   if (!Array.isArray(file.plan) || !file.plan.length)
     throw new Error("spec.plan must be non-empty");
   if (!Array.isArray(file.baseline) || !file.baseline.length)
@@ -473,6 +487,17 @@ function readSpecFile(path: string): SpecFile {
   for (const id of Object.keys(file.units))
     if (!planIds.has(id))
       throw new Error(`spec.units.${id} is not in the plan; the plan is the authority`);
+  // A spec that declares a bound above one and no constraint enabling the continuation would run the
+  // control arm while its file says fusion, which is the one confusion this driver must not create.
+  if (
+    file.fusion &&
+    (file.fusion.unitsPerSession ?? 1) > 1 &&
+    !(file.fusion.constraints ?? []).includes("repair-first")
+  )
+    throw new Error(
+      "spec.fusion declares more than one unit per session but enables no constraint that continues a " +
+        'session; declare fusion.constraints = ["repair-first"]',
+    );
   return file;
 }
 

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { NmgStore } from "../../src/core/store.ts";
+import { boardEntryView } from "../../src/core/board-entry-view.ts";
 
 function withStore(run: (store: NmgStore) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-task-board-"));
@@ -101,6 +102,17 @@ test("task board supports cursor reads, cross-agent resolution, and expiry", () 
       2,
     );
   });
+});
+
+test("the read face has one rule for a board entry's body", () => {
+  // A pointer is already the low-context form the reader wants, so it is returned whole and never cut.
+  assert.equal(boardEntryView("memory=abc123"), "memory=abc123");
+  // Anything else becomes one bounded line, so a read never carries a body it did not ask for.
+  assert.equal(boardEntryView("first line\n\nsecond   line"), "first line second line");
+  assert.equal(boardEntryView("x".repeat(10), 10), "x".repeat(10));
+  const bounded = boardEntryView("y".repeat(11), 10);
+  assert.equal(bounded.length, 10);
+  assert.equal(bounded, `${"y".repeat(9)}…`);
 });
 
 test("compact preview read omits long bodies but keeps ordering and cursor", () => {
@@ -746,14 +758,15 @@ test("task board serial handoff promotes pending on claim, resolve, and expiry",
         content,
         expiresAt,
       });
-    const stateOf = (store: NmgStore, id: string) => store.taskBoardEntry(id)!.serialState;
+    const stateOf = (store: NmgStore, channel: string, id: string) =>
+      store.getTaskBoardEntryById(channel, id)?.serialState ?? null;
 
     // — Claim drives promotion ("回复=接手"): claiming the outstanding lets the
     // next pending promote; the claimed entry stops occupying the serial slot.
     const c1 = putHandoff("serial-promo-1", "first", "2099-01-01T00:00:00.000Z");
     const c2 = putHandoff("serial-promo-1", "second", "2099-01-01T00:00:00.000Z");
-    assert.equal(stateOf(store, c1.id), "outstanding");
-    assert.equal(stateOf(store, c2.id), "pending");
+    assert.equal(stateOf(store, "serial-promo-1", c1.id), "outstanding");
+    assert.equal(stateOf(store, "serial-promo-1", c2.id), "pending");
     assert.throws(
       () =>
         store.claimTaskBoardEntry({
@@ -770,8 +783,8 @@ test("task board serial handoff promotes pending on claim, resolve, and expiry",
       agentId: "worker",
       leaseSeconds: 60,
     });
-    assert.equal(stateOf(store, c1.id), null); // claimed → no longer the slot
-    assert.equal(stateOf(store, c2.id), "outstanding"); // promoted
+    assert.equal(stateOf(store, "serial-promo-1", c1.id), null); // claimed → no longer the slot
+    assert.equal(stateOf(store, "serial-promo-1", c2.id), "outstanding"); // promoted
 
     // — Resolve drives promotion: closing the outstanding promotes the next.
     const r1 = putHandoff("serial-promo-2", "first", "2099-01-01T00:00:00.000Z");
@@ -781,7 +794,7 @@ test("task board serial handoff promotes pending on claim, resolve, and expiry",
       entryId: r1.id,
       agentId: "worker",
     });
-    assert.equal(stateOf(store, r2.id), "outstanding");
+    assert.equal(stateOf(store, "serial-promo-2", r2.id), "outstanding");
 
     // — Expiry drives promotion: pruning the expired outstanding moves the
     // pending up (RAII on the serial slot).
@@ -789,15 +802,15 @@ test("task board serial handoff promotes pending on claim, resolve, and expiry",
     const e1 = putHandoff("serial-promo-3", "first", past);
     const e2 = putHandoff("serial-promo-3", "second", "2099-01-01T00:00:00.000Z");
     store.pruneExpiredTaskBoardEntries(new Date().toISOString());
-    assert.equal(store.taskBoardEntry(e1.id), null); // pruned
-    assert.equal(stateOf(store, e2.id), "outstanding");
+    assert.equal(store.getTaskBoardEntryById("serial-promo-3", e1.id), null); // pruned
+    assert.equal(stateOf(store, "serial-promo-3", e2.id), "outstanding");
 
     // — No pending to promote is a safe no-op (last outstanding resolved).
     const n1 = putHandoff("serial-promo-4", "only", "2099-01-01T00:00:00.000Z");
     store.resolveTaskBoardEntry({ taskId: "serial-promo-4", entryId: n1.id, agentId: "worker" });
     // No throw, no phantom outstanding in a fresh channel.
     const fresh = putHandoff("serial-promo-5", "fresh", "2099-01-01T00:00:00.000Z");
-    assert.equal(stateOf(store, fresh.id), "outstanding");
+    assert.equal(stateOf(store, "serial-promo-5", fresh.id), "outstanding");
   });
 });
 

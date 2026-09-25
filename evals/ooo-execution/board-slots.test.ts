@@ -141,6 +141,9 @@ test("at the default budget the licence is still the head of the ordered set", (
     "the legal set is what a caller may report or rank, whatever the budget",
   );
   assert.deepEqual(gate.startable(), ["P"], "the licence is the budget's part of that set");
+  // The ordered set has a head, and it is one task: a caller that asks "what next" gets the same
+  // answer the licence names, rather than the second candidate or the whole set.
+  assert.equal(gate.next(), "P", "the head of the ordered set is the next task");
   const published = handoffs(gate);
   assert.equal(published.length, 1, "one slot publishes one handoff");
   assert.equal(published[0]!.to, null, "the default budget publishes the broadcast handoff");

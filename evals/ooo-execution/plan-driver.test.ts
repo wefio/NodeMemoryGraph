@@ -14,6 +14,7 @@ import {
   piWorker,
   runPlan,
   specFrom,
+  validateSpecFile,
   type PlanDriverSpec,
   type PlanWorker,
   type SpecFile,
@@ -132,7 +133,11 @@ function sessionWorker(latencyMs = 20): PlanWorker {
 
 test("a fused run runs several units in one session, each with its own ticket and verdict", async () => {
   const run = await runPlan(
-    spec({ slots: 1, fusion: { unitsPerSession: 2 }, worker: sessionWorker(10) }),
+    spec({
+      slots: 1,
+      fusion: { unitsPerSession: 2, constraints: ["repair-first"] },
+      worker: sessionWorker(10),
+    }),
   );
   // One session of two units, then a yield boundary and a second session: `summary` becomes a
   // candidate only once `third` is accepted, so the chain continues into it.
@@ -164,7 +169,11 @@ test("a fused session ends where the next unit needs another capability", async 
   const run = await runPlan(
     spec({
       slots: 1,
-      fusion: { unitsPerSession: 4, declarations: { third: { capability: "other" } } },
+      fusion: {
+        unitsPerSession: 4,
+        constraints: ["repair-first"],
+        declarations: { third: { capability: "other" } },
+      },
       worker: sessionWorker(10),
     }),
   );
@@ -187,7 +196,9 @@ test("a unit with no verdict ends the session it was running in", async () => {
     const produced = await sessionWorker(10)(taskId, frozen, dependencies, session);
     return produced;
   };
-  const run = await runPlan(spec({ slots: 1, fusion: { unitsPerSession: 4 }, worker }));
+  const run = await runPlan(
+    spec({ slots: 1, fusion: { unitsPerSession: 4, constraints: ["repair-first"] }, worker }),
+  );
   assert.equal(run.failures, 1);
   assert.ok(run.incomplete.some((entry) => entry.includes("second")));
   assert.deepEqual(run.sessions, [["first"]], "the session ended at the unit with no verdict");
@@ -200,7 +211,11 @@ test("a fused session does not continue from a unit the host rejected", async ()
   const bad: readonly DataCheck[] = [
     dataCheck("unit check", { status: "failed", log: "the host refused this answer" }),
   ];
-  const base = spec({ slots: 1, fusion: { unitsPerSession: 4 }, worker: sessionWorker(10) });
+  const base = spec({
+    slots: 1,
+    fusion: { unitsPerSession: 4, constraints: ["repair-first"] },
+    worker: sessionWorker(10),
+  });
   const run = await runPlan({
     ...base,
     units: { ...base.units, second: { ...base.units["second"]!, checks: bad } },
@@ -225,7 +240,11 @@ test("a worker that starts its own session is not reported as fusion", async () 
   // `recordingWorker` never echoes a session, which is what a worker that opens a fresh session per
   // unit looks like from the driver's side. The run must report boundaries, not fusion.
   const run = await runPlan(
-    spec({ slots: 1, fusion: { unitsPerSession: 4 }, worker: recordingWorker(10) }),
+    spec({
+      slots: 1,
+      fusion: { unitsPerSession: 4, constraints: ["repair-first"] },
+      worker: recordingWorker(10),
+    }),
   );
   assert.deepEqual(run.sessions, [["first"], ["second"], ["third"], ["summary"]]);
   assert.ok(
@@ -469,12 +488,12 @@ test("a spec file's fusion block reaches the run it describes", () => {
       },
     },
     worker: { kind: "stub" as const, latencyMs: 1 },
-    fusion: { unitsPerSession: 2 },
+    fusion: { unitsPerSession: 2, constraints: ["repair-first"] },
   };
   const declared = specFrom(file, recordingWorker(), 1);
   assert.deepEqual(
     declared.fusion,
-    { unitsPerSession: 2 },
+    { unitsPerSession: 2, constraints: ["repair-first"] },
     "a spec that asked for fusion must not be run as the control arm",
   );
   const without: SpecFile = { ...file };
@@ -483,5 +502,33 @@ test("a spec file's fusion block reaches the run it describes", () => {
     specFrom(without, recordingWorker(), 1).fusion,
     undefined,
     "a spec that declared none has none: the two readings must not be the same run",
+  );
+});
+
+test("a spec cannot declare a bound it does not enable the constraint for", () => {
+  const file: SpecFile = {
+    baseline: ["evals/ooo-execution/fixtures/report/alpha.ts"],
+    plan: [{ id: "first", effect: "isolated-artifact" }],
+    units: {
+      first: {
+        instruction: "work on first",
+        editable: ["evals/ooo-execution/fixtures/report/alpha.ts"],
+        checks: [{ label: "ok", test: "evals/ooo-execution/fixtures/report/alpha.test.ts" }],
+      },
+    },
+    worker: { kind: "stub", latencyMs: 1 },
+    fusion: { unitsPerSession: 2 },
+  };
+  // Without the declaration the run would be the control arm while the file says fusion, so the spec
+  // is refused by name rather than believed. A bound of one asks for nothing and stays legal.
+  assert.throws(
+    () => validateSpecFile(file),
+    /declare fusion\.constraints = \["repair-first"\]/u,
+  );
+  assert.equal(validateSpecFile({ ...file, fusion: { unitsPerSession: 1 } }).fusion?.unitsPerSession, 1);
+  assert.equal(
+    validateSpecFile({ ...file, fusion: { unitsPerSession: 2, constraints: ["repair-first"] } }).fusion
+      ?.unitsPerSession,
+    2,
   );
 });

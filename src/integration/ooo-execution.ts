@@ -83,6 +83,29 @@ export interface DispatchTask {
   cancelled?: boolean;
 }
 
+/** Why a unit of the plan is not in the legal set. Every cause names one of the gates `selection`
+ *  applies, so the answer a caller asks for is the rule's own reasoning rather than a second reading
+ *  of the rules. The three plan-level causes are attached to the units they hold back. */
+export type DispatchCause =
+  | "claimed"
+  | "cancelled"
+  | "stale-input"
+  | "external-wait"
+  | "effect-not-startable"
+  | "dependency-not-accepted"
+  | "delivered-not-accepted"
+  | "budget-spent"
+  | "several-waits-pending"
+  | "earlier-unit-blocked";
+
+/** One unit as the rule reads it: on offer or not, and why not. `reasons` is empty exactly for a unit
+ *  that is legal or already accepted, so no refusal is silent. */
+export interface UnitLegality {
+  id: string;
+  legal: boolean;
+  reasons: readonly DispatchCause[];
+}
+
 /** Input order and declarations belong to the coordinator, never the worker.
  * This checks eligibility, not whether arbitrary worker code is actually safe. */
 /**
@@ -178,12 +201,24 @@ function acceptedDependency(
   return task.dependencies.every((dependency) => acceptedDependency(byId, dependency, path));
 }
 
+/** The effects the rule hands out. Named once: `ready` and the cause that reports a unit held back
+ *  for its effect read the same list, so an effect cannot be startable in one and not in the other. */
+const STARTABLE_EFFECTS = ["read-only", "isolated-artifact"];
+
+/** The rule's own reading: the ordered legal set, the budget it left, and one cause list per unit it
+ *  does not have on offer. */
+interface Selection {
+  legal: readonly string[];
+  room: number;
+  causes: ReadonlyMap<string, readonly DispatchCause[]>;
+}
+
 /** The one implementation both readings share, so the budget cannot come to mean two things: `legal` is
- *  the ordered candidate set, and `room` is how much of it the run's remaining budget pays for. */
-function selection(
-  plan: readonly DispatchTask[],
-  slots: number,
-): { legal: readonly string[]; room: number } {
+ *  the ordered candidate set, and `room` is how much of it the run's remaining budget pays for.
+ *
+ *  The causes are computed here rather than beside the rule: a cause names a gate below, and a second
+ *  copy of a gate's condition is how an answer starts disagreeing with the decision it explains. */
+function selection(plan: readonly DispatchTask[], slots: number): Selection {
   checkedSlots(slots);
   const byId = taskIndex(plan);
   const valid = (id: string, visiting = new Set<string>()) =>
@@ -193,7 +228,7 @@ function selection(
     current(task) &&
     !task.cancelled &&
     !waiting(task) &&
-    ["read-only", "isolated-artifact"].includes(task.effect) &&
+    STARTABLE_EFFECTS.includes(task.effect) &&
     task.dependencies.every((id) => valid(id));
   // A task holding bytes nobody can claim is not a task to select, and it is not a reason to
   // select nothing either: it is dropped from the plan, which is what the coordinator's reopen()
@@ -201,17 +236,73 @@ function selection(
   const selectable = plan.filter((task) => task.accepted || !task.delivered);
   const pending = selectable.filter((task) => !valid(task.id));
   const room = slots - claimedInFlight(pending);
-  const none = { legal: [], room: 0 } as const;
-  // ponytail: scan the bounded experiment plan; no learned priorities or preemption.
-  if (room < 1 || pending.filter(waiting).length > 1) return none;
+  const spent = room < 1;
+  const severalWaits = pending.filter(waiting).length > 1;
   const first = pending[0];
-  if (!first) return none;
+  // A unit's own gates, in the order `ready` applies them. A cause names the gate; it never restates
+  // the condition, so the answer cannot come to mean something the rule does not.
+  const ownCauses = (task: DispatchTask): DispatchCause[] => {
+    const causes: DispatchCause[] = [];
+    if (!selectable.includes(task)) causes.push("delivered-not-accepted");
+    if (task.claimed) causes.push("claimed");
+    if (task.cancelled) causes.push("cancelled");
+    if (!current(task)) causes.push("stale-input");
+    if (waiting(task)) causes.push("external-wait");
+    if (!STARTABLE_EFFECTS.includes(task.effect)) causes.push("effect-not-startable");
+    if (task.dependencies.some((id) => !valid(id))) causes.push("dependency-not-accepted");
+    return causes;
+  };
+  // The answer: what is on offer, and for every other unit the gates it failed - or, when it is a
+  // plan-level gate that holds it, that gate's name. An accepted unit owes nothing and stays empty.
+  const answer = (legal: readonly string[], legalRoom: number, held?: DispatchCause): Selection => {
+    const offered = new Set(legal);
+    const causes = new Map<string, readonly DispatchCause[]>();
+    for (const task of plan) {
+      if (offered.has(task.id) || task.accepted) continue;
+      const own = ownCauses(task);
+      causes.set(task.id, own.length > 0 ? own : held ? [held] : []);
+    }
+    return { legal, room: legalRoom, causes };
+  };
+  // ponytail: scan the bounded experiment plan; no learned priorities or preemption.
+  if (spent || severalWaits) return answer([], 0, spent ? "budget-spent" : "several-waits-pending");
+  if (!first) return answer([], 0);
   const ids = (tasks: readonly DispatchTask[]) =>
     tasks.filter((task) => !task.claimed && ready(task)).map((task) => task.id);
-  if (ready(first)) return { legal: ids(pending), room };
+  if (ready(first)) return answer(ids(pending), room);
   // A stale/missing input or undeclared dependency is not an external wait license.
-  if (!current(first) || !waiting(first)) return none;
-  return { legal: ids(pending.slice(1)), room };
+  if (!current(first) || !waiting(first)) return answer([], 0, "earlier-unit-blocked");
+  return answer(ids(pending.slice(1)), room);
+}
+
+/** The answer a caller asks for: the ordered legal set, the budget it left, and one reading per unit
+ *  in plan order. Plain data on purpose - a caller may print two of them and diff them. */
+export interface LegalityAnswer {
+  legal: readonly string[];
+  room: number;
+  units: readonly UnitLegality[];
+}
+
+/**
+ * The legality answer: the ordered legal set, the run's remaining claim budget, and a reading per unit
+ * in plan order. It is a query - it writes nothing, claims nothing and wakes nobody - and it calls
+ * `selection`, so a caller cannot read a unit as legal here while the shared rule refuses it there.
+ *
+ * The cut to the budget is `startableTasks`'; this answer reports the whole legal set and the room
+ * left, so a caller with its own order still cuts the same way instead of re-deriving what is pending.
+ */
+export function unitLegality(plan: readonly DispatchTask[], slots = 1): LegalityAnswer {
+  const { legal, room, causes } = selection(plan, slots);
+  const offered = new Set(legal);
+  return {
+    legal,
+    room,
+    units: plan.map((task) => ({
+      id: task.id,
+      legal: offered.has(task.id),
+      reasons: causes.get(task.id) ?? [],
+    })),
+  };
 }
 
 /** What fusion legality needs and a `DispatchTask` does not carry: which executor may run a unit and
@@ -229,6 +320,11 @@ export interface SessionPlan {
   tasks: readonly DispatchTask[];
   declarations: Readonly<Record<string, SessionDeclaration>>;
   pendingBranches?: readonly string[];
+  /** The constraints this plan enables, by the protocol's names - the vocabulary is
+   *  `PLAN_CONSTRAINTS` in `ooo-fusion-plan.ts`, and the move that reads them lives there too.
+   *  Absent means none: a plan that declares nothing gets the baseline (one unit per session, in
+   *  plan order) rather than whatever the planner happens to prefer. */
+  constraints?: readonly string[];
 }
 
 function subset(inner: readonly string[], outer: readonly string[]): boolean {

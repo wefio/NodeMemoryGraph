@@ -11,12 +11,12 @@
  *     --daemon <round store path> --channel <taskId> --entry <id> --agent <holder> \
  *     --digest <sha256> [--ref <path-or-url>] [--summary <text>]
  */
-import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import { boardCall, roundDaemon } from "./round-client.ts";
+import { workDigest } from "../../src/integration/work-identity.ts";
 
 // node:util owns flag parsing; an unknown flag or a repeated one is an error rather
 // than something this script silently ignores.
@@ -32,12 +32,15 @@ const { values } = parseArgs({
   },
 });
 
-const channel = values.channel;
-const entryId = values.entry;
-const agentId = values.agent;
+const channel = flag("channel", values.channel);
+const entryId = flag("entry", values.entry);
+const agentId = flag("agent", values.agent);
 const ref = values.ref;
-for (const [name, value] of Object.entries({ channel, entry: entryId, agent: agentId })) {
+/** One required flag, refused by name. A loop over an object of them cannot narrow any of them, which is
+ *  why this returns the value it checked instead of only rejecting a missing one. */
+function flag(name: string, value: string | undefined): string {
   if (!value) throw new Error(`--${name} is required`);
+  return value;
 }
 if (!values.daemon) {
   throw new Error("--daemon is required: the store path whose daemon serves this round's board");
@@ -59,7 +62,7 @@ const state = roundDaemon(resolve(values.daemon));
   // If the artifact is a readable file, never trust the caller's digest: recompute.
   const digest =
     ref && statSync(ref, { throwIfNoEntry: false })?.isFile()
-      ? createHash("sha256").update(readFileSync(ref)).digest("hex")
+      ? workDigest(readFileSync(ref))
       : values.digest;
   if (!digest) throw new Error("--digest is required when --ref is not a readable file");
   if (values.digest && values.digest !== digest) {
