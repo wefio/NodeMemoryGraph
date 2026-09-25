@@ -12,13 +12,13 @@
 
 2026-09-24 实测，当时 149 颗 mutant、22 个目标：
 
-| 锚点指向什么                                   | 颗数 | 占比 | 已经限定到成员 |
-| ---------------------------------------------- | ---- | ---- | -------------- |
-| 守卫或谓词里的一项被中和（G）                  | 64   | 43%  | 30             |
-| 值、实参、下标或被调被替换（V）                | 58   | 39%  | 26             |
-| 语句或调用被删除（R）                          | 11   | 7%   | 6              |
-| 插入代码：一条语句、一个分支或第二份拷贝（I）  | 8    | 5%   | 4              |
-| 整个表达式被替换（E）                          | 8    | 5%   | 5              |
+| 锚点指向什么                                  | 颗数 | 占比 | 已经限定到成员 |
+| --------------------------------------------- | ---- | ---- | -------------- |
+| 守卫或谓词里的一项被中和（G）                 | 64   | 43%  | 30             |
+| 值、实参、下标或被调被替换（V）               | 58   | 39%  | 26             |
+| 语句或调用被删除（R）                         | 11   | 7%   | 6              |
+| 插入代码：一条语句、一个分支或第二份拷贝（I） | 8    | 5%   | 4              |
+| 整个表达式被替换（E）                         | 8    | 5%   | 5              |
 
 两个读数决定了本记录。**89% 的牙（149 之 133）是"一个点位 + 少数几个算子之一"**——让条件失效、中和一项、替换实参、删除语句——也就是算子才是意图、点位是附带，把点位存成文本只是一个选择而不是必需。而且 **149 之 78（52%）完全没有结构性作用域**：一个在文件里任意匹配的字节片段，正是最先死掉的形状。规划期间观察到的两处失效都是这个形状：一条语句里层调用被内联、一处拒绝的理由消息被抽成 `subject` 表达式。旁边还出现了第三种：两颗牙点名的用例已经抓不住它们（`fusion-continues-from-an-unverified-answer`、`next-is-not-the-head-of-the-ordered-candidates` 读数变成"被整个 suite 抓到，不是点名用例"），这是同一层耦合往外挪了一格——锚点还在，而"这条用例是唯一会失败的那条"这句话旧了。
 
@@ -41,35 +41,35 @@
 
 **登记处现在是 110 颗牙、22 个目标条目、覆盖 21 个文件，每一颗都是"名字 + 算子 + 选择器"，没有一颗手写锚点。26 个算子。已有 37 颗牙退役，改为由陈述了该规则的检查承担。**
 
-`tools/mutation-anchor.ts` 是解析器：`Mutant`、`Derive`、`Site`、`matchText`、`locate`，以及一张"一个算子一个解析函数"的表，所以加一个算子就是表里加一行、类型里加一个名字。它不持有状态、不读文件，因此 sweep 与 anchors-only pass 问的是同一个函数的同一个问题，而 `tests/tools/mutation-anchor.test.ts` 用源码字符串证明它——34 条用例，每个算子一条并覆盖各自的拒绝情形，不碰文件系统。凡是变异自己决定字节的（`false`、`true`、取反后的算子、调用的接收者、守卫的 body、空集合），什么都不存。
+`tools/mutation-anchor.ts` 是解析器：`Mutant`、`Derive`、`Site`、`matchText`、`locate`，以及一张"一个算子一个解析函数"的表，所以加一个算子就是表里加一行、类型里加一个名字。它不持有状态、不读文件，因此 sweep 与 anchors-only pass 问的是同一个函数的同一个问题，而 `tests/tools/mutation-anchor.test.ts` 用源码字符串证明它——35 条用例，每个算子一条并覆盖各自的拒绝情形，不碰文件系统。凡是变异自己决定字节的（`false`、`true`、取反后的算子、调用的接收者、守卫的 body、空集合），什么都不存。
 
-| 算子                                                                                                   | 现成目录里的名字                                                          | 颗数       |
-| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- | ---------- |
-| `condition-never`、`condition-holds`                                                                   | pitest `FALSE_RETURNS` / `TRUE_RETURNS`；Stryker `ConditionalExpression`  | 45 + 3     |
-| `neutralize-term`                                                                                      | pitest `NEGATE_CONDITIONALS`；Stryker 逻辑/布尔字面量                     | 9          |
-| `negate-condition`                                                                                     | pitest `NEGATE_CONDITIONALS`；Stryker 布尔字面量                          | 2          |
-| `negate-comparison`                                                                                    | pitest `NEGATE_CONDITIONALS`；Stryker `EqualityOperator`                  | 3          |
-| `remove-conditionals`                                                                                  | pitest `REMOVE_CONDITIONALS`                                              | 1          |
-| `drop-statement`                                                                                       | Stryker `BlockRemoval`；pitest `VOID_METHOD_CALLS`                        | 8          |
-| `remove-call`                                                                                          | Stryker filter/slice/sort 删除；pitest `VOID_METHOD_CALLS`                | 2          |
-| `replace-call`                                                                                         | Stryker `MethodExpression`；pitest `CONSTRUCTOR_CALLS`                    | 4          |
-| `replace-argument`、`replace-property`、`replace-initializer`                                          | pitest `PRIMITIVE_RETURNS`、`INLINE_CONSTS`；Stryker 字面量类             | 8 + 10 + 7 |
-| `replace-iterable`                                                                                     | Stryker `ArrayDeclaration`；pitest `EMPTY_RETURNS`                        | 3          |
-| `replace-index`                                                                                        | （目录里没有；最接近的 `FirstToLast` 指的是名为 `first` 的方法）          | 2          |
-| `replace-literal-fragment`                                                                             | SQLMutation 的子句级算子，降到片段粒度                                    | 3          |
+| 算子                                                          | 现成目录里的名字                                                         | 颗数       |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------ | ---------- |
+| `condition-never`、`condition-holds`                          | pitest `FALSE_RETURNS` / `TRUE_RETURNS`；Stryker `ConditionalExpression` | 45 + 3     |
+| `neutralize-term`                                             | pitest `NEGATE_CONDITIONALS`；Stryker 逻辑/布尔字面量                    | 9          |
+| `negate-condition`                                            | pitest `NEGATE_CONDITIONALS`；Stryker 布尔字面量                         | 2          |
+| `negate-comparison`                                           | pitest `NEGATE_CONDITIONALS`；Stryker `EqualityOperator`                 | 3          |
+| `remove-conditionals`                                         | pitest `REMOVE_CONDITIONALS`                                             | 1          |
+| `drop-statement`                                              | Stryker `BlockRemoval`；pitest `VOID_METHOD_CALLS`                       | 8          |
+| `remove-call`                                                 | Stryker filter/slice/sort 删除；pitest `VOID_METHOD_CALLS`               | 2          |
+| `replace-call`                                                | Stryker `MethodExpression`；pitest `CONSTRUCTOR_CALLS`                   | 4          |
+| `replace-argument`、`replace-property`、`replace-initializer` | pitest `PRIMITIVE_RETURNS`、`INLINE_CONSTS`；Stryker 字面量类            | 8 + 10 + 7 |
+| `replace-iterable`                                            | Stryker `ArrayDeclaration`；pitest `EMPTY_RETURNS`                       | 3          |
+| `replace-index`                                               | （目录里没有；最接近的 `FirstToLast` 指的是名为 `first` 的方法）         | 2          |
+| `replace-literal-fragment`                                    | SQLMutation 的子句级算子，降到片段粒度                                   | 3          |
 
 登记处分三波转换，每一波之后都 sweep：用解析器最初那六个算子转了 59 颗，用目录点名的七个算子转了 18 颗，最后 15 颗用另外三个算子加三处扩宽转完。三处扩宽全都是**真实的牙转不过去**才发现的，没有一处是靠讨论定下来的：
 
-| 残留需要什么         | 实际加了什么                                                                                                        | 颗数 |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------- | ---- |
-| 绑定到名字的函数     | `uniqueMember` 接受绑定到变量或对象属性的函数（`claim: (store) => ...`）                                            | 2    |
-| 两个一模一样的调用点 | `in` 指"调用或字面量所在语句里的一段文本"                                                                           | 3    |
-| 模块级               | `within` 变可选：文件就是作用域，选择器必须在文件里唯一                                                             | 2    |
-| 构造函数调用         | 调用选择器接受 `new X(...)` 作为调用点                                                                              | 1    |
-| 简写属性             | `replace-property` 把它写开（`position` 变 `position: 0`），因为值不能写在名字的位置上                              | 1    |
-| 下标、字面量片段     | `replace-index`、`replace-literal-fragment`                                                                         | 5    |
+| 残留需要什么         | 实际加了什么                                                                           | 颗数 |
+| -------------------- | -------------------------------------------------------------------------------------- | ---- |
+| 绑定到名字的函数     | `uniqueMember` 接受绑定到变量或对象属性的函数（`claim: (store) => ...`）               | 2    |
+| 两个一模一样的调用点 | `in` 指"调用或字面量所在语句里的一段文本"                                              | 3    |
+| 模块级               | `within` 变可选：文件就是作用域，选择器必须在文件里唯一                                | 2    |
+| 构造函数调用         | 调用选择器接受 `new X(...)` 作为调用点                                                 | 1    |
+| 简写属性             | `replace-property` 把它写开（`position` 变 `position: 0`），因为值不能写在名字的位置上 | 1    |
+| 下标、字面量片段     | `replace-index`、`replace-literal-fragment`                                            | 5    |
 
-**本版读数：**`anchors: 110 of 110 resolve, over 22 targets`；`mutants: 110 of 110 caught by the named test`，**110 颗全部由各自 `expect` 点名的用例抓住**，22 of 22 逐位元组还原，exit 0，160 秒；`tests/tools/mutation-anchor.test.ts` 34 条全过；`test:product` 1580 全过；`verify:static` exit 0；lint 0 findings；复杂度门禁通过。同一条弧上更早的一次全量读数是：136 颗牙，136 of 136 caught，136 全部按名字，217 秒。
+**本版读数：**`anchors: 110 of 110 resolve, over 22 targets`；`mutants: 110 of 110 caught by the named test`，**110 颗全部由各自 `expect` 点名的用例抓住**，22 of 22 逐位元组还原，exit 0，162 秒；`tests/tools/mutation-anchor.test.ts` 35 条全过；`test:product` 1580 全过；`verify:static` exit 0；lint 0 findings；复杂度门禁通过。加上 misnamed 检查的那一次运行读数完全相同，这也就是"这条检查在整张登记处上没有假报"的证据。同一条弧上更早的一次全量读数是：136 颗牙，136 of 136 caught，136 全部按名字，217 秒。
 
 **本记录携带的更正，每一条都是被运行结果抓出来的、不是被评审看出来的：**
 
@@ -80,7 +80,7 @@
 - `expect` 手打，读起来就像一颗坏掉的牙。两颗牙凭记忆重打用例名（而不是从登记处抄），结果都报 **"survived"**：工具按点名的用例过滤 suite，名字对不上任何用例时，与"没有任何用例抓到"无法区分。它是响的失败、从不是误判通过，但这是这个登记处第二次被"`expect` 自己也是一条断言"咬到。转换脚本现在从登记处**抄**这个字符串。
 - 词汇长大之后重跑旧的转换脚本，把两颗牙改回了早期形态；anchors pass 一次性把两个都拒了。这正是"把这个 pass 放进静态契约"从另一个方向看到的理由：它也抓**对登记处本身的编辑**，不只抓它指向的代码漂移。
 
-**退役。** 37 颗牙走了，分四组，每组都先由 sweep 说明"失败的就是它点名的用例"、再读那条用例的断言。前两组十一颗（B5 行背后的两处调用点计数、32 种组合的枚举、A5 行背后的多项式计数 10、按名字拒绝的重新绑定，以及由一条用例陈述的预算五规则）。第三组两颗（D11 行，其正文本来就建立在对应用例上）。第四组 26 颗：插入形状的牙——它们的锚点是"代码不得出现的地方"，derived 选择器表达不了，诚实的选择只有"永久脆弱的锚点"或"一条陈述了规则的检查"。这一组里有一颗后来也转掉了，另有七颗是**孤儿**——没有任何账本行点名它们，于是它们钉的规则有检查、没有行。
+**退役。** 37 颗牙走了，分四组，每组都先由 sweep 说明"失败的就是它点名的用例"、再读那条用例的断言。前两组十一颗（B5 行背后的两处调用点计数、32 种组合的枚举、A5 行背后的多项式计数 10、按名字拒绝的重新绑定，以及由一条用例陈述的预算五规则）。第三组两颗（D11 行，其正文本来就建立在对应用例上）。第四组 26 颗：插入形状的牙——它们的锚点是"代码不得出现的地方"，derived 选择器表达不了，诚实的选择只有"永久脆弱的锚点"或"一条陈述了规则的检查"。这一组里有一颗后来也转掉了，另有七颗点名的规则没有任何账本行声称（规则是真的，只是行里没写）；这七条后来各自被安顿到本来就承载它的行，或是补了一行（[账本](../../design/task-unit-semantics-obligations.md)）。
 
 **没有声称的东西。** derived 牙**不比**它替代的字节锚点更强：违规是同一个、抓它的用例是同一条。它换来的是改名、重排之后仍瞄准原来那条规则，而这正是本记录要解决的那个失败。算子也不等于整个目录——它们只是本登记处的规则恰好需要的那些类。转换也不是"可以不再 sweep"的许可：`mutation:anchors` 证明的是解析成功，不是"还抓得住"。
 
@@ -103,4 +103,5 @@
 - **退役会丢掉一条具名用例。**关系型检查抓的是一类，而牙抓的可能是某个具体错误行为，于是行可能声称得比展示的多。缓解：退役时在账本行里、在同一个提交里点名替代它的那条检查。
 - **转换是"对证据动手"。**每一次转换都触碰"这份代码被保护着"的那件证物，因此错误会安静地降低覆盖。缓解：一次一个目标、同名同用例、前后都记下抓取结果，以及那条关于活 mutant 的 postmortem 规则（任何运行前先看被测文件的状态）。
 - **这个 pass 可能被信任而不是被运行。**anchors-only pass 证明点位还解析得出来，不证明 mutant 还抓得住；一颗 `expect` 已经陈旧的牙照样能通过它。缓解：全量 sweep 仍是推送前的常设规则，而真正要看的读数不是牙的数量，而是**"失败的就是它点名那条用例"的牙的数量**。
-- **开放、且刻意不在这里决定：**那七颗孤儿牙——它们钉的规则有检查、没有账本行（这些规则该不该有自己的行，是账本的问题而不是登记处的问题）；以及 `expect` 字段自身的失效模式——它是响的，但只在慢路径上；一份"点名用例在目标套件里存在与否"的报告能让它立刻可见。
+- **`expect` 字段自身的失效模式已经答了。**它本是响的、却有歧义：一个没有任何用例的名字会让过滤后的运行"零用例通过"，而这个通过被报成"mutant 存活"——那两颗牙就是这样被读成坏掉的，而它们只是名字写错了。`ranACase` 在相信一次通过之前先读运行自己的报告：带标记的行里若不是套件文件，就是一条用例；只有套件文件的行意味着过滤没匹配到任何东西；不认识的 reporter 则答"未知"，而不是去指控一颗牙。名字写错的牙现在报 `misnamed` 并附上它要的那个名字，算 problem、退出码非零，而且不再为它跑整套 fallback——缺陷是名字，不是覆盖。
+- **那七条没有行点名的规则是"安顿了"，不是"挂着"。**退役插入形状的牙时，其中七颗点名的规则没有任何行声称：发布加入调用方的事务、一轮在自己持有的 pin 被清除时释放它们、ordered 模式就是声明顺序、一个批次的各单元同时在途、没有检查的单元被拒、父检查报告它合成的裁决。每一条都被安顿到本来就承载它的那一行——B3 拿到发布那条用例（同一套件）、B4 拿到 pin 释放、ordered 模式自成一行为 A6（设计里关于发布顺序的那一句原本没有行），四条判官循环的规则则属于 F2b-slot 与 F2c，它们的正文现在点名了这些用例。仍然开着的只剩一个问题："有检查、没有行"的规则到底算不算缺陷——这里算，但缺陷在账本，不在登记处。

@@ -96,7 +96,7 @@ favour of checks that state their rule.**
 `tools/mutation-anchor.ts` holds the resolver: `Mutant`, `Derive`, `Site`, `matchText`, `locate`, and a
 table of resolvers, one per operator, so adding an operator is an entry in that table plus its name in
 the type union. It holds no state and reads no file, so the sweep and the anchors-only pass ask the same
-function the same question and `tests/tools/mutation-anchor.test.ts` proves it over source strings - 34
+function the same question and `tests/tools/mutation-anchor.test.ts` proves it over source strings - 35
 cases, one per operator plus every refusal, with no filesystem access. Where the mutation determines its
 own bytes (`false`, `true`, the negated operator, the call's receiver, the guard's body, the empty
 collection) nothing is stored.
@@ -131,9 +131,11 @@ widenings. The widenings were all found by real teeth failing to convert, never 
 
 **Readings, at this revision:** `anchors: 110 of 110 resolve, over 22 targets`; `mutants: 110 of 110
 caught by the named test`, **all 110 by the case their `expect` names**, 22 of 22 targets restored
-byte-identically, exit 0 in 160 s; `tests/tools/mutation-anchor.test.ts` 34 pass; `test:product` 1580
-pass; `verify:static` exit 0; lint 0 findings; complexity gate ok. An earlier full-run reading on the
-same arc: 136 teeth, 136 of 136 caught, all 136 by name, 217 s.
+byte-identically, exit 0 in 162 s; `tests/tools/mutation-anchor.test.ts` 35 pass; `test:product` 1580
+pass; `verify:static` exit 0; lint 0 findings; complexity gate ok. The run that added the misnamed check
+reads exactly the same, which is also what says the check raises no false alarm across the whole
+register. An earlier full-run reading on the same arc: 136 teeth, 136 of 136 caught, all 136 by name,
+217 s.
 
 **Corrections this record carries, each caught by a run rather than by review:**
 
@@ -175,8 +177,9 @@ A5, a rebinding refused by name, and the five rules of the declared budget state
 the third (row D11, whose prose already rested on the cases). 26 in the fourth: the insertion-shaped
 teeth, whose anchor is a place where code must not appear, and which a derived selector cannot express -
 the only honest alternatives were a permanent fragile anchor or a check that states the rule. One of that
-set was kept and then converted, and seven were **orphans** - no ledger row named them, so the rule each
-pinned has a check and no row.
+set was kept and then converted, and seven named no ledger row at all: the rules were real, but no row
+mentioned them. Each of the seven was given a home in the row that already carries its rule rather than a
+row invented for it - two rows extended, one row added ([the ledger](../../design/task-unit-semantics-obligations.md)).
 
 **What is not claimed.** A derived tooth is not stronger evidence than the byte anchor it replaced: it is
 the same violation, caught by the same case. What it buys is that the tooth stays aimed at its rule
@@ -242,7 +245,20 @@ existing.deliveredBy)` has to know the operator. Mitigation: the operators are f
   that the mutant is still caught, and a tooth whose `expect` went stale still passes it. Mitigation: the
   full sweep remains the standing rule before a push, and the sweep is the reading that counts - not the
   number of teeth, but **the number of teeth whose named case is the one that fails**.
-- **Open, and deliberately not decided here:** the seven orphan teeth whose rules have a check and no
-  ledger row (whether those rules deserve rows is a question about the ledger, not about the register);
-  and the `expect` field's own failure mode, which is loud but only on the slow path - a report that says
-  whether the named case exists in the target's suites would make it immediate.
+- **The `expect` field's own failure mode is answered.** It was loud but ambiguous: a name no case
+  carries made the filtered run pass with no case in it, and that pass was reported as a surviving
+  mutant - which is how two teeth were read as broken while they were only misnamed. `ranACase` reads the
+  run's own report before believing a pass: a marked line that is not the suite file is a case, a suite
+  line alone means the filter matched nothing, and an unrecognized reporter answers unknown rather than
+  accusing a tooth. A misnamed tooth is reported as `misnamed` with the name it wanted, it is a problem
+  with a non-zero exit, and the whole-suite fallback is not run for it - the defect is the name, not the
+  coverage.
+- **The seven rules no row named are placed, not left dangling.** When the insertion-shaped teeth were
+  retired, seven of them named a rule no row claimed: a publication joining the caller's transition, a
+  round releasing the pins it held, the ordered mode being the declared plan order, the batch's units in
+  flight together, a unit with no checks refused, the parent check reporting its composed verdict. Each was
+  given a home in the row that already carries its rule - B3 gained the publication case (its own suite),
+  B4 the pin release, the ordered mode became its own row (A6, the design's own sentence about publication
+  order, which had no row), and the four judge-loop rules are F2b-slot's and F2c's, whose texts now name
+  the cases. What remains open is only whether a rule with a check but no row is a defect at all: it was
+  one here, but the defect was in the ledger, not in the register.

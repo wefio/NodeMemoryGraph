@@ -163,6 +163,31 @@ export function matchText(
   return { start: match.index, end: match.index + match[0].length, retaken: true };
 }
 
+/** Did any case name run in this suite output? `true` when a case line is there, `false` when the only
+ *  line the reporter marked is the suite file itself, and `undefined` when the output carries no marked
+ *  line at all.
+ *
+ *  A mutant names the case that must fail, and a sweep filters a suite by that name so one tooth costs
+ *  one case instead of a whole suite. A name that matches no case is not a mutant nothing catches: the
+ *  filtered run passes with no case in it, and that pass reads exactly like a surviving mutant. The two
+ *  are different defects - one is a rule nothing checks, the other is evidence whose name went stale -
+ *  so the runner asks this before it believes a pass, in the same spirit as `matchText` refusing to
+ *  claim a site it cannot find.
+ *
+ *  The suite file line is what makes the answer possible: a file's own test runs whether or not any
+ *  case inside it matched, so a marked line whose name ends in `.ts` says nothing about the filter.
+ *  An unrecognized reporter answers `undefined`, never `false`: a tooth is not accused on evidence the
+ *  harness cannot read. */
+export function ranACase(report: string): boolean | undefined {
+  const marked = report
+    .split("\n")
+    .map((line) => /^\s*[\u2714\u2716]\s+(.*)$/u.exec(line)?.[1])
+    .filter((name): name is string => name !== undefined)
+    .map((name) => name.replace(/\s+\([\d.]+ms\)\s*$/u, "").trim());
+  if (marked.length === 0) return undefined;
+  return marked.some((name) => !/\.tsx?$/u.test(name));
+}
+
 /** Where a mutant applies: by selector when it derives one, by syntax tree when it says so, by bytes
  *  otherwise.
  *
