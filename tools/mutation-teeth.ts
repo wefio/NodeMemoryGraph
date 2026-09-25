@@ -32,7 +32,8 @@
  *
  * Where a mutant says where it applies:
  *
- *   - `derive: { within, operator, ... }` is a **selector plus an operator**: the member is named, a
+ *   - `derive: { within, operator, ... }` is a **selector plus an operator**: the member is named
+ *     (`constructor` when the site is in a class constructor), a
  *     fragment inside it is matched (the same matcher as below, so a reflow cannot break it), and the
  *     bytes to write are computed on every run. This is the form a tooth should have. Its identity is
  *     the rule and the site it names, never the text that happens to be there today, and it is what
@@ -91,8 +92,11 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "read-or-write-path-may-leave-the-frozen-files",
-        from: "      if (!usable.has(path)) {",
-        to: "      if (false && !usable.has(path)) {",
+        derive: {
+          within: "refusePermissionExpansion",
+          operator: "condition-never",
+          condition: "!usable.has(path)",
+        },
         expect: "refuses a read or write path outside the frozen files",
       },
       {
@@ -109,8 +113,12 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "over-maximum-budget-is-accepted",
-        from: "  if (spec.budget && !unknownBudget.length && !within(spec.budget, MAX_PATCH_BUDGET)) {",
-        to: "  if (false) {",
+        derive: {
+          within: "refuseOutOfRange",
+          operator: "condition-never",
+          condition:
+            "spec.budget && !unknownBudget.length && !within(spec.budget, MAX_PATCH_BUDGET)",
+        },
         expect: "refuses an unknown key inside budget or limits, and a range above the maximum",
       },
       {
@@ -121,8 +129,11 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "assumption-may-carry-a-dependency",
-        from: '    } else if (typeof task === "string" && !dependencies.includes(task)) {',
-        to: "    } else if (false) {",
+        derive: {
+          within: "refuseRequirements",
+          operator: "condition-never",
+          condition: 'typeof task === "string" && !dependencies.includes(task)',
+        },
         expect:
           "case 2: a lost obligation or a widened permission is refused, and an assumption cannot stand in for a dependency",
       },
@@ -130,9 +141,13 @@ const TARGETS: readonly Target[] = [
         // The status query is the same rule read back: if it kept asking with a one-task budget it
         // would report a ready set narrower than what the run declared, and the two answers would differ.
         name: "the-status-query-ignores-the-declared-budget",
-        ast: { within: "deriveStatus" },
-        from: "  const ready = startableTasks(tasks, slots);",
-        to: "  const ready = startableTasks(tasks, 1);",
+        derive: {
+          within: "deriveStatus",
+          operator: "replace-argument",
+          call: "startableTasks",
+          arg: 1,
+        },
+        to: "1",
         expect: "a run that declares more slots reports the tasks it may start, not just the head",
       },
     ],
@@ -153,24 +168,30 @@ const TARGETS: readonly Target[] = [
         // A failure the caller swallows still forbids the commit: nothing may be written up to the
         // failure and then kept by a normal return value.
         name: "swallowed-failure-still-commits",
-        ast: { within: "withPort" },
-        from: "      state.rollbackOnly = true;",
-        to: "      void state.rollbackOnly;",
+        derive: {
+          within: "withPort",
+          operator: "drop-statement",
+          statement: "state.rollbackOnly = true;",
+        },
         expect: "a failure the caller swallows still forbids the commit",
       },
 
       {
         name: "stale-claim-may-deliver-again",
-        ast: { within: "claimTaskBoardEntry" },
-        from: "    if (!renewed) {",
-        to: "    if (false && !renewed) {",
+        derive: {
+          within: "claimTaskBoardEntry",
+          operator: "condition-never",
+          condition: "!renewed",
+        },
         expect: "renewing your own live claim does not start a new attempt",
       },
       {
         name: "deliverer-may-judge-its-own-work",
-        ast: { within: "judgeTaskBoardEntry" },
-        from: "    if (existing.deliveredBy === input.agentId) {",
-        to: "    if (false && existing.deliveredBy === input.agentId) {",
+        derive: {
+          within: "judgeTaskBoardEntry",
+          operator: "condition-never",
+          condition: "existing.deliveredBy === input.agentId",
+        },
         expect: "the deliverer cannot judge its own deliverable",
       },
       {
@@ -192,18 +213,22 @@ const TARGETS: readonly Target[] = [
         // One managed entry belongs to one run: answering with the first binding would hand a
         // second run's facts to whoever asked.
         name: "a-second-run-adopts-a-bound-entry",
-        ast: { within: "taskRunForEntry" },
-        from: "    if (runs.size > 1)",
-        to: "    if (runs.size > 1 && false)",
+        derive: {
+          within: "taskRunForEntry",
+          operator: "condition-never",
+          condition: "runs.size > 1",
+        },
         expect: "an entry bound by two runs is refused rather than answered with one of them",
       },
       {
         // A managed entry's write belongs to its run's scope: the store is the only thing that can
         // tell a coordinated write from a verb reached around it.
         name: "a-managed-entry-ignores-the-coordinated-scope",
-        ast: { within: "requireManagedWriteScope" },
-        from: "    if (this.coordinatedRun === binding.runId) return;",
-        to: "    if (true) return;",
+        derive: {
+          within: "requireManagedWriteScope",
+          operator: "condition-holds",
+          condition: "this.coordinatedRun === binding.runId",
+        },
         expect: "a direct board verb cannot move an entry a run has adopted",
       },
     ],
@@ -237,38 +262,51 @@ const TARGETS: readonly Target[] = [
         // The cache exists to be recomputable. A rebuild that returns without writing is the
         // difference between "the sources decide" and "the schema says so".
         name: "derived-rebuild-is-a-no-op",
-        ast: { within: "refreshDerived" },
-        from: "        this.putInputDigest(\n          row.id,\n          row.attempt >= 1 ? (frozen?.digest ?? this.inputDigest(row)) : null,\n        );",
-        to: "        void row.id;",
+        derive: {
+          within: "refreshDerived",
+          operator: "drop-statement",
+          statement: "this.putInputDigest(",
+        },
         expect: "deleting the derived cache and rebuilding it yields the same view",
       },
       {
         name: "round-releases-dependents-on-delivered-bytes",
-        ast: { within: "readAccepted" },
-        from: "        verdict: recorded?.verdict ?? null,",
-        to: '          verdict: "accepted",',
+        derive: {
+          within: "readAccepted",
+          operator: "replace-property",
+          property: "verdict",
+        },
+        to: '"accepted"',
         expect:
           "an outside rejection withdraws the release of a dependent, and the round fails closed",
       },
       {
         name: "verdict-lookup-not-bound-to-the-artifact",
-        ast: { within: "readAccepted" },
-        from: "    const recorded = verdictOf.get(roundChannel(runId), digest) as unknown as",
-        to: '    const recorded = verdictOf.get(roundChannel(runId), "%") as unknown as',
+        derive: {
+          within: "readAccepted",
+          operator: "replace-argument",
+          call: "verdictOf.get",
+          arg: 1,
+        },
+        to: '"%"',
         expect: "the board verdict is what accepts an artifact, not the round's own column",
       },
       {
         name: "cancellation-does-not-stop-a-claim",
-        ast: { within: "claim" },
-        from: '    if (!id || !agentId) throw new Error("task and agent required");\n    if (this.cancelled() !== null) throw new Error("round cancelled");',
-        to: '    if (!id || !agentId) throw new Error("task and agent required");',
+        derive: {
+          within: "claim",
+          operator: "drop-statement",
+          statement: 'if (this.cancelled() !== null) throw new Error("round cancelled");',
+        },
         expect: "a cancellation names the lease it revokes, and the batch behind it is refused",
       },
       {
         name: "round-does-not-pin-what-it-references",
-        ast: { within: "publishReady" },
-        from: '      this.retainTaskBoardEntry({\n        taskId: this.channel,\n        entryId,\n        owner: RETENTION_OWNER,\n        reason: `round ${this.runId ?? "initial"} handoff for ${row.id}`,\n        now: new Date(this.now).toISOString(),\n      });',
-        to: "      void entryId;",
+        derive: {
+          within: "publishReady",
+          operator: "drop-statement",
+          statement: "this.retainTaskBoardEntry({",
+        },
         expect:
           "acceptance survives the entry's own TTL, because the round retains what it references",
       },
@@ -277,9 +315,12 @@ const TARGETS: readonly Target[] = [
         // The borrowed view is one implementation serving two paths. Letting the offline port
         // answer from its own rule is exactly the divergence this target exists to catch.
         name: "the-offline-reader-decides-acceptance-on-its-own",
-        ast: { within: "openRoundQuery" },
-        from: "      accepted: () => readAccepted(db, resolved),",
-        to: "      accepted: () => ({}),",
+        derive: {
+          within: "openRoundQuery",
+          operator: "replace-property",
+          property: "accepted",
+        },
+        to: "() => ({})",
         expect: "the owner's view and the offline reader report the same facts",
       },
 
@@ -287,17 +328,22 @@ const TARGETS: readonly Target[] = [
         // The frozen plan is the run's input, and installing a second one over it is the second
         // editable task truth the design forbids. The constructor refuses by policy digest.
         name: "a-second-plan-silently-adopts-the-run",
-        from: "    if (recorded && recorded.policy !== wanted)",
-        to: "    if (false && recorded && recorded.policy !== wanted)",
+        derive: {
+          within: "constructor",
+          operator: "condition-never",
+          condition: "recorded && recorded.policy !== wanted",
+        },
         expect: "the frozen plan has one owner, and a second, different plan is refused",
       },
       {
         // Verification is await-capable, so a ticket can be retired while it runs. Dropping the
         // re-check at the commit is how a decision made before the wait is applied after it.
         name: "the-commit-trusts-a-claim-the-board-retired",
-        ast: { within: "commitArtifact" },
-        from: '      if (!this.live(row)) return "stale";',
-        to: '      if (false && !this.live(row)) return "stale";',
+        derive: {
+          within: "commitArtifact",
+          operator: "condition-never",
+          condition: "!this.live(row)",
+        },
         expect: "a claim the board retires inside the verification window cannot be committed",
       },
 
@@ -484,9 +530,11 @@ const TARGETS: readonly Target[] = [
         // Dropping the declaration restores a preference no plan enabled, which is what made a plan's
         // meaning depend on which planner read it.
         name: "the-continuation-is-not-declared",
-        ast: { within: "nextSessionMove" },
-        from: '  if (!enabledConstraints(input.plan).includes("repair-first"))',
-        to: "    if (false)",
+        derive: {
+          within: "nextSessionMove",
+          operator: "condition-never",
+          condition: '!enabledConstraints(input.plan).includes("repair-first")',
+        },
         expect: "the continuation is a declared constraint, not the planner's default",
       },
       {
@@ -516,16 +564,22 @@ const TARGETS: readonly Target[] = [
       {
         // A task someone is working is not offered to a second worker, at any budget.
         name: "the-budget-offers-a-claimed-task",
-        from: "    if (input.claimed.includes(unit))",
-        to: "    if (false && input.claimed.includes(unit))",
+        derive: {
+          within: "checkBudget",
+          operator: "condition-never",
+          condition: "input.claimed.includes(unit)",
+        },
         expect:
           "the budget properties fire on a hand-built view, so deleting them cannot pass quietly",
       },
       {
         // A bigger budget adds candidates; it may not drop one a smaller budget offered.
         name: "a-bigger-budget-may-drop-a-candidate",
-        from: "    if (!input.ready.includes(unit))",
-        to: "    if (false && !input.ready.includes(unit))",
+        derive: {
+          within: "checkBudget",
+          operator: "condition-never",
+          condition: "!input.ready.includes(unit)",
+        },
         expect:
           "the budget properties fire on a hand-built view, so deleting them cannot pass quietly",
       },
@@ -533,38 +587,49 @@ const TARGETS: readonly Target[] = [
         // Every condition in the checker is deleted once, and the case that names it has to fail:
         // a condition no case can reach is a comment, not a check.
         name: "the-completion-does-not-bind-the-verdict-to-the-bytes",
-        from: "    else if (verdict.digest !== artifact)",
-        to: "    else if (false && verdict.digest !== artifact)",
+        derive: {
+          within: "checkCompletion",
+          operator: "condition-never",
+          condition: "verdict.digest !== artifact",
+        },
         expect: "the checker reports a completion whose verdict judged other bytes",
       },
       {
         // Whether an input is current, and whether its bytes are the bytes its verdict judged, is the
         // one acceptance predicate's answer; the checker asks it instead of comparing by hand.
         name: "the-input-is-not-required-to-be-accepted",
-        ast: { within: "checkInputs" },
-        from: "    if (dependencyUnit && !isAccepted(dependencyUnit, context.facts))",
-        to: "    if (false && dependencyUnit && !isAccepted(dependencyUnit, context.facts))",
+        derive: {
+          within: "checkInputs",
+          operator: "condition-never",
+          condition: "dependencyUnit && !isAccepted(dependencyUnit, context.facts)",
+        },
         expect: "the checker reports a completion resting on an input that drifted",
       },
       {
         name: "the-input-may-be-cancelled",
-        ast: { within: "checkInputs" },
-        from: "    if (cancelled(context.facts, dependency))",
-        to: "    if (false && cancelled(context.facts, dependency))",
+        derive: {
+          within: "checkInputs",
+          operator: "condition-never",
+          condition: "cancelled(context.facts, dependency)",
+        },
         expect: "the checker reports a completion resting on a cancelled input",
       },
       {
         name: "the-completion-ignores-a-cancelled-unit",
-        ast: { within: "checkCompletion" },
-        from: "  if (cancelled(context.facts, unit.id))",
-        to: "  if (false)",
+        derive: {
+          within: "checkCompletion",
+          operator: "condition-never",
+          condition: "cancelled(context.facts, unit.id)",
+        },
         expect: "the checker reports a completion of a cancelled unit",
       },
       {
         name: "the-dispatch-does-not-require-a-closed-input",
-        ast: { within: "checkDispatch" },
-        from: '  checkInputs(context, unit, "dispatch");',
-        to: "  void checkInputs;",
+        derive: {
+          within: "checkDispatch",
+          operator: "drop-statement",
+          statement: 'checkInputs(context, unit, "dispatch");',
+        },
         expect: "the checker reports a dispatch whose input is not accepted",
       },
     ],
@@ -583,8 +648,13 @@ const TARGETS: readonly Target[] = [
         // The closure takes the unit-level predicate, so the marker names the two conditions it
         // joins: a unit's own acceptance and every dependency being in the set.
         name: "acceptance-closure-dropped",
-        from: "        own(unit) && unit.inputs.dependencies.every((dependency) => accepted.has(dependency));",
-        to: "        own(unit);",
+        derive: {
+          within: "acceptedClosure",
+          operator: "neutralize-term",
+          condition:
+            "own(unit) && unit.inputs.dependencies.every((dependency) => accepted.has(dependency))",
+          term: "unit.inputs.dependencies.every((dependency) => accepted.has(dependency))",
+        },
         expect: "a dependency that is not accepted makes fusion pay a rollback and a retry",
       },
     ],
@@ -626,24 +696,31 @@ const TARGETS: readonly Target[] = [
     mutants: [
       {
         name: "the-round-client-does-not-require-a-daemon",
-        from: '  if (!state || state.transport !== "http" || !state.host || !state.port || !state.token) {',
-        to: '  if (false && (!state || state.transport !== "http" || !state.host || !state.port || !state.token)) {',
+        derive: {
+          within: "roundDaemon",
+          operator: "condition-never",
+          condition:
+            '!state || state.transport !== "http" || !state.host || !state.port || !state.token',
+        },
         expect: "a driver refuses without a daemon, and no driver opens a database of its own",
       },
       {
         // Whether a call to an endpoint the caller itself serves can be answered depends on the
         // caller not blocking - the assumption that turned this failure into a 305-second wait.
         name: "the-round-client-calls-the-endpoint-it-serves",
-        from: "  if (state.pid === process.pid) {",
-        to: "  if (false && state.pid === process.pid) {",
+        derive: {
+          within: "roundDaemon",
+          operator: "condition-never",
+          condition: "state.pid === process.pid",
+        },
         expect: "a client refuses to call the endpoint its own process serves",
       },
       {
         // Without a bound, a blocked host is indistinguishable from a slow one, and the caller waits
         // out the transport's own timeout instead of being told what to look at.
         name: "the-round-client-has-no-limit-on-how-long-it-waits",
-        from: "    return await httpCall(state, method, params, { timeoutMs });",
-        to: "    return await httpCall(state, method, params, {});",
+        derive: { within: "call", operator: "replace-argument", call: "httpCall", arg: 3 },
+        to: "{}",
         expect: "a call to a host that never answers gives up in seconds and names the reason",
       },
     ],
@@ -662,8 +739,13 @@ const TARGETS: readonly Target[] = [
     mutants: [
       {
         name: "the-loop-ignores-the-slot-count",
-        from: "    const batch = legal.slice(0, input.slots);",
-        to: "    const batch = legal.slice(0, 1);",
+        derive: {
+          within: "dispatchPlan",
+          operator: "replace-argument",
+          call: "legal.slice",
+          arg: 1,
+        },
+        to: "1",
         expect: "a declared slot count is reached, and the claims overlap in time",
       },
 
@@ -682,16 +764,19 @@ const TARGETS: readonly Target[] = [
         // layer, not a mutation target), so what this mutant breaks is the loop's hand-off of the
         // declared bound: the invariant is unchanged, its anchor follows the code carrying it.
         name: "fusion-ignores-the-declared-bound",
-        from: "      bound: input.sessions?.bound ?? 1,",
-        to: "      bound: Number.MAX_SAFE_INTEGER,",
+        derive: { within: "dispatchPlan", operator: "replace-property", property: "bound" },
+        to: "Number.MAX_SAFE_INTEGER",
         expect: "a fused chain stops at the declared bound and does not swallow the plan",
       },
       {
         // The evidence of fusion is the session the worker reported, not the one the loop asked for:
         // a worker that quietly starts its own session must not be reported as fused.
         name: "fusion-counts-a-session-the-worker-did-not-use",
-        from: "      if (unit.sessionId !== session.id) {",
-        to: "      if (false && unit.sessionId !== session.id) {",
+        derive: {
+          within: "dispatchPlan",
+          operator: "condition-never",
+          condition: "unit.sessionId !== session.id",
+        },
         expect: "a worker that starts its own session is not reported as fusion",
       },
       {
@@ -704,8 +789,11 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "a-failed-worker-is-reported-as-a-run-that-finished",
-        from: "  if (result.failure !== undefined || result.artifact === undefined)",
-        to: "  if (false && (result.failure !== undefined || result.artifact === undefined))",
+        derive: {
+          within: "dispatchUnit",
+          operator: "condition-never",
+          condition: "result.failure !== undefined || result.artifact === undefined",
+        },
         expect: "a unit whose worker failed is asked once in a pass",
       },
     ],
@@ -744,8 +832,7 @@ const TARGETS: readonly Target[] = [
     mutants: [
       {
         name: "the-serving-process-never-releases-its-lease",
-        from: "  lease.release();",
-        to: "  // lease.release();",
+        derive: { within: "serveHttp", operator: "drop-statement", statement: "lease.release();" },
         expect: "a host releases its lease when it stops, so the next host can take the store",
       },
     ],
@@ -762,34 +849,50 @@ const TARGETS: readonly Target[] = [
     mutants: [
       {
         name: "a-suggestion-outside-the-legal-set-is-scored",
-        from: "  if (!legalSet.has(suggestion.taskId)) {",
-        to: "  if (false && !legalSet.has(suggestion.taskId)) {",
+        derive: {
+          within: "refuseSuggestion",
+          operator: "condition-never",
+          condition: "!legalSet.has(suggestion.taskId)",
+        },
         expect: "a suggestion outside the legal set is refused, however high it scores",
       },
 
       {
         name: "an-unmodelled-action-is-scored",
-        from: '  if (suggestion.action !== "next") {',
-        to: "  if (false) {",
+        derive: {
+          within: "refuseSuggestion",
+          operator: "condition-never",
+          condition: 'suggestion.action !== "next"',
+        },
         expect: "an unmodelled action is refused rather than scored",
       },
       {
         name: "a-disabled-source-is-asked-anyway",
-        from: "    if (source.enabled === false) {",
-        to: "    if (false && source.enabled === false) {",
+        derive: {
+          within: "orderCandidates",
+          operator: "condition-never",
+          condition: "source.enabled === false",
+        },
         expect: "a disabled or failing source falls back to the rule policy, and says why",
       },
 
       {
         name: "a-score-from-another-scope-is-reused",
-        from: "  if (\n    provenance.sessionId !== projection.sessionId ||\n    provenance.branchId !== projection.branchId\n  ) {",
-        to: "  if (false) {",
+        derive: {
+          within: "refuseSuggestion",
+          operator: "condition-never",
+          condition:
+            "provenance.sessionId !== projection.sessionId || provenance.branchId !== projection.branchId",
+        },
         expect: "a score from another session or branch is not reused",
       },
       {
         name: "a-version-mismatch-still-counts-as-the-same-reading",
-        from: "  if (provenance.parametersVersion !== projection.parametersVersion)\n    missing.push(`parametersVersion=${provenance.parametersVersion}`);",
-        to: "  if (false) missing.push(`parametersVersion=${provenance.parametersVersion}`);",
+        derive: {
+          within: "missingValidityInputs",
+          operator: "condition-never",
+          condition: "provenance.parametersVersion !== projection.parametersVersion",
+        },
         expect: "a changed parameter or projection version makes an old score a new one",
       },
       {
@@ -801,8 +904,11 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "a-ranking-survives-into-the-claim",
-        from: "  return legalNow.includes(adopted.taskId)",
-        to: "  return true",
+        derive: {
+          within: "revalidateSuggestion",
+          operator: "condition-holds",
+          condition: "legalNow.includes(adopted.taskId)",
+        },
         expect: "an adopted ranking is re-checked where the write happens",
       },
     ],
@@ -828,23 +934,32 @@ const TARGETS: readonly Target[] = [
         // A run cannot adopt an entry for work it never froze: otherwise the binding names a task
         // no decision was ever read against.
         name: "a-binding-ignores-whether-the-task-was-frozen",
-        from: "    if (!isFrozen(store, request.runId, request.taskId))",
-        to: "    if (false && !isFrozen(store, request.runId, request.taskId))",
+        derive: {
+          within: "bindRunEntry",
+          operator: "condition-never",
+          condition: "!isFrozen(store, request.runId, request.taskId)",
+        },
         expect: "a binding refuses what the store does not hold",
       },
       {
         // The binding names an entry the board really holds, on the channel the caller names.
         name: "a-binding-does-not-check-the-entry-exists",
-        from: "    if (!store.getTaskBoardEntryById(request.boardTaskId, request.entryId))",
-        to: "    if (false && !store.getTaskBoardEntryById(request.boardTaskId, request.entryId))",
+        derive: {
+          within: "bindRunEntry",
+          operator: "condition-never",
+          condition: "!store.getTaskBoardEntryById(request.boardTaskId, request.entryId)",
+        },
         expect: "a binding refuses what the store does not hold",
       },
       {
         // One entry carries one task: without this a second run would fence an entry it does not
         // own, and the fence would refuse the first run's own writes.
         name: "one-entry-is-bound-to-two-tasks",
-        from: "    if (bound && (bound.runId !== request.runId || bound.taskId !== request.taskId))",
-        to: "    if (false && bound && (bound.runId !== request.runId || bound.taskId !== request.taskId))",
+        derive: {
+          within: "bindRunEntry",
+          operator: "condition-never",
+          condition: "bound && (bound.runId !== request.runId || bound.taskId !== request.taskId)",
+        },
         expect: "a binding refuses what the store does not hold",
       },
       {
@@ -867,24 +982,33 @@ const TARGETS: readonly Target[] = [
       {
         // The binding is re-read where the write happens, not where the caller decided to make it.
         name: "a-coordinated-write-skips-the-binding-recheck",
-        from: "    if (binding.runId !== request.runId)",
-        to: "    if (false && binding.runId !== request.runId)",
+        derive: {
+          within: "coordinatedBoardWrite",
+          operator: "condition-never",
+          condition: "binding.runId !== request.runId",
+        },
         expect: "a coordinated write refuses an entry that is not this run's",
       },
       {
         // The run surface's transitions: a plan the run cannot satisfy is refused while it is still
         // a proposal rather than frozen into a task that can never be ready.
         name: "the-plan-may-freeze-a-dangling-dependency",
-        from: "      if (!known.has(dependency))",
-        to: "      if (false && !known.has(dependency))",
+        derive: {
+          within: "freezeRunPlan",
+          operator: "condition-never",
+          condition: "!known.has(dependency)",
+        },
         expect: "a freeze cannot dangle, repeat a task, or lean on itself",
       },
       {
         // A task that waits for itself is a task that is never ready, and the freeze is the last
         // point at which that is still only a proposal.
         name: "a-task-may-depend-on-itself",
-        from: "      if (dependency === task.taskId)",
-        to: "      if (false && dependency === task.taskId)",
+        derive: {
+          within: "freezeRunPlan",
+          operator: "condition-never",
+          condition: "dependency === task.taskId",
+        },
         expect: "a freeze cannot dangle, repeat a task, or lean on itself",
       },
 
@@ -901,8 +1025,8 @@ const TARGETS: readonly Target[] = [
         // The binding records which channel carries the entry, which is what lets a status reader
         // resolve it without searching every channel.
         name: "a-binding-does-not-record-its-channel",
-        from: "        payload: JSON.stringify({ boardTaskId: request.boardTaskId }),",
-        to: "        payload: null,",
+        derive: { within: "bindRunEntry", operator: "replace-property", property: "payload" },
+        to: "null",
         expect: "a run registers, freezes a plan, adopts entries, and reads it all back",
       },
 
@@ -910,24 +1034,36 @@ const TARGETS: readonly Target[] = [
         // A run-level cancellation is the run's fact, not a task's: the schema's empty task id is
         // what keeps it from colliding with a task that has no name.
         name: "a-run-cancellation-names-a-task",
-        from: '        taskId: request.taskId ?? "",',
-        to: '        taskId: request.taskId ?? "-",',
+        derive: {
+          within: "cancelRun",
+          operator: "replace-property",
+          property: "taskId",
+          in: "taskId: request.taskId",
+        },
+        to: 'request.taskId ?? "-"',
         expect: "cancelling a run is recorded once, stops its managed writes, and is readable",
       },
       {
         // Cancelling a task the plan never froze would name nothing while reading as a fact about
         // the run.
         name: "a-cancellation-ignores-whether-the-task-was-frozen",
-        from: "  if (request.taskId !== undefined && !isFrozen(store, request.runId, request.taskId))",
-        to: "  if (false && request.taskId !== undefined && !isFrozen(store, request.runId, request.taskId))",
+        derive: {
+          within: "cancelRun",
+          operator: "condition-never",
+          condition:
+            "request.taskId !== undefined && !isFrozen(store, request.runId, request.taskId)",
+        },
         expect: "cancelling one task names it, and a task the plan never froze cannot be cancelled",
       },
       {
         // There is nothing to cancel in a run this store cannot name, and the refusal says so
         // rather than leaving it to the transaction's own message.
         name: "an-unknown-run-can-be-cancelled",
-        from: "  if (!store.taskRunManifest(request.runId))",
-        to: "  if (false && !store.taskRunManifest(request.runId))",
+        derive: {
+          within: "cancelRun",
+          operator: "condition-never",
+          condition: "!store.taskRunManifest(request.runId)",
+        },
         expect:
           "status is a read: an unknown run has no manifest and is not registered by being asked",
       },
@@ -951,8 +1087,8 @@ const TARGETS: readonly Target[] = [
         // The wire drops an adoption request: the entry is created, the caller is told the put
         // succeeded, and no run manages it - the silent divergence the epoch rule exists for.
         name: "the-wire-drops-an-adoption-request",
-        from: "      adopt: optionalAdoption(params.adopt),",
-        to: "      adopt: undefined,",
+        derive: { within: "parseTaskBoardParams", operator: "replace-property", property: "adopt" },
+        to: "undefined",
         expect:
           "adoption is part of the transition that creates the entry, so a refusal leaves no entry",
       },
@@ -966,8 +1102,11 @@ const TARGETS: readonly Target[] = [
     mutants: [
       {
         name: "the-declined-shared-checks-still-run",
-        from: '  const declined = route.verify.sharedChecks === "none";',
-        to: "  const declined = false;",
+        derive: {
+          within: "planNarrowVerify",
+          operator: "condition-never",
+          condition: 'route.verify.sharedChecks === "none"',
+        },
         expect: "a route that declares the shared checks not applicable narrows to its own tests",
       },
       {
@@ -988,15 +1127,22 @@ const TARGETS: readonly Target[] = [
     mutants: [
       {
         name: "a-declined-floor-may-have-no-tests",
-        from: 'if (sharedChecks === "none" && !route.tests.length) {',
-        to: 'if (false && sharedChecks === "none" && !route.tests.length) {',
+        derive: {
+          within: "validateRouteVerify",
+          operator: "condition-never",
+          condition: 'sharedChecks === "none" && !route.tests.length',
+        },
         expect:
           "verify.sharedChecks must be a known declaration, and declining needs its own tests",
       },
       {
         name: "an-unknown-shared-checks-value-is-accepted",
-        from: 'if (sharedChecks !== undefined && sharedChecks !== "always" && sharedChecks !== "none") {',
-        to: 'if (false && sharedChecks !== undefined && sharedChecks !== "always" && sharedChecks !== "none") {',
+        derive: {
+          within: "validateRouteVerify",
+          operator: "condition-never",
+          condition:
+            'sharedChecks !== undefined && sharedChecks !== "always" && sharedChecks !== "none"',
+        },
         expect:
           "verify.sharedChecks must be a known declaration, and declining needs its own tests",
       },
@@ -1096,8 +1242,12 @@ const TARGETS: readonly Target[] = [
     mutants: [
       {
         name: "fusion-books-the-shared-startup-per-unit",
-        from: "    sharedStartupMs: sessions * params.sessionStartMs,",
-        to: "    sharedStartupMs: shape.units * params.sessionStartMs,",
+        derive: {
+          within: "fusionAccounting",
+          operator: "replace-property",
+          property: "sharedStartupMs",
+        },
+        to: "shape.units * params.sessionStartMs",
         expect: "fusion books the shared startup once per session, not once per unit",
       },
       {
@@ -1108,14 +1258,21 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "fusion-removes-boundaries-that-are-not-there",
-        from: "    boundarySavedMs: (shape.units - sessions) * params.contextMsPerUnit,",
-        to: "    boundarySavedMs: shape.units * params.contextMsPerUnit,",
+        derive: {
+          within: "fusionAccounting",
+          operator: "replace-property",
+          property: "boundarySavedMs",
+        },
+        to: "shape.units * params.contextMsPerUnit",
         expect: "a fusion bound of one unit removes no boundary and still pays the startup",
       },
       {
         name: "fusion-reads-a-gain-out-of-an-assumed-term",
-        from: '  if (!params.sessionStartMeasured) return "unmeasured";',
-        to: '  if (false) return "unmeasured";',
+        derive: {
+          within: "fusionVerdict",
+          operator: "condition-never",
+          condition: "!params.sessionStartMeasured",
+        },
         expect: "an assumed session startup never reads as a gain",
       },
     ],
@@ -1163,14 +1320,24 @@ const TARGETS: readonly Target[] = [
     mutants: [
       {
         name: "the-identity-is-not-hex",
-        from: '  return createHash("sha256").update(bytes).digest("hex");',
-        to: '  return createHash("sha256").update(bytes).digest("base64url");',
+        derive: {
+          within: "workDigest",
+          operator: "replace-argument",
+          call: 'createHash("sha256").update(bytes).digest',
+          arg: 0,
+        },
+        to: '"base64url"',
         expect: "the identity of work bytes is sha256 in hex, at full length",
       },
       {
         name: "the-json-variant-does-not-digest-json",
-        from: "  return workDigest(JSON.stringify(value));",
-        to: "  return workDigest(String(value));",
+        derive: {
+          within: "workDigestOf",
+          operator: "replace-argument",
+          call: "workDigest",
+          arg: 0,
+        },
+        to: "String(value)",
         expect: "the JSON variant digests JSON text, so key order is the caller's",
       },
     ],

@@ -51,7 +51,8 @@ export interface Derive {
     | "replace-argument"
     /** The value of the object property named `property` becomes the declared `to` fragment. */
     | "replace-property"
-    /** The statement the selector identifies is removed, with its line and its indentation. */
+    /** The statement the selector identifies is removed, with its line and its indentation: an
+     *  expression, a declaration, a `return`, a `throw`, or a guard clause. */
     | "drop-statement";
   /** Which guard: a fragment its condition's own text contains, e.g. `existing.deliveredBy`. */
   readonly condition?: string;
@@ -79,6 +80,14 @@ export interface Site {
   readonly end: number;
   readonly replacement: string;
   readonly retaken: boolean;
+}
+
+/** Does this text contain the fragment, ignoring the line breaks the formatter chose? A filter that
+ *  asks "which candidate mentions this" must not require the fragment to be unique inside the
+ *  candidate: `b` appears three times in `a && (b || !b)`, and that condition is still the one a
+ *  selector naming `b` is talking about. */
+function containsText(haystack: string, fragment: string): boolean {
+  return haystack.replace(/\s+/gu, " ").includes(fragment.replace(/\s+/gu, " ").trim());
 }
 
 /** Whitespace-normalized text search: exact bytes first, then reflowed form.
@@ -203,11 +212,14 @@ function collect<T extends ts.Node>(root: ts.Node, isWanted: (node: ts.Node) => 
   return found;
 }
 
-/** The one member with this name in the file, or why it is not one site. */
+/** The one member with this name in the file, or why it is not one site. A class constructor is a
+ *  member too: its name is written `constructor`, and code that refuses a second plan while it opens
+ *  the store lives there and nowhere else. */
 function uniqueMember(source: ts.SourceFile, name: string): ts.Node | { reason: string } {
   const named = (node: ts.Node): boolean =>
-    (ts.isMethodDeclaration(node) || ts.isFunctionDeclaration(node)) &&
-    node.name?.getText(source) === name;
+    ((ts.isMethodDeclaration(node) || ts.isFunctionDeclaration(node)) &&
+      node.name?.getText(source) === name) ||
+    (ts.isConstructorDeclaration(node) && name === "constructor");
   const members = collect<ts.Node>(source, named);
   if (members.length !== 1)
     return {
@@ -288,18 +300,32 @@ function statementSite(
   if (derive.statement === undefined)
     return { reason: "drop-statement needs a `statement` fragment" };
   const fragment = derive.statement;
+  // A guard clause is a statement like any other: `if (...) throw ...;` is dropped whole, and the
+  // statement matcher normalizes whitespace so a reflow cannot make it unfindable.
   const containing = (node: ts.Node): boolean =>
     (ts.isExpressionStatement(node) ||
       ts.isVariableStatement(node) ||
       ts.isReturnStatement(node) ||
-      ts.isThrowStatement(node)) &&
-    node.getText(source).includes(fragment);
+      ts.isThrowStatement(node) ||
+      ts.isIfStatement(node)) &&
+    containsText(node.getText(source), fragment);
   const statements = collect<ts.Statement>(member, containing);
-  if (statements.length !== 1)
+  // The innermost statement wins, the same rule conditions follow: a guard whose body is itself a
+  // statement is the guard, not the two of them.
+  const innermost = statements.filter(
+    (statement) =>
+      !statements.some(
+        (other) =>
+          other !== statement &&
+          other.getStart(source) >= statement.getStart(source) &&
+          other.getEnd() <= statement.getEnd(),
+      ),
+  );
+  if (innermost.length !== 1)
     return {
-      reason: `${statements.length} statements in ${derive.within} contain the fragment, refusing to claim a check`,
+      reason: `${innermost.length} statements in ${derive.within} contain the fragment, refusing to claim a check`,
     };
-  const statement = statements[0]!;
+  const statement = innermost[0]!;
   // The whole line goes: the indentation to its left and the newline to its right. A trailing comment
   // on that line would be dropped with it, and a statement that shares its line with anything else
   // would leave half of that line behind, so both are refused rather than silently damaged.
@@ -355,10 +381,12 @@ function conditionSite(
   derive: Derive,
 ): ts.Expression | { reason: string } {
   const conditions = decisionExpressions(member);
-  const matching =
-    derive.condition === undefined
-      ? conditions
-      : conditions.filter((condition) => condition.getText(source).includes(derive.condition!));
+  // Matched with the same whitespace normalization as everything else: a condition written across
+  // lines is still one condition, and a fragment that names it must not have to reproduce the line
+  // breaks prettier chose.
+  const mentions = (condition: ts.Expression): boolean =>
+    derive.condition === undefined || containsText(condition.getText(source), derive.condition);
+  const matching = conditions.filter(mentions);
   const innermost = matching.filter(
     (condition) =>
       !matching.some(

@@ -129,6 +129,42 @@ targets`. The target `tools/agent-verify.ts` went with its single tooth, so the 
    strings rather than by a filesystem. **Landed:** the resolver is `tools/mutation-anchor.ts` (it held
    no state, so it moved out of the sweep script and the tests can call it), with 16 cases over source
    strings and no filesystem access.
+   **Extended to the whole register (2026-09-24): 59 more teeth converted, and the register is now 77
+   derived of 110** - every class of site the six operators can express, taken target by target and
+   swept after each: `condition-never` on a guard or an initializer (44 in total), `neutralize-term` (9),
+   `replace-property` (9), `replace-argument` (6), `drop-statement` (6), `condition-holds` (3). The
+   reading after it: `110 of 110 caught by the named test`, **all 110 by the case their `expect` names**,
+   22 of 22 restored byte-identically, 171 s.
+   Three vocabulary gaps showed up as _sites the operators could not name_, and each was closed with a
+   case in `tests/tools/mutation-anchor.test.ts` (now 19 cases) rather than argued about:
+   - **A class constructor is a member.** `BoardAdmission`'s constructor refuses a second plan while it
+     opens the store, and `uniqueMember` only knew method and function declarations, so that site had no
+     `within` at all. Its name is `constructor`; matching it is what let
+     `a-second-plan-silently-adopts-the-run` convert.
+   - **A condition written across lines is one condition.** The candidate filter compared raw text while
+     the whole-condition check compared whitespace-normalized text, so a fragment of a wrapped `if` found
+     no candidate and then matched nothing. Both now normalize, and a filter does not require the
+     fragment to be unique _inside_ the candidate - `b` appears three times in `a && (b || !b)`, and that
+     is still the condition a selector naming `b` means.
+   - **A guard clause is a statement.** `if (...) throw ...;` was not among the statements
+     `drop-statement` would remove, because an `if` is an `IfStatement` rather than an expression,
+     declaration, `return` or `throw`. It is now, and statements resolve to the **innermost** one
+     containing the fragment, the rule conditions already followed - which is also what keeps a fragment
+     from matching both a guard and the statement inside it.
+     One wrong `within` was shipped and the sweep caught it, which is the argument for sweeping after a
+     conversion rather than trusting the anchors pass: `the-completion-ignores-a-cancelled-unit` was aimed
+     at `checkDispatch` instead of `checkCompletion` (the fragment occurs in both members), so the anchors
+     pass resolved, the mutant was still caught - and it was caught by the _suite_, not by the case that
+     names a completion of a cancelled unit. Re-aimed, that case fails again.
+     **What is left hand-written is 33 teeth, and they cluster by the operator they would need:** a
+     comparison rewritten (`=== "none"` to `!== "always"`, 3), a fragment inside a template or a SQL string
+     (5), an iterable emptied or a filter dropped (4), a call or `new` replaced or unwrapped (6), an index
+     moved (`[0]` to `[1]`, 2), an initializer replaced by a different expression (3), a condition negated
+     (2), a statement rewritten into another statement (3), two statements sharing one line (2), a literal
+     swapped (1), a site at module top level, where there is no member to name (1), and one tooth that
+     changes two things at once (`every-task-is-frozen-at-position-zero`, kept deliberately). Four of these
+     clusters look worth an operator (`replace-comparison`, `replace-fragment`, `empty-iterable`,
+     `replace-callee`); the rest are single sites or shapes a general operator would make ambiguous.
 2. The pilot target converted and swept: same names, same cases, same catches; then a refactor inside it
    that demonstrates a derived tooth surviving what a byte anchor did not. **Landed**, with one
    correction: the demo first refactor was a rename plus a condition lifted into `const closed = spent ||

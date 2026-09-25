@@ -29,6 +29,14 @@
 **一颗牙的耐久部分是它的名字、它的算子、它的选择器，以及必须失败的那个用例。位置与替换字节每次从语法树算出来。**
 
 1. **六个作用在具名选择器上的算子**，作用域限定在一个成员内：`condition-never`（选择器指到的那条条件永不成立）、`condition-holds`（它始终成立——镜像的那个，因为写成 `return a && b` 的规则说的是“这条条件为真”，把它换成 `false` 是把规则反过来，而不是去掉）、`neutralize-term`（该条件里的一项变成它的恒等元——`&&` 下为 `true`，`||` 下为 `false`）、`replace-argument`（某个调用的第 _n_ 个实参换成声明的片段）、`replace-property`（具名对象属性的值换成声明的片段）、`drop-statement`（选择器指到的那条语句连行带缩进被删掉）。两条规则让选择器保持诚实：匹配到多于一处、或者片段同时命中两个候选的，一律拒绝而不是猜；两个“整条件”算子拒绝只命名条件一部分的片段，因为整段替换会把 mutant 悄悄放大成“这条规则的每一条理由”——一项有它自己的算子。规则用不上这些时，仍可用“成员作用域 + 最小片段”的旧形式；而**“最小”是要点**：不要消息文本、不要同级实参、一项能表达的不要写成整条语句。
+   **已推广到整个登记处（2026-09-24）：又转了 59 颗，登记处现在是 110 颗里 77 颗 derived。**六个算子能表达的每一类点位都按目标逐个转完，每转完一个目标就 sweep：`condition-never`（守卫或初始化器，共 44）、`neutralize-term`（9）、`replace-property`（9）、`replace-argument`（6）、`drop-statement`（6）、`condition-holds`（3）。转完的读数：`110 of 110 caught by the named test`，**110 颗全部由各自 `expect` 点名的用例抓住**，22 of 22 逐字节还原，171 秒。
+   过程中暴露了三个"算子点不到这个点位"的缺口，每个都用 `tests/tools/mutation-anchor.test.ts` 里的一条用例补上（现在 19 条），而不是靠讨论：
+   - **类构造函数也是成员。**`BoardAdmission` 的构造函数在打开 store 时拒绝第二个 plan，而 `uniqueMember` 只认方法声明和函数声明，那个点位当时连 `within` 都写不出来。它的名字是 `constructor`；认它之后 `a-second-plan-silently-adopts-the-run` 才转得动。
+   - **跨行写的条件仍然是一个条件。**候选过滤器比的是原始文本，而整条件检查比的是空白归一化后的文本，于是被折行 `if` 的片段先找不到候选、再匹配不上。现在两边都归一化；并且过滤器不要求片段在候选内部唯一——`b` 在 `a && (b || !b)` 里出现三次，而它仍然是指名 `b` 的选择器所指的那个条件。
+   - **守卫语句也是一种语句。**`if (...) throw ...;` 原本不在 `drop-statement` 会删的语句里，因为 `if` 是 `IfStatement` 而非表达式、声明、`return` 或 `throw`。现在它算，并且语句解析取**最内层**那个包含片段的语句——条件早就是这个规则，这也正是不让片段同时命中守卫和守卫里那条语句的原因。
+     有一处 `within` 我写错了，是 sweep 抓出来的，这也正是"转完必须 sweep、不能只信 anchors pass"的理由：`the-completion-ignores-a-cancelled-unit` 被指向 `checkDispatch` 而不是 `checkCompletion`（那个片段在两个成员里都出现），于是 anchors pass 照样通过、mutant 照样被抓——但抓它的是**整个 suite**，不是那条"报告一个被取消单元的完成"的用例。重新瞄准后，那条用例又失败了。
+     **剩下 33 颗仍是手写，且按"需要什么算子"成簇：**比较运算符被改写（`=== "none"` 变 `!== "always"`，3）、模板或 SQL 字符串里的片段（5）、可迭代对象被清空或过滤被删（4）、调用或 `new` 被替换/脱壳（6）、下标移动（`[0]`→`[1]`，2）、初始化器被换成另一个表达式（3）、条件被取反（2）、语句被改写成另一条语句（3）、两条语句挤在一行（2）、字面量被替换（1）、点位在模块顶层因而没有成员可命名（1），以及一颗一次改两处的牙（`every-task-is-frozen-at-position-zero`，故意留着）。这四簇看起来值得加算子（`replace-comparison`、`replace-fragment`、`empty-iterable`、`replace-callee`）；其余是单点位，或者用通用算子表达反而会变得有歧义的形状。
+
 2. **把 133 颗 G/V/R 牙逐目标改成派生形式**，从 `src/integration/ooo-execution.ts` 开始试点：该文件在两条目标条目里共 24 颗（16 颗融合合法性推演、8 颗会话融合）；同样的名字、同样的 `expect` 用例，转换后同样 24/24 被抓——其中 19 颗派生、5 颗保留手写（下面具名）——然后在该文件里做一次真重构，证明派生出来的位置都还在，而字节锚点会在这次重构里退役。
    试点文件里那 5 颗残余，每一颗都是单个表达式或单个值，而不是整条语句或消息：`selection-ignores-a-withdrawn-acceptance`（整个 `const` 初始化式被替换）、`the-budget-is-not-cut-from-the-startable-set`（被返回表达式里的调用被删）、`next-task-is-not-the-head-of-the-legal-set`（下标 `[0]` 变 `[1]`）、`speculation-guesses-several-facts-at-once`（`length === 1` 变 `>= 1`）、`a-guess-with-no-evidence-publishes`（插入一个分支并重写消息）。
 3. **派生形式表达不了的，保留手写，并且说明为什么。** 16 颗 I/E 牙——插入、包装、第二份规则——它们的锚点是“某段代码不该出现的地方”，所以它们最后才搬，也最先被重新考虑：凡是规则已经有一个关系式或穷举式检查的，就退役这颗牙，并在它原来的位置上点名那个检查。

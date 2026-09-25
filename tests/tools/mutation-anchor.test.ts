@@ -217,6 +217,53 @@ test("a member the selector cannot tell apart is refused: none, several, or a fr
   );
 });
 
+test("a class constructor is a member, and its name is `constructor`", () => {
+  const classSource = `class Gate {\n  constructor(runs, wanted) {\n    const recorded = runs.find((run) => run.id === wanted.id);\n    if (recorded && recorded.policy !== wanted.policy) refuse("policy changed");\n  }\n}\n`;
+  const inConstructor = named("x", {
+    within: "constructor",
+    operator: "condition-never",
+    condition: "recorded && recorded.policy !== wanted.policy",
+  });
+  assert.equal(
+    selected(classSource, inConstructor),
+    "recorded && recorded.policy !== wanted.policy",
+  );
+  assert.match(
+    refusal(
+      classSource,
+      named("x", { within: "Gate", operator: "condition-never", condition: "recorded" }),
+    ),
+    /member Gate matched 0 members/,
+  );
+});
+
+test("a condition written across lines is one condition, and a reflowed fragment still names it", () => {
+  const wrapped = `function refuseSuggestion(suggestion, projection) {\n  const provenance = suggestion.provenance;\n  if (\n    provenance.sessionId !== projection.sessionId ||\n    provenance.branchId !== projection.branchId\n  ) {\n    return "other scope";\n  }\n  return null;\n}\n`;
+  const scope = named("x", {
+    within: "refuseSuggestion",
+    operator: "condition-never",
+    condition:
+      "provenance.sessionId !== projection.sessionId || provenance.branchId !== projection.branchId",
+  });
+  assert.match(
+    selected(wrapped, scope),
+    /^provenance\.sessionId !== projection\.sessionId \|\|\n\s+provenance\.branchId !== projection\.branchId$/u,
+  );
+});
+
+test("a guard clause is a statement that can be dropped, listed among the statements that can", () => {
+  const guarded = `function claim(id, agentId, cancelled) {\n  if (!id || !agentId) throw new Error("task and agent required");\n  if (cancelled !== null) throw new Error("round cancelled");\n  return id;\n}\n`;
+  const guard = named("x", {
+    within: "claim",
+    operator: "drop-statement",
+    statement: 'if (cancelled !== null) throw new Error("round cancelled");',
+  });
+  assert.equal(
+    selected(guarded, guard),
+    '  if (cancelled !== null) throw new Error("round cancelled");\n',
+  );
+});
+
 test("when a fragment sits inside two decision positions, the innermost one is the site", () => {
   const nested = named("x", {
     within: "selection",
