@@ -231,23 +231,6 @@ const TARGETS: readonly Target[] = [
         expect: "a run registers once, and a second plan for the same run is refused",
       },
       {
-        // Frozen means frozen: the same task id with a different definition is a different plan,
-        // and replacing it in place would rewrite the input a decision was already read against.
-        name: "a-frozen-task-is-replaced-by-a-different-definition",
-        ast: { within: "insertTaskRunTask" },
-        from: "      if (!same)",
-        to: "      if (!same && false)",
-        expect: "freezing a task twice is a no-op, and a different definition for it is refused",
-      },
-      {
-        // The fact's own identity is what makes a retry after a lost response append once.
-        name: "a-retried-run-fact-is-appended-twice",
-        ast: { within: "insertTaskRunFact" },
-        from: "    if (known) return { sequence: Number(known.sequence), recorded: false };",
-        to: "    if (known && false) return { sequence: Number(known.sequence), recorded: false };",
-        expect: "appending the same fact twice records it once and keeps the first sequence",
-      },
-      {
         // The fact write has to join the transition the caller opened, not open a second one; the
         // board write and the run fact of one transition stand or fall together.
         name: "the-run-fact-opens-its-own-transaction",
@@ -416,8 +399,7 @@ const TARGETS: readonly Target[] = [
         ast: { within: "next" },
         from: "    return this.candidates()[0] ?? null;",
         to: "    return this.candidates()[1] ?? null;",
-        expect:
-          "contract: a verified patch candidate is what dependents bind to, and only acceptance releases them",
+        expect: "at the default budget the licence is still the head of the ordered set",
       },
     ],
   },
@@ -1220,7 +1202,7 @@ const TARGETS: readonly Target[] = [
         name: "the-caller-rebuilds-the-shared-floor",
         from: "? [...narrowPlan.shared, ...(route.tests.length ? [nodeTestCheckName(route.id)] : [])]",
         to: '? ["check", "docs:check", "format:check", "glossary:check", "lint", "package:check", "rtm:check", ...(route.tests.length ? [nodeTestCheckName(route.id)] : [])]',
-        expect: "a route that declines the shared checks plans only its own tests",
+        expect: "a declining route's narrow run verifies on its own tests and nothing else",
       },
     ],
   },

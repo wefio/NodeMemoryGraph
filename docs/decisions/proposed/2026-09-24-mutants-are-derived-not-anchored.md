@@ -150,12 +150,32 @@ claims at once, and the store is why each handoff is directed`, whose assertions
      needed, which makes that case a better witness than the tooth's name. Measured after:
      `anchors: 138 of 138 resolve`, and `--targets=src/integration/ooo-board.ts` sweeps `15 of 15 caught`,
      restored byte-identically.
-     **Remaining:** the I/E teeth, the store-target teeth (`a-retried-run-fact-is-appended-twice`,
-     `a-frozen-task-is-replaced-by-a-different-definition`), and the two candidates judged **not**
-     retirable so far - `every-task-is-frozen-at-position-zero` and `a-binding-does-not-record-its-channel`,
-     whose named case is a register/freeze/adopt/read-back round-trip, weaker than the rule it is asked to
-     carry. The stale `expect` on `next-is-not-the-head-of-the-ordered-candidates` and on
-     `fusion-continues-from-an-unverified-answer` is still outstanding.
+     **Third group landed (two teeth retired, four links repaired, 2026-09-24):**
+     `a-retried-run-fact-is-appended-twice` and `a-frozen-task-is-replaced-by-a-different-definition` (row
+     D11) go, because the row's own prose already rested on the cases for those two rules and the cases say
+     them outright. The group's larger finding is what the first **whole-register** sweep said: 136 of 136
+     caught, but only **134 by the case each `expect` named**. Four links were wrong, each in its own way:
+   - `fusion-continues-from-an-unverified-answer`'s case refused the pair for a second reason as well, so
+     it passed under the mutant. The pair now carries no dependency between the two units, which leaves
+     the predecessor's verdict as the only condition that can refuse it.
+   - `next-is-not-the-head-of-the-ordered-candidates`'s `expect` named a case in another target. The
+     board's budget case now asserts `next()` is the head of the ordered set, and that is the name it
+     carries.
+   - `the-caller-rebuilds-the-shared-floor`'s `expect` was a paraphrase that named no case at all.
+   - `the-grace-is-zero`'s named case derived its fixture from the constant under test
+     (`half = CLOCK_GRACE_MS / 2000`), so zeroing the grace moved the stamp onto `now` and the case passed
+     while the bug was live. The fixture is a literal now.
+     The re-run after those repairs: **136 of 136 caught, all 136 by the case its `expect` names**, 23 of 23
+     targets restored byte-identically, 217 s. The class is the same one this record opened with - a link
+     that goes stale while the artifact still looks right - so the reading to keep is not the count of teeth
+     but the count of teeth whose named case is the one that fails.
+     One behaviour recorded rather than changed: a named case that does not finish inside its bound counts as
+     caught, with the reason printed (`the-pass-asks-a-unit-it-already-failed-again`, 30 s). The tool's own
+     comment says a run that never ends proves nothing; the code counts it as caught and says why. That
+     tension is left alone, because resolving it changes what the ledger's `proven` means.
+     **Remaining:** the I/E teeth, and the two candidates judged **not** retirable so far -
+     `every-task-is-frozen-at-position-zero` and `a-binding-does-not-record-its-channel`, whose named case is
+     a register/freeze/adopt/read-back round-trip, weaker than the rule it is asked to carry.
 
 ## Acceptance criteria
 

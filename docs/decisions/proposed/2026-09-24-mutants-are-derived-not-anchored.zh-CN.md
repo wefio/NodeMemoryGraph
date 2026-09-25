@@ -48,7 +48,14 @@
      退役后实测：`anchors: 144 of 144 resolve`（登记处是 144 颗牙，不是 149），这趟碰到的四个目标 sweep `70 of 70 caught`，5 of 5 逐字节还原。
      一个要带下去的发见：`a-refused-unit-is-silent` **没有任何**台账行点名它，抓住它的那条用例同样无人认领——一颗孤儿牙，退役它移除的是孤儿，而不是某一行的钉子。
      **第二组已落地（六颗，2026-09-24）：**声明的预算那五条规则——许可的是预算的那一部分而不是表头、预算大于一必须点名目标、每个可开始任务都有一个 handoff、可开始的 handoff 会在重发布中存活、多槽位的 handoff 是被定向的——都由同一条用例陈述：`evals/ooo-execution/board-slots.test.ts` 的 `a declared budget holds two claims at once, and the store is why each handoff is directed`，其断言逐条点名了这些规则（拒绝消息、handoff 计数、`serialState` 为 null、重发布后 id 不变、先认领非表头那个）。这五颗从 F2b-slot 行退役，该行保留七颗。第六颗 `claim-is-not-scoped-to-its-run`（B1 行）是命名空间实验里最初**没被抓住**的那颗牙——用例被加强到能抓住它，实验记录写下了当时必需的"裸行读取"，所以那条用例比这颗牙的名字是更好的证人。退役后实测：`anchors: 138 of 138 resolve`，`--targets=src/integration/ooo-board.ts` sweep `15 of 15 caught`，逐字节还原。
-     **尚未完成：**I/E 牙、store 目标那两颗（`a-retried-run-fact-is-appended-twice`、`a-frozen-task-is-replaced-by-a-different-definition`），以及目前判定为**不可退役**的两颗——`every-task-is-frozen-at-position-zero` 与 `a-binding-does-not-record-its-channel`，它们的点名用例是"注册/冻结/采纳/读回"的往返，弱于要它承担的规则。`next-is-not-the-head-of-the-ordered-candidates` 与 `fusion-continues-from-an-unverified-answer` 的过期 `expect` 仍未处理。
+     **第三组已落地（退役两颗、修好四条链接，2026-09-24）：**`a-retried-run-fact-is-appended-twice` 与 `a-frozen-task-is-replaced-by-a-different-definition`（D11 行）退役——该行的正文本来就靠这两条用例承载那两条规则，而用例把规则直说了。这一组更大的发现是**第一次全登记处 sweep**的读数：136 颗全部被抓，但只有 **134 颗是被各自 `expect` 点名的那条用例抓住的**。四条链接都错了，而且各错各的：
+   - `fusion-continues-from-an-unverified-answer` 的点名用例还因为另一个原因拒绝这一对，于是在 mutant 下照样通过。现在这一对的两个单元之间没有依赖，前驱的裁决成为唯一能拒绝它的条件。
+   - `next-is-not-the-head-of-the-ordered-candidates` 的 `expect` 指的是另一个目标里的用例。董事会（board）的预算用例现在断言 `next()` 就是有序集合的表头，它的名字随之更正。
+   - `the-caller-rebuilds-the-shared-floor` 的 `expect` 是一句转述，不对应任何用例。
+   - `the-grace-is-zero` 的点名用例从**被测常量本身**推导夹具（`half = CLOCK_GRACE_MS / 2000`），于是把 grace 归零会把时间戳挪到 `now` 上，缺陷活着而用例照过。夹具现在是字面量。
+     修完重跑：**136 of 136 caught，且 136 颗全部由各自 `expect` 点名的用例抓住**，23 of 23 目标逐字节还原，217 秒。这一类正是本记录开头写的那一类——**凭据看着没问题，链接悄悄过期**——所以要记住的读数不是牙的数量，而是"点名用例就是失败那个"的牙的数量。
+     一条记录而未改动的行为：点名用例在自己的时限内没跑完，也被算作抓住，并把原因打印出来（`the-pass-asks-a-unit-it-already-failed-again`，30 秒）。工具自己的注释说"永远跑不完的一轮什么也证明不了"，代码却把它算作抓住并说明了理由。这个矛盾留在原地，因为解决它会改变台账里 `proven` 的含义。
+     **尚未完成：**I/E 牙，以及目前判定为**不可退役**的两颗——`every-task-is-frozen-at-position-zero` 与 `a-binding-does-not-record-its-channel`，它们的点名用例是"注册/冻结/采纳/读回"的往返，弱于要它承担的规则。
 
 ## 验收标准
 

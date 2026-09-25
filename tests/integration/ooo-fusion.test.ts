@@ -72,7 +72,10 @@ test("fusion refuses a successor whose visibility the session would widen", () =
 });
 
 test("fusion refuses to continue from a unit whose verdict is not accepted", () => {
-  const tasks = [task("before"), task("after", { dependencies: ["before"] })];
+  // No dependency between them, so this pair is refused by exactly one condition: the predecessor's
+  // verdict. With a dependency the same assertion would pass for the other reason, and the case would
+  // claim a rule it does not pin.
+  const tasks = [task("before"), task("after")];
   assert.equal(legal({ tasks }), false);
 });
 

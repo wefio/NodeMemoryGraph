@@ -33,7 +33,10 @@ import {
 } from "../../../src/core/store/clock.ts";
 import { NmgStore } from "../../../src/core/store.ts";
 
-const half = (CLOCK_GRACE_MS / 2000).toFixed(3);
+// Deliberately a literal, not `CLOCK_GRACE_MS / 2000`: a fixture derived from the constant under test
+// moves with it, so zeroing the grace would move the stamp onto `now` and the case would pass while the
+// bug it exists for was live. The case below asserts the relation to the constant instead.
+const half = "0.025";
 
 /** A memory whose validity boundaries are stamped in SQL, then reopened through the store: the read
  *  then compares SQLite's clock against SQLite's clock. */
