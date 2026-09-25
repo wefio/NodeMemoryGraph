@@ -129,8 +129,8 @@ targets`. The target `tools/agent-verify.ts` went with its single tooth, so the 
    strings rather than by a filesystem. **Landed:** the resolver is `tools/mutation-anchor.ts` (it held
    no state, so it moved out of the sweep script and the tests can call it), with 16 cases over source
    strings and no filesystem access.
-   **Extended to the whole register (2026-09-24): 59 more teeth converted, then the operators the
-   catalogues name, and the register is now 95 derived of 110.** First pass: every class of site the
+   **Extended to the whole register (2026-09-24), in three waves: 59 teeth, then 18, then the last 15 -
+   and the register is now 110 derived of 110.** First pass: every class of site the
    six operators already had, taken target by target and swept after each - `condition-never` on a
    guard or an initializer (44 in total), `neutralize-term` (9), `replace-property` (9),
    `replace-argument` (6), `drop-statement` (6), `condition-holds` (3).
@@ -179,36 +179,60 @@ targets`. The target `tools/agent-verify.ts` went with its single tooth, so the 
 caught by the named test`, **all 110 by the case their `expect` names**, 22 of 22 targets restored
    byte-identically, exit 0 in 176 s.
 
-   **What is left hand-written is 15 teeth, and the classification is now measured rather than
-   guessed:**
+   **Then every one of the 33 converted, and the register is 110 derived of 110 with no hand-written
+   tooth left (2026-09-24).** The three that were declared open above as "worth an operator" were taken
+   instead of argued about, and each turned out to be a small, nameable widening rather than a new
+   domain:
 
-   - three are the same shape the tools also cannot express: a fragment **inside a string** - two SQL
-     clauses (`prune-ignores-retention`, `bounded-pin-never-expires`) and one SQLite unit
-     (`the-grace-uses-a-unit-sqlite-does-not-know`). Catalogues mutate the whole literal
-     (`StringLiteral` to `""`), and SQL has its own catalogue (SQLMutation: clause deletion, `AND` to
-     `OR`, NULL mutations), so the honest next step for these is clause-level SQL operators, not byte
-     surgery;
-   - two are at **module top level**, where there is no member to name: a guard in a script
-     (`judge-may-judge-its-own-delivery`) and `export const CLOCK_GRACE_MS = 50`. Giving `derive` a
-     file-scope mode is a design decision, not a widening, and it is not taken here;
-   - two move an **index** (`[0]` to `[1]`). This one corrects this record's own earlier list: it said
-     "index moved (2)" was among the classes the catalogues cover, and that is wrong. `FirstToLast` is a
-     method _named_ `first`; no catalogue checked here mutates an array index;
-   - two write **two statements on one line** (`fusion-rollback-not-counted`,
-     `a-score-with-no-recorded-history-counts-as-a-reproduction`) - the line discipline of
-     `drop-statement`, not a mutation class;
-   - one rewrites a comparison into a range test (`=== 1` to `>= 1`), where the catalogue's negation
-     (`!== 1`) would not realise the violation the name states;
-   - four are bespoke expression rewrites with no operator behind them: a constructor swapped for a
-     crafted substitute of the same interface (`the-status-read-path-opens-the-rounds-store`), a
-     multi-line call replaced by a stub fact (`a-coordinated-write-skips-its-run-fact`), a wrapper
-     unwrapped to its inner call (`the-daemon-verb-skips-the-coordinated-path`), and
-     `view-adapter-accepts-bytes`, where two statements become one `return`;
-   - one, `every-task-is-frozen-at-position-zero`, changes two things at once and is kept deliberately.
+   | what the residue needed                                                                                                         | what was actually added                                                                                                                                        | teeth |
+   | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+   | a file-scope selector                                                                                                           | `within` is optional: without it the whole file is the scope, and the selector has to be unique in it                                                          | 2     |
+   | an index operator                                                                                                               | `replace-index`: the element access the selector identifies gets the declared index                                                                            | 2     |
+   | clause-level SQL mutation                                                                                                       | `replace-literal-fragment`: a piece of text written inside a literal becomes the declared fragment, with the same holder disambiguator the call selectors have | 3     |
+   | a function bound to a property                                                                                                  | `uniqueMember` accepts a function bound to a variable _or an object property_ (`claim: (store, parsed) => ...`)                                                | 1     |
+   | a shorthand property                                                                                                            | `replace-property` writes a shorthand out (`position` becomes `position: 0`), because a value cannot go where the name was                                     | 1     |
+   | a guard inside a module-level script                                                                                            | the file scope above, with `condition-never`                                                                                                                   | 1     |
+   | a constructor call                                                                                                              | the call selectors accept `new X(...)` as a call site                                                                                                          | 1     |
+   | a call replaced by a boolean, a value replaced by a stub fact, a wrapper unwrapped, an iterable shortened, a comparison negated | the operators that already existed, used with a declared `to`                                                                                                  | 5     |
 
-   Three of those clusters would repay an operator and are recorded as open: clause-level SQL mutation,
-   a file-scope selector, and an index operator. None is added here, because none is a widening - each
-   is a new scoping rule or a new domain - and the measured cost of not having them is seven teeth.
+   Three things this pass settled by measurement rather than by argument, each of which had been
+   written down here as a reason **not** to convert:
+
+   - `speculation-guesses-several-facts-at-once` was kept because the catalogue's negation (`=== 1` to
+     `!== 1`) "would not realise the violation the name states". It does: the named case fails under the
+     negated comparison. The reasoning was wrong and the sweep said so.
+   - `every-task-is-frozen-at-position-zero` was kept because it "changes two things at once". Only one
+     of the two changes is load-bearing: `noUnusedParameters` is not set, so the callback can keep the
+     parameter it no longer reads, and the tooth converts to a single `replace-property`.
+   - The two teeth that write two statements on one line were never about the line discipline at all.
+     Their hand anchors had to span two statements; the mutations are single-statement deletions, and
+     both converted to `drop-statement`.
+
+   Two mistakes were made and caught inside this pass, and both are worth keeping:
+
+   - **A hand-typed `expect` reads as a broken mutant.** Retyping two case names from memory instead of
+     copying them from the register made both teeth report **"survived"** - the tool filters the suite by
+     the named case, so a name that matches no case looks exactly like a mutant nothing catches. It is a
+     loud failure (an alarm, not a false pass), and it is the second time this register has been bitten
+     by the `expect` field being an assertion of its own: the conversion script now copies the string,
+     and the copy is why the same conversions then read `caught by the named test`.
+   - **A conversion script rerun against a converted register.** Re-running the first wave's script after
+     the vocabulary had grown rewrote two teeth back to their earlier form (`in` dropped, `within` back
+     to the guessed member), and the anchors pass refused both immediately. That is the argument for the
+     anchors pass being in the static contract, seen from the other side: it also catches _edits to the
+     register_, not only drift in the code it points at.
+
+   **The register is now 110 teeth, every one a name plus an operator plus a selector, over 22 targets
+   covering 21 files; 26 operators, all of them a mutation class the catalogues name or a slot they name
+   (a value, an argument, a property, an initializer, an iterable, an index, a callee, a literal
+   fragment).** Reading: `anchors: 110 of 110 resolve, over 22 targets`; `mutants: 110 of 110 caught by
+the named test`, **all 110 by the case their `expect` names**, 22 of 22 restored byte-identically,
+   exit 0 in 160 s; `tests/tools/mutation-anchor.test.ts` 34 pass.
+   What is _not_ claimed: a derived tooth is not stronger evidence than the byte anchor it replaced - it
+   is the same violation, caught by the same case. What it buys is that the tooth stays aimed at its rule
+   across renames and reflows, which is the failure this record exists for. The operators are also not
+   the whole catalogue: they are the classes this register's rules happen to need, and adding one is now
+   an entry in a table plus its name in the union.
    Two things the catalogues say about the shape of this work are worth carrying:
 
    - **Subsumption.** pitest's _Less is more_ names the effect this record's retirement criterion

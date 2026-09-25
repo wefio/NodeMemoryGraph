@@ -32,10 +32,11 @@
  *
  * Where a mutant says where it applies:
  *
- *   - `derive: { within, operator, ... }` is a **selector plus an operator**: the member is named (a
- *     method, a function declaration, a class constructor under the name `constructor`, or a function
- *     bound to a variable), a fragment inside it is matched (the same matcher as below, so a reflow
- *     cannot break it), and the bytes to write are computed on every run. This is the form a tooth
+ *   - `derive: { within, operator, ... }` is a **selector plus an operator**: the scope is named (a
+ *     method, a function declaration, a class constructor under the name `constructor`, a function
+ *     bound to a variable or to an object property - or omitted at module level, where the file is the
+ *     scope), a fragment inside it is matched (the same matcher as below, so a reflow cannot break it),
+ *     and the bytes to write are computed on every run. This is the form a tooth
  *     should have. Its identity is the rule and the site it names, never the text that happens to be
  *     there today, and it is what lets a rename, a reordered condition or a lifted line leave the tooth
  *     aimed at the same rule. Selectors that match more than one site - or a fragment that fits two
@@ -137,8 +138,8 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "view-adapter-accepts-bytes",
-        from: "  const recorded = facts.verdicts?.[unit.id];",
-        to: "  return Boolean(facts.artifacts?.[unit.id]);",
+        derive: { within: "isAccepted", operator: "replace-call", call: "acceptedFact" },
+        to: "Boolean(artifact)",
         expect: "acceptedFact is the single rule, and the view adapter does not grow its own",
       },
       {
@@ -210,16 +211,23 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "prune-ignores-retention",
-        ast: { within: "pruneExpiredTaskBoardEntries" },
-        from: "            `DELETE FROM task_board_entries WHERE task_id = ? AND expires_at <= ?\n               AND id NOT IN (SELECT entry_id FROM task_board_retentions)`,",
-        to: "            `DELETE FROM task_board_entries WHERE task_id = ? AND expires_at <= ?`,",
+        derive: {
+          within: "pruneExpiredTaskBoardEntries",
+          operator: "replace-literal-fragment",
+          text: "AND id NOT IN (SELECT entry_id FROM task_board_retentions)",
+          in: "DELETE FROM task_board_entries WHERE task_id",
+        },
+        to: "",
         expect: "a retained entry, its delivery and its acknowledgement survive the prune",
       },
       {
         name: "bounded-pin-never-expires",
-        ast: { within: "expireStaleRetentions" },
-        from: '        "DELETE FROM task_board_retentions WHERE retained_until IS NOT NULL AND retained_until <= ?",',
-        to: '        "DELETE FROM task_board_retentions WHERE 0",',
+        derive: {
+          within: "expireStaleRetentions",
+          operator: "replace-literal-fragment",
+          text: "retained_until IS NOT NULL AND retained_until <= ?",
+        },
+        to: "0",
         expect: "a bounded pin stops pinning when its bound passes",
       },
 
@@ -263,12 +271,9 @@ const TARGETS: readonly Target[] = [
     ],
     mutants: [
       {
-        // The borrowed view must not reopen the writer's path: this mutant makes the read path
-        // migrate and publish the store it was asked only to read.
         name: "the-status-read-path-opens-the-rounds-store",
-        ast: { within: "openRoundQuery" },
-        from: "const db = new DatabaseSync(databasePath, { readOnly: true });",
-        to: "const db = new BoardAdmission(databasePath) as unknown as DatabaseSync;",
+        derive: { within: "openRoundQuery", operator: "replace-call", call: "DatabaseSync" },
+        to: "new BoardAdmission(databasePath) as unknown as DatabaseSync",
         expect: "the query port reads a round without migrating, publishing or exposing a write",
       },
 
@@ -362,13 +367,9 @@ const TARGETS: readonly Target[] = [
       },
 
       {
-        // Selection and ranking must not be able to disagree with each other. `next()` is the head of
-        // `candidates()`, so a caller that starts one unit and a caller that starts several read the
-        // same order - and a mutant that moves the head by one breaks the round's dispatch.
         name: "next-is-not-the-head-of-the-ordered-candidates",
-        ast: { within: "next" },
-        from: "    return this.candidates()[0] ?? null;",
-        to: "    return this.candidates()[1] ?? null;",
+        derive: { within: "next", operator: "replace-index", access: "this.candidates()[0]" },
+        to: "1",
         expect: "at the default budget the licence is still the head of the ordered set",
       },
     ],
@@ -479,21 +480,22 @@ const TARGETS: readonly Target[] = [
           "the answer names the gate a unit was refused through, and the gates are the rule's own",
       },
       {
-        // `nextTask` returns the head of what it decided, so an ordering cannot disagree with the
-        // shared rule about what may be selected: dropping the head moves both.
         name: "next-task-is-not-the-head-of-the-legal-set",
-        ast: { within: "nextTask" },
-        from: "  return selectableTasks(plan, slots)[0] ?? null;",
-        to: "  return selectableTasks(plan, slots)[1] ?? null;",
+        derive: {
+          within: "nextTask",
+          operator: "replace-index",
+          access: "selectableTasks(plan, slots)[0]",
+        },
+        to: "1",
         expect: "the round's own answer is the shared rule's answer, not an ordering's",
       },
       {
-        // The design's first experiment allows exactly one pending fact. This lets a candidate guess
-        // two at once, which is the boundary the design says to prove before widening.
         name: "speculation-guesses-several-facts-at-once",
-        ast: { within: "isBoundedSpeculation" },
-        from: "    candidate.assumptions.length === 1 &&",
-        to: "    candidate.assumptions.length >= 1 &&",
+        derive: {
+          within: "isBoundedSpeculation",
+          operator: "negate-comparison",
+          condition: "candidate.assumptions.length === 1",
+        },
         expect: "the first experiment allows one pending fact, and a second is refused by name",
       },
 
@@ -647,8 +649,7 @@ const TARGETS: readonly Target[] = [
     mutants: [
       {
         name: "fusion-rollback-not-counted",
-        from: "      rollbacks += 1;\n      retries += 1;",
-        to: "      retries += 1;",
+        derive: { within: "run", operator: "drop-statement", statement: "rollbacks += 1;" },
         expect: "a dependency that is not accepted makes fusion pay a rollback and a retry",
       },
       {
@@ -688,8 +689,7 @@ const TARGETS: readonly Target[] = [
     mutants: [
       {
         name: "judge-may-judge-its-own-delivery",
-        from: "  if (entry.deliveredBy === agentId) {",
-        to: "  if (false && entry.deliveredBy === agentId) {",
+        derive: { operator: "condition-never", condition: "entry.deliveredBy === agentId" },
         expect:
           "the board drivers run the protocol end to end through the daemon that serves the store",
       },
@@ -908,8 +908,11 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "a-score-with-no-recorded-history-counts-as-a-reproduction",
-        from: '  if (!provenance.observationOrder?.length) missing.push("observationOrder");\n  else if (!sameOrder(provenance.observationOrder, projection.observationOrder))\n    missing.push(`observationOrder=${provenance.observationOrder.join(",")}`);',
-        to: "",
+        derive: {
+          within: "missingValidityInputs",
+          operator: "drop-statement",
+          statement: "!provenance.observationOrder?.length",
+        },
         expect:
           "a score that cannot name its own history is re-scored, never reported as a reproduction",
       },
@@ -975,11 +978,13 @@ const TARGETS: readonly Target[] = [
         expect: "a binding refuses what the store does not hold",
       },
       {
-        // The transition is the run's record of what happened to its entry; without it the board
-        // moved and the run has nothing to read.
         name: "a-coordinated-write-skips-its-run-fact",
-        from: "    const fact = store.appendTaskRunFact(\n      {\n        runId: request.runId,\n        kind: managedTransitionKind(request.verb),\n        taskId: binding.taskId,\n        attempt: binding.attempt,\n        entryId: request.entryId,\n        payload: JSON.stringify({ actorId: request.actorId, status }),\n      },\n      port,\n    );",
-        to: "    const fact = { sequence: 0, recorded: true };",
+        derive: {
+          within: "coordinatedBoardWrite",
+          operator: "replace-initializer",
+          variable: "fact",
+        },
+        to: "{ sequence: 0, recorded: true }",
         expect: "a coordinated write lands the board transition and the run's fact together",
       },
       {
@@ -1025,11 +1030,9 @@ const TARGETS: readonly Target[] = [
       },
 
       {
-        // The plan order is the array order: the position comes from that loop, so freezing every
-        // task at zero would leave the stored plan's order to the task ids.
         name: "every-task-is-frozen-at-position-zero",
-        from: "    request.tasks.forEach((task, position) =>\n      store.freezeTaskRunTask({ ...task, runId: request.runId, position }, port),\n    );",
-        to: "    request.tasks.forEach((task) =>\n      store.freezeTaskRunTask({ ...task, runId: request.runId, position: 0 }, port),\n    );",
+        derive: { within: "freezeRunPlan", operator: "replace-property", property: "position" },
+        to: "0",
         expect: "a run registers, freezes a plan, adopts entries, and reads it all back",
       },
 
@@ -1086,13 +1089,14 @@ const TARGETS: readonly Target[] = [
     suites: ["tests/integration/ooo-managed-write.test.ts", "tests/cli/task-run-surface.test.ts"],
     mutants: [
       {
-        // The routing is what keeps the daemon's verbs out of the store's refusal: a managed entry
-        // reached directly from a handler cannot be moved at all. The rule itself lives in the
-        // coordinator (one home for it), so this mutant pins that the daemon's claim still goes
-        // through it rather than at the store.
         name: "the-daemon-verb-skips-the-coordinated-path",
-        from: '      entry: coordinatedEntryWrite(store, {\n        verb: "claim",\n        entryId: p.entryId,\n        actorId: p.agentId,\n        apply: () => store.claimTaskBoardEntry(p),\n      }),',
-        to: "      entry: store.claimTaskBoardEntry(p),",
+        derive: {
+          within: "claim",
+          operator: "replace-call",
+          call: "coordinatedEntryWrite",
+          in: 'verb: "claim"',
+        },
+        to: "store.claimTaskBoardEntry(p)",
         expect: "a daemon board verb routes a managed entry through the run's transition",
       },
       {
@@ -1321,14 +1325,18 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "the-grace-is-zero",
-        from: "export const CLOCK_GRACE_MS = 50;",
-        to: "export const CLOCK_GRACE_MS = 0;",
+        derive: { operator: "replace-initializer", variable: "CLOCK_GRACE_MS" },
+        to: "0",
         expect: "a value stamped a moment in the future is current, not missing",
       },
       {
         name: "the-grace-uses-a-unit-sqlite-does-not-know",
-        from: "  return `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '${modifier}${seconds} seconds')`;",
-        to: "  return `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '${modifier}${CLOCK_GRACE_MS} milliseconds')`;",
+        derive: {
+          within: "clockNow",
+          operator: "replace-literal-fragment",
+          text: "${seconds} seconds",
+        },
+        to: "${CLOCK_GRACE_MS} milliseconds",
         expect: "a just-written memory is never read as not active",
       },
     ],

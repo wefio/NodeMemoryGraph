@@ -36,8 +36,10 @@ export interface Mutant {
 
 /** The operators a derived mutant may use, and the selector each one needs. */
 export interface Derive {
-  /** The member whose body holds the site. Exact, and required: the scope is what makes it unique. */
-  readonly within: string;
+  /** The member whose body holds the site. The scope is what makes a fragment unique, so it is named
+   *  wherever there is a member to name; omitted at module level, where the whole file is the scope and
+   *  the selector has to be unique in it. */
+  readonly within?: string;
   readonly operator:
     /** The condition the selector identifies never holds: it becomes `false`. */
     | "condition-never"
@@ -74,6 +76,12 @@ export interface Derive {
     /** The iterable of the loop the selector identifies becomes the declared `to` fragment, so the
      *  loop runs over an empty or a shortened collection. */
     | "replace-iterable"
+    /** The index of the element access the selector identifies becomes the declared `to` fragment:
+     *  the code reads the next element instead of the head of the collection. */
+    | "replace-index"
+    /** A piece of text written inside a literal becomes the declared `to` fragment, for the data a
+     *  catalogue only mutates whole: a SQL clause, a format unit. */
+    | "replace-literal-fragment"
     /** The statement the selector identifies is removed, with its line and its indentation: an
      *  expression, a declaration, a `return`, a `throw`, or a guard clause. */
     | "drop-statement";
@@ -92,6 +100,11 @@ export interface Derive {
   readonly variable?: string;
   /** Which loop, for `replace-iterable`: a fragment of the loop's own text, e.g. `of unknownBudget`. */
   readonly iterable?: string;
+  /** Which element access, for `replace-index`: a fragment of its own text, e.g. `candidates()[0]`. */
+  readonly access?: string;
+  /** Which piece of text, for `replace-literal-fragment`: the text itself, as it is written inside
+   *  the literal, e.g. `retained_until IS NOT NULL`. */
+  readonly text?: string;
   /** The holder that tells two same-named sites apart: for `replace-property`, a fragment of the
    *  object literal that holds it; for `replace-argument`, a fragment of the call's own text; for
    *  `remove-call` and `replace-call`, a fragment of the statement the call sits in. */
@@ -244,14 +257,19 @@ function collect<T extends ts.Node>(root: ts.Node, isWanted: (node: ts.Node) => 
 /** The one member with this name in the file, or why it is not one site. A class constructor is a
  *  member too: its name is written `constructor`, and code that refuses a second plan while it opens
  *  the store lives there and nowhere else. So is a function bound to a name - `const count = (label)
- *  => ...` names one function, and whether the formatter wrote it as a declaration is not a fact about
- *  which rules live inside it. */
+ *  => ...` or `claim: (store, parsed) => ...` names one function, and whether the formatter wrote it as
+ *  a declaration is not a fact about which rules live inside it. */
 function uniqueMember(source: ts.SourceFile, name: string): ts.Node | { reason: string } {
+  const bound = (node: ts.Node, initializer: ts.Expression | undefined): boolean =>
+    initializer !== undefined &&
+    (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer));
   const boundFunction = (node: ts.Node): boolean =>
-    ts.isVariableDeclaration(node) &&
-    node.name.getText(source) === name &&
-    node.initializer !== undefined &&
-    (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer));
+    (ts.isVariableDeclaration(node) &&
+      node.name.getText(source) === name &&
+      bound(node, node.initializer)) ||
+    (ts.isPropertyAssignment(node) &&
+      node.name.getText(source) === name &&
+      bound(node, node.initializer));
   const named = (node: ts.Node): boolean =>
     ((ts.isMethodDeclaration(node) || ts.isFunctionDeclaration(node)) &&
       node.name?.getText(source) === name) ||
@@ -263,17 +281,20 @@ function uniqueMember(source: ts.SourceFile, name: string): ts.Node | { reason: 
       reason: `member ${name} matched ${members.length} members, refusing to claim a check`,
     };
   const member = members[0]!;
+  const body =
+    ts.isVariableDeclaration(member) || ts.isPropertyAssignment(member)
+      ? member.initializer
+      : undefined;
   // A name bound to a function is the function's body for every purpose here, so the selectors search
   // the body rather than the declaration that wraps it.
-  if (ts.isVariableDeclaration(member) && member.initializer) return member.initializer;
-  return member;
+  return body ?? member;
 }
 
 /** Argument `arg` of the one call to `call` inside the member. */
 function argumentSite(
   source: ts.SourceFile,
   member: ts.Node,
-  derive: Derive,
+  derive: Scoped,
   to: string | undefined,
 ): Site | { reason: string } {
   if (derive.call === undefined || derive.arg === undefined)
@@ -314,14 +335,18 @@ function holderText(source: ts.SourceFile, node: ts.Node): string {
 function propertySite(
   source: ts.SourceFile,
   member: ts.Node,
-  derive: Derive,
+  derive: Scoped,
   to: string | undefined,
 ): Site | { reason: string } {
   if (derive.property === undefined) return { reason: "replace-property needs a `property` name" };
   if (to === undefined) return { reason: "replace-property needs the mutant's `to` fragment" };
+  // A shorthand is a property too: `{ position }` writes the same property as `{ position: position }`,
+  // and it is replaced whole (`position: 0`), because writing the value where the name was would leave
+  // a spread element rather than a property.
   const named = (node: ts.Node): boolean =>
-    ts.isPropertyAssignment(node) && node.name.getText(source) === derive.property;
-  const properties = collect<ts.PropertyAssignment>(member, named);
+    (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) &&
+    node.name.getText(source) === derive.property;
+  const properties = collect<ts.PropertyAssignment | ts.ShorthandPropertyAssignment>(member, named);
   const held =
     derive.in === undefined
       ? properties
@@ -330,7 +355,15 @@ function propertySite(
     return {
       reason: `property ${derive.property} matched ${held.length} sites in ${derive.within}, refusing to claim a check`,
     };
-  const value = held[0]!.initializer;
+  const property = held[0]!;
+  if (ts.isShorthandPropertyAssignment(property))
+    return {
+      start: property.getStart(source),
+      end: property.getEnd(),
+      replacement: `${derive.property}: ${to}`,
+      retaken: false,
+    };
+  const value = property.initializer;
   return { start: value.getStart(source), end: value.getEnd(), replacement: to, retaken: false };
 }
 
@@ -338,7 +371,7 @@ function propertySite(
 function statementSite(
   source: ts.SourceFile,
   member: ts.Node,
-  derive: Derive,
+  derive: Scoped,
   text: string,
 ): Site | { reason: string } {
   if (derive.statement === undefined)
@@ -422,7 +455,7 @@ function decisionExpressions(member: ts.Node): ts.Expression[] {
 function conditionSite(
   source: ts.SourceFile,
   member: ts.Node,
-  derive: Derive,
+  derive: Scoped,
 ): ts.Expression | { reason: string } {
   const conditions = decisionExpressions(member);
   // Matched with the same whitespace normalization as everything else: a condition written across
@@ -454,7 +487,7 @@ function conditionSite(
 function wholeCondition(
   source: ts.SourceFile,
   condition: ts.Expression,
-  derive: Derive,
+  derive: Scoped,
 ): Site | { reason: string } {
   if (derive.condition === undefined)
     return { reason: `${derive.operator} needs a \`condition\` fragment` };
@@ -504,7 +537,7 @@ function identityLiteral(before: string, after: string): string | null {
 function neutralizedTerm(
   source: ts.SourceFile,
   condition: ts.Expression,
-  derive: Derive,
+  derive: Scoped,
 ): Site | { reason: string } {
   if (derive.term === undefined) return { reason: "neutralize-term needs a `term` fragment" };
   const text = condition.getText(source);
@@ -524,13 +557,19 @@ function neutralizedTerm(
   };
 }
 
-/** What every resolver is given: the parsed file, the one member, the selector, and the bytes a
+/** The selector as the resolvers see it: the scope is always named, because `deriveSite` fills in
+ *  "the module" when the mutant did not name one. */
+interface Scoped extends Omit<Derive, "within"> {
+  readonly within: string;
+}
+
+/** What every resolver is given: the parsed file, the one scope, the selector, and the bytes a
  *  value-substituting operator declares. */
 interface Context {
   readonly source: ts.SourceFile;
   readonly text: string;
   readonly member: ts.Node;
-  readonly derive: Derive;
+  readonly derive: Scoped;
   readonly to: string | undefined;
 }
 
@@ -554,7 +593,7 @@ function innermost<T extends ts.Node>(source: ts.SourceFile, nodes: readonly T[]
 /** The one collection site the fragment identifies, or why there is not one. */
 function oneSite<T extends ts.Node>(
   source: ts.SourceFile,
-  derive: Derive,
+  derive: Scoped,
   nodes: readonly T[],
   what: string,
 ): T | { reason: string } {
@@ -675,16 +714,16 @@ function holderStatementText(source: ts.SourceFile, node: ts.Node): string {
 }
 
 /** The one call the selector names, by the callee as written. */
-function callSite(context: Context): ts.CallExpression | { reason: string } {
+function callSite(context: Context): ts.CallExpression | ts.NewExpression | { reason: string } {
   const { source, derive } = context;
   if (derive.call === undefined) return { reason: `${derive.operator} needs a \`call\` fragment` };
   const found = oneSite(
     source,
     derive,
-    collect<ts.CallExpression>(
+    collect<ts.CallExpression | ts.NewExpression>(
       context.member,
       (node) =>
-        ts.isCallExpression(node) &&
+        (ts.isCallExpression(node) || ts.isNewExpression(node)) &&
         node.expression.getText(source) === derive.call &&
         (derive.in === undefined || containsText(holderStatementText(source, node), derive.in)),
     ),
@@ -777,6 +816,66 @@ function replaceIterable(context: Context): Site | { reason: string } {
   };
 }
 
+/** The index of the one element access the selector identifies becomes the declared fragment: the
+ *  code reads the next element instead of the head of the collection. */
+function replaceIndex(context: Context): Site | { reason: string } {
+  const { source, derive } = context;
+  if (derive.access === undefined)
+    return { reason: "replace-index needs an `access` fragment naming the element access" };
+  if (context.to === undefined) return { reason: "replace-index needs the mutant's `to` fragment" };
+  const fragment = derive.access;
+  const found = oneSite(
+    source,
+    derive,
+    collect<ts.ElementAccessExpression>(
+      context.member,
+      (node) => ts.isElementAccessExpression(node) && containsText(node.getText(source), fragment),
+    ),
+    "element accesses",
+  );
+  if ("reason" in found) return found;
+  return {
+    start: found.argumentExpression.getStart(source),
+    end: found.argumentExpression.getEnd(),
+    replacement: context.to,
+    retaken: false,
+  };
+}
+
+/** A piece of text written inside a literal becomes the declared fragment. Catalogues mutate whole
+ *  literals; the data a query is made of keeps its own rules inside one, and this is the narrowest
+ *  operator that names that: the text is matched where it is written, and it must be written once. */
+function replaceLiteralFragment(context: Context): Site | { reason: string } {
+  const { source, derive } = context;
+  if (derive.text === undefined)
+    return { reason: "replace-literal-fragment needs a `text` fragment" };
+  if (context.to === undefined)
+    return { reason: "replace-literal-fragment needs the mutant's `to` fragment" };
+  const fragment = derive.text;
+  const holders = collect<ts.Node>(
+    context.member,
+    (node) =>
+      (ts.isStringLiteralLike(node) ||
+        ts.isNoSubstitutionTemplateLiteral(node) ||
+        ts.isTemplateExpression(node)) &&
+      containsText(node.getText(source), fragment) &&
+      (derive.in === undefined || containsText(holderStatementText(source, node), derive.in)),
+  );
+  const found = oneSite(source, derive, holders, "literals");
+  if ("reason" in found) return found;
+  const at = found.getText(source).indexOf(fragment);
+  if (at < 0)
+    return {
+      reason: `cannot read ${fragment} in the literal it was found in, refusing to claim a check`,
+    };
+  return {
+    start: found.getStart(source) + at,
+    end: found.getStart(source) + at + fragment.length,
+    replacement: context.to,
+    retaken: false,
+  };
+}
+
 /** The operators, each one a function of the selector and the declared bytes. Adding an operator means
  *  adding an entry here and its name to `Derive["operator"]`: nothing else in the register changes. */
 const RESOLVERS: Readonly<Record<Derive["operator"], Resolver>> = {
@@ -797,6 +896,8 @@ const RESOLVERS: Readonly<Record<Derive["operator"], Resolver>> = {
   "replace-call": replaceCall,
   "replace-initializer": replaceInitializer,
   "replace-iterable": replaceIterable,
+  "replace-index": replaceIndex,
+  "replace-literal-fragment": replaceLiteralFragment,
   "neutralize-term": (context) => {
     const condition = conditionSite(context.source, context.member, context.derive);
     if ("reason" in condition) return condition;
@@ -818,11 +919,14 @@ const RESOLVERS: Readonly<Record<Derive["operator"], Resolver>> = {
  */
 function deriveSite(
   text: string,
-  derive: Derive,
+  derive: Scoped,
   to: string | undefined,
 ): Site | { reason: string } {
   const source = ts.createSourceFile("mutant.ts", text, ts.ScriptTarget.Latest, true);
-  const member = uniqueMember(source, derive.within);
+  // Module level is a scope like any other, and the only one that has no member to name: a mutant
+  // written there says so by naming none, and its selector then has to be unique in the whole file.
+  const scoped: Scoped = { ...derive, within: derive.within ?? "the module" };
+  const member = derive.within === undefined ? source : uniqueMember(source, derive.within);
   if ("reason" in member) return member;
-  return RESOLVERS[derive.operator]({ source, text, member, derive, to });
+  return RESOLVERS[scoped.operator]({ source, text, member, derive: scoped, to });
 }

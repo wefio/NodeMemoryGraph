@@ -582,3 +582,97 @@ test("a function bound to a name is a member, and the selectors search its body"
   assert.ok(!("reason" in site));
   assert.equal(above.slice(site.start, site.end), 'new RegExp("x").exec(values)');
 });
+
+test("the index of an element access is replaced, and the access is named when there are several", () => {
+  const above = `function selection(board) {\n  const head = board.candidates()[0] ?? null;\n  const tail = board.candidates()[1] ?? null;\n  return [head, tail];\n}\n`;
+  assert.equal(
+    selected(
+      above,
+      named(
+        "x",
+        { within: "selection", operator: "replace-index", access: "candidates()[0]" },
+        { to: "1" },
+      ),
+    ),
+    "0",
+  );
+  assert.match(
+    refusal(
+      above,
+      named(
+        "x",
+        { within: "selection", operator: "replace-index", access: "candidates()" },
+        { to: "1" },
+      ),
+    ),
+    /2 element accesses in selection match the selector/,
+  );
+});
+
+test("a piece of text inside a literal is replaced where it is written, and a repeated one is refused", () => {
+  const above = `function prune() {\n  return db.prepare(\n    \`DELETE FROM entries WHERE expires_at <= ?\n       AND id NOT IN (SELECT entry_id FROM retentions)\`,\n  );\n}\n`;
+  assert.equal(
+    selected(
+      above,
+      named(
+        "x",
+        {
+          within: "prune",
+          operator: "replace-literal-fragment",
+          text: "AND id NOT IN (SELECT entry_id FROM retentions)",
+        },
+        { to: "" },
+      ),
+    ),
+    "AND id NOT IN (SELECT entry_id FROM retentions)",
+  );
+  const quoted = `function prune() {\n  const a = "WHERE 0";\n  const b = "WHERE 0";\n  return [a, b];\n}\n`;
+  assert.match(
+    refusal(
+      quoted,
+      named(
+        "x",
+        { within: "prune", operator: "replace-literal-fragment", text: "WHERE 0" },
+        { to: "" },
+      ),
+    ),
+    /2 literals in prune match the selector/,
+  );
+});
+
+test("a constructor call is a call site, and the module is a scope when no member is named", () => {
+  const above = `function openRoundQuery(path) {\n  const db = new DatabaseSync(path, { readOnly: true });\n  return db;\n}\n`;
+  const site = locate(
+    above,
+    named(
+      "x",
+      { within: "openRoundQuery", operator: "replace-call", call: "DatabaseSync" },
+      { to: "new BoardAdmission(path) as unknown as DatabaseSync" },
+    ),
+  );
+  assert.ok(!("reason" in site));
+  assert.equal(above.slice(site.start, site.end), "new DatabaseSync(path, { readOnly: true })");
+  const module = `if (entry.deliveredBy === agentId) {\n  throw new Error("the deliverer may not judge its own work");\n}\n`;
+  const guard = locate(
+    module,
+    named("x", { operator: "condition-never", condition: "entry.deliveredBy === agentId" }),
+  );
+  assert.ok(!("reason" in guard));
+  assert.equal(module.slice(guard.start, guard.end), "entry.deliveredBy === agentId");
+  assert.equal(guard.replacement, "false");
+});
+
+test("a shorthand property is written out, because the value cannot go where the name was", () => {
+  const above = `function selection(task, runId) {\n  return { ...task, runId, position };\n}\n`;
+  const site = locate(
+    above,
+    named(
+      "x",
+      { within: "selection", operator: "replace-property", property: "position" },
+      { to: "0" },
+    ),
+  );
+  assert.ok(!("reason" in site));
+  assert.equal(above.slice(site.start, site.end), "position");
+  assert.equal(site.replacement, "position: 0");
+});
