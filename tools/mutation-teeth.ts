@@ -6,9 +6,11 @@
  * load-bearing line with a plausible-but-wrong version; the suite must then fail, and the *expected
  *
  * Two rules the config learned the hard way. `expect` is the NAME of the test that must fail -
- * prose there makes a real catch read as "NOT caught". The `ast` locator is indentation-sensitive,
- * so an anchor whose leading spaces no longer match the file is a stale anchor to be fixed, not a
- * cosmetic difference; and a site that cannot be located is a failure, never a claimed check.
+ * prose there makes a real catch read as "NOT caught", and a name no case carries makes a filtered run
+ * pass with nothing in it, which is reported as `misnamed` rather than as a survivor. The `ast` locator
+ * is indentation-sensitive, so an anchor whose leading spaces no longer match the file is a stale anchor
+ * to be fixed, not a cosmetic difference; and a site that cannot be located is a failure, never a
+ * claimed check.
  * test* must be the one that fails. Three outcomes per target, not two:
  *
  *   1. the clean tree passes the target's suites;
@@ -72,7 +74,7 @@ import {
   type MutationLock,
 } from "./mutation-lock.ts";
 import { writeJsonAtomic } from "./parts/fs.ts";
-import { locate, type Mutant } from "./mutation-anchor.ts";
+import { locate, ranACase, type Mutant } from "./mutation-anchor.ts";
 
 interface Target {
   readonly target: string;
@@ -1386,6 +1388,9 @@ interface MutantOutcome {
   readonly ms?: number;
   /** True when the named case was what failed, rather than the whole suite catching it. */
   readonly caughtByName?: boolean;
+  /** True when no case in the target's suites carries the name this tooth requires - the tooth cannot be
+   *  evaluated at all, which is a defect of the evidence rather than a surviving mutant. */
+  readonly misnamed?: boolean;
 }
 
 interface Outcome {
@@ -1649,9 +1654,15 @@ for (const { target, suites, mutants: declared } of selected) {
     const mutantStartedAt = Date.now();
     const named = runSuites(present, mutant.expect);
     const caughtByName = !named.ok && named.out.includes(mutant.expect);
+    // A filtered run passes when the name matches no case in these suites, and that pass reads exactly
+    // like a surviving mutant. The two are different defects, and only one of them is about the code, so
+    // the run's own report is asked which it is - the failure mode that made two teeth read as broken
+    // when they were only misnamed. A tooth with no case to name cannot be rescued by the whole suite,
+    // so the fallback is skipped for it: the defect is the name, not the coverage.
+    const namesNoCase = named.ok && ranACase(named.out) === false;
     // A case that never finishes is this mutant's own answer - a loop broken enough to spin - and
     // running the whole suite after it would only spend the same bound again to learn nothing.
-    const result = caughtByName || named.timedOut ? named : runSuites(present);
+    const result = caughtByName || named.timedOut || namesNoCase ? named : runSuites(present);
     const ms = Date.now() - mutantStartedAt;
     const caught = !result.ok && result.out.includes(mutant.expect);
     // A mutant that makes the case spin is not a passing mutant, but it is not an assertion failure
@@ -1660,20 +1671,35 @@ for (const { target, suites, mutants: declared } of selected) {
     // whole suite.
     const didNotFinish = named.timedOut === true;
     mutantOutcomes.push(
-      caught || didNotFinish
+      namesNoCase
         ? {
             name: mutant.name,
             applicable: true,
-            caught: true,
-            caughtByName: caughtByName || didNotFinish,
+            caught: false,
+            misnamed: true,
             ms,
-            ...(didNotFinish
-              ? { note: `the case did not finish within ${patternTimeoutMs() / 1000}s` }
-              : {}),
+            note: `no case in this target's suites is named "${mutant.expect}"`,
           }
-        : { name: mutant.name, applicable: true, caught, caughtByName, ms, note: "survived" },
+        : caught || didNotFinish
+          ? {
+              name: mutant.name,
+              applicable: true,
+              caught: true,
+              caughtByName: caughtByName || didNotFinish,
+              ms,
+              ...(didNotFinish
+                ? { note: `the case did not finish within ${patternTimeoutMs() / 1000}s` }
+                : {}),
+            }
+          : { name: mutant.name, applicable: true, caught, caughtByName, ms, note: "survived" },
     );
-    if (!caught && !didNotFinish) {
+    if (namesNoCase) {
+      problems.push(
+        `  mutant ${mutant.name}: the case it names is not in this target's suites, so a passing "${
+          mutant.expect
+        }" run proves nothing about it`,
+      );
+    } else if (!caught && !didNotFinish) {
       const observed = observedFailures(result.out);
       problems.push(
         `  mutant ${mutant.name}: NOT caught by "${mutant.expect}" (suite passed: ${result.ok}; observed: ${
@@ -1719,7 +1745,9 @@ for (const outcome of outcomes)
       outcome.mutants
         .map(
           (mutant) =>
-            `${mutant.name} ${mutant.caught ? "caught" : "survived"}${
+            `${mutant.name} ${
+              mutant.misnamed ? "misnamed" : mutant.caught ? "caught" : "survived"
+            }${
               mutant.caughtByName === false
                 ? " (by the suite, not the named case)"
                 : mutant.note

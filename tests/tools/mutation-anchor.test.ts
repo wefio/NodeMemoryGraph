@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { locate, matchText, type Mutant } from "../../tools/mutation-anchor.ts";
+import { locate, matchText, ranACase, type Mutant } from "../../tools/mutation-anchor.ts";
 
 const SOURCE = `function selection(tasks, slots) {
   const spent = slots < 1;
@@ -675,4 +675,26 @@ test("a shorthand property is written out, because the value cannot go where the
   assert.ok(!("reason" in site));
   assert.equal(above.slice(site.start, site.end), "position");
   assert.equal(site.replacement, "position: 0");
+});
+
+// A tooth names the case that must fail, and a sweep filters the suite by that name so one tooth costs one
+// case instead of a whole suite. A name no case carries therefore makes the filtered run pass with nothing
+// in it, and that pass reads exactly like a surviving mutant - the misreading this asks about. The suite
+// file's own line is what makes the answer possible: it runs whatever the filter did.
+test("a filtered run that matched no case is not a run that found the mutant innocent", () => {
+  const nothingMatched =
+    "\u2714 tests\\tools\\mutation-anchor.test.ts (277.9136ms)\n\u2139 tests 1\n\u2139 pass 1\n";
+  assert.equal(ranACase(nothingMatched), false);
+  const oneMatched =
+    "\u2714 a shorthand property is written out (6.8911ms)\n\u2139 tests 1\n\u2139 pass 1\n";
+  assert.equal(ranACase(oneMatched), true);
+  assert.equal(ranACase("\u2714 a case that passed\n\u2716 a case that failed\n"), true);
+  // A second suite in the same run, where nothing matched: the file line alone is still not a case.
+  assert.equal(
+    ranACase("\u2714 tests\\tools\\a.test.ts (12ms)\n\u2714 tests\\tools\\b.test.ts (9ms)\n"),
+    false,
+  );
+  // A reporter this harness does not recognize is not evidence against a tooth: unknown, not absent.
+  assert.equal(ranACase("ok 1 - tests/tools/mutation-anchor.test.ts\n"), undefined);
+  assert.equal(ranACase(""), undefined);
 });
