@@ -46,6 +46,7 @@ import {
   queryOverlapTerms,
   recallHitTerms,
   recallReason,
+  rerankEqualScoresByQueryCoverage,
   termOverlapScore,
   type StoreRow as Row,
 } from "./search-ranking.ts";
@@ -175,6 +176,21 @@ function markDuplicateResults(results: MemorySearchResult[]): void {
     if (kept !== undefined) result.duplicateOf = kept;
     else seen.set(normalized, result.memory.id);
   }
+}
+
+function rankSelectedEvidence(
+  query: string,
+  results: MemorySearchResult[],
+  retrievalMode: SearchOptions["retrievalMode"],
+  hasSemanticQuery: boolean,
+): MemorySearchResult[] {
+  if (retrievalMode !== "fts5" || hasSemanticQuery) return results;
+  return rerankEqualScoresByQueryCoverage(
+    query,
+    results,
+    (result) => result.combinedScore,
+    (result) => `${result.memory.statement} ${result.evidence.content.slice(0, 500)}`,
+  );
 }
 
 export function withRetrieval<TBase extends Constructor>(Base: TBase) {
@@ -573,7 +589,16 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         };
         perf?.stop(SECTION.secondPass);
       }
-      const { results, selectedNodes, estimatedTokens, exhausted } = selection;
+      const { selectedNodes, estimatedTokens, exhausted } = selection;
+      // Reorder the evidence already selected by the budget, so lexical ties
+      // cannot change candidate membership or the second-pass decision.
+      const results = rankSelectedEvidence(
+        query,
+        selection.results,
+        options.retrievalMode,
+        semantic !== undefined,
+      );
+      selections = buildSelections(results);
       const projectedEdges = new Map(
         edgeProjection.edges.map((edge) => [edge.relationId, edge] as const),
       );

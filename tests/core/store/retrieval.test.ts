@@ -48,6 +48,40 @@ test("searchContext returns results and relations for a lexical query", () => {
   });
 });
 
+test("lexical tie-break keeps Active Graph selection order aligned with returned evidence", () => {
+  withStore((store) => {
+    const decoy = store.remember({
+      statement: "The store uses WAL",
+      nodeName: "Atlas SQLite",
+      importance: 1,
+    });
+    const target = store.remember({
+      statement: "Atlas SQLite stores project data",
+      nodeName: "Database choice",
+      importance: 0.5,
+    });
+    const query = "Atlas SQLite";
+    const context = store.searchContext(query, {
+      retrievalMode: "fts5",
+      limit: 2,
+    });
+    assert.ok(context.activeGraph);
+    assert.equal(context.results[0]?.memory.id, target.memory.id);
+    assert.equal(context.results[1]?.memory.id, decoy.memory.id);
+    assert.deepEqual(
+      context.activeGraph.memoryIds,
+      context.results.map((result) => result.memory.id),
+    );
+    assert.deepEqual(
+      context.activeGraph.selections.map((selection) => selection.memoryId),
+      context.activeGraph.memoryIds,
+    );
+    const trace = store.retrievalTrace(context.activeGraph.id);
+    assert.deepEqual(trace?.resultMemoryIds, context.activeGraph.memoryIds);
+    assert.deepEqual(trace?.selections?.map((selection) => selection.memoryId), context.activeGraph.memoryIds);
+  });
+});
+
 test("relevanceFloor gates disclosed results and may abstain", () => {
   withStore((store) => {
     store.remember({

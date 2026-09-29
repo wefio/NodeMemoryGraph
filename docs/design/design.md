@@ -1855,6 +1855,13 @@ Search signals are separated by purpose:
 - regular expression only as an advanced/debug fallback over a bounded candidate
   set or raw session subset.
 
+On the FTS5-only path, after the Active Graph budget selects the ranked evidence,
+adjacent candidates with exactly equal `combinedScore` are ordered by IDF-weighted
+coverage of the query's word terms in their statements and bounded evidence
+excerpts. The rule does not change candidate membership, QPP expansion, or hybrid
+retrieval. Its evaluation and the rejected neural ranking arm are recorded in
+[lexical tie ranking](../decisions/implemented/2026-09-30-lexical-tie-ranking.md).
+
 Arbitrary model-generated regex is not a relevance ranker and must not scan the
 entire store by default. Surface anchors are admitted beside semantic candidates
 before the shared AG budget and projection. Plain prose produces no surface
