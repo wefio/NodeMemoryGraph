@@ -164,7 +164,10 @@ Two external services, both configured by env (no models ship with NMG):
 
 ## Results
 
-Formal run results are recorded as dated documents under `docs/`, not here:
+Formal run results are recorded as dated experiments under `docs/`:
+
+- [Lexical tie ranking and neural ranker outcome](../../docs/experiments/retrieval-quality/lexical-tie-ranking-2026-09-30.md)
+  — paired five-dataset lexical evaluation and the failed local neural ranking arm.
 
 - [Retrieval-quality baseline 2026-08-16](../../docs/experiments/retrieval-quality-baseline-2026-08-16.md)
   — first pinned run, lexical arm, the original three-dataset protocol.

@@ -3,6 +3,61 @@ import type { MemoryNode, MemorySearchResult, MemoryType, RecallCue } from "../t
 
 export type StoreRow = Record<string, string | number | Uint8Array | null>;
 
+const wordSegmenter = new Intl.Segmenter(undefined, { granularity: "word" });
+
+function wordTerms(text: string): Set<string> {
+  const terms = new Set<string>();
+  for (const part of wordSegmenter.segment(text.normalize("NFKC").toLowerCase())) {
+    if (part.isWordLike && Array.from(part.segment).length >= 2) terms.add(part.segment);
+  }
+  return terms;
+}
+
+/** Reorder only adjacent equal-score candidates, leaving the selected set intact. */
+export function rerankEqualScoresByQueryCoverage<T>(
+  query: string,
+  candidates: readonly T[],
+  scoreOf: (candidate: T) => number,
+  textOf: (candidate: T) => string,
+): T[] {
+  if (
+    candidates.length < 2 ||
+    !candidates.some(
+      (candidate, index) => index > 0 && scoreOf(candidate) === scoreOf(candidates[index - 1]!),
+    )
+  ) {
+    return [...candidates];
+  }
+  const queryTerms = wordTerms(query);
+  if (queryTerms.size === 0) return [...candidates];
+  const candidateTerms = candidates.map((candidate) => wordTerms(textOf(candidate)));
+  const weights = [...queryTerms].map((term) => {
+    const frequency = candidateTerms.filter((terms) => terms.has(term)).length;
+    return {
+      term,
+      weight: Math.log(1 + (candidates.length - frequency + 0.5) / (frequency + 0.5)),
+    };
+  });
+  const coverage = candidateTerms.map((terms) =>
+    weights.reduce((sum, { term, weight }) => sum + (terms.has(term) ? weight : 0), 0),
+  );
+  const reordered: T[] = [];
+  for (let start = 0; start < candidates.length;) {
+    let end = start + 1;
+    while (end < candidates.length && scoreOf(candidates[end]!) === scoreOf(candidates[start]!))
+      end++;
+    const tied = candidates
+      .slice(start, end)
+      .map((candidate, offset) => ({ candidate, index: start + offset }));
+    tied.sort(
+      (left, right) => coverage[right.index]! - coverage[left.index]! || left.index - right.index,
+    );
+    reordered.push(...tied.map(({ candidate }) => candidate));
+    start = end;
+  }
+  return reordered;
+}
+
 export function contextUsefulness(query: string, result: MemorySearchResult): number {
   const normalized = normalize(query);
   const type = result.memory.memoryType;
