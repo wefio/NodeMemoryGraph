@@ -25,8 +25,8 @@ test("the standalone TUI uses the Pi harness-compatible pi-tui line", () => {
   const harnessVersion = packageJson.devDependencies?.["@earendil-works/pi-coding-agent"];
   const tuiVersion = packageJson.dependencies?.["@earendil-works/pi-tui"];
 
-  assert.equal(harnessVersion, "^0.84.1");
-  assert.equal(tuiVersion, "^0.84.1");
+  assert.equal(harnessVersion, "^0.99.1");
+  assert.equal(tuiVersion, "^0.99.1");
 });
 
 test("the installed Pi TUI line exposes the renderer used by nmg inspect", async () => {
