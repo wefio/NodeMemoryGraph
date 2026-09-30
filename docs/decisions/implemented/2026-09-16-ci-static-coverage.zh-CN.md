@@ -49,15 +49,16 @@ severity。
 `calculateConfigForFile` 询问生效的 severity，所以注释无法让它通过。它的第一条断言在改动前的
 配置上就是红的 —— 当时 `evals/**/*.ts` 与 `scripts/**/*.ts` 指向扫描面之外。
 
-**静态检查与未使用代码扫描在 CI 里运行，而债不阻塞合并。** 必跑的 `static` job 运行拓宽后的
-`lint`：活性发现以警告形式出现、并作为运行里的 annotation，不失败构建；其余规则与 `src/` 同标准。
-另有一个 advisory 步骤 `npm run check:tests`，运行
-`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`（`tsconfig.tests.json` 第一次
-被脚本引用），因为没有任何阻塞轨道对 `tests/` 做类型检查。在既有类型错误还清之前它预期失败；
-`continue-on-error` 加在**步骤**而非 job 上，所以它的发现以 annotation 出现、退出码留在 job 日志里，
-而必跑聚合仍然为绿。job 级 `continue-on-error` 仍被
-[2026-09-12](2026-09-12-visible-non-blocking-research-track.md) 否决：那里的反对理由是 job 的真实
-结果与"从未运行过"无法区分，因此这里把细节以 annotation 形式发出，而不是把步骤吞掉。
+**测试面的类型检查阻塞，ESLint 活性发现仍只报告。** `check:tests` 运行
+`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`，在 `verify:static`
+里执行一次；`ci-and-tests` 声明相同的原子检查。CI 调用共享契约，不重复运行 advisory 类型检查步骤。
+覆盖面是配置显式包含的文件及其导入依赖，不等于全部 `evals/`、`scripts/`、`tools/`。
+必跑的 `static` job 仍把开发面上的两条 ESLint 活性规则报为警告；这不放松 TypeScript 的 strict
+类型检查或 unused 检查。
+
+2026-09-25 的后续清理测得 79 条类型错误，并在不排除文件、不加 `@ts-ignore`、不放松编译器 flag
+的前提下修复。fixture 补齐当前契约字段并收窄判别结果；Kimi hook 的 JavaScript 导出有声明边界，
+渲染 fixture 使用完整检索记录。阻塞契约测试锁定一次 `check:tests` 调用，并拒绝重复 advisory 步骤。
 
 ### 首次拓宽扫描报出的 11 条
 
@@ -112,6 +113,9 @@ severity。
   漏掉一个全局变量，就会让每个使用处长期被报成未定义。
 - **把配置当文本读取来做守卫。** 否决：那样注释与排版就能决定结果，而工单要求的正是"注释不能让它
   失败"。
+- **永久保留 advisory 类型检查。** 实测错误修复后否决：它会允许同样的 fixture 与 API 漂移
+  再次积累。把错误 fixture 经 `unknown` 强转或排除报错文件也被否决；它们不能证明测试遵守了
+  自己要检验的契约。
 - **在同一次改动里拓宽 `format:check`。** 记为 Deferred 而非否决：它是同一类漏洞，但需要对新增
   目录跑一次 Prettier，而研究代码的格式化重写会淹没与它同行的 lint 改动。
 
@@ -121,8 +125,8 @@ severity。
   落在扫描面之外或匹配不到任何文件。
 - 未使用的导入、未使用的变量与死存储会在每一个开发面上被报告。本次改动删掉了其中 9 条，下一条会
   以警告 annotation 的形式出现在运行里，而不是变成一个合并阻塞项。
-- `tests/` 这条面第一次获得类型检查，形式是一个 advisory 步骤，其失败计数就是它的债。
-  `tsconfig.tests.json` 从一个没人读的文件变成了被脚本引用的文件。
+- `tests/` 依赖图中的类型错误会使本地静态验证与必跑 CI static job 失败；编译器 flag 与
+  include 面不变。
 - 代价：一条没人读的 advisory 发现不是门禁。反作用力是这些发现会作为 annotation 挂在 diff 上、
   在运行里被计数，而守卫测试让 severity 自身不会悄悄漂移。
 - 回滚：revert 一个 commit。这里没有数据迁移，也没有运行时契约变更。
@@ -134,6 +138,4 @@ severity。
 - 没有任何轨道对 `evals/`、`scripts/` 以及 `tsconfig.json` 里那三个文件名之外的 `tools/` 做类型
   检查。`check:tests` 只是第一刀；产品面加同样 flag 只报 1 个错误，因此后续改动可以对它使用同样的
   处理。
-- `check:tests` 报出 69 个既有类型错误（`tests/` 37 个、`workbuddy-plugin/nmg-hook.ts` 26 个、
-  `evals/` 5 个、`tools/` 1 个）。其中没有一条是活性发现；把它们还清、并把该步骤移入
-  `verify:static` 是另一次改动。
+

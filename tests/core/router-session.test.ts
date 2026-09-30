@@ -6,6 +6,7 @@ import { Router } from "../../src/core/router.ts";
 test("hierarchical activation keeps temporal state isolated per session", () => {
   const router = new Router({
     dimensions: 2,
+    model: "test-embedder",
     embed: () => [1, 0],
   });
   const first = router.ensureHA(2, "session-a");

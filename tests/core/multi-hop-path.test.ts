@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NmgStore } from "../../src/core/store.ts";
+import type { NodeRelation, NodeRelationType } from "../../src/core/types.ts";
 import { propagateEdgeActivation } from "../../src/core/edge-activation.ts";
 
 function withStore(run: (store: NmgStore) => void): void {
@@ -18,7 +19,7 @@ function withStore(run: (store: NmgStore) => void): void {
 }
 
 test("propagateEdgeActivation traces the best-activation path per node", () => {
-  const rel = (id: string, s: string, t: string, type: string) => ({
+  const rel = (id: string, s: string, t: string, type: NodeRelationType): NodeRelation => ({
     id,
     sourceNodeId: s,
     targetNodeId: t,
@@ -28,7 +29,13 @@ test("propagateEdgeActivation traces the best-activation path per node", () => {
     direction: "source->target",
     fanBudget: false,
     status: "consolidated",
-  } as const);
+    evidenceIds: [],
+    residence: "ltg",
+    stability: 1,
+    consolidationSource: "explicit",
+    consolidatedAt: "2026-08-01T00:00:00.000Z",
+    createdAt: "2026-08-01T00:00:00.000Z",
+  });
   const result = propagateEdgeActivation(
     new Map([["A", 1.0]]),
     [rel("r1", "A", "B", "causes"), rel("r2", "B", "C", "causes")],

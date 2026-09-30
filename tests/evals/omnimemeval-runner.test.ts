@@ -48,10 +48,9 @@ test("CLI exposes only suite, config, resume, and dry-run", () => {
 });
 
 test("one config supplies common and suite-specific official arguments", () => {
-  const suites = Object.fromEntries(Object.keys(SUITES).map((name) => [name, []])) as Record<
-    BenchmarkSuite,
-    string[]
-  >;
+  const suites: Record<BenchmarkSuite, string[]> = {
+    beam: [], locomo: [], longmemeval: [], "personamem-v2": [], halumem: [],
+  };
   suites.beam = ["--scale", "100k", "--judge-batch-size", "4"];
   const repoRoot = fixtureRepo("beam", { suites });
   const plan = createRunPlan(parseRunOptions(["beam", "--config", "benchmark.json"]), {

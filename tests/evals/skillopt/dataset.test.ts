@@ -235,6 +235,7 @@ function eventsFor(
     expansionUseful,
     excessiveNoise,
     noMemoryNeeded,
+    memoryMisleading: null,
   };
   return [retrieval, feedback];
 }

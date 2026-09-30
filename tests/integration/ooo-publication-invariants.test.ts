@@ -29,6 +29,7 @@ import {
   compileTaskUnits,
   deriveStatus,
   type RecordedFacts,
+  type CompileInput,
 } from "../../src/integration/task-semantics.ts";
 import { nextTask, type DispatchTask } from "../../src/integration/ooo-execution.ts";
 import type { PatchTaskSpec } from "../../src/integration/ooo-board.ts";

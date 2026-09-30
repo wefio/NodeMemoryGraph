@@ -65,7 +65,7 @@ test("a chain input names the check when the unit has one", () => {
   const frozen = patchWork();
   const input = patchSessionInput(frozen, {
     looseConclusion: true,
-    check: { label: "the unit check", maxRuns: 1, run: async () => ({ ok: true, output: "" }) },
+    check: { label: "the unit check", maxRuns: 1, run: async () => ({ verdict: "accept", log: "" }) },
   });
   assert.match(input.prompt, /the check the unit check/);
   assert.match(input.prompt, /call only read_snapshot, run_check and submit_artifact/);

@@ -47,6 +47,8 @@ function report(): AgentContextReport {
       },
     ],
     availableRoutes: ["store", "docs"],
+    capabilities: [],
+    availableCapabilities: [],
     guardrails: [],
     canonical: { design: "design.md", completion: "audit.md", todo: "todo.md" },
     state: { desiredRevision: "desired", observedRevision: "observed" },

@@ -25,7 +25,7 @@ export function createTestRuntime(): CordisTestRuntime {
       const fiber = await root.plugin((context) =>
         effect({
           effect(register, name) {
-            context.effect(register, name);
+            context.effect(() => register() ?? (() => {}), name);
           },
         }),
       );

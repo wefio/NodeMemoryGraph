@@ -2254,9 +2254,9 @@ test("/nmg with no arguments opens the interactive select menu", async () => {
       ctx: {
         hasUI: boolean;
         ui: {
-          select: (...args: unknown[]) => Promise<unknown>;
+          select: (title: string, options: string[]) => Promise<string | undefined>;
           input: (...args: unknown[]) => Promise<unknown>;
-          notify: (...args: unknown[]) => void;
+          notify: (message: string) => void;
         };
       },
     ) => Promise<void>;

@@ -188,6 +188,7 @@ function taskEvents(
       expansionUseful: false,
       excessiveNoise: false,
       noMemoryNeeded: false,
+      memoryMisleading: null,
     },
   ];
 }

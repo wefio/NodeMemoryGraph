@@ -33,10 +33,7 @@ function selected(source: string, mutant: Mutant): string {
 
 function refusal(source: string, mutant: Mutant): string {
   const site = locate(source, mutant);
-  assert.ok(
-    "reason" in site,
-    `expected a refusal, got a site: ${source.slice(site.start, site.end)}`,
-  );
+  assert.ok("reason" in site, "expected a refusal, got a site");
   return site.reason;
 }
 

@@ -515,7 +515,7 @@ export class OmniMemEvalBridge {
         },
       },
     );
-    const rankedMemoryIds = new Set(context.activeGraph.memoryIds);
+    const rankedMemoryIds = new Set(context.activeGraph?.memoryIds ?? []);
     const memories = context.results.map((result) => ({
       memoryId: result.memory.id,
       nodeId: result.node.id,

@@ -58,18 +58,20 @@ matches a file that the script scans. It imports `eslint.config.js` and asks ESL
 Its first check is red on the pre-change config, where `evals/**/*.ts` and
 `scripts/**/*.ts` pointed outside the scanned surface.
 
-**Static checking and the unused-code scan run in CI, and the debt does not block.** The
-required `static` job runs the widened `lint`: liveness findings appear as warnings and
-as annotations on the run, and never fail the build, while everything else is held to the
-same standard as `src/`. One advisory step, `npm run check:tests`, runs
-`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters` — the first reference
-to `tsconfig.tests.json` — because no blocking route type-checks `tests/`. It is expected
-to fail while its pre-existing type errors are paid down; `continue-on-error` sits on the
-step, not on the job, so its findings appear as annotations and its exit code is in the
-job log while the required aggregate stays green. A job-level `continue-on-error` remains
-rejected by [2026-09-12](2026-09-12-visible-non-blocking-research-track.md): there the
-objection was a job whose real result could not be told apart from one that never ran, so
-the detail is emitted as annotations rather than swallowed.
+**Tests-surface type checking blocks, while ESLint liveness findings remain advisory.**
+`check:tests` runs `tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`
+once in `verify:static`; `ci-and-tests` lists the same atomic checks. CI invokes the
+shared contract without a duplicate advisory type-check step. The checked surface is
+the configuration's explicit includes plus their imported dependencies, not all of
+`evals/`, `scripts/` or `tools/`. The required `static` job still reports the two ESLint
+liveness rules as warnings on developer surfaces. This does not weaken TypeScript's
+strict type or unused checks.
+
+The 2026-09-25 follow-up measured 79 type errors and repaired them without exclusions,
+`@ts-ignore`, or relaxed compiler flags. Fixtures supply current contract fields and
+narrow discriminated results; the Kimi hook's JavaScript exports have a declaration
+boundary, and presentation fixtures use complete retrieval records. The blocking
+contract test pins one `check:tests` invocation and rejects a duplicate advisory step.
 
 ### What the first widened scan reported
 
@@ -132,6 +134,10 @@ evidence behind the advisory severity above:
 - **Guard the config by reading it as text.** Rejected: comments and formatting would
   decide the result, which is what the ticket means by "a comment must not be able to
   fail".
+- **Leave tests-surface type checking permanently advisory.** Rejected once the measured
+  errors were repaired: it would permit the same fixture and API drift to accumulate again.
+  Casting malformed fixtures through `unknown` or excluding failing files is also rejected;
+  neither establishes that the test obeys the contract it exercises.
 - **Widen `format:check` in the same change.** Deferred, not rejected: it is the same
   class of hole, but it needs a Prettier pass over the newly covered directories, and a
   formatting rewrite of research code would bury the lint change it travels with.
@@ -144,9 +150,8 @@ evidence behind the advisory severity above:
 - Unused imports, unused variables and dead stores are reported on every developer
   surface. Nine of them are gone with this change, and the next one is visible in the run
   as a warning annotation rather than as a merge blocker.
-- The `tests/` surface is type-checked for the first time, by an advisory step whose
-  failure count is its debt. `tsconfig.tests.json` is now referenced by a script instead
-  of being an unread file.
+- Type errors in the `tests/` dependency graph fail local static verification and the
+  required CI static job. The compiler flags and inclusion surface remain unchanged.
 - Cost: an advisory finding that nobody reads is not a gate. The counter-pressure is that
   the findings are annotated on the diff and counted in the run, and the guard test keeps
   the severities themselves from drifting silently.
@@ -161,10 +166,4 @@ evidence behind the advisory severity above:
   names in `tsconfig.json`. `check:tests` is the first slice; the product surface with
   the same flags reports one error, so the same treatment is available for a later
   change.
-- `check:tests` reports 69 pre-existing type errors (37 under `tests/`, 26 in
-  `workbuddy-plugin/nmg-hook.ts`, 5 under `evals/`, 1 under `tools/`). None of them is a
-  liveness finding; paying them down and moving the step into `verify:static` is its own
-  change. The count is a property of the tree, not of the step: the tree that merges
-  `feat/ooo-run-namespace` measures 74 (41 under `tests/`, everything else unchanged), the
-  four extra findings being that branch's own test files. Whoever merges it re-measures this
-  line rather than carrying 69 forward.
+

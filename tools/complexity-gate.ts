@@ -313,7 +313,7 @@ export function functionIdentityAtLine(filePath: string, source: string, line: n
   );
   let best: ts.FunctionLikeDeclaration | undefined;
   const visit = (node: ts.Node): void => {
-    if (ts.isFunctionLike(node) && containsLine(sourceFile, node, line)) {
+    if (ts.isFunctionLike(node) && "body" in node && containsLine(sourceFile, node, line)) {
       if (!best || node.getWidth(sourceFile) < best.getWidth(sourceFile)) best = node;
     }
     ts.forEachChild(node, visit);

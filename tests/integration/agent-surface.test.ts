@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { searchResultFixture } from "../helpers/search-result.ts";
 import type { MemoryContext } from "../../src/core/types.ts";
 import {
   renderEvidenceSurface,
@@ -18,6 +19,9 @@ test("session Active Graph surface renders only projected temporary items", () =
     projectionSequence: 1,
     latestProjectionId: "projection-a",
     temporaryProjectionActive: true,
+    disclosedProjectionIds: [],
+    disclosureTurn: 0,
+    disclosures: [],
     items: [
       {
         id: "memory:a",
@@ -52,22 +56,20 @@ test("session Active Graph surface renders only projected temporary items", () =
 
 function context(): MemoryContext {
   const chainId = "chain-atlas";
-  const result = (id: string, statement: string, position: number) =>
-    ({
-      memory: {
-        id,
-        statement,
-        memoryType: "fact",
-        tier: 1,
-        truthStatus: "asserted",
-        scope: { project: "atlas" },
-        eventTime: "2026-08-20T12:00:00.000Z",
-      },
-      node: { canonicalName: "Atlas" },
-      evidence: { content: `Exact source detail for ${id}.` },
+  const result = (id: string, statement: string, position: number): MemoryContext["results"][number] => {
+    const fixture = searchResultFixture(id, statement);
+    return {
+      ...fixture,
+      memory: { ...fixture.memory, eventTime: "2026-08-20T12:00:00.000Z" },
+      node: { ...fixture.node, canonicalName: "Atlas" },
+      evidence: { ...fixture.evidence, content: `Exact source detail for ${id}.` },
+      evidenceRecords: [{ ...fixture.evidence, content: `Exact source detail for ${id}.` }],
       recallReason: "vector_match",
+      lexicalScore: 0,
+      vectorScore: 1,
       chainMemberships: [{ chainId, chainType: "logical", topic: "Atlas flow", position }],
-    }) as MemoryContext["results"][number];
+    };
+  };
   return {
     results: [
       result("memory-a", "Atlas receives input.", 0),
@@ -166,7 +168,7 @@ test("shared task-board surface renders coordination without promoting it to mem
       entries: [
         {
           id: "entry-1",
-          sequence: 7,
+
           kind: "question",
           status: "open",
           agentId: "agent-a",
@@ -174,7 +176,7 @@ test("shared task-board surface renders coordination without promoting it to mem
           ackedBy: ["agent-b"],
         },
       ],
-      nextCursor: 7,
+      nextCursor: "7",
     },
     { taskId: "adapter-migration" },
   );

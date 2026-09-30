@@ -57,7 +57,7 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 
 `npm run lint` 的扫描面是 `src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ tests/ evals/ scripts/ tools/`。两条**活性规则**（`@typescript-eslint/no-unused-vars`、`no-useless-assignment`，都在断言"这个值从未被读取"）在 `tests/`、`evals/`、`scripts/`、`tools/` 上只报告为 `warn`，在 `src/` 上仍为 error：静态工具最容易在这里把活代码判成死的（`tests/core/graph-cycles.test.ts` 的三个"未使用绑定"实际是漏掉的断言），阻塞门禁会把修法推向删掉线索。其余规则对开发面与 `src/` 同标准（决策：[静态覆盖面](../decisions/implemented/2026-09-16-ci-static-coverage.md)）。测试、研究 harness、脚本与仓库工具按设计打印，因此 `no-console` 对这些面关闭。扫描面自身由 `tests/tools/eslint-config-coverage.test.ts` 守住：`lint` 与 `lint:fix` 同面，config 里每个以目录锚定的 `files:` 块都必须落在扫描面内并仍能匹配到文件，且生效 severity 由 ESLint 自己回答（提升某条规则是一次刻意改动）。
 
-`npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`，`tests/` 面第一次被类型检查）刻意不进入任何阻塞契约，只在 CI 以 advisory 步骤运行。
+`npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`）进入 `verify:static` 与 `ci-and-tests` 的阻塞集合。它检查 `tests/`、配置显式包含的源文件以及它们导入的依赖；不声明覆盖全部 `evals/`、`scripts/`、`tools/`。
 
 `verify:static` 中的 `mutation:anchors`（`tools/mutation-teeth.ts --anchors-only`）只做一件事：把 110 颗具名 mutant 的位置全部解析一遍，不跑任何用例、不写任何字节，在 1 秒内回答“每一颗牙是否还瞄着东西”。它进入静态契约是因为**一颗锚点失效时没有别的检查会注意到**：全量 sweep 不跑（`mutation:teeth` 不在任何 CI 作业里），而一颗匹配不到位置的牙在 sweep 报告里只是“不可应用”并被排除出分母——本轮修掉的两颗牙就是这样悄无声息地停摆的。全量 sweep 仍然不进闸门：它是分钟级、要跑用例，属于推送前的常设规则（[决策](../decisions/implemented/2026-09-24-mutants-are-derived-not-anchored.md)）。
 
@@ -76,7 +76,7 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 `verify:chaos` 这些命名 package contract，使本地可复现入口和远程 CI 保持同源：
 
 - `static`：build、package、type、lint、format、文档、术语索引、需求追溯、Agent context 与生产依赖审计；
-- `static` 内的 advisory 步骤：`check:tests`（`tests/` 面的类型检查 + 未使用局部量/参数）。`continue-on-error` 加在步骤上而非 job 上，`static` 仍是必跑且绿的 job；它的发现以 `error` annotation 与 job 日志里的退出码出现在运行里，刻意不是合并阻塞项（决策：[静态覆盖面](../decisions/implemented/2026-09-16-ci-static-coverage.md)）。同一 job 里拓宽后的 `lint` 把开发面上的活性发现报为 `warn`，同样以 annotation 出现在运行里而不失败构建；
+- `static` 通过 `verify:static` 阻塞执行 `check:tests`，不重复运行 advisory 类型检查步骤。ESLint 在开发面上的两条活性规则仍是 `warn`，与 TypeScript 的类型及 unused 检查分别执行（决策：[静态覆盖面](../decisions/implemented/2026-09-16-ci-static-coverage.md)）；
 - `tests`：Node 24 产品测试和覆盖率；
 - `research-tests`：研究/benchmark adapter 表征，**非阻塞但可见**：它不进入 `all-checks-passed`，因此失败不阻塞合并；但它不再带 `continue-on-error`，所以失败会以红色 check 出现在 PR 上，而不是永远显示绿色（决策：`docs/decisions/implemented/2026-09-12-visible-non-blocking-research-track.md`）。
 - `node-compat`：最低支持版本 Node 22.19 的 build/package；

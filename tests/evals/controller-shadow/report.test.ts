@@ -54,6 +54,7 @@ test("shadow coverage keeps missing labels unknown and reports calibration block
       expansionUseful: true,
       excessiveNoise: false,
       noMemoryNeeded: false,
+      memoryMisleading: null,
     },
     {
       ...base,
