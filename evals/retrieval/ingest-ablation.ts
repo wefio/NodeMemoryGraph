@@ -86,7 +86,8 @@ function runCoordinator(): void {
   }
 
   const signatures = new Set([...samples.values()].flat().map((sample) => sample.signature));
-  if (signatures.size !== 1) throw new Error("ablation arms produced different persisted semantics");
+  if (signatures.size !== 1)
+    throw new Error("ablation arms produced different persisted semantics");
   const baseline = median(samples.get("baseline")!.map((sample) => sample.wallMs));
   const report = {
     generatedAt: new Date().toISOString(),
@@ -239,9 +240,7 @@ function rotate<T>(values: readonly T[], offset: number): T[] {
 function median(values: readonly number[]): number {
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? (sorted[middle - 1]! + sorted[middle]!) / 2
-    : sorted[middle]!;
+  return sorted.length % 2 === 0 ? (sorted[middle - 1]! + sorted[middle]!) / 2 : sorted[middle]!;
 }
 
 function validateConfig(value: Config): void {

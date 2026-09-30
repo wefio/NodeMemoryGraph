@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import test from "node:test";
 
-import {
-  officialPythonExecutable,
-  probePython,
-} from "../../../evals/official/python.ts";
+import { officialPythonExecutable, probePython } from "../../../evals/official/python.ts";
 
 test("official Python uses one explicit override without a fallback chain", () => {
   assert.equal(

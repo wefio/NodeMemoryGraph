@@ -9,12 +9,7 @@ import {
 } from "../../src/core/embedding-provider.ts";
 import { loadEnvironmentFile } from "../local-env.ts";
 
-export type BenchmarkSuite =
-  | "longmemeval"
-  | "locomo"
-  | "beam"
-  | "personamem-v2"
-  | "halumem";
+export type BenchmarkSuite = "longmemeval" | "locomo" | "beam" | "personamem-v2" | "halumem";
 
 type SuiteDefinition = {
   runner: string;
@@ -143,7 +138,10 @@ export function loadBenchmarkConfig(path: string): BenchmarkConfig {
 }
 
 function generatedVersion(suite: BenchmarkSuite, now: Date): string {
-  const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  const stamp = now
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
   return `${suite}_${stamp}`;
 }
 
@@ -397,9 +395,7 @@ export function createRunPlan(
 export async function runPlan(plan: RunPlan): Promise<number> {
   await preflightEmbeddingProvider(loadBenchmarkEnvironment(plan));
   const { spawn } = await import("node:child_process");
-  const { ResourceSampler, writeResourceReport } = await import(
-    "./resource-observability.ts"
-  );
+  const { ResourceSampler, writeResourceReport } = await import("./resource-observability.ts");
 
   const child = spawn(plan.bash, plan.args, {
     cwd: plan.omniRoot,
@@ -426,12 +422,7 @@ export async function runPlan(plan: RunPlan): Promise<number> {
 
   // Write one bounded report beside the run's result directory.
   try {
-    const resultDir = join(
-      plan.omniRoot,
-      "results",
-      SUITES[plan.suite].resultFolder,
-      plan.version,
-    );
+    const resultDir = join(plan.omniRoot, "results", SUITES[plan.suite].resultFolder, plan.version);
     writeResourceReport(sampler.report, resultDir);
   } catch {
     // A missing/unwritable result dir must not fail the run itself.
@@ -440,31 +431,34 @@ export async function runPlan(plan: RunPlan): Promise<number> {
 }
 
 function isMainModule(): boolean {
-  return process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  return (
+    process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  );
 }
 
 if (isMainModule()) {
   if (process.argv.slice(2).some((argument) => argument === "--help" || argument === "-h")) {
     console.log(usage());
-  } else try {
-    const options = parseRunOptions(process.argv.slice(2));
-    const plan = createRunPlan(options);
-    console.log(
-      JSON.stringify(
-        {
-          suite: plan.suite,
-          version: plan.version,
-          config: plan.configPath,
-          envFile: plan.envFile,
-          command: [plan.bash, ...plan.args],
-        },
-        null,
-        2,
-      ),
-    );
-    if (!options.dryRun) process.exitCode = await runPlan(plan);
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  }
+  } else
+    try {
+      const options = parseRunOptions(process.argv.slice(2));
+      const plan = createRunPlan(options);
+      console.log(
+        JSON.stringify(
+          {
+            suite: plan.suite,
+            version: plan.version,
+            config: plan.configPath,
+            envFile: plan.envFile,
+            command: [plan.bash, ...plan.args],
+          },
+          null,
+          2,
+        ),
+      );
+      if (!options.dryRun) process.exitCode = await runPlan(plan);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    }
 }

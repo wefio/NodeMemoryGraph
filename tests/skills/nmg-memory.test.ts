@@ -31,14 +31,19 @@ test("NMG Skill natural evidence loop separates observation, calibration, and ac
   assert.match(naturalEvidence, /NMG_SHADOW_COLLECTION_ORIGIN/u);
   assert.match(naturalEvidence, /eval:natural-readiness -- --project-dir <REAL_PROJECT>/u);
   assert.match(naturalEvidence, /eval:controller-dataset -- --compact/u);
-  assert.match(naturalEvidence, /writes a rollbackable candidate artifact; it does not activate it/u);
+  assert.match(
+    naturalEvidence,
+    /writes a rollbackable candidate artifact; it does not activate it/u,
+  );
   assert.match(naturalEvidence, /must keep the corresponding production actuator disabled/u);
 });
 
 test("NMG Skill eval definitions have a stable executable-harness schema", () => {
-  const cases = JSON.parse(
-    readFileSync(resolve(skillRoot, "evals/evals.json"), "utf8"),
-  ) as Array<{ name?: unknown; prompt?: unknown; expected?: unknown }>;
+  const cases = JSON.parse(readFileSync(resolve(skillRoot, "evals/evals.json"), "utf8")) as Array<{
+    name?: unknown;
+    prompt?: unknown;
+    expected?: unknown;
+  }>;
 
   assert.ok(cases.length > 0);
   assert.equal(new Set(cases.map((entry) => entry.name)).size, cases.length);

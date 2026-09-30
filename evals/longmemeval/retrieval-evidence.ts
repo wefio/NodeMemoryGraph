@@ -23,11 +23,8 @@ export function officialRetrievalForMemoryIds(
 ): OfficialRetrievalMetrics | null {
   const store = new NmgStore(resolve(nmgDirectory, "nmg.sqlite"));
   try {
-    return officialMetricsForContext(
-      store.getContext(memoryIds, 0),
-      questionId,
-      answerSessionIds,
-    ).officialMetrics;
+    return officialMetricsForContext(store.getContext(memoryIds, 0), questionId, answerSessionIds)
+      .officialMetrics;
   } finally {
     store.close();
   }
@@ -50,9 +47,10 @@ export function latestAutomaticRecallEvidence(
       )
       .get() as { id?: unknown; session_id?: unknown } | undefined;
     traceId = row?.id === undefined ? null : String(row.id);
-    sessionId = row?.session_id === null || row?.session_id === undefined
-      ? undefined
-      : String(row.session_id);
+    sessionId =
+      row?.session_id === null || row?.session_id === undefined
+        ? undefined
+        : String(row.session_id);
   } finally {
     database.close();
   }

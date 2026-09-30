@@ -19,6 +19,8 @@ export function probePython(executable: string): { available: boolean; error: st
   return {
     available: false,
     error:
-      result.error?.message || result.stderr.trim() || `process exited with status ${result.status}`,
+      result.error?.message ||
+      result.stderr.trim() ||
+      `process exited with status ${result.status}`,
   };
 }

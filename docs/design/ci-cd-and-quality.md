@@ -57,6 +57,8 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 
 `npm run lint` 的扫描面是 `src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ tests/ evals/ scripts/ tools/`。两条**活性规则**（`@typescript-eslint/no-unused-vars`、`no-useless-assignment`，都在断言"这个值从未被读取"）在 `tests/`、`evals/`、`scripts/`、`tools/` 上只报告为 `warn`，在 `src/` 上仍为 error：静态工具最容易在这里把活代码判成死的（`tests/core/graph-cycles.test.ts` 的三个"未使用绑定"实际是漏掉的断言），阻塞门禁会把修法推向删掉线索。其余规则对开发面与 `src/` 同标准（决策：[静态覆盖面](../decisions/implemented/2026-09-16-ci-static-coverage.md)）。测试、研究 harness、脚本与仓库工具按设计打印，因此 `no-console` 对这些面关闭。扫描面自身由 `tests/tools/eslint-config-coverage.test.ts` 守住：`lint` 与 `lint:fix` 同面，config 里每个以目录锚定的 `files:` 块都必须落在扫描面内并仍能匹配到文件，且生效 severity 由 ESLint 自己回答（提升某条规则是一次刻意改动）。
 
+`format` 与 `format:check` 的 `**/*.ts` 面为 `src/`、`.pi/`、`workbuddy-plugin/`、`tests/`、`evals/`、`scripts/`、`tools/`；暂存格式 hook 与它们同面，子包保留独立流程。守卫测试锁定两条命令及 hook 一致，评估 fixture 的故意错误行为不因格式化而修正（[静态覆盖面决策](../decisions/implemented/2026-09-16-ci-static-coverage.md)）。
+
 `npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`）进入 `verify:static` 与 `ci-and-tests` 的阻塞集合。它检查 `tests/`、配置显式包含的源文件以及它们导入的依赖；不声明覆盖全部 `evals/`、`scripts/`、`tools/`。
 
 `verify:static` 中的 `mutation:anchors`（`tools/mutation-teeth.ts --anchors-only`）只做一件事：把 110 颗具名 mutant 的位置全部解析一遍，不跑任何用例、不写任何字节，在 1 秒内回答“每一颗牙是否还瞄着东西”。它进入静态契约是因为**一颗锚点失效时没有别的检查会注意到**：全量 sweep 不跑（`mutation:teeth` 不在任何 CI 作业里），而一颗匹配不到位置的牙在 sweep 报告里只是“不可应用”并被排除出分母——本轮修掉的两颗牙就是这样悄无声息地停摆的。全量 sweep 仍然不进闸门：它是分钟级、要跑用例，属于推送前的常设规则（[决策](../decisions/implemented/2026-09-24-mutants-are-derived-not-anchored.md)）。

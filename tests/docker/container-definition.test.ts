@@ -3,10 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const dockerfile = readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8");
-const entrypoint = readFileSync(
-  new URL("../../docker/entrypoint.sh", import.meta.url),
-  "utf8",
-);
+const entrypoint = readFileSync(new URL("../../docker/entrypoint.sh", import.meta.url), "utf8");
 
 test("external target stays free of the bundled embedding environment", () => {
   const baseStart = dockerfile.indexOf("AS nmg-runtime");

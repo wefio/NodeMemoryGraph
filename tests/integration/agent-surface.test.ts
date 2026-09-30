@@ -56,7 +56,11 @@ test("session Active Graph surface renders only projected temporary items", () =
 
 function context(): MemoryContext {
   const chainId = "chain-atlas";
-  const result = (id: string, statement: string, position: number): MemoryContext["results"][number] => {
+  const result = (
+    id: string,
+    statement: string,
+    position: number,
+  ): MemoryContext["results"][number] => {
     const fixture = searchResultFixture(id, statement);
     return {
       ...fixture,

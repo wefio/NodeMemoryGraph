@@ -240,7 +240,9 @@ test("natural maintenance audit reads claim, consolidation, and topology evidenc
       ),
     );
     assert.equal(
-      report.ltg.stgConsolidation.materializations.some((item) => item.memoryId === manualLtgMemoryId),
+      report.ltg.stgConsolidation.materializations.some(
+        (item) => item.memoryId === manualLtgMemoryId,
+      ),
       false,
       "a manual LTG row without the source marker is not a materialization",
     );

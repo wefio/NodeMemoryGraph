@@ -521,14 +521,14 @@ test("a spec cannot declare a bound it does not enable the constraint for", () =
   };
   // Without the declaration the run would be the control arm while the file says fusion, so the spec
   // is refused by name rather than believed. A bound of one asks for nothing and stays legal.
-  assert.throws(
-    () => validateSpecFile(file),
-    /declare fusion\.constraints = \["repair-first"\]/u,
-  );
-  assert.equal(validateSpecFile({ ...file, fusion: { unitsPerSession: 1 } }).fusion?.unitsPerSession, 1);
+  assert.throws(() => validateSpecFile(file), /declare fusion\.constraints = \["repair-first"\]/u);
   assert.equal(
-    validateSpecFile({ ...file, fusion: { unitsPerSession: 2, constraints: ["repair-first"] } }).fusion
-      ?.unitsPerSession,
+    validateSpecFile({ ...file, fusion: { unitsPerSession: 1 } }).fusion?.unitsPerSession,
+    1,
+  );
+  assert.equal(
+    validateSpecFile({ ...file, fusion: { unitsPerSession: 2, constraints: ["repair-first"] } })
+      .fusion?.unitsPerSession,
     2,
   );
 });

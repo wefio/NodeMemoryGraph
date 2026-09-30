@@ -58,14 +58,11 @@ Return ONLY JSON with no prose:
  "supersededMemoryId": "<candidate id>", "reason": "<short reason>"}`;
 
 function buildUserMessage(input: JudgeInput): string {
-  const lines = [
-    `New statement:`,
-    input.statement,
-    ``,
-    `Candidates:`,
-  ];
+  const lines = [`New statement:`, input.statement, ``, `Candidates:`];
   for (const c of input.supersedeCandidates ?? input.candidates) {
-    lines.push(`- id=${c.memoryId} event_time=${c.eventTime ?? "unknown"} similarity=${c.similarity.toFixed(2)}`);
+    lines.push(
+      `- id=${c.memoryId} event_time=${c.eventTime ?? "unknown"} similarity=${c.similarity.toFixed(2)}`,
+    );
     lines.push(`  ${c.statement.slice(0, 400)}`);
   }
   return lines.join("\n");
@@ -73,7 +70,10 @@ function buildUserMessage(input: JudgeInput): string {
 
 /** Parse the model's JSON answer defensively; anything unexpected -> keep. */
 function parseJudgement(raw: string): DuplicateJudgement {
-  const trimmed = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const trimmed = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
   try {
     const parsed = JSON.parse(trimmed) as {
       action?: string;
@@ -87,7 +87,12 @@ function parseJudgement(raw: string): DuplicateJudgement {
       return { merge: true, reason };
     }
     if (action === "supersede" && parsed.supersededMemoryId) {
-      return { merge: false, supersede: true, supersededMemoryId: String(parsed.supersededMemoryId), reason };
+      return {
+        merge: false,
+        supersede: true,
+        supersededMemoryId: String(parsed.supersededMemoryId),
+        reason,
+      };
     }
     return { merge: false, reason };
   } catch {
@@ -214,8 +219,6 @@ export function createJudgeClientFromEnv(
     timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : 30_000,
     thinking,
     reasoningEffort: effort === "low" || effort === "medium" ? effort : "high",
-    ...(Number.isInteger(maxTokensRaw) && maxTokensRaw > 0
-      ? { maxTokens: maxTokensRaw }
-      : {}),
+    ...(Number.isInteger(maxTokensRaw) && maxTokensRaw > 0 ? { maxTokens: maxTokensRaw } : {}),
   });
 }

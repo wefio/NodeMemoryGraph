@@ -73,6 +73,14 @@ narrow discriminated results; the Kimi hook's JavaScript exports have a declarat
 boundary, and presentation fixtures use complete retrieval records. The blocking
 contract test pins one `check:tests` invocation and rejects a duplicate advisory step.
 
+**Formatting covers the declared TypeScript surfaces.** `format` and `format:check`
+scan `src/`, `.pi/`, `workbuddy-plugin/`, `tests/`, `evals/`, `scripts/` and `tools/`
+with `**/*.ts`. The staged-file hook uses the same directory set; subpackages retain
+their own formatting pipelines. This does not extend to `.mjs`, `.mts`, Python or
+other file types. `test-groups.test.ts` pins both commands' surface and hook parity.
+Deliberately broken evaluation fixtures are formatted, not repaired: their wrong
+behavior is an input to the evaluator, not a product defect.
+
 ### What the first widened scan reported
 
 The scan's first pass over the newly covered surface produced 11 findings. Nine were
@@ -138,9 +146,9 @@ evidence behind the advisory severity above:
   errors were repaired: it would permit the same fixture and API drift to accumulate again.
   Casting malformed fixtures through `unknown` or excluding failing files is also rejected;
   neither establishes that the test obeys the contract it exercises.
-- **Widen `format:check` in the same change.** Deferred, not rejected: it is the same
-  class of hole, but it needs a Prettier pass over the newly covered directories, and a
-  formatting rewrite of research code would bury the lint change it travels with.
+- **Mix the formatting pass into lint or type repairs.** Rejected: broad research
+  formatting obscures semantic fixes. The coverage expansion and controlled Prettier
+  pass are a separate commit, with fixture semantics and mutation evidence checked.
 
 ## Consequences
 
@@ -159,11 +167,7 @@ evidence behind the advisory severity above:
 
 ## Deferred
 
-- `format:check` scans `src/`, `.pi/` and `workbuddy-plugin/` only. `tests/`, `evals/`,
-  `scripts/` and `tools/` are still unformatted, and closing that hole needs its own
-  Prettier pass.
-- No route type-checks `evals/`, `scripts/`, or the `tools/` files outside the three
-  names in `tsconfig.json`. `check:tests` is the first slice; the product surface with
-  the same flags reports one error, so the same treatment is available for a later
-  change.
+- Files under `evals/`, `scripts/` or `tools/` that are neither explicitly included
+  nor imported by `tsconfig.json` or `tsconfig.tests.json` remain outside their type
+  checks. Full-directory type-check coverage is a separate scope.
 

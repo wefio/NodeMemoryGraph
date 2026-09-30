@@ -36,7 +36,12 @@ const cases: GateCase[] = [
 const rows = cases.map((item) => {
   const decision = decideMemoryLoad(item.prompt);
   const predictedRecall = decision.mode === "retrieve";
-  return { ...item, mode: decision.mode, predictedRecall, correct: predictedRecall === item.needsRecall };
+  return {
+    ...item,
+    mode: decision.mode,
+    predictedRecall,
+    correct: predictedRecall === item.needsRecall,
+  };
 });
 
 const languages = [...new Set(rows.map((row) => row.language))];

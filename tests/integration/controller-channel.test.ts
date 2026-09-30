@@ -76,10 +76,14 @@ test("active controller binds candidate, three gate artifacts, and rollback", ()
   try {
     const receiptPath = join(fixture.directory, "activation.json");
     const gatePaths = ["retrieval.json", "controller.json", "product.json"];
-    for (const path of gatePaths) writeFileSync(join(fixture.directory, path), `{"gate":"${path}"}`);
+    for (const path of gatePaths)
+      writeFileSync(join(fixture.directory, path), `{"gate":"${path}"}`);
     const rollbackPath = join(fixture.directory, "rollback.json");
     new ControllerRuntime(rollbackPath).save();
-    const reference = (path: string) => ({ path, sha256: fingerprint(join(fixture.directory, path)) });
+    const reference = (path: string) => ({
+      path,
+      sha256: fingerprint(join(fixture.directory, path)),
+    });
     const receipt: ControllerActivationReceipt = {
       version: 1,
       status: "approved",

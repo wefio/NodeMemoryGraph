@@ -17,10 +17,10 @@ function row(index: number, split: "train" | "validation", qpp: number, useful: 
 }
 
 test("rolling tau remains shadow-only and fails closed on sparse data", () => {
-  const artifact = calibrateRollingTau([
-    row(0, "train", 0.2, true),
-    row(1, "validation", 0.8, false),
-  ], { generatedAt: "2026-08-13T00:00:00.000Z" });
+  const artifact = calibrateRollingTau(
+    [row(0, "train", 0.2, true), row(1, "validation", 0.8, false)],
+    { generatedAt: "2026-08-13T00:00:00.000Z" },
+  );
   assert.equal(artifact.eligibleForShadow, false);
   assert.equal(artifact.eligibleForActivation, false);
   assert.ok(artifact.blockers.some((blocker) => blocker.includes("50")));

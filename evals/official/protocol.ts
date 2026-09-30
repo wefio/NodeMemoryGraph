@@ -1,18 +1,26 @@
 export function personaMemCorrect(hypothesis: string, reference: string): boolean {
   const expected = reference.toLocaleLowerCase().replace(/[()\s]/gu, "");
   const final = hypothesis.includes("<final_answer>")
-    ? hypothesis.split("<final_answer>").at(-1)!.replace(/<\/final_answer>\s*$/u, "").trim()
+    ? hypothesis
+        .split("<final_answer>")
+        .at(-1)!
+        .replace(/<\/final_answer>\s*$/u, "")
+        .trim()
     : hypothesis.trim();
-  return optionLetters(final).size === 1 && optionLetters(final).has(expected) ||
-    optionLetters(hypothesis).size === 1 && optionLetters(hypothesis).has(expected);
+  return (
+    (optionLetters(final).size === 1 && optionLetters(final).has(expected)) ||
+    (optionLetters(hypothesis).size === 1 && optionLetters(hypothesis).has(expected))
+  );
 }
 
 function optionLetters(value: string): Set<string> {
   const lower = value.toLocaleLowerCase();
   const parenthesized = [...lower.matchAll(/\(([a-d])\)/gu)].map((match) => match[1]!);
-  return new Set(parenthesized.length > 0
-    ? parenthesized
-    : [...lower.matchAll(/\b([a-d])\b/gu)].map((match) => match[1]!));
+  return new Set(
+    parenthesized.length > 0
+      ? parenthesized
+      : [...lower.matchAll(/\b([a-d])\b/gu)].map((match) => match[1]!),
+  );
 }
 
 export function beamJudgePrompt(question: string, rubric: string, response: string): string {
@@ -70,10 +78,18 @@ QUESTION:
 ${question}
 
 REFERENCE EVENTS (their array indices are stable identifiers):
-${JSON.stringify(rubric.map((event, index) => ({ index, event })), null, 2)}
+${JSON.stringify(
+  rubric.map((event, index) => ({ index, event })),
+  null,
+  2,
+)}
 
 SYSTEM ITEMS (one item per non-empty response line):
-${JSON.stringify(systemItems.map((item, index) => ({ index, item })), null, 2)}
+${JSON.stringify(
+  systemItems.map((item, index) => ({ index, item })),
+  null,
+  2,
+)}
 
 For every system item, in the original order, return {"referenceIndex": <integer or null>, "item": <the original item>}. Match by semantic equivalence, not exact wording. A reference index may be used at most once. Use null when no unused reference event is equivalent. Return exactly one output object per system item and only the JSON array, for example [{"referenceIndex":0,"item":"first line"},{"referenceIndex":null,"item":"extra line"}].`;
 }
@@ -110,8 +126,7 @@ export function normalizedKendallTauB(reference: number[], candidate: number[]):
   }
 
   const denominator = Math.sqrt(
-    (concordant + discordant + referenceOnlyTies) *
-    (concordant + discordant + candidateOnlyTies),
+    (concordant + discordant + referenceOnlyTies) * (concordant + discordant + candidateOnlyTies),
   );
   if (denominator === 0) return 0;
   return ((concordant - discordant) / denominator + 1) / 2;

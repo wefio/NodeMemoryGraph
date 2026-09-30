@@ -49,7 +49,11 @@ test("CLI exposes only suite, config, resume, and dry-run", () => {
 
 test("one config supplies common and suite-specific official arguments", () => {
   const suites: Record<BenchmarkSuite, string[]> = {
-    beam: [], locomo: [], longmemeval: [], "personamem-v2": [], halumem: [],
+    beam: [],
+    locomo: [],
+    longmemeval: [],
+    "personamem-v2": [],
+    halumem: [],
   };
   suites.beam = ["--scale", "100k", "--judge-batch-size", "4"];
   const repoRoot = fixtureRepo("beam", { suites });

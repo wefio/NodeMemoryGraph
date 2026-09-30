@@ -31,12 +31,14 @@ test("topology audit accepts same-person fragments, rejects cross-person pairs, 
 function fixture(): BenchmarkCase {
   const sessions = Array.from({ length: 4 }, (_, sessionIndex) => ({
     id: `session_${sessionIndex + 1}`,
-    turns: ["Alex", "Blair"].flatMap((speaker) => [0, 1].map((turnIndex) => ({
-      role: speaker === "Alex" ? "user" as const : "assistant" as const,
-      speaker,
-      content: `${speaker === "Alex" ? "amber hiking" : "cobalt cooking"} detail ${sessionIndex}-${turnIndex}`,
-      sourceId: `${speaker}-${sessionIndex}-${turnIndex}`,
-    }))),
+    turns: ["Alex", "Blair"].flatMap((speaker) =>
+      [0, 1].map((turnIndex) => ({
+        role: speaker === "Alex" ? ("user" as const) : ("assistant" as const),
+        speaker,
+        content: `${speaker === "Alex" ? "amber hiking" : "cobalt cooking"} detail ${sessionIndex}-${turnIndex}`,
+        sourceId: `${speaker}-${sessionIndex}-${turnIndex}`,
+      })),
+    ),
   }));
   return {
     id: "q-1",

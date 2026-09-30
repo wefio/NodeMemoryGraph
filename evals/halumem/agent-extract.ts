@@ -54,12 +54,19 @@ export function parseAgentExtraction(raw: string): AgentExtractedMemory[] {
     const row = value as Record<string, unknown>;
     const statement = String(row.statement ?? "").trim();
     const evidence = String(row.evidence ?? "").trim();
-    const rawMemoryType = String(row.memoryType ?? "").trim().toLowerCase();
+    const rawMemoryType = String(row.memoryType ?? "")
+      .trim()
+      .toLowerCase();
     const memoryType =
-      ({ goal: "fact", decision: "fact", persona: "fact", relationship: "fact", procedure: "strategy" } as Record<
-        string,
-        string
-      >)[rawMemoryType] ?? rawMemoryType;
+      (
+        {
+          goal: "fact",
+          decision: "fact",
+          persona: "fact",
+          relationship: "fact",
+          procedure: "strategy",
+        } as Record<string, string>
+      )[rawMemoryType] ?? rawMemoryType;
     if (!statement || !evidence || !allowed.has(memoryType)) {
       throw new Error(`invalid memory at index ${index}`);
     }
@@ -79,9 +86,7 @@ async function main(): Promise<void> {
   const input = resolve(
     args.input ?? ".benchmarks/official/OmniMemEval/data/halumem/HaluMem-Medium.jsonl",
   );
-  const output = resolve(
-    args.output ?? ".benchmarks/halumem-nmg/results/agent-extractions.jsonl",
-  );
+  const output = resolve(args.output ?? ".benchmarks/halumem-nmg/results/agent-extractions.jsonl");
   const cacheDir = resolve(args.cacheDir ?? ".benchmarks/halumem-nmg/extraction-cache");
   const maxUsers = positive(args.users, 1);
   const throughSession = positive(args.throughSession, 1);
@@ -113,7 +118,10 @@ async function main(): Promise<void> {
     for (let index = 0; index < Math.min(throughSession, user.sessions.length); index += 1) {
       const dialogue = user.sessions[index]!.dialogue;
       const dialogueHash = digest(JSON.stringify(dialogue));
-      const cachePath = resolve(cacheDir, `${digest(`${model}\0${policyHash}\0${dialogueHash}`)}.json`);
+      const cachePath = resolve(
+        cacheDir,
+        `${digest(`${model}\0${policyHash}\0${dialogueHash}`)}.json`,
+      );
       let memories: AgentExtractedMemory[];
       if (existsSync(cachePath)) {
         memories = JSON.parse(readFileSync(cachePath, "utf8")) as AgentExtractedMemory[];
@@ -149,7 +157,14 @@ async function main(): Promise<void> {
         }
         writeFileSync(cachePath, JSON.stringify(memories, null, 2), "utf8");
       }
-      rows.push({ uuid: user.uuid, sessionIndex: index + 1, dialogueHash, policyHash, model, memories });
+      rows.push({
+        uuid: user.uuid,
+        sessionIndex: index + 1,
+        dialogueHash,
+        policyHash,
+        model,
+        memories,
+      });
     }
     users += 1;
   }

@@ -183,7 +183,10 @@ test("the continuation is a declared constraint, not the planner's default", () 
   const silent: SessionPlan = { ...declared, constraints: [] };
 
   // The same plan and the same facts, and the only difference is which constraints the plan enabled.
-  assert.deepEqual(nextSessionMove({ plan: declared, ...boundary }), { kind: "admit", unit: "two" });
+  assert.deepEqual(nextSessionMove({ plan: declared, ...boundary }), {
+    kind: "admit",
+    unit: "two",
+  });
   assert.deepEqual(nextSessionMove({ plan: silent, ...boundary }), {
     kind: "close",
     reason: "repair-first is not enabled, so this plan runs one unit per session",

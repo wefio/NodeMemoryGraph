@@ -18,9 +18,30 @@ function withStore(run: (store: NmgStore) => void): void {
 
 test("detectGraphCycles finds a directed relation cycle", () => {
   withStore((store) => {
-    const m1 = store.remember({ nodeName: "N1", nodeKind: "topic", nodeSummary: "n1", statement: "节点1因果", sessionId: "s1", sourceActor: "user" });
-    const m2 = store.remember({ nodeName: "N2", nodeKind: "topic", nodeSummary: "n2", statement: "节点2因果", sessionId: "s1", sourceActor: "user" });
-    const m3 = store.remember({ nodeName: "N3", nodeKind: "topic", nodeSummary: "n3", statement: "节点3因果", sessionId: "s1", sourceActor: "user" });
+    const m1 = store.remember({
+      nodeName: "N1",
+      nodeKind: "topic",
+      nodeSummary: "n1",
+      statement: "节点1因果",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
+    const m2 = store.remember({
+      nodeName: "N2",
+      nodeKind: "topic",
+      nodeSummary: "n2",
+      statement: "节点2因果",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
+    const m3 = store.remember({
+      nodeName: "N3",
+      nodeKind: "topic",
+      nodeSummary: "n3",
+      statement: "节点3因果",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
     store.linkNodes({ sourceNodeId: m1.node.id, targetNodeId: m2.node.id, type: "causes" });
     store.linkNodes({ sourceNodeId: m2.node.id, targetNodeId: m3.node.id, type: "causes" });
     store.linkNodes({ sourceNodeId: m3.node.id, targetNodeId: m1.node.id, type: "causes" });
@@ -39,14 +60,36 @@ test("detectGraphCycles finds a directed relation cycle", () => {
 
 test("detectGraphCycles finds a supersede cycle (data anomaly)", () => {
   withStore((store) => {
-    const a = store.remember({ nodeName: "X", nodeKind: "topic", nodeSummary: "x", statement: "A版", sessionId: "s1", sourceActor: "user" });
-    const b = store.remember({ nodeName: "X", nodeKind: "topic", nodeSummary: "x", statement: "B版", sessionId: "s1", sourceActor: "user" });
+    const a = store.remember({
+      nodeName: "X",
+      nodeKind: "topic",
+      nodeSummary: "x",
+      statement: "A版",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
+    const b = store.remember({
+      nodeName: "X",
+      nodeKind: "topic",
+      nodeSummary: "x",
+      statement: "B版",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
     // Normal supersede is a DAG — no cycle.
     assert.equal(store.detectGraphCycles().supersedeCycles.length, 0);
     // Inject a mutual-supersede anomaly directly (write path would reject it).
-    const db = (store as unknown as { db: { prepare: (sql: string) => { run: (...p: unknown[]) => void } } }).db;
-    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(b.memory.id, a.memory.id);
-    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(a.memory.id, b.memory.id);
+    const db = (
+      store as unknown as { db: { prepare: (sql: string) => { run: (...p: unknown[]) => void } } }
+    ).db;
+    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(
+      b.memory.id,
+      a.memory.id,
+    );
+    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(
+      a.memory.id,
+      b.memory.id,
+    );
     const r = store.detectGraphCycles();
     assert.ok(
       r.supersedeCycles.some((cycle) => cycle.includes(a.memory.id) && cycle.includes(b.memory.id)),
@@ -57,9 +100,30 @@ test("detectGraphCycles finds a supersede cycle (data anomaly)", () => {
 
 test("detectGraphCycles is empty for an acyclic chain", () => {
   withStore((store) => {
-    const p1 = store.remember({ nodeName: "P1", nodeKind: "topic", nodeSummary: "p1", statement: "正常链1", sessionId: "s1", sourceActor: "user" });
-    const p2 = store.remember({ nodeName: "P2", nodeKind: "topic", nodeSummary: "p2", statement: "正常链2", sessionId: "s1", sourceActor: "user" });
-    const p3 = store.remember({ nodeName: "P3", nodeKind: "topic", nodeSummary: "p3", statement: "正常链3", sessionId: "s1", sourceActor: "user" });
+    const p1 = store.remember({
+      nodeName: "P1",
+      nodeKind: "topic",
+      nodeSummary: "p1",
+      statement: "正常链1",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
+    const p2 = store.remember({
+      nodeName: "P2",
+      nodeKind: "topic",
+      nodeSummary: "p2",
+      statement: "正常链2",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
+    const p3 = store.remember({
+      nodeName: "P3",
+      nodeKind: "topic",
+      nodeSummary: "p3",
+      statement: "正常链3",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
     store.linkNodes({ sourceNodeId: p1.node.id, targetNodeId: p2.node.id, type: "causes" });
     store.linkNodes({ sourceNodeId: p2.node.id, targetNodeId: p3.node.id, type: "causes" });
     const r = store.detectGraphCycles();
@@ -70,8 +134,22 @@ test("detectGraphCycles is empty for an acyclic chain", () => {
 
 test("symmetric relations (contradicts) never count as cycles", () => {
   withStore((store) => {
-    const m1 = store.remember({ nodeName: "N1", nodeKind: "topic", nodeSummary: "n1", statement: "观点A", sessionId: "s1", sourceActor: "user" });
-    const m2 = store.remember({ nodeName: "N2", nodeKind: "topic", nodeSummary: "n2", statement: "观点B", sessionId: "s1", sourceActor: "user" });
+    const m1 = store.remember({
+      nodeName: "N1",
+      nodeKind: "topic",
+      nodeSummary: "n1",
+      statement: "观点A",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
+    const m2 = store.remember({
+      nodeName: "N2",
+      nodeKind: "topic",
+      nodeSummary: "n2",
+      statement: "观点B",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
     store.linkNodes({ sourceNodeId: m1.node.id, targetNodeId: m2.node.id, type: "contradicts" });
     store.linkNodes({ sourceNodeId: m2.node.id, targetNodeId: m1.node.id, type: "contradicts" });
     // A mutual contradiction is normal symmetric semantics, not an anomaly.
@@ -85,12 +163,25 @@ test("symmetric relations (contradicts) never count as cycles", () => {
 
 test("applySupersession rejects writes that would create a supersede cycle", () => {
   withStore((store) => {
-    const a = store.remember({ nodeName: "X", nodeKind: "topic", nodeSummary: "x", statement: "预算5000版1", sessionId: "s1", sourceActor: "user" });
-    const b = store.remember({ nodeName: "X", nodeKind: "topic", nodeSummary: "x", statement: "预算5000版2", sessionId: "s1", sourceActor: "user" });
+    const a = store.remember({
+      nodeName: "X",
+      nodeKind: "topic",
+      nodeSummary: "x",
+      statement: "预算5000版1",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
+    const b = store.remember({
+      nodeName: "X",
+      nodeKind: "topic",
+      nodeSummary: "x",
+      statement: "预算5000版2",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
     store.applySupersession({ newMemoryId: a.memory.id, supersededMemoryId: b.memory.id });
     assert.throws(
-      () =>
-        store.applySupersession({ newMemoryId: b.memory.id, supersededMemoryId: a.memory.id }),
+      () => store.applySupersession({ newMemoryId: b.memory.id, supersededMemoryId: a.memory.id }),
       /supersede cycle/,
       "mutual supersession is rejected at write time",
     );
@@ -128,7 +219,14 @@ test("supersedeReachableFrom walks a deep chain and defends at depth", () => {
     );
     assert.ok(reach.has(m1!) && reach.has(m5!), "chain head and tail present");
     // Adding a normal successor on top is fine.
-    const m6 = store.remember({ nodeName: "预算", nodeKind: "topic", nodeSummary: "预算", statement: "深链预算v6", sessionId: "s1", sourceActor: "user" });
+    const m6 = store.remember({
+      nodeName: "预算",
+      nodeKind: "topic",
+      nodeSummary: "预算",
+      statement: "深链预算v6",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
     store.applySupersession({ newMemoryId: m6.memory.id, supersededMemoryId: m5! });
     assert.deepEqual(store.detectGraphCycles().supersedeCycles, []);
     // Closing the loop (m1 supersedes m6) is rejected: m6 reaches m1.
@@ -143,19 +241,44 @@ test("supersedeReachableFrom walks a deep chain and defends at depth", () => {
 test("supersede cycle detection handles loop + inflowing chain + independent chain", () => {
   withStore((store) => {
     const mk = (stmt: string) =>
-      store.remember({ nodeName: "X", nodeKind: "topic", nodeSummary: "x", statement: stmt, sessionId: "s1", sourceActor: "user" });
+      store.remember({
+        nodeName: "X",
+        nodeKind: "topic",
+        nodeSummary: "x",
+        statement: stmt,
+        sessionId: "s1",
+        sourceActor: "user",
+      });
     const [a, b, c] = [mk("环A"), mk("环B"), mk("环C")];
-    const db = (store as unknown as { db: { prepare: (sql: string) => { run: (...p: unknown[]) => void } } }).db;
+    const db = (
+      store as unknown as { db: { prepare: (sql: string) => { run: (...p: unknown[]) => void } } }
+    ).db;
     // 3-cycle A→B→C→A (write path rejects cycles, so inject directly).
-    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(b.memory.id, a.memory.id);
-    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(c.memory.id, b.memory.id);
-    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(a.memory.id, c.memory.id);
+    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(
+      b.memory.id,
+      a.memory.id,
+    );
+    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(
+      c.memory.id,
+      b.memory.id,
+    );
+    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(
+      a.memory.id,
+      c.memory.id,
+    );
     // Inflowing chain X→A is NOT a cycle member.
     const x = mk("链尾X");
-    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(a.memory.id, x.memory.id);
+    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(
+      a.memory.id,
+      x.memory.id,
+    );
     // Independent acyclic chain Y→Z.
-    const y = mk("Y"), z = mk("Z");
-    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(z.memory.id, y.memory.id);
+    const y = mk("Y"),
+      z = mk("Z");
+    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(
+      z.memory.id,
+      y.memory.id,
+    );
 
     const r = store.detectGraphCycles();
     assert.equal(r.supersedeCycles.length, 1, "exactly the 3-cycle, not inflow/independent chain");
@@ -167,12 +290,34 @@ test("supersede cycle detection handles loop + inflowing chain + independent cha
 
 test("breakSupersedeCycle clears intra-cycle supersedes_id edges", () => {
   withStore((store) => {
-    const c = store.remember({ nodeName: "X", nodeKind: "topic", nodeSummary: "x", statement: "预算5000版3", sessionId: "s1", sourceActor: "user" });
-    const d = store.remember({ nodeName: "X", nodeKind: "topic", nodeSummary: "x", statement: "预算5000版4", sessionId: "s1", sourceActor: "user" });
+    const c = store.remember({
+      nodeName: "X",
+      nodeKind: "topic",
+      nodeSummary: "x",
+      statement: "预算5000版3",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
+    const d = store.remember({
+      nodeName: "X",
+      nodeKind: "topic",
+      nodeSummary: "x",
+      statement: "预算5000版4",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
     // Inject a mutual-supersede anomaly directly (write path would reject it).
-    const db = (store as unknown as { db: { prepare: (sql: string) => { run: (...p: unknown[]) => void } } }).db;
-    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(d.memory.id, c.memory.id);
-    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(c.memory.id, d.memory.id);
+    const db = (
+      store as unknown as { db: { prepare: (sql: string) => { run: (...p: unknown[]) => void } } }
+    ).db;
+    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(
+      d.memory.id,
+      c.memory.id,
+    );
+    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(
+      c.memory.id,
+      d.memory.id,
+    );
     const r = store.detectGraphCycles();
     const cycle = r.supersedeCycles.find((x) => x.includes(c.memory.id) && x.includes(d.memory.id));
     assert.ok(cycle, "cycle detected before break");

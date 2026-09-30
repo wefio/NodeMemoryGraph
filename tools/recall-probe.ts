@@ -4,11 +4,7 @@ import { resolve } from "node:path";
 
 import { NmgStore } from "../src/core/store.ts";
 import { searchMemoryContext } from "../src/integration/search.ts";
-import {
-  executeProbeRow,
-  summarizeProbe,
-  type RecallProbeRow,
-} from "../src/lab/recall-probe.ts";
+import { executeProbeRow, summarizeProbe, type RecallProbeRow } from "../src/lab/recall-probe.ts";
 
 /**
  * Deterministic controlled recall probe over a store snapshot.
@@ -72,7 +68,9 @@ async function main(argv: string[]): Promise<number> {
         `robust=[${summary.robust.join(",")}] fragile=${summary.fragile.length}\n`,
     );
     for (const fragile of summary.fragile) {
-      process.stdout.write(`  fragile ${fragile.groupId} under: ${fragile.failedVariants.join(" | ")}\n`);
+      process.stdout.write(
+        `  fragile ${fragile.groupId} under: ${fragile.failedVariants.join(" | ")}\n`,
+      );
     }
   }
   return 0;

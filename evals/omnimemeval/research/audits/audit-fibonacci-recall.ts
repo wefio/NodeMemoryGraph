@@ -43,30 +43,57 @@ function hitsInPrefix(results: MemoryContext["results"], k: number, diaIds: Set<
 async function run(): Promise<void> {
   const client = createEmbeddingClientFromEnv();
   if (!client) {
-    console.error("no embedding client: set NMG_EMBED_BASE_URL / NMG_EMBED_MODEL / NMG_EMBED_API_KEY");
+    console.error(
+      "no embedding client: set NMG_EMBED_BASE_URL / NMG_EMBED_MODEL / NMG_EMBED_API_KEY",
+    );
     process.exit(1);
   }
   const cached = new CachedOmniEmbeddingClient(EMBED_CACHE, client);
   const cases = loadLocomo(DATA).slice(0, MAX_CASES);
-  const conversations = new Map<string, { sessions: (typeof cases)[0]["sessions"]; questions: { question: string; evidenceIds: string[] }[] }>();
+  const conversations = new Map<
+    string,
+    {
+      sessions: (typeof cases)[0]["sessions"];
+      questions: { question: string; evidenceIds: string[] }[];
+    }
+  >();
   for (const benchmarkCase of cases) {
     const key = benchmarkCase.officialMetadata?.sampleId ?? benchmarkCase.sessions[0]?.id ?? "x";
     const group = conversations.get(key) ?? { sessions: benchmarkCase.sessions, questions: [] };
-    group.questions.push({ question: benchmarkCase.question, evidenceIds: benchmarkCase.evidenceIds });
+    group.questions.push({
+      question: benchmarkCase.question,
+      evidenceIds: benchmarkCase.evidenceIds,
+    });
     conversations.set(key, group);
   }
 
   // fixed: per-K aggregates; adaptive: per limit:threshold aggregates
   const fixedHits = new Map<number, number[]>(); // K -> recall values
   for (const k of KS) fixedHits.set(k, []);
-  interface AdaptStat { results: number[]; recalls: number[]; triggers: number; stages: number[]; }
+  interface AdaptStat {
+    results: number[];
+    recalls: number[];
+    triggers: number;
+    stages: number[];
+  }
   const adapt = new Map<string, AdaptStat>();
-  for (const limit of ADAPTIVE_LIMITS) for (const thr of THRESHOLDS) adapt.set(`${limit}:${thr}`, { results: [], recalls: [], triggers: 0, stages: [] });
+  for (const limit of ADAPTIVE_LIMITS)
+    for (const thr of THRESHOLDS)
+      adapt.set(`${limit}:${thr}`, { results: [], recalls: [], triggers: 0, stages: [] });
 
   let built = 0;
   let questions = 0;
-  const root = mkdtempSync(join(tmpdir(), "nmg-fib-audit-"));  const start = Date.now();
-  const rows: Array<{ top1: number; nqc: number; c: number; kneed100: number; kneed80: number; numEvidence: number; stageHit: number }> = [];
+  const root = mkdtempSync(join(tmpdir(), "nmg-fib-audit-"));
+  const start = Date.now();
+  const rows: Array<{
+    top1: number;
+    nqc: number;
+    c: number;
+    kneed100: number;
+    kneed80: number;
+    numEvidence: number;
+    stageHit: number;
+  }> = [];
 
   for (const [, group] of conversations) {
     const storePath = join(STORE_DIR, `case-${built}.sqlite`);
@@ -106,12 +133,21 @@ async function run(): Promise<void> {
       const diaIds = new Set(caseQa.evidenceIds);
       const queryVector = (await cached.embedQueries([caseQa.question]))[0]!;
       // ONE retrieval at limit 34; truncate for all K.
-      const pool = store.searchContext(caseQa.question, {
-        limit: 34,
-        maxTier: 3,
-        activeGraphBudget: { maxNodes: 34, maxEvidence: 34, maxTokens: 10_000, maxTierBudget: 34 },
-        vectorGranularity: "records",
-      }, { queryVector, model: client.indexId });
+      const pool = store.searchContext(
+        caseQa.question,
+        {
+          limit: 34,
+          maxTier: 3,
+          activeGraphBudget: {
+            maxNodes: 34,
+            maxEvidence: 34,
+            maxTokens: 10_000,
+            maxTierBudget: 34,
+          },
+          vectorGranularity: "records",
+        },
+        { queryVector, model: client.indexId },
+      );
       for (const k of KS) {
         fixedHits.get(k)!.push(hitsInPrefix(pool.results, k, diaIds) / Math.max(diaIds.size, 1));
       }
@@ -124,7 +160,8 @@ async function run(): Promise<void> {
       const sortedRanks = [...ranks].sort((a, b) => a - b);
       const kneed100 = sortedRanks.length > 0 ? sortedRanks[sortedRanks.length - 1]! : 0;
       const target80 = Math.ceil(diaIds.size * 0.8);
-      const kneed80 = sortedRanks.length > 0 ? sortedRanks[Math.min(target80, sortedRanks.length) - 1]! : 0;
+      const kneed80 =
+        sortedRanks.length > 0 ? sortedRanks[Math.min(target80, sortedRanks.length) - 1]! : 0;
       // QPP components from the same ranked pool (selection = top 34).
       const selections = pool.results.map((result, index) => ({
         memoryId: result.memory.id,
@@ -134,24 +171,46 @@ async function run(): Promise<void> {
         rank: index + 1,
         tier: result.memory.tier,
         estimatedTokens: 1,
-        scores: { lexical: result.lexicalScore, vector: result.vectorScore, route: result.routeScore, combined: result.combinedScore },
+        scores: {
+          lexical: result.lexicalScore,
+          vector: result.vectorScore,
+          route: result.routeScore,
+          combined: result.combinedScore,
+        },
       }));
       const comps = computeQppComponents(caseQa.question, qppCandidates(pool.results, selections));
       const c = comps.top1 + 0.5 * comps.nqc;
       const stageHit = KS.find((k) => kneed100 > 0 && k >= kneed100) ?? 0;
-      rows.push({ top1: comps.top1, nqc: comps.nqc, c, kneed100, kneed80, numEvidence: diaIds.size, stageHit });
+      rows.push({
+        top1: comps.top1,
+        nqc: comps.nqc,
+        c,
+        kneed100,
+        kneed80,
+        numEvidence: diaIds.size,
+        stageHit,
+      });
       // adaptive walks
       for (const limit of ADAPTIVE_LIMITS) {
-        const budget = { maxNodes: limit, maxEvidence: limit, maxTokens: Math.max(1_000, limit * 300), maxTierBudget: limit };
+        const budget = {
+          maxNodes: limit,
+          maxEvidence: limit,
+          maxTokens: Math.max(1_000, limit * 300),
+          maxTierBudget: limit,
+        };
         for (const thr of THRESHOLDS) {
           const stat = adapt.get(`${limit}:${thr}`)!;
-          const ctx = store.searchContextWithSecondPass(caseQa.question, {
-            limit,
-            maxTier: 3,
-            qppThreshold: thr,
-            activeGraphBudget: budget,
-            vectorGranularity: "records",
-          }, { queryVector, model: client.indexId });
+          const ctx = store.searchContextWithSecondPass(
+            caseQa.question,
+            {
+              limit,
+              maxTier: 3,
+              qppThreshold: thr,
+              activeGraphBudget: budget,
+              vectorGranularity: "records",
+            },
+            { queryVector, model: client.indexId },
+          );
           stat.results.push(ctx.results.length);
           stat.recalls.push(evidenceRecall(ctx.results, diaIds));
           if (ctx.activeGraph?.qpp?.trigger === true) stat.triggers += 1;
@@ -160,13 +219,18 @@ async function run(): Promise<void> {
       }
     }
     store.close();
-    if (built % 2 === 0) process.stderr.write(`built ${built}/${conversations.size} | ${questions} questions | ${((Date.now() - start) / 1000).toFixed(0)}s\r`);
+    if (built % 2 === 0)
+      process.stderr.write(
+        `built ${built}/${conversations.size} | ${questions} questions | ${((Date.now() - start) / 1000).toFixed(0)}s\r`,
+      );
   }
   if (JSON_OUT) writeFileSync(JSON_OUT, JSON.stringify(rows));
   rmSync(root, { recursive: true, force: true });
 
   const mean = (v: number[]): number => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0);
-  console.log(`\nconversations: ${built} | questions: ${questions} | ${((Date.now() - start) / 1000).toFixed(0)}s | model: ${client.indexId}`);
+  console.log(
+    `\nconversations: ${built} | questions: ${questions} | ${((Date.now() - start) / 1000).toFixed(0)}s | model: ${client.indexId}`,
+  );
   console.log(`\n=== fixed top-K recall@returned (single retrieval, truncated) ===`);
   for (const k of KS) {
     const r = mean(fixedHits.get(k)!);
@@ -177,10 +241,14 @@ async function run(): Promise<void> {
     const n = mean(stat.results);
     const r = mean(stat.recalls);
     console.log(`\n=== adaptive limit=${limit} thr=${thr} ===`);
-    console.log(`  results: ${n.toFixed(2)} (min ${Math.min(...stat.results)} max ${Math.max(...stat.results)}) | recall: ${r.toFixed(4)} | trigger: ${stat.triggers}/${stat.questions ?? questions} | stages: ${(stat.stages.reduce((a, b) => a + b, 0) / stat.stages.length).toFixed(2)}`);
+    console.log(
+      `  results: ${n.toFixed(2)} (min ${Math.min(...stat.results)} max ${Math.max(...stat.results)}) | recall: ${r.toFixed(4)} | trigger: ${stat.triggers}/${stat.questions ?? questions} | stages: ${(stat.stages.reduce((a, b) => a + b, 0) / stat.stages.length).toFixed(2)}`,
+    );
     // per-record efficiency vs the K=limit fixed point
     const fixedR = mean(fixedHits.get(Number(limit)) ?? []);
-    console.log(`  vs fixed K=${limit} (recall ${fixedR.toFixed(4)}): delta ${(r - fixedR).toFixed(4)} | recall/record ${(r / Math.max(n, 1)).toFixed(4)}`);
+    console.log(
+      `  vs fixed K=${limit} (recall ${fixedR.toFixed(4)}): delta ${(r - fixedR).toFixed(4)} | recall/record ${(r / Math.max(n, 1)).toFixed(4)}`,
+    );
   }
 }
 

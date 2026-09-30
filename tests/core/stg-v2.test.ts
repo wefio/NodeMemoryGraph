@@ -4,11 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import {
-  createStgStore,
-  purgeSessionFromStg,
-  stgStorePath,
-} from "../../src/core/stg.ts";
+import { createStgStore, purgeSessionFromStg, stgStorePath } from "../../src/core/stg.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { HashingVectorEmbedder } from "../../src/core/vector.ts";
 
@@ -98,12 +94,18 @@ test("v2: session-scoped search isolates provisional rows", () => {
 
     const forA = stg.searchContext("private plan", { sessionId: "session-a", maxTier: 3 });
     const aStatements = forA.results.map((r) => r.memory.statement);
-    assert.ok(aStatements.some((s) => s.includes("Atlas 2.0")), "A sees its own row");
+    assert.ok(
+      aStatements.some((s) => s.includes("Atlas 2.0")),
+      "A sees its own row",
+    );
     assert.ok(!aStatements.some((s) => s.includes("legacy pipeline")), "A does not see B's row");
 
     const forB = stg.searchContext("private plan", { sessionId: "session-b", maxTier: 3 });
     const bStatements = forB.results.map((r) => r.memory.statement);
-    assert.ok(bStatements.some((s) => s.includes("legacy pipeline")), "B sees its own row");
+    assert.ok(
+      bStatements.some((s) => s.includes("legacy pipeline")),
+      "B sees its own row",
+    );
     assert.ok(!bStatements.some((s) => s.includes("Atlas 2.0")), "B does not see A's row");
 
     // anonymous read (no sessionId): provisional rows must NOT leak — only
@@ -169,7 +171,10 @@ test("v2: derived retrieval paths cannot expose another session's provisional ro
     );
 
     const exact = stg.getContext([anchor.memory.id], 1, "session-a");
-    assert.deepEqual(exact.results.map((result) => result.memory.id), [anchor.memory.id]);
+    assert.deepEqual(
+      exact.results.map((result) => result.memory.id),
+      [anchor.memory.id],
+    );
     assert.equal(exact.relations.length, 0, "exact expansion also hides session B's relation");
   });
 });
@@ -283,21 +288,30 @@ test("v2: purgeSession removes only that session's provisional rows", () => {
     assert.ok(stg.getMemory(cached.memory.id));
     // B's row survives under its own session; A's row is gone from its own
     // session (physical purge, not just a visibility filter).
-    const forB = stg.searchContext("scratch", { sessionId: "session-b", maxTier: 3 }).results.map(
-      (r) => r.memory.statement,
+    const forB = stg
+      .searchContext("scratch", { sessionId: "session-b", maxTier: 3 })
+      .results.map((r) => r.memory.statement);
+    assert.ok(
+      forB.some((s) => s.includes("B's fresh")),
+      "B's row kept",
     );
-    assert.ok(forB.some((s) => s.includes("B's fresh")), "B's row kept");
-    const forA = stg.searchContext("scratch", { sessionId: "session-a", maxTier: 3 }).results.map(
-      (r) => r.memory.statement,
-    );
+    const forA = stg
+      .searchContext("scratch", { sessionId: "session-a", maxTier: 3 })
+      .results.map((r) => r.memory.statement);
     assert.ok(!forA.some((s) => s.includes("A's stale")), "A's row purged from its own session");
     // anonymous read: private rows stay invisible (shared visibility is
     // already covered by getMemory(cached.memory.id) above)
-    const remaining = stg.searchContext("scratch", { maxTier: 3 }).results.map(
-      (r) => r.memory.statement,
+    const remaining = stg
+      .searchContext("scratch", { maxTier: 3 })
+      .results.map((r) => r.memory.statement);
+    assert.ok(
+      !remaining.some((s) => s.includes("A's stale")),
+      "A's row purged / invisible anonymously",
     );
-    assert.ok(!remaining.some((s) => s.includes("A's stale")), "A's row purged / invisible anonymously");
-    assert.ok(!remaining.some((s) => s.includes("B's fresh")), "anonymous does not see B's private row");
+    assert.ok(
+      !remaining.some((s) => s.includes("B's fresh")),
+      "anonymous does not see B's private row",
+    );
   });
 });
 

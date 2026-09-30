@@ -190,9 +190,7 @@ async function labelBatch(
 
 function applyExplicitLabels(directory: string, specs: string[]): number {
   const known = new Set(
-    readRecallInstances(recallInstancesPath(directory)).map(
-      (instance) => instance.activeGraphId,
-    ),
+    readRecallInstances(recallInstancesPath(directory)).map((instance) => instance.activeGraphId),
   );
   let written = 0;
   for (const spec of specs) {
@@ -246,7 +244,9 @@ async function main(argv: string[]): Promise<number> {
   } else {
     process.stdout.write(aggregate(final));
     process.stdout.write(
-      hadModel ? `\nnewlyLabeled=${newlyLabeled}\n` : "\n(set NMG_JUDGE_BASE_URL + NMG_JUDGE_MODEL to semantically label)\n",
+      hadModel
+        ? `\nnewlyLabeled=${newlyLabeled}\n`
+        : "\n(set NMG_JUDGE_BASE_URL + NMG_JUDGE_MODEL to semantically label)\n",
     );
   }
   return 0;
@@ -254,7 +254,7 @@ async function main(argv: string[]): Promise<number> {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main(process.argv.slice(2)).then(
-    (code) => process.exitCode = code,
+    (code) => (process.exitCode = code),
     (error) => {
       process.stderr.write(`${error}\n`);
       process.exitCode = 1;

@@ -5,10 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { NmgStore } from "../../../src/core/store.ts";
-import {
-  normalizeStatement,
-  statementSimilarity,
-} from "../../../src/core/store/search-ranking.ts";
+import { normalizeStatement, statementSimilarity } from "../../../src/core/store/search-ranking.ts";
 
 function withStore(run: (store: NmgStore) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-dup-"));
@@ -24,7 +21,10 @@ function withStore(run: (store: NmgStore) => void): void {
 test("normalizeStatement: strips case, punctuation, whitespace", () => {
   assert.equal(normalizeStatement("I like dogs."), normalizeStatement("i like dogs"));
   assert.equal(normalizeStatement("  A,  B!  "), normalizeStatement("a b"));
-  assert.equal(normalizeStatement("Hello, world — really!"), normalizeStatement("hello world really"));
+  assert.equal(
+    normalizeStatement("Hello, world — really!"),
+    normalizeStatement("hello world really"),
+  );
 });
 
 test("statementSimilarity: exact normalized = 1, partial between, unrelated low", () => {
@@ -90,7 +90,9 @@ test("scope write index preserves duplicate and supersession candidates", () => 
       nodeName: "work",
       scope: { user: "a" },
     });
-    assert.ok(newer.supersedeCandidates?.some((candidate) => candidate.memoryId === first.memory.id));
+    assert.ok(
+      newer.supersedeCandidates?.some((candidate) => candidate.memoryId === first.memory.id),
+    );
     store.applySupersession({
       newMemoryId: newer.memory.id,
       supersededMemoryId: first.memory.id,
@@ -101,7 +103,11 @@ test("scope write index preserves duplicate and supersession candidates", () => 
       scope: { user: "a" },
       supersedeScan: false,
     });
-    assert.notEqual(after.memory.id, first.memory.id, "superseded rows must leave the active index");
+    assert.notEqual(
+      after.memory.id,
+      first.memory.id,
+      "superseded rows must leave the active index",
+    );
   } finally {
     store.close();
     rmSync(directory, { force: true, recursive: true });
@@ -143,7 +149,10 @@ test("remember: judge merge returns target without writing a new record", () => 
     });
     assert.equal(judged.length, 1);
     assert.equal(judged[0]!.candidates.length, 1);
-    assert.ok(judged[0]!.candidates[0] && (judged[0]!.candidates[0] as { similarity: number }).similarity >= 0.7);
+    assert.ok(
+      judged[0]!.candidates[0] &&
+        (judged[0]!.candidates[0] as { similarity: number }).similarity >= 0.7,
+    );
     // returned the existing record, not a new write
     assert.equal(result.memory.statement, "I like dogs and cats.");
     assert.ok(result.duplicates && result.duplicates.length >= 1);
@@ -399,8 +408,16 @@ test("searchContext: as-of ranking lifts the record current at the asked date", 
     const i2026 = idx("work-life balance");
     assert.ok(i2033 >= 0, "2033 record must be retrieved");
     assert.ok(i2026 >= 0, "2026 record must be retrieved");
-    assert.equal(h.results[i2033]?.memory.id, new2033.memory.id, "the 2033 slot is the 2033 record");
-    assert.equal(h.results[i2026]?.memory.id, old2026.memory.id, "the 2026 slot is the 2026 record");
+    assert.equal(
+      h.results[i2033]?.memory.id,
+      new2033.memory.id,
+      "the 2033 slot is the 2033 record",
+    );
+    assert.equal(
+      h.results[i2026]?.memory.id,
+      old2026.memory.id,
+      "the 2026 slot is the 2026 record",
+    );
     assert.ok(i2033 < i2026, `as-of 2033 ranks the 2033 record (${i2033}) above 2026 (${i2026})`);
 
     // No window (current query): relevance order is untouched by the temporal boost.
@@ -449,7 +466,10 @@ test("searchContext: historical query keeps a superseded value when its successo
       eventTimeTo: "2026-12-31T00:00:00Z",
     });
     const st26 = h2026.results.map((r) => r.memory.statement);
-    assert.ok(st26.some((s) => s.includes("senior engineer")), "mid value must survive as-of 2026");
+    assert.ok(
+      st26.some((s) => s.includes("senior engineer")),
+      "mid value must survive as-of 2026",
+    );
     assert.ok(
       !st26.some((s) => s.includes("principal engineer")),
       "successor outside the window must not replace the historical value",
@@ -461,7 +481,10 @@ test("searchContext: historical query keeps a superseded value when its successo
       eventTimeTo: "2031-12-31T00:00:00Z",
     });
     const st31 = h2031.results.map((r) => r.memory.statement);
-    assert.ok(st31.some((s) => s.includes("principal engineer")), "successor inside window replaces");
+    assert.ok(
+      st31.some((s) => s.includes("principal engineer")),
+      "successor inside window replaces",
+    );
     assert.ok(
       !st31.some((s) => s.includes("senior engineer")),
       "superseded mid dropped when its successor is inside the window",
@@ -470,7 +493,10 @@ test("searchContext: historical query keeps a superseded value when its successo
     // current query (no window): replace with the newest value.
     const cur = store.searchContext("current job title", { limit: 10 });
     const stc = cur.results.map((r) => r.memory.statement);
-    assert.ok(stc.some((s) => s.includes("principal engineer")), "current query surfaces newest");
+    assert.ok(
+      stc.some((s) => s.includes("principal engineer")),
+      "current query surfaces newest",
+    );
     assert.ok(
       !stc.some((s) => s.includes("senior engineer")),
       "current query drops superseded mid",
@@ -597,7 +623,8 @@ test("remember: transition from-side word recalls low-overlap predecessor", () =
   withStore((store) => {
     // 旧值：和新语句共享 "Employed"(大写) 但 normalize 后共享 employed + salary 无（措辞差异）
     store.remember({
-      statement: "I am Employed at Huaxin Consulting and earn a monthly salary of twenty thousand yuan.",
+      statement:
+        "I am Employed at Huaxin Consulting and earn a monthly salary of twenty thousand yuan.",
       nodeName: "work",
       scope: { user: "a" },
     });
@@ -620,13 +647,15 @@ test("transition phrase outranks higher-lexical-similarity chit-chat for superse
   withStore((store) => {
     // 真正的旧值（含 from 侧词 employed）
     store.remember({
-      statement: "I am currently Employed, working in the healthcare industry at Huaxin Consulting.",
+      statement:
+        "I am currently Employed, working in the healthcare industry at Huaxin Consulting.",
       nodeName: "work",
       scope: { user: "a" },
     });
     // 高 sim 闲聊（共享 make/positive/impact/healthcare，但无关）
     store.remember({
-      statement: "I am determined to make a meaningful positive impact in global healthcare through my work.",
+      statement:
+        "I am determined to make a meaningful positive impact in global healthcare through my work.",
       nodeName: "chat",
       scope: { user: "a" },
     });

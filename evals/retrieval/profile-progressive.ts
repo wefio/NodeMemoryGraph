@@ -63,7 +63,9 @@ async function main() {
     const f = storeFileFor(item.userId);
     try {
       const db = new DatabaseSync(resolve(dir, f), { readOnly: true });
-      const blocks = (db.prepare("SELECT COUNT(*) c FROM memory_leaf_blocks").get() as { c: number }).c;
+      const blocks = (
+        db.prepare("SELECT COUNT(*) c FROM memory_leaf_blocks").get() as { c: number }
+      ).c;
       db.close();
       if (blocks > largest.blocks) largest = { file: f, blocks };
     } catch {
@@ -83,7 +85,9 @@ async function main() {
     if (pending > 0) {
       console.log(`draining ${pending} pending node summaries …`);
       const r = await drainNodeSummaries(store, provider, { maxCalls: 1000 });
-      console.log(`  node summaries: +${r.summarized} (failed ${r.failed}, truncated ${r.truncated})`);
+      console.log(
+        `  node summaries: +${r.summarized} (failed ${r.failed}, truncated ${r.truncated})`,
+      );
     } else {
       console.log("  no pending node summaries (already summarized)");
     }
@@ -173,17 +177,28 @@ async function main() {
     });
   }
 
-  const agg = (k: keyof (typeof results)[0]) =>
-    median(results.map((r) => r[k] as number));
+  const agg = (k: keyof (typeof results)[0]) => median(results.map((r) => r[k] as number));
   console.log("\n== per-query medians ==");
-  console.log(`full-block candidates : ${agg("fullMs").toFixed(3)} ms, ${agg("fullHits").toFixed(1)} hits`);
-  console.log(`node routing          : ${agg("nodeMs").toFixed(3)} ms, ${agg("nodeHits").toFixed(1)} nodes`);
-  console.log(`node->blocks          : ${agg("nodeBlocksMs").toFixed(3)} ms, ${agg("nodeBlocks").toFixed(1)} blocks`);
+  console.log(
+    `full-block candidates : ${agg("fullMs").toFixed(3)} ms, ${agg("fullHits").toFixed(1)} hits`,
+  );
+  console.log(
+    `node routing          : ${agg("nodeMs").toFixed(3)} ms, ${agg("nodeHits").toFixed(1)} nodes`,
+  );
+  console.log(
+    `node->blocks          : ${agg("nodeBlocksMs").toFixed(3)} ms, ${agg("nodeBlocks").toFixed(1)} blocks`,
+  );
   console.log(`round-1 size          : ${agg("round1Size").toFixed(1)} blocks`);
-  console.log(`overlap top-3         : ${agg("overlapTop3").toFixed(2)} / 3 (${((agg("overlapTop3") / 3) * 100).toFixed(0)}%)`);
+  console.log(
+    `overlap top-3         : ${agg("overlapTop3").toFixed(2)} / 3 (${((agg("overlapTop3") / 3) * 100).toFixed(0)}%)`,
+  );
   console.log(`overlap top-10        : ${agg("overlapTop10").toFixed(2)} / 10`);
-  console.log(`overlap all           : ${agg("overlapAll").toFixed(2)} / ${agg("fullHits").toFixed(1)}`);
-  console.log(`\nnode-routed empty (no node FTS hits): ${results.filter((r) => r.nodeHits === 0).length}/${results.length}`);
+  console.log(
+    `overlap all           : ${agg("overlapAll").toFixed(2)} / ${agg("fullHits").toFixed(1)}`,
+  );
+  console.log(
+    `\nnode-routed empty (no node FTS hits): ${results.filter((r) => r.nodeHits === 0).length}/${results.length}`,
+  );
 
   store.close();
 }

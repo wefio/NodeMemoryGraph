@@ -37,7 +37,8 @@ try {
     });
     const current = store.search("Atlas current Python", { maxTier: 3, limit: 5 });
     return {
-      passed: current.some((item) => item.memory.id === currentState.memory.id) &&
+      passed:
+        current.some((item) => item.memory.id === currentState.memory.id) &&
         !current.some((item) => item.memory.id === oldState.memory.id),
       detail: "new state supersedes the old state in ordinary retrieval",
     };
@@ -61,9 +62,9 @@ try {
       derivation: "Aggregation of two independently recorded return events",
     });
     return {
-      passed: aggregate.memory.evidenceIds.length >= 2 &&
-        store.search("two returned items", { maxTier: 3 })[0]?.memory.id ===
-          aggregate.memory.id,
+      passed:
+        aggregate.memory.evidenceIds.length >= 2 &&
+        store.search("two returned items", { maxTier: 3 })[0]?.memory.id === aggregate.memory.id,
       detail: "derived memory preserves both source evidence chains",
     };
   });
@@ -90,7 +91,8 @@ try {
       graphHops: 1,
     });
     return {
-      passed: context.results.some((item) => item.memory.id === left.memory.id) &&
+      passed:
+        context.results.some((item) => item.memory.id === left.memory.id) &&
         context.results.some((item) => item.memory.id === right.memory.id) &&
         context.relations.some((relation) => relation.type === "contradicts"),
       detail: "both claims and their typed contradiction remain visible",
@@ -184,10 +186,7 @@ const report = {
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 if (report.passed !== report.cases) process.exitCode = 1;
 
-function measure(
-  category: string,
-  run: () => { passed: boolean; detail: string },
-): void {
+function measure(category: string, run: () => { passed: boolean; detail: string }): void {
   const started = performance.now();
   const result = run();
   results.push({

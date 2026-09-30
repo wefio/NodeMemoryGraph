@@ -1930,7 +1930,13 @@ test("opt-in embedding auto-sync makes remembered records available to hybrid se
     });
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const status = await service.invoke("status");
-      if (status.embedding.health && typeof status.embedding.health === "object" && "lastSucceededAt" in status.embedding.health && status.embedding.health.lastSucceededAt) break;
+      if (
+        status.embedding.health &&
+        typeof status.embedding.health === "object" &&
+        "lastSucceededAt" in status.embedding.health &&
+        status.embedding.health.lastSucceededAt
+      )
+        break;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     const searched = await service.invoke("search", {
@@ -1984,7 +1990,13 @@ test("provider presence alone (no AUTO_SYNC env) auto-syncs remembered records t
     });
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const status = await service.invoke("status");
-      if (status.embedding.health && typeof status.embedding.health === "object" && "lastSucceededAt" in status.embedding.health && status.embedding.health.lastSucceededAt) break;
+      if (
+        status.embedding.health &&
+        typeof status.embedding.health === "object" &&
+        "lastSucceededAt" in status.embedding.health &&
+        status.embedding.health.lastSucceededAt
+      )
+        break;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     const searched = await service.invoke("search", {

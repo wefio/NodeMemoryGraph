@@ -23,11 +23,7 @@ test("OmniMemEval adapter installer patches the registry idempotently", () => {
     "utf8",
   );
   const ingestHelpers = join(utils, "ingest_helpers.py");
-  writeFileSync(
-    ingestHelpers,
-    '_CONV_ID_LIBS = frozenset({"memos", "everos"})\n',
-    "utf8",
-  );
+  writeFileSync(ingestHelpers, '_CONV_ID_LIBS = frozenset({"memos", "everos"})\n', "utf8");
   const locomoSearch = join(locomo, "locomo_search.py");
   writeFileSync(
     locomoSearch,
@@ -41,10 +37,7 @@ test("OmniMemEval adapter installer patches the registry idempotently", () => {
     const source = readFileSync(registry, "utf8");
     assert.equal(source.match(/"nmg": \("nmg_client", "NmgClient"\)/g)?.length, 1);
     assert.equal(existsSync(join(factory, "nmg_client.py")), true);
-    assert.match(
-      readFileSync(join(factory, "nmg_client.py"), "utf8"),
-      /ensure_ascii=True/,
-    );
+    assert.match(readFileSync(join(factory, "nmg_client.py"), "utf8"), /ensure_ascii=True/);
     assert.equal(
       readFileSync(searchHelpers, "utf8").match(/"nmg": generic_text_search/g)?.length,
       1,

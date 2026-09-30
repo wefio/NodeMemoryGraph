@@ -48,10 +48,7 @@ test("scoreQuestion matches candidate inside a gold session blob (candidate-in-g
     {
       category: "single-session-user",
       golds: ["user: I graduated with a Business Administration degree\nassistant: congrats"],
-      candidates: [
-        ["unrelated memory"],
-        ["I graduated with a Business Administration degree"],
-      ],
+      candidates: [["unrelated memory"], ["I graduated with a Business Administration degree"]],
     },
     "candidate-in-gold",
   );

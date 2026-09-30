@@ -25,6 +25,16 @@ test("research and chaos suites remain explicit execution groups", () => {
   assert.match(packageJson.scripts["test:chaos"], /tests\/chaos/);
 });
 
+test("format and format:check cover the same declared developer TypeScript surfaces", () => {
+  const expected = ["src", ".pi", "workbuddy-plugin", "tests", "evals", "scripts", "tools"].sort();
+  for (const name of ["format", "format:check"]) {
+    const surfaces = [...packageJson.scripts[name]!.matchAll(/"([^"]+)\/\*\*\/\*\.ts"/gu)]
+      .map((match) => match[1]!)
+      .sort();
+    assert.deepEqual(surfaces, expected, `${name} must cover the declared surface`);
+  }
+});
+
 test("the pre-commit formatter surface is the format:check surface", () => {
   // Two surfaces decide which TypeScript Prettier rewrites: the commit hook (staged
   // files, so drift cannot land) and `format:check` (the whole tree, so CI can report

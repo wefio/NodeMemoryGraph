@@ -150,10 +150,7 @@ export function namesakesThresholdCurve(
       recall: ratio(truePositives, positives.length),
       precision: ratio(truePositives, selected.length),
       aliasRecall: ratio(selectedAliases, aliasPositives.length),
-      exactNameNegativeRejection: ratio(
-        rejectedExactNameNegatives,
-        exactNameNegatives.length,
-      ),
+      exactNameNegativeRejection: ratio(rejectedExactNameNegatives, exactNameNegatives.length),
     };
   });
 }
@@ -266,8 +263,7 @@ function ratio(numerator: number, denominator: number): number {
 
 async function main(): Promise<void> {
   const path = resolve(
-    process.env.NMG_NAMESAKES_DATA ??
-      ".benchmarks/namesakes/data/Namesakes_entities.jsonl",
+    process.env.NMG_NAMESAKES_DATA ?? ".benchmarks/namesakes/data/Namesakes_entities.jsonl",
   );
   const maxEntities = process.env.NMG_NAMESAKES_MAX_ENTITIES
     ? Number(process.env.NMG_NAMESAKES_MAX_ENTITIES)

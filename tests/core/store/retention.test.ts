@@ -113,7 +113,7 @@ test("session-private STG memories do not enter the shared LTG retention lifecyc
       nodeName: "session hypothesis",
       memoryType: "derived",
       residence: "stg",
-        sessionId: "test-session",
+      sessionId: "test-session",
     });
     assert.throws(
       () => store.setMemoryStorageState(provisional.memory.id, "dormant"),
@@ -182,13 +182,13 @@ test("open STG memories do not expire before resolution", () => {
       statement: "The current session is testing Atlas storage",
       nodeName: "Atlas storage session",
       residence: "stg",
-        sessionId: "test-session",
+      sessionId: "test-session",
     });
     const open = store.remember({
       statement: "Check the Atlas storage benchmark result",
       nodeName: "Atlas storage benchmark",
       residence: "stg",
-        sessionId: "test-session",
+      sessionId: "test-session",
       resolution: "open",
       relatedMemoryIds: [anchor.memory.id],
       expiresAt: "2000-01-01T00:00:00.000Z",

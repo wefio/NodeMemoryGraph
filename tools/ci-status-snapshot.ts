@@ -116,7 +116,9 @@ export function buildCiStatusSnapshot(
     }))
     .sort((left, right) => left.name.localeCompare(right.name) || left.id - right.id);
 
-  const pullRequests = [...new Set((run.pull_requests ?? []).map((pull) => number(pull.number)).filter(Boolean))]
+  const pullRequests = [
+    ...new Set((run.pull_requests ?? []).map((pull) => number(pull.number)).filter(Boolean)),
+  ]
     .sort((left, right) => left - right)
     .map((pullNumber) => ({ number: pullNumber }));
 
@@ -180,7 +182,11 @@ export function renderCiStatusSummary(snapshot: CiStatusSnapshot): string {
   return lines.join("\n");
 }
 
-async function fetchWorkflowJobs(repository: string, runId: number, token: string): Promise<WorkflowJob[]> {
+async function fetchWorkflowJobs(
+  repository: string,
+  runId: number,
+  token: string,
+): Promise<WorkflowJob[]> {
   const api = process.env.GITHUB_API_URL ?? "https://api.github.com";
   const jobs: WorkflowJob[] = [];
   for (let page = 1; ; page += 1) {
@@ -228,7 +234,8 @@ async function main(): Promise<void> {
   if (summaryPath) await appendFile(summaryPath, renderCiStatusSummary(snapshot), "utf8");
 }
 
-const isEntrypoint = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+const isEntrypoint =
+  process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isEntrypoint) {
   main().catch((error: unknown) => {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);

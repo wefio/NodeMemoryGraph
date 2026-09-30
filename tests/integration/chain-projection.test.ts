@@ -7,13 +7,12 @@ import { projectLogicalChains } from "../../src/integration/chain-projection.ts"
 
 function logicalChainContext(): MemoryContext {
   const chainId = "logical-merge";
-  const result = (id: string, statement: string, position: number) =>
-    ({
-      ...searchResultFixture(id, statement),
-      chainMemberships: [
-        { chainId, position, chainType: "logical" as const, topic: "Atlas merge evidence" },
-      ],
-    });
+  const result = (id: string, statement: string, position: number) => ({
+    ...searchResultFixture(id, statement),
+    chainMemberships: [
+      { chainId, position, chainType: "logical" as const, topic: "Atlas merge evidence" },
+    ],
+  });
 
   return {
     results: [

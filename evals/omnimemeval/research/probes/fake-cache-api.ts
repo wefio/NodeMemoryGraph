@@ -26,7 +26,8 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
 
 async function readBody(request: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  for await (const chunk of request)
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   return Buffer.concat(chunks);
 }
 
@@ -101,7 +102,8 @@ function runCli(): void {
     process.env.CACHE_PREFIX_BLOCK_BYTES ?? String(DEFAULT_PREFIX_BLOCK_BYTES),
     10,
   );
-  if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("PORT must be 1..65535");
+  if (!Number.isInteger(port) || port < 1 || port > 65_535)
+    throw new Error("PORT must be 1..65535");
   const { server } = createFakeCacheApi({ blockBytes });
   server.listen(port, "127.0.0.1", () => {
     console.log(`fake cache API listening on http://127.0.0.1:${port}/v1`);

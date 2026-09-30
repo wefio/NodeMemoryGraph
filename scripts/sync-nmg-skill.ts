@@ -30,7 +30,9 @@ export interface SkillSyncReport {
 export function inspectNmgSkill(target: string): SkillSyncReport {
   const resolvedTarget = safeTarget(target);
   const sourceFiles = inventory(sourceRoot);
-  const targetFiles = existsSync(resolvedTarget) ? inventory(resolvedTarget) : new Map<string, Buffer>();
+  const targetFiles = existsSync(resolvedTarget)
+    ? inventory(resolvedTarget)
+    : new Map<string, Buffer>();
   const missing: string[] = [];
   const changed: string[] = [];
   const extra: string[] = [];
@@ -105,7 +107,9 @@ export function recoverInterruptedSync(target: string): void {
 
   if (!existsSync(resolvedTarget) && backups.length > 0) {
     const newestBackup = backups.reduce((newest, entry) =>
-      statSync(join(parent, entry)).mtimeMs > statSync(join(parent, newest)).mtimeMs ? entry : newest,
+      statSync(join(parent, entry)).mtimeMs > statSync(join(parent, newest)).mtimeMs
+        ? entry
+        : newest,
     );
     renameSync(join(parent, newestBackup), resolvedTarget);
     backups.splice(backups.indexOf(newestBackup), 1);
@@ -196,7 +200,8 @@ function inventory(root: string): Map<string, Buffer> {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const absolute = join(directory, entry.name);
       if (entry.isDirectory()) visit(absolute);
-      else if (entry.isFile()) files.set(relative(root, absolute).replaceAll("\\", "/"), readFileSync(absolute));
+      else if (entry.isFile())
+        files.set(relative(root, absolute).replaceAll("\\", "/"), readFileSync(absolute));
       else throw new Error(`unsupported skill entry: ${absolute}`);
     }
   };
@@ -225,7 +230,8 @@ function validateArgs(args: string[]): void {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const args = process.argv.slice(2);
   validateArgs(args);
-  const target = optionValue(args, "--target") ?? join(homedir(), ".agents", "skills", "nmg-memory");
+  const target =
+    optionValue(args, "--target") ?? join(homedir(), ".agents", "skills", "nmg-memory");
   const check = args.includes("--check");
   const report = check ? inspectNmgSkill(target) : syncNmgSkill(target);
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

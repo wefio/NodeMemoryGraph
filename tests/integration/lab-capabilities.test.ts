@@ -43,6 +43,9 @@ test("agent self-service cannot bypass controlled or active controller gates", (
 
 test("Lab capability discovery distinguishes self-service and gated features", () => {
   const descriptors = new LabActivationAuthority().list();
-  assert.equal(descriptors.find((item) => item.id === "memory_graph_reasoner")?.agentMayEnable, true);
+  assert.equal(
+    descriptors.find((item) => item.id === "memory_graph_reasoner")?.agentMayEnable,
+    true,
+  );
   assert.equal(descriptors.find((item) => item.id === "controller_active")?.agentMayEnable, false);
 });

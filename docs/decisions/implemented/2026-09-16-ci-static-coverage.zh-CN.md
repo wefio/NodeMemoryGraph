@@ -60,6 +60,12 @@ severity。
 的前提下修复。fixture 补齐当前契约字段并收窄判别结果；Kimi hook 的 JavaScript 导出有声明边界，
 渲染 fixture 使用完整检索记录。阻塞契约测试锁定一次 `check:tests` 调用，并拒绝重复 advisory 步骤。
 
+**格式检查覆盖声明的 TypeScript 面。** `format` 与 `format:check` 以 `**/*.ts`
+扫描 `src/`、`.pi/`、`workbuddy-plugin/`、`tests/`、`evals/`、`scripts/`、`tools/`。
+暂存文件 hook 使用相同目录集合，子包保留自己的格式流程；本次不拓宽至 `.mjs`、`.mts`、Python
+等类型。`test-groups.test.ts` 锁定两条命令的扫描面与 hook 一致性。故意错误的评估 fixture
+只格式化、不修正确性：它们的错误行为是 evaluator 的输入，不是产品缺陷。
+
 ### 首次拓宽扫描报出的 11 条
 
 第一次扫过新覆盖面时共 11 条。其中 9 条确实是死代码，已删除；另 2 条根本不是死代码：
@@ -116,8 +122,8 @@ severity。
 - **永久保留 advisory 类型检查。** 实测错误修复后否决：它会允许同样的 fixture 与 API 漂移
   再次积累。把错误 fixture 经 `unknown` 强转或排除报错文件也被否决；它们不能证明测试遵守了
   自己要检验的契约。
-- **在同一次改动里拓宽 `format:check`。** 记为 Deferred 而非否决：它是同一类漏洞，但需要对新增
-  目录跑一次 Prettier，而研究代码的格式化重写会淹没与它同行的 lint 改动。
+- **把格式化 pass 混进 lint 或类型修复提交。** 否决：大范围研究代码格式化会淹没语义修复。
+  覆盖扩展与受控 Prettier pass 单独提交，并验证 fixture 语义与 mutation 证据。
 
 ## Consequences
 
@@ -133,9 +139,6 @@ severity。
 
 ## Deferred
 
-- `format:check` 仍只扫 `src/`、`.pi/`、`workbuddy-plugin/`。`tests/`、`evals/`、`scripts/`、
-  `tools/` 仍未纳入格式检查，补上这个洞需要单独一次 Prettier pass。
-- 没有任何轨道对 `evals/`、`scripts/` 以及 `tsconfig.json` 里那三个文件名之外的 `tools/` 做类型
-  检查。`check:tests` 只是第一刀；产品面加同样 flag 只报 1 个错误，因此后续改动可以对它使用同样的
-  处理。
+- `evals/`、`scripts/`、`tools/` 中既未被 `tsconfig.json` / `tsconfig.tests.json` 显式
+  包含、也未被其依赖图导入的文件仍在类型检查之外；全目录类型覆盖是独立范围。
 

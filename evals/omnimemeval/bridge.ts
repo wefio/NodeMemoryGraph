@@ -484,37 +484,32 @@ export class OmniMemEvalBridge {
     if (this.#embeddingClient) {
       await this.#syncSemanticIndex(store);
     }
-    const context = await searchMemoryContext(
-      store,
-      this.#embeddingClient,
-      query,
-      {
-        limit,
-        maxTier: 3,
-        graphHops: 1,
-        vectorGranularity: this.#embeddingClient ? "records" : undefined,
-        secondPass: this.#secondPass,
-        progressiveWarmDisclosure: false,
-        tieredDisclosure: true,
-        initialEvidenceTarget: this.#qppInitialEvidenceTarget,
-        qppThreshold: this.#qppThreshold,
-        strongHitTopGap: this.#strongHitTopGap,
-        strongHitInitialTarget: this.#strongHitInitialTarget,
-        expandChains: true,
-        leafBlockRouting: this.#leafBlockRouting,
-        appendedMaxChars: this.#appendedMaxChars,
-        chainExpansionMaxChains: this.#chainExpansionMaxChains,
-        chainExpansionMaxHops: this.#chainExpansionMaxHops,
-        chainExpansionMaxMemoryHops: this.#chainExpansionMaxMemoryHops,
-        appendedMaxRatio: this.#appendedMaxRatio,
-        activeGraphBudget: {
-          maxNodes: limit,
-          maxEvidence: limit,
-          maxTokens: Math.max(1_000, limit * 300),
-          maxTierBudget: limit,
-        },
+    const context = await searchMemoryContext(store, this.#embeddingClient, query, {
+      limit,
+      maxTier: 3,
+      graphHops: 1,
+      vectorGranularity: this.#embeddingClient ? "records" : undefined,
+      secondPass: this.#secondPass,
+      progressiveWarmDisclosure: false,
+      tieredDisclosure: true,
+      initialEvidenceTarget: this.#qppInitialEvidenceTarget,
+      qppThreshold: this.#qppThreshold,
+      strongHitTopGap: this.#strongHitTopGap,
+      strongHitInitialTarget: this.#strongHitInitialTarget,
+      expandChains: true,
+      leafBlockRouting: this.#leafBlockRouting,
+      appendedMaxChars: this.#appendedMaxChars,
+      chainExpansionMaxChains: this.#chainExpansionMaxChains,
+      chainExpansionMaxHops: this.#chainExpansionMaxHops,
+      chainExpansionMaxMemoryHops: this.#chainExpansionMaxMemoryHops,
+      appendedMaxRatio: this.#appendedMaxRatio,
+      activeGraphBudget: {
+        maxNodes: limit,
+        maxEvidence: limit,
+        maxTokens: Math.max(1_000, limit * 300),
+        maxTierBudget: limit,
       },
-    );
+    });
     const rankedMemoryIds = new Set(context.activeGraph?.memoryIds ?? []);
     const memories = context.results.map((result) => ({
       memoryId: result.memory.id,

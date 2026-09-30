@@ -34,7 +34,12 @@ test("executeProbeRow labels the primary query and each variant", async () => {
 
 test("summarizeProbe buckets gaps, robust and fragile groups", async () => {
   const rows: RecallProbeRow[] = [
-    { groupId: "weather", query: "how do i check weather", expectMemoryId: "m1", variants: ["wttr"] },
+    {
+      groupId: "weather",
+      query: "how do i check weather",
+      expectMemoryId: "m1",
+      variants: ["wttr"],
+    },
     { groupId: "absent", query: "unused thing", expectMemoryId: "m2", variants: [] },
     { groupId: "fragile", query: "recall me", expectMemoryId: "m3", variants: ["near alias"] },
   ];

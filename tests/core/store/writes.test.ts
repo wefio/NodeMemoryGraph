@@ -71,7 +71,9 @@ test("remember validates exact harness evidence provenance", () => {
 test("remember bounds supersession prefilter terms for very long evidence", () => {
   withStore((store) => {
     store.remember({ statement: "baseline durable fact", nodeName: "Long evidence" });
-    const statement = Array.from({ length: 1_500 }, (_, index) => `distincttoken${index}`).join(" ");
+    const statement = Array.from({ length: 1_500 }, (_, index) => `distincttoken${index}`).join(
+      " ",
+    );
     const result = store.remember({ statement, nodeName: "Long evidence" });
     assert.equal(result.memory.statement, statement);
   });

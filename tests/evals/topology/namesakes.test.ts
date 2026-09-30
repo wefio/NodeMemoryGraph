@@ -70,7 +70,7 @@ function fixture(pageid: string): NamesakesEntity {
       text: mention,
       start,
       end: cursor,
-      tag: index === 3 ? "Other" as const : "Same" as const,
+      tag: index === 3 ? ("Other" as const) : ("Same" as const),
     };
   });
   return {

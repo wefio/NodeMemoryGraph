@@ -18,5 +18,8 @@ test("an explicit NMG_DATA_DIR overrides the fallback", () => {
 
 test("controlled clients can supply a project-local fallback", () => {
   assert.equal(resolveNmgDataDir({}, "C:/project/.nmg"), resolve("C:/project/.nmg"));
-  assert.equal(resolveNmgDataDir({ NMG_DATA_DIR: "   " }, "C:/project/.nmg"), resolve("C:/project/.nmg"));
+  assert.equal(
+    resolveNmgDataDir({ NMG_DATA_DIR: "   " }, "C:/project/.nmg"),
+    resolve("C:/project/.nmg"),
+  );
 });

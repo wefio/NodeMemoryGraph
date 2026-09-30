@@ -195,7 +195,8 @@ test("removing a reference cannot orphan an already supported downstream conclus
     () => workspace.updateNode(observation.id, { evidenceRefs: [] }),
     /would remove support/u,
   );
-  assert.deepEqual(workspace.toJSON().nodes.find((node) => node.id === observation.id)?.evidenceRefs, [
-    "tool:result",
-  ]);
+  assert.deepEqual(
+    workspace.toJSON().nodes.find((node) => node.id === observation.id)?.evidenceRefs,
+    ["tool:result"],
+  );
 });

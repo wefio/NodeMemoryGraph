@@ -49,7 +49,13 @@ if (!resultsDir) {
 }
 
 const report = JSON.parse(readFileSync(resolve(resultsDir, "report.json"), "utf8")) as {
-  results: Array<{ questionId: string; mode: string; questionType: string; passed: boolean; retrievalPassed: boolean | null }>;
+  results: Array<{
+    questionId: string;
+    mode: string;
+    questionType: string;
+    passed: boolean;
+    retrievalPassed: boolean | null;
+  }>;
 };
 const outcomeByQuestion = new Map<string, Outcome>();
 for (const r of report.results) {
@@ -73,7 +79,10 @@ for (const questionId of readdirSorted(armsDir)) {
   try {
     for (const repeat of readdirSorted(detDir)) {
       const candidate = resolve(detDir, repeat, "nmg.sqlite");
-      if (exists(candidate)) { dbPath = candidate; break; }
+      if (exists(candidate)) {
+        dbPath = candidate;
+        break;
+      }
     }
   } catch {
     // no nmg-deterministic arm for this question
@@ -82,8 +91,10 @@ for (const questionId of readdirSorted(armsDir)) {
 
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
-    const typeRows = db.prepare("SELECT id, memory_type FROM memory_records").all() as
-      Array<{ id: string; memory_type: string }>;
+    const typeRows = db.prepare("SELECT id, memory_type FROM memory_records").all() as Array<{
+      id: string;
+      memory_type: string;
+    }>;
     const memoryType = new Map(typeRows.map((r) => [r.id, r.memory_type]));
     const traceRows = db
       .prepare("SELECT query, selections_json AS sels FROM retrieval_traces")
@@ -136,21 +147,34 @@ if (rows.length === 0) {
 
 // Per-question table.
 console.log(`\n=== QPP vs outcome (n=${rows.length}, threshold=${DEFAULT_QPP_THRESHOLD}) ===`);
-console.log("qid          type                  qpp    trig reason            nSel top1 var  ic   rh   pass ret");
+console.log(
+  "qid          type                  qpp    trig reason            nSel top1 var  ic   rh   pass ret",
+);
 for (const r of rows.sort((a, b) => a.qpp - b.qpp)) {
   console.log(
-    pad(r.questionId, 12) + " " +
-    pad(r.questionType, 20) + " " +
-    r.qpp.toFixed(2) + "  " +
-    (r.trigger ? "TRIG" : "ok  ") + " " +
-    pad(r.reason, 17) + " " +
-    pad(String(r.nSelections), 4) + " " +
-    r.top1.toFixed(2) + " " +
-    r.variance.toFixed(2) + " " +
-    r.intentCoverage.toFixed(2) + " " +
-    r.reasonHealth.toFixed(2) + " " +
-    (r.passed ? "P" : "F") + "   " +
-    (r.retrievalPassed === null ? "-" : r.retrievalPassed ? "P" : "F"),
+    pad(r.questionId, 12) +
+      " " +
+      pad(r.questionType, 20) +
+      " " +
+      r.qpp.toFixed(2) +
+      "  " +
+      (r.trigger ? "TRIG" : "ok  ") +
+      " " +
+      pad(r.reason, 17) +
+      " " +
+      pad(String(r.nSelections), 4) +
+      " " +
+      r.top1.toFixed(2) +
+      " " +
+      r.variance.toFixed(2) +
+      " " +
+      r.intentCoverage.toFixed(2) +
+      " " +
+      r.reasonHealth.toFixed(2) +
+      " " +
+      (r.passed ? "P" : "F") +
+      "   " +
+      (r.retrievalPassed === null ? "-" : r.retrievalPassed ? "P" : "F"),
   );
 }
 
@@ -163,8 +187,12 @@ const ret = (rs: Row[]) => {
   return m.length === 0 ? NaN : m.filter((r) => r.retrievalPassed).length / m.length;
 };
 console.log("\n=== bucket: Stage-0 trigger decision ===");
-console.log(`would-trigger (qpp<τ or guardrail): n=${trig.length}, answer-acc=${fmt(acc(trig))}, retrieval-acc=${fmt(ret(trig))}`);
-console.log(`would-skip     (qpp≥τ):              n=${ok.length}, answer-acc=${fmt(acc(ok))}, retrieval-acc=${fmt(ret(ok))}`);
+console.log(
+  `would-trigger (qpp<τ or guardrail): n=${trig.length}, answer-acc=${fmt(acc(trig))}, retrieval-acc=${fmt(ret(trig))}`,
+);
+console.log(
+  `would-skip     (qpp≥τ):              n=${ok.length}, answer-acc=${fmt(acc(ok))}, retrieval-acc=${fmt(ret(ok))}`,
+);
 
 // Bucket: tertiles by qpp.
 const sorted = [...rows].sort((a, b) => a.qpp - b.qpp);
@@ -172,13 +200,19 @@ const t = Math.ceil(sorted.length / 3);
 const low = sorted.slice(0, t);
 const high = sorted.slice(sorted.length - t);
 console.log("\n=== bucket: qpp tertiles ===");
-console.log(`low-qpp:    n=${low.length}, qpp∈[${low[0]?.qpp.toFixed(2)},${low.at(-1)?.qpp.toFixed(2)}], answer-acc=${fmt(acc(low))}, retrieval-acc=${fmt(ret(low))}`);
-console.log(`high-qpp:   n=${high.length}, qpp∈[${high[0]?.qpp.toFixed(2)},${high.at(-1)?.qpp.toFixed(2)}], answer-acc=${fmt(acc(high))}, retrieval-acc=${fmt(ret(high))}`);
+console.log(
+  `low-qpp:    n=${low.length}, qpp∈[${low[0]?.qpp.toFixed(2)},${low.at(-1)?.qpp.toFixed(2)}], answer-acc=${fmt(acc(low))}, retrieval-acc=${fmt(ret(low))}`,
+);
+console.log(
+  `high-qpp:   n=${high.length}, qpp∈[${high[0]?.qpp.toFixed(2)},${high.at(-1)?.qpp.toFixed(2)}], answer-acc=${fmt(acc(high))}, retrieval-acc=${fmt(ret(high))}`,
+);
 
 // Component health.
 const allConv = rows.filter((r) => r.intentCoverage === 0.5).length;
 console.log(`\nintentCoverage neutral (no intent family matched): ${allConv}/${rows.length}`);
-console.log(`reasonHealth=0 (all hybrid_match) rows: ${rows.filter((r) => r.reasonHealth === 0).length}/${rows.length}`);
+console.log(
+  `reasonHealth=0 (all hybrid_match) rows: ${rows.filter((r) => r.reasonHealth === 0).length}/${rows.length}`,
+);
 
 function fmt(x: number): string {
   return Number.isNaN(x) ? "n/a" : x.toFixed(2);
@@ -187,7 +221,11 @@ function readdirSorted(p: string): string[] {
   return readdirSync(p).sort();
 }
 function exists(p: string): boolean {
-  try { return statSync(p).isFile(); } catch { return false; }
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
 }
 function pad(s: string, n: number): string {
   return s.length >= n ? s.slice(0, n) : s + " ".repeat(n - s.length);

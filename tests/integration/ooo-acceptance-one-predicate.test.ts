@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { acceptedFact, isAccepted, type TaskUnit, type RecordedFacts } from "../../src/integration/task-semantics.ts";
+import {
+  acceptedFact,
+  isAccepted,
+  type TaskUnit,
+  type RecordedFacts,
+} from "../../src/integration/task-semantics.ts";
 
 const root = new URL("../../", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 const read = (relative: string) => readFileSync(join(root, relative), "utf8");

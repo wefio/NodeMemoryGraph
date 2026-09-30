@@ -181,11 +181,7 @@ test("renewing your own live claim does not start a new attempt", () => {
       agentId: "worker-b",
     });
     assert.equal(renewed.attempt, 1, "a heartbeat is not a new attempt");
-    assert.equal(
-      renewed.deliverableDigest,
-      "d1",
-      "a heartbeat must not discard work in progress",
-    );
+    assert.equal(renewed.deliverableDigest, "d1", "a heartbeat must not discard work in progress");
   });
 });
 

@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import {
-  buildCiStatusSnapshot,
-  renderCiStatusSummary,
-} from "../../tools/ci-status-snapshot.ts";
+import { buildCiStatusSnapshot, renderCiStatusSummary } from "../../tools/ci-status-snapshot.ts";
 
 test("CI status snapshot preserves GitHub identity and reports failed steps", () => {
   const snapshot = buildCiStatusSnapshot(
@@ -40,7 +37,12 @@ test("CI status snapshot preserves GitHub identity and reports failed steps", ()
         completed_at: "2026-08-31T00:01:00Z",
         steps: [
           { name: "npm ci", status: "completed", conclusion: "success", number: 1 },
-          { name: "Shared static verification contract", status: "completed", conclusion: "failure", number: 2 },
+          {
+            name: "Shared static verification contract",
+            status: "completed",
+            conclusion: "failure",
+            number: 2,
+          },
         ],
       },
       {
