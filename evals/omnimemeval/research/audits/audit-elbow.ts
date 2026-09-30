@@ -38,16 +38,27 @@ interface Row {
 async function run(): Promise<void> {
   const client = createEmbeddingClientFromEnv();
   if (!client) {
-    console.error("no embedding client: set NMG_EMBED_BASE_URL / NMG_EMBED_MODEL / NMG_EMBED_API_KEY");
+    console.error(
+      "no embedding client: set NMG_EMBED_BASE_URL / NMG_EMBED_MODEL / NMG_EMBED_API_KEY",
+    );
     process.exit(1);
   }
   const cached = new CachedOmniEmbeddingClient(EMBED_CACHE, client);
   const cases = loadLocomo(DATA).slice(0, MAX_CASES);
-  const conversations = new Map<string, { sessions: (typeof cases)[0]["sessions"]; questions: { question: string; evidenceIds: string[] }[] }>();
+  const conversations = new Map<
+    string,
+    {
+      sessions: (typeof cases)[0]["sessions"];
+      questions: { question: string; evidenceIds: string[] }[];
+    }
+  >();
   for (const benchmarkCase of cases) {
     const key = benchmarkCase.officialMetadata?.sampleId ?? benchmarkCase.sessions[0]?.id ?? "x";
     const group = conversations.get(key) ?? { sessions: benchmarkCase.sessions, questions: [] };
-    group.questions.push({ question: benchmarkCase.question, evidenceIds: benchmarkCase.evidenceIds });
+    group.questions.push({
+      question: benchmarkCase.question,
+      evidenceIds: benchmarkCase.evidenceIds,
+    });
     conversations.set(key, group);
   }
 
@@ -93,12 +104,21 @@ async function run(): Promise<void> {
       questions += 1;
       const diaIds = new Set(caseQa.evidenceIds);
       const queryVector = (await cached.embedQueries([caseQa.question]))[0]!;
-      const ctx = store.searchContext(caseQa.question, {
-        limit: TOPK,
-        maxTier: 3,
-        activeGraphBudget: { maxNodes: TOPK, maxEvidence: TOPK, maxTokens: 10_000, maxTierBudget: TOPK },
-        vectorGranularity: "records",
-      }, { queryVector, model: cached.indexId });
+      const ctx = store.searchContext(
+        caseQa.question,
+        {
+          limit: TOPK,
+          maxTier: 3,
+          activeGraphBudget: {
+            maxNodes: TOPK,
+            maxEvidence: TOPK,
+            maxTokens: 10_000,
+            maxTierBudget: TOPK,
+          },
+          vectorGranularity: "records",
+        },
+        { queryVector, model: cached.indexId },
+      );
       const hitAt: number[] = [];
       ctx.results.forEach((result, index) => {
         if (diaIds.has(result.memory.scope?.diaId as string)) hitAt.push(index + 1);
@@ -106,7 +126,8 @@ async function run(): Promise<void> {
       const sortedRanks = [...hitAt].sort((a, b) => a - b);
       const kneed100 = sortedRanks.length > 0 ? sortedRanks[sortedRanks.length - 1]! : 0;
       const target80 = Math.ceil(diaIds.size * 0.8);
-      const kneed80 = sortedRanks.length > 0 ? sortedRanks[Math.min(target80, sortedRanks.length) - 1]! : 0;
+      const kneed80 =
+        sortedRanks.length > 0 ? sortedRanks[Math.min(target80, sortedRanks.length) - 1]! : 0;
       rows.push({
         scores: ctx.results.map((r) => r.combinedScore),
         vectorScores: ctx.results.map((r) => r.vectorScore),
@@ -117,11 +138,16 @@ async function run(): Promise<void> {
       });
     }
     store.close();
-    if (built % 2 === 0) process.stderr.write(`built ${built}/${conversations.size} | ${questions} questions | ${((Date.now() - start) / 1000).toFixed(0)}s\r`);
+    if (built % 2 === 0)
+      process.stderr.write(
+        `built ${built}/${conversations.size} | ${questions} questions | ${((Date.now() - start) / 1000).toFixed(0)}s\r`,
+      );
   }
   rmSync(tmp, { recursive: true, force: true });
   writeFileSync(JSON_OUT, JSON.stringify(rows));
-  console.log(`\nrows: ${rows.length} | ${((Date.now() - start) / 1000).toFixed(0)}s | out: ${JSON_OUT}`);
+  console.log(
+    `\nrows: ${rows.length} | ${((Date.now() - start) / 1000).toFixed(0)}s | out: ${JSON_OUT}`,
+  );
 }
 
 run().catch((error) => {

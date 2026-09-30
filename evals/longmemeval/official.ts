@@ -46,10 +46,7 @@ export function scoreLongMemRetrieval(
     (sum, id, index) => sum + (relevant.has(id) ? 1 / Math.log2(index + 2) : 0),
     0,
   );
-  const ideal = [...relevant].reduce(
-    (sum, _id, index) => sum + 1 / Math.log2(index + 2),
-    0,
-  );
+  const ideal = [...relevant].reduce((sum, _id, index) => sum + 1 / Math.log2(index + 2), 0);
   return { recallAny, recallAll, recall, ndcg: ideal === 0 ? 0 : dcg / ideal };
 }
 
@@ -66,9 +63,10 @@ export function longMemEvalJudgePrompt(
   if (task === "single-session-preference") {
     return `I will give you a question, a rubric for desired personalized response, and a response from a model. Please answer yes if the response satisfies the desired response. Otherwise, answer no. The model does not need to reflect all the points in the rubric. The response is correct as long as it recalls and utilizes the user's personal information correctly.\n\nQuestion: ${question}\n\nRubric: ${answer}\n\nModel Response: ${response}\n\nIs the model response correct? Answer yes or no only.`;
   }
-  const updateRule = task === "knowledge-update"
-    ? " If the response contains some previous information along with an updated answer, the response should be considered as correct as long as the updated answer is the required answer."
-    : " If the response is equivalent to the correct answer or contains all the intermediate steps to get the correct answer, you should also answer yes. If the response only contains a subset of the information required by the answer, answer no.";
+  const updateRule =
+    task === "knowledge-update"
+      ? " If the response contains some previous information along with an updated answer, the response should be considered as correct as long as the updated answer is the required answer."
+      : " If the response is equivalent to the correct answer or contains all the intermediate steps to get the correct answer, you should also answer yes. If the response only contains a subset of the information required by the answer, answer no.";
   return `I will give you a question, a correct answer, and a response from a model. Please answer yes if the response contains the correct answer. Otherwise, answer no.${updateRule}\n\nQuestion: ${question}\n\nCorrect Answer: ${answer}\n\nModel Response: ${response}\n\nIs the model response correct? Answer yes or no only.`;
 }
 

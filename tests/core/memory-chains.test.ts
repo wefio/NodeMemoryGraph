@@ -74,7 +74,10 @@ test("addMemoryToChain keeps ordered membership and getMemoryChain pulls the who
       got.members.map((m) => m.note),
       ["阶段1", "阶段2", "阶段3"],
     );
-    assert.deepEqual(got.members.map((m) => m.memoryId), mids);
+    assert.deepEqual(
+      got.members.map((m) => m.memoryId),
+      mids,
+    );
   });
 });
 
@@ -104,16 +107,17 @@ test("membership is idempotent (PK chain_id+memory_id) and remove works", () => 
 
     store.addMemoryToChain({ chainId: chain.id, memoryId: mids[1]!, position: 2 });
     store.removeMemoryFromChain({ chainId: chain.id, memoryId: mids[1]! });
-    assert.deepEqual(store.getMemoryChain(chain.id)!.members.map((m) => m.memoryId), [mids[0]]);
+    assert.deepEqual(
+      store.getMemoryChain(chain.id)!.members.map((m) => m.memoryId),
+      [mids[0]],
+    );
   });
 });
 
 test("getMemoryChain returns null for unknown chain; add to unknown chain throws", () => {
   withStore((store) => {
     assert.equal(store.getMemoryChain("nope"), null);
-    assert.throws(() =>
-      store.addMemoryToChain({ chainId: "nope", memoryId: "m", position: 0 }),
-    );
+    assert.throws(() => store.addMemoryToChain({ chainId: "nope", memoryId: "m", position: 0 }));
   });
 });
 
@@ -125,12 +129,12 @@ test("listMemoryChains filters by type and owner", () => {
 
     assert.equal(store.listMemoryChains({ chainType: "temporal" }).length, 2);
     assert.equal(store.listMemoryChains({ ownerSessionId: "s1" }).length, 2);
+    assert.equal(store.listMemoryChains({ chainType: "temporal", ownerSessionId: "s1" }).length, 1);
     assert.equal(
-      store.listMemoryChains({ chainType: "temporal", ownerSessionId: "s1" }).length,
-      1,
-    );
-    assert.equal(
-      store.listMemoryChains({ ownerSessionId: "s2" }).map((c) => c.topic).join(),
+      store
+        .listMemoryChains({ ownerSessionId: "s2" })
+        .map((c) => c.topic)
+        .join(),
       "b",
     );
   });
@@ -139,12 +143,7 @@ test("listMemoryChains filters by type and owner", () => {
 test("expandChains appends chain members after a hit (recall supplement, no re-rank)", () => {
   withStore((store) => {
     const mids: string[] = [];
-    for (const stmt of [
-      "预算跟踪器需求",
-      "预算收支记录实现",
-      "预算分类图表添加",
-      "露营天气讨论",
-    ]) {
+    for (const stmt of ["预算跟踪器需求", "预算收支记录实现", "预算分类图表添加", "露营天气讨论"]) {
       const r = store.remember({
         nodeName: "预算",
         nodeKind: "topic",
@@ -160,9 +159,9 @@ test("expandChains appends chain members after a hit (recall supplement, no re-r
       topic: "预算演进",
       ownerSessionId: "s1",
     });
-    mids.slice(0, 3).forEach((m, i) =>
-      store.addMemoryToChain({ chainId: chain.id, memoryId: m, position: i }),
-    );
+    mids
+      .slice(0, 3)
+      .forEach((m, i) => store.addMemoryToChain({ chainId: chain.id, memoryId: m, position: i }));
     const chainMemberIds = store.getMemoryChain(chain.id)!.members.map((m) => m.memoryId);
 
     // Without expansion, limit=1 returns only the single ranked hit.
@@ -233,7 +232,10 @@ test("expandChains follows one adjacent chain through a shared memory, but not a
     });
     const ids = context.results.map((result) => result.memory.id);
     assert.ok(ids.includes(adjacentEvidence), "one adjacent chain is expanded");
-    assert.ok(!ids.includes(secondHopEvidence), "a chain discovered at hop one is not traversed again");
+    assert.ok(
+      !ids.includes(secondHopEvidence),
+      "a chain discovered at hop one is not traversed again",
+    );
     assert.equal(new Set(ids).size, ids.length, "shared memories are emitted once");
   });
 });
@@ -265,7 +267,10 @@ test("chain expansion is bounded relative to primary evidence, not only by the a
       appendedMaxChars: 16_000,
       appendedMaxRatio: 0.75,
     });
-    assert.deepEqual(context.results.map((result) => result.memory.id), [anchor]);
+    assert.deepEqual(
+      context.results.map((result) => result.memory.id),
+      [anchor],
+    );
   });
 });
 
@@ -304,7 +309,10 @@ test("chain-level MMR spends a bounded slot on diverse evidence instead of a red
       chainExpansionMaxMembers: 20,
     });
     const ids = context.results.map((result) => result.memory.id);
-    assert.ok(ids.includes(diverseOnly), "the lower-overlap adjacent chain receives the remaining slot");
+    assert.ok(
+      ids.includes(diverseOnly),
+      "the lower-overlap adjacent chain receives the remaining slot",
+    );
     assert.ok(!ids.includes(redundantOnly), "the near-duplicate chain remains folded");
   });
 });
@@ -405,8 +413,16 @@ test("logical chain expansion obeys explicit edge distance independently of chai
         }).memory.id,
     );
     const chain = store.createMemoryChain({ chainType: "logical", topic: "bounded logical walk" });
-    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: ids[0]!, targetMemoryId: ids[1]! });
-    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: ids[1]!, targetMemoryId: ids[2]! });
+    store.addMemoryChainEdge({
+      chainId: chain.id,
+      sourceMemoryId: ids[0]!,
+      targetMemoryId: ids[1]!,
+    });
+    store.addMemoryChainEdge({
+      chainId: chain.id,
+      sourceMemoryId: ids[1]!,
+      targetMemoryId: ids[2]!,
+    });
 
     const oneHop = store.searchContext("graph-hop anchor", {
       limit: 1,
@@ -498,7 +514,10 @@ test("expandChains admits higher-activation evidence before chronological render
       appendedMaxChars: statements[1]!.length,
     });
     const returned = context.results.map((result) => result.memory.id);
-    assert.ok(returned.includes(ids[2]!), "higher-activation candidate consumes the shared budget first");
+    assert.ok(
+      returned.includes(ids[2]!),
+      "higher-activation candidate consumes the shared budget first",
+    );
     assert.ok(!returned.includes(ids[1]!), "lower-activation long candidate cannot crowd it out");
   });
 });
@@ -661,7 +680,10 @@ test("activation gate: a query-term match escapes position decay at any distance
       chainExpansionMaxMembers: 10,
     });
     const got = res.results.map((r) => r.memory.statement);
-    assert.ok(got.some((s) => s.startsWith("beacon ")), "term-matching distant member admitted");
+    assert.ok(
+      got.some((s) => s.startsWith("beacon ")),
+      "term-matching distant member admitted",
+    );
     assert.ok(!got.includes("填充丁"), "distance-4 filler dropped");
   });
 });
@@ -767,7 +789,11 @@ test("recency decay is skipped for historical (eventTimeTo) queries", () => {
 
 test("addMemoryChainEdge writes a directed DAG edge and auto-joins endpoints as members", () => {
   withStore((store) => {
-    const chain = store.createMemoryChain({ chainType: "logical", topic: "事故因果", ownerSessionId: "s1" });
+    const chain = store.createMemoryChain({
+      chainType: "logical",
+      topic: "事故因果",
+      ownerSessionId: "s1",
+    });
     const [a, b, c] = seedMemories(store, 3);
     store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: a, targetMemoryId: b });
     store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: b, targetMemoryId: c });
@@ -775,7 +801,10 @@ test("addMemoryChainEdge writes a directed DAG edge and auto-joins endpoints as 
     assert.equal(edges.length, 2);
     assert.deepEqual(
       edges.map((e) => [e.sourceMemoryId, e.targetMemoryId]),
-      [[a, b], [b, c]],
+      [
+        [a, b],
+        [b, c],
+      ],
     );
     assert.equal(edges[0]!.edgeType, "order");
     // Endpoints were auto-joined as members (no separate addMemoryToChain).
@@ -789,7 +818,11 @@ test("addMemoryChainEdge writes a directed DAG edge and auto-joins endpoints as 
 
 test("addMemoryChainEdge rejects an edge that would close a directed cycle", () => {
   withStore((store) => {
-    const chain = store.createMemoryChain({ chainType: "logical", topic: "反馈回路", ownerSessionId: "s1" });
+    const chain = store.createMemoryChain({
+      chainType: "logical",
+      topic: "反馈回路",
+      ownerSessionId: "s1",
+    });
     const [a, b, c] = seedMemories(store, 3);
     store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: a, targetMemoryId: b });
     store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: b, targetMemoryId: c });
@@ -812,7 +845,11 @@ test("addMemoryChainEdge rejects an edge that would close a directed cycle", () 
 
 test("topologicalChainOrder returns a deterministic DAG order (branching chain)", () => {
   withStore((store) => {
-    const chain = store.createMemoryChain({ chainType: "logical", topic: "分叉事故", ownerSessionId: "s1" });
+    const chain = store.createMemoryChain({
+      chainType: "logical",
+      topic: "分叉事故",
+      ownerSessionId: "s1",
+    });
     const [a, b, c, d] = seedMemories(store, 4);
     // a --> b, a --> c (branch), c --> d
     store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: a, targetMemoryId: b });

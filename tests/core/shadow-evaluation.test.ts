@@ -48,6 +48,8 @@ test("shadow evaluation separates retrieval, disclosure, attribution, outcome, a
             topGap: 1,
             intentCoverage: 1,
             reasonHealth: 1,
+            expansionDependence: 0,
+            expansionRisk: 0,
             directCount: 1,
             totalCount: 1,
           },

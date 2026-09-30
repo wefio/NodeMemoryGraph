@@ -21,7 +21,10 @@ function captureFetch(
     if (typeof body === "object" && body !== null && !Array.isArray(body)) {
       Object.assign(body as Record<string, unknown>, parsed);
     }
-    const outcome = impl?.(parsed) ?? { ok: true, payload: { choices: [{ message: { content: "summary text" } }] } };
+    const outcome = impl?.(parsed) ?? {
+      ok: true,
+      payload: { choices: [{ message: { content: "summary text" } }] },
+    };
     return new Response(outcome.ok ? JSON.stringify(outcome.payload) : "boom", {
       status: outcome.ok ? 200 : 500,
     });
@@ -61,7 +64,10 @@ test("OpenAiLeafSummaryProvider: HTTP errors and empty content throw", async () 
   const empty = new OpenAiLeafSummaryProvider({
     baseUrl: "https://example.test",
     model: "m",
-    fetch: captureFetch(null, () => ({ ok: true, payload: { choices: [{ message: { content: "" } }] } })),
+    fetch: captureFetch(null, () => ({
+      ok: true,
+      payload: { choices: [{ message: { content: "" } }] },
+    })),
   });
   await assert.rejects(() => empty.summarize({ nodeName: "n", statements: ["s"] }));
 });

@@ -13,7 +13,8 @@ import { NmgStore } from "../../../src/core/store.ts";
 const directories: string[] = [];
 
 afterEach(() => {
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  for (const directory of directories.splice(0))
+    rmSync(directory, { recursive: true, force: true });
 });
 
 describe("LongMemEval automatic recall evidence", () => {

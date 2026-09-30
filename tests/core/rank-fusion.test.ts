@@ -11,11 +11,14 @@ test("RRF preserves one route and removes duplicate ids", () => {
 });
 
 test("RRF rewards agreement across retrieval routes", () => {
-  const fused = reciprocalRankFusion([
-    { ids: ["a", "b", "c"], weight: 1.5 },
-    { ids: ["c", "b", "d"] },
-  ], 4);
-  assert.deepEqual(fused.map(({ id }) => id), ["b", "c", "a", "d"]);
+  const fused = reciprocalRankFusion(
+    [{ ids: ["a", "b", "c"], weight: 1.5 }, { ids: ["c", "b", "d"] }],
+    4,
+  );
+  assert.deepEqual(
+    fused.map(({ id }) => id),
+    ["b", "c", "a", "d"],
+  );
 });
 
 test("RRF is deterministic and obeys the hard output cap", () => {

@@ -421,7 +421,9 @@ interface ScanInput {
 
 /** Reads every contract file, records each assertion's standing, and returns what the final pass
  *  needs to report the claims that rest on nothing. */
-function scanContracts(input: ScanInput): Pick<AssertionScan, "declared" | "referenced" | "unresolved"> {
+function scanContracts(
+  input: ScanInput,
+): Pick<AssertionScan, "declared" | "referenced" | "unresolved"> {
   const scan: AssertionScan = {
     report: input.report,
     resolvable: createResolver(input.root, input.routes, input.scripts),
@@ -497,8 +499,7 @@ function openCounterexamples(
   for (const item of report.items) {
     if (item.standing === "uncovered")
       open.push(`uncovered: ${item.contract}:${item.id} -> ${item.check}`);
-    if (item.standing === "documented-only")
-      open.push(`declared gap: ${item.contract}:${item.id}`);
+    if (item.standing === "documented-only") open.push(`declared gap: ${item.contract}:${item.id}`);
     if (item.standing === "not-recorded")
       open.push(`no execution evidence: ${item.contract}:${item.id}`);
   }
@@ -551,7 +552,11 @@ export function checkRtm(rootDirectory = process.cwd()): RtmReport {
   report.unresolvedAssumptions = [...scan.unresolved].sort();
   report.orphans = [...scan.declared].filter((check) => !scan.referenced.has(check)).sort();
   appendExecutionErrors(report);
-  report.counterexamples = openCounterexamples(report, report.orphans, report.unresolvedAssumptions);
+  report.counterexamples = openCounterexamples(
+    report,
+    report.orphans,
+    report.unresolvedAssumptions,
+  );
   report.riskClasses = groupRiskClasses(report.items);
   return report;
 }

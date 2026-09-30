@@ -96,9 +96,9 @@ export async function prepareHaluMem(options: PrepareOptions): Promise<PreparedS
           ...(typeof turn === "string"
             ? { role: "user", content: turn }
             : {
-          role: turn.role,
-          content: turn.content,
-          chat_time: turn.timestamp,
+                role: turn.role,
+                content: turn.content,
+                chat_time: turn.timestamp,
               }),
         }));
         const started = performance.now();
@@ -189,15 +189,12 @@ function parseArguments(argv: readonly string[]): PrepareOptions {
   }
   return {
     input:
-      values.get("--input") ??
-      ".benchmarks/official/OmniMemEval/data/halumem/HaluMem-Medium.jsonl",
+      values.get("--input") ?? ".benchmarks/official/OmniMemEval/data/halumem/HaluMem-Medium.jsonl",
     output: values.get("--output") ?? ".benchmarks/halumem-nmg/results/nmg_eval_results.jsonl",
     dataDir: values.get("--data-dir") ?? ".benchmarks/halumem-nmg/store",
     maxUsers: values.has("--users") ? Number(values.get("--users")) : undefined,
     maxSessions: values.has("--sessions") ? Number(values.get("--sessions")) : undefined,
-    sessionStart: values.has("--session-start")
-      ? Number(values.get("--session-start"))
-      : undefined,
+    sessionStart: values.has("--session-start") ? Number(values.get("--session-start")) : undefined,
     updateTopK: values.has("--update-top-k") ? Number(values.get("--update-top-k")) : undefined,
     reset,
     agentExtractions: values.get("--agent-extractions"),
@@ -213,7 +210,10 @@ function loadAgentExtractions(path: string): Map<string, string[]> {
       sessionIndex: number;
       memories: Array<{ statement: string }>;
     };
-    result.set(`${row.uuid}:${row.sessionIndex}`, row.memories.map((memory) => memory.statement));
+    result.set(
+      `${row.uuid}:${row.sessionIndex}`,
+      row.memories.map((memory) => memory.statement),
+    );
   }
   return result;
 }

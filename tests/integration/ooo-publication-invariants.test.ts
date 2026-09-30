@@ -29,6 +29,7 @@ import {
   compileTaskUnits,
   deriveStatus,
   type RecordedFacts,
+  type CompileInput,
 } from "../../src/integration/task-semantics.ts";
 import { nextTask, type DispatchTask } from "../../src/integration/ooo-execution.ts";
 import type { PatchTaskSpec } from "../../src/integration/ooo-board.ts";
@@ -70,9 +71,7 @@ test("no publication over the design's interleavings is unsupported by its own f
     "every publication is supported by the recorded facts",
   );
   assert.deepEqual(
-    report.budgetFindings.map(
-      (finding) => `${finding.property}:${finding.budget}:${finding.unit}`,
-    ),
+    report.budgetFindings.map((finding) => `${finding.property}:${finding.budget}:${finding.unit}`),
     [],
     "every declared budget published a view its own budget allows",
   );
@@ -92,7 +91,11 @@ test("a declared budget publishes more than one slot can, and never a claimed ta
   ];
   const report = enumerateInterleavings({ plan: wide, specs: { P: spec() }, scripts });
   assert.equal(report.refused, undefined);
-  assert.deepEqual(report.budgetFindings, [], "no budget offered a claimed task or dropped a candidate");
+  assert.deepEqual(
+    report.budgetFindings,
+    [],
+    "no budget offered a claimed task or dropped a candidate",
+  );
   assert.ok(
     report.widened > 0,
     "the two-slot view published a task the one-slot view did not, which is what the budget buys",
@@ -127,7 +130,12 @@ test("the budget properties fire on a hand-built view, so deleting them cannot p
     "a bigger budget adds candidates, it does not replace them",
   );
   assert.deepEqual(checkBudget({ budget: 2, ready: ["Q"], claimed: ["P"], smallerReady: [] }), []);
-  const refused = enumerateInterleavings({ plan: DESIGN_PLAN, specs: { P: spec() }, scripts: [], budgets: [0] });
+  const refused = enumerateInterleavings({
+    plan: DESIGN_PLAN,
+    specs: { P: spec() },
+    scripts: [],
+    budgets: [0],
+  });
   assert.match(refused.refused!, /budget 0 is not a positive integer/);
 });
 

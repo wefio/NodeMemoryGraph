@@ -11,7 +11,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { BoardAdmission, type PatchTaskSpec, type ProbePlan } from "../../src/integration/ooo-board.ts";
+import {
+  BoardAdmission,
+  type PatchTaskSpec,
+  type ProbePlan,
+} from "../../src/integration/ooo-board.ts";
 import { preparePatchWork } from "../../src/integration/ooo-patch.ts";
 
 const TASK = "A";

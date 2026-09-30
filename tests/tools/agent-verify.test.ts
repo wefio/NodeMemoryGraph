@@ -47,6 +47,8 @@ function report(): AgentContextReport {
       },
     ],
     availableRoutes: ["store", "docs"],
+    capabilities: [],
+    availableCapabilities: [],
     guardrails: [],
     canonical: { design: "design.md", completion: "audit.md", todo: "todo.md" },
     state: { desiredRevision: "desired", observedRevision: "observed" },
@@ -886,7 +888,10 @@ test("a failing route test fails the narrow gate instead of passing vacuously", 
   const receipt = JSON.parse(readFileSync(payload.rcp!.receiptPath!, "utf8")) as {
     checks: Array<{ name: string; status: string }>;
   };
-  assert.deepEqual(receipt.checks.map((check) => check.name), ["node-test:plugin"]);
+  assert.deepEqual(
+    receipt.checks.map((check) => check.name),
+    ["node-test:plugin"],
+  );
   assert.equal(receipt.checks.find((check) => check.name === "node-test:plugin")?.status, "failed");
 });
 

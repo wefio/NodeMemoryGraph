@@ -182,14 +182,16 @@ test("leafBlockRouting: chain edges pull cross-block neighbors into the append",
     }).memory.id;
     store.rebuildLeafBlocks();
     const taskA = store.pendingLeafSummaries().find((t) => t.nodeName === "alpha trips")!;
-    store.setLeafSummary(taskA.blockId, "zebra index terms for alpha", "test-model", taskA.membersKey);
+    store.setLeafSummary(
+      taskA.blockId,
+      "zebra index terms for alpha",
+      "test-model",
+      taskA.membersKey,
+    );
 
     // Without a chain, the append covers block A only.
     const plain = store.searchContext("zebra", { leafBlockRouting: true });
-    assert.deepEqual(
-      plain.results.map((r) => r.memory.id).sort(),
-      [a1, a2].sort(),
-    );
+    assert.deepEqual(plain.results.map((r) => r.memory.id).sort(), [a1, a2].sort());
 
     // A temporal chain a1 → b1 makes the cross-block continuation surface:
     // b1 lives in another block and is appended with chain markings.
@@ -225,7 +227,12 @@ test("leafBlockRouting: member-only chains pull position-adjacent neighbors", ()
     }).memory.id;
     store.rebuildLeafBlocks();
     const taskA = store.pendingLeafSummaries().find((t) => t.nodeName === "alpha trips")!;
-    store.setLeafSummary(taskA.blockId, "zebra index terms for alpha", "test-model", taskA.membersKey);
+    store.setLeafSummary(
+      taskA.blockId,
+      "zebra index terms for alpha",
+      "test-model",
+      taskA.membersKey,
+    );
 
     const chain = store.createMemoryChain({ chainType: "logical", topic: "march trip" });
     store.addMemoryToChain({ chainId: chain.id, memoryId: a1, position: 0 });

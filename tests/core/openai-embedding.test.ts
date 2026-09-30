@@ -144,7 +144,10 @@ test("embedding templates require a text placeholder", () => {
 });
 
 test("BAAI-prefixed and bare BGE model names share one index identity", () => {
-  const prefixed = new OpenAIEmbeddingClient({ model: "BAAI/bge-small-en-v1.5", profile: "bge-en" });
+  const prefixed = new OpenAIEmbeddingClient({
+    model: "BAAI/bge-small-en-v1.5",
+    profile: "bge-en",
+  });
   const bare = new OpenAIEmbeddingClient({ model: "bge-small-en-v1.5", profile: "bge-en" });
   // Same model, two spellings → same normalized identity (one embedding index).
   assert.equal(prefixed.indexId, bare.indexId);

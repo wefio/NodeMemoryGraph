@@ -32,6 +32,39 @@ import type { MemoryContext } from "../src/core/types.ts";
 import { assertDaemonProtocol } from "../src/cli/daemon-client.ts";
 import type { NmgHelloResult } from "../src/cli/protocol.ts";
 
+interface HookPayload {
+  prompt?: unknown;
+  hook_event_name?: string;
+  event?: string;
+  tool_name?: string;
+  tool_input?: { command?: unknown };
+  session_id?: string;
+  sessionId?: string;
+  cwd?: string;
+}
+
+interface HttpLease {
+  host: string;
+  port: number;
+  token: string;
+  pid: number;
+}
+
+interface WakeEntry {
+  id: string;
+  taskId: string;
+  kind: string;
+  content: string;
+  sequence?: number;
+  status?: string;
+  sourceSessionId?: string | null;
+  agentId?: string | null;
+  claimExpiresAt?: string | null;
+  to?: string | null;
+  serialState?: string | null;
+  createdAt?: string | null;
+}
+
 const NUDGE = [
   "<nmg_nudge>",
   "A code commit or task completion was just detected. NMG long-term memory is",
@@ -63,8 +96,8 @@ const WORLD_BOARD_ID = "default";
 const FALSE_LIKE = new Set(["0", "false", "off", "no"]);
 const BROADCAST_PREFIX = "[NMG board 协作广播]";
 const WAKE_KINDS = new Set(["question", "blocker", "handoff"]);
-const KIND_RANK = { question: 0, blocker: 1, handoff: 2 };
-const KIND_LABEL = {
+const KIND_RANK: Readonly<Record<string, number>> = { question: 0, blocker: 1, handoff: 2 };
+const KIND_LABEL: Readonly<Record<string, string>> = {
   question: "问题",
   blocker: "阻塞",
   handoff: "交接",
@@ -78,7 +111,7 @@ function dataDir(): string {
   return process.env.NMG_DATA_DIR?.trim() || join(homedir(), ".nmg");
 }
 
-function promptText(payload): string {
+function promptText(payload: HookPayload): string {
   const prompt = payload?.prompt;
   if (typeof prompt === "string") return prompt;
   if (Array.isArray(prompt)) {
@@ -90,12 +123,12 @@ function promptText(payload): string {
   return "";
 }
 
-function isGitCommit(payload): boolean {
+function isGitCommit(payload: HookPayload): boolean {
   const command = payload?.tool_input?.command;
   return typeof command === "string" && /\bgit\s+commit\b/u.test(command);
 }
 
-function shouldNudge(payload): boolean {
+function shouldNudge(payload: HookPayload): boolean {
   const event = payload?.hook_event_name ?? payload?.event;
   if (event === "UserPromptSubmit") return COMPLETION_PATTERN.test(promptText(payload));
   if (event === "PreToolUse") {
@@ -105,7 +138,7 @@ function shouldNudge(payload): boolean {
   return false;
 }
 
-function isPromptSubmit(payload): boolean {
+function isPromptSubmit(payload: HookPayload): boolean {
   const event = payload?.hook_event_name ?? payload?.event;
   return event === "UserPromptSubmit";
 }
@@ -118,7 +151,7 @@ function readJson(path: string) {
   }
 }
 
-function writeJson(path: string, value) {
+function writeJson(path: string, value: unknown) {
   try {
     writeFileSync(path, JSON.stringify(value), "utf8");
   } catch {
@@ -126,16 +159,16 @@ function writeJson(path: string, value) {
   }
 }
 
-function pidAlive(pid): boolean {
+function pidAlive(pid: unknown): boolean {
   try {
     process.kill(Number(pid), 0);
     return true;
   } catch (error) {
-    return error?.code === "EPERM";
+    return (error as NodeJS.ErrnoException | null)?.code === "EPERM";
   }
 }
 
-export function liveLease(dir: string) {
+export function liveLease(dir: string): HttpLease | null {
   const lease = readJson(join(dir, "nmg.sqlite.server.json"));
   if (
     !lease ||
@@ -151,7 +184,7 @@ export function liveLease(dir: string) {
   return pidAlive(lease.pid) ? lease : null;
 }
 
-async function rpcCall(lease, method: string, params) {
+async function rpcCall(lease: HttpLease, method: string, params: unknown) {
   const response = await fetch(`http://${lease.host}:${lease.port}/`, {
     method: "POST",
     headers: {
@@ -190,7 +223,7 @@ async function compatibleLease(dir: string) {
   return pending;
 }
 
-function agentIdentity(payload, environment = process.env) {
+function agentIdentity(payload: HookPayload, environment = process.env) {
   const sessionId = payload?.session_id ?? payload?.sessionId ?? "workbuddy-hook";
   return {
     sessionId,
@@ -203,7 +236,7 @@ function agentIdentity(payload, environment = process.env) {
  * Discovery belongs to the system layer; it never injects context or wakes
  * another model. */
 export async function reportAgentPresence(
-  payload,
+  payload: HookPayload,
   dir = dataDir(),
   environment = process.env,
 ): Promise<boolean> {
@@ -223,7 +256,7 @@ export async function reportAgentPresence(
 /** Small-budget automatic recall: one daemon search per user turn, compact
  * header projection from the shared Agent Surface, per-session id dedup.
  * Returns "" when there is nothing to inject. */
-export async function recallHeaders(payload, dir = dataDir()): Promise<string> {
+export async function recallHeaders(payload: HookPayload, dir = dataDir()): Promise<string> {
   const lease = await compatibleLease(dir);
   if (!lease) return "";
   const query = promptText(payload).trim().slice(0, RECALL_QUERY_CHARS);
@@ -272,7 +305,10 @@ export async function recallHeaders(payload, dir = dataDir()): Promise<string> {
 
 /** Pure board-wake gate (same semantics as the Kimi hook). A claim suppresses
  * a notice only while its lease is live; notify-only kinds never wake. */
-export function isBoardWakeCandidate(entry, { sessionId, agentId, now = Date.now() }): boolean {
+export function isBoardWakeCandidate(
+  entry: WakeEntry,
+  { sessionId, agentId, now = Date.now() }: { sessionId: string; agentId: string; now?: number },
+): boolean {
   const ownEcho =
     entry.sourceSessionId === sessionId ||
     (entry.sourceSessionId == null && entry.agentId === agentId);
@@ -293,7 +329,7 @@ export function isBoardWakeCandidate(entry, { sessionId, agentId, now = Date.now
 /** Poll the task board for one undelivered open entry and format its wake
  * notice. Returns "" when there is nothing to say (or wake is off). */
 export async function pollBoardWake(
-  payload,
+  payload: HookPayload,
   dir = dataDir(),
   environment = process.env,
 ): Promise<string> {
@@ -317,10 +353,10 @@ export async function pollBoardWake(
   const lease = await compatibleLease(dir);
   if (!lease) return "";
   const { sessionId, agentId } = agentIdentity(payload, environment);
-  const rpc = (method: string, params) => rpcCall(lease, method, params);
+  const rpc = (method: string, params: unknown) => rpcCall(lease, method, params);
 
-  const candidates = [];
-  const collect = (taskId: string, entries) => {
+  const candidates: WakeEntry[] = [];
+  const collect = (taskId: string, entries: readonly WakeEntry[] | undefined) => {
     for (const entry of entries ?? []) {
       if (isBoardWakeCandidate(entry, { sessionId, agentId, now })) {
         candidates.push({ ...entry, taskId });
@@ -381,7 +417,7 @@ export async function pollBoardWake(
 }
 
 export async function runHook(
-  payload,
+  payload: HookPayload,
   options: { dir?: string; environment?: NodeJS.ProcessEnv } = {},
 ): Promise<string> {
   const output: string[] = [];

@@ -97,6 +97,7 @@ test(
     // that wants to adopt an entry gates that field on the method being there (an earlier daemon in
     // the same epoch would ignore `adopt` and create an unmanaged entry).
     const hello = await service.invoke("hello");
+    assert.ok(hello.methods);
     assert.ok(hello.methods.includes("taskRun"));
     await registerAndFreeze(service);
     const written = await service.invoke("taskBoard", {

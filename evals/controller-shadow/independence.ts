@@ -15,9 +15,7 @@ export interface IndependentGroup {
  * A split may never separate rows sharing either identity, including transitive
  * links (session A -> task X -> session B).
  */
-export function independentGroups(
-  rows: readonly IndependentRowIdentity[],
-): IndependentGroup[] {
+export function independentGroups(rows: readonly IndependentRowIdentity[]): IndependentGroup[] {
   const parent = rows.map((_, index) => index);
   const find = (index: number): number => {
     while (parent[index] !== index) {

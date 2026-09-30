@@ -36,11 +36,7 @@ test("LoCoMo audit deduplicates evidence within a task and reports repeated cove
     answer: "answer",
     evidence: index === 0 ? ["d1", "d1"] : ["d1"],
   }));
-  writeFileSync(
-    path,
-    JSON.stringify([{ sample_id: "sample", conversation: {}, qa }]),
-    "utf8",
-  );
+  writeFileSync(path, JSON.stringify([{ sample_id: "sample", conversation: {}, qa }]), "utf8");
   try {
     const report = evaluateLocomoConsolidation(path);
     assert.equal(report.cases, 5);

@@ -113,7 +113,9 @@ const EMPTY_STORE_COUNTS = {
  * Inspect maintenance evidence without opening a writable NMG store. Missing
  * databases are reported rather than created, and no maintenance actuator runs.
  */
-export function auditNaturalMaintenance(options: NaturalMaintenanceAuditOptions): NaturalMaintenanceAudit {
+export function auditNaturalMaintenance(
+  options: NaturalMaintenanceAuditOptions,
+): NaturalMaintenanceAudit {
   const environment = options.environment ?? process.env;
   const stgPolicy = configuredStgConsolidationPolicy(environment);
   const maintenancePolicy = configuredMaintenancePolicy(environment);
@@ -121,14 +123,18 @@ export function auditNaturalMaintenance(options: NaturalMaintenanceAuditOptions)
   const ltgDetails = ltg.exists
     ? withReadOnlyDatabase(ltg.path, (db) => auditLtgDetails(db, maintenancePolicy))
     : emptyLtgDetails();
-  const stg = [...new Set(options.stgPaths ?? [])].map((path) => auditStore(resolve(path), stgPolicy));
+  const stg = [...new Set(options.stgPaths ?? [])].map((path) =>
+    auditStore(resolve(path), stgPolicy),
+  );
   const evidenceGaps: string[] = [];
   const naturalClaimEvents = stg.reduce((sum, store) => sum + store.claims.naturalOutcomeEvents, 0);
   const candidates = stg.reduce((sum, store) => sum + store.claims.promotionCandidates.length, 0);
-  if (stg.length === 0 || stg.every((store) => !store.exists)) evidenceGaps.push("no_stg_store_observed");
+  if (stg.length === 0 || stg.every((store) => !store.exists))
+    evidenceGaps.push("no_stg_store_observed");
   if (naturalClaimEvents === 0) evidenceGaps.push("no_stg_claim_outcomes");
   if (candidates === 0) evidenceGaps.push("no_stg_consolidation_candidates");
-  if (ltgDetails.consolidatedFromStg.length === 0) evidenceGaps.push("no_materialized_stg_to_ltg_examples");
+  if (ltgDetails.consolidatedFromStg.length === 0)
+    evidenceGaps.push("no_materialized_stg_to_ltg_examples");
   if (ltgDetails.stgConsolidation.retracted === 0) {
     evidenceGaps.push("no_stg_consolidation_retractions");
   }
@@ -157,7 +163,12 @@ export function auditNaturalMaintenance(options: NaturalMaintenanceAuditOptions)
 
 function auditStore(path: string, policy: StgConsolidationPolicyConfig): StoreAudit {
   if (!existsSync(path)) {
-    return { path, exists: false, ...structuredClone(EMPTY_STORE_COUNTS), warnings: ["database_missing"] };
+    return {
+      path,
+      exists: false,
+      ...structuredClone(EMPTY_STORE_COUNTS),
+      warnings: ["database_missing"],
+    };
   }
   return withReadOnlyDatabase(path, (db) => {
     const warnings: string[] = [];
@@ -187,19 +198,21 @@ function auditStore(path: string, policy: StgConsolidationPolicyConfig): StoreAu
         )
       : {};
     const hasCollectionOrigin = columnExists(db, "claim_outcome_events", "collection_origin");
-    const outcomeOrigins = tableExists(db, "claim_outcome_events") && hasCollectionOrigin
-      ? allRows(
-          db,
-          `SELECT collection_origin AS origin, COUNT(*) AS events,
+    const outcomeOrigins =
+      tableExists(db, "claim_outcome_events") && hasCollectionOrigin
+        ? allRows(
+            db,
+            `SELECT collection_origin AS origin, COUNT(*) AS events,
                   COUNT(DISTINCT semantic_task_id) AS tasks
              FROM claim_outcome_events GROUP BY collection_origin`,
-        )
-      : [];
+          )
+        : [];
     const outcomeEventsByOrigin = Object.fromEntries(
       outcomeOrigins.map((row) => [String(row.origin), numberValue(row.events)]),
     );
     const naturalOutcome = outcomeOrigins.find((row) => String(row.origin) === "natural");
-    if (!tableExists(db, "claim_outcome_events")) warnings.push("claim_outcome_events_table_missing");
+    if (!tableExists(db, "claim_outcome_events"))
+      warnings.push("claim_outcome_events_table_missing");
     const grouped = groupPosteriors(posteriorRows);
     return {
       path,
@@ -218,10 +231,16 @@ function auditStore(path: string, policy: StgConsolidationPolicyConfig): StoreAu
         posteriors: posteriorRows.length,
         memoriesWithPosteriors: grouped.size,
         promotionCandidates: [...grouped.entries()]
-          .filter(([, claims]) => claims.length > 0 && claims.every((claim) => qualifiesForPromotion(claim, policy)))
+          .filter(
+            ([, claims]) =>
+              claims.length > 0 && claims.every((claim) => qualifiesForPromotion(claim, policy)),
+          )
           .map(([memoryId]) => memoryId),
         belowRetention: [...grouped.entries()]
-          .filter(([, claims]) => claims.length > 0 && claims.some((claim) => !qualifiesForRetention(claim, policy)))
+          .filter(
+            ([, claims]) =>
+              claims.length > 0 && claims.some((claim) => !qualifiesForRetention(claim, policy)),
+          )
           .map(([memoryId]) => memoryId),
       },
       warnings,
@@ -264,17 +283,23 @@ function auditLtgDetails(
     accessDueNodes,
     largestNodeWrites: Math.max(0, ...backlogRows.map((row) => numberValue(row.writes))),
     largestNodeAccesses: Math.max(0, ...backlogRows.map((row) => numberValue(row.accesses))),
-    distributedWritePressure: indexDeltas >= maintenancePolicy.writeThreshold && writeDueNodes === 0,
-    distributedAccessPressure: pendingAccesses >= maintenancePolicy.accessThreshold && accessDueNodes === 0,
+    distributedWritePressure:
+      indexDeltas >= maintenancePolicy.writeThreshold && writeDueNodes === 0,
+    distributedAccessPressure:
+      pendingAccesses >= maintenancePolicy.accessThreshold && accessDueNodes === 0,
   };
   const proposals = tableExists(db, "topology_proposals")
     ? allRows(db, "SELECT * FROM topology_proposals ORDER BY created_at, id")
     : [];
-  const transforms = tableExists(db, "node_transforms") ? allRows(db, "SELECT * FROM node_transforms") : [];
+  const transforms = tableExists(db, "node_transforms")
+    ? allRows(db, "SELECT * FROM node_transforms")
+    : [];
   const journals = tableExists(db, "node_transform_journals")
     ? allRows(db, "SELECT * FROM node_transform_journals")
     : [];
-  const relations = tableExists(db, "node_relations") ? allRows(db, "SELECT * FROM node_relations") : [];
+  const relations = tableExists(db, "node_relations")
+    ? allRows(db, "SELECT * FROM node_relations")
+    : [];
   const stgMaterializations = tableExists(db, "memory_records")
     ? allRows(db, "SELECT id, status, markers_json FROM memory_records").flatMap((row) => {
         const sourceMemoryId = consolidatedSource(row.markers_json);
@@ -311,7 +336,9 @@ function auditLtgDetails(
       proposalsByStatus: countBy(proposals, "status"),
       proposalsByRelation: countBy(proposals, "relation_type", "none"),
       pendingAutomaticMergeAssessments: proposals
-        .filter((row) => String(row.status) === "pending" && String(row.relation_type) === "same_as")
+        .filter(
+          (row) => String(row.status) === "pending" && String(row.relation_type) === "same_as",
+        )
         .map((row) => assessAutomaticMerge(db, row)),
       relationsByType: countBy(relations, "relation_type"),
       transformsByType: countBy(transforms, "transform_type"),
@@ -365,17 +392,22 @@ function assessAutomaticMerge(db: DatabaseSync, proposal: Row): AutomaticMergeAu
   if (numberValue(proposal.observations) < 5) reasons.push("insufficient_observations");
   if (numberValue(proposal.estimated_gain) < 0.98) reasons.push("insufficient_confidence");
   if (evidenceMemoryIds.length < 4) reasons.push("insufficient_evidence_memories");
-  const evidenceRows = evidenceMemoryIds.map((id) =>
-    db
-      .prepare(
-        "SELECT node_id, scope_json, status, source_actor FROM memory_records WHERE id = ?",
-      )
-      .get(id) as Row | undefined,
+  const evidenceRows = evidenceMemoryIds.map(
+    (id) =>
+      db
+        .prepare(
+          "SELECT node_id, scope_json, status, source_actor FROM memory_records WHERE id = ?",
+        )
+        .get(id) as Row | undefined,
   );
   if (evidenceRows.some((row) => !row || String(row.status) !== "active")) {
     reasons.push("missing_or_inactive_evidence");
   }
-  if (sourceNodeIds.some((nodeId) => !evidenceRows.some((row) => String(row?.node_id ?? "") === nodeId))) {
+  if (
+    sourceNodeIds.some(
+      (nodeId) => !evidenceRows.some((row) => String(row?.node_id ?? "") === nodeId),
+    )
+  ) {
     reasons.push("evidence_not_balanced_across_nodes");
   }
   const evidenceByNode = new Map<string, Set<string>>();
@@ -399,7 +431,9 @@ function assessAutomaticMerge(db: DatabaseSync, proposal: Row): AutomaticMergeAu
   ) {
     reasons.push("source_actor_mismatch_across_nodes");
   }
-  const scopes = new Set(evidenceRows.filter(Boolean).map((row) => String(row?.scope_json ?? "{}")));
+  const scopes = new Set(
+    evidenceRows.filter(Boolean).map((row) => String(row?.scope_json ?? "{}")),
+  );
   if (scopes.size > 1) reasons.push("scope_mismatch");
   let targetName: string | null = null;
   if (scopes.size === 1) {
@@ -416,9 +450,10 @@ function assessAutomaticMerge(db: DatabaseSync, proposal: Row): AutomaticMergeAu
   }
   if (targetName && tableExists(db, "memory_nodes")) {
     const identity = canonicalNodeIdentity(targetName);
-    const duplicate = allRows(db, "SELECT canonical_name FROM memory_nodes WHERE status = 'active'").some(
-      (row) => canonicalNodeIdentity(String(row.canonical_name)) === identity,
-    );
+    const duplicate = allRows(
+      db,
+      "SELECT canonical_name FROM memory_nodes WHERE status = 'active'",
+    ).some((row) => canonicalNodeIdentity(String(row.canonical_name)) === identity);
     if (duplicate) reasons.push("target_name_already_active");
   }
   const nodeKey = [...sourceNodeIds].sort().join("\0");
@@ -427,7 +462,12 @@ function assessAutomaticMerge(db: DatabaseSync, proposal: Row): AutomaticMergeAu
     `SELECT source_node_ids_json FROM topology_proposals
      WHERE id <> ? AND status = 'pending' AND relation_type IN ('distinct_from', 'contradicts')`,
     String(proposal.id),
-  ).some((row) => parseStringArray(row.source_node_ids_json ?? null).sort().join("\0") === nodeKey);
+  ).some(
+    (row) =>
+      parseStringArray(row.source_node_ids_json ?? null)
+        .sort()
+        .join("\0") === nodeKey,
+  );
   if (competing) reasons.push("competing_conflict_proposal");
   return {
     proposalId: String(proposal.id),
@@ -462,7 +502,10 @@ function groupPosteriors(rows: readonly Row[]): Map<string, PosteriorAudit[]> {
   return grouped;
 }
 
-function qualifiesForPromotion(claim: PosteriorAudit, policy: StgConsolidationPolicyConfig): boolean {
+function qualifiesForPromotion(
+  claim: PosteriorAudit,
+  policy: StgConsolidationPolicyConfig,
+): boolean {
   return (
     claim.independentVoteCount >= policy.minimumIndependentVotes &&
     claim.mean >= policy.minimumPosteriorMean &&
@@ -470,7 +513,10 @@ function qualifiesForPromotion(claim: PosteriorAudit, policy: StgConsolidationPo
   );
 }
 
-function qualifiesForRetention(claim: PosteriorAudit, policy: StgConsolidationPolicyConfig): boolean {
+function qualifiesForRetention(
+  claim: PosteriorAudit,
+  policy: StgConsolidationPolicyConfig,
+): boolean {
   return (
     claim.mean >= policy.minimumRetainedPosteriorMean &&
     claim.lowerBound >= policy.minimumRetainedConservativeLowerBound
@@ -485,7 +531,10 @@ function consolidatedSource(value: SQLOutputValue | undefined): string | null {
     for (const marker of markers) {
       if (!marker || typeof marker !== "object") continue;
       const candidate = marker as { kind?: unknown; attributes?: { sourceMemoryId?: unknown } };
-      if (candidate.kind === "consolidated_from_stg" && typeof candidate.attributes?.sourceMemoryId === "string") {
+      if (
+        candidate.kind === "consolidated_from_stg" &&
+        typeof candidate.attributes?.sourceMemoryId === "string"
+      ) {
         return candidate.attributes.sourceMemoryId;
       }
     }
@@ -505,7 +554,9 @@ function withReadOnlyDatabase<T>(path: string, run: (db: DatabaseSync) => T): T 
 }
 
 function tableExists(db: DatabaseSync, table: string): boolean {
-  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
+  return Boolean(
+    db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table),
+  );
 }
 
 function columnExists(db: DatabaseSync, table: string, column: string): boolean {
@@ -536,7 +587,10 @@ function countBy(
   const counts: Record<string, number> = {};
   for (const row of rows) {
     const value = row[key];
-    const label = value === null || value === undefined || String(value).length === 0 ? fallback : String(value);
+    const label =
+      value === null || value === undefined || String(value).length === 0
+        ? fallback
+        : String(value);
     counts[label] = (counts[label] ?? 0) + 1;
   }
   return counts;

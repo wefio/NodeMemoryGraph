@@ -50,7 +50,10 @@ async function profileBridge(): Promise<void> {
   console.log(
     `[bridge] ${spec.conversations.length} conversations, ${messages} messages, ` +
       `total ${(total / 1000).toFixed(1)}s, mean ${(total / durations.length).toFixed(1)}ms/conv, ` +
-      `p50 ${sorted[Math.floor(sorted.length / 2)]!.toFixed(1)}ms, slowest ${sorted.slice(0, 5).map((v) => v.toFixed(0)).join("/")}ms`,
+      `p50 ${sorted[Math.floor(sorted.length / 2)]!.toFixed(1)}ms, slowest ${sorted
+        .slice(0, 5)
+        .map((v) => v.toFixed(0))
+        .join("/")}ms`,
   );
   // Time growth within a user: split per-user durations into halves.
   const perUser = new Map<string, number[]>();

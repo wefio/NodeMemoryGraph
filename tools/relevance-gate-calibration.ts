@@ -78,7 +78,9 @@ async function collect(options: Options): Promise<Sample[]> {
   const spec = loadDataset(options.dataset, {});
   const root = resolve(options.storeRoot, options.dataset);
   if (!existsSync(root)) {
-    throw new Error(`no ingested store at ${root}; run \`npm run eval:retrieval -- --dataset ${options.dataset}\``);
+    throw new Error(
+      `no ingested store at ${root}; run \`npm run eval:retrieval -- --dataset ${options.dataset}\``,
+    );
   }
   const stores = new Map<string, NmgStore>();
   const getStore = (userId: string): NmgStore | null => {
@@ -106,7 +108,9 @@ async function collect(options: Options): Promise<Sample[]> {
     const candidates = context.results.map((result) => ({
       scores: result,
       text: normalizeText(
-        [result.memory.statement, ...(result.evidenceRecords ?? []).map((e) => e.content)].join(" "),
+        [result.memory.statement, ...(result.evidenceRecords ?? []).map((e) => e.content)].join(
+          " ",
+        ),
       ),
     }));
     if (candidates.length === 0) continue;
@@ -118,7 +122,11 @@ async function collect(options: Options): Promise<Sample[]> {
           : gold.includes(candidate.text),
       ),
     );
-    const stats = queryScoreStats(candidates.map((candidate) => candidate.scores), undefined, "raw");
+    const stats = queryScoreStats(
+      candidates.map((candidate) => candidate.scores),
+      undefined,
+      "raw",
+    );
     samples.push({ hit, cv: stats.cv, top1: stats.top1 });
   }
   for (const store of stores.values()) store.close();

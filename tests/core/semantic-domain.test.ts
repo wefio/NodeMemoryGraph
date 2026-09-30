@@ -9,10 +9,10 @@ import {
 } from "../../src/core/semantic-domain.ts";
 
 test("scope compatibility is conjunction intersection, not exact equality", () => {
-  assert.deepEqual(
-    intersectScopes({ project: "atlas" }, { project: "atlas", device: "laptop" }),
-    { project: "atlas", device: "laptop" },
-  );
+  assert.deepEqual(intersectScopes({ project: "atlas" }, { project: "atlas", device: "laptop" }), {
+    project: "atlas",
+    device: "laptop",
+  });
   assert.equal(scopesOverlap({}, { project: "atlas" }), true);
   assert.equal(scopesOverlap({ project: "atlas" }, { project: "beacon" }), false);
   assert.equal(intersectScopes({ project: "atlas" }, { project: "beacon" }), null);
@@ -30,10 +30,7 @@ test("validity intervals are half-open and missing ends are unbounded", () => {
     }),
     true,
   );
-  assert.equal(
-    validityIntervalsOverlap(january, { validFrom: "2026-02-01T00:00:00.000Z" }),
-    false,
-  );
+  assert.equal(validityIntervalsOverlap(january, { validFrom: "2026-02-01T00:00:00.000Z" }), false);
   assert.equal(validityIntervalsOverlap({}, january), true);
 });
 

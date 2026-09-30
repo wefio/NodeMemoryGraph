@@ -183,5 +183,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     }),
   });
   if (options.outputPath) writeJsonAtomic(options.outputPath, packet);
-  process.stdout.write(`${JSON.stringify({ eventPath, outputPath: options.outputPath ?? null, ...packet }, null, 2)}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ eventPath, outputPath: options.outputPath ?? null, ...packet }, null, 2)}\n`,
+  );
 }

@@ -52,7 +52,6 @@ const SCOPE = {
 /** What the projection says when the set holds two selectable tasks. */
 const projection = (legal: readonly string[]): Omit<AdviceProjection, "legal"> => ({
   ...SCOPE,
-  legal: [],
   ready: [...legal],
   accepted: [],
   blocked: {},

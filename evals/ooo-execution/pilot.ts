@@ -82,9 +82,7 @@ if (!reportOnly && (!provider || !model))
   throw new Error(
     "Set PI_PROVIDER and PI_MODEL: the pilot's model is an input, not a default\n" + USAGE,
   );
-const reps = (values["reps"] ?? "3,3,2")
-  .split(",")
-  .map((value) => Number(value.trim()));
+const reps = (values["reps"] ?? "3,3,2").split(",").map((value) => Number(value.trim()));
 if (reps.length !== 3 || reps.some((count) => !Number.isSafeInteger(count) || count < 1))
   throw new Error(`--reps wants three positive integers, one per arm\n${USAGE}`);
 const seed = Number(values["seed"] ?? 1);
@@ -227,44 +225,43 @@ process.stdout.write(`results: ${out}${reportOnly ? "" : `\nper-run: ${runsDir}`
 
 async function runArms(): Promise<void> {
   for (const [index, step] of schedule.entries()) {
-  process.stdout.write(
-    `[${index + 1}/${schedule.length}] arm ${step.arm} rep ${step.rep} (${step.plan}, ` +
-      `${step.slots} slot${step.slots === 1 ? "" : "s"})\n`,
-  );
-  const startedAt = Date.now();
-  const run = await runPlan(
-    specFrom(specs.get(step.spec)!, piWorker({ provider, model }, true), step.slots),
-  );
-  const verdicts: Record<string, number> = {};
-  for (const unit of run.units) verdicts[unit.verdict] = (verdicts[unit.verdict] ?? 0) + 1;
-  const one: Recorded = {
-    arm: step.arm,
-    plan: step.plan,
-    rep: step.rep,
-    slotsRequested: run.slotsRequested,
-    slotsUsed: run.slotsUsed,
-    ...(run.slotRefusal ? { slotRefusal: run.slotRefusal } : {}),
-    wallMs: run.wallMs,
-    hostMs: run.hostMs,
-    tokens: run.tokens,
-    units: run.units.length,
-    accepted: Object.keys(run.accepted).length,
-    ...(run.parent ? { parent: run.parent.verdict } : {}),
-    verdicts,
-    incomplete: run.incomplete,
-  };
-  recorded.push(one);
-  writeFileSync(
-    resolve(runsDir, `${step.arm}-${step.rep}-${startedAt}.json`),
-    `${JSON.stringify(one, null, 2)}\n`,
-  );
-  process.stdout.write(
-    `  wall ${one.wallMs}ms, host ${one.hostMs}ms, tokens ${one.tokens}, slots ${one.slotsUsed}/` +
-      `${one.slotsRequested}, verdicts ${JSON.stringify(verdicts)}, parent ${String(one.parent)}` +
-      `${one.incomplete.length ? `, incomplete ${JSON.stringify(one.incomplete)}` : ""}\n`,
-  );
+    process.stdout.write(
+      `[${index + 1}/${schedule.length}] arm ${step.arm} rep ${step.rep} (${step.plan}, ` +
+        `${step.slots} slot${step.slots === 1 ? "" : "s"})\n`,
+    );
+    const startedAt = Date.now();
+    const run = await runPlan(
+      specFrom(specs.get(step.spec)!, piWorker({ provider, model }, true), step.slots),
+    );
+    const verdicts: Record<string, number> = {};
+    for (const unit of run.units) verdicts[unit.verdict] = (verdicts[unit.verdict] ?? 0) + 1;
+    const one: Recorded = {
+      arm: step.arm,
+      plan: step.plan,
+      rep: step.rep,
+      slotsRequested: run.slotsRequested,
+      slotsUsed: run.slotsUsed,
+      ...(run.slotRefusal ? { slotRefusal: run.slotRefusal } : {}),
+      wallMs: run.wallMs,
+      hostMs: run.hostMs,
+      tokens: run.tokens,
+      units: run.units.length,
+      accepted: Object.keys(run.accepted).length,
+      ...(run.parent ? { parent: run.parent.verdict } : {}),
+      verdicts,
+      incomplete: run.incomplete,
+    };
+    recorded.push(one);
+    writeFileSync(
+      resolve(runsDir, `${step.arm}-${step.rep}-${startedAt}.json`),
+      `${JSON.stringify(one, null, 2)}\n`,
+    );
+    process.stdout.write(
+      `  wall ${one.wallMs}ms, host ${one.hostMs}ms, tokens ${one.tokens}, slots ${one.slotsUsed}/` +
+        `${one.slotsRequested}, verdicts ${JSON.stringify(verdicts)}, parent ${String(one.parent)}` +
+        `${one.incomplete.length ? `, incomplete ${JSON.stringify(one.incomplete)}` : ""}\n`,
+    );
   }
   if (recorded.length !== reps.reduce((sum, count) => sum + count, 0))
     throw new Error(`planned ${reps.join("+")} runs and recorded ${recorded.length}`);
 }
-

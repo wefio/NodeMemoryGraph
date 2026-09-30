@@ -56,7 +56,7 @@ test("parsePythonLiteral parses BEAM-style probing dicts", () => {
     "{'fact_recall': [{'question': 'It\\'s about \"x\", cost 42', 'source_chat_ids': [3, 7], 'ok': True, 'missing': None}]}",
   ) as Record<string, Array<Record<string, unknown>>>;
   const entry = parsed["fact_recall"]![0]!;
-  assert.equal(entry["question"], "It's about \"x\", cost 42");
+  assert.equal(entry["question"], 'It\'s about "x", cost 42');
   assert.deepEqual(entry["source_chat_ids"], [3, 7]);
   assert.equal(entry["ok"], true);
   assert.equal(entry["missing"], null);

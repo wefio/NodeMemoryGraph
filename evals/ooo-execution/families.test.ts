@@ -59,9 +59,7 @@ for (const family of FAMILIES) {
       Object.values(fine.units)
         .flatMap((unit) => unit.editable)
         .sort(),
-      coarse.units[family.coarseUnit]!
-        .editable.slice()
-        .sort(),
+      coarse.units[family.coarseUnit]!.editable.slice().sort(),
       "the fine plan's units cover exactly the files the coarse unit may edit",
     );
   });
@@ -75,7 +73,11 @@ for (const family of FAMILIES) {
     const seen: { name: string; slots: number; units: number; host: number }[] = [];
     for (const arm of arms) {
       const run = await runPlan(specFrom(arm.file, cannedWorker(arm.file), arm.slots));
-      assert.deepEqual(run.incomplete, [], `${arm.name}/${arm.slots}: ${run.incomplete.join("; ")}`);
+      assert.deepEqual(
+        run.incomplete,
+        [],
+        `${arm.name}/${arm.slots}: ${run.incomplete.join("; ")}`,
+      );
       assert.deepEqual(
         run.units.map((unit) => unit.verdict),
         run.units.map(() => "accepted"),
@@ -88,7 +90,12 @@ for (const family of FAMILIES) {
           "frozen copies of its siblings",
       );
       assert.equal(run.units.length, arm.units);
-      seen.push({ name: arm.name, slots: arm.slots, units: run.units.length, host: run.hostChecks });
+      seen.push({
+        name: arm.name,
+        slots: arm.slots,
+        units: run.units.length,
+        host: run.hostChecks,
+      });
     }
     // The composed acceptance is the same one in both plans - the same frozen checks over the same
     // frozen files - so the granularity is the only thing the arms differ in.

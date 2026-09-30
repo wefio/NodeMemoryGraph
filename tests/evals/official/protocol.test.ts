@@ -11,10 +11,7 @@ import {
   normalizedKendallTauB,
   personaMemCorrect,
 } from "../../../evals/official/protocol.ts";
-import {
-  officialPythonExecutable,
-  probePython,
-} from "../../../evals/official/python.ts";
+import { officialPythonExecutable, probePython } from "../../../evals/official/python.ts";
 
 test("PersonaMem uses the official single-option extraction rule", () => {
   assert.equal(personaMemCorrect("<final_answer>(b)</final_answer>", "(b)"), true);
@@ -23,12 +20,14 @@ test("PersonaMem uses the official single-option extraction rule", () => {
 });
 
 test("LongMemEval protocol preserves update and abstention instructions", () => {
-  assert.match(longMemEvalJudgePrompt(
-    "knowledge-update", "Q", "A", "H", false,
-  ), /previous information.*updated answer/su);
-  assert.match(longMemEvalJudgePrompt(
-    "single-session-user", "Q", "A", "H", true,
-  ), /unanswerable question/u);
+  assert.match(
+    longMemEvalJudgePrompt("knowledge-update", "Q", "A", "H", false),
+    /previous information.*updated answer/su,
+  );
+  assert.match(
+    longMemEvalJudgePrompt("single-session-user", "Q", "A", "H", true),
+    /unanswerable question/u,
+  );
 });
 
 test("BEAM protocol includes the official rubric inputs and score scale", () => {
@@ -50,10 +49,7 @@ test("BEAM event ordering uses normalized Kendall tau-b", () => {
   assert.equal(normalizedKendallTauB([0, 1, 2], [2, 1, 0]), 0);
   const partial = normalizedKendallTauB([0, 1, 2], [0, 2]);
   assert.ok(partial > 0 && partial < 1);
-  assert.equal(
-    normalizedKendallTauB([0, 1, 2], [3]),
-    0.1464466094067262,
-  );
+  assert.equal(normalizedKendallTauB([0, 1, 2], [3]), 0.1464466094067262);
 });
 
 test("LoCoMo bridge invokes the pinned official scorer when bootstrapped", (context) => {
@@ -75,22 +71,24 @@ test("LoCoMo bridge invokes the pinned official scorer when bootstrapped", (cont
   }
   const result = spawnSync(python, [resolve(root, "evals/official/locomo_score.py")], {
     cwd: root,
-    input: JSON.stringify({ qas: [
-      {
-        answer: "tea",
-        category: 2,
-        evidence: ["d1"],
-        prediction: "Tea",
-        prediction_context: ["d1"],
-      },
-      {
-        answer: "coffee",
-        category: 2,
-        evidence: ["d2"],
-        prediction: "Coffee",
-        prediction_context: [],
-      },
-    ] }),
+    input: JSON.stringify({
+      qas: [
+        {
+          answer: "tea",
+          category: 2,
+          evidence: ["d1"],
+          prediction: "Tea",
+          prediction_context: ["d1"],
+        },
+        {
+          answer: "coffee",
+          category: 2,
+          evidence: ["d2"],
+          prediction: "Coffee",
+          prediction_context: [],
+        },
+      ],
+    }),
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);

@@ -1,14 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { execFileSync } from "node:child_process";
-import {
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-  readdirSync,
-  existsSync,
-} from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,13 +12,7 @@ import { fileURLToPath } from "node:url";
 // search/dataset artifact and asserts selection rule + run-dir uniqueness.
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const CANARY = join(
-  REPO_ROOT,
-  "evals",
-  "omnimemeval",
-  "research",
-  "context-live-canary.py",
-);
+const CANARY = join(REPO_ROOT, "evals", "omnimemeval", "research", "context-live-canary.py");
 
 const PYTHON = process.env.PYTHON || "python";
 
@@ -65,19 +52,25 @@ test("research canary: dry-run selection follows order-first rule and filters ca
     writeFileSync(searchFile, JSON.stringify(search));
 
     const dataset = Array.from({ length: 6 }, () => ({ qa: [] as unknown[] }));
-    (dataset[0].qa as { question: string; answer: string; category: string }[]).push(
-      { question: "q0", answer: "a0", category: "2" },
-    );
+    (dataset[0].qa as { question: string; answer: string; category: string }[]).push({
+      question: "q0",
+      answer: "a0",
+      category: "2",
+    });
     (dataset[1].qa as { question: string; answer: string; category: string }[]).push(
       { question: "q1_cat5", answer: "a", category: "5" },
       { question: "q1", answer: "a1", category: "3" },
     );
-    (dataset[2].qa as { question: string; answer: string; category: string }[]).push(
-      { question: "q2", answer: "a2", category: "4" },
-    );
-    (dataset[3].qa as { question: string; answer: string; category: string }[]).push(
-      { question: "q3", answer: "a3", category: "1" },
-    );
+    (dataset[2].qa as { question: string; answer: string; category: string }[]).push({
+      question: "q2",
+      answer: "a2",
+      category: "4",
+    });
+    (dataset[3].qa as { question: string; answer: string; category: string }[]).push({
+      question: "q3",
+      answer: "a3",
+      category: "1",
+    });
     const datasetFile = join(dir, "locomo10.json");
     writeFileSync(datasetFile, JSON.stringify(dataset));
 

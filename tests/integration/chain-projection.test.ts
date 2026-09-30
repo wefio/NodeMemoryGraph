@@ -2,26 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { MemoryContext } from "../../src/core/types.ts";
+import { searchResultFixture } from "../helpers/search-result.ts";
 import { projectLogicalChains } from "../../src/integration/chain-projection.ts";
 
 function logicalChainContext(): MemoryContext {
   const chainId = "logical-merge";
-  const result = (id: string, statement: string, position: number) =>
-    ({
-      memory: {
-        id,
-        statement,
-        memoryType: "fact",
-        tier: 1,
-        truthStatus: "asserted",
-        scope: { project: "atlas" },
-      },
-      node: { canonicalName: `Atlas ${id}` },
-      evidence: { content: statement },
-      chainMemberships: [
-        { chainId, position, chainType: "logical", topic: "Atlas merge evidence" },
-      ],
-    }) as MemoryContext["results"][number];
+  const result = (id: string, statement: string, position: number) => ({
+    ...searchResultFixture(id, statement),
+    chainMemberships: [
+      { chainId, position, chainType: "logical" as const, topic: "Atlas merge evidence" },
+    ],
+  });
 
   return {
     results: [

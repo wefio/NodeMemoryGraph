@@ -61,7 +61,8 @@ export function parsePromotionVotes(
   const fenced = /```(?:json)?\s*(\{[\s\S]*\})\s*```/iu.exec(raw.trim());
   const source = fenced?.[1] ?? raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1);
   const parsed = JSON.parse(source) as { votes?: unknown };
-  if (!Array.isArray(parsed.votes)) throw new Error("promotion audit response must contain votes[]");
+  if (!Array.isArray(parsed.votes))
+    throw new Error("promotion audit response must contain votes[]");
   const seen = new Set<string>();
   return parsed.votes.map((value, index) => {
     const row = value as Record<string, unknown>;
@@ -79,7 +80,8 @@ export function parsePromotionVotes(
     const attributable = dialogue.some(
       (turn) => turn.role === "user" && turn.content.includes(evidence),
     );
-    if (!attributable) throw new Error(`vote evidence is not an exact user excerpt: ${candidateId}`);
+    if (!attributable)
+      throw new Error(`vote evidence is not an exact user excerpt: ${candidateId}`);
     seen.add(candidateId);
     return { candidateId, outcome, evidence };
   });
@@ -107,9 +109,7 @@ async function main(): Promise<void> {
   const output = resolve(
     args.output ?? ".benchmarks/halumem-nmg/results/promotion-qualified-extractions.jsonl",
   );
-  const reportPath = resolve(
-    args.report ?? ".benchmarks/halumem-nmg/results/promotion-audit.json",
-  );
+  const reportPath = resolve(args.report ?? ".benchmarks/halumem-nmg/results/promotion-audit.json");
   const cacheDir = resolve(args.cacheDir ?? ".benchmarks/halumem-nmg/promotion-cache");
   const dataDir = resolve(args.dataDir ?? ".benchmarks/halumem-nmg/promotion-store");
   const originStart = positive(args.originStart, 1);
@@ -129,7 +129,9 @@ async function main(): Promise<void> {
   const users = readFileSync(input, "utf8")
     .split(/\r?\n/u)
     .filter(Boolean)
-    .map((line) => JSON.parse(line) as { uuid: string; sessions: Array<{ dialogue: DialogueTurn[] }> });
+    .map(
+      (line) => JSON.parse(line) as { uuid: string; sessions: Array<{ dialogue: DialogueTurn[] }> },
+    );
   const user = users[positive(args.user, 1) - 1];
   if (!user) throw new Error("requested user does not exist");
   const extractionRows = readFileSync(extractionsPath, "utf8")
@@ -208,7 +210,9 @@ async function main(): Promise<void> {
         session,
       });
       for (const vote of votes) {
-        candidates.find((candidate) => candidate.candidateId === vote.candidateId)!.votes.push(vote);
+        candidates
+          .find((candidate) => candidate.candidateId === vote.candidateId)!
+          .votes.push(vote);
       }
       const byOrigin = new Map<number, CandidateVote[]>();
       for (const vote of votes) {
@@ -279,13 +283,17 @@ async function main(): Promise<void> {
       .map((row) => ({
         ...row,
         memories:
-          row.sessionIndex >= originStart
-            ? (qualifiedBySession.get(row.sessionIndex) ?? [])
-            : [],
+          row.sessionIndex >= originStart ? (qualifiedBySession.get(row.sessionIndex) ?? []) : [],
       }));
-    writeFileSync(output, `${qualifiedRows.map((row) => JSON.stringify(row)).join("\n")}\n`, "utf8");
+    writeFileSync(
+      output,
+      `${qualifiedRows.map((row) => JSON.stringify(row)).join("\n")}\n`,
+      "utf8",
+    );
     writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
-    process.stdout.write(`${JSON.stringify({ ...report, candidates: undefined, output, report: reportPath }, null, 2)}\n`);
+    process.stdout.write(
+      `${JSON.stringify({ ...report, candidates: undefined, output, report: reportPath }, null, 2)}\n`,
+    );
   } finally {
     service.close();
   }
@@ -306,7 +314,10 @@ async function auditSession(input: {
     statement: candidate.memory.statement,
   }));
   const payload = JSON.stringify({ candidates: candidatePayload, userMessages: userDialogue });
-  const cachePath = resolve(input.cacheDir, `${digest(`${input.model}\0${SYSTEM_PREFIX}\0${payload}`)}.json`);
+  const cachePath = resolve(
+    input.cacheDir,
+    `${digest(`${input.model}\0${SYSTEM_PREFIX}\0${payload}`)}.json`,
+  );
   if (existsSync(cachePath)) return JSON.parse(readFileSync(cachePath, "utf8")) as CandidateVote[];
   const response = await fetch(`${input.baseUrl}/chat/completions`, {
     method: "POST",
@@ -323,7 +334,9 @@ async function auditSession(input: {
     }),
   });
   if (!response.ok) throw new Error(`promotion audit failed with HTTP ${response.status}`);
-  const body = (await response.json()) as { choices?: Array<{ message?: { content?: string | null } }> };
+  const body = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string | null } }>;
+  };
   const votes = parsePromotionVotes(
     body.choices?.[0]?.message?.content ?? "",
     new Set(input.candidates.map((candidate) => candidate.candidateId)),

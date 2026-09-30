@@ -1,10 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const BENCHMARK_SECRET_KEYS = new Set([
-  "DEEPSEEK_API_KEY",
-  "OPENCODE_API_KEY",
-]);
+const BENCHMARK_SECRET_KEYS = new Set(["DEEPSEEK_API_KEY", "OPENCODE_API_KEY"]);
 
 /**
  * Load only benchmark model credentials from the repository-local ignored

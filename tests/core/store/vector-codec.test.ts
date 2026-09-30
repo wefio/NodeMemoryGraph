@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  encodeVector,
-  parseVector,
-  storedVector,
-} from "../../../src/core/store/vector-codec.ts";
+import { encodeVector, parseVector, storedVector } from "../../../src/core/store/vector-codec.ts";
 
 test("encodeVector and parseVector round-trip through float32", () => {
   const original = [0.5, -0.25, 1, 0];
@@ -25,7 +21,7 @@ test("parseVector returns empty for malformed or absent values", () => {
   assert.deepEqual(parseVector("not json"), []);
   assert.deepEqual(parseVector(null), []);
   assert.deepEqual(parseVector(undefined), []);
-  assert.deepEqual(parseVector("[1,\"x\",null,2]"), [1, 2]);
+  assert.deepEqual(parseVector('[1,"x",null,2]'), [1, 2]);
 });
 
 test("storedVector prefers the binary column over legacy JSON", () => {

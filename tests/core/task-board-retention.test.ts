@@ -52,7 +52,6 @@ function expiredEntry(store: NmgStore, content = "an entry that is past its TTL"
     now: WHEN_LIVE,
   });
   store.acknowledgeTaskBoardEntry({
-    taskId: "retention-channel",
     entryId: entry.id,
     agentId: "scout-b",
     now: WHEN_LIVE,

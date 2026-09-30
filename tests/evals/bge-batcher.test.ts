@@ -8,7 +8,7 @@ const repoRoot = resolve(import.meta.dirname, "..", "..");
 const gpuPython = resolve(repoRoot, ".benchmarks", "bge-venv", "Scripts", "python.exe");
 const python = existsSync(gpuPython)
   ? gpuPython
-  : process.env.PYTHON ?? (process.platform === "win32" ? "python" : "python3");
+  : (process.env.PYTHON ?? (process.platform === "win32" ? "python" : "python3"));
 
 function runPython(source: string) {
   return spawnSync(python, ["-c", source], {

@@ -99,9 +99,7 @@ export function auditTopologyGate(cases: readonly BenchmarkCase[]): TopologyGate
         if (assessment.eligible) eligibleCrossPersonCandidates += 1;
       }
 
-      for (const [index, candidate] of discovered.filter(
-        (item) => !item.sameSpeaker,
-      ).entries()) {
+      for (const [index, candidate] of discovered.filter((item) => !item.sameSpeaker).entries()) {
         const early = people.find((person) => person.speaker === candidate.earlySpeaker)!;
         const late = people.find((person) => person.speaker === candidate.lateSpeaker)!;
         naturalFalseMergesAttempted += 1;
@@ -219,9 +217,15 @@ function buildPersonFragments(
   sampleId: string,
   sessions: readonly BenchmarkSession[],
 ): PersonFragments[] {
-  const speakers = [...new Set(sessions.flatMap((session) =>
-    session.turns.map((turn) => turn.speaker).filter((speaker): speaker is string => Boolean(speaker))
-  ))];
+  const speakers = [
+    ...new Set(
+      sessions.flatMap((session) =>
+        session.turns
+          .map((turn) => turn.speaker)
+          .filter((speaker): speaker is string => Boolean(speaker)),
+      ),
+    ),
+  ];
   return speakers.flatMap((speaker) => {
     const midpoint = Math.max(1, Math.floor(sessions.length / 2));
     const earlyTurns = turnsForSpeaker(sessions.slice(0, midpoint), speaker).slice(0, 3);
@@ -230,21 +234,29 @@ function buildPersonFragments(
     // One scoped identity dimension is deliberate: the conversation prefix
     // prevents same-name speakers in different samples from sharing identity.
     const scope = { person: `${sampleId}:${speaker}` };
-    return [{
-      speaker,
-      early: earlyTurns.map((turn, index) => store.remember({
-        statement: turn.content,
-        nodeName: `${sampleId}:${speaker}:early`,
-        scope,
-        sourceRef: turn.sourceId ?? `${sampleId}:${speaker}:early:${index}`,
-      }).memory),
-      late: lateTurns.map((turn, index) => store.remember({
-        statement: turn.content,
-        nodeName: `${sampleId}:${speaker}:late`,
-        scope,
-        sourceRef: turn.sourceId ?? `${sampleId}:${speaker}:late:${index}`,
-      }).memory),
-    }];
+    return [
+      {
+        speaker,
+        early: earlyTurns.map(
+          (turn, index) =>
+            store.remember({
+              statement: turn.content,
+              nodeName: `${sampleId}:${speaker}:early`,
+              scope,
+              sourceRef: turn.sourceId ?? `${sampleId}:${speaker}:early:${index}`,
+            }).memory,
+        ),
+        late: lateTurns.map(
+          (turn, index) =>
+            store.remember({
+              statement: turn.content,
+              nodeName: `${sampleId}:${speaker}:late`,
+              scope,
+              sourceRef: turn.sourceId ?? `${sampleId}:${speaker}:late:${index}`,
+            }).memory,
+        ),
+      },
+    ];
   });
 }
 
@@ -273,7 +285,10 @@ function repeatedProposal(
   return proposalId;
 }
 
-function countReasons(counts: Record<string, number>, assessment: TopologyAutomationAssessment): void {
+function countReasons(
+  counts: Record<string, number>,
+  assessment: TopologyAutomationAssessment,
+): void {
   for (const reason of assessment.reasons) counts[reason] = (counts[reason] ?? 0) + 1;
 }
 

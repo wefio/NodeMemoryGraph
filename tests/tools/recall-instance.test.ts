@@ -150,13 +150,24 @@ test("instancesSurfacing finds recalls whose retrieval surfaced a memory", () =>
     ],
   };
   const matches = instancesSurfacing([withM2, instance("g2")], "m2");
-  assert.deepEqual(matches.map((match) => match.activeGraphId), ["g1"]);
+  assert.deepEqual(
+    matches.map((match) => match.activeGraphId),
+    ["g1"],
+  );
 });
 
 test("summarizeLabels counts remember-settled labels like any label", () => {
-  const labeled = applyRecallLabels([instance("g1")], [
-    { activeGraphId: "g1", label: "on_target", source: "remember", at: "2026-09-07T00:00:00.000Z" },
-  ]);
+  const labeled = applyRecallLabels(
+    [instance("g1")],
+    [
+      {
+        activeGraphId: "g1",
+        label: "on_target",
+        source: "remember",
+        at: "2026-09-07T00:00:00.000Z",
+      },
+    ],
+  );
   const summary = summarizeLabels(labeled);
   assert.equal(summary.labeled, 1);
   assert.equal(summary.precision, 1);
@@ -168,7 +179,10 @@ test("recordLabel writes a valid agent judgement and rejects an invalid one", ()
     assert.equal(recordLabel(dir, "g1", "noise"), true);
     assert.equal(recordLabel(dir, "g1", "bogus"), false);
     const entries = readRecallLabels(recallLabelsPath(dir));
-    assert.deepEqual(entries.map((entry) => entry.label), ["noise"]);
+    assert.deepEqual(
+      entries.map((entry) => entry.label),
+      ["noise"],
+    );
     assert.equal(entries[0]?.source, "judge");
   } finally {
     rmSync(dir, { recursive: true, force: true });

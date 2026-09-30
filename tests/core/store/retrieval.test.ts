@@ -78,7 +78,10 @@ test("lexical tie-break keeps Active Graph selection order aligned with returned
     );
     const trace = store.retrievalTrace(context.activeGraph.id);
     assert.deepEqual(trace?.resultMemoryIds, context.activeGraph.memoryIds);
-    assert.deepEqual(trace?.selections?.map((selection) => selection.memoryId), context.activeGraph.memoryIds);
+    assert.deepEqual(
+      trace?.selections?.map((selection) => selection.memoryId),
+      context.activeGraph.memoryIds,
+    );
   });
 });
 

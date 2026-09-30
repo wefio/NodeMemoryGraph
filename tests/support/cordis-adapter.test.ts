@@ -22,10 +22,20 @@ test("Cordis adapter disposes registered effects in reverse order", async () => 
   const runtime = adapter.createTestRuntime();
 
   await runtime.use((scope) => {
-    scope.effect(() => () => events.push("first"), "first");
+    scope.effect(
+      () => () => {
+        events.push("first");
+      },
+      "first",
+    );
   });
   await runtime.use((scope) => {
-    scope.effect(() => () => events.push("second"), "second");
+    scope.effect(
+      () => () => {
+        events.push("second");
+      },
+      "second",
+    );
   });
 
   await runtime.dispose();

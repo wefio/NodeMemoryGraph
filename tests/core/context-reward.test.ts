@@ -29,8 +29,7 @@ test("RSCB invariant: false positive is the worst outcome", () => {
   const fp = contextUseReward("falsePositive", "retrieve");
   for (const outcome of OUTCOMES) {
     if (outcome === "falsePositive") continue;
-    const action =
-      outcome === "correctAbstain" ? "none" : ("retrieve" as const);
+    const action = outcome === "correctAbstain" ? "none" : ("retrieve" as const);
     assert.ok(
       fp < contextUseReward(outcome, action),
       `falsePositive (${fp}) should beat ${outcome} (${contextUseReward(outcome, action)})`,
@@ -99,10 +98,7 @@ test("feedback labels with no usable signal map to null, never a silent vote", (
   assert.equal(contextOutcomeFromFeedback({}), null);
   assert.equal(contextOutcomeFromFeedback({ taskSuccess: false }), null);
   assert.equal(contextOutcomeFromFeedback({ expansionUseful: true }), null);
-  assert.equal(
-    contextOutcomeFromFeedback({ taskSuccess: false, expansionUseful: false }),
-    null,
-  );
+  assert.equal(contextOutcomeFromFeedback({ taskSuccess: false, expansionUseful: false }), null);
   // Contradictory: sufficient evidence yet the task failed -> no vote.
   assert.equal(contextOutcomeFromFeedback({ evidenceSufficient: true, taskSuccess: false }), null);
 });

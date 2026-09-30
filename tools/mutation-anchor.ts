@@ -285,16 +285,16 @@ function collect<T extends ts.Node>(root: ts.Node, isWanted: (node: ts.Node) => 
  *  => ...` or `claim: (store, parsed) => ...` names one function, and whether the formatter wrote it as
  *  a declaration is not a fact about which rules live inside it. */
 function uniqueMember(source: ts.SourceFile, name: string): ts.Node | { reason: string } {
-  const bound = (node: ts.Node, initializer: ts.Expression | undefined): boolean =>
+  const bound = (initializer: ts.Expression | undefined): boolean =>
     initializer !== undefined &&
     (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer));
   const boundFunction = (node: ts.Node): boolean =>
     (ts.isVariableDeclaration(node) &&
       node.name.getText(source) === name &&
-      bound(node, node.initializer)) ||
+      bound(node.initializer)) ||
     (ts.isPropertyAssignment(node) &&
       node.name.getText(source) === name &&
-      bound(node, node.initializer));
+      bound(node.initializer));
   const named = (node: ts.Node): boolean =>
     ((ts.isMethodDeclaration(node) || ts.isFunctionDeclaration(node)) &&
       node.name?.getText(source) === name) ||
@@ -944,7 +944,7 @@ const RESOLVERS: Readonly<Record<Derive["operator"], Resolver>> = {
  */
 function deriveSite(
   text: string,
-  derive: Scoped,
+  derive: Derive,
   to: string | undefined,
 ): Site | { reason: string } {
   const source = ts.createSourceFile("mutant.ts", text, ts.ScriptTarget.Latest, true);

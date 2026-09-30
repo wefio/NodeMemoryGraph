@@ -76,7 +76,7 @@ test("an ordinary handoff reaches the shared semantics, runs, is accepted, and r
 
     // The worker is the caller's own code. Here it delivers a patch whose digest is the one the
     // claim froze, which is the only envelope the board accepts for a patch task.
-    const delivery = (taskId: string, ticket: BoardTicket, path: string, content: string) =>
+    const delivery = (_taskId: string, ticket: BoardTicket, path: string, content: string) =>
       JSON.stringify({ digest: ticket.inputDigest, files: [{ path, content }] });
 
     const ticketB = gate.claim("B", "worker-one") as BoardTicket;

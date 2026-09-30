@@ -7,7 +7,7 @@
  * every query touching that table.
  */
 
-export function parseStringArray(value: string | number | Uint8Array | null): string[] {
+export function parseStringArray(value: string | number | bigint | Uint8Array | null): string[] {
   if (typeof value !== "string") return [];
   try {
     const parsed = JSON.parse(value) as unknown;

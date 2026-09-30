@@ -68,9 +68,8 @@ test("daemon protocol guard accepts the current compatibility epoch", () => {
 });
 
 test("same-epoch capability additions do not affect protocol compatibility", () => {
-  assert.doesNotThrow(() =>
-    assertDaemonProtocol({ protocol: NMG_PROTOCOL_VERSION, capabilities: ["future-feature"] }),
-  );
+  const hello = { protocol: NMG_PROTOCOL_VERSION, capabilities: ["future-feature"] };
+  assert.doesNotThrow(() => assertDaemonProtocol(hello));
 });
 
 test("daemon protocol guard fails closed with restart guidance", () => {

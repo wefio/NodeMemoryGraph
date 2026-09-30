@@ -33,7 +33,9 @@ test("SkillOpt policy dataset keeps whole tasks split and excludes memory conten
     noise_labels: 2,
   });
   assert.deepEqual(
-    new Set(dataset.items.filter((item) => item.semantic_task_id === "task-a").map((item) => item.split)),
+    new Set(
+      dataset.items.filter((item) => item.semantic_task_id === "task-a").map((item) => item.split),
+    ),
     new Set(["train"]),
   );
   assert.deepEqual(
@@ -235,6 +237,7 @@ function eventsFor(
     expansionUseful,
     excessiveNoise,
     noMemoryNeeded,
+    memoryMisleading: null,
   };
   return [retrieval, feedback];
 }

@@ -12,23 +12,17 @@ const packageJson = JSON.parse(
 };
 
 test("Pi harness stays an optional adapter peer instead of a runtime dependency", () => {
-  assert.equal(
-    packageJson.dependencies?.["@earendil-works/pi-coding-agent"],
-    undefined,
-  );
+  assert.equal(packageJson.dependencies?.["@earendil-works/pi-coding-agent"], undefined);
   assert.ok(packageJson.devDependencies?.["@earendil-works/pi-coding-agent"]);
   assert.ok(packageJson.peerDependencies?.["@earendil-works/pi-coding-agent"]);
   assert.equal(
-    packageJson.peerDependenciesMeta?.["@earendil-works/pi-coding-agent"]
-      ?.optional,
+    packageJson.peerDependenciesMeta?.["@earendil-works/pi-coding-agent"]?.optional,
     true,
   );
 });
 
 test("the standalone TUI uses the Pi harness-compatible pi-tui line", () => {
-  const harnessVersion = packageJson.devDependencies?.[
-    "@earendil-works/pi-coding-agent"
-  ];
+  const harnessVersion = packageJson.devDependencies?.["@earendil-works/pi-coding-agent"];
   const tuiVersion = packageJson.dependencies?.["@earendil-works/pi-tui"];
 
   assert.equal(harnessVersion, "^0.99.1");

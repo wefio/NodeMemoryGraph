@@ -22,9 +22,7 @@ export interface AgentRunTelemetry {
  * turn. Token usage is the sum of every assistant message in the prompt so
  * retries and multi-turn tool loops are not silently dropped.
  */
-export function collectAgentRunTelemetry(
-  events: readonly AgentSessionEvent[],
-): AgentRunTelemetry {
+export function collectAgentRunTelemetry(events: readonly AgentSessionEvent[]): AgentRunTelemetry {
   const tokenUsage: AgentTokenUsage = {
     input: 0,
     output: 0,

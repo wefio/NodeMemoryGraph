@@ -8,6 +8,9 @@ export function alphaSection(rows: readonly string[]): Section {
   return {
     id: "alpha",
     title: "Alpha",
-    lines: rows.filter((row) => row !== "").slice().sort(),
+    lines: rows
+      .filter((row) => row !== "")
+      .slice()
+      .sort(),
   };
 }

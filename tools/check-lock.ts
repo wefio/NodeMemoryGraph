@@ -19,7 +19,15 @@ const manifest = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"))
   peerDependencies?: Record<string, string>;
 };
 const lock = JSON.parse(readFileSync(resolve(root, "package-lock.json"), "utf8")) as {
-  packages?: Record<string, { dependencies?: Record<string, string>; devDependencies?: Record<string, string>; optionalDependencies?: Record<string, string>; peerDependencies?: Record<string, string> }>;
+  packages?: Record<
+    string,
+    {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+    }
+  >;
 };
 
 const lockRoot = lock.packages?.[""];
@@ -41,15 +49,22 @@ if (!lockRoot) {
   };
   const drift: string[] = [];
   for (const [name, spec] of Object.entries(expected)) {
-    if (locked[name] !== spec) drift.push(`${name}: package.json "${spec}" != lock "${locked[name] ?? "(missing)"}"`);
+    if (locked[name] !== spec)
+      drift.push(`${name}: package.json "${spec}" != lock "${locked[name] ?? "(missing)"}"`);
   }
   for (const name of Object.keys(locked)) {
     if (!(name in expected)) drift.push(`${name}: present in lock but not in package.json`);
   }
   if (drift.length > 0) {
-    process.stderr.write("check:lock — package-lock.json is stale; run `npm install --package-lock-only`:\n" + drift.map((line) => `  - ${line}`).join("\n") + "\n");
+    process.stderr.write(
+      "check:lock — package-lock.json is stale; run `npm install --package-lock-only`:\n" +
+        drift.map((line) => `  - ${line}`).join("\n") +
+        "\n",
+    );
     process.exitCode = 1;
   } else {
-    process.stdout.write(`check:lock ok: ${Object.keys(expected).length} root dependency specifiers match package-lock.json\n`);
+    process.stdout.write(
+      `check:lock ok: ${Object.keys(expected).length} root dependency specifiers match package-lock.json\n`,
+    );
   }
 }

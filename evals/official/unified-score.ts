@@ -36,7 +36,12 @@ export function scoreEvidenceIds(
   retrievedIds: readonly string[] | null | undefined,
   expectedIds: readonly string[] | null | undefined,
 ): UnifiedEvidenceScore | null {
-  if (!expectedIds || expectedIds.length === 0 || retrievedIds === null || retrievedIds === undefined) {
+  if (
+    !expectedIds ||
+    expectedIds.length === 0 ||
+    retrievedIds === null ||
+    retrievedIds === undefined
+  ) {
     return null;
   }
   const expected = new Set(expectedIds);

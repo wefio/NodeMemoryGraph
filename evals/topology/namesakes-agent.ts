@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
 
 import { RpcClient } from "@earendil-works/pi-coding-agent";
-import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { JsonAgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 import { cosineSimilarity, HashingVectorEmbedder } from "../../src/core/vector.ts";
 import { benchmarkIsolationArgs, counterbalancedOrder } from "../benchmarks/matched.ts";
@@ -395,7 +395,7 @@ async function runArm(
   const started = performance.now();
   let rawResponse = "";
   let selectedIds: string[] = [];
-  let events: AgentSessionEvent[] = [];
+  let events: JsonAgentSessionEvent[] = [];
   let error: string | undefined;
   try {
     events = await client.promptAndWait(prompt, undefined, 300_000);
@@ -497,7 +497,7 @@ function normalizeName(value: string): string {
     .replace(/[^a-z0-9]+/gu, "");
 }
 
-function collectTokenUsage(events: readonly AgentSessionEvent[]): TokenUsage | undefined {
+function collectTokenUsage(events: readonly JsonAgentSessionEvent[]): TokenUsage | undefined {
   const total: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
   let found = false;
   for (const event of events) {

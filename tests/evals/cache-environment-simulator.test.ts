@@ -31,7 +31,10 @@ test("fixed-byte chains expose only same-length prefix hashes", () => {
 
   assert.deepEqual(left.checkpoints.slice(0, 2), right.checkpoints.slice(0, 2));
   assert.notEqual(left.requestHash, right.requestHash);
-  assert.deepEqual(left.checkpoints.map((checkpoint) => checkpoint.length), [8, 16, 20]);
+  assert.deepEqual(
+    left.checkpoints.map((checkpoint) => checkpoint.length),
+    [8, 16, 20],
+  );
   assert.ok(!JSON.stringify(left).includes("0123456789abcdef"));
 });
 
@@ -49,10 +52,12 @@ test("requests arriving while a shared prefix is building miss, then a later req
 });
 
 test("expired prefixes no longer count as reusable", () => {
-  const report = simulateCacheEnvironment(
-    [request("a", 0, "aaaa"), request("b", 51, "bbbb")],
-    { ...environment, concurrency: 1, cacheBuildMs: 0, cacheTtlMs: 50 },
-  );
+  const report = simulateCacheEnvironment([request("a", 0, "aaaa"), request("b", 51, "bbbb")], {
+    ...environment,
+    concurrency: 1,
+    cacheBuildMs: 0,
+    cacheTtlMs: 50,
+  });
 
   assert.equal(report.hitRequests, 0);
   assert.equal(report.reusablePrefixBytes, 0);
@@ -75,7 +80,7 @@ test("fake API accepts ordinary chat requests and reports hashes without prompt 
     body,
   });
   assert.equal(completion.status, 200);
-  const completionBody = await completion.json() as {
+  const completionBody = (await completion.json()) as {
     choices: Array<{ message: { content: string } }>;
   };
   assert.equal(completionBody.choices[0]?.message.content, "CACHE_TRACE_ONLY");

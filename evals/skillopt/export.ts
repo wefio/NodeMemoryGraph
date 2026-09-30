@@ -32,7 +32,11 @@ export function exportSkillOptDataset(options: ExportSkillOptOptions): {
     mkdirSync(directory, { recursive: true });
     writeFileSync(
       resolve(directory, "items.json"),
-      `${JSON.stringify(dataset.items.filter((item) => item.split === split), null, 2)}\n`,
+      `${JSON.stringify(
+        dataset.items.filter((item) => item.split === split),
+        null,
+        2,
+      )}\n`,
       "utf8",
     );
   }
@@ -95,7 +99,9 @@ function parseArguments(args: readonly string[]): ExportSkillOptOptions {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
-    process.stdout.write(`${JSON.stringify(exportSkillOptDataset(parseArguments(process.argv.slice(2))), null, 2)}\n`);
+    process.stdout.write(
+      `${JSON.stringify(exportSkillOptDataset(parseArguments(process.argv.slice(2))), null, 2)}\n`,
+    );
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 2;

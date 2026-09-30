@@ -102,7 +102,7 @@ test("a deliverable the host refuses neither accepts nor releases, and the coord
   );
 
   // The coordinator's recovery, then the same task with an artifact the host accepts.
-  gate.reopen("B");
+  gate.reopen("B", "retry the refused attempt");
   verdictB = "accept";
   assert.equal(gate.next(), "B", "the reopened task is selectable again");
   const retry = gate.claim("B", "worker-one") as BoardTicket;
@@ -203,7 +203,7 @@ test("a later refusal does not withdraw the prefix that was already accepted", a
   assert.equal(gate.next(), null, "and the refused task is not re-selected on its own");
 
   // Reopening it and accepting it completes the plan; the prefix was never lost along the way.
-  gate.reopen("A");
+  gate.reopen("A", "retry the refused attempt");
   verdictA = "accept";
   const retry = gate.claim("A", "worker-two") as BoardTicket;
   assert.equal(

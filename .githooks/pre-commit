@@ -19,7 +19,7 @@ set -eu
 # files are excluded: prettier has nothing to format on a path that is gone.
 # Keep only paths under the root Prettier surface.
 files="$(git diff --cached --name-only --diff-filter=ACM -- '*.ts' \
-  | grep -E '^(src|\\.pi|workbuddy-plugin)/' || true)"
+  | grep -E '^(src|\\.pi|workbuddy-plugin|tests|evals|scripts|tools)/' || true)"
 [ -z "$files" ] && exit 0
 
 # Format only files still present on disk, then re-stage what prettier rewrote.

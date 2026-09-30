@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { OpenAiCompatibleJudgeClient, createJudgeClientFromEnv } from "../../evals/omnimemeval/judge-provider.ts";
+import {
+  OpenAiCompatibleJudgeClient,
+  createJudgeClientFromEnv,
+} from "../../evals/omnimemeval/judge-provider.ts";
 import type { DuplicateCandidate } from "../../src/core/types.ts";
 
-function candidate(id: string, statement: string, eventTime = "2026-01-01T00:00:00Z"): DuplicateCandidate {
+function candidate(
+  id: string,
+  statement: string,
+  eventTime = "2026-01-01T00:00:00Z",
+): DuplicateCandidate {
   return { memoryId: id, nodeId: "n", statement, eventTime, similarity: 0.3 };
 }
 
@@ -36,13 +43,22 @@ test("judge: supersede decision parsed from model JSON", async () => {
       const body = JSON.parse(String(init?.body));
       assert.equal(body.temperature, 0, "non-thinking mode uses temperature 0");
       assert.ok(!("thinking" in body));
-      return new Response(JSON.stringify({
-        choices: [{ message: { content: JSON.stringify({
-          action: "supersede",
-          supersededMemoryId: "stale-1",
-          reason: "newer value",
-        }) } }],
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  action: "supersede",
+                  supersededMemoryId: "stale-1",
+                  reason: "newer value",
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
     }) as typeof fetch,
   });
   const r = await client.judge({
@@ -63,9 +79,14 @@ test("judge: thinking mode sends DeepSeek reasoning fields, no temperature", asy
     reasoningEffort: "high",
     fetch: (async (_url, init) => {
       sentBody = JSON.parse(String(init?.body));
-      return new Response(JSON.stringify({
-        choices: [{ message: { content: JSON.stringify({ action: "keep", reason: "distinct" }) } }],
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(
+        JSON.stringify({
+          choices: [
+            { message: { content: JSON.stringify({ action: "keep", reason: "distinct" }) } },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
     }) as typeof fetch,
   });
   await client.judge({
@@ -83,9 +104,13 @@ test("judge: code-fenced / malformed model output degrades to keep", async () =>
   const client = new OpenAiCompatibleJudgeClient({
     baseUrl: "https://x.example",
     model: "m",
-    fetch: (async (_url, _init) => new Response(JSON.stringify({
-      choices: [{ message: { content: "```json\n{\"action\":\"merge\",\"memoryId\":\"c1\"}\n```" } }],
-    }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch,
+    fetch: (async (_url, _init) =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '```json\n{"action":"merge","memoryId":"c1"}\n```' } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as typeof fetch,
   });
   const r = await client.judge({
     statement: "s",
@@ -97,9 +122,13 @@ test("judge: code-fenced / malformed model output degrades to keep", async () =>
   const bad = new OpenAiCompatibleJudgeClient({
     baseUrl: "https://x.example",
     model: "m",
-    fetch: (async () => new Response(JSON.stringify({
-      choices: [{ message: { content: "not json at all" } }],
-    }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch,
+    fetch: (async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "not json at all" } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as typeof fetch,
   });
   const r2 = await bad.judge({
     statement: "s",

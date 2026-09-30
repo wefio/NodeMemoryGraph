@@ -25,7 +25,9 @@ const python = resolve(root, ".benchmarks", "python");
 run("uv", ["venv", "--python", "3.11", python]);
 const executable = officialPythonExecutable(root, {}, process.platform);
 run("uv", ["pip", "install", "--python", executable, "regex", "numpy", "nltk"]);
-process.stdout.write(`Official benchmark sources and Python are ready under ${resolve(root, ".benchmarks")}\n`);
+process.stdout.write(
+  `Official benchmark sources and Python are ready under ${resolve(root, ".benchmarks")}\n`,
+);
 
 function run(command: string, args: string[], probe = false): boolean {
   const result = spawnSync(command, args, { cwd: root, stdio: probe ? "ignore" : "inherit" });

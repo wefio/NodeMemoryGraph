@@ -35,12 +35,10 @@ export function mergeLongMemEvalShards(
 if (process.argv[1]?.endsWith("merge-longmemeval-shards.ts")) {
   const [output, ...inputs] = process.argv.slice(2);
   if (!output || inputs.length === 0) {
-    throw new Error(
-      "usage: merge-longmemeval-shards.ts <output.json> <shard.json>...",
-    );
+    throw new Error("usage: merge-longmemeval-shards.ts <output.json> <shard.json>...");
   }
-  const shards = inputs.map((path) =>
-    JSON.parse(readFileSync(resolve(path), "utf8")) as SearchResults
+  const shards = inputs.map(
+    (path) => JSON.parse(readFileSync(resolve(path), "utf8")) as SearchResults,
   );
   const merged = mergeLongMemEvalShards(shards, 500);
   writeFileSync(resolve(output), `${JSON.stringify(merged, null, 2)}\n`);

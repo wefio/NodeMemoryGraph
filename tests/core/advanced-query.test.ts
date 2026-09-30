@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { applyAdvancedFilters, extractEventWindow, parseAdvancedQuery } from "../../src/core/store/advanced-query.ts";
+import {
+  applyAdvancedFilters,
+  extractEventWindow,
+  parseAdvancedQuery,
+} from "../../src/core/store/advanced-query.ts";
 
 function fakeResult(overrides: {
   statement: string;
@@ -66,7 +70,10 @@ test("applyAdvancedFilters filters by type and node", () => {
   const byType = applyAdvancedFilters(results, { types: ["preference"], excludeTerms: [] });
   assert.equal(byType.length, 1);
   assert.equal(byType[0].memory.memoryType, "preference");
-  const byNode = applyAdvancedFilters(results, { nodeNames: ["conversation abc"], excludeTerms: [] });
+  const byNode = applyAdvancedFilters(results, {
+    nodeNames: ["conversation abc"],
+    excludeTerms: [],
+  });
   assert.equal(byNode.length, 1);
   assert.equal(byNode[0].memory.statement, "去过东京");
 });
@@ -82,14 +89,19 @@ test("applyAdvancedFilters filters by time range and exclusions", () => {
     eventTimeFrom: "2026-02-01",
     eventTimeTo: "2026-06-30",
   });
-  assert.deepEqual(ranged.map((r) => r.memory.statement), ["五月去了京都", "订了快餐外卖"]);
+  assert.deepEqual(
+    ranged.map((r) => r.memory.statement),
+    ["五月去了京都", "订了快餐外卖"],
+  );
   const excluded = applyAdvancedFilters(results, { excludeTerms: ["快餐"], types: undefined });
   assert.equal(excluded.length, 2);
   assert.ok(!excluded.some((r) => r.memory.statement.includes("快餐")));
 });
 
 test("extractEventWindow: as of <date> → inclusive through that day", () => {
-  const w = extractEventWindow("What is Martin Mark's current mental health status as of Mar 10, 2029?");
+  const w = extractEventWindow(
+    "What is Martin Mark's current mental health status as of Mar 10, 2029?",
+  );
   assert.equal(w.to, "2029-03-11");
   assert.equal(w.from, undefined);
 });
@@ -101,7 +113,9 @@ test("extractEventWindow: on <date> → that exact day", () => {
 });
 
 test("extractEventWindow: from <d1> to <d2> → range", () => {
-  const w = extractEventWindow("How did Karen's motivation evolve from February 28, 2035, to February 28, 2036?");
+  const w = extractEventWindow(
+    "How did Karen's motivation evolve from February 28, 2035, to February 28, 2036?",
+  );
   assert.equal(w.from, "2035-02-28");
   assert.equal(w.to, "2036-02-29");
 });

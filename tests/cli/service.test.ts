@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
-import { NMG_METHODS, NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
+import { NMG_METHODS, NMG_PROTOCOL_VERSION, type NmgMethodResult } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
 import { columnsForBlocks } from "../../src/core/relevance-features.ts";
 import { NmgStore } from "../../src/core/store.ts";
@@ -481,7 +481,7 @@ test("task board RPC shares temporary coordination without creating semantic mem
       resolution: "Parser review complete.",
     });
     assert.equal(resolved.action, "resolve");
-    if (resolved.action === "read") throw new Error("expected task board resolve result");
+    if (resolved.action !== "resolve") throw new Error("expected task board resolve result");
     assert.equal(resolved.entry.resolvedBy, "agent-b");
 
     const store = new NmgStore(databasePath);
@@ -514,7 +514,7 @@ test("task board acknowledge records a no-reply confirmation visible on read and
 
     // Ack from two collaborators.
     for (const agentId of ["agent-a", "agent-b"]) {
-      const acked = await service.invoke("taskBoard", {
+      const acked: NmgMethodResult["taskBoard"] = await service.invoke("taskBoard", {
         action: "acknowledge",
         taskId: "acks",
         agentId,
@@ -687,6 +687,8 @@ test("remember relation resolution creates a reversible proposal without merging
     assert.deepEqual(resolved.proposal.evidenceMemoryIds, [specific.memory.id, general.memory.id]);
 
     const listed = await service.invoke("topologyProposal", { action: "list" });
+    assert.equal(listed.action, "list");
+    if (listed.action !== "list") throw new Error("expected topology list");
     assert.deepEqual(
       listed.proposals.map((proposal) => proposal.id),
       [resolved.proposal.id],
@@ -695,6 +697,8 @@ test("remember relation resolution creates a reversible proposal without merging
       action: "assess",
       proposalId: resolved.proposal.id,
     });
+    assert.equal(assessment.action, "assess");
+    if (assessment.action !== "assess") throw new Error("expected topology assessment");
     assert.equal(assessment.assessment.proposalId, resolved.proposal.id);
     assert.equal(assessment.assessment.eligible, false);
     const reviewed = await service.invoke("topologyProposal", {
@@ -702,6 +706,8 @@ test("remember relation resolution creates a reversible proposal without merging
       proposalId: resolved.proposal.id,
       decision: "accept",
     });
+    assert.equal(reviewed.action, "review");
+    if (reviewed.action !== "review") throw new Error("expected topology review");
     assert.equal(reviewed.proposal.status, "accepted");
     await assert.rejects(
       service.invoke("topologyProposal", {
@@ -1924,7 +1930,13 @@ test("opt-in embedding auto-sync makes remembered records available to hybrid se
     });
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const status = await service.invoke("status");
-      if (status.embedding.health?.lastSucceededAt) break;
+      if (
+        status.embedding.health &&
+        typeof status.embedding.health === "object" &&
+        "lastSucceededAt" in status.embedding.health &&
+        status.embedding.health.lastSucceededAt
+      )
+        break;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     const searched = await service.invoke("search", {
@@ -1978,7 +1990,13 @@ test("provider presence alone (no AUTO_SYNC env) auto-syncs remembered records t
     });
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const status = await service.invoke("status");
-      if (status.embedding.health?.lastSucceededAt) break;
+      if (
+        status.embedding.health &&
+        typeof status.embedding.health === "object" &&
+        "lastSucceededAt" in status.embedding.health &&
+        status.embedding.health.lastSucceededAt
+      )
+        break;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     const searched = await service.invoke("search", {

@@ -5,5 +5,8 @@
 import type { Step } from "./frozen.ts";
 
 export function normalize(steps: readonly Step[]): Step[] {
-  return steps.filter((step) => step.ms > 0).slice().sort((a, b) => a.name.localeCompare(b.name));
+  return steps
+    .filter((step) => step.ms > 0)
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name));
 }

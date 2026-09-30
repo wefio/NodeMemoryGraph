@@ -1,12 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 
-import type {
-  BenchmarkCase,
-  BenchmarkRole,
-  BenchmarkSession,
-  BenchmarkTurn,
-} from "./types.ts";
+import type { BenchmarkCase, BenchmarkRole, BenchmarkSession, BenchmarkTurn } from "./types.ts";
 
 type JsonObject = Record<string, unknown>;
 
@@ -54,10 +49,7 @@ export function loadLocomo(path: string): BenchmarkCase[] {
   });
 }
 
-export function loadPersonaMem(
-  questionsPath: string,
-  contextsPath: string,
-): BenchmarkCase[] {
+export function loadPersonaMem(questionsPath: string, contextsPath: string): BenchmarkCase[] {
   const contexts = loadPersonaContexts(contextsPath);
   return parseCsv(readFileSync(resolve(questionsPath), "utf8")).map((row) => {
     const contextId = requiredString(row.shared_context_id, "shared_context_id");
@@ -80,10 +72,12 @@ export function loadPersonaMem(
         topic: row.topic,
         correctAnswer: row.correct_answer,
       },
-      sessions: [{
-        id: contextId,
-        turns: selected.map((message, index) => toTurn(message, `${contextId}:${index}`)),
-      }],
+      sessions: [
+        {
+          id: contextId,
+          turns: selected.map((message, index) => toTurn(message, `${contextId}:${index}`)),
+        },
+      ],
     };
   });
 }
@@ -103,7 +97,8 @@ export function loadBeam(chatsDirectory: string): BenchmarkCase[] {
         turns: asArray(value.turns).flatMap((group, groupIndex) =>
           asArray(group).map((message, messageIndex) =>
             toTurn(message, `${chatId}:${batchNumber}:${groupIndex}:${messageIndex}`),
-          )),
+          ),
+        ),
       } satisfies BenchmarkSession;
     });
     const probing = asObject(readJson(probingPath));
@@ -126,31 +121,25 @@ export function loadBeam(chatsDirectory: string): BenchmarkCase[] {
   });
 }
 
-export function stratifiedSample(
-  cases: BenchmarkCase[],
-  perCategory: number,
-): BenchmarkCase[] {
+export function stratifiedSample(cases: BenchmarkCase[], perCategory: number): BenchmarkCase[] {
   const grouped = new Map<string, BenchmarkCase[]>();
   for (const item of cases) {
     const group = grouped.get(item.category) ?? [];
     group.push(item);
     grouped.set(item.category, group);
   }
-  return [...grouped.keys()].sort().flatMap(
-    (category) => grouped.get(category)!.slice(0, perCategory),
-  );
+  return [...grouped.keys()]
+    .sort()
+    .flatMap((category) => grouped.get(category)!.slice(0, perCategory));
 }
 
 function loadPersonaContexts(path: string): Map<string, unknown[]> {
   const result = new Map<string, unknown[]>();
-  for (const [lineIndex, line] of readFileSync(resolve(path), "utf8")
-    .split(/\r?\n/u).entries()) {
+  for (const [lineIndex, line] of readFileSync(resolve(path), "utf8").split(/\r?\n/u).entries()) {
     if (!line.trim()) continue;
     const parsed: unknown = JSON.parse(line);
     if (Array.isArray(parsed)) {
-      const first = parsed[0] && typeof parsed[0] === "object"
-        ? asObject(parsed[0])
-        : {};
+      const first = parsed[0] && typeof parsed[0] === "object" ? asObject(parsed[0]) : {};
       const id = stringValue(first.shared_context_id ?? first.context_id ?? first.id);
       if (!id) throw new Error(`PersonaMem context line ${lineIndex + 1} has no id`);
       result.set(id, parsed);
@@ -176,13 +165,16 @@ function toTurn(value: unknown, sourceId: string): BenchmarkTurn {
   return {
     role: normalizeRole(object.role ?? object.speaker),
     ...(stringValue(object.speaker) ? { speaker: stringValue(object.speaker)! } : {}),
-    content: typeof content === "string"
-      ? content
-      : asArray(content).map((part) => {
-        if (typeof part === "string") return part;
-        const item = asObject(part);
-        return stringValue(item.text) ?? "";
-      }).join("\n"),
+    content:
+      typeof content === "string"
+        ? content
+        : asArray(content)
+            .map((part) => {
+              if (typeof part === "string") return part;
+              const item = asObject(part);
+              return stringValue(item.text) ?? "";
+            })
+            .join("\n"),
     sourceId: stringValue(object.id ?? object.index) ?? sourceId,
     officialMetadata: { ...object },
   };
@@ -224,18 +216,18 @@ function parseCsv(input: string): Record<string, string>[] {
     rows.push(row);
   }
   const headers = rows.shift() ?? [];
-  return rows.map((values) => Object.fromEntries(
-    headers.map((header, index) => [header.replace(/^\uFEFF/u, ""), values[index] ?? ""]),
-  ));
+  return rows.map((values) =>
+    Object.fromEntries(
+      headers.map((header, index) => [header.replace(/^\uFEFF/u, ""), values[index] ?? ""]),
+    ),
+  );
 }
 
 function parseOptions(value: string): string[] | undefined {
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   try {
-    const normalized = trimmed.startsWith("[")
-      ? trimmed.replaceAll("'", '"')
-      : trimmed;
+    const normalized = trimmed.startsWith("[") ? trimmed.replaceAll("'", '"') : trimmed;
     const parsed: unknown = JSON.parse(normalized);
     return Array.isArray(parsed) ? parsed.map(String) : undefined;
   } catch {
@@ -261,9 +253,7 @@ function findFiles(directory: string, name: string): string[] {
   if (!statSync(directory, { throwIfNoEntry: false })?.isDirectory()) return [];
   return readdirSync(directory).flatMap((entry) => {
     const path = join(directory, entry);
-    return statSync(path).isDirectory()
-      ? findFiles(path, name)
-      : entry === name ? [path] : [];
+    return statSync(path).isDirectory() ? findFiles(path, name) : entry === name ? [path] : [];
   });
 }
 
@@ -280,9 +270,7 @@ function asArray(value: unknown): unknown[] {
 }
 
 function asObject(value: unknown): JsonObject {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as JsonObject
-    : {};
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
 }
 
 function stringValue(value: unknown): string | undefined {

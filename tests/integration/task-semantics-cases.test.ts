@@ -67,7 +67,7 @@ test("case 1: a join waits for every dependency, and concurrent candidates never
     artifacts,
     verdicts: facts({ P: "accepted", T: "accepted" }),
   });
-  assert.deepEqual(both.accepted.sort(), ["P", "T"]);
+  assert.deepEqual([...both.accepted].sort(), ["P", "T"]);
   assert.equal(both.ready[0], "J", "only acceptance of both makes the join next");
 
   // Preparation and mergeability are the two halves of this case the finite model does not

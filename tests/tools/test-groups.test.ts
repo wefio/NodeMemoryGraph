@@ -25,6 +25,16 @@ test("research and chaos suites remain explicit execution groups", () => {
   assert.match(packageJson.scripts["test:chaos"], /tests\/chaos/);
 });
 
+test("format and format:check cover the same declared developer TypeScript surfaces", () => {
+  const expected = ["src", ".pi", "workbuddy-plugin", "tests", "evals", "scripts", "tools"].sort();
+  for (const name of ["format", "format:check"]) {
+    const surfaces = [...packageJson.scripts[name]!.matchAll(/"([^"]+)\/\*\*\/\*\.ts"/gu)]
+      .map((match) => match[1]!)
+      .sort();
+    assert.deepEqual(surfaces, expected, `${name} must cover the declared surface`);
+  }
+});
+
 test("the pre-commit formatter surface is the format:check surface", () => {
   // Two surfaces decide which TypeScript Prettier rewrites: the commit hook (staged
   // files, so drift cannot land) and `format:check` (the whole tree, so CI can report
@@ -63,15 +73,32 @@ test("local and CI verification groups share named package contracts", () => {
   assert.match(packageJson.scripts["verify:product-ci"], /test:coverage/);
 });
 
+test("tests-surface type checking is blocking in the shared static contract", () => {
+  const checks = [...packageJson.scripts["verify:static"]!.matchAll(/npm run ([\w:-]+)/gu)].map(
+    (match) => match[1]!,
+  );
+  assert.equal(checks.filter((name) => name === "check:tests").length, 1);
+  const ci = parseYaml(workflow) as {
+    jobs: { static: { steps: { run?: string; "continue-on-error"?: boolean }[] } };
+  };
+  const staticStep = ci.jobs.static.steps.find((step) => step.run === "npm run verify:static");
+  assert.ok(staticStep);
+  assert.notEqual(staticStep["continue-on-error"], true);
+  assert.ok(
+    !ci.jobs.static.steps.some((step) => step.run === "npm run check:tests"),
+    "CI uses the shared contract, not a duplicate advisory type-check step",
+  );
+});
+
 test("agent static checks match the CI contract without nested duplicate execution", () => {
   const context = parseYaml(
     readFileSync(new URL("../../agent-context.yaml", import.meta.url), "utf8"),
   ) as { routes: { id: string; verify: { blocking: string[] } }[] };
   const route = context.routes.find(({ id }) => id === "ci-and-tests");
   assert.ok(route);
-  const staticChecks = [...packageJson.scripts["verify:static"]!.matchAll(/npm run ([\w:-]+)/gu)].map(
-    (match) => match[1]!,
-  );
+  const staticChecks = [
+    ...packageJson.scripts["verify:static"]!.matchAll(/npm run ([\w:-]+)/gu),
+  ].map((match) => match[1]!);
   assert.deepEqual(route.verify.blocking, [...staticChecks, "test:product"]);
   assert.equal(new Set(route.verify.blocking).size, route.verify.blocking.length);
 });

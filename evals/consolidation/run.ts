@@ -95,14 +95,16 @@ export function evaluateLocomoConsolidation(
   }
   const counts = [...uses.values()];
   const eligible = counts.filter((supported) =>
-    consolidationEligible(posteriorAfterOutcomes(priorConfidence, supported, 0), policy)
+    consolidationEligible(posteriorAfterOutcomes(priorConfidence, supported, 0), policy),
   );
   const repeated = counts.filter((count) => count >= policy.minimumIndependentVotes);
   const reversal = eligible.map((supported) =>
-    contradictionsToRetract(priorConfidence, supported, policy)
+    contradictionsToRetract(priorConfidence, supported, policy),
   );
   const reversalHistogram = Object.fromEntries(
-    [...new Set(reversal)].sort(numberOrNull).map((count) => [String(count), reversal.filter((x) => x === count).length]),
+    [...new Set(reversal)]
+      .sort(numberOrNull)
+      .map((count) => [String(count), reversal.filter((x) => x === count).length]),
   );
   return {
     protocol: "nmg.stg-consolidation-locomo.v1",
@@ -160,5 +162,7 @@ function dataPath(): string {
 
 if (import.meta.url === `file:///${process.argv[1]?.replaceAll("\\", "/")}`) {
   const policy = configuredStgConsolidationPolicy(process.env);
-  process.stdout.write(`${JSON.stringify(evaluateLocomoConsolidation(dataPath(), 0.5, policy), null, 2)}\n`);
+  process.stdout.write(
+    `${JSON.stringify(evaluateLocomoConsolidation(dataPath(), 0.5, policy), null, 2)}\n`,
+  );
 }

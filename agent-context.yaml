@@ -143,6 +143,7 @@ routes:
         - build
         - package:check
         - check
+        - check:tests
         - mutation:anchors
         - check:lock
         - lint

@@ -50,11 +50,13 @@ export function calibrateRollingTau(
   const baseline = evaluate(validation, previousThreshold);
   const candidate = evaluate(validation, threshold);
   const blockers: string[] = [];
-  if (usable.length < MIN_TOTAL_ROWS) blockers.push(`requires at least ${MIN_TOTAL_ROWS} labelled rows`);
+  if (usable.length < MIN_TOTAL_ROWS)
+    blockers.push(`requires at least ${MIN_TOTAL_ROWS} labelled rows`);
   if (validation.length < MIN_VALIDATION_ROWS) {
     blockers.push(`requires at least ${MIN_VALIDATION_ROWS} held-out rows`);
   }
-  if (!hasBothLabels(train)) blockers.push("training window requires positive and negative expansion labels");
+  if (!hasBothLabels(train))
+    blockers.push("training window requires positive and negative expansion labels");
   if (!hasBothLabels(validation)) {
     blockers.push("held-out window requires positive and negative expansion labels");
   }
@@ -86,7 +88,11 @@ export function calibrateRollingTau(
 function bestThreshold(rows: readonly ShadowDatasetRow[], fallback: number): number {
   if (!rows.length || !hasBothLabels(rows)) return fallback;
   const scores = [...new Set(rows.map(qpp))].sort((left, right) => left - right);
-  const candidates = [0, ...scores.map((score, index) => (score + (scores[index + 1] ?? 1)) / 2), 1];
+  const candidates = [
+    0,
+    ...scores.map((score, index) => (score + (scores[index + 1] ?? 1)) / 2),
+    1,
+  ];
   return candidates.reduce((best, candidate) => {
     const next = evaluate(rows, candidate);
     const current = evaluate(rows, best);
@@ -126,8 +132,10 @@ function evaluate(rows: readonly ShadowDatasetRow[], threshold: number): TauMetr
 }
 
 function hasBothLabels(rows: readonly ShadowDatasetRow[]): boolean {
-  return rows.some((row) => row.feedback.expansionUseful === true) &&
-    rows.some((row) => row.feedback.expansionUseful === false);
+  return (
+    rows.some((row) => row.feedback.expansionUseful === true) &&
+    rows.some((row) => row.feedback.expansionUseful === false)
+  );
 }
 
 function qpp(row: ShadowDatasetRow): number {
@@ -138,7 +146,11 @@ function bounded(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-function fingerprint(rows: readonly ShadowDatasetRow[], previous: number, candidate: number): string {
+function fingerprint(
+  rows: readonly ShadowDatasetRow[],
+  previous: number,
+  candidate: number,
+): string {
   return createHash("sha256")
     .update(
       JSON.stringify({

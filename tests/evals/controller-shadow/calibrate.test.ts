@@ -172,6 +172,7 @@ function eventsFor(
       expansionUseful: false,
       excessiveNoise: true,
       noMemoryNeeded: false,
+      memoryMisleading: null,
     },
   ];
 }
@@ -181,7 +182,7 @@ function selection(memoryId: string, nodeId: string, rank: number, usefulness: n
     memoryId,
     nodeId,
     source: "direct" as const,
-    reason: "lexical_match",
+    reason: "lexical_match" as const,
     rank,
     tier: 0 as const,
     estimatedTokens: 20,

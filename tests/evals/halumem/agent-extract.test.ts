@@ -14,7 +14,10 @@ test("agent extraction parser accepts bare and fenced durable memories", () => {
     ],
   };
   assert.deepEqual(parseAgentExtraction(JSON.stringify(object)), object.memories);
-  assert.deepEqual(parseAgentExtraction(`\`\`\`json\n${JSON.stringify(object)}\n\`\`\``), object.memories);
+  assert.deepEqual(
+    parseAgentExtraction(`\`\`\`json\n${JSON.stringify(object)}\n\`\`\``),
+    object.memories,
+  );
 });
 
 test("agent extraction parser fails closed on unsupported or unattributed output", () => {
@@ -31,7 +34,9 @@ test("agent extraction maps only documented semantic aliases", () => {
   assert.equal(
     parseAgentExtraction(
       JSON.stringify({
-        memories: [{ statement: "The user aims to help.", memoryType: "goal", evidence: "I aim to help." }],
+        memories: [
+          { statement: "The user aims to help.", memoryType: "goal", evidence: "I aim to help." },
+        ],
       }),
     )[0]?.memoryType,
     "fact",

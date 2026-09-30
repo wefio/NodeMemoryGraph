@@ -23,7 +23,8 @@ function main() {
   const dataset = process.argv[2] ?? "longmemeval";
   const dir = resolve(STORES_ROOT, dataset);
   const files = readdirSync(dir).filter((f) => f.endsWith(".sqlite"));
-  const rows: Array<{ file: string; mem: number; blocks: number; nodes: number; leafFts: number }> = [];
+  const rows: Array<{ file: string; mem: number; blocks: number; nodes: number; leafFts: number }> =
+    [];
 
   for (const file of files) {
     const db = open(resolve(dir, file));
@@ -41,10 +42,13 @@ function main() {
 
   rows.sort((a, b) => b.blocks - a.blocks);
   const total = rows.length;
-  const sum = (k: "mem" | "blocks" | "nodes") => rows.reduce((s, r) => s + (r[k] > 0 ? r[k] : 0), 0);
+  const sum = (k: "mem" | "blocks" | "nodes") =>
+    rows.reduce((s, r) => s + (r[k] > 0 ? r[k] : 0), 0);
   const avg = (k: "mem" | "blocks" | "nodes") => (sum(k) / Math.max(1, total)).toFixed(1);
   console.log(`\n== ${dataset}: ${total} stores ==`);
-  console.log(`avg per store — mem: ${avg("mem")}  blocks: ${avg("blocks")}  nodes: ${avg("nodes")}`);
+  console.log(
+    `avg per store — mem: ${avg("mem")}  blocks: ${avg("blocks")}  nodes: ${avg("nodes")}`,
+  );
   console.log("\ntop-8 by blocks:");
   for (const r of rows.slice(0, 8)) {
     console.log(

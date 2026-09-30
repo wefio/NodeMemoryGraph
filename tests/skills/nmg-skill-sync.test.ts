@@ -101,11 +101,9 @@ test("NMG Skill check exits one for drift and CLI options fail closed", (context
   assert.notEqual(missingValue.status, 0);
   assert.match(missingValue.stderr, /--target requires a value/u);
 
-  const unknown = spawnSync(
-    process.execPath,
-    ["--experimental-strip-types", script, "--unknown"],
-    { encoding: "utf8" },
-  );
+  const unknown = spawnSync(process.execPath, ["--experimental-strip-types", script, "--unknown"], {
+    encoding: "utf8",
+  });
   assert.notEqual(unknown.status, 0);
   assert.match(unknown.stderr, /unknown option/u);
 

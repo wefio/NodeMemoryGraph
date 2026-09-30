@@ -51,8 +51,23 @@ test("detectCommunities finds weakly-connected components and drops isolates", (
 test("analyzeCommunities profiles patterns and emits natural-supervision suggestions", () => {
   withStore((store) => {
     // Community 1: evolution + dependency.
-    const b1 = store.remember({ nodeName: "预算", nodeKind: "topic", nodeSummary: "预算", statement: "预算v2023", sessionId: "s1", sourceActor: "user" });
-    const b2 = store.remember({ nodeName: "预算", nodeKind: "topic", nodeSummary: "预算", statement: "预算v2024", sessionId: "s1", sourceActor: "user", supersedesId: b1.memory.id });
+    const b1 = store.remember({
+      nodeName: "预算",
+      nodeKind: "topic",
+      nodeSummary: "预算",
+      statement: "预算v2023",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
+    const b2 = store.remember({
+      nodeName: "预算",
+      nodeKind: "topic",
+      nodeSummary: "预算",
+      statement: "预算v2024",
+      sessionId: "s1",
+      sourceActor: "user",
+      supersedesId: b1.memory.id,
+    });
     const tech = node(store, "技术选型");
     const ops = node(store, "运维");
     store.linkNodes({ sourceNodeId: b2.node.id, targetNodeId: tech.node.id, type: "depends_on" });
@@ -68,10 +83,19 @@ test("analyzeCommunities profiles patterns and emits natural-supervision suggest
     const c0 = analysis.find((c) => c.patternCounts.EVOLUTION > 0);
     const c1 = analysis.find((c) => c.patternCounts.CONTRADICTION > 0);
     assert.ok(c0, "evolution community found");
-    assert.ok(c0!.suggestions.some((s) => s.kind === "EVOLUTION_CHAIN"), "evolution suggestion");
-    assert.ok(c0!.suggestions.some((s) => s.kind === "DEPENDENCY_CHAIN"), "dependency suggestion");
+    assert.ok(
+      c0!.suggestions.some((s) => s.kind === "EVOLUTION_CHAIN"),
+      "evolution suggestion",
+    );
+    assert.ok(
+      c0!.suggestions.some((s) => s.kind === "DEPENDENCY_CHAIN"),
+      "dependency suggestion",
+    );
     assert.ok(c1, "contradiction community found");
-    assert.ok(c1!.suggestions.some((s) => s.kind === "CONTRADICTION_PAIR"), "contradiction suggestion");
+    assert.ok(
+      c1!.suggestions.some((s) => s.kind === "CONTRADICTION_PAIR"),
+      "contradiction suggestion",
+    );
   });
 });
 
@@ -84,6 +108,9 @@ test("analyzeCommunities flags a feedback loop for manual review", () => {
     const analysis = store.analyzeCommunities();
     assert.equal(analysis.length, 1);
     assert.equal(analysis[0]!.patternCounts.FEEDBACK, 1);
-    assert.ok(analysis[0]!.suggestions.some((s) => s.kind === "FEEDBACK_REVIEW"), "feedback review suggestion");
+    assert.ok(
+      analysis[0]!.suggestions.some((s) => s.kind === "FEEDBACK_REVIEW"),
+      "feedback review suggestion",
+    );
   });
 });
