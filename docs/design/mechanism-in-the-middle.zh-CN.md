@@ -4,7 +4,7 @@
 **Created:** 2026-09-21
 **Updated:** 2026-09-21
 
-一个黑板条目怎么走，以及决定这个模型有没有资格进记录的那几项检查。本文拥有模型、"一条边界什么时候够资格建缝"的那条规则、以及这些检查。它不复述大类清单（那在 [protocol-governed-collaboration.md](protocol-governed-collaboration.zh-CN.md)），也不复述决策（那在三份记录里：[机制，不是策略](../decisions/proposed/2026-09-21-mechanism-not-policy.zh-CN.md)、[帧、它的数据格式与它的存储](../decisions/proposed/2026-09-21-the-frame-and-its-storage.zh-CN.md)、[程序只回答合法性](../decisions/implemented/2026-09-20-the-program-answers-legality.zh-CN.md)）。
+一个黑板条目怎么走，以及决定这个模型有没有资格进记录的那几项检查。本文拥有模型、"一条边界什么时候够资格建缝"的那条规则、以及这些检查。它不复述大类清单（那在 [protocol-governed-collaboration.md](protocol-governed-collaboration.zh-CN.md)），也不复述决策（那在三份记录里：[机制，不是策略](../decisions/implemented/2026-09-21-mechanism-not-policy.zh-CN.md)、[帧、它的数据格式与它的存储](../decisions/proposed/2026-09-21-the-frame-and-its-storage.zh-CN.md)、[程序只回答合法性](../decisions/implemented/2026-09-20-the-program-answers-legality.zh-CN.md)）。
 
 ## 模型
 
@@ -70,6 +70,8 @@
 
 ## 检查
 
+持续分类检查由[机制，不是策略](../decisions/implemented/2026-09-21-mechanism-not-policy.zh-CN.md#决策)拥有。下方测量是历史实验，不是维护的清单，也不是已经分离的证明。
+
 预测先写下来再测量，这样"意外"是可见的，而不是事后被圆过去的。
 
 **（a）中间层里的策略词。** 对中间层——`src/core/store/`、`src/integration/ooo-board.ts`、`src/integration/ooo-dispatch.ts`、`src/integration/task-semantics.ts`、`src/integration/ooo-execution.ts`、`src/integration/ooo-candidate.ts`——grep 这份策略词清单：`patch`、`editable`、`instruction`、`checks`、`files`、`repair-first`。**每一处命中都要带路径列出，不能只给计数**，因为同一个词在一条路径上是机制、在另一条路径上是策略。预测：十五处以上，集中在板子与合法性模块。预期的发现：板子自己的票类型与那个冻结方法就是中心。
@@ -91,7 +93,7 @@
 
 **（a）中间层里的策略词。** 预测十五处以上。实测六个文件里共 195 处：`patch` 106、`files` 39、`checks` 23、`editable` 14、`instruction` 12、`repair-first` 1。集中处与预测一致：`src/integration/ooo-board.ts` 带 53 处 `patch`，`src/integration/task-semantics.ts` 27 处 `patch` 与 9 处 `editable`，`src/core/store/base.ts` 13 处 `patch`。
 
-测量迫使两条修正。**第一，原始计数高估了情况**——而这正是写这条检查时要带上的那个前提：`src/core/store/writes.ts` 与 `src/core/store/retrieval.ts` 里的 `files` 是机制词（存储里的路径），`src/integration/ooo-candidate.ts` 里的 `checks` 指的是检查的**运行器**，也是机制。所以词表应**去掉 `files` 与 `checks`**，只留 `patch`、`editable`、`instruction`。**第二，剩下的仍有约 120 处**，所以「中间层是无策略的」作为**今天的描述**是假的，而且超出一个数量级。模型拿到的是**方向性支持**：泄漏真实、量大、集中在三个文件里——那正是接上一条缝要拿掉的东西。
+测量迫使两条修正。**第一，原始计数高估了情况**——而这正是写这条检查时要带上的那个前提：`src/core/store/writes.ts` 与 `src/core/store/retrieval.ts` 里的 `files` 是机制词（存储里的路径），`src/integration/ooo-candidate.ts` 里的 `checks` 指的是检查的**运行器**，也是机制。那次测量建议去掉 `files` 与 `checks`；维护的检查依据上方决策，保留依赖语境的词并按站点分类。**第二，剩下的仍有约 120 处**，所以「中间层是无策略的」作为**今天的描述**是假的，而且超出一个数量级。模型拿到的是**方向性支持**：泄漏真实、量大、集中在三个文件里——那正是接上一条缝要拿掉的东西。
 
 **（b）两端。** 生产端预测「集中且可分」，实测三到六个函数散在三个文件：`src/integration/ooo-patch.ts` 里的 `preparePatchWork`、`patchPrompt`、`patchCandidate`、`patchSubmission`，`src/integration/ooo-session-mechanism.ts` 里的 `snapshotText`，`evals/ooo-execution/data-check-runner.ts` 里的 `runTestFile`。预测成立。呈现端预测「散落、没有缝」，实测六个站点：`src/core/store/base.ts` 的预览文本、`src/core/types.ts` 的条目与预览类型、`src/cli/protocol.ts` 的线上形状、`src/cli/service.ts` 的服务、`.pi/extensions/nmg/index.ts` 里面向 agent 的渲染、以及由 `src/prompts/nmg-prompts.yaml` 生成的工具描述。这条预测也成立，但有**一处对本文的修正**：黑板条目只有一种呈现，而旧表里的分层词汇是从记忆那一侧**借**来的，不是黑板这一侧**找到**的。对同一批站点后来的一遍检查看到计数看不到的东西：那六个站点是一条**链**，不是六个格式化器，而重复就坐在其中三处——store 的预览规则、适配器的通用助手、以及适配器广播路径里的那条裸切。
 

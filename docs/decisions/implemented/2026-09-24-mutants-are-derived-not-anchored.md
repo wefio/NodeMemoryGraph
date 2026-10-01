@@ -4,7 +4,7 @@
 
 **Status:** implemented
 **Approved:** explicit
-**Relates to:** [Tests do not need a filesystem](2026-09-20-tests-need-no-filesystem.md), [The checks read a live mutant](../../postmortem/0003-checks-read-a-live-mutant.md), [Bound agent verification as one run](2026-09-23-verification-whole-run-deadline.md), [The contract's obligations](../../design/task-unit-semantics-obligations.md), [Mechanism, not policy](../proposed/2026-09-21-mechanism-not-policy.md)
+**Relates to:** [Tests do not need a filesystem](2026-09-20-tests-need-no-filesystem.md), [The checks read a live mutant](../../postmortem/0003-checks-read-a-live-mutant.md), [Bound agent verification as one run](2026-09-23-verification-whole-run-deadline.md), [The contract's obligations](../../design/task-unit-semantics-obligations.md), [Mechanism, not policy](2026-09-21-mechanism-not-policy.md)
 
 ## Problem
 
@@ -212,7 +212,7 @@ that names the rule" is a defect this register reports and none of those tools w
 - **Insert the mutation into the code behind a runtime switch** (mutant schemata, `mutation_active("...")`
   guards). Rejected for this repository: the guard is real code in `src/`, and a switched-off mutation
   path is a policy word in the mechanism layer, which [mechanism, not
-  policy](../proposed/2026-09-21-mechanism-not-policy.md) forbids.
+  policy](2026-09-21-mechanism-not-policy.md) forbids.
 - **Auto-generate mutants from operators over the whole tree** (what pitest, StrykerJS and cargo-mutants
   do). Rejected as the form here: it would replace named evidence with a score, and the ledger needs a
   named tooth per row. The derived form keeps the operator idea and the naming.

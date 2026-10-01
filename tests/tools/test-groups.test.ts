@@ -90,6 +90,17 @@ test("tests-surface type checking is blocking in the shared static contract", ()
   );
 });
 
+test("the maintained policy-word check blocks the shared static contract exactly once", () => {
+  const checks = [...packageJson.scripts["verify:static"]!.matchAll(/npm run ([\w:-]+)/gu)].map(
+    (match) => match[1]!,
+  );
+  assert.equal(checks.filter((name) => name === "check:policy-words").length, 1);
+  assert.equal(
+    packageJson.scripts["check:policy-words"],
+    "node --experimental-strip-types tools/policy-word-check.ts",
+  );
+});
+
 test("agent static checks match the CI contract without nested duplicate execution", () => {
   const context = parseYaml(
     readFileSync(new URL("../../agent-context.yaml", import.meta.url), "utf8"),

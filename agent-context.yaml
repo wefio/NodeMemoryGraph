@@ -153,6 +153,7 @@ routes:
         - complexity:gate
         - verify:packages
         - glossary:check
+        - check:policy-words
         - rtm:check
         - test:product
       advisory: [verify:research, verify:chaos]

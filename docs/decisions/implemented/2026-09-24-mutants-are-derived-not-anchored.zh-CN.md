@@ -4,7 +4,7 @@
 
 **Status:** implemented
 **Approved:** explicit
-**Relates to:** [测试不需要文件系统](2026-09-20-tests-need-no-filesystem.md)、[检查读到的是一个还活着的 mutant](../../postmortem/0003-checks-read-a-live-mutant.md)、[把 agent 验证限制为一次运行](2026-09-23-verification-whole-run-deadline.md)、[契约的义务](../../design/task-unit-semantics-obligations.md)、[机制，而非策略](../proposed/2026-09-21-mechanism-not-policy.md)
+**Relates to:** [测试不需要文件系统](2026-09-20-tests-need-no-filesystem.md)、[检查读到的是一个还活着的 mutant](../../postmortem/0003-checks-read-a-live-mutant.md)、[把 agent 验证限制为一次运行](2026-09-23-verification-whole-run-deadline.md)、[契约的义务](../../design/task-unit-semantics-obligations.md)、[机制，而非策略](2026-09-21-mechanism-not-policy.zh-CN.md)
 
 ## 问题
 
@@ -91,7 +91,7 @@
 - **继续手写锚点、只是写得更小。**作为整体答案被否：那是纪律而不是机制，而纪律正是 52% 的牙当时违反的东西。它作为"替换字节"的规则保留下来，并且是刻意最小：不要消息文本、不要兄弟实参、能用一项时不要整条语句。
 - **只按 AST 节点锚定，替换字节照旧**（早先的 `ast.within` 加一对文本）。被否，理由是实测：149 颗里已有 71 颗是这个形态，而本轮仍有两颗死在它上面——因为**替换内容**和**片段**仍是对行的拷贝。
 - **整体改用输入侧检查替代 mutant。**按上面的测量被否：它没有区分力（每一颗被抓到的 mutant 从外部都可见），而且会丢掉唯一一种能谈"预料之外的实现疏忽"而非"已声明违规"的证据。
-- **把变异插进代码、放在运行时开关之后**（mutant schemata、`mutation_active("...")` 守卫）。本仓库否掉：那个守卫是 `src/` 里的真实代码，而"被关掉的变异路径"是机制层里的策略词，[机制，而非策略](../proposed/2026-09-21-mechanism-not-policy.md)禁止这样做。
+- **把变异插进代码、放在运行时开关之后**（mutant schemata、`mutation_active("...")` 守卫）。本仓库否掉：那个守卫是 `src/` 里的真实代码，而"被关掉的变异路径"是机制层里的策略词，[机制，而非策略](2026-09-21-mechanism-not-policy.zh-CN.md)禁止这样做。
 - **对整个语法树按算子自动生成 mutant**（pitest、StrykerJS、cargo-mutants 的做法）。作为本仓库的形式被否：它会把具名证据换成一个分数，而账本每一行都需要一颗具名的牙。derived 形态保留了算子这个想法和"具名"。
 - **干脆不进任何闸门、只靠常设规则。**被否：本记录的实测就是"没人注意到两颗牙已经停摆"，而"依赖被记住"的规则正是本仓库在别处已经替换掉的形状。
 
