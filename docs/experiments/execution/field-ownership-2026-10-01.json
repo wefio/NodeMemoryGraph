@@ -1,0 +1,91 @@
+{
+  "measuredAt": "2026-10-01T14:10:00.180Z",
+  "baseRevision": "256bcc0e66ebe8a946e300b8d465731caea02bf4",
+  "sources": [
+    {
+      "path": "src/integration/task-semantics.ts",
+      "sha256": "0c87147812ec4ee3948fa229f279666972e1e30f9bc1107e6eff4c766fec1c87"
+    },
+    {
+      "path": "src/integration/ooo-execution.ts",
+      "sha256": "ddfa301504da7a1458d3fc8b9a9d61269cbeb6cee78f0061b1b60a1986482da5"
+    },
+    {
+      "path": "src/integration/ooo-patch.ts",
+      "sha256": "9f0acb44899c55f567bf3f353a3f3c54d984815f2626cdd6de3be956a490e8b0"
+    }
+  ],
+  "controlledModels": 5,
+  "scope": "pure Task-Unit model/eligibility and snapshot evaluator; no live providers or protocol migration",
+  "overlappingProposalPaths": {
+    "writes": [
+      [
+        "data/shared.txt"
+      ],
+      [
+        "data/shared.txt"
+      ]
+    ],
+    "effects": [
+      "isolated-artifact",
+      "isolated-artifact"
+    ],
+    "legal": [
+      "A",
+      "B"
+    ],
+    "changedEffectLegal": [
+      "A"
+    ],
+    "changedEffectReasons": [
+      {
+        "id": "A",
+        "legal": true,
+        "reasons": []
+      },
+      {
+        "id": "B",
+        "legal": false,
+        "reasons": [
+          "effect-not-startable"
+        ]
+      }
+    ]
+  },
+  "changedInputBytes": {
+    "beforeDigest": "0a3f02cabe63b7285b47f5734edbaf83ecbbaf5a22eb6c54e6405d6a0caf3484",
+    "afterDigest": "6b019519e9f178a5d6cbda1e864bd13c71989b445427198b5c96ff7bbf0ec7ab",
+    "beforeLegal": [
+      "A",
+      "B"
+    ],
+    "afterLegal": [
+      "A",
+      "B"
+    ]
+  },
+  "declaredDependency": {
+    "beforeAccepted": [
+      "A"
+    ],
+    "afterAccepted": [
+      "B"
+    ]
+  },
+  "operations": [
+    {
+      "operation": "double",
+      "legal": [
+        "P"
+      ],
+      "answer": "8"
+    },
+    {
+      "operation": "sum",
+      "legal": [
+        "P"
+      ],
+      "answer": "0"
+    }
+  ]
+}

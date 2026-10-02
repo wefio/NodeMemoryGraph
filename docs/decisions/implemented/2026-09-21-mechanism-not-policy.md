@@ -66,13 +66,28 @@ require an explicit classification and rationale in the same reviewed change; th
 refreshes counts automatically. Vocabulary additions are recorded here with their rationale.
 
 The scope is bounded by the maintained path list, not all source, tests or drivers. Source imports and
-schema literals on those paths count too. This implements the approved classification and static-check
-slice (original Plan 2–3), not the work-shape conversion. The frame/storage proposal remains proposed.
+schema literals on those paths count too. The gate implements the classification and static-check
+slice (original Plan 2–3); it does not prove work-shape separation. The frame/storage proposal remains proposed.
+
+### Opaque dispatch declarations
+
+The dispatch port carries a required, nullable `declaration`, parameterized by its shape, with only a
+`digest` required by the shared mechanism. The base `BoardTicket` has the same opaque carrier. Default
+adopters specialize it to their own declaration type and freeze and validate it before returning a
+ticket. The loop passes that declaration unchanged; it neither reconstructs patch work nor renders it.
+A missing declaration is an adopter contract failure, not an implicit patch default.
+
+An adopter can return a named refusal without issuing a ticket. The loop records that as a slot refusal,
+separately from a failed worker or an invalid ticket. The [numeric-adopter evidence](../../experiments/execution/field-ownership-2026-10-01.md#numeric-adopter)
+exercises both the shared port and the real store's lease, delivery and independent verdict. It is a
+controlled seam test, not a production peer-protocol installation or a frame/storage migration.
 
 **Rows deliberately left undecided**, so that they are not settled by accident:
 
-- `task_run_tasks.effect`, the declared write set, is mechanism only if the mechanism must enforce that
-  write sets do not overlap. If enforcement is a protocol obligation, it is policy data.
+- `task_run_tasks.effect` is an effect-class label, not the declared proposal-write set. Whether
+  resource-set exclusion is a common mechanism obligation or a protocol obligation is a separate
+  question; the [field experiment](../../experiments/execution/field-ownership-2026-10-01.md) does not
+  turn the current class-label gate into an exclusion check.
 - the granularity of `input` and `dependencies`: dependencies affect legality and order, which is mechanism,
   but whether an input carries content or only a digest is a separate question.
 - `operation`, which may be policy.
@@ -81,21 +96,18 @@ slice (original Plan 2–3), not the work-shape conversion. The frame/storage pr
 
 ### Work-shape boundary
 
-The work-shape conversion (original Plan 5) is not part of the approved slice. The patch assumptions
-below remain; their classification does not assert that an opaque adapter seam has been implemented.
+The opaque dispatch seam is one part of the work-shape conversion (original Plan 5), not completion
+of the conversion. A work shape is the policy layer's name for the declaration-and-artifact pair that
+the core carries without understanding it. Patch freezing remains in the default adopters; requiring
+that shape in the shared port does not.
 
-A work shape is not a core concept. It is the policy layer's name for the declaration-and-artifact pair
-that the core carries without understanding it. The six sites where the patch assumption lives classify as
-follows.
+The remaining coupling is:
 
-| Site                                                                         | Mechanism or policy                                   | Where it belongs                                                                                                                       |
-| ---------------------------------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `BoardTicket.patch?: FrozenPatchTask & { digest }`                           | policy                                                | the ticket carries an opaque `declaration` with a digest                                                                               |
-| `patchFrozen()` calling `preparePatchWork`, and the `not a patch task` throw | policy inside the core                                | freezing and field validation move into the shape adapter; the core only hands back the opaque declaration                             |
-| `refuseWidening` reading `parent.patch.editable`                             | check is mechanism, wording and enablement are policy | permission closure becomes a declared constraint the program enforces and reports reasons for                                          |
-| `FrozenPatchWork` signatures in the session mechanism                | mixed                                                 | rendering a declaration into a prompt and submitting an artifact are policy; session lifecycle, metrics and cancellation are mechanism |
-| `task_run_tasks.patch_files` / `patch_editable`, parsed in the store         | policy in the schema                                  | belongs in the payload document; run, task and revision are mechanism, while input/dependency granularity and operation remain undecided                |
-| drivers asserting `ticket.patch!.digest`                                     | policy assertion                                      | the mechanism assertion is that a declaration carries a digest, that a claim binds the attempt, and that a delivery binds the digest   |
+| Site | Mechanism or policy | Remaining boundary |
+| --- | --- | --- |
+| `refuseWidening` reading `parent.patch.editable` | check is mechanism, wording and enablement are policy | permission closure becomes a declared constraint the program enforces and reports reasons for |
+| `FrozenPatchWork` signatures in the session mechanism | mixed | prompt rendering and artifact validation are policy; session lifecycle, metrics and cancellation are mechanism |
+| `task_run_tasks.patch_files` / `patch_editable`, parsed in the store | policy in the schema | belongs in the declaration's payload; reconcile the storage target with the frame proposal's typed Task-Unit tables and NULL board payload before migrating |
 
 The legality rule found today is the clearest case of the refinement this record adds: its check belongs to
 the program, while permission closure's name and enablement belong to a declaration. The fix is therefore not
@@ -106,17 +118,20 @@ is the right one.
 
 ### Field experiments and separation evidence
 
-- `task_run_tasks.effect`, input/dependency granularity and `operation` remain undecided. Their owning
-  field must be exercised under an alternative declaration before deciding ownership; this gate does
-  not include those words or resolve them.
+- The [controlled field probe](../../experiments/execution/field-ownership-2026-10-01.md) supplies
+  reproducible evidence for effect labels, content-bound digests, dependency release and operation
+  interpretation. It narrows the questions; it does not decide the universal input granularity or a
+  storage migration. This gate does not include those words or resolve them.
 - The `files` groups in schema migration and `TaskUnit` are marked `undecided`: a group combines
   patch-specific paths with another role. Resolve them by separating the DDL subjects or exercising
   an alternative input declaration, not by relabelling the entire group mechanism.
 - The remaining permission-closure name/enablement coupling needs a declared constraint while its
   check continues to execute in the program and return reasons.
-- Zero policy hits and a second work shape requiring no mechanism changes are unverified separation
-  goals, not consequences of passing this ratchet. The draft's [second-shape experiment](../../design/mechanism-in-the-middle.md#results)
-  remains evidence of coupling, not a completed adapter migration.
+- A numeric declaration runs through the widened dispatch seam and the real board lifecycle without
+  further mechanism changes. Zero policy hits, generic permission/session boundaries and a four-role
+  peer-protocol interface remain unverified goals. Passing the ratchet proves none of them. The draft's
+  [second-shape experiment](../../design/mechanism-in-the-middle.md#results) remains historical coupling
+  evidence, not the current seam test.
 
 ## Alternatives considered
 

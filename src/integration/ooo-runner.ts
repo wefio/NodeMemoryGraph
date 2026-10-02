@@ -26,6 +26,7 @@ import {
   preparePatchWork,
   type PatchSubmission,
   type PatchWork,
+  type FrozenPatchWork,
 } from "./ooo-patch.ts";
 import { unitLegality, type LegalityAnswer } from "./ooo-execution.ts";
 import { compileTaskUnits, dispatchTasks, type RecordedFacts } from "./task-semantics.ts";
@@ -70,7 +71,7 @@ type RunTask = ReturnType<NmgStore["taskRunTasks"]>[number];
 type RunBinding = ReturnType<typeof taskRunStatus>["bindings"][number];
 
 /** The store's board for one run, satisfying the loop's port and nothing else. */
-export class StoreRunBoard implements DispatchBoard {
+export class StoreRunBoard implements DispatchBoard<FrozenPatchWork> {
   readonly channel: string;
   readonly #store: NmgStore;
   readonly #options: RunBoardOptions;
@@ -107,7 +108,7 @@ export class StoreRunBoard implements DispatchBoard {
   }
 
   /** Take one unit. The claim is the store's compare-and-set on the entry its binding names. */
-  claim(taskId: string, owner: string): DispatchTicket {
+  claim(taskId: string, owner: string): DispatchTicket<FrozenPatchWork> {
     const binding = this.#bindingFor(taskId);
     const entry = coordinatedBoardWrite(this.#store, {
       runId: this.#options.runId,
@@ -124,6 +125,7 @@ export class StoreRunBoard implements DispatchBoard {
     const attempt = entry.attempt ?? binding.attempt;
     const task = this.#task(taskId);
     const accepted = this.accepted();
+    const work = this.#work(task, attempt);
     return {
       attempt,
       dependencies: Object.fromEntries(
@@ -131,7 +133,7 @@ export class StoreRunBoard implements DispatchBoard {
           .filter((dependency) => dependency in accepted)
           .map((dependency) => [dependency, accepted[dependency]!]),
       ),
-      patch: this.#work(task, attempt) ?? undefined,
+      declaration: work === null ? null : frozenOf(work),
     };
   }
 
@@ -173,7 +175,7 @@ export class StoreRunBoard implements DispatchBoard {
 
   /**
    * Let the acceptance decide the verdict of what was delivered, under the judge's own name. The
-   * frozen envelope is rebuilt here for the same reason the loop rebuilds it: the digest is the
+   * frozen envelope is rebuilt here from the adopter's declaration: the digest is the
    * artifact's identity, and recomputing it is how a caller holding only an entry id gets it back.
    */
   async submit(entryId: string): Promise<string> {

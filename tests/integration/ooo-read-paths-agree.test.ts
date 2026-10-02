@@ -64,7 +64,7 @@ async function accept(
   agent: string,
 ): Promise<void> {
   const artifact = JSON.stringify({
-    digest: ticket.patch!.digest,
+    digest: ticket.declaration!.digest,
     files: Object.entries(specs[task]!.files).map(([path, content]) => ({
       path,
       content: `${content}// candidate for ${task}\n`,

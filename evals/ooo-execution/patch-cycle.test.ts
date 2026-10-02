@@ -56,7 +56,7 @@ function fixture(t: TestContext, verify: PatchTaskSpec["verify"] = verifyRename)
 
 function submitPatch(
   gate: BoardAdmission,
-  ticket: { owner: string; patch?: { digest: string } },
+  ticket: { owner: string; declaration: { digest: string } | null },
   artifact: string,
 ) {
   const entry = gate.putTaskBoardEntry({
@@ -73,7 +73,7 @@ test("contract: a verified patch candidate is what dependents bind to, and only 
   const gate = fixture(t);
   const ticket = gate.claim("P", "worker-p");
   const artifact = JSON.stringify({
-    digest: ticket.patch!.digest,
+    digest: ticket.declaration!.digest,
     files: [{ path: TARGET, content: expected }],
   });
   assert.deepEqual(gate.accepted(), {});
@@ -97,7 +97,7 @@ test("acceptance lands on the board as a deliverable and an outside verdict, not
     .readTaskBoard({ taskId: gate.channel })
     .entries.find((entry) => entry.claimedBy === "worker-p")!.id;
   const artifact = JSON.stringify({
-    digest: ticket.patch!.digest,
+    digest: ticket.declaration!.digest,
     files: [{ path: TARGET, content: expected }],
   });
   assert.equal(await submitPatch(gate, ticket, artifact), "accepted");
@@ -123,7 +123,7 @@ test("the board verdict is what accepts an artifact, not the round's own column"
     .readTaskBoard({ taskId: gate.channel })
     .entries.find((entry) => entry.claimedBy === "worker-p")!.id;
   const artifact = JSON.stringify({
-    digest: ticket.patch!.digest,
+    digest: ticket.declaration!.digest,
     files: [{ path: TARGET, content: expected }],
   });
   assert.equal(await submitPatch(gate, ticket, artifact), "accepted");
@@ -166,7 +166,7 @@ test("safety: worker-supplied approval is ignored and a reissued attempt fences 
   const first = gate.claim("P", "worker-p");
   // Extra fields are not a verdict gate.channel: the artifact shape must be exact.
   const selfApproved = JSON.stringify({
-    digest: first.patch!.digest,
+    digest: first.declaration!.digest,
     files: files(expected),
     passed: true,
     verdict: "accept",
@@ -179,10 +179,10 @@ test("safety: worker-supplied approval is ignored and a reissued attempt fences 
   gate.now += 61_000;
   const second = gate.claim("P", "worker-q");
   assert.equal(second.attempt, 2);
-  assert.notEqual(second.patch!.digest, first.patch!.digest);
-  const stale = JSON.stringify({ digest: first.patch!.digest, files: files(expected) });
+  assert.notEqual(second.declaration!.digest, first.declaration!.digest);
+  const stale = JSON.stringify({ digest: first.declaration!.digest, files: files(expected) });
   assert.equal(await submitPatch(gate, first, stale), "stale");
-  const fresh = JSON.stringify({ digest: second.patch!.digest, files: files(expected) });
+  const fresh = JSON.stringify({ digest: second.declaration!.digest, files: files(expected) });
   assert.equal(await submitPatch(gate, second, fresh), "accepted");
   assert.equal(await submitPatch(gate, second, fresh), "duplicate");
 });
@@ -193,7 +193,7 @@ test("safety: a rejected proposal never accepts worker text and the same attempt
   assert.equal(await submitPatch(gate, first, proposal()), "rejected");
   assert.equal(gate.next(), null);
   const corrected = JSON.stringify({
-    digest: first.patch!.digest,
+    digest: first.declaration!.digest,
     files: [{ path: TARGET, content: expected }],
   });
   assert.equal(await submitPatch(gate, first, corrected), "accepted");
@@ -207,7 +207,7 @@ test("safety: a rejected proposal never accepts worker text and the same attempt
 test("contract: a conclusion is admissible without files but cannot carry a change", async (t) => {
   const gate = fixture(t);
   const first = gate.claim("P", "worker-1");
-  const digest = first.patch!.digest;
+  const digest = first.declaration!.digest;
   const conclusion = (extra: Record<string, unknown> = {}) =>
     JSON.stringify({
       digest,
@@ -238,7 +238,7 @@ test("safety: a host check that throws or is undecidable cannot accept a candida
   });
   const ticket = gate.claim("P", "worker-p");
   const artifact = JSON.stringify({
-    digest: ticket.patch!.digest,
+    digest: ticket.declaration!.digest,
     files: [{ path: TARGET, content: expected }],
   });
   assert.equal(await submitPatch(gate, ticket, artifact), "rejected");
@@ -252,7 +252,7 @@ test("an outside rejection withdraws the release of a dependent, and the round f
     .readTaskBoard({ taskId: gate.channel })
     .entries.find((entry) => entry.claimedBy === "worker-p")!.id;
   const artifact = JSON.stringify({
-    digest: ticket.patch!.digest,
+    digest: ticket.declaration!.digest,
     files: [{ path: TARGET, content: expected }],
   });
   assert.equal(await submitPatch(gate, ticket, artifact), "accepted");
@@ -288,7 +288,7 @@ test("acceptance survives the entry's own TTL, because the round retains what it
   const gate = fixture(t);
   const ticket = gate.claim("P", "worker-p");
   const artifact = JSON.stringify({
-    digest: ticket.patch!.digest,
+    digest: ticket.declaration!.digest,
     files: [{ path: TARGET, content: expected }],
   });
   assert.equal(await submitPatch(gate, ticket, artifact), "accepted");
@@ -335,7 +335,7 @@ test("cancelling a round releases the pins it held, so nothing it referenced lea
   const gate = fixture(t);
   const ticket = gate.claim("P", "worker-p");
   const artifact = JSON.stringify({
-    digest: ticket.patch!.digest,
+    digest: ticket.declaration!.digest,
     files: [{ path: TARGET, content: expected }],
   });
   assert.equal(await submitPatch(gate, ticket, artifact), "accepted");

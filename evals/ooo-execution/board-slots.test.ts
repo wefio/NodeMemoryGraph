@@ -55,7 +55,7 @@ function fixture(
  *  decides. Accepting a claimed task is what frees its dependents. */
 async function acceptUnit(
   gate: BoardAdmission,
-  ticket: { owner: string; patch?: { digest: string } },
+  ticket: { owner: string; declaration: { digest: string } | null },
 ) {
   const entry = gate.putTaskBoardEntry({
     taskId: gate.channel,
@@ -64,7 +64,7 @@ async function acceptUnit(
     content: JSON.stringify({
       ticket,
       artifact: JSON.stringify({
-        digest: ticket.patch!.digest,
+        digest: ticket.declaration!.digest,
         files: [{ path: TARGET, content: expected }],
       }),
     }),

@@ -81,7 +81,7 @@ function fixture(t: TestContext) {
     // that one task.
     const spec = specs[task]!;
     const artifact = JSON.stringify({
-      digest: ticket.patch!.digest,
+      digest: ticket.declaration!.digest,
       files: Object.entries(spec.files).map(([path, content]) => ({
         path,
         content: `${content}// candidate for ${task}

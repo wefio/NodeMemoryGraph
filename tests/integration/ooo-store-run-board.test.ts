@@ -18,11 +18,7 @@ import { NmgStore } from "../../src/core/store.ts";
 import { dispatchPlan, type PlanWorker } from "../../src/integration/ooo-dispatch.ts";
 import type { SessionPlan } from "../../src/integration/ooo-execution.ts";
 import { StoreRunBoard, type AcceptanceAnswer } from "../../src/integration/ooo-runner.ts";
-import {
-  preparePatchWork,
-  type FrozenPatchWork,
-  type PatchSubmission,
-} from "../../src/integration/ooo-patch.ts";
+import { type FrozenPatchWork, type PatchSubmission } from "../../src/integration/ooo-patch.ts";
 import {
   coordinatedBoardWrite,
   createBoundEntry,
@@ -103,7 +99,7 @@ function artifactFor(taskId: string, frozen: FrozenPatchWork): string {
   });
 }
 
-const worker: PlanWorker = async (taskId, frozen) => artifactFor(taskId, frozen);
+const worker: PlanWorker<FrozenPatchWork> = async (taskId, frozen) => artifactFor(taskId, frozen);
 
 /** The acceptance reads the submission and answers; its name is not the deliverer's. */
 const acceptance = {
@@ -195,10 +191,8 @@ test("the deliverer cannot judge its own delivery, so a run cannot self-accept",
     });
     const entryId = bindingEntry(store, "P");
     const ticket = board.claim("P", "worker:P");
-    // The artifact the loop would have delivered, frozen the way the loop freezes it. Reading a digest
-    // off the ticket wrote an artifact with no digest at all, and the store took it: a delivery is a
-    // digest and a reference, and the wire shape is the host's check rather than the board's.
-    const frozen = preparePatchWork({ ...ticket.patch!, attempt: ticket.attempt });
+    // The adopter freezes before claiming; the wire artifact is checked by the host, not the store.
+    const frozen = ticket.declaration!;
     const artifact = artifactFor("P", frozen);
     coordinatedBoardWrite(store, {
       runId: RUN,
@@ -299,7 +293,7 @@ test("the board answers what is legal and why, and asking changes nothing", asyn
     // other), which is why the gate named here is the claim. In-doubt work across runs is the
     // umbrella's own open gap, not something this read may paper over.
     const ticket = board.claim("P", "worker:P");
-    const frozen = preparePatchWork({ ...ticket.patch!, attempt: ticket.attempt });
+    const frozen = ticket.declaration!;
     coordinatedBoardWrite(store, {
       runId: RUN,
       entryId,

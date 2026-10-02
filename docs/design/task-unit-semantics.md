@@ -106,7 +106,7 @@ Task IR 是从现有声明与记录计算出的只读视图；不接收另一份
 
 board `kind` 的唯一 owner 是 [TaskBoardKind](../../src/core/types.ts)。它描述协作消息用途：`handoff` 交接、`result` 返回、`decision` 判定；不是 patch/conclusion 类型，也不是 effect。OoO 行内的 patch/snapshot `kind` 又是内部任务类别。三者不得互相转换或新增 `task-ir` kind、工具、频道来承载重复定义。
 
-数据流为：现有 RoundSpec 研究入口 → 共享规范化/校验 → 现有任务契约与计划 → 派生分析视图 → `BoardTicket`。需要产品接入的解析规则必须移到共享 owner，由研究入口和各 harness 调用；不能把研究 A/B/C 输入格式提升为通用语言。`FrozenPatchTask` 仍由 `preparePatchWork` 产生，票据继续携带完整冻结 work，禁止重抄字段子集。
+数据流为：现有 RoundSpec 研究入口 → 共享规范化/校验 → 现有任务契约与计划 → 派生分析视图 → `BoardTicket`。需要产品接入的解析规则必须移到共享 owner，由研究入口和各 harness 调用；不能把研究 A/B/C 输入格式提升为通用语言。默认补丁采用方用 `preparePatchWork` 生成完整冻结声明，不重抄字段子集。票据和共享循环通过带摘要的不透明 `declaration` 携带它，不要求所有采用方的声明都有补丁字段；冻结、解释和验收由采用方负责。[声明边界决策](../decisions/implemented/2026-09-21-mechanism-not-policy.zh-CN.md#不透明派发声明)说明缺失声明与具名拒绝的区别。
 
 编译必须对无映射能力明确拒绝，不静默丢字段或降为自由文本。第一版只分析现有 patch/snapshot 契约，验证器、预算和访问规则不重实现。新增语义先扩展 owner、身份摘要及对应检查，再进入派生视图。
 

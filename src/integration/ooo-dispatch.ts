@@ -6,7 +6,7 @@
  * record facts in, `decideSessionMove`'s - the same rule plus the cancellation read). What this module
  * owns is the order of operations no caller should have to re-invent:
  *
- *   candidates -> claim a ticket -> freeze the task -> call the worker -> put the result on the
+ *   candidates -> claim a frozen declaration -> call the worker -> put the result on the
  *   board -> let the store decide -> account for it -> ask whether the session may continue.
  *
  * Two things are deliberately *not* decided here.
@@ -26,8 +26,6 @@
  * worker, their session identity and their report. See
  * `docs/decisions/implemented/2026-09-19-dispatch-loop-is-shared.md`.
  */
-import type { PatchWork, FrozenPatchWork } from "./ooo-patch.ts";
-import { preparePatchWork } from "./ooo-patch.ts";
 import type { LegalityAnswer, SessionPlan } from "./ooo-execution.ts";
 import { nextSessionMove } from "./ooo-fusion-plan.ts";
 import { decideSessionMove } from "./ooo-session-facts.ts";
@@ -59,9 +57,14 @@ export type WorkerMetrics = {
 export type PlanWorkerResult =
   string | { artifact?: string; metrics?: WorkerMetrics; failure?: string };
 
-export type PlanWorker = (
+/** Only this identity is shared. The adopter owns the declaration's payload and its validation. */
+export interface WorkDeclaration {
+  readonly digest: string;
+}
+
+export type PlanWorker<Declaration extends WorkDeclaration = WorkDeclaration> = (
   taskId: string,
-  frozen: FrozenPatchWork,
+  frozen: Declaration,
   dependencies: Readonly<Record<string, string>>,
   session?: PlanSession,
 ) => Promise<PlanWorkerResult>;
@@ -75,14 +78,18 @@ export interface PlanSession {
 }
 
 /** The open handoff one unit is admitted through, as the loop reads it. */
-export interface DispatchTicket {
+export interface DispatchTicket<Declaration extends WorkDeclaration = WorkDeclaration> {
   /** The claim's own attempt number: it names this try, so it is read from the claim and not from the
    *  frozen work, which the same task can be re-issued with. */
   readonly attempt: number;
   readonly dependencies: Readonly<Record<string, string>>;
-  /** The frozen work this claim admits, absent when the task is not a patch task. */
-  readonly patch?: PatchWork;
+  /** Host-frozen and digest-bound before a claim is offered to the worker. No shape is required. */
+  readonly declaration: Declaration | null;
 }
+
+/** A named domain refusal is not a claimed attempt or a failed unit. */
+export type DispatchClaim<Declaration extends WorkDeclaration = WorkDeclaration> =
+  DispatchTicket<Declaration> | { refused: string };
 
 /** A board entry this run put on the channel. Only its identity is read here. */
 export interface DispatchEntry {
@@ -97,7 +104,7 @@ export interface DispatchEntry {
  * board satisfies this by being one, or by a thin adapter over it - which is where a board-specific
  * decision belongs.
  */
-export interface DispatchBoard {
+export interface DispatchBoard<Declaration extends WorkDeclaration = WorkDeclaration> {
   /** The channel this run's entries go on. */
   readonly channel: string;
   /** The board's clock, as the loop stamps its entries with it. */
@@ -112,7 +119,7 @@ export interface DispatchBoard {
   /** The accepted artifact per task id: the rule every dependency and every parent check reads. */
   accepted(): Readonly<Record<string, string>>;
   /** Take one unit. The board re-checks legality here, so a stale answer becomes a refusal. */
-  claim(taskId: string, owner: string): DispatchTicket;
+  claim(taskId: string, owner: string): DispatchClaim<Declaration>;
   /** Put this run's entry on the channel, and say where it landed. */
   putTaskBoardEntry(input: {
     taskId: string;
@@ -198,9 +205,9 @@ export interface SessionCapability {
 }
 
 /** What the loop needs to run one plan. The declarations stay the caller's; the ordering does not. */
-export interface DispatchPlanInput {
+export interface DispatchPlanInput<Declaration extends WorkDeclaration = WorkDeclaration> {
   /** The board the plan runs through: the product's, or an instrument's over the same loop. */
-  board: DispatchBoard;
+  board: DispatchBoard<Declaration>;
   /** Plan order. The legal set comes from the board, not from here; this is what must finish. */
   plan: readonly string[];
   /** How many legal units may be in flight at once. */
@@ -211,7 +218,7 @@ export interface DispatchPlanInput {
   /** The legality view the shared move reads. Built by the caller: the arms from their spec, a product
    *  caller from the frozen run and the board's own facts. */
   legality: (pendingBranches: readonly string[]) => SessionPlan;
-  worker: PlanWorker;
+  worker: PlanWorker<Declaration>;
   /** Who a unit's handoff is offered to and who therefore claims it: one name, one home. */
   ownerOf: (taskId: string) => string;
   /** Where a unit's session decision is recorded. Given, the decision is `decideSessionMove`'s - the
@@ -245,16 +252,16 @@ type UnitAttempt =
  * One unit through the board: claim, run the worker, put the result on the channel, submit. The store
  * decides the verdict; this loop never reads a worker's claim about itself.
  */
-async function dispatchUnit(
-  input: DispatchPlanInput,
+async function dispatchUnit<Declaration extends WorkDeclaration>(
+  input: DispatchPlanInput<Declaration>,
   taskId: string,
   session?: PlanSession,
 ): Promise<UnitAttempt> {
   const board = input.board;
   const claimedAt = Date.now();
-  let ticket: DispatchTicket;
+  let claim: DispatchClaim<Declaration>;
   try {
-    ticket = board.claim(taskId, input.ownerOf(taskId));
+    claim = board.claim(taskId, input.ownerOf(taskId));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     // The board publishes a handoff only for the task it has selected, so while one unit is claimed no
@@ -263,23 +270,15 @@ async function dispatchUnit(
       return { refused: reason };
     return { failure: `${taskId}: ${reason}` };
   }
-  if (!ticket.patch)
-    return { failure: `${taskId}: the claim admits no patch work, so nothing can be produced` };
-  const work = ticket.patch;
-  const frozen = preparePatchWork({
-    taskId: work.taskId,
-    attempt: ticket.attempt,
-    instruction: work.instruction,
-    files: work.files,
-    editable: work.editable,
-    visible: work.visible,
-    admittedConclusions: work.admittedConclusions,
-    budget: work.budget,
-    limits: work.limits,
-  });
+  if ("refused" in claim) return { refused: claim.refused };
+  const ticket = claim;
+  if (!ticket.declaration)
+    return {
+      failure: `${taskId}: the claim admits no frozen declaration, so nothing can be produced`,
+    };
   let produced: PlanWorkerResult;
   try {
-    produced = await input.worker(taskId, frozen, ticket.dependencies, session);
+    produced = await input.worker(taskId, ticket.declaration, ticket.dependencies, session);
   } catch (error) {
     return { failure: `${taskId}: ${error instanceof Error ? error.message : String(error)}` };
   }
@@ -318,7 +317,9 @@ async function dispatchUnit(
  * from the board and the store at the moment it is needed, so a caller that stops and resumes, or two
  * callers of one run, see the same state instead of a caller's memory of it.
  */
-export async function dispatchPlan(input: DispatchPlanInput): Promise<DispatchOutcome> {
+export async function dispatchPlan<Declaration extends WorkDeclaration>(
+  input: DispatchPlanInput<Declaration>,
+): Promise<DispatchOutcome> {
   const board = input.board;
   const units: DispatchedUnit[] = [];
   const order: string[] = [];

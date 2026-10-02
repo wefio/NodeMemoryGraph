@@ -33,12 +33,14 @@ loop would create the second implementation the same decision warned against, an
 
 - **One programmatic loop.** `dispatchPlan` lives with the other shared execution
   decisions, takes a board and worker port, and consumes the board's candidate set. It owns the ordering of
-  the claim, the freeze, the worker call, the result entry, the verdict, the failure and refusal
+  the claim, the worker call, the result entry, the verdict, the failure and refusal
   accounting, and the session decision at each boundary (`decideSessionMove`), recorded as a run fact when
   a run-fact port is supplied.
 - **The worker is a port.** What the loop calls to produce a candidate is supplied by its caller - the
   arms supply a live model worker or a recorded one, the host supplies the runner it already has. The
-  port's shape is the one the arms already use; the adapter implements it, and no policy moves into it.
+  port is parameterized by a declaration with a digest; freezing, rendering and interpretation belong
+  to its adopter. The [opaque declaration decision](2026-09-21-mechanism-not-policy.md#opaque-dispatch-declarations)
+  governs this boundary.
 - **The arms keep what makes them research.** Their spec files, their cells' declarations (bounds, slots,
   per-unit session declarations), their report format and their archive stay where they are. The arms get
   their own _declarations and measurements_; they no longer get their own _loop_.
@@ -64,7 +66,7 @@ loop would create the second implementation the same decision warned against, an
 - **The measurements stay comparable.** The driver's report format and its CLI do not change; the loop it
   calls is the same code, so a cell recorded before and after this move is the same cell. The archive's
   `matrix.json` and the plan's grade rule keep working unchanged.
-- **The board is a port.** The loop consumes `DispatchBoard`, the freeze, a
+- **The board is a port.** The loop consumes `DispatchBoard`, an admitted opaque declaration, a
   worker port and the shared session decision; nothing in the move
   adds a product policy or a new store column.
 - **Extraction is not product activation.** The fast dispatch tests exercise a fake board, with a real

@@ -136,7 +136,7 @@ test("a claim the board retires inside the verification window cannot be committ
   // committing. What happens in between is another writer retiring the entry the round holds -
   // verification is await-capable, which is exactly the window the design fences.
   const artifact = JSON.stringify({
-    digest: ticket.patch!.digest,
+    digest: ticket.declaration!.digest,
     files: [{ path: "a.ts", content: "export const a = 2;\n" }],
   });
   const result = gate.putTaskBoardEntry({

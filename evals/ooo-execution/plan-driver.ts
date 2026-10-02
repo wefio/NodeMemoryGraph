@@ -35,7 +35,7 @@ import {
   type ProbePlan,
 } from "../../src/integration/ooo-board.ts";
 import { verifyDataChecks } from "../../src/integration/ooo-candidate.ts";
-import type { PatchSubmission } from "../../src/integration/ooo-patch.ts";
+import type { PatchSubmission, FrozenPatchWork } from "../../src/integration/ooo-patch.ts";
 import type { DataCheck } from "../../src/integration/ooo-candidate.ts";
 import { testFileCheck } from "./data-check-runner.ts";
 import type { SessionPlan } from "../../src/integration/ooo-execution.ts";
@@ -48,10 +48,11 @@ import { dispatchPlan, type DispatchedUnit } from "../../src/integration/ooo-dis
 import type {
   WorkerMetrics,
   PlanWorkerResult,
-  PlanWorker,
+  PlanWorker as DispatchWorker,
   PlanSession,
 } from "../../src/integration/ooo-dispatch.ts";
-export type { WorkerMetrics, PlanWorkerResult, PlanWorker, PlanSession };
+export type PlanWorker = DispatchWorker<FrozenPatchWork>;
+export type { WorkerMetrics, PlanWorkerResult, PlanSession };
 
 /** One unit of the plan: what it is asked for, what it may edit, and what its own candidate must
  *  pass. The last one is the unit's acceptance; the parent check is separate and fixed. Both are
@@ -264,7 +265,7 @@ export async function runPlan(spec: PlanDriverSpec): Promise<PlanRun> {
 
   // The loop is the shared one: this driver supplies what only it knows - the plan, each task's spec,
   // the declared bound, the legality view, the worker, and the session identity its measurements are
-  // keyed by - and the shared layer owns the order of operations (claim, freeze, worker, result,
+  // keyed by - and the shared layer owns the order of operations (claim, worker, result,
   // verdict, and the session decision at each boundary).
   const outcome = await dispatchPlan({
     board: gate,
