@@ -4,7 +4,7 @@
 
 **Status:** implemented
 **Approved:** explicit
-**Relates to:** [Mechanism, not policy](../proposed/2026-09-21-mechanism-not-policy.md), [Board governance and capability addressing](2026-09-06-board-governance-addressing.md), [Name the collaboration protocol and its task-unit sub-protocol](2026-09-20-name-the-collaboration-protocol.md), [Task unit semantics](../../design/task-unit-semantics.md), [The contract's obligations](../../design/task-unit-semantics-obligations.md), [Protocol-governed collaboration: the parts, the gaps](../../design/protocol-governed-collaboration.md)
+**Relates to:** [Mechanism, not policy](2026-09-21-mechanism-not-policy.md), [Board governance and capability addressing](2026-09-06-board-governance-addressing.md), [Name the collaboration protocol and its task-unit sub-protocol](2026-09-20-name-the-collaboration-protocol.md), [Task unit semantics](../../design/task-unit-semantics.md), [The contract's obligations](../../design/task-unit-semantics-obligations.md), [Protocol-governed collaboration: the parts, the gaps](../../design/protocol-governed-collaboration.md)
 
 ## Problem
 

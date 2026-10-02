@@ -570,6 +570,12 @@ export function deriveStatus(
 export const MODELLED_ACTIONS = ["next", "publish"] as const;
 export const UNMODELLED_ACTIONS = ["fuse", "prepare"] as const;
 
+/** A supported primitive, named and enabled by the declaring protocol rather than by the checker. */
+export interface RefinementConstraint {
+  readonly kind: "within-parent-writes";
+  readonly name: string;
+}
+
 /** A refinement is a host-declared split, not something a language model asserts. */
 export interface RefinementSpec {
   parent: string;
@@ -577,6 +583,74 @@ export interface RefinementSpec {
   join: string;
   /** Parent obligation → the part outputs that carry it. */
   obligations: Readonly<Partial<Record<Obligation, readonly string[]>>>;
+  /** Presence enables a named primitive; an empty list never creates an implicit rule. */
+  constraints: readonly RefinementConstraint[];
+}
+
+const REFINEMENT_CONSTRAINT_FIELDS = new Set(["kind", "name"]);
+
+function constraintRefusals(value: unknown, task: string, index: number): Refusal[] {
+  const field = `constraints.${index}`;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return [{ task, field, reason: "a refinement constraint must be a named declaration" }];
+  const constraint = value as Partial<RefinementConstraint>;
+  const refusals = unknownKeys(value, REFINEMENT_CONSTRAINT_FIELDS).map((key) => ({
+    task,
+    field: `${field}.${key}`,
+    reason: "unsupported refinement constraint field",
+  }));
+  if (typeof constraint.name !== "string" || !constraint.name.trim())
+    refusals.push({
+      task,
+      field: `${field}.name`,
+      reason: "the protocol must name its constraint",
+    });
+  if (constraint.kind !== "within-parent-writes")
+    refusals.push({
+      task,
+      field: `${field}.kind`,
+      reason: `unsupported primitive ${String(constraint.kind)} for ${constraint.name ?? "unnamed constraint"}`,
+    });
+  return refusals;
+}
+
+function declaredRefinementConstraints(spec: RefinementSpec): {
+  rules: readonly RefinementConstraint[];
+  refusals: Refusal[];
+} {
+  if (!Array.isArray(spec.constraints))
+    return {
+      rules: [],
+      refusals: [
+        {
+          task: spec.parent,
+          field: "constraints",
+          reason:
+            "the protocol must declare its refinement constraints, even when none are enabled",
+        },
+      ],
+    };
+  const rules: RefinementConstraint[] = [];
+  const refusals: Refusal[] = [];
+  const names = new Set<string>();
+  for (const [index, constraint] of spec.constraints.entries()) {
+    const invalid = constraintRefusals(constraint, spec.parent, index);
+    if (invalid.length) {
+      refusals.push(...invalid);
+      continue;
+    }
+    if (names.has(constraint.name)) {
+      refusals.push({
+        task: spec.parent,
+        field: `constraints.${index}.name`,
+        reason: `duplicate constraint name ${constraint.name}`,
+      });
+      continue;
+    }
+    names.add(constraint.name);
+    rules.push(constraint);
+  }
+  return { rules, refusals };
 }
 
 function refuseUnmappedObligations(parent: TaskUnit, spec: RefinementSpec): Refusal[] {
@@ -590,16 +664,15 @@ function refuseUnmappedObligations(parent: TaskUnit, spec: RefinementSpec): Refu
     }));
 }
 
-function refuseWidening(part: TaskUnit, parent: TaskUnit): Refusal[] {
-  if (!parent.patch) return [];
-  const allowed = new Set(parent.patch.editable);
-  return (part.patch?.editable ?? [])
-    .filter((path) => !allowed.has(path))
-    .map((path) => ({
+function refuseWidening(part: TaskUnit, parent: TaskUnit, rule: RefinementConstraint): Refusal[] {
+  const allowed = new Set(parent.effects.proposeWrite);
+  return part.effects.proposeWrite
+    .filter((resource) => !allowed.has(resource))
+    .map((resource) => ({
       task: part.id,
-      field: "editable",
+      field: "effects.proposeWrite",
       obligation: "permission-closure" as const,
-      reason: `a split may not widen the write set: ${path} is outside the parent's`,
+      reason: `${rule.name}: ${resource} is outside the parent's declared write set`,
     }));
 }
 
@@ -610,9 +683,11 @@ export function checkRefinement(compiled: CompiledTasks, spec: RefinementSpec): 
   if (!parent) {
     return [{ task: spec.parent, field: "parent", reason: "refinement parent is not in the plan" }];
   }
+  const declared = declaredRefinementConstraints(spec);
   const refusals: Refusal[] = spec.parts.includes(spec.join)
-    ? []
+    ? [...declared.refusals]
     : [
+        ...declared.refusals,
         {
           task: spec.parent,
           field: "join",
@@ -620,13 +695,23 @@ export function checkRefinement(compiled: CompiledTasks, spec: RefinementSpec): 
           reason: "the join must be one of the parts",
         },
       ];
+  if (
+    parent.obligations.includes("permission-closure") &&
+    !declared.rules.some((rule) => rule.kind === "within-parent-writes")
+  )
+    refusals.push({
+      task: parent.id,
+      field: "constraints",
+      obligation: "permission-closure",
+      reason: "the parent's permission obligation needs a declared within-parent-writes constraint",
+    });
   for (const part of spec.parts) {
     const unit = byId.get(part);
     if (!unit) {
       refusals.push({ task: part, field: "parts", reason: "refinement part is not in the plan" });
       continue;
     }
-    refusals.push(...refuseWidening(unit, parent));
+    for (const rule of declared.rules) refusals.push(...refuseWidening(unit, parent, rule));
   }
   return [...refusals, ...refuseUnmappedObligations(parent, spec)];
 }

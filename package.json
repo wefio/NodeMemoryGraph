@@ -130,7 +130,7 @@
     "mutation:anchors": "node --experimental-strip-types tools/mutation-teeth.ts --anchors-only",
     "verify:packages": "node --experimental-strip-types tools/verify-packages.ts",
     "check:lock": "node --experimental-strip-types tools/check-lock.ts",
-    "verify:static": "npm run build && npm run package:check && npm run check && npm run check:tests && npm run mutation:anchors && npm run check:lock && npm run lint && npm run format:check && npm run docs:check && npm run agent:context:check && npm run complexity:gate && npm run verify:packages && npm run glossary:check && npm run rtm:check",
+    "verify:static": "npm run build && npm run package:check && npm run check && npm run check:tests && npm run mutation:anchors && npm run check:lock && npm run lint && npm run format:check && npm run docs:check && npm run agent:context:check && npm run complexity:gate && npm run verify:packages && npm run glossary:check && npm run check:policy-words && npm run rtm:check",
     "verify:product-ci": "npm run build && npm run test:coverage",
     "verify:research": "npm run prompts:generate && npm run test:research",
     "verify:node-compat": "npm run build && npm run check && npm run package:check",
@@ -142,6 +142,7 @@
     "test:chaos": "npm run build && node --experimental-strip-types --test \"tests/chaos/*.test.ts\"",
     "test:cg": "node --experimental-strip-types --test tests/core/autodiff.test.ts tests/core/differentiable-controller.test.ts tests/core/hierarchical-activation.test.ts tests/core/memory-graph-reasoner.test.ts tests/core/fork-merge.test.ts tests/core/robustness.test.ts",
     "glossary:check": "node --experimental-strip-types tools/glossary-check.ts",
+    "check:policy-words": "node --experimental-strip-types tools/policy-word-check.ts",
     "rtm:check": "node --experimental-strip-types tools/rtm-check.ts"
   },
   "devDependencies": {

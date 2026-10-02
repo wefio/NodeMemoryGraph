@@ -153,6 +153,7 @@ routes:
         - complexity:gate
         - verify:packages
         - glossary:check
+        - check:policy-words
         - rtm:check
         - test:product
       advisory: [verify:research, verify:chaos]
@@ -239,6 +240,7 @@ routes:
       - src/integration/check-runner.ts
       - src/integration/ooo-session-facts.ts
       - src/integration/ooo-session-mechanism.ts
+      - src/integration/ooo-patch-session.ts
       - src/integration/task-advisers.ts
       - src/integration/task-coordinator.ts
       - src/integration/task-semantics-interleavings.ts
@@ -249,7 +251,7 @@ routes:
       - docs/design/ooo-execution-bootstrap.md
       - docs/design/task-unit-semantics.md
       - docs/design/ooo-fusion-planning.md
-    tests: [tests/integration/ooo-*.test.ts, tests/integration/task-semantics*.test.ts]
+    tests: [tests/integration/ooo-*.test.ts, tests/integration/task-semantics*.test.ts, tests/integration/task-refinement*.test.ts]
     verify:
       blocking: [check, test:product, build]
       advisory: []

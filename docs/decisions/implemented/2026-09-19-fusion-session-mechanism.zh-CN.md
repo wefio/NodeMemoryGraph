@@ -6,7 +6,7 @@
 **Approved:** explicit
 **Relates to:** [pilot 与其上限](2026-09-18-fusion-and-speculation-pilot.zh-CN.md)、[融合合法性与其记账](../implemented/2026-09-18-fusion-legality-and-accounting.zh-CN.md)
 
-实现证据：`.pi/extensions/nmg/ooo-execution.ts` 的 `createPiSessionRunner` 与 `patchSessionInput` 通过 `UnitState` 盒子让每次运行持有一个会话，`executePiInputWith` 委托给它，扩展因此只保留一套 tool surface，`evals/ooo-execution/plan-driver.ts` 的 `piSessionWorker` 每个 session id 持有一个 runner。冒烟结果显示两个单元同处一个会话（`sessions: [["alpha","summary"]]`，21k tokens）。仍未完成的不再是机制：产品侧还没有调用方去决定复用会话。
+实现证据：`.pi/extensions/nmg/ooo-execution.ts` 的 `createPiSessionRunner` 消费[默认会话采用方](../../../src/integration/ooo-patch-session.ts)的 `patchSessionInput`，通过其 `UnitState` 盒子让每次运行持有一个会话，`executePiInputWith` 委托给它，扩展因此只保留一套 tool surface，`evals/ooo-execution/plan-driver.ts` 的 `piSessionWorker` 每个 session id 持有一个 runner。冒烟结果显示两个单元同处一个会话（`sessions: [["alpha","summary"]]`，21k tokens）。仍未完成的不再是机制：产品侧还没有调用方去决定复用会话。
 
 ## Problem
 

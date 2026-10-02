@@ -10,12 +10,13 @@ import {
   patchSubmission,
   preparePatchWork,
   type ConclusionKind,
-  type FrozenPatchTask,
+  type FrozenPatchWork,
   type PatchBudget,
   type PatchLimits,
   type PatchSubmission,
 } from "./ooo-patch.ts";
 import { workDigest, workDigestOf } from "./work-identity.ts";
+import type { WorkDeclaration } from "./ooo-dispatch.ts";
 
 export type ProbeOperation = SnapshotWork["operation"];
 
@@ -122,7 +123,7 @@ function parsePayload(content: string): { ticket: BoardTicket; artifact: string 
   return { ticket: ticket as BoardTicket, artifact };
 }
 
-export interface BoardTicket {
+export interface BoardTicket<Declaration extends WorkDeclaration = WorkDeclaration> {
   runId: string;
   taskId: string;
   revision: string;
@@ -133,9 +134,8 @@ export interface BoardTicket {
   input: string;
   dependencies: Record<string, string>;
   operation: ProbeOperation | null;
-  // The frozen work itself, plus the digest that names it: typing it as a hand-listed
-  // subset is what let the ticket silently omit every field added later.
-  patch?: FrozenPatchTask & { digest: string };
+  // The shape owner freezes before issuing the ticket. Mechanism readers know only its digest.
+  readonly declaration: Declaration | null;
 }
 
 /** Which run of a store to open. Omitted, a store with exactly one run continues it and a
@@ -1068,7 +1068,7 @@ export class BoardAdmission extends NmgStore {
     return facts;
   }
 
-  claim(id: string, agentId: string): BoardTicket {
+  claim(id: string, agentId: string): BoardTicket<FrozenPatchWork> {
     if (!id || !agentId) throw new Error("task and agent required");
     if (this.cancelled() !== null) throw new Error("round cancelled");
     return this.transaction(() => {
@@ -1114,7 +1114,7 @@ export class BoardAdmission extends NmgStore {
         input: row.input,
         operation: spec ? null : (row.operation as ProbeOperation),
         dependencies,
-        patch: frozen ? { ...frozen.work, digest: frozen.digest } : undefined,
+        declaration: frozen,
       };
     });
   }

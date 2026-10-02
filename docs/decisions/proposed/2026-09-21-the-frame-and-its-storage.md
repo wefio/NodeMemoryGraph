@@ -3,7 +3,7 @@
 [中文](2026-09-21-the-frame-and-its-storage.zh-CN.md)
 
 **Status:** proposed
-**Relates to:** [Mechanism, not policy](2026-09-21-mechanism-not-policy.md), [The program answers legality](../implemented/2026-09-20-the-program-answers-legality.md), [Name the collaboration protocol and its task-unit sub-protocol](../implemented/2026-09-20-name-the-collaboration-protocol.md), [Protocol-governed collaboration: the parts, the gaps](../../design/protocol-governed-collaboration.md), [Board governance and capability addressing](../implemented/2026-09-06-board-governance-addressing.md), [Task unit semantics](../../design/task-unit-semantics.md)
+**Relates to:** [Mechanism, not policy](../implemented/2026-09-21-mechanism-not-policy.md), [The program answers legality](../implemented/2026-09-20-the-program-answers-legality.md), [Name the collaboration protocol and its task-unit sub-protocol](../implemented/2026-09-20-name-the-collaboration-protocol.md), [Protocol-governed collaboration: the parts, the gaps](../../design/protocol-governed-collaboration.md), [Board governance and capability addressing](../implemented/2026-09-06-board-governance-addressing.md), [Task unit semantics](../../design/task-unit-semantics.md)
 
 ## Problem
 
@@ -123,11 +123,12 @@ A peer protocol supplies four narrow things:
    does not change.
 
 Reusable material exists; an interface with all four roles does not. `RoundQueryPort` carries two typed
-reads - `cancelled()` and `accepted()` - and the dispatch loop fails a claim whose ticket has no `patch`,
-so patch work is the only work shape today and a peer protocol has to bring its own. Widening that seam
-(or adding a port beside `DispatchBoard`) is a step of this record, not a fact that already holds. What is
-already in place is the legality computation the board calls, the read-only query port pattern, and the
-dispatch loop's own separation of a refusal to use a slot from a failed unit.
+reads - `cancelled()` and `accepted()`. The [dispatch declaration seam](../implemented/2026-09-21-mechanism-not-policy.md#opaque-dispatch-declarations)
+is parameterized by an opaque declaration with a digest, and a controlled numeric adopter uses the
+shared loop and real board lifecycle without patch fields. That does not implement protocol selectors,
+payload storage, projection or version rules. The four-role interface remains a step of this record.
+The existing legality computation, read-only query port pattern and separation of slot refusal from
+unit failure are reusable mechanisms.
 
 Once that seam exists, replacing a protocol means another implementation plus another `protocol` value;
 the payloads of entries written under the old value stay exactly as they are - readable, not actionable,
@@ -167,8 +168,8 @@ test. Anything that needs a new table, a new tool or a new channel is outside th
 3. Domain refusals become data at the RPC and tool boundary while request-level errors stay errors; the
    store keeps throwing.
 4. Tool schemas shaped for strict mode; flat T0/T1 rendering.
-5. The four-role protocol seam: widen the query port or add one beside `DispatchBoard`, and let a peer
-   protocol bring its own work shape instead of requiring `patch`.
+5. The four-role protocol seam: extend the opaque dispatch declaration port with declaration validation,
+   legality, projection and acceptance under a named, versioned protocol.
 6. A threat list, with the two rules carried as text until a trust boundary exists.
 
 ## Alternatives considered

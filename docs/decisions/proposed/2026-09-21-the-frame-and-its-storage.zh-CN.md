@@ -3,7 +3,7 @@
 [English](2026-09-21-the-frame-and-its-storage.md)
 
 **Status:** proposed
-**Relates to:** [机制，不是策略](2026-09-21-mechanism-not-policy.zh-CN.md)、[程序只回答合法性](../implemented/2026-09-20-the-program-answers-legality.zh-CN.md)、[给协作协议及其任务单元子协议命名](../implemented/2026-09-20-name-the-collaboration-protocol.zh-CN.md)、[协议化协作：组成部分与空缺](../../design/protocol-governed-collaboration.zh-CN.md)、[黑板治理与能力寻址](../implemented/2026-09-06-board-governance-addressing.zh-CN.md)、[任务单元语义](../../design/task-unit-semantics.md)
+**Relates to:** [机制，不是策略](../implemented/2026-09-21-mechanism-not-policy.zh-CN.md)、[程序只回答合法性](../implemented/2026-09-20-the-program-answers-legality.zh-CN.md)、[给协作协议及其任务单元子协议命名](../implemented/2026-09-20-name-the-collaboration-protocol.zh-CN.md)、[协议化协作：组成部分与空缺](../../design/protocol-governed-collaboration.zh-CN.md)、[黑板治理与能力寻址](../implemented/2026-09-06-board-governance-addressing.zh-CN.md)、[任务单元语义](../../design/task-unit-semantics.md)
 
 ## 问题
 
@@ -78,7 +78,7 @@
 3. **投影**——T1 的一行摘要与 T2 的结构。必须有，因为载荷对板子不透明；MCP 与 A2A 出于同样理由也是这个形状。
 4. **验收**——接受一次交付的判据。形式（digest 加独立裁决）不变。
 
-可复用的材料存在，但四项职责齐全的接口不存在。`RoundQueryPort` 只有两个 typed 读——`cancelled()` 与 `accepted()`；派发循环对没有 `patch` 的票直接判失败，所以今天唯一的“工作形态”就是 patch，平级协议必须自带它自己的。把这条缝拓宽（或在 `DispatchBoard` 旁边加一个 port）是本文的**计划步骤**，不是既成事实。已经到位的是板子调用的合法性计算、只读查询端口的模式，以及派发循环里已有的“拒绝使用槽位”与“单元失败”之分。
+可复用的材料存在，但四项职责齐全的接口不存在。`RoundQueryPort` 只有两个 typed 读——`cancelled()` 与 `accepted()`。[派发声明边界](../implemented/2026-09-21-mechanism-not-policy.zh-CN.md#不透明派发声明)以带摘要的不透明声明参数化；受控数值采用方无须补丁字段，能使用共享循环和真实黑板生命周期。这不等于已经实现协议选择器、payload 存储、投影或版本规则；四角色接口仍是本文的计划步骤。现有合法性计算、只读查询端口模式、槽位拒绝与单元失败的区分，是可复用机制。
 
 那条缝一旦存在，替换一个协议就是换一个实现加换一个 `protocol` 取值；旧取值下写入的载荷原样留着——可读、不可行动，且不需要迁移。
 
@@ -105,7 +105,7 @@ ECMA-434 对 NLIP 是符合性要求，配套安全指南给十五类威胁打�
 2. 一次迁移：`protocol`、`protocol_version`、`payload_format`、`payload`，加那条不变量测试。
 3. 域内拒绝在 RPC 与工具边界变成数据，而请求级错误仍是错误；store 继续抛异常。
 4. 工具 schema 按 strict 模式写；T0/T1 扁平渲染。
-5. 四项职责的协议缝：拓宽查询端口，或在 `DispatchBoard` 旁边加一个；让平级协议自带工作形态，而不是要求 `patch`。
+5. 四项职责的协议缝：在不透明派发声明端口上，为具名、版本化协议接入声明校验、合法性、投影与验收。
 6. 一份威胁清单，两条规则先以文字承载，等出现信任边界再谈强制。
 
 ## 考虑过的替代方案

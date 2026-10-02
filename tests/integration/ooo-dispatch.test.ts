@@ -33,7 +33,12 @@ import {
   type LegalityAnswer,
   type SessionPlan,
 } from "../../src/integration/ooo-execution.ts";
-import type { PlanSession, PlanWorker } from "../../src/integration/ooo-dispatch.ts";
+import type {
+  PlanSession,
+  PlanWorker as DispatchWorker,
+} from "../../src/integration/ooo-dispatch.ts";
+import { preparePatchWork, type FrozenPatchWork } from "../../src/integration/ooo-patch.ts";
+type PlanWorker = DispatchWorker<FrozenPatchWork>;
 
 const REMOVE_TEMP_TREE = { recursive: true, force: true, maxRetries: 5, retryDelay: 100 };
 
@@ -51,7 +56,7 @@ type BoardOptions = {
 };
 
 /** A board in memory: legal set, claims, entries and verdicts, with no store behind any of it. */
-class StubBoard implements DispatchBoard {
+class StubBoard implements DispatchBoard<FrozenPatchWork> {
   readonly channel = "run-1";
   now = 1_700_000_000_000;
   /** What a delivered-but-unaccepted unit reports, so a case can drive a rejection. */
@@ -105,7 +110,7 @@ class StubBoard implements DispatchBoard {
     return this.#accepted;
   }
 
-  claim(taskId: string, _owner: string): DispatchTicket {
+  claim(taskId: string, _owner: string): DispatchTicket<FrozenPatchWork> {
     if (this.#options.refuse?.(taskId)) throw new Error(`no published handoff for ${taskId}`);
     const attempt = (this.#claims.get(taskId) ?? 0) + 1;
     this.#claims.set(taskId, attempt);
@@ -113,19 +118,19 @@ class StubBoard implements DispatchBoard {
     return {
       attempt,
       dependencies: {},
-      patch: {
+      declaration: preparePatchWork({
         taskId,
         attempt,
         instruction: `work on ${taskId}`,
         files: { "src/unit.ts": "export const value = 1;\n" },
         editable: ["src/unit.ts"],
-      },
+      }),
     };
   }
 
   putTaskBoardEntry(input: { taskId: string; kind: "result"; content: string }): { id: string } {
     const id = `entry-${++this.#entries}`;
-    this.#taskOf.set(id, JSON.parse(input.content).ticket.patch.taskId);
+    this.#taskOf.set(id, JSON.parse(input.content).ticket.declaration.work.taskId);
     return { id };
   }
 

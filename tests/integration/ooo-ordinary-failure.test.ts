@@ -163,6 +163,7 @@ test("a split that drops a parent obligation is refused by name, with its locati
     parent: "B",
     parts: ["A"],
     join: "A",
+    constraints: [{ kind: "within-parent-writes", name: "permission-closure" }],
     obligations: {},
   });
   assert.ok(dropped.length > 0, "a split that maps no parent obligation is refused, not accepted");

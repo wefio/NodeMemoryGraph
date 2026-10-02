@@ -7,7 +7,7 @@
 A model of how a board entry travels, and the checks that decide whether the model earns a place in the
 records. This document owns the model, the rule that says when a boundary earns a seam, and the checks. It
 does not restate the parts inventory, which lives in [protocol-governed-collaboration.md](protocol-governed-collaboration.md),
-nor the decisions, which live in three records: [mechanism, not policy](../decisions/proposed/2026-09-21-mechanism-not-policy.md),
+nor the decisions, which live in three records: [mechanism, not policy](../decisions/implemented/2026-09-21-mechanism-not-policy.md),
 [the frame and its storage](../decisions/proposed/2026-09-21-the-frame-and-its-storage.md), and
 [the program answers legality](../decisions/implemented/2026-09-20-the-program-answers-legality.md).
 
@@ -139,6 +139,9 @@ out in its favour. If they do not, this document is archived rather than promote
 
 ## The checks
 
+The continuous classification check is owned by [mechanism, not policy](../decisions/implemented/2026-09-21-mechanism-not-policy.md#decision).
+The measurements below are historical experiments, not the maintained inventory or proof of separation.
+
 Predictions are recorded before the measurement, so a surprise is visible rather than rationalised.
 
 **(a) Policy words in the middle.** Grep the middle layer - `src/core/store/`, `src/integration/ooo-board.ts`,
@@ -183,8 +186,8 @@ concentration is where it was predicted: `src/integration/ooo-board.ts` carries 
 The measurement forced two corrections. First, the raw count overstates the case, which is the caveat this
 check was written with: `files` in `src/core/store/writes.ts` and `src/core/store/retrieval.ts` is a mechanism
 word - a path inside a store - and `checks` in `src/integration/ooo-candidate.ts` names the check _runner_,
-which is mechanism too. The word list should therefore drop `files` and `checks` and keep `patch`, `editable`
-and `instruction`. Second, what remains is still about 120 hits, so "the middle is policy-free" is false as a
+which is mechanism too. That measurement suggested dropping `files` and `checks`; the maintained check
+instead retains context-dependent words and classifies their sites under the decision linked above. Second, what remains is still about 120 hits, so "the middle is policy-free" is false as a
 description of today, at a scale an order of magnitude past the prediction. What the model has is directional
 support: the leak is real, large, and concentrated in three files, which is exactly what a seam would have to
 remove.

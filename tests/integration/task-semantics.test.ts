@@ -295,6 +295,7 @@ test("a refinement must carry every parent obligation and may not widen the writ
     parent: "P",
     parts: ["P1", "P2"],
     join: "P1",
+    constraints: [{ kind: "within-parent-writes", name: "permission-closure" }],
     obligations: Object.fromEntries(partial.map((obligation) => [obligation, ["P1"]])),
   });
   const missing = refusals.filter((refusal) => refusal.field.startsWith("obligations."));

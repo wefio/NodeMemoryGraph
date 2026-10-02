@@ -16,7 +16,6 @@ import {
   type PatchTaskSpec,
   type ProbePlan,
 } from "../../src/integration/ooo-board.ts";
-import { preparePatchWork } from "../../src/integration/ooo-patch.ts";
 
 const TASK = "A";
 const FILE = "src/check.ts";
@@ -34,18 +33,8 @@ async function submitOne(board: BoardAdmission): Promise<string> {
   };
   board.installPatchTask(TASK, spec);
   const ticket = board.claim(TASK, "post-commit-test");
-  assert.ok(ticket.patch, "the plan declares a patch task");
-  const frozen = preparePatchWork({
-    taskId: ticket.patch.taskId,
-    attempt: ticket.attempt,
-    instruction: ticket.patch.instruction,
-    files: ticket.patch.files,
-    editable: ticket.patch.editable,
-    visible: ticket.patch.visible,
-    admittedConclusions: ticket.patch.admittedConclusions,
-    budget: ticket.patch.budget,
-    limits: ticket.patch.limits,
-  });
+  assert.ok(ticket.declaration, "the plan declares executable work");
+  const frozen = ticket.declaration;
   // The worker's artifact is the wire shape the host validates (`{ digest, files: [{ path, content }] }`),
   // not the store's `PatchSubmission`: the host re-derives the submission from its own frozen work.
   const artifact = JSON.stringify({

@@ -96,6 +96,7 @@ test("case 2: a lost obligation or a widened permission is refused, and an assum
     parent: "P",
     parts: ["J"],
     join: "J",
+    constraints: [{ kind: "within-parent-writes", name: "permission-closure" }],
     obligations: { "input-closure": ["J"] }, // deliberately drops artifact-handoff and the rest
   });
   assert.ok(
@@ -103,8 +104,8 @@ test("case 2: a lost obligation or a widened permission is refused, and an assum
     "every parent obligation must map to a part output",
   );
 
-  // Widening is checked against a parent that actually has a frozen envelope: two units in
-  // the same plan, the second writing a file the first does not own.
+  // The default adapter projects its frozen envelope into declared proposal-write resources.
+  // The second unit proposes a resource the parent's declaration does not authorize.
   const siblings: ProbePlan = [
     ["P", "1", [], "isolated-artifact", null, null],
     ["C", "1", [], "isolated-artifact", null, null],
@@ -115,6 +116,7 @@ test("case 2: a lost obligation or a widened permission is refused, and an assum
     parent: "P",
     parts: ["C"],
     join: "C",
+    constraints: [{ kind: "within-parent-writes", name: "permission-closure" }],
     obligations: Object.fromEntries(sibParent.obligations.map((obligation) => [obligation, ["C"]])),
   });
   assert.ok(
