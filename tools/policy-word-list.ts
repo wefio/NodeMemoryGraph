@@ -16,6 +16,7 @@ export const MECHANISM_PATHS: readonly string[] = [
   "src/integration/ooo-candidate.ts",
   "src/integration/ooo-fusion-plan.ts",
   "src/integration/ooo-session-mechanism.ts",
+  "src/integration/ooo-patch-session.ts",
   "src/integration/task-semantics.ts",
   "src/integration/task-semantics-model.ts",
   "src/integration/task-semantics-interleavings.ts",
@@ -564,13 +565,22 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
     path: "src/integration/ooo-session-mechanism.ts",
     scope: "<module>",
     word: "patch",
-    count: 6,
+    count: 4,
     classification: "policy",
     reason:
-      "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
+      "Compatibility exports carry the default adapter; generic session input/state/runner contracts do not require its work shape.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
+    scope: "<module>",
+    word: "patch",
+    count: 8,
+    classification: "policy",
+    reason:
+      "The default adopter owns patch rendering and validation, above the generic session lifecycle.",
+  },
+  {
+    path: "src/integration/ooo-patch-session.ts",
     scope: "CheckTool",
     word: "files",
     count: 1,
@@ -579,7 +589,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "checkToolCandidate",
     word: "patch",
     count: 2,
@@ -588,7 +598,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "checkToolCandidate",
     word: "files",
     count: 2,
@@ -597,7 +607,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "ArtifactParams",
     word: "files",
     count: 1,
@@ -606,7 +616,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "artifactEnvelope",
     word: "patch",
     count: 2,
@@ -615,7 +625,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "artifactEnvelope",
     word: "files",
     count: 4,
@@ -624,7 +634,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "patchEnvelope",
     word: "patch",
     count: 2,
@@ -633,7 +643,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "patchEnvelope",
     word: "files",
     count: 3,
@@ -642,7 +652,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "conclusionEnvelope",
     word: "patch",
     count: 1,
@@ -651,7 +661,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "conclusionEnvelope",
     word: "files",
     count: 1,
@@ -660,7 +670,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "PatchExecOptions",
     word: "patch",
     count: 1,
@@ -669,7 +679,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "patchSessionInput",
     word: "patch",
     count: 4,
@@ -678,7 +688,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "patchSessionInput",
     word: "files",
     count: 2,
@@ -687,7 +697,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "piCompletionAllowed",
     word: "patch",
     count: 1,
@@ -705,16 +715,16 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Executes or records caller-declared checks; does not choose their wording or enablement.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "UnitState",
     word: "patch",
-    count: 2,
+    count: 1,
     classification: "policy",
     reason:
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "snapshotText",
     word: "patch",
     count: 1,
@@ -723,7 +733,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "snapshotText",
     word: "files",
     count: 4,
@@ -732,7 +742,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "snapshotText",
     word: "instruction",
     count: 2,
@@ -741,7 +751,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "snapshotText",
     word: "editable",
     count: 2,
@@ -750,7 +760,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "artifactFromText",
     word: "patch",
     count: 1,
@@ -759,7 +769,7 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "artifactFromText",
     word: "files",
     count: 2,
@@ -768,10 +778,10 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
   },
   {
-    path: "src/integration/ooo-session-mechanism.ts",
+    path: "src/integration/ooo-patch-session.ts",
     scope: "SessionRunInput",
     word: "patch",
-    count: 2,
+    count: 1,
     classification: "policy",
     reason:
       "Patch-specific worker inputs, artifact envelopes or prompt rendering remain in the session module.",
@@ -1006,24 +1016,6 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
     scope: "unitFor",
     word: "editable",
     count: 1,
-    classification: "policy",
-    reason:
-      "The compiler or refinement rule names patch-specific fields, validation and permissions.",
-  },
-  {
-    path: "src/integration/task-semantics.ts",
-    scope: "refuseWidening",
-    word: "patch",
-    count: 3,
-    classification: "policy",
-    reason:
-      "The compiler or refinement rule names patch-specific fields, validation and permissions.",
-  },
-  {
-    path: "src/integration/task-semantics.ts",
-    scope: "refuseWidening",
-    word: "editable",
-    count: 3,
     classification: "policy",
     reason:
       "The compiler or refinement rule names patch-specific fields, validation and permissions.",

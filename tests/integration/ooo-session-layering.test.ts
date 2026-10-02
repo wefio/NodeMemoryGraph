@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import ts from "typescript";
 
 const SHARED = "src/integration/ooo-session-mechanism.ts";
 const ADAPTER = "nmg/ooo-execution.ts";
@@ -29,7 +30,16 @@ function typescriptFiles(directory: string): string[] {
 
 /** The names the shared module exports, which are the names the adapter may not hand out. */
 function sharedNames(): string[] {
-  return readFileSync(SHARED, "utf8")
+  const text = readFileSync(SHARED, "utf8");
+  const source = ts.createSourceFile(SHARED, text, ts.ScriptTarget.Latest, true);
+  const forwarded = source.statements
+    .filter(ts.isExportDeclaration)
+    .flatMap((statement) =>
+      statement.exportClause && ts.isNamedExports(statement.exportClause)
+        ? statement.exportClause.elements.map((element) => element.name.text)
+        : [],
+    );
+  const direct = text
     .split(/\r?\n/)
     .map(
       (line) =>
@@ -38,6 +48,7 @@ function sharedNames(): string[] {
         )?.[1],
     )
     .filter((name): name is string => Boolean(name));
+  return [...new Set([...direct, ...forwarded])];
 }
 
 /**
@@ -73,6 +84,19 @@ function namesTakenFromAdapter(text: string): string[] {
   }
   return names;
 }
+
+test("the public surface includes explicit compatibility forwards as well as direct declarations", () => {
+  const names = sharedNames();
+  for (const name of [
+    "artifactEnvelope",
+    "patchSessionInput",
+    "UnitState",
+    "SessionInput",
+    "SessionState",
+    "SessionRunner",
+  ])
+    assert.ok(names.includes(name), `${name} must not disappear behind a forwarding export`);
+});
 
 test("no file asks the adapter for a name the shared mechanism owns", () => {
   const shared = sharedNames();

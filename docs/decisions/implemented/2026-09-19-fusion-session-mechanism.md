@@ -6,7 +6,7 @@
 **Approved:** explicit
 **Relates to:** [the pilot and its ceiling](2026-09-18-fusion-and-speculation-pilot.md), [fusion legality and accounting](../implemented/2026-09-18-fusion-legality-and-accounting.md)
 
-Implementation evidence: `createPiSessionRunner` and `patchSessionInput` in `.pi/extensions/nmg/ooo-execution.ts` hold one session per run behind the `UnitState` box, `executePiInputWith` delegates to it so the extension keeps exactly one tool surface, and `piSessionWorker` in `evals/ooo-execution/plan-driver.ts` holds one runner per session id. The smoke reported both units in one session (`sessions: [["alpha","summary"]]`, 21k tokens). What remains is not mechanism: no product-side caller yet decides to reuse a session.
+Implementation evidence: `createPiSessionRunner` in `.pi/extensions/nmg/ooo-execution.ts` consumes `patchSessionInput` from the [default session adopter](../../../src/integration/ooo-patch-session.ts) and holds one session per run behind its `UnitState` box, `executePiInputWith` delegates to it so the extension keeps exactly one tool surface, and `piSessionWorker` in `evals/ooo-execution/plan-driver.ts` holds one runner per session id. The smoke reported both units in one session (`sessions: [["alpha","summary"]]`, 21k tokens). What remains is not mechanism: no product-side caller yet decides to reuse a session.
 
 ## Problem
 

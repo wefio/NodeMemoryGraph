@@ -55,28 +55,25 @@
 - `input` 与 `dependencies` 的粒度：依赖影响合法性与顺序，这是机制；但"输入"是携带内容还是只携带摘要，是另一个问题。
 - `operation`：可能是策略。
 
+### 声明的 refinement 约束与会话策略
+
+refinement 显式声明 `constraints`，没有启用的规则也声明空列表。`within-parent-writes` 原语检查父单元规范化后的提议写资源集，不读取 `parent.patch.editable`；名字由协议给出，出现即启用。不支持的原语、未知字段、重复名字在声明位置拒绝；不能通过漏声明约束丢掉父权限义务。[受控 refinement 用例](../../../tests/integration/task-refinement-declaration.test.ts)使用不透明数值资源身份而非文件路径，并保留义务覆盖检查。
+
+通用会话输入、状态、runner 契约携带已渲染文本、计数器和调用方声明的边界，不解释补丁。[默认会话采用方](../../../src/integration/ooo-patch-session.ts)拥有补丁渲染、产物校验、工具名字和快照最少读取次数。共享模块的兼容导出指向同一批函数，不复制实现。采用方仍在扫描面内并分类为策略；移动不是文件豁免，也不证明零策略。[通用会话用例](../../../tests/integration/ooo-generic-session.test.ts)验证无补丁字段的输入与状态，以及显式零读取下限；默认策略仍要求读取。它们不运行真实 harness。
+
 ## 未完成项
 
-### 工作形态边界
+### 声明存储
 
-不透明派发边界是工作形态转换（原 Plan 5）的一部分，不等于转换已完成。工作形态是策略层对“核心不透明携带的那对声明与产物”的叫法。补丁冻结属于默认采用方，共享端口不要求这种形态。
+派发、refinement 检查和通用会话契约不要求补丁信封。store 仍解析 `task_run_tasks.patch_files` / `patch_editable`；这些形态字段属于声明 owner，不属于黑板的通用 header。迁移前须与帧提案中 Task-Unit 类型表、黑板 payload 为 NULL 的安排对齐。这次分离不批准独立存储改动。
 
-余下耦合如下：
-
-| 站点 | 机制还是策略 | 待分离边界 |
-| --- | --- | --- |
-| `refuseWidening` 读 `parent.patch.editable` | 检查是机制；措辞与启用是策略 | permission closure 成为程序执行并给理由的一条声明约束 |
-| 会话机制的 `FrozenPatchWork` 签名 | 混合 | 提示渲染和产物校验是策略；会话生命周期、指标、取消是机制 |
-| `task_run_tasks.patch_files` / `patch_editable`（store 里解析） | 策略进了 schema | 属于声明的载荷；迁移前须与帧提案中 Task-Unit 类型表、黑板 payload 为 NULL 的安排对齐 |
-
-今天那条合法性规则正是本文新增的那点修正的最清楚的例子：**它的检查属于程序，而 permission closure 的名字与启用属于声明。** 所以修法不是把检查搬出程序，而是**别再用核心的词汇硬编码这条规则**——这与合法性记录第 3 步（把 repair-first 从共享规划策略变成由计划声明的约束，2026-09-23 已落地）是**同一形状的修法**。两处各自独立的修法落在同一形状上，是"这个分类是对的"的证据。
+permission closure 保留程序中的检查，名字与启用来自声明，与合法性记录里的声明 repair-first 约束具有同一边界：执行已选规则不等于选择规则。写集子集原语不假称已强制任意资源互斥或所有 effect。
 
 ### 字段实验与分离证据
 
 - [受控字段探针](../../experiments/execution/field-ownership-2026-10-01.md)提供 effect 标签、内容绑定摘要、依赖释放和 operation 解释的可复现证据。它缩小问题，不决定通用输入粒度或存储迁移。门禁不包含这些词，也不替实验定案。
 - schema 迁移与 `TaskUnit` 中的 `files` 组标为 `undecided`：同组混有补丁专有路径与另一角色。通过拆开 DDL 主题或运行另一种输入声明来解决，不把整组改标为机制。
-- 余下 permission closure 的名字与启用耦合，需要声明约束；检查仍在程序中执行并按单元返回理由。
-- 数值声明能经过加宽的派发边界与真实黑板生命周期，无须再改机制。零策略命中、通用 permission/session 边界、四角色 peer 协议接口仍是未验证目标；门禁通过不证明这些目标。草稿的[第二形态实验](../../design/mechanism-in-the-middle.zh-CN.md#结果)仍是历史耦合证据，不是当前的边界测试。
+- 数值声明能经过加宽的派发边界与真实黑板生命周期，无须再改机制。受控 permission/session 用例证明各自的窄契约，不证明 store 已无策略或已有四角色 peer 协议接口。零策略命中与完整协议接口仍是未验证目标；门禁通过不证明这些目标。草稿的[第二形态实验](../../design/mechanism-in-the-middle.zh-CN.md#结果)仍是历史耦合证据，不是当前的边界测试。
 
 ## 考虑过的替代方案
 

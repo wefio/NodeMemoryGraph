@@ -1,4 +1,5 @@
 import { workDigest } from "./work-identity.ts";
+import type { SessionLimits } from "./ooo-session-mechanism.ts";
 
 export interface PatchBudget {
   perFile: number;
@@ -8,11 +9,7 @@ export interface PatchBudget {
 /** Execution limits belong to the host envelope too: a real development task needs
  *  more model turns and time than a one-line arithmetic probe, and the raise is
  *  bound into the digest instead of being a worker-controlled parameter. */
-export interface PatchLimits {
-  turns: number;
-  reads: number;
-  timeoutMs: number;
-}
+export type PatchLimits = SessionLimits;
 
 /** Budgets belong to the frozen host envelope, not to a hard-coded constant:
  *  a bigger task raises them explicitly and the raise is part of the digest. */

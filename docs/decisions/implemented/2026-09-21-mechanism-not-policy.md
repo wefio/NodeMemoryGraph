@@ -92,29 +92,38 @@ controlled seam test, not a production peer-protocol installation or a frame/sto
   but whether an input carries content or only a digest is a separate question.
 - `operation`, which may be policy.
 
+### Declared refinement constraints and session policy
+
+A refinement declares `constraints`, including an explicit empty list. A supported primitive
+`within-parent-writes` checks the parent's normalized proposal-write resource set, not
+`parent.patch.editable`. The protocol supplies its name; presence enables it. Unsupported primitives,
+unknown fields and duplicate names are refused at their declaration. A parent's permission obligation
+cannot be dropped by omitting its constraint. The [controlled refinement cases](../../../tests/integration/task-refinement-declaration.test.ts)
+exercise opaque numeric resource identities, not file paths, and retain obligation coverage.
+
+Generic session input, state and runner contracts carry rendered text, counters and caller-declared
+bounds without patch interpretation. [The default session adopter](../../../src/integration/ooo-patch-session.ts)
+owns patch rendering, artifact validation, tool names and its snapshot-read minimum. Compatibility
+exports in the shared module refer to these same functions, not copies. The adapter remains in the
+scan surface, classified as policy; relocation is not a file exemption or a claim of zero policy.
+The [generic-session cases](../../../tests/integration/ooo-generic-session.test.ts) exercise an input and
+state with no patch fields and completion with a declared zero-read minimum, while the default policy
+retains its read requirement. They do not run a live harness.
+
 ## Deferred
 
-### Work-shape boundary
+### Declaration storage
 
-The opaque dispatch seam is one part of the work-shape conversion (original Plan 5), not completion
-of the conversion. A work shape is the policy layer's name for the declaration-and-artifact pair that
-the core carries without understanding it. Patch freezing remains in the default adopters; requiring
-that shape in the shared port does not.
+Dispatch, refinement checking and generic session contracts do not require a patch envelope. The
+store still parses `task_run_tasks.patch_files` / `patch_editable`. Those shape fields belong to the
+declaration owner, not the board's generic header. Reconcile their storage target with the frame
+proposal's typed Task-Unit tables and NULL board payload before migrating. This separation does not
+approve that independent storage change.
 
-The remaining coupling is:
-
-| Site | Mechanism or policy | Remaining boundary |
-| --- | --- | --- |
-| `refuseWidening` reading `parent.patch.editable` | check is mechanism, wording and enablement are policy | permission closure becomes a declared constraint the program enforces and reports reasons for |
-| `FrozenPatchWork` signatures in the session mechanism | mixed | prompt rendering and artifact validation are policy; session lifecycle, metrics and cancellation are mechanism |
-| `task_run_tasks.patch_files` / `patch_editable`, parsed in the store | policy in the schema | belongs in the declaration's payload; reconcile the storage target with the frame proposal's typed Task-Unit tables and NULL board payload before migrating |
-
-The legality rule found today is the clearest case of the refinement this record adds: its check belongs to
-the program, while permission closure's name and enablement belong to a declaration. The fix is therefore not
-to move the check out of the program but to stop hard-wiring the rule in the kernel's vocabulary - the same
-shape of fix as step 3 of the legality record, which landed on 2026-09-23: repair-first became a declared
-constraint rather than shared planning policy. Two independent fixes taking the same shape is evidence that the classification
-is the right one.
+Permission closure retains a program check while its name and enablement come from the declaration.
+This has the same boundary as the legality record's declared repair-first constraint: enforcing a
+selected rule is not choosing it. The write-subset primitive does not claim to enforce arbitrary
+resource exclusion or all effects.
 
 ### Field experiments and separation evidence
 
@@ -125,11 +134,10 @@ is the right one.
 - The `files` groups in schema migration and `TaskUnit` are marked `undecided`: a group combines
   patch-specific paths with another role. Resolve them by separating the DDL subjects or exercising
   an alternative input declaration, not by relabelling the entire group mechanism.
-- The remaining permission-closure name/enablement coupling needs a declared constraint while its
-  check continues to execute in the program and return reasons.
 - A numeric declaration runs through the widened dispatch seam and the real board lifecycle without
-  further mechanism changes. Zero policy hits, generic permission/session boundaries and a four-role
-  peer-protocol interface remain unverified goals. Passing the ratchet proves none of them. The draft's
+  further mechanism changes. The controlled permission and session cases establish their narrower
+  contracts, not a policy-free store or a four-role peer-protocol interface. Zero policy hits and that
+  broader interface remain unverified goals. Passing the ratchet proves none of them. The draft's
   [second-shape experiment](../../design/mechanism-in-the-middle.md#results) remains historical coupling
   evidence, not the current seam test.
 

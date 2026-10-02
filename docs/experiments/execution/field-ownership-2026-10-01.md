@@ -65,8 +65,10 @@ protocol quarantine, or threat model. Those are different tests and work.
 
 The measurements support the [ownership decision](../../decisions/implemented/2026-09-21-mechanism-not-policy.md)
 without making a vocabulary ratchet proof of a policy-free mechanism. Permission
-closure still reads patch metadata, the session module still mixes patch policy
-with lifecycle, and the store still parses patch-specific task columns.
+closure read patch metadata and the session module mixed patch policy with
+lifecycle at the measured revision. The ownership decision records the current
+boundaries; the historical source hashes above are not claims about later code.
+The store's patch-specific declaration storage remains a separate question.
 
 Storage needs a distinct decision: the mechanism record assigns shape fields to
 the declaration payload, while the [frame proposal](../../decisions/proposed/2026-09-21-the-frame-and-its-storage.md)
