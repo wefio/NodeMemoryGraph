@@ -3,7 +3,7 @@ import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { resolveNmgDataDir } from "./data-path.ts";
-import { httpCall } from "./http-client.ts";
+import { httpCall, type HttpCallOptions } from "./http-client.ts";
 import { isProcessAlive, readServerState, serverStatePath, type ServerState } from "./lifecycle.ts";
 import {
   NMG_OPTIONAL_METHOD_CAPABILITIES,
@@ -212,12 +212,14 @@ export async function invokeDaemon(
   connection: DaemonConnection,
   method: NmgMethod,
   params: Record<string, unknown> = {},
+  options: HttpCallOptions = {},
 ): Promise<unknown> {
+  options.signal?.throwIfAborted();
   assertDaemonCapability(connection.capabilities, method, connection.methods);
   try {
-    return await httpCall(connection.state, method, params);
+    return await httpCall(connection.state, method, params, options);
   } catch (error) {
-    if (!(error instanceof TypeError)) throw error;
+    if (options.signal?.aborted || !(error instanceof TypeError)) throw error;
     // A live owner with a transiently broken endpoint must not cause a second
     // daemon to be spawned for the same database. Let the caller retry after
     // the fault window; reconnect is reserved for an owner that has exited.
@@ -229,7 +231,7 @@ export async function invokeDaemon(
     connection.methods = reconnected.methods;
     connection.catalogFingerprint = reconnected.catalogFingerprint;
     assertDaemonCapability(connection.capabilities, method, connection.methods);
-    return await httpCall(connection.state, method, params);
+    return await httpCall(connection.state, method, params, options);
   }
 }
 

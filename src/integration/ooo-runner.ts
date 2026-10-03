@@ -10,12 +10,12 @@
  * turns out to be needed here belongs in `task-semantics.ts` instead: needing one is how this module
  * would show that the abstraction leaked.
  *
- * Two things the projection cannot read from the store are the caller's, and both are existing
- * divisions rather than new ones: a task's declared file contents (the store freezes paths, and
- * preparing the workspace belongs to the patch path's caller) and an acceptance whose identity is
- * independent of the deliverer (the store refuses a deliverer that judges its own delivery).
+ * The adopter freezes the caller's initial file contents with the claim and restores later reads
+ * from that attempt's input receipt. Acceptance remains the caller's, with an identity independent
+ * of the deliverer (the store refuses a deliverer that judges its own delivery).
  */
 import { workDigest } from "./work-identity.ts";
+import { recordPatchInputs, restorePatchInputs } from "./ooo-declaration-store.ts";
 import type { NmgStore } from "../core/store.ts";
 import { taskBoardClaimIsLive } from "../core/store/base.ts";
 import { TASK_BOARD_VERDICTS } from "../core/types.ts";
@@ -45,8 +45,7 @@ export interface RunBoardOptions {
   channel: string;
   /** How many units of the legal set may be in flight at once. Declared by the run, read as given. */
   slots: number;
-  /** The declared files' contents: the store froze the paths a task declares, and the bytes are the
-   *  caller's, which is the division the patch work already assumes. */
+  /** Initial bytes for an unclaimed task or a fresh attempt; existing attempts use their receipt. */
   workspace: (taskId: string, files: readonly string[]) => Readonly<Record<string, string>>;
   /** The acceptance, and a name that need not be the deliverer's: the store refuses a deliverer that
    *  judges its own delivery, so a run whose judge is its worker is refused by the board and not by
@@ -110,31 +109,36 @@ export class StoreRunBoard implements DispatchBoard<FrozenPatchWork> {
   /** Take one unit. The claim is the store's compare-and-set on the entry its binding names. */
   claim(taskId: string, owner: string): DispatchTicket<FrozenPatchWork> {
     const binding = this.#bindingFor(taskId);
+    let declaration: FrozenPatchWork | null = null;
+    let dependencies: Readonly<Record<string, string>> = {};
     const entry = coordinatedBoardWrite(this.#store, {
       runId: this.#options.runId,
       entryId: binding.entryId,
       verb: "claim",
       actorId: owner,
-      apply: () =>
-        this.#store.claimTaskBoardEntry({
+      apply: (port) => {
+        const priorAttempt =
+          this.#store.getTaskBoardEntryById(this.channel, binding.entryId)?.attempt ?? 0;
+        const claimed = this.#store.claimTaskBoardEntry({
           taskId: this.channel,
           entryId: binding.entryId,
           agentId: owner,
-        }),
+        });
+        const task = this.#task(taskId);
+        const attempt = claimed.attempt ?? binding.attempt;
+        const work = this.#work(task, attempt, attempt === priorAttempt);
+        declaration = work === null ? null : frozenOf(work);
+        if (declaration) recordPatchInputs(this.#store, this.#options.runId, declaration, port);
+        const accepted = this.accepted();
+        dependencies = Object.fromEntries(
+          task.dependencies
+            .filter((dependency) => dependency in accepted)
+            .map((dependency) => [dependency, accepted[dependency]!]),
+        );
+        return claimed;
+      },
     }).entry;
-    const attempt = entry.attempt ?? binding.attempt;
-    const task = this.#task(taskId);
-    const accepted = this.accepted();
-    const work = this.#work(task, attempt);
-    return {
-      attempt,
-      dependencies: Object.fromEntries(
-        task.dependencies
-          .filter((dependency) => dependency in accepted)
-          .map((dependency) => [dependency, accepted[dependency]!]),
-      ),
-      declaration: work === null ? null : frozenOf(work),
-    };
+    return { attempt: entry.attempt ?? binding.attempt, dependencies, declaration };
   }
 
   /**
@@ -191,7 +195,7 @@ export class StoreRunBoard implements DispatchBoard<FrozenPatchWork> {
       await this.#options.acceptance.verify({
         taskId: task.taskId,
         submission: patchSubmission(
-          frozenOf(this.#declarationOnly(task, entry.attempt ?? binding.attempt)),
+          this.#restoredDeclaration(task, entry.attempt ?? binding.attempt),
           artifact,
         ),
       }),
@@ -216,17 +220,12 @@ export class StoreRunBoard implements DispatchBoard<FrozenPatchWork> {
   #projection(): { compiled: ReturnType<typeof compileTaskUnits>; facts: RecordedFacts } {
     const tasks = this.#tasks();
     const specs: Record<string, PatchTaskSpec> = {};
+    const bindings = this.#bindings();
     for (const task of tasks) {
       const declared = task.patchFiles ?? [];
       if (declared.length === 0 && task.patchEditable === null) continue;
-      specs[task.taskId] = {
-        instruction: task.input,
-        files: this.#options.workspace(task.taskId, declared),
-        editable: [...(task.patchEditable ?? [])],
-        visible: [...declared],
-        verify: async (submission) =>
-          this.#options.acceptance.verify({ taskId: task.taskId, submission }),
-      };
+      const binding = bindings.find((item) => item.taskId === task.taskId);
+      specs[task.taskId] = this.#spec(task, binding);
     }
     const compiled = compileTaskUnits({ plan: this.#plan(tasks), specs });
     if (!compiled.legal) {
@@ -238,6 +237,30 @@ export class StoreRunBoard implements DispatchBoard<FrozenPatchWork> {
       );
     }
     return { compiled, facts: this.#recordedFacts() };
+  }
+
+  #spec(task: RunTask, binding?: RunBinding): PatchTaskSpec {
+    const declared = task.patchFiles ?? [];
+    const entry = binding?.entryId
+      ? this.#store.getTaskBoardEntryById(this.channel, binding.entryId)
+      : null;
+    const attempt = entry?.attempt ?? 0;
+    const restored = attempt > 0 ? this.#restoredDeclaration(task, attempt) : null;
+    return {
+      instruction: task.input,
+      files: restored?.work.files ?? this.#options.workspace(task.taskId, declared),
+      editable: [...(task.patchEditable ?? [])],
+      visible: [...declared],
+      ...(restored
+        ? {
+            budget: restored.work.budget,
+            limits: restored.work.limits,
+            admittedConclusions: restored.work.admittedConclusions,
+          }
+        : {}),
+      verify: async (submission) =>
+        this.#options.acceptance.verify({ taskId: task.taskId, submission }),
+    };
   }
 
   /** The frozen plan in the row shape the shared compiler reads. */
@@ -333,13 +356,22 @@ export class StoreRunBoard implements DispatchBoard<FrozenPatchWork> {
   }
 
   /**
-   * The work a claim admits: the declaration the store froze, with the caller's bytes in it. Null when
-   * the task declares no patch files, which is the store's own reading of a non-patch unit.
+   * Renewals preserve an attempt's original inputs; a new attempt admits the caller's initial bytes.
+   * Null when the default protocol declares no patch files.
    */
-  #work(task: RunTask, attempt: number): PatchWork | null {
+  #work(task: RunTask, attempt: number, restoring: boolean): PatchWork | null {
     const declared = task.patchFiles ?? [];
     if (declared.length === 0 && task.patchEditable === null) return null;
-    return this.#declarationOnly(task, attempt);
+    return restoring
+      ? this.#restoredDeclaration(task, attempt).work
+      : this.#declarationOnly(task, attempt);
+  }
+
+  #restoredDeclaration(task: RunTask, attempt: number): FrozenPatchWork {
+    const declaration = restorePatchInputs(this.#store, this.#options.runId, task, attempt);
+    if (!declaration)
+      throw new Error(`task ${task.taskId} attempt ${attempt} has no frozen patch inputs`);
+    return declaration;
   }
 
   #declarationOnly(task: RunTask, attempt: number): PatchWork {
@@ -357,14 +389,7 @@ export class StoreRunBoard implements DispatchBoard<FrozenPatchWork> {
 
 /** The frozen envelope of a declaration, which is what the shape's own parser needs. */
 function frozenOf(work: PatchWork) {
-  return preparePatchWork({
-    taskId: work.taskId,
-    attempt: work.attempt,
-    instruction: work.instruction,
-    files: work.files,
-    editable: work.editable,
-    visible: work.visible,
-  });
+  return preparePatchWork(work);
 }
 
 /** The artifact a worker's entry carries: the loop's own put shape, read back without interpretation. */

@@ -15,6 +15,7 @@
  */
 import type { NmgStore } from "../core/store.ts";
 import type { TransactionPort } from "../core/store/base.ts";
+import type { TaskUnitDeclarationInput } from "./task-unit-declaration-store.ts";
 import type { TaskBoardEntry } from "../core/types.ts";
 
 /** The fact kind that says a run was cancelled. One home for the vocabulary: the write that appends
@@ -322,19 +323,7 @@ export function registerRun(store: NmgStore, request: RunRegistrationRequest): {
 }
 
 /** One task of a run's plan, as it is frozen. */
-export interface RunPlanTask {
-  taskId: string;
-  position: number;
-  revision: string;
-  input: string;
-  dependencies: readonly string[];
-  effect: string;
-  waitEvent?: string | null;
-  operation?: string;
-  kind?: string;
-  patchFiles?: readonly string[] | null;
-  patchEditable?: readonly string[] | null;
-}
+export type RunPlanTask = Omit<TaskUnitDeclarationInput, "runId">;
 
 export interface RunPlanFreezeRequest {
   runId: string;
