@@ -118,6 +118,14 @@ session_shutdown ───────  archive + daemon teardown + 运行时 AG
 - `SessionRuntimeAg` 继续留在进程内，因此近期工具状态在下一轮仍可见。
 - Pi 负责对话摘要。NMG 不再把 `messagesToSummarize` 原样拼接为 `asserted` 长期事件；上下文压缩本身不是持久化资格。
 
+### 自动召回等待预算
+
+Pi 的整个 `before_agent_start` 上下文准备共用五秒绝对等待期限，不是每个 RPC 五秒。已完成搜索的候选头是检查点；后续披露、重排或遥测超时不能清空它们。期限后返回的搜索数据不注入。支持取消的 HTTP 请求连同响应体读取一起中止；显式 `nmg_search` 不套用这个自动期限。
+
+daemon 自动搜索使用调用方剩余预算（最多 4.5 秒）；项目与共享库的查询嵌入共用期限，到期保留词法结果并标明降级原因。同步 JavaScript/SQLite 不能被这条异步期限抢占，已经发出的供应商请求也不保证远端取消。
+
+阶段名、耗时和完成/超时状态保留在消息的 `details.recallTiming`，不进入候选 DTO。`/nmg recall timing` 查看最近一轮，不记录原始提示或凭据。WorkBuddy 召回函数使用同一个预算原语，其身份登记和唤醒轮询不属于该函数。选择理由与回归证据见[总等待期限决策](../decisions/implemented/2026-10-02-automatic-recall-has-a-deadline.zh-CN.md)。
+
 ### 3. 不变的钩子
 
 `before_agent_start`（recall + runtime AG + nudge）、`session_start`（staging 补刷）、`agent_end`（controller shadow outcome）、`session_shutdown`（归档 + daemon teardown + `runtimeAg.clear`）。

@@ -207,6 +207,7 @@ routes:
       - src/integration/evidence.ts
       - src/integration/lab-capabilities.ts
       - src/integration/reasoning-workspaces.ts
+      - src/integration/recall-budget.ts
       - src/integration/search-projection.ts
       - src/integration/search.ts
       - src/integration/tool-contract.ts
@@ -220,6 +221,7 @@ routes:
         tests/integration/controller-channel.test.ts,
         tests/integration/evidence.test.ts,
         tests/integration/lab-capabilities.test.ts,
+        tests/integration/recall-budget.test.ts,
         tests/integration/tool-contract.test.ts,
       ]
     verify:
@@ -230,6 +232,7 @@ routes:
     paths:
       - src/integration/ooo-board.ts
       - src/integration/ooo-candidate.ts
+      - src/integration/ooo-declaration-store.ts
       - src/integration/ooo-dispatch.ts
       - src/integration/ooo-execution.ts
       - src/integration/ooo-fusion-plan.ts
@@ -243,6 +246,7 @@ routes:
       - src/integration/ooo-patch-session.ts
       - src/integration/task-advisers.ts
       - src/integration/task-coordinator.ts
+      - src/integration/task-unit-declaration-store.ts
       - src/integration/task-semantics-interleavings.ts
       - src/integration/task-semantics-model.ts
       - src/integration/task-semantics.ts

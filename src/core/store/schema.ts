@@ -16,6 +16,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { ftsIndexedText, surfaceIndexedText } from "./search-ranking.ts";
 import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import { encodeVector, parseVector } from "./vector-codec.ts";
+import { TASK_UNIT_DECLARATION_SCHEMA } from "../../integration/task-unit-declaration-store.ts";
 
 type Row = Record<string, string | number | Uint8Array | null>;
 
@@ -621,21 +622,7 @@ export function migrate(db: DatabaseSync): void {
       created_at TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS task_run_tasks (
-      run_id TEXT NOT NULL,
-      task_id TEXT NOT NULL,
-      position INTEGER NOT NULL,
-      revision TEXT NOT NULL,
-      input TEXT NOT NULL,
-      dependencies TEXT NOT NULL,
-      effect TEXT NOT NULL,
-      wait_event TEXT,
-      operation TEXT NOT NULL DEFAULT '',
-      kind TEXT NOT NULL DEFAULT 'snapshot',
-      patch_files TEXT,
-      patch_editable TEXT,
-      PRIMARY KEY (run_id, task_id)
-    );
+    ${TASK_UNIT_DECLARATION_SCHEMA}
 
     -- Appended run facts, keyed by run and sequence. The unique key is the fact's own
     -- identity, so a caller that retries after a lost response appends once: run,

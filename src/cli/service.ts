@@ -93,6 +93,7 @@ import {
   type RunPlanTaskInput,
 } from "../integration/task-coordinator.ts";
 import { searchMemoryContext } from "../integration/search.ts";
+import { RecallBudget } from "../integration/recall-budget.ts";
 import { simhash64, simhashToHex, simhashFromHex, hammingDistance } from "../core/simhash.ts";
 import { ControllerPolicyChannel } from "../integration/controller-channel.ts";
 import {
@@ -1558,7 +1559,24 @@ export class NmgService {
   }
 
   async #searchImpl(params: NmgSearchParams): Promise<NmgMethodResult["search"]> {
+    const budget = params.autoRecall
+      ? new RecallBudget(Math.min(4_500, params.autoRecallBudgetMs ?? 4_500))
+      : undefined;
+    try {
+      return await this.#searchWithinBudget(params, budget);
+    } finally {
+      budget?.close();
+    }
+  }
+
+  async #searchWithinBudget(
+    params: NmgSearchParams,
+    budget?: RecallBudget,
+  ): Promise<NmgMethodResult["search"]> {
     const { query, queries, projectDir, sessionId, ...options } = params;
+    // Transport deadlines are not core retrieval options.
+    delete options.autoRecall;
+    delete options.autoRecallBudgetMs;
     const searchOptions: SearchOptions = {
       ...options,
       sessionId,
@@ -1599,6 +1617,7 @@ export class NmgService {
         semantic,
         searchOptions,
         this.#embeddingDegradedReason(),
+        budget,
       );
       ctx.results = applyAdvancedFilters(ctx.results, filters);
       return ctx;
@@ -2451,6 +2470,7 @@ function parseSearchParams(value: unknown): NmgSearchParams {
     progressiveWarmDisclosure: optionalBoolean(params, "progressiveWarmDisclosure"),
     tieredDisclosure: optionalBoolean(params, "tieredDisclosure"),
     autoRecall: optionalBoolean(params, "autoRecall"),
+    autoRecallBudgetMs: optionalInteger(params, "autoRecallBudgetMs", 1, 5_000),
     persistTrace: optionalBoolean(params, "persistTrace"),
     activeGraphBudget: optionalActiveGraphBudget(params, "activeGraphBudget"),
     perf: optionalBoolean(params, "perf"),

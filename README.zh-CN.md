@@ -136,6 +136,9 @@ pi
 Pi adapter 刻意做薄：它通过 JSON-RPC/HTTP 惰性启动本地 daemon，自动回忆和
 四个稳定工具复用同一条连接，且只在本次 adapter 调用启动了 daemon 时才在
 会话关闭时停掉它。已在运行的共享 daemon 不会被碰。
+自动召回总等待五秒，后续阶段超时仍保留及时返回的候选。Pi 用
+`/nmg recall timing` 查看最近一轮各阶段耗时；显式 `nmg_search` 不变。
+[期限与限制](docs/design/session-memory-lifecycle-hooks-2026-08-10.md#自动召回等待预算)由钩子契约说明。
 daemon 是对应 SQLite 数据库唯一的应用层写入者。并发 Agent 轮次可以并行等待
 embedding 或摘要；短小的同步 SQLite 阶段由 daemon 事件循环串行执行。客户端
 不应再对同一文件打开独立可写 store。

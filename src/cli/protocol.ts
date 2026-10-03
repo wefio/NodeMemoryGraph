@@ -380,6 +380,8 @@ export interface NmgSearchParams {
    *  graph is eligible for online learning. Explicit nmg_search tool calls stay
    *  unstaged (the model chose them, so they are not auto-recall decisions). */
   autoRecall?: boolean;
+  /** Remaining automatic-hook budget. Explicit searches do not apply this deadline. */
+  autoRecallBudgetMs?: number;
   /** Internal planning probes are not eligible for feedback and must not persist a trace. */
   persistTrace?: boolean;
   /** Hard Active Graph envelope selected by a caller-side controller. */

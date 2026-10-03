@@ -30,6 +30,7 @@ import {
 } from "../src/integration/search-projection.ts";
 import type { MemoryContext } from "../src/core/types.ts";
 import { assertDaemonProtocol } from "../src/cli/daemon-client.ts";
+import { RecallBudget } from "../src/integration/recall-budget.ts";
 import type { NmgHelloResult } from "../src/cli/protocol.ts";
 
 interface HookPayload {
@@ -184,7 +185,7 @@ export function liveLease(dir: string): HttpLease | null {
   return pidAlive(lease.pid) ? lease : null;
 }
 
-async function rpcCall(lease: HttpLease, method: string, params: unknown) {
+async function rpcCall(lease: HttpLease, method: string, params: unknown, signal?: AbortSignal) {
   const response = await fetch(`http://${lease.host}:${lease.port}/`, {
     method: "POST",
     headers: {
@@ -192,7 +193,7 @@ async function rpcCall(lease: HttpLease, method: string, params: unknown) {
       authorization: `Bearer ${lease.token}`,
     },
     body: JSON.stringify({ jsonrpc: "2.0", method, params, id: 1 }),
-    signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
+    signal: signal ?? AbortSignal.timeout(RPC_TIMEOUT_MS),
   });
   if (!response.ok) throw new Error(`NMG HTTP ${response.status}`);
   const parsed = await response.json();
@@ -203,14 +204,14 @@ async function rpcCall(lease: HttpLease, method: string, params: unknown) {
 
 const verifiedLeaseByDirectory = new Map<string, Promise<ReturnType<typeof liveLease>>>();
 
-async function compatibleLease(dir: string) {
+async function compatibleLease(dir: string, signal?: AbortSignal) {
   let pending = verifiedLeaseByDirectory.get(dir);
   if (!pending) {
     pending = (async () => {
       const lease = liveLease(dir);
       if (!lease) return null;
       try {
-        const hello = (await rpcCall(lease, "hello", {})) as NmgHelloResult;
+        const hello = (await rpcCall(lease, "hello", {}, signal)) as NmgHelloResult;
         assertDaemonProtocol(hello);
         if (!hello.capabilities.includes("session-active-graph")) return null;
         return lease;
@@ -257,50 +258,88 @@ export async function reportAgentPresence(
  * header projection from the shared Agent Surface, per-session id dedup.
  * Returns "" when there is nothing to inject. */
 export async function recallHeaders(payload: HookPayload, dir = dataDir()): Promise<string> {
-  const lease = await compatibleLease(dir);
-  if (!lease) return "";
-  const query = promptText(payload).trim().slice(0, RECALL_QUERY_CHARS);
-  if (!query) return "";
-  const { sessionId } = agentIdentity(payload);
-  const recallSessionId = `workbuddy-hook:${sessionId}`;
-  await rpcCall(lease, "sessionActiveGraph", {
-    action: "beginDisclosureTurn",
-    sessionId: recallSessionId,
-  }).catch(() => undefined);
-  const context = (await rpcCall(lease, "search", {
-    query,
-    limit: RECALL_LIMIT,
-    maxTier: RECALL_MAX_TIER,
-    graphHops: RECALL_GRAPH_HOPS,
-    tieredDisclosure: true,
-    sessionId: recallSessionId,
-    projectDir:
-      typeof payload?.cwd === "string" && payload.cwd.trim() ? payload.cwd : process.cwd(),
-  })) as MemoryContext;
-  const compact = compactSearchContext(context);
-  if (compact.candidates.length === 0) return "";
-  const rawDisclosure = (await rpcCall(lease, "sessionActiveGraph", {
-    action: "disclose",
-    sessionId: recallSessionId,
-    projectionId: compact.activeGraphId ?? undefined,
-    disclosure: "header",
-    entries: compactDisclosureEntries(compact),
-  }).catch(() => null)) as { freshMemoryIds?: unknown } | null;
-  const disclosure = {
-    freshMemoryIds: Array.isArray(rawDisclosure?.freshMemoryIds)
-      ? rawDisclosure.freshMemoryIds
-      : compact.candidates.map((candidate) => candidate.id),
-  };
-  const freshIds = new Set(disclosure.freshMemoryIds);
-  const fresh = compact.candidates.filter((candidate) => freshIds.has(candidate.id));
-  if (fresh.length === 0) return "";
+  const budget = new RecallBudget();
+  let timelySurface = "";
+  try {
+    const lease = await budget.run("hello", (signal) => compatibleLease(dir, signal));
+    if (!lease) return "";
+    const query = promptText(payload).trim().slice(0, RECALL_QUERY_CHARS);
+    if (!query) return "";
+    const { sessionId } = agentIdentity(payload);
+    const recallSessionId = `workbuddy-hook:${sessionId}`;
+    await budget
+      .run("disclosure.begin", (signal) =>
+        rpcCall(
+          lease,
+          "sessionActiveGraph",
+          {
+            action: "beginDisclosureTurn",
+            sessionId: recallSessionId,
+          },
+          signal,
+        ),
+      )
+      .catch(() => undefined);
+    const context = (await budget.run("search", (signal) =>
+      rpcCall(
+        lease,
+        "search",
+        {
+          query,
+          limit: RECALL_LIMIT,
+          maxTier: RECALL_MAX_TIER,
+          graphHops: RECALL_GRAPH_HOPS,
+          tieredDisclosure: true,
+          autoRecall: true,
+          autoRecallBudgetMs: Math.max(1, Math.floor(Math.min(4_500, budget.remainingMs - 100))),
+          sessionId: recallSessionId,
+          projectDir:
+            typeof payload?.cwd === "string" && payload.cwd.trim() ? payload.cwd : process.cwd(),
+        },
+        signal,
+      ),
+    )) as MemoryContext;
+    const compact = compactSearchContext(context);
+    if (compact.candidates.length === 0) return "";
+    timelySurface = [RECALL_PREAMBLE, renderCompactSearchSurface(compact, { emptyText: "" })].join(
+      "\n",
+    );
+    const rawDisclosure = (await budget
+      .run("disclosure", (signal) =>
+        rpcCall(
+          lease,
+          "sessionActiveGraph",
+          {
+            action: "disclose",
+            sessionId: recallSessionId,
+            projectionId: compact.activeGraphId ?? undefined,
+            disclosure: "header",
+            entries: compactDisclosureEntries(compact),
+          },
+          signal,
+        ),
+      )
+      .catch(() => null)) as { freshMemoryIds?: unknown } | null;
+    const disclosure = {
+      freshMemoryIds: Array.isArray(rawDisclosure?.freshMemoryIds)
+        ? rawDisclosure.freshMemoryIds
+        : compact.candidates.map((candidate) => candidate.id),
+    };
+    const freshIds = new Set(disclosure.freshMemoryIds);
+    const fresh = compact.candidates.filter((candidate) => freshIds.has(candidate.id));
+    if (fresh.length === 0) return "";
 
-  const projected = {
-    ...compact,
-    candidates: fresh,
-  };
-  const surface = renderCompactSearchSurface(projected, { emptyText: "" });
-  return [RECALL_PREAMBLE, surface].join("\n");
+    const projected = {
+      ...compact,
+      candidates: fresh,
+    };
+    const surface = renderCompactSearchSurface(projected, { emptyText: "" });
+    return [RECALL_PREAMBLE, surface].join("\n");
+  } catch {
+    return timelySurface;
+  } finally {
+    budget.close();
+  }
 }
 
 /** Pure board-wake gate (same semantics as the Kimi hook). A claim suppresses

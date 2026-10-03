@@ -110,15 +110,15 @@ The [generic-session cases](../../../tests/integration/ooo-generic-session.test.
 state with no patch fields and completion with a declared zero-read minimum, while the default policy
 retains its read requirement. They do not run a live harness.
 
+### Declaration storage ownership
+
+The default protocol owns the retained typed Task-Unit schema and codec; the adopter owns immutable
+attempt inputs and restoration. Store compatibility methods forward through the existing connection
+and transaction. Both storage adapters remain in the reviewed scan surface, classified as policy.
+The [storage ownership decision](2026-10-02-declarations-have-one-owner.md) records this approved slice;
+it neither migrates the board payload nor installs a peer-protocol interface.
+
 ## Deferred
-
-### Declaration storage
-
-Dispatch, refinement checking and generic session contracts do not require a patch envelope. The
-store still parses `task_run_tasks.patch_files` / `patch_editable`. Those shape fields belong to the
-declaration owner, not the board's generic header. Reconcile their storage target with the frame
-proposal's typed Task-Unit tables and NULL board payload before migrating. This separation does not
-approve that independent storage change.
 
 Permission closure retains a program check while its name and enablement come from the declaration.
 This has the same boundary as the legality record's declared repair-first constraint: enforcing a
@@ -131,9 +131,9 @@ resource exclusion or all effects.
   reproducible evidence for effect labels, content-bound digests, dependency release and operation
   interpretation. It narrows the questions; it does not decide the universal input granularity or a
   storage migration. This gate does not include those words or resolve them.
-- The `files` groups in schema migration and `TaskUnit` are marked `undecided`: a group combines
-  patch-specific paths with another role. Resolve them by separating the DDL subjects or exercising
-  an alternative input declaration, not by relabelling the entire group mechanism.
+- The `TaskUnit` `files` group remains `undecided`: it mixes patch-only paths with another role. The
+  schema migration's filesystem prose and protocol-owned DDL have distinct scanned owners; that
+  separation does not settle the `TaskUnit` group.
 - A numeric declaration runs through the widened dispatch seam and the real board lifecycle without
   further mechanism changes. The controlled permission and session cases establish their narrower
   contracts, not a policy-free store or a four-role peer-protocol interface. Zero policy hits and that
