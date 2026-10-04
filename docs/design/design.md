@@ -385,7 +385,7 @@ adapter, not part of the NMG data model.
 Automatic Pi pre-turn context preparation and WorkBuddy recall share an absolute waiting budget,
 not a per-RPC allowance. Timely search results survive later-phase expiry; explicit searches retain
 their own behavior. The [session-hook contract](session-memory-lifecycle-hooks-2026-08-10.md#自动召回等待预算)
-owns the deadline, fallback and diagnostic timing rules.
+owns the deadline, fallback and diagnostic timing rules. It also owns [opt-in host first-output observation](session-memory-lifecycle-hooks-2026-08-10.md#首次输出计时), which does not redefine client-visible latency or enable itself.
 
 Agent-facing result semantics have one integration-layer owner. The shared
 `Agent Surface` projects and renders compact search headers, exact evidence,

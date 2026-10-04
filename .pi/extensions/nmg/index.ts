@@ -82,6 +82,7 @@ import {
   shadowCollectionOrigin,
   shadowEnabled,
 } from "./controller-shadow.ts";
+import { registerFirstResponseTiming } from "./first-response-timing.ts";
 
 /**
  * NMG Pi extension.
@@ -127,6 +128,7 @@ function assertBoardVerbCall(params: {
 export default function nmgExtension(pi: ExtensionAPI): void {
   let connectionPromise: Promise<DaemonConnection> | undefined;
   let latestRecallTiming: ReturnType<RecallBudget["timing"]> | undefined;
+  const firstResponseTiming = registerFirstResponseTiming(pi);
   const taskWindow = new SessionTaskWindow();
   const recallFlow = new SessionRecallFlow();
   const agentAttributionFlow = new AgentAttributionFlow(32);
@@ -283,6 +285,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
 
   pi.on("before_agent_start", async (event, ctx) => {
     const budget = new RecallBudget(undefined, ctx.signal);
+    firstResponseTiming.mark("nmg_start");
     const partial = {
       recalled: "",
       nudge: "",
@@ -541,6 +544,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     } finally {
       latestRecallTiming = budget.timing();
       budget.close();
+      firstResponseTiming.mark("nmg_end");
     }
   });
 

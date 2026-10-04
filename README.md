@@ -193,7 +193,8 @@ An already-running shared daemon is left untouched.
 Automatic recall stops waiting after five seconds total and preserves candidates returned before
 later phases time out. Use `/nmg recall timing` in Pi to inspect the latest phase durations.
 Explicit `nmg_search` is unchanged; [deadline details and limitations](docs/design/session-memory-lifecycle-hooks-2026-08-10.md#自动召回等待预算)
-are in the hook contract.
+are in the hook contract. Pi also provides [opt-in first-output timing](docs/design/session-memory-lifecycle-hooks-2026-08-10.md#首次输出计时)
+for diagnosing intermittent waits without logging content or sending probe requests.
 The daemon is the single application-level writer for its SQLite database.
 Concurrent Agent turns may wait on embeddings or summaries in parallel, while
 their short synchronous SQLite phases are serialized by the daemon event loop;
