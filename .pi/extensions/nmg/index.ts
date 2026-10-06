@@ -8,6 +8,8 @@
 // another is a defect: add it to src/ + the daemon, then have every adapter
 // forward the same RPC. Duplicating logic adapter-side drifts and goes stale.
 
+import { observeRecallPreparation, registerFirstResponseTiming } from "./first-response-timing.ts";
+
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -123,6 +125,7 @@ function assertBoardVerbCall(params: {
 }
 
 export default function nmgExtension(pi: ExtensionAPI): void {
+  const firstResponseTiming = registerFirstResponseTiming(pi);
   let connectionPromise: Promise<DaemonConnection> | undefined;
   const taskWindow = new SessionTaskWindow();
   const recallFlow = new SessionRecallFlow();
@@ -264,17 +267,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("before_agent_start", async (event, ctx) => {
-    const sessionId = ctx.sessionManager.getSessionId();
-    const isNewUserTurn = recallFlow.beginTurn(
-      sessionId,
-      piUserTurnKey(ctx.sessionManager, event.prompt),
-    );
-    await beginDisclosureTurn(sessionId, isNewUserTurn);
-    const completionNudge = popCompletionNudge(event.prompt);
-    // Pi re-enters before_agent_start after tool results. A completed graph may
-    // already exist at that point, but it must be reviewed on the next user
-    // turn, not consumed by an internal tool loop from the same prompt.
+  const recallNudges = async (sessionId: string, isNewUserTurn: boolean, prompt: string) => {
+    const completionNudge = popCompletionNudge(prompt);
+    // Tool-loop re-entry must not consume a review intended for the next user turn.
     const pendingFeedback = isNewUserTurn ? controllerShadow.pendingFeedback(sessionId) : null;
     if (pendingFeedback) await controllerShadow.feedbackNudgeShown(sessionId, pendingFeedback);
     const feedbackNudge = pendingFeedback
@@ -296,7 +291,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           memory_ids: pendingClaimOutcome.memoryIds.join(","),
         })
       : "";
-    const nudge = [completionNudge, feedbackNudge, claimOutcomeNudge].filter(Boolean).join("\n");
+    return [completionNudge, feedbackNudge, claimOutcomeNudge].filter(Boolean).join("\n");
+  };
+  const reasoningCheckpointFor = async (sessionId: string) => {
     let reasoningCheckpoint = "";
     if (labToolsEnabled) {
       try {
@@ -319,6 +316,18 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         reasoningCheckpoint = `Reasoning workspace unavailable: ${message(error)}`;
       }
     }
+    return reasoningCheckpoint;
+  };
+
+  observeRecallPreparation(pi, firstResponseTiming, async (event, ctx) => {
+    const sessionId = ctx.sessionManager.getSessionId();
+    const isNewUserTurn = recallFlow.beginTurn(
+      sessionId,
+      piUserTurnKey(ctx.sessionManager, event.prompt),
+    );
+    await beginDisclosureTurn(sessionId, isNewUserTurn);
+    const nudge = await recallNudges(sessionId, isNewUserTurn, event.prompt);
+    const reasoningCheckpoint = await reasoningCheckpointFor(sessionId);
     let runtimeAgContext = "";
     try {
       const result = (await invoke("sessionActiveGraph", {

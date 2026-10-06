@@ -205,6 +205,7 @@ routes:
       - src/integration/config.ts
       - src/integration/controller-channel.ts
       - src/integration/evidence.ts
+      - src/integration/first-response-timing.ts
       - src/integration/lab-capabilities.ts
       - src/integration/reasoning-workspaces.ts
       - src/integration/search-projection.ts
@@ -219,6 +220,7 @@ routes:
         tests/integration/config.test.ts,
         tests/integration/controller-channel.test.ts,
         tests/integration/evidence.test.ts,
+        tests/integration/first-response-timing.test.ts,
         tests/integration/lab-capabilities.test.ts,
         tests/integration/tool-contract.test.ts,
       ]

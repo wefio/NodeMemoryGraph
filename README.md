@@ -180,6 +180,11 @@ By default, the extension stores shared LTG and Task Board data in
 `~/.nmg/nmg.sqlite`. Set `NMG_DATA_DIR` to use another directory. Project-local
 `.nmg/` data is reserved for isolated STG sessions and controlled/headless runs.
 
+Pi provides [opt-in first-output timing](docs/design/session-memory-lifecycle-hooks-2026-08-10.md#首次输出计时)
+through `/nmg-latency on|off|status`; it records metadata only and does not change
+recall waiting policy. The hook contract defines slow-recall retention and
+host-event interpretation.
+
 The Pi adapter is deliberately thin. It lazily starts the local daemon over
 JSON-RPC/HTTP, reuses one connection for automatic recall and the default tool
 surface, and stops the daemon at session shutdown only when that adapter

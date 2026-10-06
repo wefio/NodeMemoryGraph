@@ -133,6 +133,10 @@ pi
 `NMG_DATA_DIR` 换目录。项目本地 `.nmg/` 数据保留给隔离 STG 会话和受控/无头
 运行。
 
+Pi 提供[显式开启的首次输出计时](docs/design/session-memory-lifecycle-hooks-2026-08-10.md#首次输出计时)，
+通过 `/nmg-latency on|off|status` 控制，只记录元数据，不改变召回等待策略。
+慢召回保留条件和 host 事件的解释边界由会话钩子契约定义。
+
 Pi adapter 刻意做薄：它通过 JSON-RPC/HTTP 惰性启动本地 daemon，自动回忆和
 四个稳定工具复用同一条连接，且只在本次 adapter 调用启动了 daemon 时才在
 会话关闭时停掉它。已在运行的共享 daemon 不会被碰。

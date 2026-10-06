@@ -19,6 +19,7 @@
   },
   "files": [
     ".pi/extensions/nmg/controller-shadow.ts",
+    ".pi/extensions/nmg/first-response-timing.ts",
     ".pi/extensions/nmg/index.ts",
     "bin/nmg-rcp.mjs",
     "bin/nmg.mjs",
