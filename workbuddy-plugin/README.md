@@ -15,6 +15,8 @@
 
 Hook 完全被动：只在存在活 HTTP lease（`<dataDir>/nmg.sqlite.server.json` 且 pid 存活）时调用 daemon，从不启动 daemon；它只接受 `127.0.0.1`，先执行 `hello` 并校验兼容纪元，所有失败静默，恒 exit 0。自动召回使用一次性 hook session，渲染后立即释放内存态 AG，不会与 MCP 的 session 所有权混淆。候选渲染全部走 `src/integration/agent-surface.ts` 共享面，不手拼字符串（配方出处：`skills/nmg-memory/references/harness-adapters.md`）。
 
+召回函数的 hello、搜索与披露共用五秒总等待预算，后续阶段超时保留及时返回的候选；身份登记与 wake 轮询独立计算。显式 MCP 搜索不受自动期限约束。[钩子契约](../docs/design/session-memory-lifecycle-hooks-2026-08-10.md#自动召回等待预算)说明取消和同步工作的限制。
+
 ## 注册
 
 ```json

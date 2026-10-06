@@ -108,6 +108,16 @@ board `kind` 的唯一 owner 是 [TaskBoardKind](../../src/core/types.ts)。它�
 
 数据流为：现有 RoundSpec 研究入口 → 共享规范化/校验 → 现有任务契约与计划 → 派生分析视图 → `BoardTicket`。需要产品接入的解析规则必须移到共享 owner，由研究入口和各 harness 调用；不能把研究 A/B/C 输入格式提升为通用语言。默认补丁采用方用 `preparePatchWork` 生成完整冻结声明，不重抄字段子集。票据和共享循环通过带摘要的不透明 `declaration` 携带它，不要求所有采用方的声明都有补丁字段；冻结、解释和验收由采用方负责。[声明边界决策](../decisions/implemented/2026-09-21-mechanism-not-policy.zh-CN.md#不透明派发声明)说明缺失声明与具名拒绝的区别。
 
+### 声明存储与恢复
+
+声明语义与编码归协议，执行冻结与恢复归采用方，store 提供同一个连接与事务，黑板只解释协作状态。默认 Task-Unit 的类型、DDL、读写与规范化相等性由 [task-unit-declaration-store.ts](../../src/integration/task-unit-declaration-store.ts) 拥有；`task_run_tasks` 保留为唯一任务定义，store 的既有方法是默认适配层兼容转发，不是所有协议必须采用的字段契约。
+
+默认补丁采用方在认领事务内把原始输入字节、显式 budget/limits、允许结论种类及执行声明摘要写入 `task_run_facts` 的 `task-unit.patch-inputs-frozen` 回执，按 run/task/attempt 定位。说明、依赖与权限名单仍从冻结任务行读取，不在回执或黑板正文中复制定义。认领、输入回执与认领事实一起提交；任何冻结错误使整个转移回滚。合法性和恢复查询不补写事实。
+
+恢复必须用对应 attempt 的原始输入和参数重建，并核对声明摘要；未知回执版本、非法字段、摘要不符或验收时缺少回执都明确拒绝，不以当前工作区兜底。未认领的任务仍由宿主提供初始输入。验收回调由宿主重新提供，这份回执不持久化函数，也不证明恢复了验收配置。计划、执行声明和交付产物使用各自的摘要身份。
+
+[归属决策](../decisions/implemented/2026-10-02-declarations-have-one-owner.zh-CN.md)记录为何保留类型表而不复制 JSON；peer 外框的协议字段与 payload 迁移仍是独立范围。
+
 编译必须对无映射能力明确拒绝，不静默丢字段或降为自由文本。第一版只分析现有 patch/snapshot 契约，验证器、预算和访问规则不重实现。新增语义先扩展 owner、身份摘要及对应检查，再进入派生视图。
 
 字段检查能证明计划无环、引用存在、现有产物形状兼容、权限不扩张、预算有界。它不能证明意图完整、读集声明真实或测试足以证明正确。读集真实性依赖实际工具访问限制；普通 shell 不受约束时，任务按 opaque 工作处理。

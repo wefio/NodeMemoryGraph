@@ -157,6 +157,48 @@ test("JSON-RPC over HTTP surfaces protocol validation errors", async () => {
   });
 });
 
+test(
+  "an operation deadline aborts HTTP response-body consumption after headers arrive",
+  { timeout: 10_000 },
+  async (t) => {
+    let bodyStarted!: () => void;
+    const atBody = new Promise<void>((resolve) => {
+      bodyStarted = resolve;
+    });
+    const realFetch = globalThis.fetch;
+    t.mock.method(globalThis, "fetch", async (...args: Parameters<typeof fetch>) => {
+      const response = await realFetch(...args);
+      bodyStarted();
+      return response;
+    });
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.write('{"jsonrpc":"2.0","id":1,"result":');
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const state: ServerState = {
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      transport: "http",
+      host: "127.0.0.1",
+      port: (server.address() as { port: number }).port,
+      token: "test-token",
+    };
+    const controller = new AbortController();
+    const pending = httpCall(state, "hello", {}, { signal: controller.signal });
+    try {
+      await atBody;
+      const rejected = assert.rejects(pending, /whole-operation deadline/u);
+      controller.abort(new Error("whole-operation deadline"));
+      await rejected;
+    } finally {
+      controller.abort();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);
+
 test("JSON-RPC over HTTP rejects oversized request bodies", async () => {
   await withServer(async (state) => {
     await assert.rejects(

@@ -384,6 +384,11 @@ adapter, not part of the NMG data model. The [Pi session-hook contract](session-
 also owns opt-in metadata-only first-response timing and slow-recall retention.
 Observation does not change recall waiting policy or issue provider probes.
 
+Automatic Pi pre-turn context preparation and WorkBuddy recall share an absolute waiting budget,
+not a per-RPC allowance. Timely search results survive later-phase expiry; explicit searches retain
+their own behavior. The [session-hook contract](session-memory-lifecycle-hooks-2026-08-10.md#自动召回等待预算)
+owns the deadline, fallback and diagnostic timing rules.
+
 Agent-facing result semantics have one integration-layer owner. The shared
 `Agent Surface` projects and renders compact search headers, exact evidence,
 bounded remember follow-up candidates, Task Board entries, and logical-chain
@@ -878,6 +883,11 @@ added to the caller's shared daemon-owned session AG as temporary
 Membership/ACLs and remote
 multi-device transport are not implemented; local callers sharing the daemon
 must agree on a task ID and should set stable `NMG_AGENT_ID` values.
+
+Task-Unit declaration semantics and storage encoding belong to the default protocol, freezing and
+restoration to its adopter, and persistence/transactions to the store. The board owns coordination
+state rather than another task body. The [declaration storage contract](task-unit-semantics.md#声明存储与恢复)
+retains typed task authority and binds immutable attempt inputs for restart recovery.
 
 AG update is working-memory management, not graph copying. It identifies
 candidate nodes, updates task-local runtime state, allocates one total budget,

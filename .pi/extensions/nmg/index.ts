@@ -29,6 +29,8 @@ import {
   type DaemonConnection,
 } from "../../../src/cli/daemon-client.ts";
 import { resolveNmgDataDir } from "../../../src/cli/data-path.ts";
+import type { HttpCallOptions } from "../../../src/cli/http-client.ts";
+import { RecallBudget, RecallDeadlineExceeded } from "../../../src/integration/recall-budget.ts";
 import {
   archiveOrStage,
   archiveNodeName,
@@ -127,6 +129,7 @@ function assertBoardVerbCall(params: {
 export default function nmgExtension(pi: ExtensionAPI): void {
   const firstResponseTiming = registerFirstResponseTiming(pi);
   let connectionPromise: Promise<DaemonConnection> | undefined;
+  let latestRecallTiming: ReturnType<RecallBudget["timing"]> | undefined;
   const taskWindow = new SessionTaskWindow();
   const recallFlow = new SessionRecallFlow();
   const agentAttributionFlow = new AgentAttributionFlow(32);
@@ -190,24 +193,30 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       | "recordClaimOutcomes"
       | "recordFeedback",
     params: Record<string, unknown>,
-  ) => invokeDaemon(await connection(), method, params);
+    options: HttpCallOptions = {},
+  ) => invokeDaemon(await connection(), method, params, options);
 
   const formatDisclosedContext = async (
     sessionId: string,
     context: MemoryContext,
     disclosure: DisclosureLevel,
+    options: HttpCallOptions = {},
   ): Promise<string> => {
     if (context.results.length === 0) {
       return disclosure === "header" ? "No matching NMG memory found." : "";
     }
     try {
-      const decision = (await invoke("sessionActiveGraph", {
-        action: "disclose",
-        sessionId,
-        projectionId: context.activeGraph?.id,
-        disclosure,
-        entries: memoryDisclosureEntries(context, disclosure),
-      })) as { freshMemoryIds: string[]; foldedMemoryIds: string[] };
+      const decision = (await invoke(
+        "sessionActiveGraph",
+        {
+          action: "disclose",
+          sessionId,
+          projectionId: context.activeGraph?.id,
+          disclosure,
+          entries: memoryDisclosureEntries(context, disclosure),
+        },
+        options,
+      )) as { freshMemoryIds: string[]; foldedMemoryIds: string[] };
       const freshIds = new Set(decision.freshMemoryIds);
       const foldedIds = new Set(decision.foldedMemoryIds);
       const fresh = context.results.filter((result) => freshIds.has(result.memory.id));
@@ -235,12 +244,20 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       return disclosure === "header" ? formatSearchHeaders(context) : formatMemoryContext(context);
     }
   };
-  const beginDisclosureTurn = async (sessionId: string, enabled: boolean): Promise<void> => {
+  const beginDisclosureTurn = async (
+    sessionId: string,
+    enabled: boolean,
+    options: HttpCallOptions = {},
+  ): Promise<void> => {
     if (!enabled) return;
-    await invoke("sessionActiveGraph", {
-      action: "beginDisclosureTurn",
-      sessionId,
-    }).catch(() => undefined);
+    await invoke(
+      "sessionActiveGraph",
+      {
+        action: "beginDisclosureTurn",
+        sessionId,
+      },
+      options,
+    ).catch(() => undefined);
   };
 
   // git commit via the bash tool is the strongest "milestone" signal available
@@ -267,11 +284,19 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }
   });
 
-  const recallNudges = async (sessionId: string, isNewUserTurn: boolean, prompt: string) => {
+  const recallNudges = async (
+    budget: RecallBudget,
+    sessionId: string,
+    isNewUserTurn: boolean,
+    prompt: string,
+  ) => {
     const completionNudge = popCompletionNudge(prompt);
     // Tool-loop re-entry must not consume a review intended for the next user turn.
     const pendingFeedback = isNewUserTurn ? controllerShadow.pendingFeedback(sessionId) : null;
-    if (pendingFeedback) await controllerShadow.feedbackNudgeShown(sessionId, pendingFeedback);
+    if (pendingFeedback)
+      await budget.run("feedback.nudge", () =>
+        controllerShadow.feedbackNudgeShown(sessionId, pendingFeedback),
+      );
     const feedbackNudge = pendingFeedback
       ? renderDisclosure(nmgPrompts.shadow_feedback_nudge, {
           active_graph_id: pendingFeedback.activeGraphId,
@@ -282,7 +307,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       ? controllerShadow.pendingClaimOutcome(sessionId)
       : null;
     if (pendingClaimOutcome) {
-      await controllerShadow.claimOutcomeNudgeShown(sessionId, pendingClaimOutcome);
+      await budget.run("claim.nudge", () =>
+        controllerShadow.claimOutcomeNudgeShown(sessionId, pendingClaimOutcome),
+      );
     }
     const claimOutcomeNudge = pendingClaimOutcome
       ? renderDisclosure(nmgPrompts.shadow_claim_outcome_nudge, {
@@ -293,23 +320,37 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       : "";
     return [completionNudge, feedbackNudge, claimOutcomeNudge].filter(Boolean).join("\n");
   };
-  const reasoningCheckpointFor = async (sessionId: string) => {
+  const reasoningCheckpointFor = async (budget: RecallBudget, sessionId: string) => {
     let reasoningCheckpoint = "";
     if (labToolsEnabled) {
       try {
-        const status = (await invokeDaemon(await connection(), "lab", {
-          action: "status",
-          capability: "reasoning_workspace",
-          sessionId,
-        })) as { activation?: unknown };
+        const status = (await budget.run("reasoning.status", async (signal) =>
+          invokeDaemon(
+            await connection(),
+            "lab",
+            {
+              action: "status",
+              capability: "reasoning_workspace",
+              sessionId,
+            },
+            { signal },
+          ),
+        )) as { activation?: unknown };
         if (status.activation) {
-          const consumed = (await invokeDaemon(await connection(), "lab", {
-            action: "invoke",
-            capability: "reasoning_workspace",
-            sessionId,
-            operation: "consume_checkpoint",
-            input: { maxNodes: 24, maxChars: 6_000 },
-          })) as { output?: { text?: string } | null };
+          const consumed = (await budget.run("reasoning.checkpoint", async (signal) =>
+            invokeDaemon(
+              await connection(),
+              "lab",
+              {
+                action: "invoke",
+                capability: "reasoning_workspace",
+                sessionId,
+                operation: "consume_checkpoint",
+                input: { maxNodes: 24, maxChars: 6_000 },
+              },
+              { signal },
+            ),
+          )) as { output?: { text?: string } | null };
           reasoningCheckpoint = consumed.output?.text ?? "";
         }
       } catch (error) {
@@ -320,122 +361,200 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   };
 
   observeRecallPreparation(pi, firstResponseTiming, async (event, ctx) => {
-    const sessionId = ctx.sessionManager.getSessionId();
-    const isNewUserTurn = recallFlow.beginTurn(
-      sessionId,
-      piUserTurnKey(ctx.sessionManager, event.prompt),
-    );
-    await beginDisclosureTurn(sessionId, isNewUserTurn);
-    const nudge = await recallNudges(sessionId, isNewUserTurn, event.prompt);
-    const reasoningCheckpoint = await reasoningCheckpointFor(sessionId);
-    let runtimeAgContext = "";
-    try {
-      const result = (await invoke("sessionActiveGraph", {
-        action: "snapshot",
-        sessionId,
-      })) as {
-        snapshot?:
-          import("../../../src/core/session-active-graph.ts").SessionActiveGraphSnapshot | null;
-      };
-      runtimeAgContext = renderSessionActiveGraphSurface(result.snapshot ?? null);
-    } catch {
-      // Search and ordinary Pi operation continue without optional working state.
-    }
-    const runtimeContext = [runtimeAgContext, reasoningCheckpoint].filter(Boolean).join("\n");
-    const recallRequest = taskWindow.prepare(sessionId, event.prompt);
-    const dynamicContext = composeNmgContextMessage("", "", nudge, runtimeContext);
-    if (!recallRequest) {
-      return {
-        systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
-        ...(dynamicContext
-          ? {
-              message: {
-                customType: "nmg-context",
-                content: dynamicContext,
-                display: true,
-                details: { count: 0 },
-              },
-            }
-          : {}),
-      };
-    }
-    try {
-      let context = (await invoke("search", {
-        query: recallRequest.query,
-        projectDir: projectDirectory(),
-        sessionId,
-        maxTier: Math.min(configuredAutoRecallTier(), recallRequest.maxTier) as MemoryTier,
-        limit: Math.min(configuredAutoRecallLimit(), recallRequest.limit),
-        initialEvidenceTarget: configuredInitialTarget(),
-        strongHitTopGap: configuredStrongHitTopGap(),
-        strongHitInitialTarget: configuredStrongHitInitialTarget(),
-        secondPass: qpp2Mode === "active",
-        graphHops: Math.min(1, recallRequest.graphHops),
-        tieredDisclosure: true,
-        // Tell the daemon this is an automatic recall decision: it stages the
-        // injected graph for online learning (explicit nmg_search stays unstaged).
-        autoRecall: true,
-      })) as MemoryContext;
-      if (controllerRerankMode === "active") {
-        context = await controllerShadow.rerank(context);
-      }
-      const fullContext = context;
-      if (qpp2Mode === "active") {
-        context = await applyLearnedFold(context, controllerShadow, qpp2RetainedMass, false);
-      }
-      const recalled = await formatDisclosedContext(sessionId, context, "header");
-      await controllerShadow.retrieval(fullContext, sessionId, "automatic", recalled);
-      // Automatic recall is still a retrieval trace. Keep it in the per-turn
-      // attribution window so agent_end can distinguish surfaced evidence from
-      // candidates that were merely injected.
-      agentAttributionFlow.note(sessionId, fullContext);
-      const recordCount = (recalled.match(/memory=/g) ?? []).length;
-      const searchNudge = formatSearchRecommendation(context, recommendationMode);
-      const recallContext = composeNmgContextMessage(
-        recalled,
-        "",
-        [
-          nudge,
-          searchNudge,
-          recordCount > 0 ? recallFeedbackAffordance(fullContext.activeGraph?.id) : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        runtimeContext,
+    const budget = new RecallBudget(undefined, ctx.signal);
+    const partial = {
+      recalled: "",
+      nudge: "",
+      runtimeContext: "",
+      context: undefined as MemoryContext | undefined,
+    };
+    const automaticInvoke = (
+      method: Parameters<typeof invoke>[0],
+      params: Record<string, unknown>,
+    ) =>
+      budget.run(
+        `${method}${typeof params.action === "string" ? `.${params.action}` : ""}`,
+        (signal) => invoke(method, params, { signal }),
       );
+    const prepare = async () => {
+      const sessionId = ctx.sessionManager.getSessionId();
+      const isNewUserTurn = recallFlow.beginTurn(
+        sessionId,
+        piUserTurnKey(ctx.sessionManager, event.prompt),
+      );
+      await budget.run("connection", () => connection());
+      await budget.run("disclosure.begin", (signal) =>
+        beginDisclosureTurn(sessionId, isNewUserTurn, { signal }),
+      );
+      const nudge = await recallNudges(budget, sessionId, isNewUserTurn, event.prompt);
+      partial.nudge = nudge;
+      const reasoningCheckpoint = await reasoningCheckpointFor(budget, sessionId);
+      let runtimeAgContext = "";
+      try {
+        const result = (await automaticInvoke("sessionActiveGraph", {
+          action: "snapshot",
+          sessionId,
+        })) as {
+          snapshot?:
+            import("../../../src/core/session-active-graph.ts").SessionActiveGraphSnapshot | null;
+        };
+        runtimeAgContext = renderSessionActiveGraphSurface(result.snapshot ?? null);
+      } catch {
+        // Search and ordinary Pi operation continue without optional working state.
+      }
+      const runtimeContext = [runtimeAgContext, reasoningCheckpoint].filter(Boolean).join("\n");
+      partial.runtimeContext = runtimeContext;
+      return { sessionId, nudge, runtimeContext };
+    };
+    const automatic = async () => {
+      const { sessionId, nudge, runtimeContext } = await prepare();
+      const recallRequest = taskWindow.prepare(sessionId, event.prompt);
+      const dynamicContext = composeNmgContextMessage("", "", nudge, runtimeContext);
+      if (!recallRequest) {
+        return {
+          systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
+          ...(dynamicContext
+            ? {
+                message: {
+                  customType: "nmg-context",
+                  content: dynamicContext,
+                  display: true,
+                  details: { count: 0 },
+                },
+              }
+            : {}),
+        };
+      }
+      try {
+        let context = (await automaticInvoke("search", {
+          query: recallRequest.query,
+          autoRecallBudgetMs: Math.max(1, Math.floor(Math.min(4_500, budget.remainingMs - 100))),
+          projectDir: projectDirectory(),
+          sessionId,
+          maxTier: Math.min(configuredAutoRecallTier(), recallRequest.maxTier) as MemoryTier,
+          limit: Math.min(configuredAutoRecallLimit(), recallRequest.limit),
+          initialEvidenceTarget: configuredInitialTarget(),
+          strongHitTopGap: configuredStrongHitTopGap(),
+          strongHitInitialTarget: configuredStrongHitInitialTarget(),
+          secondPass: qpp2Mode === "active",
+          graphHops: Math.min(1, recallRequest.graphHops),
+          tieredDisclosure: true,
+          // Tell the daemon this is an automatic recall decision: it stages the
+          // injected graph for online learning (explicit nmg_search stays unstaged).
+          autoRecall: true,
+        })) as MemoryContext;
+        // A completed search is already usable. Optional later phases must not
+        // discard it merely because disclosure or telemetry is slow.
+        partial.context = context;
+        partial.recalled = formatSearchHeaders(context);
+        if (controllerRerankMode === "active") {
+          context = await budget.run("controller.rerank", () => controllerShadow.rerank(context));
+          partial.recalled = formatSearchHeaders(context);
+        }
+        const fullContext = context;
+        if (qpp2Mode === "active") {
+          context = await budget.run("controller.fold", () =>
+            applyLearnedFold(context, controllerShadow, qpp2RetainedMass, false),
+          );
+          partial.recalled = formatSearchHeaders(context);
+        }
+        const recalled = await budget.run("disclosure", (signal) =>
+          formatDisclosedContext(sessionId, context, "header", { signal }),
+        );
+        partial.recalled = recalled;
+        await budget.run("controller.telemetry", () =>
+          controllerShadow.retrieval(fullContext, sessionId, "automatic", recalled),
+        );
+        // Automatic recall is still a retrieval trace. Keep it in the per-turn
+        // attribution window so agent_end can distinguish surfaced evidence from
+        // candidates that were merely injected.
+        agentAttributionFlow.note(sessionId, fullContext);
+        const recordCount = (recalled.match(/memory=/g) ?? []).length;
+        const searchNudge = formatSearchRecommendation(context, recommendationMode);
+        const recallContext = composeNmgContextMessage(
+          recalled,
+          "",
+          [
+            nudge,
+            searchNudge,
+            recordCount > 0 ? recallFeedbackAffordance(fullContext.activeGraph?.id) : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          runtimeContext,
+        );
+        return {
+          systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
+          ...(recallContext
+            ? {
+                message: {
+                  customType: "nmg-context",
+                  content: recallContext,
+                  display: true,
+                  details: { count: recordCount },
+                },
+              }
+            : {}),
+        };
+      } catch (error) {
+        const errorContext = composeNmgContextMessage(
+          partial.recalled,
+          `NMG unavailable: ${message(error)}`,
+          nudge,
+          runtimeContext,
+        );
+        return {
+          systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
+          ...(errorContext
+            ? {
+                message: {
+                  customType: "nmg-context",
+                  content: errorContext,
+                  display: true,
+                  details: { count: (partial.recalled.match(/memory=/g) ?? []).length },
+                },
+              }
+            : {}),
+        };
+      }
+    };
+    try {
+      const result = await budget.run("automatic.context", automatic);
       return {
-        systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
-        ...(recallContext
+        ...result,
+        ...(result.message
           ? {
               message: {
-                customType: "nmg-context",
-                content: recallContext,
-                display: true,
-                details: { count: recordCount },
+                ...result.message,
+                details: { ...result.message.details, recallTiming: budget.timing() },
               },
             }
           : {}),
       };
     } catch (error) {
-      const errorContext = composeNmgContextMessage(
-        "",
-        `NMG unavailable: ${message(error)}`,
-        nudge,
-        runtimeContext,
+      const recordCount = (partial.recalled.match(/memory=/g) ?? []).length;
+      if (partial.context && recordCount > 0)
+        agentAttributionFlow.note(ctx.sessionManager.getSessionId(), partial.context);
+      const content = composeNmgContextMessage(
+        partial.recalled,
+        error instanceof RecallDeadlineExceeded
+          ? "NMG automatic recall reached its 5-second budget; late work was ignored."
+          : `NMG unavailable: ${message(error)}`,
+        partial.nudge,
+        partial.runtimeContext,
       );
       return {
         systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
-        ...(errorContext
-          ? {
-              message: {
-                customType: "nmg-context",
-                content: errorContext,
-                display: true,
-                details: { count: 0 },
-              },
-            }
-          : {}),
+        message: {
+          customType: "nmg-context",
+          content,
+          display: true,
+          details: { count: recordCount, recallTiming: budget.timing() },
+        },
       };
+    } finally {
+      latestRecallTiming = budget.timing();
+      budget.close();
     }
   });
 
@@ -458,19 +577,31 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   // NMG 总二级/三级菜单。早期只有独立的 /nmg-recall 命令；现在统一收编到
   // /nmg 下，保留 /nmg-recall 作为别名。状态只影响后续渲染与重开会话后的
   // 历史恢复；已渲染的历史消息不重绘（pi 无公开 force-rerender）。
+  const recallCommand = (args: readonly string[], ctx: ExtensionCommandContext): void => {
+    if (args[0] === "timing") {
+      ctx.ui.notify(
+        latestRecallTiming
+          ? JSON.stringify(latestRecallTiming, null, 2)
+          : "本会话尚无自动召回耗时记录",
+        "info",
+      );
+      return;
+    }
+    recallCollapsed = !recallCollapsed;
+    ctx.ui.notify(
+      recallCollapsed
+        ? "nmg-context 已折叠（只显示 [nmg-context] chip）"
+        : "nmg-context 已展开（显示召回全文）",
+      "info",
+    );
+  };
   const nmgMenuHandler = async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
     const parts = args.trim().split(/\s+/).filter(Boolean);
     const [sub, ...rest] = parts;
     const restText = rest.join(" ");
     switch (sub) {
       case "recall": {
-        recallCollapsed = !recallCollapsed;
-        ctx.ui.notify(
-          recallCollapsed
-            ? "nmg-context 已折叠（只显示 [nmg-context] chip）"
-            : "nmg-context 已展开（显示召回全文）",
-          "info",
-        );
+        recallCommand(rest, ctx);
         return;
       }
       case "wake": {

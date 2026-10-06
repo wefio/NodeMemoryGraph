@@ -44,6 +44,12 @@ import { Router } from "../router.ts";
 import { cosineSimilarity, HashingVectorEmbedder } from "../vector.ts";
 import { Float32VectorCache } from "../vector-cache.ts";
 import { migrate } from "./schema.ts";
+import {
+  freezeTaskUnitDeclaration,
+  readTaskUnitDeclarations,
+  type TaskUnitDeclaration,
+  type TaskUnitDeclarationInput,
+} from "../../integration/task-unit-declaration-store.ts";
 import { parseNumberArray } from "./row-parse.ts";
 import { encodeVector, storedVector } from "./vector-codec.ts";
 import { updateRelationStrength } from "../edge-activation.ts";
@@ -1795,80 +1801,11 @@ export class NmgStoreBase {
   /** Freeze one task of a run's plan. Frozen means frozen: the same task id with a different
    *  input, position or operation is refused rather than replaced, since the plan is the thing
    *  every later decision is read against. */
-  freezeTaskRunTask(
-    input: {
-      runId: string;
-      taskId: string;
-      position: number;
-      revision: string;
-      input: string;
-      dependencies: readonly string[];
-      effect: string;
-      waitEvent?: string | null;
-      operation?: string;
-      kind?: string;
-      patchFiles?: readonly string[] | null;
-      patchEditable?: readonly string[] | null;
-    },
-    port?: TransactionPort,
-  ): void {
-    return port
-      ? this.withPort(port, () => this.insertTaskRunTask(input))
-      : this.writeTransaction(() => this.insertTaskRunTask(input));
-  }
-
-  private insertTaskRunTask(input: {
-    runId: string;
-    taskId: string;
-    position: number;
-    revision: string;
-    input: string;
-    dependencies: readonly string[];
-    effect: string;
-    waitEvent?: string | null;
-    operation?: string;
-    kind?: string;
-    patchFiles?: readonly string[] | null;
-    patchEditable?: readonly string[] | null;
-  }): void {
-    if (!this.taskRunManifestExists(input.runId))
-      throw new Error(`run ${input.runId} is not registered; a task cannot be frozen into it`);
-    const dependencies = JSON.stringify(input.dependencies);
-    const existing = this.db
-      .prepare(
-        "SELECT input, dependencies, position, operation FROM task_run_tasks WHERE run_id = ? AND task_id = ?",
-      )
-      .get(input.runId, input.taskId) as Row | undefined;
-    if (existing) {
-      const same =
-        String(existing.input) === input.input &&
-        String(existing.dependencies) === dependencies &&
-        Number(existing.position) === input.position &&
-        String(existing.operation) === (input.operation ?? "");
-      if (!same)
-        throw new Error(
-          `run ${input.runId} already froze task ${input.taskId} with a different definition`,
-        );
-      return;
-    }
-    this.db
-      .prepare(
-        "INSERT INTO task_run_tasks (run_id, task_id, position, revision, input, dependencies, effect, wait_event, operation, kind, patch_files, patch_editable) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      )
-      .run(
-        input.runId,
-        input.taskId,
-        input.position,
-        input.revision,
-        input.input,
-        dependencies,
-        input.effect,
-        input.waitEvent ?? null,
-        input.operation ?? "",
-        input.kind ?? "snapshot",
-        input.patchFiles ? JSON.stringify(input.patchFiles) : null,
-        input.patchEditable ? JSON.stringify(input.patchEditable) : null,
-      );
+  freezeTaskRunTask(input: TaskUnitDeclarationInput, port?: TransactionPort): void {
+    // Compatibility entrypoint for the default protocol. The store supplies the
+    // connection and transaction; its adapter owns declaration encoding and equality.
+    const write = () => freezeTaskUnitDeclaration(this.db, input);
+    return port ? this.withPort(port, write) : this.writeTransaction(write);
   }
 
   /** Append one run fact, if it is not already there. The fact's own identity (run, kind, task,
@@ -1953,37 +1890,8 @@ export class NmgStoreBase {
   }
 
   /** The tasks the run froze, in plan order. */
-  taskRunTasks(runId: string): {
-    taskId: string;
-    position: number;
-    revision: string;
-    input: string;
-    dependencies: string[];
-    effect: string;
-    waitEvent: string | null;
-    operation: string;
-    kind: string;
-    patchFiles: string[] | null;
-    patchEditable: string[] | null;
-  }[] {
-    const rows = this.db
-      .prepare("SELECT * FROM task_run_tasks WHERE run_id = ? ORDER BY position, task_id")
-      .all(runId) as Row[];
-    return rows.map((row) => ({
-      taskId: String(row.task_id),
-      position: Number(row.position),
-      revision: String(row.revision),
-      input: String(row.input),
-      dependencies: JSON.parse(String(row.dependencies)) as string[],
-      effect: String(row.effect),
-      waitEvent: row.wait_event === null ? null : String(row.wait_event),
-      operation: String(row.operation),
-      kind: String(row.kind),
-      patchFiles:
-        row.patch_files === null ? null : (JSON.parse(String(row.patch_files)) as string[]),
-      patchEditable:
-        row.patch_editable === null ? null : (JSON.parse(String(row.patch_editable)) as string[]),
-    }));
+  taskRunTasks(runId: string): TaskUnitDeclaration[] {
+    return readTaskUnitDeclarations(this.db, runId);
   }
 
   /** The run's appended facts in sequence order. `through` is how a caller asks for the facts as of

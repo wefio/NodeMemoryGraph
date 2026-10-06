@@ -56,6 +56,10 @@ What already holds the data, existing field to proposed field - nothing below mo
 | `task_run_manifest`, `task_run_tasks` (`input`, `dependencies`, `effect`, `wait_event`, `operation`, `kind`, `patch_files`, `patch_editable`)                                                                   | The frozen task declaration, already typed, reached by `run_id` and `task_id`; per-attempt facts append to `task_run_facts`, whose own `payload` column is this record's precedent                                      |
 | -                                                                                                                                                                                                               | The proposed `payload` carries nothing the Task-Unit Protocol needs. It is the slot a peer protocol's declaration uses, and for Task-Unit entries it stays NULL                                                         |
 
+The [approved storage-ownership slice](../implemented/2026-10-02-declarations-have-one-owner.md)
+retains these typed tables and uses their existing fact log for immutable attempt inputs. It does not
+add the proposed board columns or an independent task body; the rest of this frame remains proposed.
+
 ### 2. The data format, three separate questions
 
 - **Wire bytes.** JSON over the daemon's existing RPC. Unchanged; no second binding exists to justify
