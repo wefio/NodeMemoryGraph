@@ -180,6 +180,11 @@ By default, the extension stores shared LTG and Task Board data in
 `~/.nmg/nmg.sqlite`. Set `NMG_DATA_DIR` to use another directory. Project-local
 `.nmg/` data is reserved for isolated STG sessions and controlled/headless runs.
 
+Pi provides [opt-in first-output timing](docs/design/session-memory-lifecycle-hooks-2026-08-10.md#首次输出计时)
+through `/nmg-latency on|off|status`; it records metadata only and does not change
+recall waiting policy. The hook contract defines slow-recall retention and
+host-event interpretation.
+
 The Pi adapter is deliberately thin. It lazily starts the local daemon over
 JSON-RPC/HTTP, reuses one connection for automatic recall and the default tool
 surface, and stops the daemon at session shutdown only when that adapter
@@ -378,17 +383,19 @@ recall, and operations guidance is read only after an Agent forgets an operation
 or encounters a special case. The normal path remains
 `status → start if needed → search → selected get → ownership-safe stop`.
 
-Install or refresh the complete Skill (quick card plus references) and verify
-that the installed copy has not drifted:
+For first-time setup from a persistent local checkout, prefer a directory
+symbolic link from `~/.agents/skills/nmg-memory` (or the Agent's configured skills
+location) to `<CHECKOUT>/skills/nmg-memory`; on Windows, use a directory junction.
+Link the whole directory so the quick card and references follow source changes
+without a sync script. Keep the source available and confirm migration before
+replacing an existing installation or local modifications. See the
+[Skill installation rule](skills/nmg-memory/SKILL.md#installation).
 
-```bash
-npm run skill:nmg:sync
-npm run skill:nmg:check
-```
+File changes follow the link immediately; instructions already loaded into a
+session are not retroactively replaced. In Pi, reload at an idle boundary or start
+a new session when refreshed discovery is needed.
 
-The default cross-platform target is `~/.agents/skills/nmg-memory`; pass
-`-- --target <.../nmg-memory>` to either command for another Agent home. The
-natural-evidence reference describes passive real-use collection, fail-closed
+The natural-evidence reference describes passive real-use collection, fail-closed
 readiness audits, candidate calibration, matched validation, and rollbackable
 Agent-applied updates.
 

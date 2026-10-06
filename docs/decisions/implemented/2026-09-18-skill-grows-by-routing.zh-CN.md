@@ -44,11 +44,21 @@ English version: [2026-09-18-skill-grows-by-routing.md](2026-09-18-skill-grows-b
    路由已经列了 `skills/nmg-memory/references/harness-adapters.md`。
 5. **规则留在政策行里。** `docs/README.md#ci-contract` 在体积预算旁写明：上限覆盖的是常读入口，细节路由进
    `references/`；理由留在本记录里。
+6. **从持久本地仓库安装 Skill 时用链接，不用复制。** 目录链接让入口和它的 `references/` 共用
+   一棵源文件树，源码改动不再需要反复复制同步。源码目录要持续可用；已有安装或本地定制必须
+   经确认后再迁移。这是安装指引，不是每次使用都执行的检查。
 
 同一个改动里对 `skills/repo-development/` 的落实：`## Repository Control Plane beyond agent:verify`
 （2 741 B）成为 `references/control-plane.md`，`## Builds and generated artifacts`（1 702 B）成为
 `references/builds.md`，入口约 10.4 KB、余量约 4.5 KB。两节都保留可读、文字不改；两个带传入锚点的节
 （`#before-editing`、`#implement-and-verify`）留在入口，正是为了让已实现的记录不必改链接。
+
+同一个改动里对 `skills/nmg-memory/` 的落实：常用记忆路径留在
+[快速入口](../../../skills/nmg-memory/SKILL.md)，黑板流程移入
+[board](../../../skills/nmg-memory/references/board.md)，进阶召回及调用限额移入
+[recall](../../../skills/nmg-memory/references/recall.md)，Lab 合同留在
+[optional capabilities](../../../skills/nmg-memory/references/optional-capabilities.md)，
+每个都在对应的任务触发条件下被路由。入口与 README 共同写明链接安装方式。
 
 ## 考虑过的替代方案
 
@@ -60,6 +70,8 @@ English version: [2026-09-18-skill-grows-by-routing.md](2026-09-18-skill-grows-b
   切走等于让常见路径多读一个文件，而且它持有一个传入锚点和 `ci-and-tests` 路由的 owner。
 - **路由进 `docs/design/` 而不是 `references/`。** 否决：Skill 的操作规程不是设计文档，`docs/design/`
   的内容按设计文档受检，而 `references/` 约定在本仓库已经存在、路由写法也已定型。
+- **持久本地仓库的 Skill 安装仍要求复制同步。** 对这条安装路径否决：它维护第二棵文件树，
+  并需要目录链接能够省去的更新动作。没有持久仓库的副本分发属于另一个场景；此指引不删除现有同步工具。
 - **让预算覆盖 Skill 下的每个文件。** 否决：那会立刻破坏 `skills/nmg-memory/`，并且把"为了入口小才存在的
   按需细节"反过来卡住，恰好取消它存在的目的。
 

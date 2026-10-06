@@ -118,6 +118,18 @@ session_shutdown ───────  archive + daemon teardown + 运行时 AG
 - `SessionRuntimeAg` 继续留在进程内，因此近期工具状态在下一轮仍可见。
 - Pi 负责对话摘要。NMG 不再把 `messagesToSummarize` 原样拼接为 `asserted` 长期事件；上下文压缩本身不是持久化资格。
 
+### 首次输出计时
+
+Pi 的 `/nmg-latency on|off|status` 控制当前扩展运行时的观测开关，默认关闭；启停先等待空闲边界，会话替换、分支导航、关闭或重载不继承开启状态。该命令不改变模型、思考强度、召回等待策略或 daemon，也不发起测试请求。
+
+开启后，观测器用同一 trace ID 关联 Pi `input`、NMG 准备起止、agent 开始、可用的供应商请求/响应边界、首个解析后的供应商事件、assistant 开始、首次非空思考/文字增量及首次工具执行。NMG 边界由现有准备 handler 的外层观测记录，原异步返回值或错误继续原样传递，不增加超时或取消。每阶段只记一次，后续工具和模型循环不覆盖首次时间。事件以 `nmg-first-response-timing` 自定义条目追加到 Pi 会话，不参与模型上下文；只含版本、会话/trace ID、输入来源、阶段、墙钟时间、单调累计毫秒、排除标记和结局，不保存提示、请求体、头部、流内容、工具参数或凭据。
+
+持久化只保留 Pi `input` 到 `nmg_end` 严格超过 1,000 毫秒的 trace，包含召回开始之前的准备等待，不按单个阶段或模型输出耗时筛选。首次阶段元数据先在内存缓冲；观测到 `nmg_end` 且越过阈值时，按原始顺序补写完整起点和阶段，之后继续记录该 trace。等于或低于阈值的 trace 不落盘；尚未观测到召回结束的 trace 只在 `status` 中可见，结束、替代或重置时丢弃未判定缓冲，不把缺失边界补成零。保留样本是慢召回筛选结果，不能用它计算整体正常轮次比例或分布。
+
+含压缩尝试的 trace 标记为排除，不用于普通首响应对比。运行中的 steer/follow-up 输入也使当前 trace 排除，不能把旧请求的输出误配给新输入。失败尝试保留标记，等待 `agent_settled` 才结束整个 trace，允许同一输入重试后获得首个输出；中止、替代、关闭和观测存储失败均不伪装成成功或零耗时。存储失败关闭观测并在 `status` 中标明，不阻断对话。
+
+这些时间是 Pi 扩展事件边界：`input` 不是客户端点击发送，`provider_request` 不是已证明的网络发包，解析后的供应商事件也不是 HTTP 原始字节，文字/工具事件不证明 UI 已绘制。缺失阶段保持缺失，不补成零。不从 assistant 消息完成时间推断首个可见输出，也不把受控回归当作自然慢轮次的根因。自然样本按活跃分支对齐模型、供应商和思考设置，只使用配置已确认匹配且没有排除标记的普通输入；同会话不等于同配置。选择理由见[首次输出观测决策](../decisions/implemented/2026-10-04-first-response-timing-is-opt-in.zh-CN.md)。
+
 ### 3. 不变的钩子
 
 `before_agent_start`（recall + runtime AG + nudge）、`session_start`（staging 补刷）、`agent_end`（controller shadow outcome）、`session_shutdown`（归档 + daemon teardown + `runtimeAg.clear`）。

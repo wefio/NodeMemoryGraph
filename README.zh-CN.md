@@ -133,6 +133,10 @@ pi
 `NMG_DATA_DIR` 换目录。项目本地 `.nmg/` 数据保留给隔离 STG 会话和受控/无头
 运行。
 
+Pi 提供[显式开启的首次输出计时](docs/design/session-memory-lifecycle-hooks-2026-08-10.md#首次输出计时)，
+通过 `/nmg-latency on|off|status` 控制，只记录元数据，不改变召回等待策略。
+慢召回保留条件和 host 事件的解释边界由会话钩子契约定义。
+
 Pi adapter 刻意做薄：它通过 JSON-RPC/HTTP 惰性启动本地 daemon，自动回忆和
 四个稳定工具复用同一条连接，且只在本次 adapter 调用启动了 daemon 时才在
 会话关闭时停掉它。已在运行的共享 daemon 不会被碰。
@@ -272,6 +276,15 @@ Pi 独立于 AG 内容预算，对每用户轮的 agent 主导回忆设限：最
 参考页：详细的写入、回忆和操作指引只在 Agent 忘了操作或遇到点名特例时才读。
 正常路径始终是
 `status → 需要则 start → search → 选中的 get → 所有权安全的 stop`。
+
+从持久本地仓库首次安装时，建议将 `~/.agents/skills/nmg-memory`（或 Agent
+配置的技能位置）作为目录软链接，指向 `<CHECKOUT>/skills/nmg-memory`；Windows
+可用目录联接（junction）。链接整个目录，让入口和参考文件一起跟随源码更新，
+无需同步脚本。源码目录要持续可用；已有安装或本地修改时，先确认迁移，不自动
+覆盖。完整边界见 [Skill 安装规则](skills/nmg-memory/SKILL.md#installation)。
+
+文件改动会立即通过链接反映，但不会追溯替换已经读入会话的指令。在 Pi 中需要
+刷新发现结果时，于空闲边界重新加载或开启新会话。
 
 SQLite FTS5 是零配置的 Pi 检索路径。设置 `NMG_EMBED_BASE_URL` 和
 `NMG_EMBED_MODEL` 可把外部节点/叶子语义信号加进同一个预算化 Active Graph

@@ -1,5 +1,35 @@
 # Recall manual
 
+## Progressive recall and process limits
+
+Treat automatically injected recall and search results as candidate headers.
+Use `nmg get` to load selected exact records and evidence. Decide whether the
+question needs one or several records; candidate count does not prove evidence
+completeness. Treat the latest request as the recall target and older context as
+disambiguation. No useful memory is a valid result. Start shallow. If information
+may still be missing, try one narrower or complementary query, then increase
+`--max-tier`, `--limit`, or `--graph-hops`. Verify volatile facts against a
+current source before relying on them. If lexical results are still insufficient
+and embeddings are configured, switch to `--retrieval-mode hybrid` (see
+[embedding](embedding.md)). Do not load all candidate evidence into the model.
+
+Pi applies a per-user-turn process budget: at most three searches and five total
+search/get calls. Two searches without exact-evidence progression require a
+`get`; two consecutive searches returning no new candidate IDs stop recall. Do
+not work around these guards by paraphrasing the same query. Answer from loaded
+evidence, state the remaining uncertainty, or wait for a new user turn.
+
+## Result fields and narrowing
+
+`nmg search --compact-json` returns `candidates[].id` and top-level
+`activeGraphId`; `--json` returns `results[].memory.id` and `activeGraph.id`.
+Pass that graph ID to `nmg get --active-graph-id` to attribute exact-evidence use,
+not retrieval success.
+
+Narrow by `--node`, `--scope` or `--source-actor user` when relevant.
+Use `--include-historical` only for old/superseded state. Start with `--max-tier 1`
+and `--limit 8`, not a full evidence dump.
+
 ## Escalation order
 
 1. Rewrite the query around the missing entity, time, or relation.
