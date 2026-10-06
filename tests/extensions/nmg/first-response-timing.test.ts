@@ -32,6 +32,8 @@ function host() {
   let idle = false;
   let waits = 0;
   let sessionReads = 0;
+  let now = 0;
+  let ids = 0;
   const api = {
     on(name: string, handler: Hook) {
       hooks.set(name, handler);
@@ -44,7 +46,11 @@ function host() {
       records.push(data);
     },
   };
-  const timing = registerFirstResponseTiming(api as never);
+  const timing = registerFirstResponseTiming(api as never, {
+    now: () => now,
+    wall: () => new Date(now).toISOString(),
+    id: () => `trace-${++ids}`,
+  });
   const context = {
     sessionManager: {
       getSessionId: () => {
@@ -65,10 +71,32 @@ function host() {
     setIdle: (value: boolean) => (idle = value),
     waits: () => waits,
     sessionReads: () => sessionReads,
+    advance: (milliseconds: number) => {
+      now += milliseconds;
+    },
+    recall: (milliseconds = 1_001) => {
+      timing.mark("nmg_start");
+      now += milliseconds;
+      timing.mark("nmg_end");
+    },
     fire: (name: string, event: unknown = {}) => hooks.get(name)!(event as never, context as never),
     command: (action: string) => commands.get("nmg-latency")!.handler(action, context as never),
   };
 }
+
+test("Pi does not persist a fast input-to-recall trace", async () => {
+  const h = host();
+  await h.command("on");
+  h.fire("input", { source: "interactive" });
+  h.recall(1_000);
+  h.advance(20_000);
+  h.fire("agent_start");
+  h.fire("message_update", { assistantMessageEvent: { type: "text_delta", delta: "response" } });
+  h.fire("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+  h.fire("agent_settled");
+  assert.ok(h.timing.snapshot().phases.nmg_end! <= 1_000);
+  assert.deepEqual(h.records, [], "fast recall metadata stays out of the session log");
+});
 
 function forbiddenPayload(field: string): Record<string, unknown> {
   return Object.defineProperty({}, field, {
@@ -103,6 +131,8 @@ test("host boundaries log only metadata and first nonempty deltas", async (t) =>
   const h = host();
   await h.command("on");
   h.fire("input", Object.assign(forbiddenPayload("text"), { source: "rpc" }));
+  assert.equal(h.records.length, 0, "the input boundary is buffered, not immediately persisted");
+  h.recall();
   h.fire("agent_start");
   h.fire("before_provider_request", forbiddenPayload("payload"));
   h.fire("before_provider_headers", forbiddenPayload("headers"));
@@ -146,10 +176,11 @@ test("idle cache work is not attributed to an input's provider request", async (
   const h = host();
   await h.command("on");
   h.fire("input", { source: "interactive" });
+  h.recall();
   h.fire("before_provider_request");
   assert.deepEqual(
     h.records.map((r) => r.phase),
-    ["input"],
+    ["input", "nmg_start", "nmg_end"],
     "pre-agent requests are not model output",
   );
   h.fire("agent_start");
@@ -158,7 +189,7 @@ test("idle cache work is not attributed to an input's provider request", async (
   h.fire("provider_stream_event");
   assert.deepEqual(
     h.records.map((r) => r.phase),
-    ["input", "agent_start"],
+    ["input", "nmg_start", "nmg_end", "agent_start"],
   );
 });
 
@@ -166,6 +197,7 @@ test("compaction and queued input exclude traces without resetting the active id
   const h = host();
   await h.command("on");
   h.fire("input", { source: "interactive" });
+  h.recall();
   const id = h.records[0]!.traceId;
   h.fire("input", { source: "interactive", streamingBehavior: "followUp" });
   h.fire("session_before_compact");
@@ -179,6 +211,7 @@ test("a failed attempt can retry before settlement and remains observable", asyn
   const h = host();
   await h.command("on");
   h.fire("input", { source: "interactive" });
+  h.recall();
   h.fire("agent_end", { messages: [{ role: "assistant", stopReason: "error" }] });
   assert.equal(
     h.records.some((r) => r.phase === "end"),
@@ -196,6 +229,7 @@ test("aborting after a tool request is not misreported as successful settlement"
   const h = host();
   await h.command("on");
   h.fire("input", { source: "interactive" });
+  h.recall();
   h.fire("agent_end", { messages: [{ role: "assistant", stopReason: "toolUse" }] });
   h.fire("agent_before_settle", { outcome: "aborted" });
   h.fire("agent_settled");
@@ -207,6 +241,7 @@ test("session replacement and explicit off never leave capture armed", async () 
   const h = host();
   await h.command("on");
   h.fire("input", { source: "interactive" });
+  h.recall();
   await h.command("off");
   assert.equal(h.records.at(-1)?.outcome, "disabled");
   await h.command("on");

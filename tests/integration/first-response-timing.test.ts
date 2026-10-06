@@ -3,20 +3,108 @@ import test from "node:test";
 
 import {
   FirstResponseTiming,
+  retainSlowRecallEvents,
   type FirstResponseTimingEvent,
 } from "../../src/integration/first-response-timing.ts";
 
-function fixture() {
+function fixture(slowOnly = false) {
   let now = 0;
   let ids = 0;
   const events: FirstResponseTimingEvent[] = [];
-  const timing = new FirstResponseTiming((event) => events.push(event), {
+  const emit = (event: FirstResponseTimingEvent) => {
+    events.push(event);
+  };
+  const timing = new FirstResponseTiming(slowOnly ? retainSlowRecallEvents(emit) : emit, {
     now: () => now,
     wall: () => new Date(now).toISOString(),
     id: () => `trace-${++ids}`,
   });
   return { timing, events, advance: (ms: number) => (now += ms), ids: () => ids };
 }
+
+test("slow recall retention rejects zero, sub-second and exactly one-second waits", () => {
+  for (const milliseconds of [0, 999, 1_000]) {
+    const { timing, events, advance } = fixture(true);
+    timing.setEnabled(true);
+    timing.begin("session", "interactive");
+    advance(milliseconds);
+    timing.mark("nmg_end");
+    advance(20_000);
+    timing.mark("first_text");
+    timing.end("stop");
+    assert.deepEqual(
+      events,
+      [],
+      `recall at ${milliseconds}ms is not retained, even with slow output`,
+    );
+  }
+});
+
+test("slow recall retention uses input-to-end time and flushes all earlier boundaries", () => {
+  const { timing, events, advance } = fixture(true);
+  timing.setEnabled(true);
+  timing.begin("session", "interactive");
+  advance(900);
+  timing.mark("nmg_start");
+  assert.equal(events.length, 0, "the trace is only buffered before recall completion");
+  advance(100.01);
+  timing.mark("nmg_end");
+  assert.deepEqual(
+    events.map((event) => event.phase),
+    ["input", "nmg_start", "nmg_end"],
+  );
+  assert.equal(events[0]?.elapsedMs, 0, "the input boundary is not filtered away");
+  assert.equal(events[1]?.elapsedMs, 900);
+  assert.equal(
+    events[2]?.elapsedMs,
+    1_000.01,
+    "short recall work still qualifies after slow preparation",
+  );
+  timing.mark("first_text");
+  timing.end("error");
+  timing.exclude("compaction");
+  assert.equal(events.at(-1)?.excluded, true);
+  assert.equal(events.at(-1)?.outcome, "error");
+  assert.ok(events.every((event) => event.traceId === "trace-1"));
+});
+
+test("retention decisions and pending events never leak across new inputs or reset", () => {
+  const { timing, events, advance } = fixture(true);
+  timing.setEnabled(true);
+  timing.begin("session", "interactive");
+  advance(2_000);
+  timing.reset();
+  assert.equal(events.length, 0, "missing recall completion is not fabricated");
+  timing.setEnabled(true);
+  timing.begin("session", "interactive");
+  advance(1_001);
+  timing.mark("nmg_end");
+  timing.begin("session", "interactive");
+  advance(1_000);
+  timing.mark("nmg_end");
+  timing.begin("session", "interactive");
+  advance(1_001);
+  timing.mark("nmg_end");
+  assert.deepEqual([...new Set(events.map((event) => event.traceId))], ["trace-2", "trace-4"]);
+});
+
+test("a slow trace's buffered sink failure safely disables observation", () => {
+  let now = 0;
+  const timing = new FirstResponseTiming(
+    retainSlowRecallEvents(() => {
+      throw new Error("retained-sink-canary");
+    }),
+    { now: () => now, wall: () => "unused", id: () => "trace" },
+  );
+  timing.setEnabled(true);
+  timing.begin("session", "interactive");
+  assert.equal(timing.enabled, true);
+  now = 1_001;
+  assert.doesNotThrow(() => timing.mark("nmg_end"));
+  assert.equal(timing.snapshot().failed, true);
+  assert.equal(timing.enabled, false);
+  assert.doesNotMatch(JSON.stringify(timing.snapshot()), /retained-sink-canary/u);
+});
 
 test("first-response timing is disabled until explicit activation", () => {
   const { timing, events, ids } = fixture();

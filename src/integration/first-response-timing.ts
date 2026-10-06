@@ -47,6 +47,39 @@ export interface FirstResponseClock {
   wall(): string;
   id(): string;
 }
+export const SLOW_RECALL_THRESHOLD_MS = 1_000;
+
+/** Keep a complete trace only after observing input-to-recall completion above the threshold. */
+export function retainSlowRecallEvents(
+  emit: (event: FirstResponseTimingEvent) => void,
+): (event: FirstResponseTimingEvent) => void {
+  let traceId: string | undefined;
+  let retained: boolean | undefined;
+  let pending: FirstResponseTimingEvent[] = [];
+  return (event) => {
+    if (event.traceId !== traceId) {
+      traceId = event.traceId;
+      retained = undefined;
+      pending = [];
+    }
+    if (retained !== undefined) {
+      if (retained) emit(event);
+      return;
+    }
+    if (event.phase === "end") {
+      retained = false;
+      pending = [];
+      return;
+    }
+    pending.push(event);
+    if (event.phase !== "nmg_end") return;
+    retained = event.elapsedMs > SLOW_RECALL_THRESHOLD_MS;
+    const buffered = pending;
+    pending = [];
+    if (retained) for (const record of buffered) emit(record);
+  };
+}
+
 const CLOCK: FirstResponseClock = {
   now: () => performance.now(),
   wall: () => new Date().toISOString(),

@@ -3,13 +3,19 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   FIRST_RESPONSE_TIMING_ENTRY,
   FirstResponseTiming,
+  retainSlowRecallEvents,
+  type FirstResponseClock,
   type FirstResponseOutcome,
 } from "../../../src/integration/first-response-timing.ts";
 
 /** Bind host boundaries without retaining prompt, payload, headers, stream contents or tool arguments. */
-export function registerFirstResponseTiming(pi: ExtensionAPI): FirstResponseTiming {
-  const timing = new FirstResponseTiming((event) =>
-    pi.appendEntry(FIRST_RESPONSE_TIMING_ENTRY, event),
+export function registerFirstResponseTiming(
+  pi: ExtensionAPI,
+  clock?: FirstResponseClock,
+): FirstResponseTiming {
+  const timing = new FirstResponseTiming(
+    retainSlowRecallEvents((event) => pi.appendEntry(FIRST_RESPONSE_TIMING_ENTRY, event)),
+    clock,
   );
   let outcome: Exclude<FirstResponseOutcome, "pending"> = "stop";
   let agentStarted = false;
@@ -18,7 +24,7 @@ export function registerFirstResponseTiming(pi: ExtensionAPI): FirstResponseTimi
     timing.reset();
   };
   pi.registerCommand("nmg-latency", {
-    description: "Opt-in metadata-only first-response timing: on | off | status",
+    description: "Opt-in metadata-only timing for input-to-recall >1s: on | off | status",
     handler: async (args, ctx) => {
       const action = args.trim() || "status";
       if (action !== "on" && action !== "off" && action !== "status") {
