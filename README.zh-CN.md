@@ -277,6 +277,15 @@ Pi 独立于 AG 内容预算，对每用户轮的 agent 主导回忆设限：最
 正常路径始终是
 `status → 需要则 start → search → 选中的 get → 所有权安全的 stop`。
 
+从持久本地仓库首次安装时，建议将 `~/.agents/skills/nmg-memory`（或 Agent
+配置的技能位置）作为目录软链接，指向 `<CHECKOUT>/skills/nmg-memory`；Windows
+可用目录联接（junction）。链接整个目录，让入口和参考文件一起跟随源码更新，
+无需同步脚本。源码目录要持续可用；已有安装或本地修改时，先确认迁移，不自动
+覆盖。完整边界见 [Skill 安装规则](skills/nmg-memory/SKILL.md#installation)。
+
+文件改动会立即通过链接反映，但不会追溯替换已经读入会话的指令。在 Pi 中需要
+刷新发现结果时，于空闲边界重新加载或开启新会话。
+
 SQLite FTS5 是零配置的 Pi 检索路径。设置 `NMG_EMBED_BASE_URL` 和
 `NMG_EMBED_MODEL` 可把外部节点/叶子语义信号加进同一个预算化 Active Graph
 管线。端点失败或超时时，Pi 报告降级检索并继续用 FTS5；哈希向量只留作评测

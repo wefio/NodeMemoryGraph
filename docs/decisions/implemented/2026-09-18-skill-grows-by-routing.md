@@ -55,6 +55,11 @@ Skill to grow.
 5. **The policy row keeps the rule.** `docs/README.md#ci-contract` states next to the byte
    budget that the ceiling covers the always-read entry and that detail routes into
    `references/`; the reasoning stays in this record.
+6. **A Skill installed from a persistent checkout is linked, not copied.** A directory link keeps
+   the entry and its `references/` on one source tree, so a source edit needs no repeated copy-sync
+   step. The checkout must stay available, and an existing installation or local customization is
+   migrated only after confirmation. This is installation guidance, not a check performed on every
+   use.
 
 Applied to `skills/repo-development/` in the same change: `## Repository Control Plane beyond
 agent:verify` (2,741 B) becomes `references/control-plane.md` and `## Builds and generated
@@ -62,6 +67,13 @@ artifacts` (1,702 B) becomes `references/builds.md`, so the entry is ~10.4 KB wi
 headroom. Both sections stay available and keep their text; the two sections that carried
 incoming anchors (`#before-editing`, `#implement-and-verify`) stay in the entry precisely so
 no implemented record needs its link rewritten.
+
+Applied to `skills/nmg-memory/` in the same change: the common memory path stays in
+[the quick-start](../../../skills/nmg-memory/SKILL.md), board procedure moves to
+[board](../../../skills/nmg-memory/references/board.md), progressive recall and process limits to
+[recall](../../../skills/nmg-memory/references/recall.md), and Lab contracts stay in
+[optional capabilities](../../../skills/nmg-memory/references/optional-capabilities.md), each behind a
+named task trigger. The entry and the README state the link installation.
 
 ## Alternatives considered
 
@@ -78,6 +90,10 @@ no implemented record needs its link rewritten.
 - **Route into `docs/design/` instead of `references/`.** Rejected: a Skill's operating
   procedure is not a design document, `docs/design/` content is checked as design, and the
   `references/` convention already exists in this repository with an established routing style.
+- **Require copy-sync for a Skill installed from a persistent checkout.** Rejected
+  for this installation path: it maintains another file tree and requires an update
+  action that a directory link avoids. Copy-based distribution without a persistent
+  checkout remains a separate case; existing sync tooling is not removed by this guidance.
 - **Make the budget apply to every file under a Skill.** Rejected: it would defeat the purpose
   by capping the on-demand detail that exists to keep the entry small, and it would break
   `skills/nmg-memory/` immediately.
