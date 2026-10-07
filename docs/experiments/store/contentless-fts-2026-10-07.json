@@ -1,0 +1,89 @@
+{
+  "measuredAt": "2026-10-07T13:12:49.636Z",
+  "input": "private in-memory synthetic NMG graph; no cloud/provider I/O",
+  "nodeVersion": "v24.19.0",
+  "sqliteVersion": "3.53.3",
+  "rows": 300,
+  "statementRecipe": "Storage corpus item {index}. 用户希望保留中文解释与原始证据。 C++ v2.4.1 + 'retained source text '.repeat(24)",
+  "embeddings": "default local hashing only; the three vector tables are fingerprinted unchanged",
+  "baseline": "FTS5 full-content mirror of current transformed documents, including original lexical rowids; already single-vector-payload schema",
+  "stages": [
+    {
+      "label": "compacted-full-content-fts",
+      "pageSize": 4096,
+      "pages": 774,
+      "freePages": 0,
+      "allocatedBytes": 3170304,
+      "memories": 300,
+      "history": 300,
+      "lexicalRows": 300,
+      "surfaceRows": 300,
+      "originalHistoryBytes": 176290,
+      "statementBytes": 176290,
+      "ftsFullTextBytes": 418580,
+      "integrity": "ok",
+      "foreignKeyViolations": 0
+    },
+    {
+      "label": "contentless-no-compaction",
+      "pageSize": 4096,
+      "pages": 774,
+      "freePages": 154,
+      "allocatedBytes": 3170304,
+      "memories": 300,
+      "history": 300,
+      "lexicalRows": 300,
+      "surfaceRows": 300,
+      "originalHistoryBytes": 176290,
+      "statementBytes": 176290,
+      "ftsFullTextBytes": 0,
+      "integrity": "ok",
+      "foreignKeyViolations": 0
+    },
+    {
+      "label": "contentless-fixture-only-compaction",
+      "pageSize": 4096,
+      "pages": 619,
+      "freePages": 0,
+      "allocatedBytes": 2535424,
+      "memories": 300,
+      "history": 300,
+      "lexicalRows": 300,
+      "surfaceRows": 300,
+      "originalHistoryBytes": 176290,
+      "statementBytes": 176290,
+      "ftsFullTextBytes": 0,
+      "integrity": "ok",
+      "foreignKeyViolations": 0
+    }
+  ],
+  "logicalFtsFullTextBytesRemoved": 418580,
+  "compactedAllocatedBytesRemoved": 634880,
+  "compactedAllocatedReduction": 0.20025839793281652,
+  "identity": {
+    "history": "7189f76253d402a1e6c32ecb4cb7fd0d4feee0e1bbe2655b221a255a3d97e2d9",
+    "memories": "3a128fcdb479c161ba5aa0b85301d4f9a6abd28121b4616942dbffd7e9a0f70c",
+    "nodes": "b224b66a612cd378ec387232eb5ac27fd2b5ee74c5246ac0a68db0bcbdf50ce9",
+    "recordVectors": "847a6c8699a5cdd7136593d240af572093ab97254bdd632332c4573c3a3b55d5",
+    "nodeVectors": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "leafVectors": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "checks": {
+    "authoritativeRowsUnchanged": true,
+    "allVectorTablesUnchanged": true,
+    "lexicalIdsScoresAndRowidsUnchanged": true,
+    "surfaceIdsUnchanged": true,
+    "rowCountsPreserved": true,
+    "integrity": "ok",
+    "foreignKeyViolations": 0
+  },
+  "exclusions": [
+    "cloud database",
+    "latency",
+    "recall benchmark",
+    "backup/recovery",
+    "multi-process crash upgrade",
+    "SQLite WASM/VFS",
+    "production VACUUM"
+  ]
+}

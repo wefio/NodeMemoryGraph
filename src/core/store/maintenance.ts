@@ -61,6 +61,7 @@ import {
 } from "./embedding-index.ts";
 import { parseNumberArray, parseStringArray } from "./row-parse.ts";
 import { ftsIndexedText } from "./search-ranking.ts";
+import { deleteMemoryFts } from "./fts-index.ts";
 import {
   canonicalNodeIdentity,
   clamp,
@@ -462,12 +463,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       this.db.exec("BEGIN IMMEDIATE");
       try {
         this.db.prepare("UPDATE memory_records SET status = 'deleted' WHERE id = ?").run(memoryId);
-        this.db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
-        this.db
-          .prepare(
-            "DELETE FROM memory_surface_fts WHERE rowid IN (SELECT rowid FROM memory_fts_registry WHERE memory_id = ?)",
-          )
-          .run(memoryId);
+        deleteMemoryFts(this.db, memoryId);
         this.db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(memoryId);
         this.db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(memoryId);
         this.db.prepare("DELETE FROM memory_index_delta WHERE memory_id = ?").run(memoryId);
@@ -616,12 +612,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
           );
           this.markIndexDelta(memoryId, String(row.node_id), "upsert", now.toISOString());
         } else {
-          this.db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
-          this.db
-            .prepare(
-              "DELETE FROM memory_surface_fts WHERE rowid IN (SELECT rowid FROM memory_fts_registry WHERE memory_id = ?)",
-            )
-            .run(memoryId);
+          deleteMemoryFts(this.db, memoryId);
           this.db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(memoryId);
           this.db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(memoryId);
           this.db.prepare("DELETE FROM memory_index_delta WHERE memory_id = ?").run(memoryId);
@@ -1068,7 +1059,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
             row.id,
             this.embedder.model,
             this.embedder.dimensions,
-            JSON.stringify(vector),
+            "[]",
             encodeVector(vector),
             now,
           );

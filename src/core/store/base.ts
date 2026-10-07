@@ -52,17 +52,16 @@ import {
 } from "../../integration/task-unit-declaration-store.ts";
 import { parseNumberArray } from "./row-parse.ts";
 import { encodeVector, storedVector } from "./vector-codec.ts";
+import { deleteMemoryFts, indexMemoryFts, memoryFtsLink } from "./fts-index.ts";
 import { updateRelationStrength } from "../edge-activation.ts";
 import { serializeScope } from "../scope.ts";
 import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import { ScopeWriteIndex, type ScopeWriteIndexRow, writeTokens } from "./scope-write-index.ts";
 import {
   ftsExpression,
-  ftsIndexedText,
   memoryEmbeddingText,
   normalizeStatement,
   surfaceAnchorExpression,
-  surfaceIndexedText,
   type StoreRow as Row,
 } from "./search-ranking.ts";
 
@@ -1966,12 +1965,7 @@ export class NmgStoreBase {
         .prepare("SELECT 1 FROM memory_derivations WHERE derived_memory_id = ?")
         .get(derivedId);
       if (!remaining) {
-        this.db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(derivedId);
-        this.db
-          .prepare(
-            "DELETE FROM memory_surface_fts WHERE rowid IN (SELECT rowid FROM memory_fts_registry WHERE memory_id = ?)",
-          )
-          .run(derivedId);
+        deleteMemoryFts(this.db, derivedId);
         this.db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(derivedId);
         this.db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(derivedId);
         this.db.prepare("DELETE FROM memory_index_delta WHERE memory_id = ?").run(derivedId);
@@ -2096,14 +2090,7 @@ export class NmgStoreBase {
     // transaction did not commit cannot warm the cache either.
     this.writeTransaction(() => {
       for (const item of embeddings) {
-        upsert.run(
-          item.nodeId,
-          model,
-          dimensions,
-          JSON.stringify(item.vector),
-          encodeVector(item.vector),
-          now,
-        );
+        upsert.run(item.nodeId, model, dimensions, "[]", encodeVector(item.vector), now);
       }
     });
     for (const item of embeddings) {
@@ -2114,7 +2101,9 @@ export class NmgStoreBase {
   storedNodeEmbeddings(model: string, afterNodeId = "", limit = 256): ExternalNodeEmbedding[] {
     const rows = this.db
       .prepare(
-        `SELECT node_id, vector_blob, vector_json FROM node_embeddings
+        `SELECT node_id,
+          CASE WHEN typeof(vector_blob) = 'blob' THEN vector_blob ELSE vector_json END AS vector
+       FROM node_embeddings
        WHERE model = ? AND node_id > ? ORDER BY node_id LIMIT ?`,
       )
       .all(model, afterNodeId, Math.max(1, Math.min(limit, 2_048))) as Row[];
@@ -2172,14 +2161,7 @@ export class NmgStoreBase {
     // As above: the boundary is the store's, and the cache is warmed only after it commits.
     this.writeTransaction(() => {
       for (const item of embeddings) {
-        upsert.run(
-          item.blockId,
-          model,
-          dimensions,
-          JSON.stringify(item.vector),
-          encodeVector(item.vector),
-          now,
-        );
+        upsert.run(item.blockId, model, dimensions, "[]", encodeVector(item.vector), now);
       }
     });
     for (const item of embeddings) {
@@ -2190,7 +2172,9 @@ export class NmgStoreBase {
   storedLeafEmbeddings(model: string, afterBlockId = "", limit = 256): ExternalLeafEmbedding[] {
     const rows = this.db
       .prepare(
-        `SELECT block_id, vector_blob, vector_json FROM leaf_embeddings
+        `SELECT block_id,
+          CASE WHEN typeof(vector_blob) = 'blob' THEN vector_blob ELSE vector_json END AS vector
+       FROM leaf_embeddings
        WHERE model = ? AND block_id > ? ORDER BY block_id LIMIT ?`,
       )
       .all(model, afterBlockId, Math.max(1, Math.min(limit, 2_048))) as Row[];
@@ -2245,14 +2229,7 @@ export class NmgStoreBase {
     const now = new Date().toISOString();
     this.writeTransaction(() => {
       for (const item of embeddings) {
-        upsert.run(
-          item.memoryId,
-          model,
-          dimensions,
-          JSON.stringify(item.vector),
-          encodeVector(item.vector),
-          now,
-        );
+        upsert.run(item.memoryId, model, dimensions, "[]", encodeVector(item.vector), now);
       }
     });
     return embeddings.length;
@@ -2260,7 +2237,9 @@ export class NmgStoreBase {
   storedEmbeddings(model: string, afterMemoryId = "", limit = 256): ExternalEmbedding[] {
     const rows = this.db
       .prepare(
-        `SELECT memory_id, vector_blob, vector_json FROM memory_embeddings
+        `SELECT memory_id,
+          CASE WHEN typeof(vector_blob) = 'blob' THEN vector_blob ELSE vector_json END AS vector
+       FROM memory_embeddings
        WHERE model = ? AND memory_id > ? ORDER BY memory_id LIMIT ?`,
       )
       .all(model, afterMemoryId, Math.max(1, Math.min(limit, 2_048))) as Row[];
@@ -2482,37 +2461,22 @@ export class NmgStoreBase {
       .prepare("SELECT markers_json FROM memory_records WHERE id = ?")
       .get(memoryId) as Row | undefined;
     const triggers = recallTriggersFromStoredMarkers(row?.markers_json).join(" ");
-    this.db
-      .prepare("INSERT OR IGNORE INTO memory_fts_registry(memory_id) VALUES (?)")
-      .run(memoryId);
-    const registry = this.db
-      .prepare("SELECT rowid FROM memory_fts_registry WHERE memory_id = ?")
-      .get(memoryId) as Row;
-    this.db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
-    this.db.prepare("DELETE FROM memory_surface_fts WHERE rowid = ?").run(Number(registry.rowid));
-    this.db
-      .prepare(
-        "INSERT INTO memory_fts(memory_id, statement, node_name, evidence) VALUES (?, ?, ?, ?)",
-      )
-      .run(
-        memoryId,
-        ftsIndexedText(statement),
-        ftsIndexedText(node.canonicalName),
-        ftsIndexedText(`${evidence.content} ${triggers}`.trim()),
-      );
-    this.db
-      .prepare("INSERT INTO memory_surface_fts(rowid, content) VALUES (?, ?)")
-      .run(
-        Number(registry.rowid),
-        surfaceIndexedText(`${statement} ${node.canonicalName} ${evidence.content} ${triggers}`),
-      );
+    indexMemoryFts(this.db, {
+      memoryId,
+      statement,
+      nodeName: node.canonicalName,
+      evidence: evidence.content,
+      triggers,
+    });
   }
   ftsCandidates(query: string, limit: number): string[] {
     const expression = ftsExpression(query);
     if (!expression) return [];
+    const link = memoryFtsLink(this.db);
     const rows = this.db
       .prepare(
-        "SELECT memory_id FROM memory_fts WHERE memory_fts MATCH ? ORDER BY bm25(memory_fts) LIMIT ?",
+        `SELECT ${link.id} AS memory_id FROM memory_fts f ${link.join}
+         WHERE memory_fts MATCH ? ORDER BY bm25(memory_fts), f.rowid LIMIT ?`,
       )
       .all(expression, limit) as Row[];
     return rows.map((row) => String(row.memory_id));
@@ -2532,12 +2496,13 @@ export class NmgStoreBase {
   ftsCandidatesInNodes(query: string, nodeIds: string[], limit: number): string[] {
     const expression = ftsExpression(query);
     if (!expression || nodeIds.length === 0) return [];
+    const link = memoryFtsLink(this.db);
     const rows = this.db
       .prepare(
-        `SELECT f.memory_id FROM memory_fts f
-       JOIN memory_records m ON m.id = f.memory_id
+        `SELECT ${link.id} AS memory_id FROM memory_fts f ${link.join}
+       JOIN memory_records m ON m.id = ${link.id}
        WHERE memory_fts MATCH ? AND m.node_id IN (${nodeIds.map(() => "?").join(",")})
-       ORDER BY bm25(memory_fts) LIMIT ?`,
+       ORDER BY bm25(memory_fts), f.rowid LIMIT ?`,
       )
       .all(expression, ...nodeIds, limit) as Row[];
     return rows.map((row) => String(row.memory_id));
@@ -2685,7 +2650,7 @@ export class NmgStoreBase {
         memoryId,
         this.embedder.model,
         this.embedder.dimensions,
-        JSON.stringify(vector),
+        "[]",
         encodeVector(vector),
         new Date().toISOString(),
       );
@@ -2795,7 +2760,8 @@ export class NmgStoreBase {
     const idColumn = kind === "node" ? "node_id" : "block_id";
     const rows = this.db
       .prepare(
-        `SELECT ${idColumn} AS id, dimensions, vector_blob, vector_json
+        `SELECT ${idColumn} AS id, dimensions,
+          CASE WHEN typeof(vector_blob) = 'blob' THEN vector_blob ELSE vector_json END AS vector
        FROM ${table} WHERE model = ? ORDER BY ${idColumn}`,
       )
       .all(model) as Row[];
