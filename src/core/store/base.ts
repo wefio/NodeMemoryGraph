@@ -52,17 +52,16 @@ import {
 } from "../../integration/task-unit-declaration-store.ts";
 import { parseNumberArray } from "./row-parse.ts";
 import { encodeVector, storedVector } from "./vector-codec.ts";
+import { deleteMemoryFts, indexMemoryFts, memoryFtsLink } from "./fts-index.ts";
 import { updateRelationStrength } from "../edge-activation.ts";
 import { serializeScope } from "../scope.ts";
 import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import { ScopeWriteIndex, type ScopeWriteIndexRow, writeTokens } from "./scope-write-index.ts";
 import {
   ftsExpression,
-  ftsIndexedText,
   memoryEmbeddingText,
   normalizeStatement,
   surfaceAnchorExpression,
-  surfaceIndexedText,
   type StoreRow as Row,
 } from "./search-ranking.ts";
 
@@ -1966,12 +1965,7 @@ export class NmgStoreBase {
         .prepare("SELECT 1 FROM memory_derivations WHERE derived_memory_id = ?")
         .get(derivedId);
       if (!remaining) {
-        this.db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(derivedId);
-        this.db
-          .prepare(
-            "DELETE FROM memory_surface_fts WHERE rowid IN (SELECT rowid FROM memory_fts_registry WHERE memory_id = ?)",
-          )
-          .run(derivedId);
+        deleteMemoryFts(this.db, derivedId);
         this.db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(derivedId);
         this.db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(derivedId);
         this.db.prepare("DELETE FROM memory_index_delta WHERE memory_id = ?").run(derivedId);
@@ -2467,37 +2461,22 @@ export class NmgStoreBase {
       .prepare("SELECT markers_json FROM memory_records WHERE id = ?")
       .get(memoryId) as Row | undefined;
     const triggers = recallTriggersFromStoredMarkers(row?.markers_json).join(" ");
-    this.db
-      .prepare("INSERT OR IGNORE INTO memory_fts_registry(memory_id) VALUES (?)")
-      .run(memoryId);
-    const registry = this.db
-      .prepare("SELECT rowid FROM memory_fts_registry WHERE memory_id = ?")
-      .get(memoryId) as Row;
-    this.db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
-    this.db.prepare("DELETE FROM memory_surface_fts WHERE rowid = ?").run(Number(registry.rowid));
-    this.db
-      .prepare(
-        "INSERT INTO memory_fts(memory_id, statement, node_name, evidence) VALUES (?, ?, ?, ?)",
-      )
-      .run(
-        memoryId,
-        ftsIndexedText(statement),
-        ftsIndexedText(node.canonicalName),
-        ftsIndexedText(`${evidence.content} ${triggers}`.trim()),
-      );
-    this.db
-      .prepare("INSERT INTO memory_surface_fts(rowid, content) VALUES (?, ?)")
-      .run(
-        Number(registry.rowid),
-        surfaceIndexedText(`${statement} ${node.canonicalName} ${evidence.content} ${triggers}`),
-      );
+    indexMemoryFts(this.db, {
+      memoryId,
+      statement,
+      nodeName: node.canonicalName,
+      evidence: evidence.content,
+      triggers,
+    });
   }
   ftsCandidates(query: string, limit: number): string[] {
     const expression = ftsExpression(query);
     if (!expression) return [];
+    const link = memoryFtsLink(this.db);
     const rows = this.db
       .prepare(
-        "SELECT memory_id FROM memory_fts WHERE memory_fts MATCH ? ORDER BY bm25(memory_fts) LIMIT ?",
+        `SELECT ${link.id} AS memory_id FROM memory_fts f ${link.join}
+         WHERE memory_fts MATCH ? ORDER BY bm25(memory_fts), f.rowid LIMIT ?`,
       )
       .all(expression, limit) as Row[];
     return rows.map((row) => String(row.memory_id));
@@ -2517,12 +2496,13 @@ export class NmgStoreBase {
   ftsCandidatesInNodes(query: string, nodeIds: string[], limit: number): string[] {
     const expression = ftsExpression(query);
     if (!expression || nodeIds.length === 0) return [];
+    const link = memoryFtsLink(this.db);
     const rows = this.db
       .prepare(
-        `SELECT f.memory_id FROM memory_fts f
-       JOIN memory_records m ON m.id = f.memory_id
+        `SELECT ${link.id} AS memory_id FROM memory_fts f ${link.join}
+       JOIN memory_records m ON m.id = ${link.id}
        WHERE memory_fts MATCH ? AND m.node_id IN (${nodeIds.map(() => "?").join(",")})
-       ORDER BY bm25(memory_fts) LIMIT ?`,
+       ORDER BY bm25(memory_fts), f.rowid LIMIT ?`,
       )
       .all(expression, ...nodeIds, limit) as Row[];
     return rows.map((row) => String(row.memory_id));

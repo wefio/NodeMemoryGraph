@@ -13,8 +13,7 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-import { ftsIndexedText, surfaceIndexedText } from "./search-ranking.ts";
-import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
+import { ensureMemoryFts, MEMORY_FTS_SCHEMA } from "./fts-index.ts";
 import { encodeVector, parseVector } from "./vector-codec.ts";
 import { TASK_UNIT_DECLARATION_SCHEMA } from "../../integration/task-unit-declaration-store.ts";
 
@@ -470,7 +469,8 @@ export function migrate(db: DatabaseSync): void {
     );
 
     CREATE TABLE IF NOT EXISTS memory_fts_registry (
-      memory_id TEXT PRIMARY KEY REFERENCES memory_records(id) ON DELETE CASCADE
+      memory_id TEXT PRIMARY KEY REFERENCES memory_records(id) ON DELETE CASCADE,
+      lexical_rowid INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS store_metadata (
@@ -478,13 +478,7 @@ export function migrate(db: DatabaseSync): void {
       value TEXT NOT NULL
     );
 
-    CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
-      memory_id UNINDEXED,
-      statement,
-      node_name,
-      evidence,
-      tokenize = 'unicode61'
-    );
+    ${MEMORY_FTS_SCHEMA}
 
     CREATE VIRTUAL TABLE IF NOT EXISTS memory_surface_fts USING fts5(
       content,
@@ -676,77 +670,12 @@ export function migrate(db: DatabaseSync): void {
       WHERE residence = 'ltg' AND promoted_at IS NULL;
     INSERT OR IGNORE INTO memory_evidence_links (memory_id, history_id)
     SELECT id, evidence_id FROM memory_records;
-    INSERT INTO memory_fts(memory_id, statement, node_name, evidence)
-    SELECT m.id, m.statement, n.canonical_name, h.content
-    FROM memory_records m
-    JOIN memory_nodes n ON n.id = m.node_id
-    JOIN history_records h ON h.id = m.evidence_id
-    LEFT JOIN memory_fts_registry r ON r.memory_id = m.id
-    WHERE r.memory_id IS NULL AND m.storage_state = 'indexed';
     INSERT OR IGNORE INTO memory_fts_registry(memory_id)
-    SELECT id FROM memory_records WHERE storage_state = 'indexed';
+    SELECT id FROM memory_records WHERE storage_state = 'indexed' AND status <> 'deleted';
     INSERT OR IGNORE INTO leaf_block_status(node_id, dirty, updated_at)
     SELECT id, 1, updated_at FROM memory_nodes WHERE status = 'active';
   `);
-  ensureFtsTextFormat(db);
-}
-
-const FTS_TEXT_FORMAT_KEY = "fts_text_format";
-const FTS_TEXT_FORMAT = "unicode61-han-bigram-recall-trigger-surface-trigram-v3";
-
-/** One-time, versioned rebuild; normal store opens perform one metadata lookup. */
-function ensureFtsTextFormat(db: DatabaseSync): void {
-  const current = db
-    .prepare("SELECT value FROM store_metadata WHERE key = ?")
-    .get(FTS_TEXT_FORMAT_KEY) as Row | undefined;
-  if (String(current?.value ?? "") === FTS_TEXT_FORMAT) return;
-
-  const rows = db
-    .prepare(
-      `SELECT m.id, m.statement, m.markers_json, n.canonical_name, h.content,
-              r.rowid AS registry_rowid
-       FROM memory_records m
-       JOIN memory_nodes n ON n.id = m.node_id
-       JOIN history_records h ON h.id = m.evidence_id
-       JOIN memory_fts_registry r ON r.memory_id = m.id
-       WHERE m.storage_state = 'indexed'`,
-    )
-    .all() as Row[];
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    db.prepare("DELETE FROM memory_fts").run();
-    db.prepare("DELETE FROM memory_surface_fts").run();
-    const insert = db.prepare(
-      "INSERT INTO memory_fts(memory_id, statement, node_name, evidence) VALUES (?, ?, ?, ?)",
-    );
-    const insertSurface = db.prepare(
-      "INSERT INTO memory_surface_fts(rowid, content) VALUES (?, ?)",
-    );
-    for (const row of rows) {
-      insert.run(
-        String(row.id),
-        ftsIndexedText(String(row.statement)),
-        ftsIndexedText(String(row.canonical_name)),
-        ftsIndexedText(
-          `${String(row.content)} ${recallTriggersFromStoredMarkers(row.markers_json).join(" ")}`.trim(),
-        ),
-      );
-      insertSurface.run(
-        Number(row.registry_rowid),
-        surfaceIndexedText(
-          `${String(row.statement)} ${String(row.canonical_name)} ${String(row.content)} ${recallTriggersFromStoredMarkers(row.markers_json).join(" ")}`,
-        ),
-      );
-    }
-    db.prepare(
-      `INSERT INTO store_metadata(key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    ).run(FTS_TEXT_FORMAT_KEY, FTS_TEXT_FORMAT);
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  ensureMemoryFts(db);
 }
 
 export function ensureMemoryColumns(db: DatabaseSync): void {

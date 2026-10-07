@@ -1698,6 +1698,24 @@ Binary-aware readers remain compatible; JSON-only integrations must use the
 stored-embedding APIs or decode the BLOB before adopting this storage format.
 This migration does not change page size, journal durability, or run `VACUUM`.
 
+Lexical `memory_fts` is contentless-delete FTS5: its postings, positions and
+BM25 document sizes remain, but it does not retain another full-text copy.
+History content and memory statements remain independent authoritative fields,
+including when their bytes match. Han bigrams, recall-trigger indexing and the
+contentless surface-trigram index keep their existing text transformations.
+`memory_fts_registry.lexical_rowid` maps lexical rows to stable memory IDs;
+the registry's own rowid continues to map surface rows. Migration preserves
+both existing rowid orders, rebuilds from authoritative fields once, and commits
+the indexes, registry schema and format markers in one savepoint. Document
+refreshes update both indexes and mappings atomically. Deleted memories are not
+reindexed on reopen; dormant and restored memories follow their storage state.
+Current read-only queries support legacy full-content tables without migrating,
+and resolve the small registry after a writer's upgrade. Older executables and
+SQL consumers that read or delete by `memory_fts.memory_id` are incompatible
+with the new FTS layout: upgrade all writers/readers together or adopt the
+registry-aware queries. Binary-vector support alone is not sufficient.
+No automatic compaction or page-size change accompanies the FTS migration.
+
 The same authority boundary applies to write-time candidate acceleration. An
 optional process-local per-scope index may retain raw and normalised statements,
 pre-tokenised terms, current status and stable memory IDs. It exists only to avoid

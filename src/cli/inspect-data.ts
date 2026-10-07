@@ -9,6 +9,7 @@
  * single consumer.
  */
 import { DatabaseSync } from "node:sqlite";
+import { memoryFtsLink } from "../core/store/fts-index.ts";
 
 export interface InspectMemoryRow {
   id: string;
@@ -86,16 +87,17 @@ export function searchMemories(db: DatabaseSync, query: string, limit = 200): In
       .map((token) => `"${token.replaceAll('"', '""')}"*`)
       .join(" ");
     try {
+      const link = memoryFtsLink(db);
       return mapMemoryRows(
         db
           .prepare(
             `SELECT m.id, m.statement, m.memory_type, m.tier, m.importance, m.status,
                     m.created_at, n.canonical_name AS node_name
-             FROM memory_fts f
-             JOIN memory_records m ON m.id = f.memory_id
+             FROM memory_fts f ${link.join}
+             JOIN memory_records m ON m.id = ${link.id}
              JOIN memory_nodes n ON n.id = m.node_id
              WHERE memory_fts MATCH ? AND m.status IN ('active', 'disputed')
-             ORDER BY bm25(memory_fts)
+             ORDER BY bm25(memory_fts), f.rowid
              LIMIT ?`,
           )
           .all(ftsQuery, clampLimit(limit, 5_000)) as Row[],
