@@ -93,6 +93,19 @@ import {
 
 const MAX_SEARCH_CANDIDATES = 500;
 
+/** Keep vector payloads and their join out of purely lexical reads. */
+function vectorReadPlan(mode: SearchOptions["retrievalMode"], model: string) {
+  if (mode === "fts5") {
+    return { column: "NULL AS ve_vector", join: "", params: [] };
+  }
+  return {
+    column:
+      "CASE WHEN typeof(ve.vector_blob) = 'blob' THEN ve.vector_blob ELSE ve.vector_json END AS ve_vector",
+    join: "LEFT JOIN memory_embeddings ve ON ve.memory_id = m.id AND ve.model = ?",
+    params: [model],
+  };
+}
+
 /** Apply the two relevance gates and cap the list. The program gate is loose and
  * always on; the learned gate is the strict half, ANDed after it. Both may drop
  * every candidate — a recall is allowed to inject nothing. */
@@ -2037,7 +2050,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         forcedCandidateIds.length > 0
           ? `AND m.id IN (${forcedCandidateIds.map(() => "?").join(",")})`
           : retrievalMode === "qwen3"
-            ? "AND ve.vector_json IS NOT NULL"
+            ? "AND ve.memory_id IS NOT NULL"
             : retrievalMode === "fts5"
               ? `AND m.id IN (${ftsIds.map(() => "?").join(",")})`
               : retrievalMode === "hybrid" && ftsIds.length > 0
@@ -2071,6 +2084,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
               .join(" AND ")}`
           : "";
       const scopeParams = scopeEntries.map(([, value]) => value);
+      const vectorRead = vectorReadPlan(retrievalMode, vectorModel);
       const rows = this.db
         .prepare(
           `SELECT
@@ -2101,8 +2115,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
            n.kind AS n_kind, n.summary AS n_summary,
            n.created_at AS n_created_at, n.updated_at AS n_updated_at,
            n.status AS n_status, n.residence AS n_residence,
-           ve.vector_json AS ve_vector_json,
-           ve.vector_blob AS ve_vector_blob,
+           ${vectorRead.column},
            h.id AS h_id, h.session_id AS h_session_id, h.role AS h_role,
            h.content AS h_content, h.source_message_id AS h_source_message_id,
            h.source_ref AS h_source_ref,
@@ -2110,7 +2123,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
          FROM memory_records m
          JOIN memory_nodes n ON n.id = m.node_id
          JOIN history_records h ON h.id = m.evidence_id
-         LEFT JOIN memory_embeddings ve ON ve.memory_id = m.id AND ve.model = ?
+         ${vectorRead.join}
          WHERE m.tier <= ?
            AND m.storage_state = 'indexed'
            ${candidateClause}
@@ -2128,7 +2141,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
          LIMIT ?`,
         )
         .all(
-          vectorModel,
+          ...vectorRead.params,
           maxTier,
           ...candidateIds,
           nodeName,
@@ -2155,10 +2168,11 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       const filtered = rows
         .map((row) => {
           const lexical = lexicalScore(normalizedQuery, row);
-          const vector = cosineSimilarity(queryVector, storedVector(row, "ve_"));
+          const vector =
+            retrievalMode === "fts5" ? 0 : cosineSimilarity(queryVector, storedVector(row, "ve_"));
           const route = routes.get(String(row.m_node_id)) ?? 0;
           const result = mapSearchResult(row, lexical);
-          result.vectorScore = retrievalMode === "fts5" ? 0 : vector;
+          result.vectorScore = vector;
           result.routeScore = route;
           result.combinedScore =
             retrievalMode === "fts5"

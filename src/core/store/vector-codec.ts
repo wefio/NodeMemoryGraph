@@ -1,10 +1,9 @@
 /**
  * Encoding and decoding of embedding vectors stored in SQLite.
  *
- * Vectors are persisted twice during the ongoing migration to binary storage:
- * `vector_blob` (little-endian float32, compact and fast) and legacy
- * `vector_json`. Readers prefer the blob and fall back to JSON, so rows written
- * before the binary column existed stay readable.
+ * Writers persist `vector_blob` (little-endian float32) and keep `vector_json`
+ * as an empty compatibility placeholder. Readers project the preferred storage
+ * form into one `vector` column, retaining JSON fallback for legacy rows.
  *
  * Shared by the schema migration and the store itself, so it lives outside both.
  */
@@ -17,8 +16,10 @@ export function encodeVector(vector: readonly number[]): Buffer {
   return buffer;
 }
 
-/** Read a vector from a row, preferring the binary column over legacy JSON. */
+/** Decode a preferred-vector projection, or a legacy row with separate columns. */
 export function storedVector(row: Row, prefix = ""): number[] {
+  const projected = row[`${prefix}vector`];
+  if (projected !== undefined) return parseVector(projected);
   const blob = row[`${prefix}vector_blob`];
   return blob instanceof Uint8Array
     ? parseVector(blob)

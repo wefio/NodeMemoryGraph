@@ -900,30 +900,51 @@ export function ensureNodeSummaryColumns(db: DatabaseSync): void {
 }
 
 export function ensureBinaryVectors(db: DatabaseSync): void {
+  const formatKey = "vector_storage_format";
+  const format = "float32-only-v1";
+  const current = db.prepare("SELECT value FROM store_metadata WHERE key = ?").get(formatKey);
+  if (current?.value === format) return;
+
   const tables: Array<[string, string]> = [
     ["memory_embeddings", "memory_id"],
     ["node_embeddings", "node_id"],
     ["leaf_embeddings", "block_id"],
   ];
-  for (const [table, idColumn] of tables) {
-    const columns = new Set(
-      (db.prepare(`PRAGMA table_info(${table})`).all() as Row[]).map((row) => String(row.name)),
-    );
-    if (!columns.has("vector_blob")) {
-      db.exec(`ALTER TABLE ${table} ADD COLUMN vector_blob BLOB`);
+  db.exec("SAVEPOINT nmg_vector_storage");
+  try {
+    for (const [table, idColumn] of tables) {
+      const columns = new Set(
+        (db.prepare(`PRAGMA table_info(${table})`).all() as Row[]).map((row) => String(row.name)),
+      );
+      if (!columns.has("vector_blob")) {
+        db.exec(`ALTER TABLE ${table} ADD COLUMN vector_blob BLOB`);
+      }
+      const rows = db
+        .prepare(
+          `SELECT ${idColumn} AS id, model, vector_json FROM ${table}
+           WHERE vector_blob IS NULL`,
+        )
+        .all() as Row[];
+      const update = db.prepare(
+        `UPDATE ${table} SET vector_blob = ? WHERE ${idColumn} = ? AND model = ?`,
+      );
+      for (const row of rows) {
+        update.run(encodeVector(parseVector(row.vector_json)), row.id, row.model);
+      }
+      // Preserve unverified legacy text; the preferred binary payload must have
+      // exactly the declared Float32 shape before its duplicate is removed.
+      db.exec(`UPDATE ${table} SET vector_json = '[]'
+        WHERE vector_json <> '[]' AND typeof(vector_blob) = 'blob'
+          AND dimensions > 0 AND length(vector_blob) = dimensions * 4`);
     }
-    const rows = db
-      .prepare(
-        `SELECT ${idColumn} AS id, model, vector_json FROM ${table}
-       WHERE vector_blob IS NULL`,
-      )
-      .all() as Row[];
-    const update = db.prepare(
-      `UPDATE ${table} SET vector_blob = ? WHERE ${idColumn} = ? AND model = ?`,
-    );
-    for (const row of rows) {
-      update.run(encodeVector(parseVector(row.vector_json)), row.id, row.model);
-    }
+    db.prepare(
+      `INSERT INTO store_metadata(key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ).run(formatKey, format);
+    db.exec("RELEASE nmg_vector_storage");
+  } catch (error) {
+    db.exec("ROLLBACK TO nmg_vector_storage; RELEASE nmg_vector_storage");
+    throw error;
   }
 }
 

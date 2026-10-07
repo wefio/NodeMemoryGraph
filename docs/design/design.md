@@ -1686,6 +1686,18 @@ summary invalidation, and topology changes. A process-local contiguous
 `Float32` matrix may cache active record, node, or leaf embeddings; it is
 disposable and rebuildable from versioned binary vectors in storage.
 
+Per-model record, node, and leaf embeddings persist one little-endian Float32
+payload in `vector_blob`; `vector_json` is an empty `[]` compatibility placeholder,
+not a second export format. Legacy JSON-only rows remain readable. The first
+writable migration backfills missing binary values and removes duplicate JSON
+only when the binary byte length matches the declared positive dimensions.
+The three tables and completion marker commit atomically; completed migration
+does not rescan them on every open. Preferred-vector queries return one storage
+form, and pure FTS retrieval neither joins nor decodes embedding payloads.
+Binary-aware readers remain compatible; JSON-only integrations must use the
+stored-embedding APIs or decode the BLOB before adopting this storage format.
+This migration does not change page size, journal durability, or run `VACUUM`.
+
 The same authority boundary applies to write-time candidate acceleration. An
 optional process-local per-scope index may retain raw and normalised statements,
 pre-tokenised terms, current status and stable memory IDs. It exists only to avoid

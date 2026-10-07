@@ -1068,7 +1068,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
             row.id,
             this.embedder.model,
             this.embedder.dimensions,
-            JSON.stringify(vector),
+            "[]",
             encodeVector(vector),
             now,
           );

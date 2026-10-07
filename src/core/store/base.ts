@@ -2096,14 +2096,7 @@ export class NmgStoreBase {
     // transaction did not commit cannot warm the cache either.
     this.writeTransaction(() => {
       for (const item of embeddings) {
-        upsert.run(
-          item.nodeId,
-          model,
-          dimensions,
-          JSON.stringify(item.vector),
-          encodeVector(item.vector),
-          now,
-        );
+        upsert.run(item.nodeId, model, dimensions, "[]", encodeVector(item.vector), now);
       }
     });
     for (const item of embeddings) {
@@ -2114,7 +2107,9 @@ export class NmgStoreBase {
   storedNodeEmbeddings(model: string, afterNodeId = "", limit = 256): ExternalNodeEmbedding[] {
     const rows = this.db
       .prepare(
-        `SELECT node_id, vector_blob, vector_json FROM node_embeddings
+        `SELECT node_id,
+          CASE WHEN typeof(vector_blob) = 'blob' THEN vector_blob ELSE vector_json END AS vector
+       FROM node_embeddings
        WHERE model = ? AND node_id > ? ORDER BY node_id LIMIT ?`,
       )
       .all(model, afterNodeId, Math.max(1, Math.min(limit, 2_048))) as Row[];
@@ -2172,14 +2167,7 @@ export class NmgStoreBase {
     // As above: the boundary is the store's, and the cache is warmed only after it commits.
     this.writeTransaction(() => {
       for (const item of embeddings) {
-        upsert.run(
-          item.blockId,
-          model,
-          dimensions,
-          JSON.stringify(item.vector),
-          encodeVector(item.vector),
-          now,
-        );
+        upsert.run(item.blockId, model, dimensions, "[]", encodeVector(item.vector), now);
       }
     });
     for (const item of embeddings) {
@@ -2190,7 +2178,9 @@ export class NmgStoreBase {
   storedLeafEmbeddings(model: string, afterBlockId = "", limit = 256): ExternalLeafEmbedding[] {
     const rows = this.db
       .prepare(
-        `SELECT block_id, vector_blob, vector_json FROM leaf_embeddings
+        `SELECT block_id,
+          CASE WHEN typeof(vector_blob) = 'blob' THEN vector_blob ELSE vector_json END AS vector
+       FROM leaf_embeddings
        WHERE model = ? AND block_id > ? ORDER BY block_id LIMIT ?`,
       )
       .all(model, afterBlockId, Math.max(1, Math.min(limit, 2_048))) as Row[];
@@ -2245,14 +2235,7 @@ export class NmgStoreBase {
     const now = new Date().toISOString();
     this.writeTransaction(() => {
       for (const item of embeddings) {
-        upsert.run(
-          item.memoryId,
-          model,
-          dimensions,
-          JSON.stringify(item.vector),
-          encodeVector(item.vector),
-          now,
-        );
+        upsert.run(item.memoryId, model, dimensions, "[]", encodeVector(item.vector), now);
       }
     });
     return embeddings.length;
@@ -2260,7 +2243,9 @@ export class NmgStoreBase {
   storedEmbeddings(model: string, afterMemoryId = "", limit = 256): ExternalEmbedding[] {
     const rows = this.db
       .prepare(
-        `SELECT memory_id, vector_blob, vector_json FROM memory_embeddings
+        `SELECT memory_id,
+          CASE WHEN typeof(vector_blob) = 'blob' THEN vector_blob ELSE vector_json END AS vector
+       FROM memory_embeddings
        WHERE model = ? AND memory_id > ? ORDER BY memory_id LIMIT ?`,
       )
       .all(model, afterMemoryId, Math.max(1, Math.min(limit, 2_048))) as Row[];
@@ -2685,7 +2670,7 @@ export class NmgStoreBase {
         memoryId,
         this.embedder.model,
         this.embedder.dimensions,
-        JSON.stringify(vector),
+        "[]",
         encodeVector(vector),
         new Date().toISOString(),
       );
@@ -2795,7 +2780,8 @@ export class NmgStoreBase {
     const idColumn = kind === "node" ? "node_id" : "block_id";
     const rows = this.db
       .prepare(
-        `SELECT ${idColumn} AS id, dimensions, vector_blob, vector_json
+        `SELECT ${idColumn} AS id, dimensions,
+          CASE WHEN typeof(vector_blob) = 'blob' THEN vector_blob ELSE vector_json END AS vector
        FROM ${table} WHERE model = ? ORDER BY ${idColumn}`,
       )
       .all(model) as Row[];
