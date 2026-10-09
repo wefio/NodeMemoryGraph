@@ -45,11 +45,14 @@ import { requirePositiveInteger } from "./parts/numbers.ts";
 // verify:packages writes its own subpackage, and complexity:gate uses isolated
 // probes. The product suite stays behind this batch to avoid sharing those
 // resources or observing generated files mid-write.
-const PARALLEL_STATIC_CHECKS = new Set([
+export const PARALLEL_STATIC_CHECKS = new Set([
   "docs:check",
   "glossary:check",
   "check",
+  "check:tests",
+  "mutation:anchors",
   "check:lock",
+  "check:policy-words",
   "lint",
   "format:check",
   "agent:context:check",

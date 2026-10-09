@@ -1,0 +1,288 @@
+{
+  "schemaVersion": 1,
+  "machine": {
+    "node": "v24.19.0",
+    "platform": "win32",
+    "arch": "x64",
+    "cpu": "12th Gen Intel(R) Core(TM) i7-12700H",
+    "logicalCPUs": 20,
+    "ramGB": 63.73
+  },
+  "originalHead": "eb093bf6a492d81d782d2a31ef1f26e80893fcf5",
+  "productStageComparison": {
+    "testCount": 1675,
+    "workers4": {
+      "outerSeconds": 101.625,
+      "nodeDurationMs": 100656.8725,
+      "exitCode": 0
+    },
+    "workers8": {
+      "outerSeconds": 58.799,
+      "nodeDurationMs": 58703.9599,
+      "exitCode": 0
+    },
+    "scopeGlobs": [
+      "tests/cli/**/*.test.ts",
+      "tests/core/**/*.test.ts",
+      "tests/docker/**/*.test.ts",
+      "tests/docs/**/*.test.ts",
+      "tests/extensions/**/*.test.ts",
+      "tests/guardrails/**/*.test.ts",
+      "tests/integration/**/*.test.ts",
+      "tests/lab/**/*.test.ts",
+      "tests/prompts/**/*.test.ts",
+      "tests/rcp/**/*.test.ts",
+      "tests/scripts/**/*.test.ts",
+      "tests/skills/**/*.test.ts",
+      "tests/support/**/*.test.ts",
+      "tests/tools/**/*.test.ts"
+    ],
+    "limits": "One serial stage pair on a live workstation; npm and direct Node bootstrap differ. Not whole-run causal proof."
+  },
+  "candidate": {
+    "runId": "a30e1e55-b00a-4de3-8ba4-33bdfc888f2c",
+    "startedAt": "2026-10-09T15:25:25.214Z",
+    "finishedAt": "2026-10-09T15:27:32.662Z",
+    "outerSeconds": 129.072,
+    "requireClean": false,
+    "timeoutMs": 150000,
+    "ok": true,
+    "testCount": 1678,
+    "scopes": [
+      "src/core/store/vector-codec.ts",
+      "src/core/store/retrieval.ts",
+      "tests/core/store/vector-scoring.test.ts",
+      "docs/design/design.md",
+      "docs/design/temporary-todo.md",
+      "docs/decisions/implemented/2026-10-09-borrow-float32-scoring.md",
+      "docs/decisions/implemented/2026-10-09-borrow-float32-scoring.zh-CN.md",
+      "docs/experiments/retrieval/float32-scoring-2026-10-09.md",
+      "docs/experiments/retrieval/float32-scoring-2026-10-09.json",
+      "package.json",
+      "tools/agent-verify.ts",
+      "tests/tools/test-groups.test.ts",
+      "tests/tools/verification-scheduling.test.ts",
+      "docs/design/ci-cd-and-quality.md",
+      "docs/decisions/implemented/2026-09-23-verification-whole-run-deadline.md",
+      "docs/decisions/implemented/2026-09-23-verification-whole-run-deadline.zh-CN.md",
+      "docs/experiments/verification/full-gate-margin-2026-10-09.md"
+    ],
+    "state": {
+      "desiredRevision": "5ff2504116f635588d8664b0ac0b34797c9c71c1f40d8e62e68e5a34ead4fc55",
+      "observedRevision": "d303db206d19c916b32b44230c73886486d5db4ef8736638efb0860c1d8d6636"
+    },
+    "results": [
+      {
+        "command": "check",
+        "classification": "blocking",
+        "routes": [
+          "core-store",
+          "core-memory",
+          "ci-and-tests",
+          "repository-tooling"
+        ],
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": 11793
+      },
+      {
+        "command": "test:product",
+        "classification": "blocking",
+        "routes": [
+          "core-store",
+          "core-memory",
+          "ci-and-tests",
+          "repository-tooling"
+        ],
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": 75731
+      },
+      {
+        "command": "build",
+        "classification": "blocking",
+        "routes": [
+          "core-store",
+          "core-memory",
+          "ci-and-tests",
+          "packaging",
+          "repository-tooling"
+        ],
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": 5614
+      },
+      {
+        "command": "docs:check",
+        "classification": "blocking",
+        "routes": [
+          "documentation",
+          "ci-and-tests"
+        ],
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": 2941
+      },
+      {
+        "command": "glossary:check",
+        "classification": "blocking",
+        "routes": [
+          "documentation",
+          "ci-and-tests"
+        ],
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": 712
+      },
+      {
+        "command": "package:check",
+        "classification": "blocking",
+        "routes": [
+          "ci-and-tests",
+          "packaging"
+        ],
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": 9112
+      },
+      {
+        "command": "check:tests",
+        "classification": "blocking",
+        "routes": [
+          "ci-and-tests"
+        ],
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": 16574
+      },
+      {
+        "command": "mutation:anchors",
+        "classification": "blocking",
+        "routes": [
+          "ci-and-tests"
+        ],
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": 1862
+      },
+      {
+        "command": "check:lock",
+        "classification": "blocking",
+        "routes": [
+          "ci-and-tests"
+        ],
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": 663
+      },
+      {
+        "command": "lint",
+        "classification": "blocking",
+        "routes": [
+          "ci-and-tests"
+        ],
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": 14630
+      },
+      {
+        "command": "format:check",
+        "classification": "blocking",
+        "routes": [
+          "ci-and-tests"
+        ],
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": 14539
+      },
+      {
+        "command": "agent:context:check",
+        "classification": "blocking",
+        "routes": [
+          "ci-and-tests",
+          "repository-tooling"
+        ],
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": 661
+      },
+      {
+        "command": "complexity:gate",
+        "classification": "blocking",
+        "routes": [
+          "ci-and-tests"
+        ],
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": 5877
+      },
+      {
+        "command": "verify:packages",
+        "classification": "blocking",
+        "routes": [
+          "ci-and-tests"
+        ],
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": 4873
+      },
+      {
+        "command": "check:policy-words",
+        "classification": "blocking",
+        "routes": [
+          "ci-and-tests"
+        ],
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": 1807
+      },
+      {
+        "command": "rtm:check",
+        "classification": "blocking",
+        "routes": [
+          "ci-and-tests"
+        ],
+        "status": "passed",
+        "exitCode": 0,
+        "durationMs": 927
+      },
+      {
+        "command": "verify:research",
+        "classification": "advisory",
+        "routes": [
+          "ci-and-tests"
+        ],
+        "status": "skipped",
+        "durationMs": 0,
+        "reason": "advisory checks require --include-advisory"
+      },
+      {
+        "command": "verify:chaos",
+        "classification": "advisory",
+        "routes": [
+          "ci-and-tests"
+        ],
+        "status": "skipped",
+        "durationMs": 0,
+        "reason": "advisory checks require --include-advisory"
+      }
+    ]
+  },
+  "sourceHashes": {
+    "package.json": "f710090dc41dfccbff99f06640db5c301ec2f16c025a46e77aa06af834502297",
+    "tools/agent-verify.ts": "0300116bf6b4573286a94ce5c43ed34fdf729b71596679d88ccb6ebf257ffeab",
+    "tests/tools/test-groups.test.ts": "77cba6263462c046d4f0d7a1a9576874d28dc056dd77e258a25e36bfb13222be",
+    "tests/tools/verification-scheduling.test.ts": "75b8660fe0b963d861bdbca95ad0a3401a2653e26c1540a65db77d6595c60c38",
+    "src/core/store/vector-codec.ts": "347def3c492db3ed59231348621548da1483887af8a5bcaafd441f6fa37670b9",
+    "src/core/store/retrieval.ts": "b965805873999b7c137114f3387e2c9328654350b77ebf5c60fa8b0a40efa4b9",
+    "tests/core/store/vector-scoring.test.ts": "63e133924fb527c4da67e12835784e7e8935f425c8541c244bd1c27d2bf75e71"
+  },
+  "mutation": {
+    "exitCode": 0,
+    "targets": 22,
+    "caught": 110,
+    "restored": 22,
+    "measuredAt": "2026-10-09T15:40:26.787Z"
+  },
+  "limits": "The candidate is a dirty pre-commit receipt, not post-commit clean evidence or a universal time guarantee. Post-commit evidence belongs to the exact published HEAD."
+}
