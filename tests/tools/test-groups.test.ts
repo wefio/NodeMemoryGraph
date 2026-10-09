@@ -18,6 +18,17 @@ test("product and coverage tests exclude research and chaos suites", () => {
   }
 });
 
+test("product file concurrency is bounded without changing the coverage test scope", () => {
+  const product = packageJson.scripts["test:product"]!;
+  const coverage = packageJson.scripts["test:coverage"]!;
+  const scopes = (script: string) =>
+    [...script.matchAll(/"(tests\/[^"]+)"/gu)].map((match) => match[1]);
+  assert.match(product, /--test-concurrency=8(?:\s|$)/u);
+  assert.match(coverage, /--test-concurrency=2(?:\s|$)/u);
+  assert.deepEqual(scopes(product), scopes(coverage));
+  assert.match(product, /--experimental-strip-types --test /u);
+});
+
 test("research and chaos suites remain explicit execution groups", () => {
   assert.match(packageJson.scripts["test:research"], /tests\/benchmarks/);
   assert.match(packageJson.scripts["test:research"], /tests\/evals/);

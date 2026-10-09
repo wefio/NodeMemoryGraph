@@ -1,7 +1,7 @@
 # 代码质量与 CI/CD
 
 **Created:** 2026-07-20  
-**Updated:** 2026-09-23
+**Updated:** 2026-10-09
 **Authority:** 仓库测试、CI 与 Agent 开发流程契约
 
 NMG 的测试负责阻止可复现错误，不负责冻结尚未验证的设计。产品契约、研究测量与故障注入使用不同执行轨道，避免 benchmark 便利逻辑反向定义产品行为。
@@ -156,7 +156,7 @@ npm run agent:context -- --scope <目标路径>
 npm run agent:verify
 ```
 
-零参数入口自动读取 Git 变更并选择 route；Git 不可用时失败关闭，不允许空跑后误报成功。共享脏工作树使用 `--scope <本任务路径>` 精确覆盖自动范围。执行器聚合所有命中 route，按首次出现顺序去重，并运行全部 blocking 命令；`ci-and-tests` route 将 `verify:static` 拆成与 CI contract 一致的原子检查，跨 route 共享的检查在同一计划内只执行一次，同时保留每项的状态和 route 归因。CI 仍运行命名的 `verify:static` contract。非 RCP full 计划在构建、打包等写入屏障后有界并发执行独立静态检查，产品测试等待静态检查完成；结果仍按计划顺序排列。RCP 和 narrow 计划仍串行。一个命令退出失败、启动异常或被信号终止，都被归因到该命令且不会阻止后续检查收集证据，最终统一返回失败。官方 `npm run agent:verify` 入口的整轮验证默认预算为 150 秒，可用 `--timeout-ms` 调整；外层看门进程在超时后返回失败及 `incomplete` 证据。普通执行和 RCP full/narrow 执行也共用从执行器入口开始计算的剩余预算；每个子命令只得到剩余时间。预算用尽时不再启动后续检查，逐项记录为失败，整轮不能报通过。超时意味着验证未完成，需要缩短或重新划分检查后再运行，不能把已通过的局部检查当作整轮通过。
+零参数入口自动读取 Git 变更并选择 route；Git 不可用时失败关闭，不允许空跑后误报成功。共享脏工作树使用 `--scope <本任务路径>` 精确覆盖自动范围。执行器聚合所有命中 route，按首次出现顺序去重，并运行全部 blocking 命令；`ci-and-tests` route 将 `verify:static` 拆成与 CI contract 一致的原子检查，跨 route 共享的检查在同一计划内只执行一次，同时保留每项的状态和 route 归因。CI 仍运行命名的 `verify:static` contract。非 RCP full 计划对相邻的独立静态检查使用最多三个并发，包括测试源码类型检查、anchor 解析与 policy-word 检查；构建、打包和产品测试保持串行屏障，结果仍按计划顺序排列。产品测试使用最多八个 Node 文件 worker，完整 glob、断言、失败判定及清理契约不变；coverage 保持两个 worker。RCP 和 narrow 计划仍串行。一个命令退出失败、启动异常或被信号终止，都被归因到该命令且不会阻止后续检查收集证据，最终统一返回失败。官方 `npm run agent:verify` 入口的整轮验证默认预算为 150 秒，可用 `--timeout-ms` 调整；外层看门进程在超时后返回失败及 `incomplete` 证据。普通执行和 RCP full/narrow 执行也共用从执行器入口开始计算的剩余预算；每个子命令只得到剩余时间。预算用尽时不再启动后续检查，逐项记录为失败，整轮不能报通过。超时意味着验证未完成，需要缩短或重新划分检查后再运行，不能把已通过的局部检查当作整轮通过。
 
 advisory 命令默认只显示、不执行；显式传入 `--include-advisory` 后才运行，且其失败不改变 blocking 结果。`--dry-run` 只生成计划，`--json` 提供机器可读报告，`--require-clean` 为打包/CI 等任务增加干净工作树门槛。每次成功形成报告后会自动覆盖 `.nmg/verification/latest.json`；该文件包含 run ID、起止时间、运行时、Git HEAD、scope、route 和逐命令结果，位于已忽略的 `.nmg/` 下，不形成无限增长的日志历史。
 

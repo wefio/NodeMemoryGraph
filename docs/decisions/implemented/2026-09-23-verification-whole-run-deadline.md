@@ -28,13 +28,20 @@ its own result and route attribution. A test checks that this route stays equal
 to the static package contract. CI retains `verify:static` as its reproducible
 named entry point.
 
-The non-RCP full Agent plan runs independent static checks in bounded groups of
-three after the build and package barriers. The approved group does not rewrite
-root source or `dist`; subpackage building and complexity probes use separate
-paths. `test:product` remains after those
-groups. The plan keeps declaration-order results, per-check failures, and one
-shared deadline. RCP and narrow verification retain their existing serial
-execution.
+The non-RCP full Agent plan runs adjacent independent static checks in bounded
+groups of three, respecting build, package and product-test barriers. The approved
+group includes tests-surface type checking, anchor resolution and policy-word
+checking; none rewrites root source or `dist`. Subpackage building and complexity
+probes use separate paths. The plan keeps declaration-order results, per-check
+failures, and one shared deadline. RCP and narrow verification retain their
+existing serial execution.
+
+`test:product` uses at most eight Node test-file workers. Its file globs, test
+bodies, failure rules and cleanup contracts are unchanged; coverage retains its
+two-worker setting and full file inventory. This uses the existing Node scheduler,
+not fixed partitions, impact-selected subsets or overlap with generated-file
+writers. The [margin observation](../../experiments/verification/full-gate-margin-2026-10-09.md)
+records the workload and repeat-run measurements.
 
 ## Alternatives considered
 
@@ -59,6 +66,7 @@ execution.
   trusting the tree.
 - The Agent plan has more individually attributed check results, but does not
   repeat static checks already shared by other routes. CI's contract is unchanged.
-- Bounded concurrency shortens the static phase on the measured worktree, but
-  individual CPU-heavy checks take longer under contention. The 150-second
-  deadline still fails closed if a run cannot finish.
+- Bounded concurrency shortens the measured critical path, but CPU-heavy checks
+  may take longer under contention. Timing evidence is scoped to the measured
+  workload and machine; it is not a universal worst-case guarantee. The unchanged
+  150-second deadline still fails closed if a run cannot finish.
