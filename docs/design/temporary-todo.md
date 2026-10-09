@@ -1,7 +1,7 @@
 # NMG active TODO list
 
 **Authority:** working queue, not design specification or implementation history.
-**Updated:** 2026-09-03
+**Updated:** 2026-10-09
 
 Durable behavior belongs in the owning design or operating document; current
 implementation evidence belongs in
@@ -255,6 +255,22 @@ the current dedup consumer.
 duplicates that a SimHash pre-filter recalls (or shows the gap is already
 covered), with a decision recorded either way — no speculative index until the
 recall gap is real.
+
+## 8. Repair hybrid FTS-hit SQL parameter ordering
+
+- [ ] In `searchWithVector`, bind the repeated FTS IDs for `candidateOrder`
+  after the event-time and scope parameters, matching their SQL placeholder
+  order. Add positive FTS-hit regressions with event-time and scope filters.
+
+**Observed:** on base `7c18f6f`, eight tier-2 records matching `scoring corpus`
+produce eight FTS IDs but no hybrid results (`maxTier: 3`); a query with no FTS
+hits returns positive vector results. Debugger inspection and the SQL/bind list
+show that ORDER BY IDs currently occupy event-time filter slots. This predates
+and is not repaired by the Float32 scoring-view optimization.
+
+**Done when:** hybrid queries with positive FTS candidates retain eligible
+results and deterministic ordering, including explicit time/scope constraints,
+with SQL parameters in placeholder order. Remove this item after repair.
 
 ## Explicitly deferred — not missing current work
 

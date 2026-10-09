@@ -1698,6 +1698,15 @@ Binary-aware readers remain compatible; JSON-only integrations must use the
 stored-embedding APIs or decode the BLOB before adopting this storage format.
 This migration does not change page size, journal durability, or run `VACUUM`.
 
+Immediate record-vector scoring may borrow a Float32 view of the preferred BLOB
+on little-endian hosts, only for a four-byte-aligned complete payload backed by
+a private, non-resizable ArrayBuffer. The view is consumed synchronously by
+cosine similarity; it must not escape into public results, caches, async work,
+or survive WASM memory growth. Other payloads retain the existing decoder's
+precedence and fallback behavior. Public stored-vector readers still return
+independent ordinary arrays. This is a scoring-only optimization, not a change
+to stored bytes, vector precision, candidate selection or ranking weights.
+
 Lexical `memory_fts` is contentless-delete FTS5: its postings, positions and
 BM25 document sizes remain, but it does not retain another full-text copy.
 History content and memory statements remain independent authoritative fields,
