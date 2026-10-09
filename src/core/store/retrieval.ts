@@ -52,7 +52,7 @@ import {
 } from "./search-ranking.ts";
 import { clamp, effectiveFilterDimensions, mapSearchResult, matchesScope } from "./rows.ts";
 import { cosineSimilarity } from "../vector.ts";
-import { storedVector } from "./vector-codec.ts";
+import { scoringVector } from "./vector-codec.ts";
 import type {
   ActiveGraph,
   ActiveGraphBudget,
@@ -2169,7 +2169,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         .map((row) => {
           const lexical = lexicalScore(normalizedQuery, row);
           const vector =
-            retrievalMode === "fts5" ? 0 : cosineSimilarity(queryVector, storedVector(row, "ve_"));
+            retrievalMode === "fts5" ? 0 : cosineSimilarity(queryVector, scoringVector(row, "ve_"));
           const route = routes.get(String(row.m_node_id)) ?? 0;
           const result = mapSearchResult(row, lexical);
           result.vectorScore = vector;
