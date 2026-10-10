@@ -27,11 +27,12 @@ document and an owner disagree, the owner wins.
 | Cancellation and fencing        | Explicit cancellation, no orphan worker or check after it, late artifacts fenced                                                                                            | Complete                                                               | [long checks run detached](../decisions/implemented/2026-09-18-detached-long-checks.md), [the bootstrap design](ooo-execution-bootstrap.md)                                                            |
 | Recovery and replay             | Log plus replay of a round, the transactional outbox drained after commit and on restart, no stealing another's work after a crash                                          | Complete inside the arms; the product side is not wired                | [the bootstrap design](ooo-execution-bootstrap.md)                                                                                                                                                     |
 | Handoff                         | Session identity comes from the board; a continuation surface carries what the next holder needs                                                                            | Complete                                                               | [session identity comes from the board](../decisions/implemented/2026-09-19-session-identity-comes-from-the-board.md), [session continuation obligations](task-unit-semantics-obligations.md)          |
+| Attribution and information flow | Who holds which part, what a part exists to achieve, and who notices a part nobody is working on; a handoff carries the reason, not only the instruction                     | Attribution exists per entry and per claim; the responsibility to notice an unattended part, and to carry a part's reason onward, is not assigned | no owner yet - see gap 8                                                                                                                                                                              |
 | Evidence and audit              | Run facts, verification evidence, traceability aggregation                                                                                                                  | Complete                                                               | [rtm evidence aggregation](../decisions/implemented/2026-09-20-rtm-evidence-aggregation.md)                                                                                                            |
 
 No single part completes a task. A task completes when the unit's declaration, ownership and time,
-termination integrity, attention, legality, budget, truth separation and handoff all hold at once; the
-rows above are the ones a given piece of work cannot do without.
+termination integrity, attention, legality, budget, truth separation, attribution and handoff all hold at
+once; the rows above are the ones a given piece of work cannot do without.
 
 ## The gaps, and the concepts available for them
 
@@ -66,6 +67,15 @@ rows above are the ones a given piece of work cannot do without.
 7. **In-doubt work has no resolution.** A delivery that nobody judged is `undecidable` when the run ends,
    but an artifact left in doubt across runs has no clause. This is precisely an **in-doubt transaction**:
    the fact is known, the outcome is not, and somebody has to resolve it or write down why not.
+8. **An unattended part has no assignee, and a part's purpose has no carrier.** Nothing states who is
+   responsible for a part nobody is working on, nor requires the reason a part exists to travel with it.
+   Attribution exists per entry and per claim; the responsibility to notice an unattended part, and the
+   obligation to hand the *why* onward, do not. The concepts are **context, not control** - an executor
+   who understands the purpose, and the party downstream of it, see an omission earlier than a supervisor
+   would - and, read from the reader's side, the **orphan reaper / restart responsibility** of gap 1. The
+   principle is stated for three scopes: one agent handing to another, a human directing an agent, and a
+   human team. Only the first has machinery this umbrella could attach it to, and naming that machinery is
+   what a clause here would do.
 
 ## The concepts this system deliberately does not need
 
@@ -95,6 +105,6 @@ rows above are the ones a given piece of work cannot do without.
 Row 9's readable answer landed on 2026-09-23 as the board port's own read, and row 10's declaration
 landed the same day: a plan enables `repair-first` and the planner reads the declaration rather than
 assuming it - see [The program answers
-legality](../decisions/implemented/2026-09-20-the-program-answers-legality.md). Rows 1, 4, 5, 6 and 7 are
-gaps with no owner yet. Until each gap either gets a clause or is written down as deliberately absent,
+legality](../decisions/implemented/2026-09-20-the-program-answers-legality.md). Rows 1, 4, 5, 6, 7 and 8
+are gaps with no owner yet. Until each gap either gets a clause or is written down as deliberately absent,
 "complete" for this umbrella means the parts that have owners, not the parts a task needs.
