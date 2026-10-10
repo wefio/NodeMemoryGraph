@@ -2018,6 +2018,7 @@ Search signals are separated by purpose:
 - regular expression only as an advanced/debug fallback over a bounded candidate
   set or raw session subset.
 
+<<<<<<< HEAD
 Structured scope conjunctions and inclusive event-time bounds constrain the SQL
 candidate pool before scoring and limiting. A missing event time fails a supplied
 bound. Hybrid lexical priority does not exempt candidates from these filters:
@@ -2025,11 +2026,14 @@ its repeated `ORDER BY` memory IDs are bound after every `WHERE` value and befor
 `LIMIT`, in SQL placeholder order. Forced candidates and the no-FTS-hit vector
 fallback retain the same filtering contract.
 
-On the FTS5-only path, after the Active Graph budget selects the ranked evidence,
-adjacent candidates with exactly equal `combinedScore` are ordered by IDF-weighted
-coverage of the query's word terms in their statements and bounded evidence
-excerpts. The rule does not change candidate membership, QPP expansion, or hybrid
-retrieval. Its evaluation and the rejected neural ranking arm are recorded in
+On the FTS5-only path, adjacent candidates with exactly equal `combinedScore`
+are ordered by IDF-weighted coverage of the query's word terms in their statements
+and first 500 evidence characters before the direct result cap and the Active
+Graph budget select evidence. Non-tied order and scores remain unchanged; the
+selected prefix and QPP observations may change because the budget sees the
+resolved order. Open attachments retain their reserved positions. Semantic
+retrieval and forced surface-anchor supplements do not use this rule. Its scope,
+evaluation, and the rejected neural ranking arm are recorded in
 [lexical tie ranking](../decisions/implemented/2026-09-30-lexical-tie-ranking.md).
 
 Arbitrary model-generated regex is not a relevance ranker and must not scan the
