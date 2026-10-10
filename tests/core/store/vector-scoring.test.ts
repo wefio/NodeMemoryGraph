@@ -167,15 +167,10 @@ test("record scoring keeps ordering and all scores identical to decoder fallback
     const before = payloads();
     const modes = ["qwen3", "hybrid", "hashing"] as const;
     const search = (retrievalMode: (typeof modes)[number]) =>
-      store.searchByVector(
-        retrievalMode === "hybrid" ? "unmatchedsemanticprobe" : "scoring corpus",
-        query,
-        "qwen-scoring-fixture",
-        {
-          retrievalMode,
-          maxTier: 3,
-        },
-      );
+      store.searchByVector("scoring corpus", query, "qwen-scoring-fixture", {
+        retrievalMode,
+        maxTier: 3,
+      });
     const optimized = modes.map(search);
     for (const results of optimized) assert.ok(results.length > 0);
     const prepare = store.database.prepare.bind(store.database);

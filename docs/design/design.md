@@ -1906,6 +1906,13 @@ Search signals are separated by purpose:
 - regular expression only as an advanced/debug fallback over a bounded candidate
   set or raw session subset.
 
+Structured scope conjunctions and inclusive event-time bounds constrain the SQL
+candidate pool before scoring and limiting. A missing event time fails a supplied
+bound. Hybrid lexical priority does not exempt candidates from these filters:
+its repeated `ORDER BY` memory IDs are bound after every `WHERE` value and before
+`LIMIT`, in SQL placeholder order. Forced candidates and the no-FTS-hit vector
+fallback retain the same filtering contract.
+
 On the FTS5-only path, after the Active Graph budget selects the ranked evidence,
 adjacent candidates with exactly equal `combinedScore` are ordered by IDF-weighted
 coverage of the query's word terms in their statements and bounded evidence

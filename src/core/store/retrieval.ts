@@ -2152,12 +2152,13 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           options.sessionId ?? null,
           options.sessionId ?? null,
           options.sessionId ?? null,
-          ...(forcedCandidateIds.length === 0 && retrievalMode === "hybrid" ? ftsIds : []),
           options.eventTimeFrom ?? null,
           options.eventTimeFrom ?? null,
           options.eventTimeTo ?? null,
           options.eventTimeTo ?? null,
           ...scopeParams,
+          // ORDER BY placeholders follow every WHERE filter.
+          ...(forcedCandidateIds.length === 0 && retrievalMode === "hybrid" ? ftsIds : []),
           rowLimit,
         ) as Row[];
 
