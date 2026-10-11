@@ -94,6 +94,7 @@
 | wrong-tree verification | 0002     |              |
 | mutant-in-tree reading  | 0003     | the sweep's lock: `agent:verify` refuses, and a new sweep refuses to start, while a sweep holds the tree (`tools/mutation-lock.ts`) |
 | mislabelled flake       | 0004     | an intermittent failure is recorded with its reproduction attempt and rate, or left open - never as "flaky" (`skills/repo-development/SKILL.md`) |
+| undrainable backlog | 0005 | [store 回归](../../tests/core/store/maintenance.test.ts)、[服务回归](../../tests/cli/service.test.ts) |
 | -----                   | -------- | ------------ |
 
 类别名是简短名词短语，不是句子；在没有案例可指之前不凭空发明：第一篇记录命名它，第二篇确认它。记录的类别只写在索引里，不写在记录里，所以整个分类体系只有一处可读。
@@ -106,4 +107,5 @@
 | 0002 | [我验证的树，不是我推送的树](0002-wrong-tree-verification.zh-CN.md)        | wrong-tree verification |
 | 0003 | [我读到的检查，读的是 mutant](0003-checks-read-a-live-mutant.zh-CN.md)   | mutant-in-tree reading  |
 | 0004 | ["flaky" 其实是一个时钟边界](0004-flaky-was-a-clock-boundary.zh-CN.md)  | mislabelled flake       |
+| 0005 | [重平衡无法消耗的维护压力](0005-maintenance-pressure-cannot-drain.zh-CN.md) | undrainable backlog |
 | ---  | ----                                                                       | -------------           |

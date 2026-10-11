@@ -1765,8 +1765,18 @@ and generates—but never automatically accepts—a limited number of topology
 proposals. Failed slices leave durable counters intact for a later retry and
 never turn a successful `remember` into a failed write.
 
+Access pressure counts only indexed, active or disputed records, matching the
+records whose pending access counters tier rebalancing consumes. Both per-node
+and global access totals use this eligibility rule. Ineligible records retain
+their counters and history without triggering or prolonging a maintenance loop;
+reactivated indexed records can contribute pressure again. Empty local checks
+return their result and update performance aggregates without appending a
+`maintenance_runs` row. Productive local runs and semantic runs retain separate
+journals: a semantic result with zero `rowsTouched` can still drain trace signals.
+Retrieval traces, feedback, attribution and historical journal rows are unchanged.
+
 The due check is deliberately a dual trigger. A single hot node is selected as
-soon as its own write or access counter reaches the corresponding threshold. If
+soon as its own write or eligible access counter reaches the corresponding threshold. If
 many sparse nodes keep every local counter below the threshold but their global
 pending total reaches it, the same bounded slice selects the largest then oldest
 non-empty node backlogs. The resident service schedules another bounded slice
