@@ -122,6 +122,12 @@ TestRuntime
 
 该层精确锁定 `@deepseek-ai/cordis@4.0.1` 作为 **devDependency**，只借用插件 effect/fiber 生命周期。NMG Core、daemon、Pi adapter 和发布包均不依赖 Cordis；不引入其 loader、HMR 或配置系统。Cordis adapter 与 NMG fixture composition 分离，未来若替换框架只需修改生命周期 adapter。
 
+### 4.1 行为片段与资源 fixture
+
+行为组合不属于资源生命周期层。场景构造留在消费者本地；`tests/support/task-board-behavior.ts` 的 `claimAndDeliver` 作用于调用者已有的 entry 引用，组合领取与交付。Task Board 交付和保留期测试共享该函数，显式传入身份、digest、租期及 `now`，取得实际交付快照。时间输入只控制这两个动作，不代表创建、最终处理或整个测试都使用可注入时钟。
+
+两个动作是独立写入，不保证原子性；交付失败保留已成功的领取，异常直接传播。需要观察两步之间的状态或单独验证拒绝动作时，测试直接调用 store API。既有具名声明、断言与文件数据库生命周期保留，不引入 DSL 或生成器；取舍由[行为组合试点决策](../decisions/implemented/2026-10-12-deliverable-tests-compose-behavior.zh-CN.md)记录。
+
 ## 5. Agent 原生仓库上下文
 
 根 `AGENTS.md` 保存稳定的查找协议。Agent 从任务术语、符号和目标目录定位实现与所属契约，按当前动作读取相关章节；入口不维护模块清单、命令或运行状态。所有权或检查要求不清楚时，可运行：
