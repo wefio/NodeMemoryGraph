@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NmgStore } from "../../src/core/store.ts";
+import { linkNodePath } from "../support/node-graph-behavior.ts";
 
 function withStore(run: (store: NmgStore) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "gcyc-"));
@@ -42,9 +43,7 @@ test("detectGraphCycles finds a directed relation cycle", () => {
       sessionId: "s1",
       sourceActor: "user",
     });
-    store.linkNodes({ sourceNodeId: m1.node.id, targetNodeId: m2.node.id, type: "causes" });
-    store.linkNodes({ sourceNodeId: m2.node.id, targetNodeId: m3.node.id, type: "causes" });
-    store.linkNodes({ sourceNodeId: m3.node.id, targetNodeId: m1.node.id, type: "causes" });
+    linkNodePath(store, [m1.node.id, m2.node.id, m3.node.id, m1.node.id], "causes");
 
     const r = store.detectGraphCycles();
     assert.equal(r.supersedeCycles.length, 0);
@@ -124,8 +123,7 @@ test("detectGraphCycles is empty for an acyclic chain", () => {
       sessionId: "s1",
       sourceActor: "user",
     });
-    store.linkNodes({ sourceNodeId: p1.node.id, targetNodeId: p2.node.id, type: "causes" });
-    store.linkNodes({ sourceNodeId: p2.node.id, targetNodeId: p3.node.id, type: "causes" });
+    linkNodePath(store, [p1.node.id, p2.node.id, p3.node.id], "causes");
     const r = store.detectGraphCycles();
     assert.deepEqual(r.relationCycles, []);
     assert.deepEqual(r.supersedeCycles, []);
@@ -150,13 +148,11 @@ test("symmetric relations (contradicts) never count as cycles", () => {
       sessionId: "s1",
       sourceActor: "user",
     });
-    store.linkNodes({ sourceNodeId: m1.node.id, targetNodeId: m2.node.id, type: "contradicts" });
-    store.linkNodes({ sourceNodeId: m2.node.id, targetNodeId: m1.node.id, type: "contradicts" });
+    linkNodePath(store, [m1.node.id, m2.node.id, m1.node.id], "contradicts");
     // A mutual contradiction is normal symmetric semantics, not an anomaly.
     assert.deepEqual(store.detectGraphCycles().relationCycles, []);
     // But the same pair as a directed semantic relation is a real cycle.
-    store.linkNodes({ sourceNodeId: m1.node.id, targetNodeId: m2.node.id, type: "causes" });
-    store.linkNodes({ sourceNodeId: m2.node.id, targetNodeId: m1.node.id, type: "causes" });
+    linkNodePath(store, [m1.node.id, m2.node.id, m1.node.id], "causes");
     assert.equal(store.detectGraphCycles().relationCycles.length, 1);
   });
 });

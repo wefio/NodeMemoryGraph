@@ -1,0 +1,2889 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-10-13T03:38:50.339Z",
+  "probeSha256": "7535e16fc41a33d7473d85ae545ae64fa1a39e4ba4e45b88b3ceae7b5a760842",
+  "head": "d864ffb56331405a5833a6fc41df3ce8451751a7",
+  "dirtyFiles": [
+    "M docs/decisions/implemented/2026-10-12-deliverable-tests-compose-behavior.md",
+    " M docs/decisions/implemented/2026-10-12-deliverable-tests-compose-behavior.zh-CN.md",
+    " M docs/experiments/verification/behavior-composition-and-combinatorial-testing-2026-10-12.md",
+    " M tools/mutation-teeth.ts",
+    "?? docs/experiments/verification/behavior-structure-screen-2026-10-13.json",
+    "?? scripts/behavior-structure-screen.probe.mjs",
+    "?? tests/core/task-board-attempt-boundaries.test.ts"
+  ],
+  "node": "v24.19.0",
+  "parser": "typescript@5.9.3",
+  "manifestSha256": "9356dde3dd7c50ab22566afa11199fc41378c93a318525769604881b0045b880",
+  "patterns": [
+    "tests/cli/**/*.test.ts",
+    "tests/core/**/*.test.ts",
+    "tests/docker/**/*.test.ts",
+    "tests/docs/**/*.test.ts",
+    "tests/extensions/**/*.test.ts",
+    "tests/guardrails/**/*.test.ts",
+    "tests/integration/**/*.test.ts",
+    "tests/lab/**/*.test.ts",
+    "tests/prompts/**/*.test.ts",
+    "tests/rcp/**/*.test.ts",
+    "tests/scripts/**/*.test.ts",
+    "tests/skills/**/*.test.ts",
+    "tests/support/**/*.test.ts",
+    "tests/tools/**/*.test.ts"
+  ],
+  "selfChecks": "adjacent pair, assertion barrier, separate callbacks, empty AST, closed path, non-basic metadata exclusion; all passed",
+  "totals": {
+    "files": 199,
+    "testDeclarations": 1716,
+    "calls": 15666,
+    "pairs": 3967,
+    "basicNodePaths": 13
+  },
+  "limitations": [
+    "Static sites are not executed-case counts, semantic equivalence or maintenance savings.",
+    "Member names are clustered without type resolution; receiver and argument shapes require review.",
+    "Pairs stay in one lexical block; nested callbacks are separate; helpers and RPC strings are not expanded.",
+    "Observed gaps are retained, not declarations that operations may be safely collapsed.",
+    "Only multi-file groups are output; this is cross-file discovery, not a rejection of local helpers."
+  ],
+  "inputs": [
+    {
+      "file": "tests/cli/archive-shutdown.test.ts",
+      "sha256": "1751d965f57fe332a707b9f93ba67d66d16041da5a3d8ea5ea2026f5c3c5a4ad"
+    },
+    {
+      "file": "tests/cli/archive-staging.test.ts",
+      "sha256": "88d229067f99b35323e0cd32afb26b61d2d15b101469f589e63b17a1cef73ff5"
+    },
+    {
+      "file": "tests/cli/commands.test.ts",
+      "sha256": "41c9e2fc5db7e53d9797d5debd4a40ee89b98c13548dad53f69bac30035e203e"
+    },
+    {
+      "file": "tests/cli/compound-reference.test.ts",
+      "sha256": "7fa9959308a223ddaa60920099e0432089f6b8ce22efe542db0e2b9adfb33f75"
+    },
+    {
+      "file": "tests/cli/context-online-rpc.test.ts",
+      "sha256": "f638a59a2d7b638df5796c6760a3990488d1754ed1583747d461a1176071b32c"
+    },
+    {
+      "file": "tests/cli/daemon-client.test.ts",
+      "sha256": "0cf68a80dacb263ec2714bd4bf3647c094ea19eb589cc4865d63c439daee95cb"
+    },
+    {
+      "file": "tests/cli/data-path.test.ts",
+      "sha256": "3a7c466d1cbc3bd4cea3c1f12599431db4df62538cf8803793ff5a3b2b24529f"
+    },
+    {
+      "file": "tests/cli/graph-data.test.ts",
+      "sha256": "bf312ed0bd0f1072164c6877b3e67494daf61b80911290a7298be5345f20dc63"
+    },
+    {
+      "file": "tests/cli/graph-render.test.ts",
+      "sha256": "96e467aab145e2e65d34e63e9742c184fa356cb4a932118608c41182bb300432"
+    },
+    {
+      "file": "tests/cli/http-boundary.test.ts",
+      "sha256": "5c44bcf9c807b6a13931d72255b2c9bb8b793326a8edcca7be38799c3a614e9d"
+    },
+    {
+      "file": "tests/cli/http.test.ts",
+      "sha256": "920cc1ea6c2914d9fb6fb4d475d8afe49b65e0f5f78794fe92bb37ade3aa69b6"
+    },
+    {
+      "file": "tests/cli/inspect-data.test.ts",
+      "sha256": "f825988f04ce1a25c597c60833d8911607fc27d752f70793bd94ccbed0c4c926"
+    },
+    {
+      "file": "tests/cli/process.test.ts",
+      "sha256": "786c45b61b92c1ffcb78a6dfdcec48bb8e61a318f019e92be78cfe1511659216"
+    },
+    {
+      "file": "tests/cli/service-drain.test.ts",
+      "sha256": "61474f924f251c5886387cd3bd239b462d44bd8d0a0ba389317814d038a6e7dd"
+    },
+    {
+      "file": "tests/cli/service.test.ts",
+      "sha256": "2bffe266d8110f145b5cb872ebb404dcf95a2a92e19367d1642920d18ff243a2"
+    },
+    {
+      "file": "tests/cli/session-observe.test.ts",
+      "sha256": "a9042e02a4770c18ea47d3462148a135f3de31535562ea9a047ef19741094b2e"
+    },
+    {
+      "file": "tests/cli/task-run-surface.test.ts",
+      "sha256": "852b64b96c386a82232931dc9b947eba330ae4e38ebdd2da66882448b557239c"
+    },
+    {
+      "file": "tests/cli/working-state.test.ts",
+      "sha256": "75949d24d21b889093a8301e324d6343067f88f27eab6f4e0507e4fa67e94536"
+    },
+    {
+      "file": "tests/core/advanced-query.test.ts",
+      "sha256": "bff682c20c596b944109306582ca805e19a3f24677f2f5fbcfa32369b27ded85"
+    },
+    {
+      "file": "tests/core/analogy.test.ts",
+      "sha256": "8a75162b3936ad051a44dc9bb447cd8d7a7f4194625941b6e2b6ed2f3fad6fe9"
+    },
+    {
+      "file": "tests/core/ann.test.ts",
+      "sha256": "fe85fdb5131aeb1f3e9ca9224c4b9b9f6777d49b51e466c0aee24f533dffbfc4"
+    },
+    {
+      "file": "tests/core/autodiff.test.ts",
+      "sha256": "f24c8606f591312d2ba5f9ea2c56489f92476fd1d4fdf3ed727ae10d3dec5f6a"
+    },
+    {
+      "file": "tests/core/backend-selection.test.ts",
+      "sha256": "3d718ae55f528121ce9fc4eeed754b34b073e7a9aab8225bad74e6f9f9ce9d44"
+    },
+    {
+      "file": "tests/core/community.test.ts",
+      "sha256": "a85dd8986428363641d60b08b9bfad2e7b4471daa5bc0c80178a7ed949c06e16"
+    },
+    {
+      "file": "tests/core/context-intervention.test.ts",
+      "sha256": "5ab4226828e136ba6bec89858597a2f7e1b11454883e730a7f311aa28d3313b3"
+    },
+    {
+      "file": "tests/core/context-journal.test.ts",
+      "sha256": "edf13bc7ad6f22d17372fe7e39464f96e71a040683342360da0f6f9605c0e19a"
+    },
+    {
+      "file": "tests/core/context-reward.test.ts",
+      "sha256": "9fc691a54f9f5d53a16844b21d5085805640af78bad8b2cefa70cea6860fc321"
+    },
+    {
+      "file": "tests/core/context-router.test.ts",
+      "sha256": "c51b0c006c7f812d7139e1ca9aaa74a47161a06d64812da47f3bb5faca76a15a"
+    },
+    {
+      "file": "tests/core/context-trial-review.test.ts",
+      "sha256": "63907667fa73ba53e3d6d988768f28425d11653d29e4c221b832bd3319d3af88"
+    },
+    {
+      "file": "tests/core/context-trial.test.ts",
+      "sha256": "ee22d58e1cc17aee77595d7f31802cb45f7f427a2de0720eb984c0a69527b6ee"
+    },
+    {
+      "file": "tests/core/controller-gate.test.ts",
+      "sha256": "21797177143033e14e9b0673e3cc88eceda32af33929b3530a6e9126e480b79d"
+    },
+    {
+      "file": "tests/core/controller-protocol.test.ts",
+      "sha256": "a528b04bc9ef91b0bb1fa2c2ccc5f97c3da2075c4e43f54f94b75ce01ab94d0f"
+    },
+    {
+      "file": "tests/core/controller-runtime.test.ts",
+      "sha256": "46983619173d277cb44fc65bad60e359f9c7ae9035e92d59457fd56373e2e213"
+    },
+    {
+      "file": "tests/core/differentiable-controller.test.ts",
+      "sha256": "e4f6b3d7747b0932bed71b65d35391986e3ac768d6ad2182f413b923d7ba2ddf"
+    },
+    {
+      "file": "tests/core/edge-activation.test.ts",
+      "sha256": "8e74e4d2160d2524673494785d8f0d7b85d3168b83e09e9a6f6637ca404e7a05"
+    },
+    {
+      "file": "tests/core/embedding-provider.test.ts",
+      "sha256": "d6ec21ca592bba5d3b6330fd2b7eb07a7c92921e6808dee740803bc47d346726"
+    },
+    {
+      "file": "tests/core/embedding-sync.test.ts",
+      "sha256": "4bf5b0d62accba5c426af291490f2d0fe09c5b11cbaefa2cfe867561ef2a29fd"
+    },
+    {
+      "file": "tests/core/feedback.test.ts",
+      "sha256": "5484a0ccfbafbe31e9b00e11d91f50312e93e88fe30e463e59153e72cc6fa398"
+    },
+    {
+      "file": "tests/core/fork-merge.test.ts",
+      "sha256": "5db5140228e412fd19949b5f0e30fa5563a5898c4e5a309b47ab555fb2c53161"
+    },
+    {
+      "file": "tests/core/gate.test.ts",
+      "sha256": "e748c83af0880fd57a009644740d9fd59f463c16481cafaf08a067ea729fed78"
+    },
+    {
+      "file": "tests/core/graph-cycles.test.ts",
+      "sha256": "b2a0c4b2c089537d2986021f4149e33942dba06eed435b2c0cc7b0a6d602c551"
+    },
+    {
+      "file": "tests/core/hierarchical-activation.test.ts",
+      "sha256": "f45b9e3a6feecbd16762beeccf5f2f9278c837705150d30e1dba8d25f0612f4a"
+    },
+    {
+      "file": "tests/core/memory-chains.test.ts",
+      "sha256": "0cb0151c3eff5ce388c8f9ea0b3d48e3e49a556b76ef01e7556e805cee70fc2e"
+    },
+    {
+      "file": "tests/core/memory-graph-reasoner.test.ts",
+      "sha256": "ee2bb1a30ab6f801033b4934d4fb3e97d77ef10996391126ec038b543fcf6532"
+    },
+    {
+      "file": "tests/core/multi-hop-path.test.ts",
+      "sha256": "42ed4afa12b069cf3eee255b73b22eaec28fb7c83663dc226edeeb31d4d409cc"
+    },
+    {
+      "file": "tests/core/openai-embedding.test.ts",
+      "sha256": "c5132001213929aad2b96ca53ccfa2ed58e722741ab97ceee7193b1c0fb8017a"
+    },
+    {
+      "file": "tests/core/perf.test.ts",
+      "sha256": "75277cd01a6de188eb4daf458fabd338a795f6be4748c849985fb815f94fa379"
+    },
+    {
+      "file": "tests/core/qpp.test.ts",
+      "sha256": "d492eb8453d3bee768b2110ba6daaae01db044d7f827f76027ec3b362ceca43c"
+    },
+    {
+      "file": "tests/core/rank-fusion.test.ts",
+      "sha256": "419f1317c2303bf98199db3482e0bbfc2de586b90684f0ce9ccaa5bbe44170ed"
+    },
+    {
+      "file": "tests/core/reasoning-workspace.test.ts",
+      "sha256": "7ac877a968f3e27dac3aad10dc0c6557644e6d81be22041bcd8f9862089e78e4"
+    },
+    {
+      "file": "tests/core/relevance-features.test.ts",
+      "sha256": "6cfbff6e640c316a3e1358937999c49e0fdaec1c5e46b8910c3537191e7f63de"
+    },
+    {
+      "file": "tests/core/relevance-gate.test.ts",
+      "sha256": "5ad1df2924374f6dbc9b341304af17be2ab03576948c6b1aace008f16665d7df"
+    },
+    {
+      "file": "tests/core/relevance-model.test.ts",
+      "sha256": "bf22f9f9fed1e761fa650a424b58092b8617bb91c40e252422087323265bf1b1"
+    },
+    {
+      "file": "tests/core/robustness.test.ts",
+      "sha256": "6be583531b156ac65baea3bc442f4e12f41892ae48a9e0b8bde506fa586ea7e3"
+    },
+    {
+      "file": "tests/core/router-session.test.ts",
+      "sha256": "2df5ce9f54e8151e5359143c9aeef81f4f511a46f87aa2974a46bce6635e59fe"
+    },
+    {
+      "file": "tests/core/router.test.ts",
+      "sha256": "9e648a5f93f4b2852f9aa77bbcbce70108d8691773a2232842b537990314a230"
+    },
+    {
+      "file": "tests/core/semantic-domain.test.ts",
+      "sha256": "11998ecb9a37504556f24e23aac3af9371ce1c8d2fb52f0490771928f9b77611"
+    },
+    {
+      "file": "tests/core/session-active-graph.test.ts",
+      "sha256": "acd6be08abb56002d66b0b59af22d5626c54d00ce9d84f828d3d99cfa948116d"
+    },
+    {
+      "file": "tests/core/shadow-evaluation.test.ts",
+      "sha256": "4375bd790f293962b47e02e076d6c0369a2c66f4e67e17ff068af9a77acfda33"
+    },
+    {
+      "file": "tests/core/simhash.test.ts",
+      "sha256": "8711177882b7af9fb26a506a44d9b8a28d13980831e5f800b7e8c7e714758eab"
+    },
+    {
+      "file": "tests/core/skillopt-policy.test.ts",
+      "sha256": "a639bef20bfb2d6e52ef3ae9dae80a8653e6026e426b05e6b12a7a9abeb9d8d7"
+    },
+    {
+      "file": "tests/core/stg-isolated.test.ts",
+      "sha256": "c81590f98887b928ab8988ecf547876d054afee5c741195ba21c23cdd93f4308"
+    },
+    {
+      "file": "tests/core/stg-v2.test.ts",
+      "sha256": "9c682f20ec87fda8e87c009354b9ba06d3d5dbbad3eec9b955e25e803a9ff1e6"
+    },
+    {
+      "file": "tests/core/store-readonly-open.test.ts",
+      "sha256": "e815c690baeebbe0fbf4a350d68d6bb75e99bf8703a0179a4366a35bf60bef4b"
+    },
+    {
+      "file": "tests/core/store-transaction-port.test.ts",
+      "sha256": "6f1ba53fc4daba87a08308dfcb215a1658d3e02286de8428305e75a032480bc0"
+    },
+    {
+      "file": "tests/core/store.test.ts",
+      "sha256": "95f37ae5a1021ed8090af436c2a09044bc4f9c553b07a853ac4767fe899df1dd"
+    },
+    {
+      "file": "tests/core/store/claim-posterior.test.ts",
+      "sha256": "8bb011b4462dac28d4938cb222f872ed4e13b694b2f75ac65a140ea41d606619"
+    },
+    {
+      "file": "tests/core/store/cluster-dag.test.ts",
+      "sha256": "aa95b1d1aacd62a091b8a1799eb1349e41c6015dca8b11f7a8bcd8d289d26a85"
+    },
+    {
+      "file": "tests/core/store/current-value-window.test.ts",
+      "sha256": "44d4f60c36bebb817e16f88260e801142896b39bd2f0ad92b313256917736e5b"
+    },
+    {
+      "file": "tests/core/store/duplicates.test.ts",
+      "sha256": "a4487c7df102759d73e623b2d920e85e60dde8b1273a50cd763cbd99d3a95ec4"
+    },
+    {
+      "file": "tests/core/store/embedding-index.test.ts",
+      "sha256": "5930662a6b9a22d64db664e7beaa95ca8ee4e0d91b2396fdf6e307e1e335a24b"
+    },
+    {
+      "file": "tests/core/store/feedback.test.ts",
+      "sha256": "90c37b9bfea585f3f5b7fa3d6407bc565256cdc95961ef64eb835f8546a8a6c4"
+    },
+    {
+      "file": "tests/core/store/graph.test.ts",
+      "sha256": "4021747d9a4cb227119e374668bd983a8015550eae9156a532714dfa41446481"
+    },
+    {
+      "file": "tests/core/store/leaf-summaries.test.ts",
+      "sha256": "fd5a7ce6ba98211ef7f55b8bd8058e8858b63cc7b3c2a9744fadf71ee79770dc"
+    },
+    {
+      "file": "tests/core/store/maintenance.test.ts",
+      "sha256": "8b3dbe41fca98c5fa02ad91fe4395dd16754116c8756b380f51c3823207ffc57"
+    },
+    {
+      "file": "tests/core/store/module-boundary.test.ts",
+      "sha256": "bd5bf8a2be0f89b085da41b984719e3f13d9e2b69ac481441263b22bfd47863f"
+    },
+    {
+      "file": "tests/core/store/node-summaries.test.ts",
+      "sha256": "9989aa2144bbf80f4db39d02cc77af4863ecce7a89517cffde46fa03bb444d18"
+    },
+    {
+      "file": "tests/core/store/retention.test.ts",
+      "sha256": "43d8a3921b5bb19f46a19d4e55d00438eba1146e4278ef5f1dd962ac46357963"
+    },
+    {
+      "file": "tests/core/store/retrieval.test.ts",
+      "sha256": "e5f4b8b8f4de60a0c62288ad752fa7a1b737c931ece4083c1f3431a5d56cf55b"
+    },
+    {
+      "file": "tests/core/store/rows.test.ts",
+      "sha256": "20c6b42bec819a071f679db7b89c7f81ce174921f9ce1591a6b0651fcf641a38"
+    },
+    {
+      "file": "tests/core/store/schema.test.ts",
+      "sha256": "ae0f6b3fad24ebaa33ee7a160dc3945864845fdf98566a94bcf00a24ba78a996"
+    },
+    {
+      "file": "tests/core/store/search-ranking.test.ts",
+      "sha256": "6a5e20ebc3bac9763b46536efb28c833abed37ab40bec5ed4e3da9ddfeb46d35"
+    },
+    {
+      "file": "tests/core/store/task-runs.test.ts",
+      "sha256": "8d2d46165599c64c31bbc49d2f5071f372f02874d07a7656ffbada5163890e8b"
+    },
+    {
+      "file": "tests/core/store/vector-codec.test.ts",
+      "sha256": "29a1153392d3ec8dd4632941bfd358fdfd5cab61f5d6862c11f441fe0719c525"
+    },
+    {
+      "file": "tests/core/store/writes.test.ts",
+      "sha256": "0bb3d8ec824ff3c6071f61ec11845e16f6dd1b76971d7dec6391f6a94203b488"
+    },
+    {
+      "file": "tests/core/sufficiency-coverage.test.ts",
+      "sha256": "fff1abceebf1c247e08074f1ca310e0d6576cc4cf369a506345d57b44e0ca1a6"
+    },
+    {
+      "file": "tests/core/sufficiency-features.test.ts",
+      "sha256": "bbe15c07af86b73a70c802edfbb2870e228bd1ecf5002b53628cd5fc2f19a363"
+    },
+    {
+      "file": "tests/core/task-board-attempt-boundaries.test.ts",
+      "sha256": "88ab27988e2b8c0122f523341cb1c90608818f7ad91e9bc0b5bab2648599f4fa"
+    },
+    {
+      "file": "tests/core/task-board-deliverable.test.ts",
+      "sha256": "26e52db1de8d72134b96010b4c4a28adefc8a2b9320b8afac6257b599678f8ca"
+    },
+    {
+      "file": "tests/core/task-board-retention.test.ts",
+      "sha256": "fffce8ff11b6032b0d38839d1c5762d70a08a3cd0bf76af3d88832ba5b5ff4e1"
+    },
+    {
+      "file": "tests/core/task-board.test.ts",
+      "sha256": "1e44dcc4b06c907eb7ebf0241a6fcbc19d95e43c18b358aea023f78a1b516bb1"
+    },
+    {
+      "file": "tests/core/tesserae-simhash.test.ts",
+      "sha256": "3c8895b5427bd28bddb757c364b5326d05e451495787929ac1f5bc97f75d08de"
+    },
+    {
+      "file": "tests/core/tesserae.test.ts",
+      "sha256": "b15c1f46d90463fefe6196d61c9e042678ca202c20258920b2f77e5af5f06e58"
+    },
+    {
+      "file": "tests/core/vector-cache.test.ts",
+      "sha256": "77f0d19f92c308831caced7875780e973327524f7d5ccc6e58722949d589dc9c"
+    },
+    {
+      "file": "tests/core/working-state.test.ts",
+      "sha256": "876c6e5de9a18646d1b61a8b3d2e65c75ab91c2229b4278a1689cb1f0c208a76"
+    },
+    {
+      "file": "tests/core/write-policy.test.ts",
+      "sha256": "bbe3c4dad527db6b72fe1838f0ff344cab5f6845e1a85a961a12ba7265982cce"
+    },
+    {
+      "file": "tests/docker/container-definition.test.ts",
+      "sha256": "de2edb961aa832d0f5ea14d21276e24d761b3b4f62271b33381dc14a06346b8f"
+    },
+    {
+      "file": "tests/docs/verify-docs.test.ts",
+      "sha256": "7821dec8c4ecff98728570815697f12e9660e8a7cbdc5d26535357749de9f79d"
+    },
+    {
+      "file": "tests/extensions/dsh-lab.test.ts",
+      "sha256": "fffb2cd41438c93d2199739dccd41fc85bb3fb30d36d4be59f2edca31306f6b9"
+    },
+    {
+      "file": "tests/extensions/nmg/context-router-online.test.ts",
+      "sha256": "820a494d942f1c5c04283e57adec75d90f5d501bcb06752823c75364fd4619e3"
+    },
+    {
+      "file": "tests/extensions/nmg/first-response-timing.test.ts",
+      "sha256": "ffcd333a98b32c4a6079b5209cd0a3c947e29f3d8cc78b040616045cf1d86617"
+    },
+    {
+      "file": "tests/extensions/nmg/index.test.ts",
+      "sha256": "f209df741ae5c014722b75f07063cb40b4d01114446a4472503e09e964bbbcdf"
+    },
+    {
+      "file": "tests/extensions/nmg/reasoning-workspace.test.ts",
+      "sha256": "f9a70b047f7695693bb2f57fe8d847cae0b5350cf46c5b1d6b0bb3e2d43de06a"
+    },
+    {
+      "file": "tests/extensions/nmg/working-state-display.test.ts",
+      "sha256": "a6236d90789ac1c3a3b19b0d67f4dd158b5eac05288cb93a94f079df2d47ae63"
+    },
+    {
+      "file": "tests/extensions/nmg/working-state-input.test.ts",
+      "sha256": "fae49c527fffce041289e8799fe43062b5f4948478e96db26cb8cc7fa4f451b8"
+    },
+    {
+      "file": "tests/extensions/pi-dependency-boundary.test.ts",
+      "sha256": "11102ce1440ba60fde1f26659f70cd33d28e9a01e91c24dcaffd77982ec87940"
+    },
+    {
+      "file": "tests/integration/agent-surface.test.ts",
+      "sha256": "8f837e03a359c75a1df796701f9287ca5b33e1cc3e9821db8969926bb528a778"
+    },
+    {
+      "file": "tests/integration/chain-projection.test.ts",
+      "sha256": "638ac4e10f282f52e3d732167647a3264b2a7632f3316ebd5d6c7163ea73264f"
+    },
+    {
+      "file": "tests/integration/claude-mcp.test.ts",
+      "sha256": "bfd824b451d414ea02b3ed65d4c8c3fffd28d6db21589444d2fb561735adb3af"
+    },
+    {
+      "file": "tests/integration/config.test.ts",
+      "sha256": "139ee7e2effbc91b94acad9350864af1499172bbb072f22e09170a15d94fd3dd"
+    },
+    {
+      "file": "tests/integration/controller-channel.test.ts",
+      "sha256": "557d45a21b41866c160d33f85d431c89a171f4fefcdfa10ec0f6c01a9348cd1e"
+    },
+    {
+      "file": "tests/integration/evidence.test.ts",
+      "sha256": "f1ff437058cf02e80c9d66b210052230d3b35465350793538339bcb4ad8e565c"
+    },
+    {
+      "file": "tests/integration/first-response-timing.test.ts",
+      "sha256": "630d1913dda8f9c4533b9605b631bbd6a0481c0192ade0c7ee9768819d6fcbaa"
+    },
+    {
+      "file": "tests/integration/information-output.test.ts",
+      "sha256": "a38d583059a9d706fa47361c2f5973eb905528e17d154f1397cff3b56c117efe"
+    },
+    {
+      "file": "tests/integration/kimi-hook.test.ts",
+      "sha256": "e93674ed6b55b8ab49dae910564313c4d537a95a3912f9d586aaf8b3172371f1"
+    },
+    {
+      "file": "tests/integration/lab-capabilities.test.ts",
+      "sha256": "0f028ca5c03012cda0fb1fca68e2cced43712eee02a2f7402298d4fa917d5537"
+    },
+    {
+      "file": "tests/integration/leaf-summarizer.test.ts",
+      "sha256": "75b5ccaec42835c11a5ab7619756df905193dcdc9febaf572d08a5f654ac1c58"
+    },
+    {
+      "file": "tests/integration/lexical-budget.test.ts",
+      "sha256": "7d8b1170a2bb8d7135ff9567b61cc279e3e086e95dcb9aedc88a512e08b07412"
+    },
+    {
+      "file": "tests/integration/memory-reference-snapshot.test.ts",
+      "sha256": "efdf687bd94c3d03647367c8c2fb80aee2ec401c952d5727dcedcd6eab139b51"
+    },
+    {
+      "file": "tests/integration/memory-reference.test.ts",
+      "sha256": "ac94f3a276548d5f237ab586450906c3f20f84243cca353966a1389fda2ca18d"
+    },
+    {
+      "file": "tests/integration/ooo-acceptance-one-predicate.test.ts",
+      "sha256": "99ae726829e72ba824a6e8bb1b8f81f6c21b887c0991aa6a0a9de6bb86d20a3e"
+    },
+    {
+      "file": "tests/integration/ooo-advisers.test.ts",
+      "sha256": "9535661b4cc4c5a71dc9a97e667a94a0a950aa55597509f3397654983089ec05"
+    },
+    {
+      "file": "tests/integration/ooo-dispatch.test.ts",
+      "sha256": "2c231a877097e1c8ec15a69bea03c2c3513e731b98fda688155bd98be7624eba"
+    },
+    {
+      "file": "tests/integration/ooo-evidence-drivers.test.ts",
+      "sha256": "bbf2dd71d2d7fa502bafbef41c360d61b4b8c356484c37de1a65d1d492c78c79"
+    },
+    {
+      "file": "tests/integration/ooo-external-window.test.ts",
+      "sha256": "205d5dee2deb41c949c652cccd8ca515e8d2e17f8183bff4afd5e2205f57b2bc"
+    },
+    {
+      "file": "tests/integration/ooo-fusion-plan.test.ts",
+      "sha256": "e9ef97c28b02933169937e724620bd5dbf30545e9777d16087919939a75aa7ae"
+    },
+    {
+      "file": "tests/integration/ooo-fusion.test.ts",
+      "sha256": "1f1f5669ea48168eaa2318841556315f3433db3072868d252b9ad66cf96d732f"
+    },
+    {
+      "file": "tests/integration/ooo-generic-session.test.ts",
+      "sha256": "d3d4815ae74c46a096ca0d81c3bf42ca2c7fed7b701868ba0cee074fc5503882"
+    },
+    {
+      "file": "tests/integration/ooo-managed-adopt.test.ts",
+      "sha256": "a0644bc8704a2c8eef0bc7bf4a9c6611c6b2ec52da3580c5e221da01b7a805de"
+    },
+    {
+      "file": "tests/integration/ooo-managed-fence.test.ts",
+      "sha256": "3e95146d28650688c02504061b931957e7a1938139b9b37ac9484990bbf97ac6"
+    },
+    {
+      "file": "tests/integration/ooo-managed-write.test.ts",
+      "sha256": "c7b1d082437a83a5f47d6162d4b8659dea9aef047f18f93c102bb718a660d7e0"
+    },
+    {
+      "file": "tests/integration/ooo-ordinary-failure.test.ts",
+      "sha256": "f576573ac375a338b5b46f35970bdefef2c0409598328d084cc941be6cfc426d"
+    },
+    {
+      "file": "tests/integration/ooo-ordinary-handoff.test.ts",
+      "sha256": "e791ed59e97c0233a88c4afb907e568e858abe8956428c47339e64c4d77399aa"
+    },
+    {
+      "file": "tests/integration/ooo-patch.test.ts",
+      "sha256": "4987c76407fbf45df3b78b50955032d4956e3b3c9d67b292cc69340bad5f1709"
+    },
+    {
+      "file": "tests/integration/ooo-post-commit-notification.test.ts",
+      "sha256": "74acc4d3943055e5397f3087cdfcdf4f34c4133cf1f368d654f1c1f0781c6a82"
+    },
+    {
+      "file": "tests/integration/ooo-publication-invariants.test.ts",
+      "sha256": "e181d2e7be2f12a423b8a18efcaf0e60ed3c54fecb2e43a8d7d59416afa0e80a"
+    },
+    {
+      "file": "tests/integration/ooo-read-paths-agree.test.ts",
+      "sha256": "4aba20344fdb576062a46c4f9cb13c080b1f026af7db22a5c899956ea7b26c53"
+    },
+    {
+      "file": "tests/integration/ooo-round-query.test.ts",
+      "sha256": "91b49df544525376c5178d56d5a29dd045edb82bbd58e24e5038c8caa7493b4d"
+    },
+    {
+      "file": "tests/integration/ooo-run-namespace.test.ts",
+      "sha256": "14129f11145d45ad10373e36d43d279ed72a54560e47dd9c4544994df4d3cfb4"
+    },
+    {
+      "file": "tests/integration/ooo-session-chain-contract.test.ts",
+      "sha256": "a008fed4e357099e038abea5be1919953a2b583e3664e0442148d245e51371be"
+    },
+    {
+      "file": "tests/integration/ooo-session-facts.test.ts",
+      "sha256": "8074e9bd1a4dc8d2c3e891eec294ffe490c9ad0b9776cd7594a5039de2c4cacb"
+    },
+    {
+      "file": "tests/integration/ooo-session-layering.test.ts",
+      "sha256": "1a620fdcf7eae9db6506e053eaa0e9715ff30f800502273a358656200d6e2df1"
+    },
+    {
+      "file": "tests/integration/ooo-speculation.test.ts",
+      "sha256": "6f79e9d850a12a9ca3d0ba9929096b74088513a4312715ed456b441f13c469c0"
+    },
+    {
+      "file": "tests/integration/ooo-store-run-board.test.ts",
+      "sha256": "b87e6afbc40ad11cc115b5f41271ffcd571031c45c09f058dd201859612b0390"
+    },
+    {
+      "file": "tests/integration/ooo-task-tables.test.ts",
+      "sha256": "2e05a5ee13e80553f73864627dbcc74a1d85615353963a18c6a03826f7c8a7de"
+    },
+    {
+      "file": "tests/integration/ooo-transition-atomicity.test.ts",
+      "sha256": "098807654e7bd1d439ba2dedc7909aafe86381948baa4fabc6b96c468264c2e8"
+    },
+    {
+      "file": "tests/integration/ooo-value-store-board.test.ts",
+      "sha256": "2d8a03be25db49e3d463ceee0089c11473117c1815fbe4d662454be3b7c57f14"
+    },
+    {
+      "file": "tests/integration/ooo-verification.test.ts",
+      "sha256": "3aeee4d924ba49ec535cf0a65d18598a205f2e160209e3d36c061cf30e216fa9"
+    },
+    {
+      "file": "tests/integration/ooo-work-shape.test.ts",
+      "sha256": "308cfc0cd76d58a090370200530b331c82614e6d5a9bdd49a921915f44ba874b"
+    },
+    {
+      "file": "tests/integration/summary-drain.test.ts",
+      "sha256": "6d1574742aa1bb94b4b338d6080b20a4e8f4f8b3c25be93b016c4f33d2a8a621"
+    },
+    {
+      "file": "tests/integration/task-refinement-declaration.test.ts",
+      "sha256": "65e7dee0580b1173354d981afd47f215c9422d8a10e3868c5698a6c1f5f67844"
+    },
+    {
+      "file": "tests/integration/task-semantics-cases.test.ts",
+      "sha256": "18a93bbb8e5a17f80d1e5a46b6686e1bcfa321bfec14d4a88cf2e9056ce7d168"
+    },
+    {
+      "file": "tests/integration/task-semantics-model.test.ts",
+      "sha256": "14e0ec83de06cfd462d65f05d6efb5967dfaaf5af7732a5fa2329c1b625406f7"
+    },
+    {
+      "file": "tests/integration/task-semantics.test.ts",
+      "sha256": "0461fb503c38fe3c2848fb6f53454e15097e12d60b94e9feeef7d8c37cd604e7"
+    },
+    {
+      "file": "tests/integration/tool-contract.test.ts",
+      "sha256": "eb76ea17a5ce14401fdb887e5a3153dd64a152363cb721e1adafbd4437a99e5f"
+    },
+    {
+      "file": "tests/integration/work-identity.test.ts",
+      "sha256": "407310e24ea248830b7f4339f233054a7176cb91fa9773798464de26e4a6c33c"
+    },
+    {
+      "file": "tests/integration/workbuddy-hook.test.ts",
+      "sha256": "93d7fdc97b763fcd24404ef3816d4d7b08208e9876c0125a9cbdd99a1acd5040"
+    },
+    {
+      "file": "tests/integration/working-state-client.test.ts",
+      "sha256": "7c3ccaced27db84bb4e88c6f3fde0f59e2cd8a175237f5880faa4195d5e715f8"
+    },
+    {
+      "file": "tests/integration/working-state-input.test.ts",
+      "sha256": "52633a78b7b80ceba0253aa080f70e5c8d7ccc3a1f9477dcf2dbed023087df57"
+    },
+    {
+      "file": "tests/lab/relevance-model.test.ts",
+      "sha256": "bf22f9f9fed1e761fa650a424b58092b8617bb91c40e252422087323265bf1b1"
+    },
+    {
+      "file": "tests/prompts/load.test.ts",
+      "sha256": "524ddbe3f1620198880febbcf5965fb00ea2eaeef7946beb13054808259c35fb"
+    },
+    {
+      "file": "tests/rcp/boundary.test.ts",
+      "sha256": "d4ebed8bbdd62b0eb1170db0624e8b8aae75e663898c234ad0e844d1e66d2910"
+    },
+    {
+      "file": "tests/rcp/cli.test.ts",
+      "sha256": "848fee931f933772841d3728b584b8a8e984331088f4132950d5d29747ccc822"
+    },
+    {
+      "file": "tests/rcp/contract.test.ts",
+      "sha256": "3e1f361b7d91cc60e90fbbdf4bca31e23f11d2130f38691b909da956ed8a3119"
+    },
+    {
+      "file": "tests/rcp/receipts.test.ts",
+      "sha256": "7e54bc02bf14814da9e6ffabd72842a4f7dc4885dd983655c330aeee8ee0d5a6"
+    },
+    {
+      "file": "tests/rcp/reconcile.test.ts",
+      "sha256": "ec023fd7c46fc1d03ef9ba0bd82bfea779884cc49c1dba7587b66180e3f8c43b"
+    },
+    {
+      "file": "tests/rcp/repository.test.ts",
+      "sha256": "b3acfa65b5a80f370ab5c7bd07a8d0d9bf54c9ca96aea6c8daad3ea2f6bdc22d"
+    },
+    {
+      "file": "tests/rcp/session-feedback.test.ts",
+      "sha256": "3c6bad6e37acc2a3b60fcdf9d79de2922e721d26ed4b3e8bc112d72a30002f81"
+    },
+    {
+      "file": "tests/rcp/trusted.test.ts",
+      "sha256": "b3b17836cdca26bab51165ae549f673ef1884f1393129bb02f68cbf1e7528237"
+    },
+    {
+      "file": "tests/scripts/pi-paths.test.ts",
+      "sha256": "3a9b0e9ff678ff0a0c74dec72be0e747ad2de6fbcca7ae946941943b673fb813"
+    },
+    {
+      "file": "tests/scripts/pi-timeout.test.ts",
+      "sha256": "cb5824d49e96e2de08b231f2a4f2c551f2ad47bda5dd0d38204abd35f219a744"
+    },
+    {
+      "file": "tests/scripts/pi-turns.test.ts",
+      "sha256": "9ad73955e2ff26499e0795ad58464013ed5e0c3c1481b04389d78bd271feb661"
+    },
+    {
+      "file": "tests/scripts/tutorial-first-recall.test.ts",
+      "sha256": "1cb7f01d4f780bebfb36cd4299259a78b645c79e5c63fc48eeb4db482a9df245"
+    },
+    {
+      "file": "tests/scripts/verification-impact-probe.test.ts",
+      "sha256": "19b5b9a9cb5995d051a0eb61173b0db96b1e0618401e673f3b72d746588c5ff8"
+    },
+    {
+      "file": "tests/skills/nmg-memory.test.ts",
+      "sha256": "a1d7c1654b76bd4c333009d0b30321b86f01d972afa4e5ab22ae35b82f657e03"
+    },
+    {
+      "file": "tests/skills/nmg-skill-sync.test.ts",
+      "sha256": "0a0dc4d4c87abe7a425a0404f0bdeaf7f99ea5285a4e891d68bd7bb02955e84b"
+    },
+    {
+      "file": "tests/support/cordis-adapter.test.ts",
+      "sha256": "4c795d307595f215150ea174e4f1778f48d98c395627f9807f0163f6b8c1ea29"
+    },
+    {
+      "file": "tests/support/task-board-behavior.test.ts",
+      "sha256": "32ba71021ebbe89f53d33b7f6b095cb83237f0dc7a0d405ef9072d6f6b8431de"
+    },
+    {
+      "file": "tests/support/test-env-guard.test.ts",
+      "sha256": "7d810e0435325232ed99cb2fcb2106dbe8364c88bd6249a0a89dd278ac53662c"
+    },
+    {
+      "file": "tests/support/test-runtime.test.ts",
+      "sha256": "6f6142a555f6c411dec21e42c64c204f3fdaa99d2879f904b2cbc7826bff0896"
+    },
+    {
+      "file": "tests/tools/agent-verify.test.ts",
+      "sha256": "361f97f3d479f1057e1d64599fd75965181d738863cca6fd3725b3ddf17107aa"
+    },
+    {
+      "file": "tests/tools/ci-status-snapshot.test.ts",
+      "sha256": "30278580396faf986c2811ea95c00ba8ad5df948ecc5c884911fc4e934d1de65"
+    },
+    {
+      "file": "tests/tools/ci-uncovered-tests.test.ts",
+      "sha256": "8248b7dd020820af51895ece5666e85e4d670961d0921a2ec2ea1c3464ab7aca"
+    },
+    {
+      "file": "tests/tools/complexity-gate-base.test.ts",
+      "sha256": "61a5e81d5175d4866ec4bcd7014c3504ffa02d9ef9c3b578ca48580220f5eafc"
+    },
+    {
+      "file": "tests/tools/complexity-gate.test.ts",
+      "sha256": "c654293fd0bfc884bab88e4e769c77ef11542349e91bd68b79df547b3e2ab192"
+    },
+    {
+      "file": "tests/tools/eslint-config-coverage.test.ts",
+      "sha256": "96ecbd2c6b46dccd27b9afa7e3b227183aeb7c88e12f9ad28160281c73a40c9b"
+    },
+    {
+      "file": "tests/tools/glossary-check.test.ts",
+      "sha256": "d7f7e068fec66b2ab8b517c0da98ec7f4df4186831364579dc94ae65627f9283"
+    },
+    {
+      "file": "tests/tools/mutation-anchor.test.ts",
+      "sha256": "4c9bcc38d72a8af6c0238a965877793d8707967e5a31a10ce3d9422156cb7de3"
+    },
+    {
+      "file": "tests/tools/mutation-lock.test.ts",
+      "sha256": "928a292251f7afe1636b17710515eb94d688841bc12aa159f87a417e46e6fac7"
+    },
+    {
+      "file": "tests/tools/narrow-verify.test.ts",
+      "sha256": "4512795be65ad6c40bcd2c5b3f07f236876d0842278e622d5998c38c0c4a6030"
+    },
+    {
+      "file": "tests/tools/parts.test.ts",
+      "sha256": "e8255466167853bbc3bc9c44a43676d7649c8f5f53127028c34523663918ce23"
+    },
+    {
+      "file": "tests/tools/policy-word-check.test.ts",
+      "sha256": "d24d3b57eae69632628c9a0031a4fb583f4e2b8e0b76524ac92e6fe4a6f73092"
+    },
+    {
+      "file": "tests/tools/recall-instance.test.ts",
+      "sha256": "cf328d1370467e9dfedb000473f8f24f56167bf27e27115ef170a64fa61398b2"
+    },
+    {
+      "file": "tests/tools/recall-probe.test.ts",
+      "sha256": "5b72e7092655954e1cabd4607c67b668dafa6401a0c7cd2efe8ef907ed6a98cd"
+    },
+    {
+      "file": "tests/tools/relevance-certify.test.ts",
+      "sha256": "feca806e364d5621fc4de99dc07e152f6355d1864921b810601c28916ed421f9"
+    },
+    {
+      "file": "tests/tools/relevance-training-data.test.ts",
+      "sha256": "c21c569559f3d707f7111b60be8e9c6220344886a7aa934d88fa28e28b299b19"
+    },
+    {
+      "file": "tests/tools/repo-context.test.ts",
+      "sha256": "2598513983b3e683dc47a501d058373e4e538665bb3cdc248f071e54453e9c9a"
+    },
+    {
+      "file": "tests/tools/rtm-check.test.ts",
+      "sha256": "7912c1fd6f1c7cff519e0aee5f9ab4b690e631f2fe0dca80e32205420326ad02"
+    },
+    {
+      "file": "tests/tools/test-groups.test.ts",
+      "sha256": "022e7fa38a372d394cf70c784a413cf8b642fefa9081413968cae64f1999254b"
+    }
+  ],
+  "methods": [
+    {
+      "key": "function:mkdtempSync",
+      "sites": 273,
+      "files": 90,
+      "examples": [
+        {
+          "key": "function:mkdtempSync",
+          "receiver": "",
+          "file": "tests/cli/archive-shutdown.test.ts",
+          "line": 56,
+          "test": "shutdown with successful archive: daemon fully exits, nothing staged",
+          "argumentShapes": ["CallExpression"]
+        },
+        {
+          "key": "function:mkdtempSync",
+          "receiver": "",
+          "file": "tests/cli/archive-staging.test.ts",
+          "line": 17,
+          "test": "<helper or module>",
+          "argumentShapes": ["CallExpression"]
+        },
+        {
+          "key": "function:mkdtempSync",
+          "receiver": "",
+          "file": "tests/cli/compound-reference.test.ts",
+          "line": 29,
+          "test": "<helper or module>",
+          "argumentShapes": ["CallExpression"]
+        },
+        {
+          "key": "function:mkdtempSync",
+          "receiver": "",
+          "file": "tests/cli/context-online-rpc.test.ts",
+          "line": 15,
+          "test": "recordFeedback is exposed on the RPC catalog",
+          "argumentShapes": ["CallExpression"]
+        }
+      ],
+      "filePaths": [
+        "tests/cli/archive-shutdown.test.ts",
+        "tests/cli/archive-staging.test.ts",
+        "tests/cli/compound-reference.test.ts",
+        "tests/cli/context-online-rpc.test.ts",
+        "tests/cli/daemon-client.test.ts",
+        "tests/cli/graph-data.test.ts",
+        "tests/cli/graph-render.test.ts",
+        "tests/cli/http.test.ts",
+        "tests/cli/inspect-data.test.ts",
+        "tests/cli/process.test.ts",
+        "tests/cli/service-drain.test.ts",
+        "tests/cli/service.test.ts",
+        "tests/cli/task-run-surface.test.ts",
+        "tests/cli/working-state.test.ts",
+        "tests/core/analogy.test.ts",
+        "tests/core/ann.test.ts",
+        "tests/core/community.test.ts",
+        "tests/core/context-journal.test.ts",
+        "tests/core/controller-protocol.test.ts",
+        "tests/core/controller-runtime.test.ts",
+        "tests/core/embedding-sync.test.ts",
+        "tests/core/graph-cycles.test.ts",
+        "tests/core/memory-chains.test.ts",
+        "tests/core/multi-hop-path.test.ts",
+        "tests/core/perf.test.ts",
+        "tests/core/qpp.test.ts",
+        "tests/core/relevance-model.test.ts",
+        "tests/core/stg-isolated.test.ts",
+        "tests/core/stg-v2.test.ts",
+        "tests/core/store-readonly-open.test.ts",
+        "tests/core/store-transaction-port.test.ts",
+        "tests/core/store.test.ts",
+        "tests/core/store/claim-posterior.test.ts",
+        "tests/core/store/current-value-window.test.ts",
+        "tests/core/store/duplicates.test.ts",
+        "tests/core/store/embedding-index.test.ts",
+        "tests/core/store/feedback.test.ts",
+        "tests/core/store/graph.test.ts",
+        "tests/core/store/leaf-summaries.test.ts",
+        "tests/core/store/node-summaries.test.ts",
+        "tests/core/store/retention.test.ts",
+        "tests/core/store/retrieval.test.ts",
+        "tests/core/store/schema.test.ts",
+        "tests/core/store/task-runs.test.ts",
+        "tests/core/store/writes.test.ts",
+        "tests/core/task-board-deliverable.test.ts",
+        "tests/core/task-board-retention.test.ts",
+        "tests/core/task-board.test.ts",
+        "tests/core/tesserae-simhash.test.ts",
+        "tests/core/tesserae.test.ts",
+        "tests/docs/verify-docs.test.ts",
+        "tests/extensions/nmg/context-router-online.test.ts",
+        "tests/extensions/nmg/index.test.ts",
+        "tests/extensions/nmg/reasoning-workspace.test.ts",
+        "tests/integration/claude-mcp.test.ts",
+        "tests/integration/controller-channel.test.ts",
+        "tests/integration/evidence.test.ts",
+        "tests/integration/kimi-hook.test.ts",
+        "tests/integration/leaf-summarizer.test.ts",
+        "tests/integration/ooo-advisers.test.ts",
+        "tests/integration/ooo-dispatch.test.ts",
+        "tests/integration/ooo-evidence-drivers.test.ts",
+        "tests/integration/ooo-external-window.test.ts",
+        "tests/integration/ooo-managed-adopt.test.ts",
+        "tests/integration/ooo-managed-fence.test.ts",
+        "tests/integration/ooo-managed-write.test.ts",
+        "tests/integration/ooo-ordinary-failure.test.ts",
+        "tests/integration/ooo-ordinary-handoff.test.ts",
+        "tests/integration/ooo-read-paths-agree.test.ts",
+        "tests/integration/ooo-round-query.test.ts",
+        "tests/integration/ooo-run-namespace.test.ts",
+        "tests/integration/ooo-session-facts.test.ts",
+        "tests/integration/ooo-store-run-board.test.ts",
+        "tests/integration/ooo-task-tables.test.ts",
+        "tests/integration/ooo-transition-atomicity.test.ts",
+        "tests/integration/workbuddy-hook.test.ts",
+        "tests/lab/relevance-model.test.ts",
+        "tests/rcp/trusted.test.ts",
+        "tests/scripts/verification-impact-probe.test.ts",
+        "tests/skills/nmg-skill-sync.test.ts",
+        "tests/tools/agent-verify.test.ts",
+        "tests/tools/ci-uncovered-tests.test.ts",
+        "tests/tools/complexity-gate-base.test.ts",
+        "tests/tools/glossary-check.test.ts",
+        "tests/tools/mutation-lock.test.ts",
+        "tests/tools/parts.test.ts",
+        "tests/tools/recall-instance.test.ts",
+        "tests/tools/relevance-training-data.test.ts",
+        "tests/tools/repo-context.test.ts",
+        "tests/tools/rtm-check.test.ts"
+      ]
+    },
+    {
+      "key": "function:rmSync",
+      "sites": 165,
+      "files": 78,
+      "examples": [
+        {
+          "key": "function:rmSync",
+          "receiver": "",
+          "file": "tests/cli/archive-shutdown.test.ts",
+          "line": 78,
+          "test": "shutdown with successful archive: daemon fully exits, nothing staged",
+          "argumentShapes": ["Identifier", ["force", "recursive"]]
+        },
+        {
+          "key": "function:rmSync",
+          "receiver": "",
+          "file": "tests/cli/daemon-client.test.ts",
+          "line": 48,
+          "test": "the daemon build check names an unbuilt checkout and the command that fixes it",
+          "argumentShapes": ["Identifier", ["force", "maxRetries", "recursive", "retryDelay"]]
+        },
+        {
+          "key": "function:rmSync",
+          "receiver": "",
+          "file": "tests/cli/graph-data.test.ts",
+          "line": 139,
+          "test": "graph projection reads nodes, memories, and all three edge layers",
+          "argumentShapes": ["Identifier", ["force", "recursive"]]
+        },
+        {
+          "key": "function:rmSync",
+          "receiver": "",
+          "file": "tests/cli/graph-render.test.ts",
+          "line": 89,
+          "test": "exportGraphHtml writes a self-contained page from a database",
+          "argumentShapes": ["Identifier", ["force", "recursive"]]
+        }
+      ],
+      "filePaths": [
+        "tests/cli/archive-shutdown.test.ts",
+        "tests/cli/daemon-client.test.ts",
+        "tests/cli/graph-data.test.ts",
+        "tests/cli/graph-render.test.ts",
+        "tests/cli/http.test.ts",
+        "tests/cli/inspect-data.test.ts",
+        "tests/cli/working-state.test.ts",
+        "tests/core/analogy.test.ts",
+        "tests/core/ann.test.ts",
+        "tests/core/community.test.ts",
+        "tests/core/context-journal.test.ts",
+        "tests/core/controller-protocol.test.ts",
+        "tests/core/controller-runtime.test.ts",
+        "tests/core/embedding-sync.test.ts",
+        "tests/core/graph-cycles.test.ts",
+        "tests/core/memory-chains.test.ts",
+        "tests/core/multi-hop-path.test.ts",
+        "tests/core/perf.test.ts",
+        "tests/core/qpp.test.ts",
+        "tests/core/relevance-model.test.ts",
+        "tests/core/stg-isolated.test.ts",
+        "tests/core/stg-v2.test.ts",
+        "tests/core/store-readonly-open.test.ts",
+        "tests/core/store-transaction-port.test.ts",
+        "tests/core/store.test.ts",
+        "tests/core/store/claim-posterior.test.ts",
+        "tests/core/store/current-value-window.test.ts",
+        "tests/core/store/duplicates.test.ts",
+        "tests/core/store/embedding-index.test.ts",
+        "tests/core/store/feedback.test.ts",
+        "tests/core/store/graph.test.ts",
+        "tests/core/store/leaf-summaries.test.ts",
+        "tests/core/store/node-summaries.test.ts",
+        "tests/core/store/retention.test.ts",
+        "tests/core/store/retrieval.test.ts",
+        "tests/core/store/schema.test.ts",
+        "tests/core/store/task-runs.test.ts",
+        "tests/core/store/writes.test.ts",
+        "tests/core/task-board-deliverable.test.ts",
+        "tests/core/task-board-retention.test.ts",
+        "tests/core/task-board.test.ts",
+        "tests/core/tesserae-simhash.test.ts",
+        "tests/core/tesserae.test.ts",
+        "tests/docs/verify-docs.test.ts",
+        "tests/extensions/nmg/context-router-online.test.ts",
+        "tests/extensions/nmg/index.test.ts",
+        "tests/extensions/nmg/reasoning-workspace.test.ts",
+        "tests/integration/claude-mcp.test.ts",
+        "tests/integration/controller-channel.test.ts",
+        "tests/integration/evidence.test.ts",
+        "tests/integration/kimi-hook.test.ts",
+        "tests/integration/leaf-summarizer.test.ts",
+        "tests/integration/ooo-dispatch.test.ts",
+        "tests/integration/ooo-external-window.test.ts",
+        "tests/integration/ooo-managed-adopt.test.ts",
+        "tests/integration/ooo-managed-fence.test.ts",
+        "tests/integration/ooo-managed-write.test.ts",
+        "tests/integration/ooo-read-paths-agree.test.ts",
+        "tests/integration/ooo-round-query.test.ts",
+        "tests/integration/ooo-run-namespace.test.ts",
+        "tests/integration/ooo-session-facts.test.ts",
+        "tests/integration/ooo-store-run-board.test.ts",
+        "tests/integration/ooo-task-tables.test.ts",
+        "tests/integration/ooo-transition-atomicity.test.ts",
+        "tests/integration/workbuddy-hook.test.ts",
+        "tests/lab/relevance-model.test.ts",
+        "tests/rcp/repository.test.ts",
+        "tests/rcp/session-feedback.test.ts",
+        "tests/rcp/trusted.test.ts",
+        "tests/skills/nmg-skill-sync.test.ts",
+        "tests/tools/agent-verify.test.ts",
+        "tests/tools/ci-uncovered-tests.test.ts",
+        "tests/tools/complexity-gate-base.test.ts",
+        "tests/tools/glossary-check.test.ts",
+        "tests/tools/mutation-lock.test.ts",
+        "tests/tools/recall-instance.test.ts",
+        "tests/tools/relevance-training-data.test.ts",
+        "tests/tools/rtm-check.test.ts"
+      ]
+    },
+    {
+      "key": "method:close",
+      "sites": 312,
+      "files": 73,
+      "examples": [
+        {
+          "key": "method:close",
+          "receiver": "service",
+          "file": "tests/cli/compound-reference.test.ts",
+          "line": 34,
+          "test": "<helper or module>",
+          "argumentShapes": []
+        },
+        {
+          "key": "method:close",
+          "receiver": "service",
+          "file": "tests/cli/context-online-rpc.test.ts",
+          "line": 25,
+          "test": "recordFeedback is exposed on the RPC catalog",
+          "argumentShapes": []
+        },
+        {
+          "key": "method:close",
+          "receiver": "writable",
+          "file": "tests/cli/graph-data.test.ts",
+          "line": 91,
+          "test": "graph projection reads nodes, memories, and all three edge layers",
+          "argumentShapes": []
+        },
+        {
+          "key": "method:close",
+          "receiver": "service",
+          "file": "tests/cli/graph-render.test.ts",
+          "line": 88,
+          "test": "exportGraphHtml writes a self-contained page from a database",
+          "argumentShapes": []
+        }
+      ],
+      "filePaths": [
+        "tests/cli/compound-reference.test.ts",
+        "tests/cli/context-online-rpc.test.ts",
+        "tests/cli/graph-data.test.ts",
+        "tests/cli/graph-render.test.ts",
+        "tests/cli/http.test.ts",
+        "tests/cli/inspect-data.test.ts",
+        "tests/cli/service-drain.test.ts",
+        "tests/cli/service.test.ts",
+        "tests/cli/task-run-surface.test.ts",
+        "tests/cli/working-state.test.ts",
+        "tests/core/analogy.test.ts",
+        "tests/core/community.test.ts",
+        "tests/core/context-journal.test.ts",
+        "tests/core/controller-protocol.test.ts",
+        "tests/core/controller-runtime.test.ts",
+        "tests/core/embedding-provider.test.ts",
+        "tests/core/embedding-sync.test.ts",
+        "tests/core/graph-cycles.test.ts",
+        "tests/core/memory-chains.test.ts",
+        "tests/core/multi-hop-path.test.ts",
+        "tests/core/openai-embedding.test.ts",
+        "tests/core/perf.test.ts",
+        "tests/core/qpp.test.ts",
+        "tests/core/stg-isolated.test.ts",
+        "tests/core/stg-v2.test.ts",
+        "tests/core/store-readonly-open.test.ts",
+        "tests/core/store-transaction-port.test.ts",
+        "tests/core/store.test.ts",
+        "tests/core/store/claim-posterior.test.ts",
+        "tests/core/store/current-value-window.test.ts",
+        "tests/core/store/duplicates.test.ts",
+        "tests/core/store/embedding-index.test.ts",
+        "tests/core/store/feedback.test.ts",
+        "tests/core/store/graph.test.ts",
+        "tests/core/store/leaf-summaries.test.ts",
+        "tests/core/store/maintenance.test.ts",
+        "tests/core/store/node-summaries.test.ts",
+        "tests/core/store/retention.test.ts",
+        "tests/core/store/retrieval.test.ts",
+        "tests/core/store/schema.test.ts",
+        "tests/core/store/task-runs.test.ts",
+        "tests/core/store/writes.test.ts",
+        "tests/core/task-board-attempt-boundaries.test.ts",
+        "tests/core/task-board-deliverable.test.ts",
+        "tests/core/task-board-retention.test.ts",
+        "tests/core/task-board.test.ts",
+        "tests/core/tesserae-simhash.test.ts",
+        "tests/core/tesserae.test.ts",
+        "tests/extensions/nmg/index.test.ts",
+        "tests/integration/claude-mcp.test.ts",
+        "tests/integration/controller-channel.test.ts",
+        "tests/integration/evidence.test.ts",
+        "tests/integration/leaf-summarizer.test.ts",
+        "tests/integration/lexical-budget.test.ts",
+        "tests/integration/memory-reference.test.ts",
+        "tests/integration/ooo-dispatch.test.ts",
+        "tests/integration/ooo-evidence-drivers.test.ts",
+        "tests/integration/ooo-external-window.test.ts",
+        "tests/integration/ooo-managed-adopt.test.ts",
+        "tests/integration/ooo-managed-fence.test.ts",
+        "tests/integration/ooo-managed-write.test.ts",
+        "tests/integration/ooo-ordinary-failure.test.ts",
+        "tests/integration/ooo-ordinary-handoff.test.ts",
+        "tests/integration/ooo-post-commit-notification.test.ts",
+        "tests/integration/ooo-read-paths-agree.test.ts",
+        "tests/integration/ooo-round-query.test.ts",
+        "tests/integration/ooo-run-namespace.test.ts",
+        "tests/integration/ooo-session-facts.test.ts",
+        "tests/integration/ooo-store-run-board.test.ts",
+        "tests/integration/ooo-task-tables.test.ts",
+        "tests/integration/ooo-transition-atomicity.test.ts",
+        "tests/integration/ooo-value-store-board.test.ts",
+        "tests/support/task-board-behavior.test.ts"
+      ]
+    },
+    {
+      "key": "method:remember",
+      "sites": 527,
+      "files": 31,
+      "examples": [
+        {
+          "key": "method:remember",
+          "receiver": "seed",
+          "file": "tests/cli/service.test.ts",
+          "line": 1698,
+          "test": "service does not reschedule maintenance for superseded access pressure",
+          "argumentShapes": [["memoryType", "nodeName", "stateKey", "statement"]]
+        },
+        {
+          "key": "method:remember",
+          "receiver": "store",
+          "file": "tests/core/analogy.test.ts",
+          "line": 20,
+          "test": "<helper or module>",
+          "argumentShapes": [
+            ["nodeKind", "nodeName", "nodeSummary", "sessionId", "sourceActor", "statement"]
+          ]
+        },
+        {
+          "key": "method:remember",
+          "receiver": "store",
+          "file": "tests/core/community.test.ts",
+          "line": 20,
+          "test": "<helper or module>",
+          "argumentShapes": [
+            ["nodeKind", "nodeName", "nodeSummary", "sessionId", "sourceActor", "statement"]
+          ]
+        },
+        {
+          "key": "method:remember",
+          "receiver": "store",
+          "file": "tests/core/controller-protocol.test.ts",
+          "line": 26,
+          "test": "trace protocol joins STG, LTG and Active Graph into fixed bounded features",
+          "argumentShapes": [
+            ["memoryType", "nodeName", "residence", "sessionId", "statement", "tier", "truthStatus"]
+          ]
+        }
+      ],
+      "filePaths": [
+        "tests/cli/service.test.ts",
+        "tests/core/analogy.test.ts",
+        "tests/core/community.test.ts",
+        "tests/core/controller-protocol.test.ts",
+        "tests/core/controller-runtime.test.ts",
+        "tests/core/embedding-sync.test.ts",
+        "tests/core/graph-cycles.test.ts",
+        "tests/core/memory-chains.test.ts",
+        "tests/core/multi-hop-path.test.ts",
+        "tests/core/perf.test.ts",
+        "tests/core/qpp.test.ts",
+        "tests/core/stg-isolated.test.ts",
+        "tests/core/stg-v2.test.ts",
+        "tests/core/store.test.ts",
+        "tests/core/store/claim-posterior.test.ts",
+        "tests/core/store/current-value-window.test.ts",
+        "tests/core/store/duplicates.test.ts",
+        "tests/core/store/feedback.test.ts",
+        "tests/core/store/graph.test.ts",
+        "tests/core/store/leaf-summaries.test.ts",
+        "tests/core/store/maintenance.test.ts",
+        "tests/core/store/node-summaries.test.ts",
+        "tests/core/store/retention.test.ts",
+        "tests/core/store/retrieval.test.ts",
+        "tests/core/store/writes.test.ts",
+        "tests/core/tesserae.test.ts",
+        "tests/extensions/nmg/index.test.ts",
+        "tests/integration/claude-mcp.test.ts",
+        "tests/integration/controller-channel.test.ts",
+        "tests/integration/leaf-summarizer.test.ts",
+        "tests/integration/lexical-budget.test.ts"
+      ]
+    },
+    {
+      "key": "method:searchContext",
+      "sites": 143,
+      "files": 20,
+      "examples": [
+        {
+          "key": "method:searchContext",
+          "receiver": "store",
+          "file": "tests/cli/compound-reference.test.ts",
+          "line": 295,
+          "test": "shared library helpers resolve a captured scope without a host-specific decoder",
+          "argumentShapes": ["StringLiteral", ["limit", "sessionId"]]
+        },
+        {
+          "key": "method:searchContext",
+          "receiver": "store",
+          "file": "tests/core/controller-protocol.test.ts",
+          "line": 48,
+          "test": "trace protocol joins STG, LTG and Active Graph into fixed bounded features",
+          "argumentShapes": [
+            "StringLiteral",
+            ["activeGraphBudget", "graphHops", "limit", "sessionId"]
+          ]
+        },
+        {
+          "key": "method:searchContext",
+          "receiver": "store",
+          "file": "tests/core/controller-runtime.test.ts",
+          "line": 22,
+          "test": "controller runtime learns from verified-evidence traces and persists exact state",
+          "argumentShapes": ["StringLiteral", ["limit"]]
+        },
+        {
+          "key": "method:searchContext",
+          "receiver": "store",
+          "file": "tests/core/memory-chains.test.ts",
+          "line": 168,
+          "test": "expandChains appends chain members after a hit (recall supplement, no re-rank)",
+          "argumentShapes": ["StringLiteral", ["expandChains", "limit", "sessionId"]]
+        }
+      ],
+      "filePaths": [
+        "tests/cli/compound-reference.test.ts",
+        "tests/core/controller-protocol.test.ts",
+        "tests/core/controller-runtime.test.ts",
+        "tests/core/memory-chains.test.ts",
+        "tests/core/multi-hop-path.test.ts",
+        "tests/core/perf.test.ts",
+        "tests/core/qpp.test.ts",
+        "tests/core/stg-isolated.test.ts",
+        "tests/core/stg-v2.test.ts",
+        "tests/core/store.test.ts",
+        "tests/core/store/claim-posterior.test.ts",
+        "tests/core/store/duplicates.test.ts",
+        "tests/core/store/leaf-summaries.test.ts",
+        "tests/core/store/maintenance.test.ts",
+        "tests/core/store/node-summaries.test.ts",
+        "tests/core/store/retrieval.test.ts",
+        "tests/core/store/writes.test.ts",
+        "tests/extensions/nmg/index.test.ts",
+        "tests/integration/controller-channel.test.ts",
+        "tests/integration/memory-reference.test.ts"
+      ]
+    },
+    {
+      "key": "method:linkNodes",
+      "sites": 47,
+      "files": 9,
+      "examples": [
+        {
+          "key": "method:linkNodes",
+          "receiver": "store",
+          "file": "tests/core/analogy.test.ts",
+          "line": 62,
+          "test": "abstractSubgraph extracts all other pattern shapes from a mixed cluster",
+          "argumentShapes": [["sourceNodeId", "targetNodeId", "type"]]
+        },
+        {
+          "key": "method:linkNodes",
+          "receiver": "store",
+          "file": "tests/core/community.test.ts",
+          "line": 36,
+          "test": "detectCommunities finds weakly-connected components and drops isolates",
+          "argumentShapes": [["sourceNodeId", "targetNodeId", "type"]]
+        },
+        {
+          "key": "method:linkNodes",
+          "receiver": "store",
+          "file": "tests/core/controller-protocol.test.ts",
+          "line": 43,
+          "test": "trace protocol joins STG, LTG and Active Graph into fixed bounded features",
+          "argumentShapes": [["sourceNodeId", "targetNodeId", "type"]]
+        },
+        {
+          "key": "method:linkNodes",
+          "receiver": "store",
+          "file": "tests/core/graph-cycles.test.ts",
+          "line": 45,
+          "test": "detectGraphCycles finds a directed relation cycle",
+          "argumentShapes": [["sourceNodeId", "targetNodeId", "type"]]
+        }
+      ],
+      "filePaths": [
+        "tests/core/analogy.test.ts",
+        "tests/core/community.test.ts",
+        "tests/core/controller-protocol.test.ts",
+        "tests/core/graph-cycles.test.ts",
+        "tests/core/multi-hop-path.test.ts",
+        "tests/core/stg-v2.test.ts",
+        "tests/core/store.test.ts",
+        "tests/core/store/graph.test.ts",
+        "tests/core/store/retrieval.test.ts"
+      ]
+    },
+    {
+      "key": "method:rebuildLeafBlocks",
+      "sites": 30,
+      "files": 6,
+      "examples": [
+        {
+          "key": "method:rebuildLeafBlocks",
+          "receiver": "store",
+          "file": "tests/core/embedding-sync.test.ts",
+          "line": 129,
+          "test": "leaf embedding sync shares the lifecycle but writes leaf targets",
+          "argumentShapes": []
+        },
+        {
+          "key": "method:rebuildLeafBlocks",
+          "receiver": "store",
+          "file": "tests/core/store.test.ts",
+          "line": 109,
+          "test": "semantic searchContext preserves Active Graph budgets and tracing",
+          "argumentShapes": ["PropertyAccessExpression", "FirstLiteralToken"]
+        },
+        {
+          "key": "method:rebuildLeafBlocks",
+          "receiver": "store",
+          "file": "tests/core/store/leaf-summaries.test.ts",
+          "line": 38,
+          "test": "pendingLeafSummaries: empty until blocks are built, then one task per block",
+          "argumentShapes": []
+        },
+        {
+          "key": "method:rebuildLeafBlocks",
+          "receiver": "store",
+          "file": "tests/core/store/maintenance.test.ts",
+          "line": 914,
+          "test": "rebuildLeafBlocks: creates leaf blocks for a node",
+          "argumentShapes": ["PropertyAccessExpression"]
+        }
+      ],
+      "filePaths": [
+        "tests/core/embedding-sync.test.ts",
+        "tests/core/store.test.ts",
+        "tests/core/store/leaf-summaries.test.ts",
+        "tests/core/store/maintenance.test.ts",
+        "tests/core/store/node-summaries.test.ts",
+        "tests/integration/leaf-summarizer.test.ts"
+      ]
+    },
+    {
+      "key": "method:observe",
+      "sites": 25,
+      "files": 6,
+      "examples": [
+        {
+          "key": "method:observe",
+          "receiver": "runtime",
+          "file": "tests/core/controller-runtime.test.ts",
+          "line": 35,
+          "test": "controller runtime learns from verified-evidence traces and persists exact state",
+          "argumentShapes": ["Identifier", "Identifier"]
+        },
+        {
+          "key": "method:observe",
+          "receiver": "runtime",
+          "file": "tests/core/session-active-graph.test.ts",
+          "line": 35,
+          "test": "temporary observations stay hidden until projected and disappear on session release",
+          "argumentShapes": [["sessionId", "sourceId", "statement"]]
+        },
+        {
+          "key": "method:observe",
+          "receiver": "runtime",
+          "file": "tests/core/working-state.test.ts",
+          "line": 39,
+          "test": "invalid, secret and oversized replacements preserve the old item and other observations",
+          "argumentShapes": [["sessionId", "statement"]]
+        },
+        {
+          "key": "method:observe",
+          "receiver": "runtime",
+          "file": "tests/integration/agent-surface.test.ts",
+          "line": 65,
+          "test": "AG output exposes typed source binding without repeating a long header",
+          "argumentShapes": [["sessionId", "statement", "taskFrameId"]]
+        }
+      ],
+      "filePaths": [
+        "tests/core/controller-runtime.test.ts",
+        "tests/core/session-active-graph.test.ts",
+        "tests/core/working-state.test.ts",
+        "tests/integration/agent-surface.test.ts",
+        "tests/rcp/reconcile.test.ts",
+        "tests/rcp/session-feedback.test.ts"
+      ]
+    },
+    {
+      "key": "method:upsertExternalEmbeddings",
+      "sites": 9,
+      "files": 5,
+      "examples": [
+        {
+          "key": "method:upsertExternalEmbeddings",
+          "receiver": "store",
+          "file": "tests/core/qpp.test.ts",
+          "line": 539,
+          "test": "searchContextWithSecondPass: strong top-gap early-stops to 3 records",
+          "argumentShapes": ["StringLiteral", "ArrayLiteralExpression"]
+        },
+        {
+          "key": "method:upsertExternalEmbeddings",
+          "receiver": "store",
+          "file": "tests/core/store.test.ts",
+          "line": 951,
+          "test": "FTS5 reaches exact cold evidence outside the hot candidate window",
+          "argumentShapes": ["StringLiteral", "ArrayLiteralExpression"]
+        },
+        {
+          "key": "method:upsertExternalEmbeddings",
+          "receiver": "store",
+          "file": "tests/core/store/retention.test.ts",
+          "line": 28,
+          "test": "L4 removes LTG memory from retrieval while stable-ID access and restore remain available",
+          "argumentShapes": ["StringLiteral", "ArrayLiteralExpression"]
+        },
+        {
+          "key": "method:upsertExternalEmbeddings",
+          "receiver": "store",
+          "file": "tests/core/store/retrieval.test.ts",
+          "line": 226,
+          "test": "semantic retrieval does not apply the FTS5 tie rule",
+          "argumentShapes": ["StringLiteral", "ArrayLiteralExpression"]
+        }
+      ],
+      "filePaths": [
+        "tests/core/qpp.test.ts",
+        "tests/core/store.test.ts",
+        "tests/core/store/retention.test.ts",
+        "tests/core/store/retrieval.test.ts",
+        "tests/integration/lexical-budget.test.ts"
+      ]
+    },
+    {
+      "key": "method:createMemoryChain",
+      "sites": 35,
+      "files": 4,
+      "examples": [
+        {
+          "key": "method:createMemoryChain",
+          "receiver": "store",
+          "file": "tests/core/memory-chains.test.ts",
+          "line": 40,
+          "test": "createMemoryChain writes a typed, owned chain",
+          "argumentShapes": [["chainType", "ownerSessionId", "topic"]]
+        },
+        {
+          "key": "method:createMemoryChain",
+          "receiver": "ltg",
+          "file": "tests/core/stg-isolated.test.ts",
+          "line": 213,
+          "test": "STG/LTG projection preserves exact logical edges from both stores",
+          "argumentShapes": [["chainType", "topic"]]
+        },
+        {
+          "key": "method:createMemoryChain",
+          "receiver": "store",
+          "file": "tests/core/store/leaf-summaries.test.ts",
+          "line": 198,
+          "test": "leafBlockRouting: chain edges pull cross-block neighbors into the append",
+          "argumentShapes": [["chainType", "topic"]]
+        },
+        {
+          "key": "method:createMemoryChain",
+          "receiver": "store",
+          "file": "tests/integration/claude-mcp.test.ts",
+          "line": 196,
+          "test": "MCP adapter exposes shared logical-chain structure",
+          "argumentShapes": [["chainType", "topic"]]
+        }
+      ],
+      "filePaths": [
+        "tests/core/memory-chains.test.ts",
+        "tests/core/stg-isolated.test.ts",
+        "tests/core/store/leaf-summaries.test.ts",
+        "tests/integration/claude-mcp.test.ts"
+      ]
+    },
+    {
+      "key": "method:replaceWorkingState",
+      "sites": 29,
+      "files": 4,
+      "examples": [
+        {
+          "key": "method:replaceWorkingState",
+          "receiver": "runtime",
+          "file": "tests/core/working-state.test.ts",
+          "line": 14,
+          "test": "working state replaces one frame-local item, keeps exact text and does not disclose",
+          "argumentShapes": ["Identifier", "StringLiteral"]
+        },
+        {
+          "key": "method:replaceWorkingState",
+          "receiver": "runtime",
+          "file": "tests/extensions/nmg/working-state-display.test.ts",
+          "line": 59,
+          "test": "<helper or module>",
+          "argumentShapes": ["Identifier", "StringLiteral"]
+        },
+        {
+          "key": "method:replaceWorkingState",
+          "receiver": "runtime",
+          "file": "tests/extensions/nmg/working-state-input.test.ts",
+          "line": 14,
+          "test": "Pi selects state at each model call without editing mixed recall, tools or raw history",
+          "argumentShapes": ["Identifier", "StringLiteral"]
+        },
+        {
+          "key": "method:replaceWorkingState",
+          "receiver": "runtime",
+          "file": "tests/integration/working-state-input.test.ts",
+          "line": 13,
+          "test": "input selection replaces only owned state fragments with the current complete body",
+          "argumentShapes": ["Identifier", "StringLiteral"]
+        }
+      ],
+      "filePaths": [
+        "tests/core/working-state.test.ts",
+        "tests/extensions/nmg/working-state-display.test.ts",
+        "tests/extensions/nmg/working-state-input.test.ts",
+        "tests/integration/working-state-input.test.ts"
+      ]
+    },
+    {
+      "key": "method:addMemoryChainEdge",
+      "sites": 20,
+      "files": 4,
+      "examples": [
+        {
+          "key": "method:addMemoryChainEdge",
+          "receiver": "store",
+          "file": "tests/core/memory-chains.test.ts",
+          "line": 376,
+          "test": "exact get preserves logical chain memberships and edges for harness projection",
+          "argumentShapes": [["chainId", "sourceMemoryId", "targetMemoryId"]]
+        },
+        {
+          "key": "method:addMemoryChainEdge",
+          "receiver": "ltg",
+          "file": "tests/core/stg-isolated.test.ts",
+          "line": 215,
+          "test": "STG/LTG projection preserves exact logical edges from both stores",
+          "argumentShapes": [["chainId", "sourceMemoryId", "targetMemoryId"]]
+        },
+        {
+          "key": "method:addMemoryChainEdge",
+          "receiver": "store",
+          "file": "tests/core/store/leaf-summaries.test.ts",
+          "line": 199,
+          "test": "leafBlockRouting: chain edges pull cross-block neighbors into the append",
+          "argumentShapes": [["chainId", "sourceMemoryId", "targetMemoryId"]]
+        },
+        {
+          "key": "method:addMemoryChainEdge",
+          "receiver": "store",
+          "file": "tests/integration/claude-mcp.test.ts",
+          "line": 200,
+          "test": "MCP adapter exposes shared logical-chain structure",
+          "argumentShapes": [["chainId", "sourceMemoryId", "targetMemoryId"]]
+        }
+      ],
+      "filePaths": [
+        "tests/core/memory-chains.test.ts",
+        "tests/core/stg-isolated.test.ts",
+        "tests/core/store/leaf-summaries.test.ts",
+        "tests/integration/claude-mcp.test.ts"
+      ]
+    },
+    {
+      "key": "method:bindWorkingState",
+      "sites": 16,
+      "files": 4,
+      "examples": [
+        {
+          "key": "method:bindWorkingState",
+          "receiver": "runtime",
+          "file": "tests/core/working-state.test.ts",
+          "line": 13,
+          "test": "working state replaces one frame-local item, keeps exact text and does not disclose",
+          "argumentShapes": ["StringLiteral"]
+        },
+        {
+          "key": "method:bindWorkingState",
+          "receiver": "runtime",
+          "file": "tests/extensions/nmg/working-state-display.test.ts",
+          "line": 58,
+          "test": "<helper or module>",
+          "argumentShapes": ["StringLiteral"]
+        },
+        {
+          "key": "method:bindWorkingState",
+          "receiver": "runtime",
+          "file": "tests/extensions/nmg/working-state-input.test.ts",
+          "line": 13,
+          "test": "Pi selects state at each model call without editing mixed recall, tools or raw history",
+          "argumentShapes": ["StringLiteral"]
+        },
+        {
+          "key": "method:bindWorkingState",
+          "receiver": "runtime",
+          "file": "tests/integration/working-state-input.test.ts",
+          "line": 12,
+          "test": "input selection replaces only owned state fragments with the current complete body",
+          "argumentShapes": ["StringLiteral"]
+        }
+      ],
+      "filePaths": [
+        "tests/core/working-state.test.ts",
+        "tests/extensions/nmg/working-state-display.test.ts",
+        "tests/extensions/nmg/working-state-input.test.ts",
+        "tests/integration/working-state-input.test.ts"
+      ]
+    },
+    {
+      "key": "method:activateTemporaryProjection",
+      "sites": 14,
+      "files": 4,
+      "examples": [
+        {
+          "key": "method:activateTemporaryProjection",
+          "receiver": "runtime",
+          "file": "tests/core/session-active-graph.test.ts",
+          "line": 46,
+          "test": "temporary observations stay hidden until projected and disappear on session release",
+          "argumentShapes": ["StringLiteral"]
+        },
+        {
+          "key": "method:activateTemporaryProjection",
+          "receiver": "runtime",
+          "file": "tests/core/working-state.test.ts",
+          "line": 54,
+          "test": "invalid, secret and oversized replacements preserve the old item and other observations",
+          "argumentShapes": ["StringLiteral"]
+        },
+        {
+          "key": "method:activateTemporaryProjection",
+          "receiver": "runtime",
+          "file": "tests/integration/agent-surface.test.ts",
+          "line": 66,
+          "test": "AG output exposes typed source binding without repeating a long header",
+          "argumentShapes": ["StringLiteral"]
+        },
+        {
+          "key": "method:activateTemporaryProjection",
+          "receiver": "f.runtime",
+          "file": "tests/rcp/session-feedback.test.ts",
+          "line": 71,
+          "test": "real failing verification feeds bounded, attributed feedback into only its target AG",
+          "argumentShapes": ["StringLiteral"]
+        }
+      ],
+      "filePaths": [
+        "tests/core/session-active-graph.test.ts",
+        "tests/core/working-state.test.ts",
+        "tests/integration/agent-surface.test.ts",
+        "tests/rcp/session-feedback.test.ts"
+      ]
+    },
+    {
+      "key": "method:applySupersession",
+      "sites": 22,
+      "files": 3,
+      "examples": [
+        {
+          "key": "method:applySupersession",
+          "receiver": "store",
+          "file": "tests/core/analogy.test.ts",
+          "line": 50,
+          "test": "abstractSubgraph extracts EVOLUTION from a supersede chain",
+          "argumentShapes": [["newMemoryId", "supersededMemoryId"]]
+        },
+        {
+          "key": "method:applySupersession",
+          "receiver": "store",
+          "file": "tests/core/graph-cycles.test.ts",
+          "line": 182,
+          "test": "applySupersession rejects writes that would create a supersede cycle",
+          "argumentShapes": [["newMemoryId", "supersededMemoryId"]]
+        },
+        {
+          "key": "method:applySupersession",
+          "receiver": "store",
+          "file": "tests/core/store/duplicates.test.ts",
+          "line": 96,
+          "test": "scope write index preserves duplicate and supersession candidates",
+          "argumentShapes": [["newMemoryId", "supersededMemoryId"]]
+        }
+      ],
+      "filePaths": [
+        "tests/core/analogy.test.ts",
+        "tests/core/graph-cycles.test.ts",
+        "tests/core/store/duplicates.test.ts"
+      ]
+    },
+    {
+      "key": "method:addMemoryToChain",
+      "sites": 25,
+      "files": 2,
+      "examples": [
+        {
+          "key": "method:addMemoryToChain",
+          "receiver": "store",
+          "file": "tests/core/memory-chains.test.ts",
+          "line": 64,
+          "test": "addMemoryToChain keeps ordered membership and getMemoryChain pulls the whole chain",
+          "argumentShapes": [["chainId", "memoryId", "note", "position"]]
+        },
+        {
+          "key": "method:addMemoryToChain",
+          "receiver": "store",
+          "file": "tests/core/store/leaf-summaries.test.ts",
+          "line": 238,
+          "test": "leafBlockRouting: member-only chains pull position-adjacent neighbors",
+          "argumentShapes": [["chainId", "memoryId", "position"]]
+        }
+      ],
+      "filePaths": ["tests/core/memory-chains.test.ts", "tests/core/store/leaf-summaries.test.ts"]
+    }
+  ],
+  "sequences": [
+    {
+      "key": "method:close -> function:rmSync",
+      "sites": 78,
+      "files": 45,
+      "adjacent": 77,
+      "withObservations": 1,
+      "examples": [
+        {
+          "key": "method:close -> function:rmSync",
+          "file": "tests/cli/graph-data.test.ts",
+          "line": 138,
+          "test": "graph projection reads nodes, memories, and all three edge layers",
+          "rightLine": 139,
+          "leftReceiver": "service",
+          "rightReceiver": "",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:close -> function:rmSync",
+          "file": "tests/cli/graph-render.test.ts",
+          "line": 88,
+          "test": "exportGraphHtml writes a self-contained page from a database",
+          "rightLine": 89,
+          "leftReceiver": "service",
+          "rightReceiver": "",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:close -> function:rmSync",
+          "file": "tests/cli/http.test.ts",
+          "line": 55,
+          "test": "<helper or module>",
+          "rightLine": 56,
+          "leftReceiver": "service",
+          "rightReceiver": "",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:close -> function:rmSync",
+          "file": "tests/cli/inspect-data.test.ts",
+          "line": 85,
+          "test": "inspect queries read memories, evidence, and traces from a live database",
+          "rightLine": 86,
+          "leftReceiver": "service",
+          "rightReceiver": "",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        }
+      ],
+      "filePaths": [
+        "tests/cli/graph-data.test.ts",
+        "tests/cli/graph-render.test.ts",
+        "tests/cli/http.test.ts",
+        "tests/cli/inspect-data.test.ts",
+        "tests/cli/working-state.test.ts",
+        "tests/core/analogy.test.ts",
+        "tests/core/community.test.ts",
+        "tests/core/controller-protocol.test.ts",
+        "tests/core/controller-runtime.test.ts",
+        "tests/core/embedding-sync.test.ts",
+        "tests/core/graph-cycles.test.ts",
+        "tests/core/memory-chains.test.ts",
+        "tests/core/multi-hop-path.test.ts",
+        "tests/core/perf.test.ts",
+        "tests/core/stg-isolated.test.ts",
+        "tests/core/store-transaction-port.test.ts",
+        "tests/core/store.test.ts",
+        "tests/core/store/claim-posterior.test.ts",
+        "tests/core/store/current-value-window.test.ts",
+        "tests/core/store/duplicates.test.ts",
+        "tests/core/store/embedding-index.test.ts",
+        "tests/core/store/feedback.test.ts",
+        "tests/core/store/graph.test.ts",
+        "tests/core/store/leaf-summaries.test.ts",
+        "tests/core/store/node-summaries.test.ts",
+        "tests/core/store/retention.test.ts",
+        "tests/core/store/retrieval.test.ts",
+        "tests/core/store/schema.test.ts",
+        "tests/core/store/task-runs.test.ts",
+        "tests/core/store/writes.test.ts",
+        "tests/core/task-board-deliverable.test.ts",
+        "tests/core/task-board-retention.test.ts",
+        "tests/core/task-board.test.ts",
+        "tests/core/tesserae.test.ts",
+        "tests/extensions/nmg/index.test.ts",
+        "tests/integration/controller-channel.test.ts",
+        "tests/integration/evidence.test.ts",
+        "tests/integration/leaf-summarizer.test.ts",
+        "tests/integration/ooo-dispatch.test.ts",
+        "tests/integration/ooo-managed-adopt.test.ts",
+        "tests/integration/ooo-managed-write.test.ts",
+        "tests/integration/ooo-session-facts.test.ts",
+        "tests/integration/ooo-store-run-board.test.ts",
+        "tests/integration/ooo-task-tables.test.ts",
+        "tests/integration/ooo-transition-atomicity.test.ts"
+      ]
+    },
+    {
+      "key": "method:remember -> method:remember",
+      "sites": 172,
+      "files": 25,
+      "adjacent": 160,
+      "withObservations": 9,
+      "examples": [
+        {
+          "key": "method:remember -> method:remember",
+          "file": "tests/core/analogy.test.ts",
+          "line": 32,
+          "test": "abstractSubgraph extracts EVOLUTION from a supersede chain",
+          "rightLine": 41,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:remember -> method:remember",
+          "file": "tests/core/community.test.ts",
+          "line": 54,
+          "test": "analyzeCommunities profiles patterns and emits natural-supervision suggestions",
+          "rightLine": 62,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:remember -> method:remember",
+          "file": "tests/core/controller-protocol.test.ts",
+          "line": 26,
+          "test": "trace protocol joins STG, LTG and Active Graph into fixed bounded features",
+          "rightLine": 35,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:remember -> method:remember",
+          "file": "tests/core/embedding-sync.test.ts",
+          "line": 28,
+          "test": "record embedding sync indexes only missing records and marks the index ready",
+          "rightLine": 29,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        }
+      ],
+      "filePaths": [
+        "tests/core/analogy.test.ts",
+        "tests/core/community.test.ts",
+        "tests/core/controller-protocol.test.ts",
+        "tests/core/embedding-sync.test.ts",
+        "tests/core/graph-cycles.test.ts",
+        "tests/core/memory-chains.test.ts",
+        "tests/core/multi-hop-path.test.ts",
+        "tests/core/perf.test.ts",
+        "tests/core/qpp.test.ts",
+        "tests/core/stg-isolated.test.ts",
+        "tests/core/stg-v2.test.ts",
+        "tests/core/store.test.ts",
+        "tests/core/store/claim-posterior.test.ts",
+        "tests/core/store/duplicates.test.ts",
+        "tests/core/store/feedback.test.ts",
+        "tests/core/store/graph.test.ts",
+        "tests/core/store/leaf-summaries.test.ts",
+        "tests/core/store/maintenance.test.ts",
+        "tests/core/store/node-summaries.test.ts",
+        "tests/core/store/retention.test.ts",
+        "tests/core/store/retrieval.test.ts",
+        "tests/core/store/writes.test.ts",
+        "tests/core/tesserae.test.ts",
+        "tests/integration/leaf-summarizer.test.ts",
+        "tests/integration/lexical-budget.test.ts"
+      ]
+    },
+    {
+      "key": "method:remember -> method:searchContext",
+      "sites": 46,
+      "files": 15,
+      "adjacent": 43,
+      "withObservations": 2,
+      "examples": [
+        {
+          "key": "method:remember -> method:searchContext",
+          "file": "tests/core/controller-protocol.test.ts",
+          "line": 120,
+          "test": "trace without explicit outcome feedback is inference-only",
+          "rightLine": 121,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:remember -> method:searchContext",
+          "file": "tests/core/controller-runtime.test.ts",
+          "line": 21,
+          "test": "controller runtime learns from verified-evidence traces and persists exact state",
+          "rightLine": 22,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:remember -> method:searchContext",
+          "file": "tests/core/memory-chains.test.ts",
+          "line": 527,
+          "test": "expandChains does nothing for a hit outside any chain",
+          "rightLine": 535,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:remember -> method:searchContext",
+          "file": "tests/core/perf.test.ts",
+          "line": 91,
+          "test": "searchContext attaches per-phase timings and persists them in the trace",
+          "rightLine": 97,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        }
+      ],
+      "filePaths": [
+        "tests/core/controller-protocol.test.ts",
+        "tests/core/controller-runtime.test.ts",
+        "tests/core/memory-chains.test.ts",
+        "tests/core/perf.test.ts",
+        "tests/core/qpp.test.ts",
+        "tests/core/stg-v2.test.ts",
+        "tests/core/store.test.ts",
+        "tests/core/store/claim-posterior.test.ts",
+        "tests/core/store/duplicates.test.ts",
+        "tests/core/store/maintenance.test.ts",
+        "tests/core/store/node-summaries.test.ts",
+        "tests/core/store/retrieval.test.ts",
+        "tests/core/store/writes.test.ts",
+        "tests/extensions/nmg/index.test.ts",
+        "tests/integration/controller-channel.test.ts"
+      ]
+    },
+    {
+      "key": "method:remember -> method:linkNodes",
+      "sites": 19,
+      "files": 7,
+      "adjacent": 19,
+      "withObservations": 0,
+      "examples": [
+        {
+          "key": "method:remember -> method:linkNodes",
+          "file": "tests/core/controller-protocol.test.ts",
+          "line": 35,
+          "test": "trace protocol joins STG, LTG and Active Graph into fixed bounded features",
+          "rightLine": 43,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:remember -> method:linkNodes",
+          "file": "tests/core/graph-cycles.test.ts",
+          "line": 37,
+          "test": "detectGraphCycles finds a directed relation cycle",
+          "rightLine": 45,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:remember -> method:linkNodes",
+          "file": "tests/core/multi-hop-path.test.ts",
+          "line": 76,
+          "test": "searchContext graph expansion returns results with multi-hop path",
+          "rightLine": 84,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:remember -> method:linkNodes",
+          "file": "tests/core/stg-v2.test.ts",
+          "line": 137,
+          "test": "v2: derived retrieval paths cannot expose another session's provisional rows",
+          "rightLine": 145,
+          "leftReceiver": "stg",
+          "rightReceiver": "stg",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        }
+      ],
+      "filePaths": [
+        "tests/core/controller-protocol.test.ts",
+        "tests/core/graph-cycles.test.ts",
+        "tests/core/multi-hop-path.test.ts",
+        "tests/core/stg-v2.test.ts",
+        "tests/core/store.test.ts",
+        "tests/core/store/graph.test.ts",
+        "tests/core/store/retrieval.test.ts"
+      ]
+    },
+    {
+      "key": "method:remember -> method:rebuildLeafBlocks",
+      "sites": 16,
+      "files": 6,
+      "adjacent": 15,
+      "withObservations": 1,
+      "examples": [
+        {
+          "key": "method:remember -> method:rebuildLeafBlocks",
+          "file": "tests/core/embedding-sync.test.ts",
+          "line": 128,
+          "test": "leaf embedding sync shares the lifecycle but writes leaf targets",
+          "rightLine": 129,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:remember -> method:rebuildLeafBlocks",
+          "file": "tests/core/store.test.ts",
+          "line": 838,
+          "test": "embedding index health tracks pending, success, and retryable failure",
+          "rightLine": 839,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:remember -> method:rebuildLeafBlocks",
+          "file": "tests/core/store/leaf-summaries.test.ts",
+          "line": 70,
+          "test": "pendingLeafSummaries: membership change re-pends the block",
+          "rightLine": 75,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:remember -> method:rebuildLeafBlocks",
+          "file": "tests/core/store/maintenance.test.ts",
+          "line": 908,
+          "test": "rebuildLeafBlocks: creates leaf blocks for a node",
+          "rightLine": 914,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        }
+      ],
+      "filePaths": [
+        "tests/core/embedding-sync.test.ts",
+        "tests/core/store.test.ts",
+        "tests/core/store/leaf-summaries.test.ts",
+        "tests/core/store/maintenance.test.ts",
+        "tests/core/store/node-summaries.test.ts",
+        "tests/integration/leaf-summarizer.test.ts"
+      ]
+    },
+    {
+      "key": "method:linkNodes -> method:linkNodes",
+      "sites": 21,
+      "files": 5,
+      "adjacent": 19,
+      "withObservations": 2,
+      "examples": [
+        {
+          "key": "method:linkNodes -> method:linkNodes",
+          "file": "tests/core/analogy.test.ts",
+          "line": 62,
+          "test": "abstractSubgraph extracts all other pattern shapes from a mixed cluster",
+          "rightLine": 63,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:linkNodes -> method:linkNodes",
+          "file": "tests/core/community.test.ts",
+          "line": 36,
+          "test": "detectCommunities finds weakly-connected components and drops isolates",
+          "rightLine": 37,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:linkNodes -> method:linkNodes",
+          "file": "tests/core/graph-cycles.test.ts",
+          "line": 45,
+          "test": "detectGraphCycles finds a directed relation cycle",
+          "rightLine": 46,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:linkNodes -> method:linkNodes",
+          "file": "tests/core/multi-hop-path.test.ts",
+          "line": 84,
+          "test": "searchContext graph expansion returns results with multi-hop path",
+          "rightLine": 85,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        }
+      ],
+      "filePaths": [
+        "tests/core/analogy.test.ts",
+        "tests/core/community.test.ts",
+        "tests/core/graph-cycles.test.ts",
+        "tests/core/multi-hop-path.test.ts",
+        "tests/core/store/graph.test.ts"
+      ]
+    },
+    {
+      "key": "method:linkNodes -> method:searchContext",
+      "sites": 9,
+      "files": 5,
+      "adjacent": 9,
+      "withObservations": 0,
+      "examples": [
+        {
+          "key": "method:linkNodes -> method:searchContext",
+          "file": "tests/core/controller-protocol.test.ts",
+          "line": 43,
+          "test": "trace protocol joins STG, LTG and Active Graph into fixed bounded features",
+          "rightLine": 48,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:linkNodes -> method:searchContext",
+          "file": "tests/core/multi-hop-path.test.ts",
+          "line": 85,
+          "test": "searchContext graph expansion returns results with multi-hop path",
+          "rightLine": 87,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:linkNodes -> method:searchContext",
+          "file": "tests/core/stg-v2.test.ts",
+          "line": 145,
+          "test": "v2: derived retrieval paths cannot expose another session's provisional rows",
+          "rightLine": 152,
+          "leftReceiver": "stg",
+          "rightReceiver": "stg",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:linkNodes -> method:searchContext",
+          "file": "tests/core/store.test.ts",
+          "line": 489,
+          "test": "searchContext combines matching memories with typed graph edges",
+          "rightLine": 496,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        }
+      ],
+      "filePaths": [
+        "tests/core/controller-protocol.test.ts",
+        "tests/core/multi-hop-path.test.ts",
+        "tests/core/stg-v2.test.ts",
+        "tests/core/store.test.ts",
+        "tests/core/store/retrieval.test.ts"
+      ]
+    },
+    {
+      "key": "method:bindWorkingState -> method:replaceWorkingState",
+      "sites": 12,
+      "files": 4,
+      "adjacent": 11,
+      "withObservations": 1,
+      "examples": [
+        {
+          "key": "method:bindWorkingState -> method:replaceWorkingState",
+          "file": "tests/core/working-state.test.ts",
+          "line": 37,
+          "test": "invalid, secret and oversized replacements preserve the old item and other observations",
+          "rightLine": 38,
+          "leftReceiver": "runtime",
+          "rightReceiver": "runtime",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:bindWorkingState -> method:replaceWorkingState",
+          "file": "tests/extensions/nmg/working-state-display.test.ts",
+          "line": 58,
+          "test": "<helper or module>",
+          "rightLine": 59,
+          "leftReceiver": "runtime",
+          "rightReceiver": "runtime",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:bindWorkingState -> method:replaceWorkingState",
+          "file": "tests/extensions/nmg/working-state-input.test.ts",
+          "line": 13,
+          "test": "Pi selects state at each model call without editing mixed recall, tools or raw history",
+          "rightLine": 14,
+          "leftReceiver": "runtime",
+          "rightReceiver": "runtime",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:bindWorkingState -> method:replaceWorkingState",
+          "file": "tests/integration/working-state-input.test.ts",
+          "line": 12,
+          "test": "input selection replaces only owned state fragments with the current complete body",
+          "rightLine": 13,
+          "leftReceiver": "runtime",
+          "rightReceiver": "runtime",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        }
+      ],
+      "filePaths": [
+        "tests/core/working-state.test.ts",
+        "tests/extensions/nmg/working-state-display.test.ts",
+        "tests/extensions/nmg/working-state-input.test.ts",
+        "tests/integration/working-state-input.test.ts"
+      ]
+    },
+    {
+      "key": "method:createMemoryChain -> method:addMemoryChainEdge",
+      "sites": 5,
+      "files": 4,
+      "adjacent": 5,
+      "withObservations": 0,
+      "examples": [
+        {
+          "key": "method:createMemoryChain -> method:addMemoryChainEdge",
+          "file": "tests/core/memory-chains.test.ts",
+          "line": 375,
+          "test": "exact get preserves logical chain memberships and edges for harness projection",
+          "rightLine": 376,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:createMemoryChain -> method:addMemoryChainEdge",
+          "file": "tests/core/stg-isolated.test.ts",
+          "line": 214,
+          "test": "STG/LTG projection preserves exact logical edges from both stores",
+          "rightLine": 215,
+          "leftReceiver": "stg",
+          "rightReceiver": "ltg",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:createMemoryChain -> method:addMemoryChainEdge",
+          "file": "tests/core/store/leaf-summaries.test.ts",
+          "line": 198,
+          "test": "leafBlockRouting: chain edges pull cross-block neighbors into the append",
+          "rightLine": 199,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:createMemoryChain -> method:addMemoryChainEdge",
+          "file": "tests/integration/claude-mcp.test.ts",
+          "line": 196,
+          "test": "MCP adapter exposes shared logical-chain structure",
+          "rightLine": 200,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        }
+      ],
+      "filePaths": [
+        "tests/core/memory-chains.test.ts",
+        "tests/core/stg-isolated.test.ts",
+        "tests/core/store/leaf-summaries.test.ts",
+        "tests/integration/claude-mcp.test.ts"
+      ]
+    },
+    {
+      "key": "method:remember -> method:applySupersession",
+      "sites": 13,
+      "files": 3,
+      "adjacent": 11,
+      "withObservations": 1,
+      "examples": [
+        {
+          "key": "method:remember -> method:applySupersession",
+          "file": "tests/core/analogy.test.ts",
+          "line": 41,
+          "test": "abstractSubgraph extracts EVOLUTION from a supersede chain",
+          "rightLine": 50,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:remember -> method:applySupersession",
+          "file": "tests/core/graph-cycles.test.ts",
+          "line": 174,
+          "test": "applySupersession rejects writes that would create a supersede cycle",
+          "rightLine": 182,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:remember -> method:applySupersession",
+          "file": "tests/core/store/duplicates.test.ts",
+          "line": 88,
+          "test": "scope write index preserves duplicate and supersession candidates",
+          "rightLine": 96,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": false,
+          "interveningStatements": 1,
+          "observations": 1
+        }
+      ],
+      "filePaths": [
+        "tests/core/analogy.test.ts",
+        "tests/core/graph-cycles.test.ts",
+        "tests/core/store/duplicates.test.ts"
+      ]
+    },
+    {
+      "key": "method:addMemoryChainEdge -> method:addMemoryChainEdge",
+      "sites": 9,
+      "files": 3,
+      "adjacent": 8,
+      "withObservations": 1,
+      "examples": [
+        {
+          "key": "method:addMemoryChainEdge -> method:addMemoryChainEdge",
+          "file": "tests/core/memory-chains.test.ts",
+          "line": 376,
+          "test": "exact get preserves logical chain memberships and edges for harness projection",
+          "rightLine": 381,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:addMemoryChainEdge -> method:addMemoryChainEdge",
+          "file": "tests/core/stg-isolated.test.ts",
+          "line": 215,
+          "test": "STG/LTG projection preserves exact logical edges from both stores",
+          "rightLine": 220,
+          "leftReceiver": "ltg",
+          "rightReceiver": "stg",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:addMemoryChainEdge -> method:addMemoryChainEdge",
+          "file": "tests/integration/claude-mcp.test.ts",
+          "line": 200,
+          "test": "MCP adapter exposes shared logical-chain structure",
+          "rightLine": 201,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        }
+      ],
+      "filePaths": [
+        "tests/core/memory-chains.test.ts",
+        "tests/core/stg-isolated.test.ts",
+        "tests/integration/claude-mcp.test.ts"
+      ]
+    },
+    {
+      "key": "method:observe -> method:activateTemporaryProjection",
+      "sites": 7,
+      "files": 3,
+      "adjacent": 7,
+      "withObservations": 0,
+      "examples": [
+        {
+          "key": "method:observe -> method:activateTemporaryProjection",
+          "file": "tests/core/session-active-graph.test.ts",
+          "line": 193,
+          "test": "unified budget: total items/characters are capped across all frames, not per frame",
+          "rightLine": 196,
+          "leftReceiver": "runtime",
+          "rightReceiver": "runtime",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:observe -> method:activateTemporaryProjection",
+          "file": "tests/core/working-state.test.ts",
+          "line": 61,
+          "test": "resident budget insufficiency refuses the state write instead of evicting existing content",
+          "rightLine": 62,
+          "leftReceiver": "runtime",
+          "rightReceiver": "runtime",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:observe -> method:activateTemporaryProjection",
+          "file": "tests/integration/agent-surface.test.ts",
+          "line": 77,
+          "test": "temporary working content retains exact constraints beyond a short preview",
+          "rightLine": 78,
+          "leftReceiver": "runtime",
+          "rightReceiver": "runtime",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        }
+      ],
+      "filePaths": [
+        "tests/core/session-active-graph.test.ts",
+        "tests/core/working-state.test.ts",
+        "tests/integration/agent-surface.test.ts"
+      ]
+    },
+    {
+      "key": "method:remember -> method:upsertExternalEmbeddings",
+      "sites": 6,
+      "files": 3,
+      "adjacent": 6,
+      "withObservations": 0,
+      "examples": [
+        {
+          "key": "method:remember -> method:upsertExternalEmbeddings",
+          "file": "tests/core/qpp.test.ts",
+          "line": 534,
+          "test": "searchContextWithSecondPass: strong top-gap early-stops to 3 records",
+          "rightLine": 539,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:remember -> method:upsertExternalEmbeddings",
+          "file": "tests/core/store/retention.test.ts",
+          "line": 22,
+          "test": "L4 removes LTG memory from retrieval while stable-ID access and restore remain available",
+          "rightLine": 28,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        },
+        {
+          "key": "method:remember -> method:upsertExternalEmbeddings",
+          "file": "tests/core/store/retrieval.test.ts",
+          "line": 221,
+          "test": "semantic retrieval does not apply the FTS5 tie rule",
+          "rightLine": 226,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        }
+      ],
+      "filePaths": [
+        "tests/core/qpp.test.ts",
+        "tests/core/store/retention.test.ts",
+        "tests/core/store/retrieval.test.ts"
+      ]
+    },
+    {
+      "key": "method:createMemoryChain -> method:addMemoryToChain",
+      "sites": 6,
+      "files": 2,
+      "adjacent": 5,
+      "withObservations": 0,
+      "examples": [
+        {
+          "key": "method:createMemoryChain -> method:addMemoryToChain",
+          "file": "tests/core/memory-chains.test.ts",
+          "line": 88,
+          "test": "a memory can join multiple chains (node reuse / cross-chain intersection)",
+          "rightLine": 90,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": false,
+          "interveningStatements": 1,
+          "observations": 0
+        },
+        {
+          "key": "method:createMemoryChain -> method:addMemoryToChain",
+          "file": "tests/core/store/leaf-summaries.test.ts",
+          "line": 237,
+          "test": "leafBlockRouting: member-only chains pull position-adjacent neighbors",
+          "rightLine": 238,
+          "leftReceiver": "store",
+          "rightReceiver": "store",
+          "adjacent": true,
+          "interveningStatements": 0,
+          "observations": 0
+        }
+      ],
+      "filePaths": ["tests/core/memory-chains.test.ts", "tests/core/store/leaf-summaries.test.ts"]
+    }
+  ],
+  "basicNodePaths": [
+    {
+      "file": "tests/core/analogy.test.ts",
+      "line": 62,
+      "test": "abstractSubgraph extracts all other pattern shapes from a mixed cluster",
+      "endLine": 63,
+      "receiver": "store",
+      "type": "contradicts",
+      "edges": 2,
+      "nodes": ["a.node.id", "b.node.id", "a.node.id"]
+    },
+    {
+      "file": "tests/core/analogy.test.ts",
+      "line": 64,
+      "test": "abstractSubgraph extracts all other pattern shapes from a mixed cluster",
+      "endLine": 65,
+      "receiver": "store",
+      "type": "depends_on",
+      "edges": 2,
+      "nodes": ["a.node.id", "b.node.id", "c.node.id"]
+    },
+    {
+      "file": "tests/core/analogy.test.ts",
+      "line": 67,
+      "test": "abstractSubgraph extracts all other pattern shapes from a mixed cluster",
+      "endLine": 68,
+      "receiver": "store",
+      "type": "causes",
+      "edges": 2,
+      "nodes": ["c.node.id", "d.node.id", "c.node.id"]
+    },
+    {
+      "file": "tests/core/community.test.ts",
+      "line": 36,
+      "test": "detectCommunities finds weakly-connected components and drops isolates",
+      "endLine": 37,
+      "receiver": "store",
+      "type": "causes",
+      "edges": 2,
+      "nodes": ["a.node.id", "b.node.id", "c.node.id"]
+    },
+    {
+      "file": "tests/core/community.test.ts",
+      "line": 73,
+      "test": "analyzeCommunities profiles patterns and emits natural-supervision suggestions",
+      "endLine": 74,
+      "receiver": "store",
+      "type": "depends_on",
+      "edges": 2,
+      "nodes": ["b2.node.id", "tech.node.id", "ops.node.id"]
+    },
+    {
+      "file": "tests/core/community.test.ts",
+      "line": 78,
+      "test": "analyzeCommunities profiles patterns and emits natural-supervision suggestions",
+      "endLine": 79,
+      "receiver": "store",
+      "type": "contradicts",
+      "edges": 2,
+      "nodes": ["va.node.id", "vb.node.id", "va.node.id"]
+    },
+    {
+      "file": "tests/core/community.test.ts",
+      "line": 106,
+      "test": "analyzeCommunities flags a feedback loop for manual review",
+      "endLine": 107,
+      "receiver": "store",
+      "type": "causes",
+      "edges": 2,
+      "nodes": ["x.node.id", "y.node.id", "x.node.id"]
+    },
+    {
+      "file": "tests/core/graph-cycles.test.ts",
+      "line": 45,
+      "test": "detectGraphCycles finds a directed relation cycle",
+      "endLine": 47,
+      "receiver": "store",
+      "type": "causes",
+      "edges": 3,
+      "nodes": ["m1.node.id", "m2.node.id", "m3.node.id", "m1.node.id"]
+    },
+    {
+      "file": "tests/core/graph-cycles.test.ts",
+      "line": 127,
+      "test": "detectGraphCycles is empty for an acyclic chain",
+      "endLine": 128,
+      "receiver": "store",
+      "type": "causes",
+      "edges": 2,
+      "nodes": ["p1.node.id", "p2.node.id", "p3.node.id"]
+    },
+    {
+      "file": "tests/core/graph-cycles.test.ts",
+      "line": 153,
+      "test": "symmetric relations (contradicts) never count as cycles",
+      "endLine": 154,
+      "receiver": "store",
+      "type": "contradicts",
+      "edges": 2,
+      "nodes": ["m1.node.id", "m2.node.id", "m1.node.id"]
+    },
+    {
+      "file": "tests/core/graph-cycles.test.ts",
+      "line": 158,
+      "test": "symmetric relations (contradicts) never count as cycles",
+      "endLine": 159,
+      "receiver": "store",
+      "type": "causes",
+      "edges": 2,
+      "nodes": ["m1.node.id", "m2.node.id", "m1.node.id"]
+    },
+    {
+      "file": "tests/core/multi-hop-path.test.ts",
+      "line": 84,
+      "test": "searchContext graph expansion returns results with multi-hop path",
+      "endLine": 85,
+      "receiver": "store",
+      "type": "causes",
+      "edges": 2,
+      "nodes": ["ma.node.id", "mb.node.id", "mc.node.id"]
+    },
+    {
+      "file": "tests/core/store/graph.test.ts",
+      "line": 131,
+      "test": "getRelations with maxHops=2 traverses two-hop neighbourhood",
+      "endLine": 132,
+      "receiver": "store",
+      "type": "related_to",
+      "edges": 2,
+      "nodes": ["a.node.id", "b.node.id", "c.node.id"]
+    }
+  ],
+  "selection": {
+    "focus": [
+      "=method:remember",
+      "=method:searchContext",
+      "=method:linkNodes",
+      "=method:rebuildLeafBlocks",
+      "=method:upsertExternalEmbeddings",
+      "=method:applySupersession",
+      "=method:createMemoryChain",
+      "=method:addMemoryChainEdge",
+      "=method:addMemoryToChain",
+      "=method:bindWorkingState",
+      "=method:replaceWorkingState",
+      "=method:observe",
+      "=method:activateTemporaryProjection",
+      "=method:close",
+      "=function:mkdtempSync",
+      "=function:rmSync",
+      "=method:remember -> method:remember",
+      "=method:remember -> method:searchContext",
+      "=method:remember -> method:linkNodes",
+      "=method:linkNodes -> method:linkNodes",
+      "=method:linkNodes -> method:searchContext",
+      "=method:remember -> method:rebuildLeafBlocks",
+      "=method:remember -> method:upsertExternalEmbeddings",
+      "=method:remember -> method:applySupersession",
+      "=method:createMemoryChain -> method:addMemoryChainEdge",
+      "=method:addMemoryChainEdge -> method:addMemoryChainEdge",
+      "=method:createMemoryChain -> method:addMemoryToChain",
+      "=method:bindWorkingState -> method:replaceWorkingState",
+      "=method:observe -> method:activateTemporaryProjection",
+      "=method:close -> function:rmSync"
+    ],
+    "basis": "explicit manual-review families, not a benefit score",
+    "examplesPerGroup": 4
+  },
+  "recipe": [
+    "Resolve package.json test:product quoted .test.ts globs through resolveRouteTestFiles.",
+    "Parse each selected file with TypeScript, recording SHA256 and static test()/it() declarations.",
+    "Cluster direct call names without type inference; retain receiver and argument-field evidence.",
+    "Within each lexical block pair consecutive primary calls; retain intervening statement and direct assertion counts.",
+    "A basic node path is a consecutive run of at least two linkNodes calls with exactly sourceNodeId/targetNodeId/type properties, the same receiver and literal type, and matching target/source expression text. Other statements terminate the run.",
+    "Review source contracts and consumers before recommending any extraction; static similarity alone is insufficient."
+  ]
+}

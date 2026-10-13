@@ -4,9 +4,9 @@
 
 本记录回答：如何从现有测试提取共同语义片段，让 LLM 在受限环境中组合、探索并提出可复现反例，而不把生成测试当成正确性的来源。
 
-本记录包含文献审核、仓库观察、[第一轮局部抽取](#第一轮试点结果)和[第二轮跨测试族行为组合](#第二轮试点结果)，不包含算法实测或全仓迁移结果。未实施部分仍是试点建议；实施选择回到设计与 decision owner，不改变产品契约、测试分类、阻塞检查或验收标准。文档归属遵循[文档权威边界](../../README.md#ownership-and-authority)。
+本记录包含文献审核、仓库观察、[第一轮局部抽取](#第一轮试点结果)、[第二轮跨测试族行为组合](#第二轮试点结果)和[第三轮状态边界组合](#第三轮边界组合结果)，以及[产品测试结构筛选](#更广的结构筛选2026-10-13)和[已有节点路径抽取](#已有节点路径实施结果2026-10-13)，不包含算法实测或全仓迁移结果。未实施部分仍是试点建议；实施选择回到设计与 decision owner，不改变产品契约、测试分类、阻塞检查或验收标准。文档归属遵循[文档权威边界](../../README.md#ownership-and-authority)。
 
-初始仓库观察基于 `1787310a2a9fda2f285f6be5c2138c87ebe69b04`；两轮试点另列基线与测量范围。研究没有运行 IPOG、SCA 或候选测试生成器，也没有测量本仓库的真实缺陷检出率、速度或维护成本。外部资料的版本与正文核查范围见[来源与未验证项](#来源与未验证项)。
+初始仓库观察基于 `1787310a2a9fda2f285f6be5c2138c87ebe69b04`；各轮试点另列基线与测量范围。研究没有运行 IPOG、SCA 或候选测试生成器，也没有测量本仓库的真实缺陷检出率、速度或维护成本。外部资料的版本与正文核查范围见[来源与未验证项](#来源与未验证项)。
 
 ## 选型结论
 
@@ -28,13 +28,13 @@
 
 每个被复用的片段需要让调用者看清以下语义，不要求全部变成元数据字段或统一接口：
 
-| 语义 | 调用者需要知道的内容 | Task Board 示例 |
-| --- | --- | --- |
-| 条件与输入 | 什么状态下运行；身份、时钟、对象及参数从哪里来 | entry 是否开放、提交者是谁、领取是否仍有效 |
-| 结果引用 | 返回结果对应哪个对象、尝试或产物，供后续动作使用 | entry ID、attempt、digest，不使用隐藏的“最后一次结果” |
-| 状态变化 | 动作可能改变哪些相关状态 | 领取者、产物、裁定、attempt |
-| 受保护状态 | 哪些已有状态不能被无关动作改变 | 有效领取的续租不丢弃已提交产物 |
-| 观察与失败 | 何处观察中间状态；预期拒绝怎样作为结果核对 | 提交后检查裁定为空；拒绝后检查相关状态未被改写 |
+| 语义       | 调用者需要知道的内容                             | Task Board 示例                                       |
+| ---------- | ------------------------------------------------ | ----------------------------------------------------- |
+| 条件与输入 | 什么状态下运行；身份、时钟、对象及参数从哪里来   | entry 是否开放、提交者是谁、领取是否仍有效            |
+| 结果引用   | 返回结果对应哪个对象、尝试或产物，供后续动作使用 | entry ID、attempt、digest，不使用隐藏的“最后一次结果” |
+| 状态变化   | 动作可能改变哪些相关状态                         | 领取者、产物、裁定、attempt                           |
+| 受保护状态 | 哪些已有状态不能被无关动作改变                   | 有效领取的续租不丢弃已提交产物                        |
+| 观察与失败 | 何处观察中间状态；预期拒绝怎样作为结果核对       | 提交后检查裁定为空；拒绝后检查相关状态未被改写        |
 
 复合动作可以融合实现，但不能封死测试需要观察的中间状态。身份、引用与时钟显式传递；是否共享 helper，以实际消费者为依据。对拒绝路径使用能执行该动作的原始片段，不先套用只允许成功状态的 convenience helper。
 
@@ -88,13 +88,13 @@ IPOG 先构造前 `t` 个参数的测试集，再逐个加入参数：水平扩�
 
 下表能力限定于 ACTS Basic 1.0 / Advanced 3.3 的 2023 年指南 [S1]，不作为未核实新版本的能力声明：
 
-| 算法 | 指南中的能力与限制 | 试点选择与放弃条件 |
-| --- | --- | --- |
-| IPOG | Advanced 支持约束、混合强度、负向测试 | 首个参数补缺候选；满足覆盖但生成、执行或模型维护成本不可接受时比较其他路线 |
-| IPOG-F | 同样支持上述能力，构造启发式不同 | 与 IPOG 在同一模型和覆盖义务下比较；名字中的 F 不是实际更快的证据 |
-| IPOG-F2 | 不支持约束、混合强度或负向测试 | 不承担本试点所需的受约束参数补缺；不是笼统宣称算法无价值 |
-| IPOG-D | 递归／组合构造面向较大模型，但不支持上述三项能力 | 不因参数多就默认选用；缺少必需能力即不适用，不用生成后过滤冒充同等覆盖 |
-| Base Choice | 围绕基准值逐项变化的一种 1-way 测试 | 基础冒烟辅助，不替代交互覆盖 |
+| 算法        | 指南中的能力与限制                               | 试点选择与放弃条件                                                         |
+| ----------- | ------------------------------------------------ | -------------------------------------------------------------------------- |
+| IPOG        | Advanced 支持约束、混合强度、负向测试            | 首个参数补缺候选；满足覆盖但生成、执行或模型维护成本不可接受时比较其他路线 |
+| IPOG-F      | 同样支持上述能力，构造启发式不同                 | 与 IPOG 在同一模型和覆盖义务下比较；名字中的 F 不是实际更快的证据          |
+| IPOG-F2     | 不支持约束、混合强度或负向测试                   | 不承担本试点所需的受约束参数补缺；不是笼统宣称算法无价值                   |
+| IPOG-D      | 递归／组合构造面向较大模型，但不支持上述三项能力 | 不因参数多就默认选用；缺少必需能力即不适用，不用生成后过滤冒充同等覆盖     |
+| Base Choice | 围绕基准值逐项变化的一种 1-way 测试              | 基础冒烟辅助，不替代交互覆盖                                               |
 
 混合强度允许对不同参数组使用不同 `t`；extend 允许从已有输入测试集增补 [S1]。可先研究总体 2-way、关键接缝组更高强度的成本，但强度来自领域风险与遗漏证据，不来自“多数缺陷只需少量参数”的普遍化假设。把已有测试映射为 seed 输入不能保留其断言或执行语义，原具名回归继续保留。
 
@@ -150,14 +150,14 @@ ACTS 原生负向测试至多放入一个被标记为无效的参数值，并把
 
 ## 非 NIST 路线的接受与放弃条件
 
-| 路线 | 解决的问题 | 代价与接受条件 | 不适合或需要换路线的情况 |
-| --- | --- | --- | --- |
-| 类型化复合函数／fixture | 共同语义片段与资源复用 | 命名贴近实际行为；输入、引用与观察边界可见；首轮不引入 DSL | helper 隐藏关键状态、承担太多无关场景，或只换写法没有复用收益 |
-| 模型／命令式性质测试 [S8] | 有状态、重复动作、前置条件和反例缩减 | 独立维护最小模型；把拒绝操作作为可生成命令；保存重放所需轨迹 | 模型照抄实现形成共同盲点；动态引用或调度无法重建 |
-| Dafny 等形式化切片 [S9] | 少量纯逻辑核心中的全称性质 | 限于稳定、值得证明的切片；计入规格维护与求解波动成本 | 为整个异步／IO 系统建模，成本超过收益；把模型证明冒充实现证明 |
-| 小证明内核＋实现差分 [S10, S11] | 限制证明接受依据，连接模型与实现 | 核查可信命题与依赖；按工具边界沙箱构建、外部重放；另测实现 | 命题被候选改写，或只证明模型却声称全部实现已证明 |
-| 确定性模拟／故障注入 [S12] | 可重放的复杂交错、故障与长轨迹 | 隔离环境内允许破坏；保留真实 IO／进程／持久化边界测试 | 模拟遗漏升级、运行时或真实资源行为；只靠模拟绿灯批准边界变更 |
-| LLM 提出性质与反例 [S13] | 扩大候选输入与性质的探索范围 | 候选先核对公约、重放与人工或独立评估；权限、预算有界 | 把模型报告直接计为缺陷，把研究有效率当成本仓库保证，或允许自动降标 |
+| 路线                            | 解决的问题                           | 代价与接受条件                                               | 不适合或需要换路线的情况                                           |
+| ------------------------------- | ------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------------ |
+| 类型化复合函数／fixture         | 共同语义片段与资源复用               | 命名贴近实际行为；输入、引用与观察边界可见；首轮不引入 DSL   | helper 隐藏关键状态、承担太多无关场景，或只换写法没有复用收益      |
+| 模型／命令式性质测试 [S8]       | 有状态、重复动作、前置条件和反例缩减 | 独立维护最小模型；把拒绝操作作为可生成命令；保存重放所需轨迹 | 模型照抄实现形成共同盲点；动态引用或调度无法重建                   |
+| Dafny 等形式化切片 [S9]         | 少量纯逻辑核心中的全称性质           | 限于稳定、值得证明的切片；计入规格维护与求解波动成本         | 为整个异步／IO 系统建模，成本超过收益；把模型证明冒充实现证明      |
+| 小证明内核＋实现差分 [S10, S11] | 限制证明接受依据，连接模型与实现     | 核查可信命题与依赖；按工具边界沙箱构建、外部重放；另测实现   | 命题被候选改写，或只证明模型却声称全部实现已证明                   |
+| 确定性模拟／故障注入 [S12]      | 可重放的复杂交错、故障与长轨迹       | 隔离环境内允许破坏；保留真实 IO／进程／持久化边界测试        | 模拟遗漏升级、运行时或真实资源行为；只靠模拟绿灯批准边界变更       |
+| LLM 提出性质与反例 [S13]        | 扩大候选输入与性质的探索范围         | 候选先核对公约、重放与人工或独立评估；权限、预算有界         | 把模型报告直接计为缺陷，把研究有效率当成本仓库保证，或允许自动降标 |
 
 这些路线可以组合，不要求选一个替代全部测试。Cedar 的 Lean 模型与 Rust 随机差分 [S10] 是模型证明加实现比较的实例，不是完整 Rust 实现证明；Agentic PBT [S13] 是研究证据，不是行业共识或 NMG 误报率测量。
 
@@ -190,13 +190,13 @@ ACTS 原生负向测试至多放入一个被标记为无效的参数值，并把
 
 ### 试点验收与退出
 
-| 需要回答的问题 | 验证方式 | 不能据此声称 |
-| --- | --- | --- |
-| 是否保持既有性质与观察点 | 抽取前后具名回归重放，逐项核对拒绝、状态变化及受保护状态 | 测试数相同就没有遗漏 |
-| 新组合是否确实可执行并击中目标边界 | 重放轨迹，记录身份、引用、时钟、中间状态与结果 | 生成器列出组合就已覆盖行为 |
-| 判定机制能否发现相关错误 | 有针对性的负控制／故障替换；分别报告发现、存活、不可应用、未执行及环境失败 | 进程崩溃就是杀死目标缺陷；不可应用就是通过 |
-| 参数模型是否完整覆盖声明域 | 小模型枚举与生成器自检核对约束、可扩展组合、分母及未覆盖项 | 当前模型满覆盖就是产品充分覆盖 |
-| 是否值得继续共享或生成 | 比较修改一个领域条件涉及的重复位置、抽取复杂度、生成时间、执行时间和重放成本 | 减少测试条数就减少总成本或保持检出能力 |
+| 需要回答的问题                     | 验证方式                                                                     | 不能据此声称                               |
+| ---------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------ |
+| 是否保持既有性质与观察点           | 抽取前后具名回归重放，逐项核对拒绝、状态变化及受保护状态                     | 测试数相同就没有遗漏                       |
+| 新组合是否确实可执行并击中目标边界 | 重放轨迹，记录身份、引用、时钟、中间状态与结果                               | 生成器列出组合就已覆盖行为                 |
+| 判定机制能否发现相关错误           | 有针对性的负控制／故障替换；分别报告发现、存活、不可应用、未执行及环境失败   | 进程崩溃就是杀死目标缺陷；不可应用就是通过 |
+| 参数模型是否完整覆盖声明域         | 小模型枚举与生成器自检核对约束、可扩展组合、分母及未覆盖项                   | 当前模型满覆盖就是产品充分覆盖             |
+| 是否值得继续共享或生成             | 比较修改一个领域条件涉及的重复位置、抽取复杂度、生成时间、执行时间和重放成本 | 减少测试条数就减少总成本或保持检出能力     |
 
 只有复用收益明确、原性质保留、新边界可重放、追溯身份仍有效且预算可接受时，才考虑扩大。出现隐藏状态、过滤拒绝路径、需要大规模基础设施才能表达小测试族，或维护成本超过收益时，缩小／撤回抽象；保留有价值的反例与具名回归，不靠削弱验收维持试点。
 
@@ -257,24 +257,157 @@ node --experimental-strip-types --test --test-name-pattern="^clear removes only 
 
 该失败不计通过，也不由单例重跑代替完整验收；未改动失败测试、放宽检查或更换锁文件。第二次独立工作区完整验证的 `test:product` 通过，但先执行的 `rtm:check` 读取首轮失败收据并拒绝，所以该次整轮仍失败。新收据写出后单独重跑 `rtm:check` 通过；没有删除或手改失败收据。提交前完整 scope 再次运行，执行结果仍由本工作区的 verifier 收据拥有。
 
+### 第三轮边界组合结果
+
+基线为独立工作区的 `d864ffb56331405a5833a6fc41df3ce8451751a7`。本轮复用 `claimAndDeliver`，不增加算子或修改其接口；新增 `tests/core/task-board-attempt-boundaries.test.ts` 的两个具名 store 契约样本，各自使用独立内存数据库并由 `node:test` 清理连接。
+
+- 同身份重新领取：60 秒租约结束前 1ms 可以修订并裁定；恰好到期不再存活，旧身份直接交付被拒绝且数据不变。同身份重新领取必须进入 attempt 2，并在再次交付之前清空旧产物、引用、摘要及裁定字段。再用共享函数交付时不得误增为 attempt 3。
+- 不同身份接手：到期前 1ms 的竞争领取被拒绝；恰好到期可以接手，并在新交付前观察旧产物与裁定被隔离。新产物交付之后，旧持有者不能交付或夺走新工作的存活租约，但可以作为当前产物的独立评审者；判断绑定的是新 digest，而不是永久身份黑名单。
+- entry TTL 固定在 2099 年，避免把条目清理与 60 秒 claim 租期混为一谈。领取、交付及裁定使用指定时刻；创建仍使用产品时钟，本轮不是全流程确定性模拟或跨进程并发实验。
+- 原先四个相关测试文件运行 38 passed；加入两个场景后五个文件运行 40 passed，均无 failed、cancelled、skipped 或 todo。Git 对比确认旧测试、共享函数及产品源码相对基线没有改动；没有退役原用例或改写既有预期。
+- 新增测试及变更的 mutation 注册文件 LSP 零诊断，目标 Prettier／ESLint 通过。三个新增故障定位均可解析，并与两个既有负控制一起运行，报告 5/5 被指定名字的测试检出，生产目标逐字节恢复。
+
+| 新增负控制                               | 改错的语义                           | 必须失败的具名场景 |
+| ---------------------------------------- | ------------------------------------ | ------------------ |
+| `expired-self-claim-is-only-a-heartbeat` | 判断续租只看同身份，遗漏租约是否存活 | 同身份到期重新领取 |
+| `claim-is-live-at-its-expiry-boundary`   | 把存活区间的结束边界从 `>` 改为 `>=` | 同身份到期重新领取 |
+| `new-attempt-keeps-prior-deliverer`      | 新 attempt 清空产物时残留旧交付者    | 不同身份到期接手   |
+
+注册与运行沿用既有 mutation harness；没有新建故障运行器。到期比较使用函数范围内的 AST 文本定位，另外两项使用既有 initializer／literal-fragment 算子；没有修改定位器实现。
+
+```text
+node --experimental-strip-types --test tests/core/task-board.test.ts tests/core/task-board-deliverable.test.ts tests/core/task-board-retention.test.ts tests/support/task-board-behavior.test.ts tests/core/task-board-attempt-boundaries.test.ts
+npm run mutation:teeth -- --targets=src/core/store/base.ts --mutant=expired-self-claim-is-only-a-heartbeat,claim-is-live-at-its-expiry-boundary,new-attempt-keeps-prior-deliverer,stale-claim-may-deliver-again,deliverer-may-judge-its-own-work
+```
+
+目标测试预算 60 秒，限定负控制预算 120 秒。正常实现通过新场景，未发现产品缺陷；人为变体被检出不等于发现三个真实缺陷，也不等于新增三个检出能力。没有单独对旧套件运行这些新变体来测量前后检出增益；旧的主动释放用例已观察交付者清空，本轮增加的是到期上下文和组合接缝，不能据此判其重复。
+
+这组样本支持保留必要的中间观察：错误残留的旧交付者可能在后续交付时被覆盖，只检查组合末态不能代替领取后的观察。它不证明全部序列覆盖、退役等价、维护收益或完整正确性；参数生成器、受限 LLM 探索及保留标记与租约的交互仍未验证。
+
+### 更广的结构筛选（2026-10-13）
+
+此前只检查三个范围，并以“同一文件、片段很短”支持不新增的结论，证据不足。该结论由本节替代：短片段和局部复用不能否定语义集中维护的价值；本次已经找到可直接实施的首选，而不是继续等待整体找虫收益的证明。
+
+#### 输入与方法
+
+观察状态为 `d864ffb56331405a5833a6fc41df3ce8451751a7` 加未提交的第三轮改动。输入由 `package.json` 的 `test:product` 十四组 glob 决定，含新边界文件，不含 research／chaos／evals 或生产数据。一次性 AST 探针解析 199 个文件，识别 1,716 个静态 test／it 声明、15,666 个非直接断言调用点和 3,967 个同一词法块内的动作对。这些是静态位置，不是执行次数；1,716 也不等于上一轮产品执行报告的 1,727 个用例。
+
+[结构筛选快照](behavior-structure-screen-2026-10-13.json)保存时刻、Node／TypeScript 版本、HEAD、输入与探针 SHA256、全部输入文件以及明确选择的 16 个方法族和 14 个动作对。每族最多保留四个跨文件例子；这是历史测量，不是当前源码目录或语义等价证明。另行核对 manifest 与全部 199 个输入文件的哈希、16／14 个保留族，以及 13 段路径对应 5 文件／9 场景的数据一致性，检查通过。
+
+探针复用既有 `resolveRouteTestFiles` 和 `writeJsonAtomic`，没有增加 npm 命令、框架或运行期接口。方法名聚类保留 receiver 与参数字段，动作对保留中间语句和直接断言数，不把跨断言的两个调用伪装成连续组合。自检覆盖连续调用、断言屏障、不同回调隔离、空 AST、闭合路径，以及附带额外元数据的片段不能混入基本路径。探针运行通过且 LSP 零诊断；一次性脚本不进入交付源码，复算方法与具体引用保留在快照中。
+
+#### 候选排序
+
+此排序依据实际共同结构、消费者差异和副作用边界，而不是把频次、行数或文件修改次数换算为收益。
+
+| 候选                             | 跨文件发现                                                                               | 语义核对与主要风险                                                                                                                 | 本次判断                                                                                                 |
+| -------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 已有节点上的路径／回路连边       | `linkNodes` 共 47 个位置、9 个文件；其中确认 13 段基本路径，属于 5 个文件的 9 个具名场景 | 同一 store、同一关系类型、前边 target 接后边 source；不夹断言。闭合路径、方向和调用顺序有真实意义，不能去重、排序或强加无环条件    | 新增行为算子的首选：以普通类型化函数集中路径构建，不创建节点或接管场景判定                               |
+| 已有 memory chain 上建立明确边集 | `addMemoryChainEdge` 20 个位置、4 个文件；连续边对 9 处、3 个文件                        | 有合流而非只有直线路径；必须区别 node ID 与 memory ID、DAG 拒绝路径，以及 LTG／STG 不同 store。20 个位置不是 20 个已证明可替换位置 | 备用候选：只共享已有 chain 引用上的明确边写入，不与节点关系路径合成通用“图算子”                          |
+| 批量记忆写入                     | remember→remember 172 处、25 个文件，160 处语句连续                                      | 自动去重、状态替代、scope、sourceActor、STG／LTG 会影响每步结果；既有 service `rememberBatch` 还限制单一物理 store                 | 复用机会大，但不能凭两个 remember 连续就判成相同准备。先复用已有能力，不为统计上的同名调用新建统一写入器 |
+| 写入后重建叶块／注入外部向量     | remember→rebuildLeafBlocks 16 处、6 个文件；upsertExternalEmbeddings 9 个位置、5 个文件  | 全库与指定节点重建不同，membersKey／Delta 前后状态可能是测试对象；向量、模型命名空间和就绪状态也属于场景输入                       | 有价值的第二梯队，不把准备与待测变化一起收进去                                                           |
+| working-state 绑定后写入         | bindWorkingState→replaceWorkingState 12 处、4 个文件                                     | 绑定涉及可信 host 上下文，写入涉及隐私、预算和拒绝后保留旧内容；简单拼接不能证明授权与观察可合并                                   | 风险较高，不作为第一项实施；不能让共享片段替调用者选权威身份                                             |
+| close 后清理目录                 | 78 处、45 个文件                                                                         | 这是资源生命周期，不是行为覆盖；内存／文件／daemon 资源需要匹配                                                                    | 最广的机械复用信号，回到既有 test-runtime owner 评估迁移，不另造行为算子库                               |
+
+已有 `claimAndDeliver` 保留：它确实跨场景复用，但本次发现说明它不是唯一值得算子化的行为，也不能由前三个小范围得出全仓没有新机会。保留／清理流程的中间观察和不同 embedding 测试替身仍需区别处理；这不是对这些领域所有片段的否定。
+
+#### 首选的具体范围
+
+十三段路径全部保留在快照的 `basicNodePaths`，包括以下消费者：
+
+- `tests/core/analogy.test.ts`：矛盾双向关系、依赖路径与因果回路。
+- `tests/core/community.test.ts`：连通结构、依赖社区、矛盾社区与反馈回路。
+- `tests/core/graph-cycles.test.ts`：有向回路、无环路径，以及同一对象在 symmetric／directed 关系下的不同观察。
+- `tests/core/multi-hop-path.test.ts`：已有节点上的两跳路径。
+- `tests/core/store/graph.test.ts`：两跳邻域。
+
+基本路径的结构选择条件为：连续至少两个 `linkNodes` 调用，参数恰为 sourceNodeId／targetNodeId／type，同 receiver、同字面关系类型，前一步 target 表达式与后一步 source 表达式一致；其他语句终止片段。逐项核对了上述五个文件，确认 store 为 NmgStore、引用来自已有真实节点。测试调用处的动态 mixin 类型未提供可用定义位置，因而继续读取 owning 源码 `src/core/store/graph.ts`，并通过 LSP 核对其实际输入与 NodeRelation 返回类型；没有把纯文本匹配冒充类型等价。
+
+可实施的表达是 `linkNodePath(store, existingNodeIds, relationType)` 一类普通函数。例如 A→B→C 与 A→B→A 由调用者显式给出节点顺序；函数保持逐边写入、既有失败传播和产品时钟，返回真实关系观察，不增加事务、自动闭环或前置过滤。只有消费同一基本语义的片段进入它；重连幂等、evidence 合并、关系强度或带中间断言的片段仍可直接调用。这里是首选接口与范围建议，不是已实施代码或新的验收门禁。
+
+Git 定位包含 `cb4a858a` 的 cycle 功能、`ed8e9797` 的 community 功能、`294cd18e` 的 analogy 功能和 `e093eb6c` 的 multi-hop 功能。这说明不同功能使用同一图结构意图，不说明曾经发生同一字段的反复同步修复，也不是节省维护工时的实测。
+
+#### 最大风险与决策终点
+
+最大的风险不是函数短或长，而是共同表达把关键差异抹平：
+
+- 普通 node relation 可以用于回路诊断；memory-chain edge 的写入拒绝 DAG 回路。不能共用“默认无环”前置条件或互借接受依据。
+- `tests/core/stg-isolated.test.ts` 中连续的 create／edge 调用跨 LTG 和 STG；相邻方法名相同不是同一个执行对象。
+- 两次同端点 linkNodes 可能是在验证幂等或合并 evidence，并不是长度为二的路径。
+- 跨断言拼成一个动作会隐藏观察；remember、binding、资源清理的高频也不能直接转换成统一行为契约。
+
+本次以明确的首选、备用候选和排除理由结束，撤回此前“当前没有值得新增的候选”的判断。下一项可以直接实施上述已有节点路径片段，并以现有具名场景和必要的局部契约／负控制完成验证；不要求先证明整体缺陷检出增益，也不自动退役测试。本轮仅完成结构筛选：没有实现新算子、执行新生成序列或改动产品／原测试，未测量维护时间、自然缺陷检出或完整语义覆盖。
+
+### 已有节点路径实施结果（2026-10-13）
+
+用户认可首选后，实施范围固定为筛选中的 13 段，不再继续选型。`tests/support/node-graph-behavior.ts` 的 `linkNodePath` 是普通类型化函数：只持有 `linkNodes` 写入能力，逐对连接调用者已有的 ID 序列和关系类型，返回真实关系结果。资源、节点创建和判定仍由消费者负责；具体边界回到[测试设计](../../design/ci-cd-and-quality.md#41-行为片段与资源-fixture)。没有产品源码、依赖、验证 route、DSL 或生成器变化。
+
+#### 保留对比
+
+基线为 `d864ffb56331405a5833a6fc41df3ce8451751a7`。五个消费者的原 49 个字面量测试名称和 158 个 `assert` 调用源码逐项一致；这些是静态声明／调用点，不是断言执行次数。将新函数调用按相邻 ID 展开为原三字段 `store.linkNodes` 调用、删除仅引入该函数的 import，再用 TypeScript printer 去注释后比较整个消费者 AST，五文件均与基线一致。比较保留 receiver、端点、关系类型、逐边顺序、场景创建和观察位置；它不是一般语义等价或完整正确性的证明。
+
+| 消费者         | 原名称 | 原断言调用 | 迁移片段 |
+| -------------- | -----: | ---------: | -------: |
+| analogy        |      4 |         12 |        3 |
+| community      |      3 |         12 |        4 |
+| graph-cycles   |      8 |         21 |        4 |
+| multi-hop-path |      3 |         18 |        1 |
+| store/graph    |     31 |         95 |        1 |
+| 合计           |     49 |        158 |       13 |
+
+一次性比较器复用 `writeJsonAtomic`，参数显式指定基线、五路径和预期 13 段。自检包括可保留的展开，以及空输入、改名、缺失／改变断言、错误端点／receiver／类型和新增观察的拒绝；运行与 LSP 检查通过。Node `v24.19.0`、TypeScript `5.9.3`，格式化后测量时刻 `2026-10-13T04:16:02.786Z`，探针 SHA256 `bb4123e205a993e5fb3a494cdf14c48c29df3cd67f9754bb42c04363d8d620ed`。本地完整结果为 `.nmg/verification/node-path-comparison.json`；脚本不交付。复核可从上述基线读取五个 blob，以 `ts.createSourceFile` 收集字面量名称和断言文本，再按上述展开与 printer 方法比较当前消费者；限定测试命令见下文。
+
+筛选快照保留实施前的输入哈希，不用修改后的五文件重写历史测量。幂等重连、evidence 合并、附加元数据、独立边，以及 symmetric 与 directed 关系之间的观察仍在原位置；没有自动退役用例。产品源码和已有 Task Board helper／原交付与保留期测试相对基线未改变。
+
+#### 契约与限定负控制
+
+新增四项具名契约测试，分别检查方向与顺序／实际快照，重复端点与重复边的逐次结果，空／单节点输入不写入，以及后续失败原样传播、停止执行且真实 SQLite 中保留成功前缀。三个场景使用独立 `:memory:` store，空／单点场景只需一个调用即抛错的写入能力；失败场景在第二次调用注入同一 Error，不声称复现了产品自然缺陷或数据库底层错误。原消费者的文件数据库生命周期不变。
+
+迁移前五文件 49/49；迁移后加四项契约共 53/53。限定命令：
+
+```text
+node --experimental-strip-types --test tests/core/analogy.test.ts tests/core/community.test.ts tests/core/graph-cycles.test.ts tests/core/multi-hop-path.test.ts tests/core/store/graph.test.ts tests/support/node-graph-behavior.test.ts
+npm run mutation:teeth -- --targets=tests/support/node-graph-behavior.ts --mutant=node-path-skips-the-first-edge,node-path-counts-only-unique-endpoints,node-path-swallows-a-later-link-failure
+```
+
+既有 harness 注册三项函数内限定故障，不增加 mutation operator 或 runner：跳过第一边由顺序／快照测试检出；以唯一端点数作为长度由重复端点测试检出；吞掉后续 link 失败由失败／成功前缀测试检出。3/3 均可定位并被指定真实名称检出，目标文件逐字节恢复，结果时刻 `2026-10-13T04:14:39.671Z`（本地 `.nmg/verification/node-path-teeth.json`）。这不是完整 mutation 扫描、三个真实缺陷，或三个新增检出能力的证明。
+
+#### 完整检查与未解决复现
+
+首轮完整 scoped run `c6c1ca85-f912-4606-be6d-fbfdbf246018` 在 `2026-10-13T04:22:28.657Z` 写出失败收据：15 项阻塞检查通过，`test:product` 为 1,730 passed／1 failed；未修改的 `tests/cli/process.test.ts` 中 `daemon idle timer is refreshed by requests` 在第二次 status 读取后得到 `running=false`。外层 task 调用另行返回 `[TIMED OUT]`；收据失败与外层超时是两项不同观察，不能互相解释。失败日志和收据保留于本地 `.nmg/verification/node-path-final-verify.log` 与 `node-path-first-full-failure.json`，未删除或手改。
+
+第二轮完整 run `5337bab5-255a-4776-8a0b-e4e4f10d577a` 于 `2026-10-13T04:38:27.895Z` 写出收据，`test:product` 通过，但先执行的 `rtm:check` 读取上一轮产品失败证据而失败，因此整轮仍不是绿灯。`--json` 模式的外层 task 也超时；不修改失败收据，后续只依据 verifier 正常写出的新证据复核。
+
+第三轮 run `a5db74d7-d0cb-4ee4-81e8-4c38b4131323` 于 `2026-10-13T04:48:37.414Z` 写出成功收据，14 个 owned 路径的 16 项阻塞检查全部通过，包括 `rtm:check` 与 `test:product`。一次性独立 launcher 在运行前记录 HEAD 和这 14 个输入的 SHA256，执行同一个 watchdog 而不修改 route 或验收标准；原生子进程退出码为 0，状态于 `2026-10-13T04:48:37.447Z` 写出。launcher 的缺失输入负控制、LSP 与全量 lint 通过，不进入交付源码。该结果证明此轮正常结束，不证明前两次外层超时的根因已解决。
+
+精确名称独立重跑四次，4/4 通过（该条件下 0/4 复现）；调试器在原文件第二次断言处观察到 `first.running=true`、`second.running=true`，继续至结束后临时资源已移除。未修改该 CLI 用例、daemon 或验收标准，检查时没有残留 verifier 进程。未建立原全量失败或外层超时的根因；后续绿灯不将它们标成已解决，也不以“flaky”代替未解决复现。
+
+```text
+node --experimental-strip-types --test --test-name-pattern="^daemon idle timer is refreshed by requests$" tests/cli/process.test.ts
+```
+
+#### 决定与边界
+
+保留该函数和这 13 个消费者片段，本块在验证后收尾，不自动进入 memory-chain、批量写入或其他候选。尚未测量维护时间、自然缺陷检出增益或全仓迁移收益。AST 保留、实际目标执行与指定故障检出分别提供证据，不互相替代；最终完整 scoped 检查由既有 `agent:verify` 的收据记录，不用本节的局部结果冒充。没有 stage、commit、push 或 merge，提交仍延期。
+
 ## 来源与未验证项
 
 豆包搜索用于发现来源；正文用于核对具体定义、条件与局限。NIST 原站部分页面未能直连，下列标注镜像的正文来自第三方 `csrc.nist.rip`，不能当作原站最新发布状态的验证。OpenReview 的 Last Modified 日期不作为论文发表日期。
 
-| 编号 | 来源与已核查范围 | 本记录采用的证据边界 |
-| --- | --- | --- |
-| S1 | [ACTS User Guide：Basic 1.0 / Advanced 3.3，文件标注 Nov 2023，镜像 PDF](https://csrc.nist.rip/csrc/media/Projects/automated-combinatorial-testing-for-software/documents/acts_user_guide_for_basic1.0_and_advanced3.3_versions_nov23.pdf)，正文 §§1–3 | 算法能力、约束处理、混合强度、负向测试、extend 与覆盖核验；未验证新发布版 |
-| S2 | [NIST Event Sequence Testing，镜像正文](https://csrc.nist.rip/Projects/automated-combinatorial-testing-for-software/combinatorial-methods-in-testing/event-sequence-testing)，页面标注更新 2021-10-12 | SCA 定义、允许插入、实例及原数组生成说明；未核验最优性 |
-| S3 | [Ordered t-way Combinations for Testing State-based Systems，2022-04-14 草案，镜像 PDF](https://csrc.nist.rip/csrc/media/Projects/automated-combinatorial-testing-for-software/documents/seqWP-4.pdf)，全文；[2023 会议记录](https://openreview.net/forum?id=vyfw4ngjAt) | 以取得的 2022 草案核对 OCC 定义与串接构造；2023 PDF 被验证页面阻挡，未核查修订差异 |
-| S4 | [Combinatorial Modeling and Test Case Generation for Industrial Control Software using ACTS，2018 v2](https://arxiv.org/pdf/1803.09006v2)，全文 | ACTS 2.92、17 个 PLC 程序的生成效率与适用性；不是缺陷检出研究或当前版本排名 |
-| S5 | [Using binary decision diagrams for constraint handling in combinatorial interaction testing，2019 v1](https://arxiv.org/html/1907.01779v1)，约束定义、IPOG、BDD 方法、实验与有效性威胁 | 62 模型、2-way／3-way 的约束处理性能证据；不是所有模型最优性的证明 |
-| S6 | Duan、Lei、Kacker、Kuhn：[An Approach to T-Way Test Sequence Generation With Constraints，2019 ICSTW 检索入口](https://csrc.nist.gov/Projects/automated-combinatorial-testing-for-software/acts-library/workshop-papers) | 题名、作者与摘要级证据；算法正文、能力与覆盖保证未核实 |
-| S7 | [Developing multithreaded techniques and improved constraint handling for the tool CAgen，2022](https://openreview.net/forum?id=7JEW3ZNrXb) | 摘要级证据；不采用其性能作为 NMG 选型结论 |
-| S8 | [fast-check model-based testing](https://fast-check.dev/docs/advanced/model-based-testing/) | 命令、模型、前置条件与执行的工作方式；未在 NMG 接入或实测 |
-| S9 | [Dafny Quick Reference](https://dafny.org/dafny/QuickReference) 与 [Verification Optimization](https://dafny.org/dafny/VerificationOptimization/VerificationOptimization) | 规格与证明机制、求解稳定性成本；不是全仓适用性证明 |
-| S10 | [Lean into verified software development：Cedar](https://aws.amazon.com/blogs/opensource/lean-into-verified-software-development/) | 可执行 Lean 模型、性质证明与 Rust 随机差分的组合实例 |
-| S11 | [Lean：Validating Proofs](https://lean-lang.org/doc/reference/latest/ValidatingProofs/) | 可信命题、依赖与验证工具边界；latest 链接会变化，不推断全部编译器／运行时信任消失 |
-| S12 | [FoundationDB testing](https://apple.github.io/foundationdb/testing.html) | 确定性模拟与故障测试经验；不是对 NMG 真实边界的验证 |
-| S13 | [Agentic PBT，2025 v1](https://arxiv.org/html/2510.09907v1) | 研究中的性质与缺陷报告评估；样本有效率不外推为 NMG 误报率或行业共识 |
+| 编号 | 来源与已核查范围                                                                                                                                                                                                                                                         | 本记录采用的证据边界                                                               |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| S1   | [ACTS User Guide：Basic 1.0 / Advanced 3.3，文件标注 Nov 2023，镜像 PDF](https://csrc.nist.rip/csrc/media/Projects/automated-combinatorial-testing-for-software/documents/acts_user_guide_for_basic1.0_and_advanced3.3_versions_nov23.pdf)，正文 §§1–3                   | 算法能力、约束处理、混合强度、负向测试、extend 与覆盖核验；未验证新发布版          |
+| S2   | [NIST Event Sequence Testing，镜像正文](https://csrc.nist.rip/Projects/automated-combinatorial-testing-for-software/combinatorial-methods-in-testing/event-sequence-testing)，页面标注更新 2021-10-12                                                                    | SCA 定义、允许插入、实例及原数组生成说明；未核验最优性                             |
+| S3   | [Ordered t-way Combinations for Testing State-based Systems，2022-04-14 草案，镜像 PDF](https://csrc.nist.rip/csrc/media/Projects/automated-combinatorial-testing-for-software/documents/seqWP-4.pdf)，全文；[2023 会议记录](https://openreview.net/forum?id=vyfw4ngjAt) | 以取得的 2022 草案核对 OCC 定义与串接构造；2023 PDF 被验证页面阻挡，未核查修订差异 |
+| S4   | [Combinatorial Modeling and Test Case Generation for Industrial Control Software using ACTS，2018 v2](https://arxiv.org/pdf/1803.09006v2)，全文                                                                                                                          | ACTS 2.92、17 个 PLC 程序的生成效率与适用性；不是缺陷检出研究或当前版本排名        |
+| S5   | [Using binary decision diagrams for constraint handling in combinatorial interaction testing，2019 v1](https://arxiv.org/html/1907.01779v1)，约束定义、IPOG、BDD 方法、实验与有效性威胁                                                                                  | 62 模型、2-way／3-way 的约束处理性能证据；不是所有模型最优性的证明                 |
+| S6   | Duan、Lei、Kacker、Kuhn：[An Approach to T-Way Test Sequence Generation With Constraints，2019 ICSTW 检索入口](https://csrc.nist.gov/Projects/automated-combinatorial-testing-for-software/acts-library/workshop-papers)                                                 | 题名、作者与摘要级证据；算法正文、能力与覆盖保证未核实                             |
+| S7   | [Developing multithreaded techniques and improved constraint handling for the tool CAgen，2022](https://openreview.net/forum?id=7JEW3ZNrXb)                                                                                                                              | 摘要级证据；不采用其性能作为 NMG 选型结论                                          |
+| S8   | [fast-check model-based testing](https://fast-check.dev/docs/advanced/model-based-testing/)                                                                                                                                                                              | 命令、模型、前置条件与执行的工作方式；未在 NMG 接入或实测                          |
+| S9   | [Dafny Quick Reference](https://dafny.org/dafny/QuickReference) 与 [Verification Optimization](https://dafny.org/dafny/VerificationOptimization/VerificationOptimization)                                                                                                | 规格与证明机制、求解稳定性成本；不是全仓适用性证明                                 |
+| S10  | [Lean into verified software development：Cedar](https://aws.amazon.com/blogs/opensource/lean-into-verified-software-development/)                                                                                                                                       | 可执行 Lean 模型、性质证明与 Rust 随机差分的组合实例                               |
+| S11  | [Lean：Validating Proofs](https://lean-lang.org/doc/reference/latest/ValidatingProofs/)                                                                                                                                                                                  | 可信命题、依赖与验证工具边界；latest 链接会变化，不推断全部编译器／运行时信任消失  |
+| S12  | [FoundationDB testing](https://apple.github.io/foundationdb/testing.html)                                                                                                                                                                                                | 确定性模拟与故障测试经验；不是对 NMG 真实边界的验证                                |
+| S13  | [Agentic PBT，2025 v1](https://arxiv.org/html/2510.09907v1)                                                                                                                                                                                                              | 研究中的性质与缺陷报告评估；样本有效率不外推为 NMG 误报率或行业共识                |
 
-尚未验证：跨测试复用的维护收益、全面缺陷检出能力、新边界组合、生成器及依赖的实际运行、最新 ACTS 发布版、S6／S7 正文、2023 OCC 论文相对草案的变化，以及受限探索执行环境的隔离强度。第一轮证据只覆盖其结果节明确测量的局部切片。后续结果回到本记录补充；正式规则或行为变化回到其既有 owner，不由研究文档自行晋升。
+尚未验证：跨测试复用的维护收益、全面缺陷检出能力、未覆盖的状态边界、生成器及依赖的实际运行、最新 ACTS 发布版、S6／S7 正文、2023 OCC 论文相对草案的变化，以及受限探索执行环境的隔离强度。第一轮证据只覆盖其结果节明确测量的局部切片。后续结果回到本记录补充；正式规则或行为变化回到其既有 owner，不由研究文档自行晋升。
