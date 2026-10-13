@@ -388,7 +388,25 @@ node --experimental-strip-types --test --test-name-pattern="^daemon idle timer i
 
 #### 决定与边界
 
-保留该函数和这 13 个消费者片段，本块在验证后收尾，不自动进入 memory-chain、批量写入或其他候选。尚未测量维护时间、自然缺陷检出增益或全仓迁移收益。AST 保留、实际目标执行与指定故障检出分别提供证据，不互相替代；最终完整 scoped 检查由既有 `agent:verify` 的收据记录，不用本节的局部结果冒充。没有 stage、commit、push 或 merge，提交仍延期。
+保留该函数和这 13 个消费者片段，本块在验证后收尾，不自动进入 memory-chain、批量写入或其他候选。尚未测量维护时间、自然缺陷检出增益或全仓迁移收益。AST 保留、实际目标执行与指定故障检出分别提供证据，不互相替代；最终完整 scoped 检查由既有 `agent:verify` 的收据记录，不用本节的局部结果冒充。该路径验证阶段尚未 stage 或 commit；后续本地提交与集成结果见下一节，历史失败与未确认的根因仍保留。
+
+## 本地集成交付（2026-10-13）
+
+本轮收尾只交付已决定保留的 `claimAndDeliver`、`linkNodePath` 及其消费者，不扩展算子库、DSL 或生成器。行为分支的 14 个待提交路径以 `164f0bb08c923e410ee980e28a9ee4bf9f17e34f` 提交，父提交为 `d864ffb5`；14 个输入 SHA256 在提交和 hook 后一致，工作区干净。新提交前复验：目标 93/93、九文件 LSP 零诊断，scoped run `4aef3730-5754-45ee-baf2-dc18296bcf86` 于 `2026-10-13T14:06:40.477Z` 完成 16 项阻塞检查，原生退出 0。该旧基线复验不是集成证明。
+
+独立分支 `test/behavior-and-reporting-integration` 以共享区的提交快照 `a964fa3af2baddf12e1e625a9bfd907d8266095f` 为基线，依次重放执行报告修复 `66238c2`、恢复测试修复 `432c0e8`、行为组合 `d864ffb5` 和 `164f0bb`，得到 `cc34153e059101333466be0f303175cdfb1632b5`。只解决 CI owning design 的更新时间冲突，保留较新的日期。31 个差异路径中其余 30 个 Git blob 与对应源提交一致；设计正文精确等于恢复修复版加算子的 §4.1，因此类型入口、按需清单、GC skip 与行为合同均未丢失。基线的其他代码及共享工作树的未提交文件未被带入或改写。
+
+该集成代码快照的实测结果：
+
+- 15 个目标文件：128 项，126 passed、0 failed、2 个正式 GC skip；显式 GC robustness 16/16，无 skip。
+- 从真实 `tools/ci-uncovered-tests.ts --list` 派生的十个离线 harness：91/91，无失败或 skip；未过滤恢复场景。
+- 19 个受影响 TypeScript 文件：LSP 零诊断。
+- 既有 mutation harness 的节点路径三项、Task Board 五项限定负控制：8/8 由指定名字检出，两个目标均逐字节恢复。不是完整 mutation sweep。
+- clean `npm run verify:product-ci`：于 `2026-10-13T14:29:25.477Z` 取得原生退出 0；1781 项，1779 passed、0 failed、2 个正式 GC skip，31 个输入 SHA256 前后一致。
+
+本节是在上述代码快照之后补入的证据记录，CI 结果不声称已经覆盖后续文档字节。最终清洁 scoped 检查由 owner 生成收据；复验范围可在 PowerShell 中用 `$scope = git diff --name-only a964fa3af2baddf12e1e625a9bfd907d8266095f HEAD` 取得，再执行 `node --experimental-strip-types tools/agent-verify-watchdog.ts --require-clean @scope`。目标测试、显式 GC、限定 mutation 和完整 CI 使用本记录及两个修复决策已有的入口，不新增 runner。
+
+这完成了本地分支的算子提交与功能集成，不表示共享分支已合并或已 push。没有 Linux、GitHub workflow dispatch、独立外部验收、live provider、完整 benchmark、生成器实测或自然缺陷检出增益证明；历史 daemon 与外层超时的根因也不由本次成功关闭。
 
 ## 来源与未验证项
 
