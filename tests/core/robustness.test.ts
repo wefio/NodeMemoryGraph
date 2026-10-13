@@ -68,9 +68,9 @@ test("Tensor.at out of bounds throws", () => {
 
 // ── memory / leak guards ──
 
-test("Tensor allocate 50K does not blow heap", () => {
+test("Tensor allocate 50K does not blow heap", (context) => {
   if (!global.gc) {
-    assert.ok(true, "skipped — run with --expose-gc");
+    context.skip("run with --expose-gc to check heap growth");
     return;
   }
   global.gc();
@@ -84,7 +84,7 @@ test("Tensor allocate 50K does not blow heap", () => {
   assert.ok(delta < 80, `heap grew ${delta.toFixed(1)} MB`);
 });
 
-test("HA propagate × 5K: no NaN, stable heap", () => {
+function propagateFiveThousandTimes(): number {
   const d = 64;
   function rvec() {
     const v = new Float32Array(d);
@@ -113,13 +113,23 @@ test("HA propagate × 5K: no NaN, stable heap", () => {
     }
   }
 
-  if (global.gc) {
-    global.gc();
-    const h1 = process.memoryUsage().heapUsed;
-    const delta = (h1 - h0) / 1024 / 1024;
-    assert.ok(delta < 100, `heap grew ${delta.toFixed(1)} MB after 5K propagates`);
+  return h0;
+}
+
+test("HA propagate × 5K: no NaN", () => {
+  propagateFiveThousandTimes();
+});
+
+test("HA propagate × 5K: stable heap", (context) => {
+  if (!global.gc) {
+    context.skip("run with --expose-gc to check heap growth");
+    return;
   }
-  assert.ok(true);
+  const h0 = propagateFiveThousandTimes();
+  global.gc();
+  const h1 = process.memoryUsage().heapUsed;
+  const delta = (h1 - h0) / 1024 / 1024;
+  assert.ok(delta < 100, `heap grew ${delta.toFixed(1)} MB after 5K propagates`);
 });
 
 test("HA 200 clone cycles: no NaN, no crash", () => {

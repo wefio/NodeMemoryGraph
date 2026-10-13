@@ -1,7 +1,7 @@
 # 代码质量与 CI/CD
 
 **Created:** 2026-07-20  
-**Updated:** 2026-10-09
+**Updated:** 2026-10-13
 **Authority:** 仓库测试、CI 与 Agent 开发流程契约
 
 NMG 的测试负责阻止可复现错误，不负责冻结尚未验证的设计。产品契约、研究测量与故障注入使用不同执行轨道，避免 benchmark 便利逻辑反向定义产品行为。
@@ -86,8 +86,8 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 - `node-compat`：最低支持版本 Node 22.19 的 build/package；
 - `chaos`：Windows 上的资源与 daemon 故障注入，仅在推送到 `main` 时运行（145 次 CI 运行中仅 1 次失败，且在 `main` 上；见[决策](../decisions/implemented/2026-09-09-chaos-tests-on-main-pushes.md)）；
 - `all-checks-passed`：只聚合阻塞轨道。
-- `static` 内的 `ci:uncovered-tests`：从各 job 实际调用的 glob 推导出**没有任何 job 覆盖的测试文件**，`evals/` 下（研究 harness，按需运行）可留为 acknowledged，其余一律失败关闭并指名文件。
-- `.github/workflows/on-demand-suites.yml`（仅 `workflow_dispatch`）：在 Linux 与 Windows 上以 `--test-concurrency=1` 跑上述未覆盖套件，并把 TAP 逐字记录作为 artifact 上传；不是必需检查。
+- `static` 内的 `ci:uncovered-tests`：从各 job 实际调用的 glob 推导出没有任何 job 覆盖的 tracked 测试文件；全部未覆盖文件仍在 inventory 中可见，未认领的文件一律失败关闭并指名。认领根同时注明是否可直接按需运行：`evals/` 的独立 harness 可运行；更具体的 `evals/ooo-execution/fixtures/` 是由 harness 填入候选后执行的冻结检查，`docs/experiments/execution/archive/` 是历史候选证据，两者不可直接运行。具体根优先匹配，不按泛化的 `fixtures` 名称过滤其他测试。
+- `.github/workflows/on-demand-suites.yml`（仅 `workflow_dispatch`）：工具的 `--list` 只输出可直接运行的未覆盖文件；workflow 在 Linux 与 Windows 上以 `--test-concurrency=1` 跑该清单，保留每个路径的参数边界及 Node 的失败退出码，并上传 TAP。空清单写出 `1..0 # SKIP` 的 TAP，不调用无文件参数的 Node 自动发现；该轨仍不是必需检查。
 
 CI 或打包规则变更除本地目标测试外，应在 clean checkout（或等价干净 worktree）运行其完整命令，防止未跟踪文件让本地验证产生假阳性。
 
@@ -106,6 +106,8 @@ TestRuntime
 ```
 
 测试通过 `withTestRuntime(...)` 或显式 `dispose()` 获取 RAII 式回收。插件依赖必须显式：database 要求 workspace，daemon 要求 database；缺少依赖时失败，不偷偷创建隐含全局状态。daemon 在进程内使用真实 HTTP JSON-RPC handler，因此能验证协议，同时不会遗留后台进程。
+
+依赖 Node 显式 GC 的堆增长检查只在 `global.gc` 可用时执行；不可用时通过 `node:test` 的 skip 报告未执行，不用恒真断言代替。`tests/core/robustness.test.ts` 的 HA 无 NaN 压力检查与堆增长检查是两个具名用例，缺少 GC 不跳过前者。堆检查的显式本地入口是 `node --expose-gc --experimental-strip-types --test tests/core/robustness.test.ts`；该见证不声明所有分配模式都无泄漏。执行目标与结果报告的取舍见[决策](../decisions/implemented/2026-10-13-runnable-suites-and-executed-checks.md)。
 
 测试资源按断言需观察的边界分为四类，按需取得最轻且隔离的资源（[决策](../decisions/implemented/2026-09-24-resource-matched-test-fixtures.md)）：
 
