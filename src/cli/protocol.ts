@@ -921,6 +921,15 @@ export interface NmgStateResult {
   information?: PreparedInformationOutput;
 }
 
+/** State dispatch preserves domain results; presentation reuses the existing output protocol. */
+export interface NmgStateResult {
+  action: "read" | "write";
+  space: "ag" | "board";
+  operation: string;
+  result: NmgLabResult | NmgSessionActiveGraphResult | NmgMethodResult["taskBoard"];
+  information?: PreparedInformationOutput;
+}
+
 export type NmgMethodResult = {
   hello: NmgHelloResult;
   status: NmgStatusResult;
