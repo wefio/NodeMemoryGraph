@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
+import ts from "typescript";
 import { parse as parseYaml } from "yaml";
+import { testCoverage } from "../../tools/ci-uncovered-tests.ts";
 
 const packageJson = JSON.parse(
   readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
@@ -99,6 +103,34 @@ test("tests-surface type checking is blocking in the shared static contract", ()
     !ci.jobs.static.steps.some((step) => step.run === "npm run check:tests"),
     "CI uses the shared contract, not a duplicate advisory type-check step",
   );
+});
+
+test("runnable OoO harnesses are covered by the blocking tests type-check surface", () => {
+  const root = fileURLToPath(new URL("../../", import.meta.url));
+  const path = fileURLToPath(new URL("../../tsconfig.tests.json", import.meta.url));
+  const config = ts.readConfigFile(path, ts.sys.readFile);
+  assert.equal(config.error, undefined);
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root, undefined, path);
+  assert.deepEqual(parsed.errors, []);
+  const compilerRoots = new Set(
+    parsed.fileNames.map((file) => relative(root, file).replaceAll("\\", "/")),
+  );
+  const runnable = testCoverage(root).onDemand.filter((file) =>
+    file.startsWith("evals/ooo-execution/"),
+  );
+  assert.ok(runnable.length > 0, "there must be runnable OoO harnesses to check");
+  for (const file of runnable)
+    assert.ok(compilerRoots.has(file), `${file} is outside the blocking type-check surface`);
+  for (const file of compilerRoots) {
+    assert.ok(
+      !file.startsWith("evals/ooo-execution/fixtures/"),
+      `${file} is a frozen fixture root`,
+    );
+    assert.ok(
+      !file.startsWith("docs/experiments/execution/archive/"),
+      `${file} is an archived evidence root`,
+    );
+  }
 });
 
 test("the maintained policy-word check blocks the shared static contract exactly once", () => {

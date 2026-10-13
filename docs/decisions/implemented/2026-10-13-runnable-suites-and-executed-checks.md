@@ -68,14 +68,12 @@ check is not a proof that all allocations are leak-free. Local Windows tests do
 not claim a GitHub workflow dispatch or Linux execution, and no live provider or
 complete benchmark is required by this change.
 
-## Deferred
+## Follow-up
 
-The derived ten-suite set ran on Windows with 86 passed and five failed out of
-91 tests, both in the fix worktree and at unchanged baseline `e5b19733`. The five
-failures are in `evals/ooo-execution/recovery.test.ts`: those cases read
-`ticket.patch.digest`, while the debugger observes no `patch` in the current
-claim ticket. Reproduce with
-`node --experimental-strip-types --test evals/ooo-execution/recovery.test.ts`.
-Those recovery assumptions remain outside this reporting repair; the suites stay
-selected and their failures stay visible. Neither the selected-set run nor a
-passing product gate establishes that the on-demand workflow is wholly green.
+The original selected-set run on Windows at `e5b19733` had 86 passes and five
+failures out of 91 tests. Those five recovery consumers read the removed
+`ticket.patch.digest`; the reporting repair kept them selected and recorded their
+failures. The [separate recovery repair](2026-10-13-recovery-tests-use-frozen-declarations.md)
+corrects that consumer drift and closes the type-check entry gap. It owns the
+follow-up result and proof boundary; a passing product gate alone still does not
+establish execution of the on-demand suites.

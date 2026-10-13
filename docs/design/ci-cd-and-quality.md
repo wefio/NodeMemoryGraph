@@ -59,7 +59,7 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 
 `format` 与 `format:check` 的 `**/*.ts` 面为 `src/`、`.pi/`、`workbuddy-plugin/`、`tests/`、`evals/`、`scripts/`、`tools/`；暂存格式 hook 与它们同面，子包保留独立流程。守卫测试锁定两条命令及 hook 一致，评估 fixture 的故意错误行为不因格式化而修正（[静态覆盖面决策](../decisions/implemented/2026-09-16-ci-static-coverage.md)）。
 
-`npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`）进入 `verify:static` 与 `ci-and-tests` 的阻塞集合。它检查 `tests/`、配置显式包含的源文件以及它们导入的依赖；不声明覆盖全部 `evals/`、`scripts/`、`tools/`。
+`npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`）进入 `verify:static` 与 `ci-and-tests` 的阻塞集合。它检查 `tests/`、独立运行的 `evals/ooo-execution/*.test.ts` harness、配置显式包含的源文件以及它们导入的依赖；冻结的 `evals/ooo-execution/fixtures/` 和归档证据不作为独立检查入口。纳入类型检查不等于纳入默认产品执行轨；范围回归由 `tests/tools/test-groups.test.ts` 对照真实编译器入口与按需选择清单。它不声明覆盖全部 `evals/`、`scripts/`、`tools/`（[恢复测试修复决策](../decisions/implemented/2026-10-13-recovery-tests-use-frozen-declarations.md)）。
 
 `check:policy-words` 在 `verify:static` 与 `ci-and-tests` 的阻塞集合中执行一次；维护词表、分类记录和扫描面由[机制，不是策略](../decisions/implemented/2026-09-21-mechanism-not-policy.zh-CN.md#决策)拥有。它阻止未登记的命中与记录漂移，不证明机制层已无策略。
 

@@ -144,9 +144,9 @@ worker 失败、超时或输出被截断都不是完成：它被记为一次失�
 7. S4 的对照必须回答“本设计会不会更慢”：变异复检与候选目录都是本轮新增的宿主开销，不能只报收益。
 
 S2 的退出条件“故障注入后无重复完成、错误解锁或无限等待；重启可恢复或明确终止”现由
-`evals/ooo-execution/recovery.test.ts` 的 8 个确定性测试覆盖：崩溃后继者不偷活认领、重复提交为
+`evals/ooo-execution/recovery.test.ts` 的 9 个具名本地 SQLite 场景覆盖：后继协调器不偷活认领、重复提交为
 `duplicate` 且不二次释放依赖、被撤认领的产物为 `stale`、租约失效是新一代而非静默成功、永不回报的检查以
-`undecidable` 显式终止、伪造票据不能终止等待、取消围栏迟到产物且跨重启保留、存储按列增量迁移且保留既有状态。另加两条真实进程的取消实测（`cancellation.test.ts`：杀进程树、无幽灵完成、依赖不解锁、原因跨重启保留）与“重放要么复现要么指名拒收”。5. 统一术语：协调器=retire/commit 阶段，接受=commit，拒绝=squash，attempt digest=fencing token。
+`undecidable` 显式终止、伪造票据不能终止等待、首次取消原因不被重写、取消围栏迟到产物且跨重启保留、重开同一数据库保留既有认领和票据身份。补丁产物绑定 `BoardTicket.declaration.digest`，宿主拒收错误摘要后仍可接受同一活认领的正确产物（[决策](../decisions/implemented/2026-10-13-recovery-tests-use-frozen-declarations.md)）。这些场景以关闭并重开协调器模拟恢复；数据库重开场景不构造旧版本 schema，不证明任意旧库的升级，也不模拟进程被强杀。另加两条真实进程的取消实测（`cancellation.test.ts`：杀进程树、无幽灵完成、依赖不解锁、原因跨重启保留）与“重放要么复现要么指名拒收”。5. 统一术语：协调器=retire/commit 阶段，接受=commit，拒绝=squash，attempt digest=fencing token。
 
 ### 推测的落点（规则由决策记录拥有，本节只列可落地的位置）
 

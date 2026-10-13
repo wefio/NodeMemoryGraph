@@ -32,6 +32,6 @@ fixture 检查仍由其 harness 使用，归档保持原样。默认 CI 的覆�
 
 默认产品运行可以如实报告堆检查 skipped；显式 `--expose-gc` 执行测量原有堆增长见证。通过不证明所有分配方式均无泄漏。Windows 本地验证不声称已运行 GitHub workflow 或 Linux，也不需要真实 provider 或完整 benchmark。
 
-## Deferred
+## Follow-up
 
-派生的十套件集合在 Windows 上共执行 91 项，86 通过、5 失败；修复工作区与未改变的 `e5b19733` 基线结果一致。五项失败都在 `evals/ooo-execution/recovery.test.ts`：这些用例读取 `ticket.patch.digest`，而调试器观察到当前领取 ticket 中没有 `patch`。复现命令为 `node --experimental-strip-types --test evals/ooo-execution/recovery.test.ts`。恢复用例的这些假设不在本次报告修复范围内；套件仍被选中，失败保持可见。该实跑与通过的产品门禁都不建立按需 workflow 全部通过的结论。
+原始 Windows 十套件运行在 `e5b19733` 上共 91 项，86 通过、5 失败；五个恢复消费者读取了已移除的 `ticket.patch.digest`。本报告修复保留其选择和失败记录。[独立恢复修复](2026-10-13-recovery-tests-use-frozen-declarations.zh-CN.md)纠正消费者漂移并补上类型检查入口缺口，由该记录拥有后续结果及证明边界。产品门禁通过本身仍不能建立按需套件已经执行的结论。
