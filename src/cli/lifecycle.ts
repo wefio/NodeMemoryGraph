@@ -1,4 +1,13 @@
-import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 
 export interface ServerState {
@@ -21,7 +30,8 @@ export function serverStatePath(databasePath: string): string {
   return `${databasePath}.server.json`;
 }
 
-export function acquireServerLease(databasePath: string): ServerLease {
+export function acquireServerLease(databasePath: string, reloadTicket?: string): ServerLease {
+  assertReloadAdmission(databasePath, reloadTicket);
   const statePath = serverStatePath(databasePath);
   mkdirSync(dirname(statePath), { recursive: true });
 
@@ -63,6 +73,99 @@ export function acquireServerLease(databasePath: string): ServerLease {
   }
 
   throw new Error("could not acquire NMG server lease");
+}
+
+export interface ReloadLease {
+  ticket: string;
+  release(): void;
+}
+
+interface ReloadOwner {
+  pid: number;
+  ticket: string;
+}
+
+export function serverReloadPath(databasePath: string): string {
+  return `${databasePath}.reload.json`;
+}
+
+/** An exclusive handover gate, not another daemon descriptor or state store. */
+export function acquireReloadLease(databasePath: string): ReloadLease {
+  const path = serverReloadPath(databasePath);
+  mkdirSync(dirname(path), { recursive: true });
+  let descriptor: number;
+  try {
+    descriptor = openSync(path, "wx", 0o600);
+  } catch (error) {
+    if (!isAlreadyExists(error)) throw error;
+    throw new Error("NMG daemon reload is already in progress; inspect its owner before recovery", {
+      cause: error,
+    });
+  }
+  const owner: ReloadOwner = { pid: process.pid, ticket: randomUUID() };
+  try {
+    writeFileSync(descriptor, `${JSON.stringify(owner)}\n`, "utf8");
+  } finally {
+    closeSync(descriptor);
+  }
+  return {
+    ticket: owner.ticket,
+    release() {
+      const current = readReloadOwner(databasePath);
+      if (current?.pid === owner.pid && current.ticket === owner.ticket)
+        rmSync(path, { force: true });
+    },
+  };
+}
+
+function readReloadOwner(databasePath: string): ReloadOwner | undefined {
+  const path = serverReloadPath(databasePath);
+  if (!existsSync(path)) return undefined;
+  let owner: Partial<ReloadOwner>;
+  try {
+    owner = JSON.parse(readFileSync(path, "utf8")) as Partial<ReloadOwner>;
+  } catch (error) {
+    throw new Error("Unreadable daemon reload gate; operator recovery required", { cause: error });
+  }
+  if (
+    !owner ||
+    !Number.isSafeInteger(owner.pid) ||
+    Number(owner.pid) <= 0 ||
+    typeof owner.ticket !== "string" ||
+    !owner.ticket
+  )
+    throw new Error("Invalid daemon reload gate; operator recovery required");
+  return { pid: Number(owner.pid), ticket: owner.ticket };
+}
+
+export function requireReloadTicket(databasePath: string, ticket: unknown): void {
+  if (typeof ticket !== "string" || !ticket)
+    throw new Error("reload requires its captured handover ticket");
+  assertReloadAdmission(databasePath, ticket);
+}
+
+function assertReloadAdmission(databasePath: string, ticket?: string): void {
+  const owner = readReloadOwner(databasePath);
+  if (ticket) {
+    if (!owner || owner.ticket !== ticket || !isProcessAlive(owner.pid))
+      throw new Error("NMG daemon reload ticket is stale or foreign");
+    return;
+  }
+  if (owner) throw new Error("NMG daemon reload is in progress; no second owner may start");
+}
+
+/** Never clear an abandoned gate or silently spawn over a failed handover. */
+export async function waitForReload(databasePath: string, timeoutMs = 30_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let owner = readReloadOwner(databasePath);
+  while (owner) {
+    if (!isProcessAlive(owner.pid))
+      throw new Error("NMG reload owner exited; operator recovery required");
+    if (Date.now() >= deadline)
+      throw new Error("NMG daemon reload is still in progress; retry later");
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+    owner = readReloadOwner(databasePath);
+  }
 }
 
 export async function stopServer(

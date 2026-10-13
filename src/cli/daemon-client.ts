@@ -6,7 +6,13 @@ import { resolveNmgDataDir } from "./data-path.ts";
 import { captureWorkingStateInvocation } from "../integration/lab-capabilities.ts";
 import { captureStateInvocation } from "../integration/state.ts";
 import { httpCall, type HttpCallOptions } from "./http-client.ts";
-import { isProcessAlive, readServerState, serverStatePath, type ServerState } from "./lifecycle.ts";
+import {
+  isProcessAlive,
+  readServerState,
+  serverStatePath,
+  waitForReload,
+  type ServerState,
+} from "./lifecycle.ts";
 import {
   NMG_OPTIONAL_METHOD_CAPABILITIES,
   NMG_PROTOCOL_VERSION,
@@ -53,6 +59,7 @@ export function daemonBuildProblem(entrypoint: string, builtCli: string): string
 }
 
 export async function connectDaemon(databasePath: string): Promise<DaemonConnection> {
+  await waitForReload(databasePath);
   const statePath = serverStatePath(databasePath);
   const existing = readyState(statePath);
   if (existing) {
@@ -68,12 +75,15 @@ export async function connectDaemon(databasePath: string): Promise<DaemonConnect
       };
     } catch (error) {
       if (error instanceof NmgDaemonCompatibilityError) throw error;
+      if (await endpointReplacedDuringConnect(databasePath, existing))
+        return connectDaemon(databasePath);
       // The OS may have reused a stale descriptor's PID for an unrelated
       // process. Only an authenticated endpoint proves daemon identity.
       rmSync(statePath, { force: true });
     }
   }
 
+  await waitForReload(databasePath);
   await warnIfDaemonLimitExceeded();
 
   const entrypoint = resolve(import.meta.dirname, "../../bin/nmg.mjs");
@@ -210,7 +220,7 @@ export async function shutdownOwnedDaemon(connection: DaemonConnection): Promise
 /**
  * 调用 daemon；连接级失败（fetch 网络层的 TypeError，如 daemon 空闲超时
  * 退出后的 ECONNREFUSED）时自动重连一次并重试。HTTP 层 4xx/5xx 与协议
- * 错误是普通 Error，不重试——避免掩盖真实错误。
+ * 错误是普通 Error，不重试；owner 换代后只自动重试读取，写入结果不确定时显式拒绝重放。
  */
 export async function invokeDaemon(
   connection: DaemonConnection,
@@ -219,6 +229,7 @@ export async function invokeDaemon(
   options: HttpCallOptions = {},
 ): Promise<unknown> {
   options.signal?.throwIfAborted();
+  await refreshDaemonConnection(connection);
   assertDaemonCapability(connection.capabilities, method, connection.methods);
   const captured =
     method === "lab"
@@ -258,14 +269,48 @@ export async function invokeDaemon(
     // the fault window; reconnect is reserved for an owner that has exited.
     if (isProcessAlive(connection.state.pid)) throw error;
     const reconnected = await connectDaemon(connection.databasePath);
-    connection.state = reconnected.state;
-    connection.startedByCaller = reconnected.startedByCaller;
-    connection.capabilities = reconnected.capabilities;
-    connection.methods = reconnected.methods;
-    connection.catalogFingerprint = reconnected.catalogFingerprint;
+    replaceConnection(connection, reconnected);
+    if (!readRetryAllowed(method))
+      throw new Error(
+        "NMG daemon owner changed; the operation was not replayed because its outcome is unknown",
+        { cause: error },
+      );
     assertDaemonCapability(connection.capabilities, method, connection.methods);
     return await httpCall(connection.state, method, captured, options);
   }
+}
+
+async function endpointReplacedDuringConnect(
+  databasePath: string,
+  previous: ServerState,
+): Promise<boolean> {
+  await waitForReload(databasePath);
+  const current = readServerState(serverStatePath(databasePath));
+  return (
+    !isProcessAlive(previous.pid) ||
+    (!!current && (current.pid !== previous.pid || current.token !== previous.token))
+  );
+}
+
+async function refreshDaemonConnection(connection: DaemonConnection): Promise<void> {
+  if (await endpointReplacedDuringConnect(connection.databasePath, connection.state))
+    replaceConnection(connection, await connectDaemon(connection.databasePath));
+}
+
+function replaceConnection(connection: DaemonConnection, next: DaemonConnection): void {
+  Object.assign(connection, next);
+}
+
+function readRetryAllowed(method: NmgMethod): boolean {
+  return [
+    "hello",
+    "status",
+    "search",
+    "get",
+    "perfAggregates",
+    "retentionCandidates",
+    "exportMemories",
+  ].includes(method);
 }
 
 function stringArray(value: unknown): value is string[] {

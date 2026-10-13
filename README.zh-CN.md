@@ -267,7 +267,10 @@ CLI/管理能力，不是额外的模型侧 Pi 工具。保留候选筛选是 dr
 L4/L5 或删除其语义解释需要显式命令。`memory delete` 保留不可变来源历史。
 
 服务拒绝同库的第二个 daemon，惰性打开 SQLite，并清理过期的进程租约。daemon
-和客户端命令要用同一个 `--data-dir` 或 `--db`。
+和客户端命令要用同一个 `--data-dir` 或 `--db`。在协调的代码升级窗口，
+`nmg daemon reload` 等待已接受工作完成并受控换代，防止客户端争抢第二 owner；
+持久记忆/黑板保留，临时 AG 与 writer 租约清空。缺少能力的旧 daemon 明确拒绝，
+不会被偷偷重启。见[受控 reload](docs/design/daemon-lifecycle-design.md#controlled-code-reload)。
 
 节点身份维护在写入时自动启动：同一节点种类的精确规范名和仅大小写/空格/标点
 差异的变体复用现有节点。更大范围的语义合并不靠嵌入相似度单独触发；它们需要

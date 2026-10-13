@@ -106,6 +106,7 @@ export const NMG_CAPABILITIES = [
   "lab-capabilities",
   "session-active-graph",
   "state-spaces",
+  "controlled-reload",
 ] as const;
 
 export type NmgCapability = (typeof NMG_CAPABILITIES)[number];
@@ -161,7 +162,7 @@ const RPC_DESCRIPTOR_SOURCE = {
 
 for (const descriptor of Object.values(RPC_DESCRIPTOR_SOURCE)) Object.freeze(descriptor);
 
-/** Process-lifetime catalog. Runtime registration and hot reload are intentionally unsupported. */
+/** Process-lifetime catalog. Controlled reload replaces the process, never mutates its catalog. */
 export const NMG_RPC_DESCRIPTORS = Object.freeze(RPC_DESCRIPTOR_SOURCE);
 
 export type NmgMethod = keyof typeof NMG_RPC_DESCRIPTORS;

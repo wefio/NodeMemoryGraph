@@ -1,7 +1,7 @@
 # NMG Daemon 生命周期加固设计（Idle 超时 / 自动重拉 / 数量上限）
 
-**Status:** current — 2026-08-02 实机验证通过，见 §8
-**Updated:** 2026-08-25
+**Status:** current
+**Updated:** 2026-10-13
 **Related:** [stg-isolated-store.md](stg-isolated-store.md), [memory-graphs.md](memory-graphs.md), [external-source-design.md](external-source-design.md), [design.md](design.md)
 
 ## 0. 背景：2026-08-02 内存耗尽事故
@@ -86,33 +86,18 @@ export async function serveHttp(
 
 1. **连接侧探活**：`daemon-client.ts` 的 `readyState()` 要求 `isProcessAlive(pid)` 为真才复用；daemon 超时退出后 pid 死亡 → 视为"无 daemon" → 走 spawn 分支；
 2. **残留 lease 清理**：`lifecycle.ts` 的 `acquireServerLease` 用 `wx` 独占创建 `*.server.json`，遇 EEXIST 时读 pid：存活则报错（防双 daemon），**已死则 `rmSync` 后重试** → 强杀/崩溃残留的 stale 文件不阻塞重拉；
-3. **daemon 无进程态**：sqlite 是唯一事实源，新 daemon 用同一 `--db` 重新打开即恢复全部数据；token/port 每次新生成，客户端始终通过 `server.json` 重新发现，无需旧 token。
+3. **持久数据恢复**：新 daemon 用同一 `--db` 恢复 SQLite 记忆与黑板。AG、writer 租约与其他进程内状态不恢复；token/port 每次新生成，客户端通过 `server.json` 重新发现。
 
 ### 4.2 新增：客户端连接失败自动重连（防"会话中途被杀"）
 
-R1 引入了新失效模式：agent 思考间隙超过 idle 超时时，daemon 可能**在会话中途**退出，下一次 nmg 调用将 ECONNREFUSED。为让失败自愈，`invokeDaemon` 增加**一次**重连重试：
+agent 思考间隙超过 idle 超时时，daemon 可能在会话中途退出。客户端按同一
+`databasePath` 重新发现端点和 hello 能力，并更新原连接对象。只有旧 owner 确实退出
+才允许连接级重拉；存活 owner 的瞬时端点故障不会让客户端另起第二 writer。
 
-```ts
-export interface DaemonConnection {
-  state: ServerState;
-  startedByCaller: boolean;
-  databasePath: string;          // 新增：重连时需要重新 spawn 的 db 路径
-}
-
-export async function invokeDaemon(connection, method, params = {}) {
-  try {
-    return await httpCall(connection.state, method, params);
-  } catch (error) {
-    if (!(error instanceof TypeError)) throw error;   // 仅连接级错误（fetch 网络层）
-    const reconnected = await connectDaemon(connection.databasePath); // 已死则重拉
-    connection.state = reconnected.state;              // 就地更新，扩展缓存的对象随之生效
-    connection.startedByCaller = reconnected.startedByCaller;
-    return await httpCall(connection.state, method, params);
-  }
-}
-```
-
-判别依据：连接级失败是 fetch 网络层抛出的 `TypeError`（ECONNREFUSED 等）；HTTP 层 4xx/5xx 与协议错误是我们的普通 `Error`，**不重试**（避免掩盖真错误）。
+`invokeDaemon` 在调用前等待交接并刷新改变的 owner，再进行能力检查。
+请求尚未发出时可正常连接新 owner；请求已经发出而响应丢失时，只对
+[客户端读取集合](../../src/cli/daemon-client.ts)自动重试一次。变更操作结果不确定就
+明确报错且不重放。HTTP/协议/领域拒绝不重试；缺能力不隐式升级。
 
 ### 4.3 重连的所有权语义
 
@@ -207,6 +192,39 @@ stderr 会被 `RpcClient` 子进程捕获并透传到评测主进程，可观测
 - **评测侧显式清理**（`evaluate()` finally 里 `shutdownOwnedDaemon`、启动前全量扫 stale daemon）：本设计是 daemon 侧兜底，评测侧修复仍推荐单独做（互不替代）；
 - **daemon 复用**（matched 3 arms 共享同一 seed db/daemon）：减少 spawn 次数的结构性优化，独立改动；
 - **硬阻断上限**：留 `NMG_DAEMON_LIMIT_BLOCK` 作为可选后续项。
+
+## Controlled code reload
+
+`nmg daemon reload [--db FILE | --data-dir DIR] [--json]` 是显式管理操作，不是
+代码监听器、进程内模块热加载或旧 restart 的别名。它加载当前已构建的 CLI 入口，
+不自动 build。用户接受清空 AG、writer 租约与其他进程内状态；持久记忆和黑板保留。
+
+1. 控制器独占 `<db>.reload.json` 交接门禁。原 `<db>.server.json` 仍拥有 daemon
+   端点身份；交接文件不是第二 daemon 描述符或状态库。
+2. 旧 owner 必须经认证握手发布 `controlled-reload`。缺少能力时拒绝，不发送关闭请求；
+   首次升级需要由 owner 协调安全窗口。
+3. 受控 `shutdown(reload=true, ticket)` 验证当前交接票据，再关闭领域请求准入并等待
+   已接受调用完成。drain 超时重新开放旧服务，控制器不启动替代进程，也不强杀。
+4. 旧进程确实退出后，控制器启动持票子进程；只有该票据可在门禁期间获取 daemon
+   租约。成功要求对应子进程的端点及认证 hello 就绪，不接受其他进程代答。
+5. 客户端在连接、调用和 CLI 本地降级前等待交接；端点变化刷新能力缓存与 ownership，
+   不把控制器的替代进程归为模型客户端所有。任何换代后的旧 AG binding 仍须被 owner 拒绝。
+
+读取可在连接级失败后重连一次；已发出的变更操作遇到结果不确定的连接失败，
+只刷新连接并明确报告未重放，不能以自动 retry 重复发布、认领或写入。
+协议/领域拒绝不会触发自动升级。参与交接的客户端及启动二进制必须支持门禁；
+不能把当前机制宣称为任意旧版本的热迁移。
+
+drain 为 5 秒，旧 owner 退出为 5 秒，新进程端点就绪为 10 秒；
+hello 为 5 秒，客户端门禁等待为 30 秒。超时不记作成功，不回退为强杀或旧 CLI。
+正常失败释放自己的门禁；控制器被杀、门禁损坏或 owner 身份不可靠时 fail closed，
+保留文件并报告需要 operator recovery，不自动删门禁抢启。恢复前须确认旧 owner、
+控制器及候选子进程均已退出或明确选定唯一 owner。
+
+[接口决定](../decisions/implemented/2026-10-13-daemon-controlled-reload.zh-CN.md)
+记录本切片与进程内热加载的区别。单元/HTTP 与隔离真实进程测试覆盖 drain 拒绝后恢复、
+真实 CLI 换代、记忆和黑板保留、临时状态清空、旧 binding 拒绝、争抢与孤儿门禁、
+旧 daemon 不被隐式升级、结果不确定的写入不重放。它们不证明共享生产 daemon 已部署。
 
 ## 10. Implementation lineage
 

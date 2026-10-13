@@ -30,6 +30,19 @@ the old and required protocol versions and ask the owner/user to run
 `nmg daemon restart` at a safe point. Once restarted, reconnect normally; never
 fall back to an older RPC name or silently omit the failed operation.
 
+## Controlled code reload
+
+Use `nmg daemon reload --db <DATABASE> --json` only at an explicit coordinated
+upgrade boundary. It requires a live owner advertising `controlled-reload`;
+old daemons are refused, not silently restarted. Build the selected checkout
+first. Reload drains accepted calls, fences replacement startup and confirms the
+new authenticated owner. Durable memory and board data survive; private AG and
+writer leases are cleared and must be rebuilt from repository/task evidence.
+
+A malformed/orphaned `<DATABASE>.reload.json` is not permission to delete it or
+spawn another owner. Coordinate recovery after checking the controller and both
+candidate daemon processes. See the [lifecycle owner](../../../docs/design/daemon-lifecycle-design.md#controlled-code-reload).
+
 ## Storage selection
 
 CLI LTG storage defaults to `NMG_DATA_DIR` or `.nmg`. The Pi adapter defaults

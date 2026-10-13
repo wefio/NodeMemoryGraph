@@ -373,7 +373,11 @@ requires an explicit command. `memory delete` retains immutable source history.
 
 The service rejects a second daemon for the same database, opens SQLite lazily,
 and removes stale process leases. Use the same `--data-dir` or `--db` for daemon
-and client commands.
+and client commands. At a coordinated code-update boundary, `nmg daemon reload`
+drains accepted work and replaces a capable owner without clients racing to
+start a second one. Persistent memory/board data survives; volatile AG and writer
+leases are cleared. An older daemon without this capability is refused, not
+silently restarted. See [controlled reload](docs/design/daemon-lifecycle-design.md#controlled-code-reload).
 
 Node identity maintenance starts automatically on write: exact canonical names
 and case/spacing/punctuation-only variants of the same node kind reuse the

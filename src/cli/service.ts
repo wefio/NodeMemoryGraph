@@ -375,6 +375,19 @@ export class NmgService {
     }
   }
 
+  /** Reload admission is reversible only when draining fails; no accepted call is cancelled. */
+  async prepareReload(timeoutMs = 5_000): Promise<void> {
+    if (this.#closing) throw new NmgProtocolError("SHUTTING_DOWN", "the service takes no new work");
+    this.#closing = true;
+    try {
+      await this.drain(timeoutMs);
+    } catch (error) {
+      this.#closing = false;
+      this.#shutdownRequested = false;
+      throw error;
+    }
+  }
+
   /** The four topology actions share one parameter parse and three mutually exclusive branches;
    *  keeping them in the dispatch switch made that switch the largest decision point in the file. */
   #topologyProposal(params: unknown): unknown {

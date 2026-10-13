@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { randomBytes } from "node:crypto";
 
-import type { ServerLease } from "./lifecycle.ts";
+import { requireReloadTicket, type ServerLease } from "./lifecycle.ts";
 import type { NmgMethod } from "./protocol.ts";
 import { NMG_METHODS, NMG_PROTOCOL_VERSION, NmgProtocolError } from "./protocol.ts";
 import { NmgService } from "./service.ts";
@@ -148,8 +148,10 @@ async function handle(
   }
 
   try {
+    validateReloadShutdown(service.databasePath, method, request.params);
     const result = await service.invoke(method as NmgMethod, request.params);
     if (method === "shutdown") {
+      await prepareReloadIfRequested(service, request.params);
       send(200, { jsonrpc: "2.0", result, id: request.id ?? null });
       setImmediate(onShutdown);
       return;
@@ -162,6 +164,23 @@ async function handle(
       jsonRpcError(request.id, protocol ? -32602 : -32603, errorMessage(error)),
     );
   }
+}
+
+async function prepareReloadIfRequested(service: NmgService, params: unknown): Promise<void> {
+  if (isReloadShutdown(params)) await service.prepareReload();
+}
+
+function validateReloadShutdown(databasePath: string, method: string, params: unknown): void {
+  if (method === "shutdown" && isReloadShutdown(params))
+    requireReloadTicket(databasePath, (params as { ticket?: unknown }).ticket);
+}
+
+function isReloadShutdown(params: unknown): boolean {
+  return (
+    typeof params === "object" &&
+    params !== null &&
+    (params as { reload?: unknown }).reload === true
+  );
 }
 
 function jsonRpcError(id: unknown, code: number, message: string) {
