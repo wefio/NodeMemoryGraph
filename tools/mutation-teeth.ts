@@ -84,6 +84,53 @@ interface Target {
 
 const TARGETS: readonly Target[] = [
   {
+    target: "tests/support/node-graph-behavior.ts",
+    suites: [
+      "tests/support/node-graph-behavior.test.ts",
+      "tests/core/analogy.test.ts",
+      "tests/core/community.test.ts",
+      "tests/core/graph-cycles.test.ts",
+      "tests/core/multi-hop-path.test.ts",
+      "tests/core/store/graph.test.ts",
+    ],
+    mutants: [
+      {
+        name: "node-path-skips-the-first-edge",
+        derive: {
+          within: "linkNodePath",
+          operator: "replace-initializer",
+          variable: "index",
+        },
+        to: "2",
+        expect:
+          "linkNodePath writes adjacent pairs in order and returns the actual relation snapshots",
+      },
+      {
+        name: "node-path-counts-only-unique-endpoints",
+        ast: { within: "linkNodePath" },
+        from: "index < nodeIds.length",
+        to: "index < new Set(nodeIds).size",
+        expect: "linkNodePath preserves repeated endpoints and repeated edge results",
+      },
+      {
+        name: "node-path-swallows-a-later-link-failure",
+        derive: { within: "linkNodePath", operator: "replace-call", call: "store.linkNodes" },
+        to: `(() => {
+          try {
+            return store.linkNodes({
+              sourceNodeId: nodeIds[index - 1]!,
+              targetNodeId: nodeIds[index]!,
+              type: relationType,
+            });
+          } catch {
+            return relations[relations.length - 1]!;
+          }
+        })()`,
+        expect: "linkNodePath propagates a later link failure and leaves the successful prefix",
+      },
+    ],
+  },
+  {
     target: "src/integration/task-semantics.ts",
     suites: [
       "tests/integration/task-semantics.test.ts",
@@ -174,6 +221,7 @@ const TARGETS: readonly Target[] = [
     suites: [
       "tests/core/task-board-retention.test.ts",
       "tests/core/task-board-deliverable.test.ts",
+      "tests/core/task-board-attempt-boundaries.test.ts",
       "tests/core/store-transaction-port.test.ts",
       "tests/core/store-readonly-open.test.ts",
       "tests/core/store/task-runs.test.ts",
@@ -193,6 +241,34 @@ const TARGETS: readonly Target[] = [
         expect: "a failure the caller swallows still forbids the commit",
       },
 
+      {
+        name: "expired-self-claim-is-only-a-heartbeat",
+        derive: {
+          within: "claimTaskBoardEntry",
+          operator: "replace-initializer",
+          variable: "renewed",
+        },
+        to: "existing.claimedBy === input.agentId",
+        expect: "an expired holder starts a fresh attempt even when its identity is unchanged",
+      },
+      {
+        name: "claim-is-live-at-its-expiry-boundary",
+        ast: { within: "taskBoardClaimIsLive" },
+        from: "entry.claimExpiresAt > now",
+        to: "entry.claimExpiresAt >= now",
+        expect: "an expired holder starts a fresh attempt even when its identity is unchanged",
+      },
+      {
+        name: "new-attempt-keeps-prior-deliverer",
+        derive: {
+          within: "claimTaskBoardEntry",
+          operator: "replace-literal-fragment",
+          text: "delivered_by = NULL,",
+        },
+        to: "",
+        expect:
+          "an expiry-boundary takeover changes delivery authority without blacklisting the old actor",
+      },
       {
         name: "stale-claim-may-deliver-again",
         derive: {

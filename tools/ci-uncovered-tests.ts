@@ -5,7 +5,7 @@
 // CI jobs call, expands their globs, and reports every test file no job reaches.
 //
 // Two modes:
-//   --list   print the unreached files, one per line (the on-demand workflow runs them)
+//   --list   print runnable unreached suites, one per line (the on-demand workflow runs them)
 //   --check  fail when an unreached file sits outside an acknowledged root
 //
 // The acknowledged root is a deliberate decision, not an accident of naming: research harnesses
@@ -21,8 +21,24 @@ import { join } from "node:path";
 /** The entry points of the CI jobs, in .github/workflows/ci.yml. */
 const CI_ENTRY_POINTS = ["verify:product-ci", "verify:research", "verify:chaos"];
 
-/** Unreached suites that may stay out of the required checks, with the reason they may. */
-const ACKNOWLEDGED_ROOTS = ["evals/", "docs/experiments/execution/archive/"];
+/** Specific roots precede their parent. Acknowledgement does not imply standalone execution. */
+const ACKNOWLEDGED_ROOTS = [
+  {
+    prefix: "evals/ooo-execution/fixtures/",
+    onDemand: false,
+    reason: "fixture checks run through their harness",
+  },
+  { prefix: "evals/", onDemand: true, reason: "on-demand only" },
+  {
+    prefix: "docs/experiments/execution/archive/",
+    onDemand: false,
+    reason: "archived candidate evidence",
+  },
+];
+
+function acknowledgedRoot(file: string) {
+  return ACKNOWLEDGED_ROOTS.find(({ prefix }) => file.startsWith(prefix));
+}
 
 type Scripts = Record<string, string>;
 
@@ -43,6 +59,7 @@ export interface Coverage {
   globs: string[];
   covered: Set<string>;
   unreached: string[];
+  onDemand: string[];
   unacknowledged: string[];
 }
 
@@ -66,9 +83,8 @@ export function testCoverage(root: string): Coverage {
     globs,
     covered,
     unreached,
-    unacknowledged: unreached.filter(
-      (file) => !ACKNOWLEDGED_ROOTS.some((prefix) => file.startsWith(prefix)),
-    ),
+    onDemand: unreached.filter((file) => acknowledgedRoot(file)?.onDemand !== false),
+    unacknowledged: unreached.filter((file) => !acknowledgedRoot(file)),
   };
 }
 
@@ -78,7 +94,7 @@ function main(argv: readonly string[], root: string): number {
   // `process.stdout.write`, not `console.log`: this is a tool that pipes its output (the
   // on-demand workflow runs the listed files), and the repository's lint warns on console.
   if (mode === "--list") {
-    for (const file of coverage.unreached) process.stdout.write(`${file}\n`);
+    for (const file of coverage.onDemand) process.stdout.write(`${file}\n`);
     return 0;
   }
   if (mode !== "--check") throw new Error(`unknown mode: ${mode} (use --check or --list)`);
@@ -86,15 +102,18 @@ function main(argv: readonly string[], root: string): number {
   // be told apart from one that never looked.
   process.stdout.write(
     `ci coverage: ${coverage.globs.length} glob(s) from ${CI_ENTRY_POINTS.join(", ")}, ` +
-      `${coverage.covered.size} test file(s) reached, ${coverage.unreached.length} unreached\n`,
+      `${coverage.covered.size} test file(s) reached, ${coverage.unreached.length} unreached, ` +
+      `${coverage.onDemand.length} runnable on demand\n`,
   );
-  for (const file of coverage.unreached)
+  for (const file of coverage.unreached) {
+    const root = acknowledgedRoot(file);
     process.stdout.write(
       `  unreached: ${file}` +
-        (ACKNOWLEDGED_ROOTS.some((prefix) => file.startsWith(prefix))
-          ? " (acknowledged: on-demand only)\n"
+        (root
+          ? ` (acknowledged: ${root.reason})\n`
           : " (NOT acknowledged: add it to a CI job or to ACKNOWLEDGED_ROOTS with a reason)\n"),
     );
+  }
   if (coverage.unacknowledged.length) {
     process.stderr.write(
       `ci coverage FAILED: ${coverage.unacknowledged.length} test file(s) are in no CI job and not acknowledged\n`,

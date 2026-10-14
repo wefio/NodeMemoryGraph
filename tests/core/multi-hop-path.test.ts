@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NmgStore } from "../../src/core/store.ts";
+import { linkNodePath } from "../support/node-graph-behavior.ts";
 import type { NodeRelation, NodeRelationType } from "../../src/core/types.ts";
 import { propagateEdgeActivation } from "../../src/core/edge-activation.ts";
 
@@ -81,8 +82,7 @@ test("searchContext graph expansion returns results with multi-hop path", () => 
       sessionId: "s1",
       sourceActor: "user",
     });
-    store.linkNodes({ sourceNodeId: ma.node.id, targetNodeId: mb.node.id, type: "causes" });
-    store.linkNodes({ sourceNodeId: mb.node.id, targetNodeId: mc.node.id, type: "causes" });
+    linkNodePath(store, [ma.node.id, mb.node.id, mc.node.id], "causes");
 
     const ctx = store.searchContext("A公司转账", {
       limit: 10,

@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { NmgStore } from "../../src/core/store.ts";
 import type { TaskBoardEntry } from "../../src/core/types.ts";
+import { claimAndDeliver } from "../support/task-board-behavior.ts";
 
 /** Board-governance P1 slice: deliverable + independent verdict.
  *
@@ -70,13 +71,11 @@ test("only the live claim holder may deliver an artifact", () => {
 
 test("the deliverer cannot judge its own deliverable", () => {
   withStore((store) => {
-    const entry = workItem(store);
-    store.claimTaskBoardEntry({ taskId: "round-1", entryId: entry.id, agentId: "worker-b" });
-    store.deliverTaskBoardEntry({
-      taskId: "round-1",
-      entryId: entry.id,
+    const entry = claimAndDeliver(store, workItem(store), {
       agentId: "worker-b",
       digest: "d1",
+      now: new Date().toISOString(),
+      leaseSeconds: 3600,
     });
 
     assert.throws(
@@ -106,13 +105,11 @@ test("the deliverer cannot judge its own deliverable", () => {
 
 test("a verdict cannot be inherited by a different artifact", () => {
   withStore((store) => {
-    const entry = workItem(store);
-    store.claimTaskBoardEntry({ taskId: "round-1", entryId: entry.id, agentId: "worker-b" });
-    store.deliverTaskBoardEntry({
-      taskId: "round-1",
-      entryId: entry.id,
+    const entry = claimAndDeliver(store, workItem(store), {
       agentId: "worker-b",
       digest: "d1",
+      now: new Date().toISOString(),
+      leaseSeconds: 3600,
     });
     store.judgeTaskBoardEntry({
       taskId: "round-1",
@@ -136,13 +133,11 @@ test("a verdict cannot be inherited by a different artifact", () => {
 
 test("a new attempt fences the previous deliverable and verdict", () => {
   withStore((store) => {
-    const entry = workItem(store);
-    store.claimTaskBoardEntry({ taskId: "round-1", entryId: entry.id, agentId: "worker-b" });
-    store.deliverTaskBoardEntry({
-      taskId: "round-1",
-      entryId: entry.id,
+    const entry = claimAndDeliver(store, workItem(store), {
       agentId: "worker-b",
       digest: "d1",
+      now: new Date().toISOString(),
+      leaseSeconds: 3600,
     });
     store.judgeTaskBoardEntry({
       taskId: "round-1",
@@ -166,13 +161,11 @@ test("a new attempt fences the previous deliverable and verdict", () => {
 
 test("renewing your own live claim does not start a new attempt", () => {
   withStore((store) => {
-    const entry = workItem(store);
-    store.claimTaskBoardEntry({ taskId: "round-1", entryId: entry.id, agentId: "worker-b" });
-    store.deliverTaskBoardEntry({
-      taskId: "round-1",
-      entryId: entry.id,
+    const entry = claimAndDeliver(store, workItem(store), {
       agentId: "worker-b",
       digest: "d1",
+      now: new Date().toISOString(),
+      leaseSeconds: 3600,
     });
 
     const renewed = store.claimTaskBoardEntry({
@@ -187,13 +180,11 @@ test("renewing your own live claim does not start a new attempt", () => {
 
 test("undecidable is recorded as itself, not as rejected", () => {
   withStore((store) => {
-    const entry = workItem(store);
-    store.claimTaskBoardEntry({ taskId: "round-1", entryId: entry.id, agentId: "worker-b" });
-    store.deliverTaskBoardEntry({
-      taskId: "round-1",
-      entryId: entry.id,
+    const entry = claimAndDeliver(store, workItem(store), {
       agentId: "worker-b",
       digest: "d1",
+      now: new Date().toISOString(),
+      leaseSeconds: 3600,
     });
 
     const judged = store.judgeTaskBoardEntry({

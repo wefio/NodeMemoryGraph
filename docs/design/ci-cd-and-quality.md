@@ -1,7 +1,7 @@
 # 代码质量与 CI/CD
 
 **Created:** 2026-07-20  
-**Updated:** 2026-10-09
+**Updated:** 2026-10-13
 **Authority:** 仓库测试、CI 与 Agent 开发流程契约
 
 NMG 的测试负责阻止可复现错误，不负责冻结尚未验证的设计。产品契约、研究测量与故障注入使用不同执行轨道，避免 benchmark 便利逻辑反向定义产品行为。
@@ -59,7 +59,7 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 
 `format` 与 `format:check` 的 `**/*.ts` 面为 `src/`、`.pi/`、`workbuddy-plugin/`、`tests/`、`evals/`、`scripts/`、`tools/`；暂存格式 hook 与它们同面，子包保留独立流程。守卫测试锁定两条命令及 hook 一致，评估 fixture 的故意错误行为不因格式化而修正（[静态覆盖面决策](../decisions/implemented/2026-09-16-ci-static-coverage.md)）。
 
-`npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`）进入 `verify:static` 与 `ci-and-tests` 的阻塞集合。它检查 `tests/`、配置显式包含的源文件以及它们导入的依赖；不声明覆盖全部 `evals/`、`scripts/`、`tools/`。
+`npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`）进入 `verify:static` 与 `ci-and-tests` 的阻塞集合。它检查 `tests/`、独立运行的 `evals/ooo-execution/*.test.ts` harness、配置显式包含的源文件以及它们导入的依赖；冻结的 `evals/ooo-execution/fixtures/` 和归档证据不作为独立检查入口。纳入类型检查不等于纳入默认产品执行轨；范围回归由 `tests/tools/test-groups.test.ts` 对照真实编译器入口与按需选择清单。它不声明覆盖全部 `evals/`、`scripts/`、`tools/`（[恢复测试修复决策](../decisions/implemented/2026-10-13-recovery-tests-use-frozen-declarations.md)）。
 
 `check:policy-words` 在 `verify:static` 与 `ci-and-tests` 的阻塞集合中执行一次；维护词表、分类记录和扫描面由[机制，不是策略](../decisions/implemented/2026-09-21-mechanism-not-policy.zh-CN.md#决策)拥有。它阻止未登记的命中与记录漂移，不证明机制层已无策略。
 
@@ -86,8 +86,8 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 - `node-compat`：最低支持版本 Node 22.19 的 build/package；
 - `chaos`：Windows 上的资源与 daemon 故障注入，仅在推送到 `main` 时运行（145 次 CI 运行中仅 1 次失败，且在 `main` 上；见[决策](../decisions/implemented/2026-09-09-chaos-tests-on-main-pushes.md)）；
 - `all-checks-passed`：只聚合阻塞轨道。
-- `static` 内的 `ci:uncovered-tests`：从各 job 实际调用的 glob 推导出**没有任何 job 覆盖的测试文件**，`evals/` 下（研究 harness，按需运行）可留为 acknowledged，其余一律失败关闭并指名文件。
-- `.github/workflows/on-demand-suites.yml`（仅 `workflow_dispatch`）：在 Linux 与 Windows 上以 `--test-concurrency=1` 跑上述未覆盖套件，并把 TAP 逐字记录作为 artifact 上传；不是必需检查。
+- `static` 内的 `ci:uncovered-tests`：从各 job 实际调用的 glob 推导出没有任何 job 覆盖的 tracked 测试文件；全部未覆盖文件仍在 inventory 中可见，未认领的文件一律失败关闭并指名。认领根同时注明是否可直接按需运行：`evals/` 的独立 harness 可运行；更具体的 `evals/ooo-execution/fixtures/` 是由 harness 填入候选后执行的冻结检查，`docs/experiments/execution/archive/` 是历史候选证据，两者不可直接运行。具体根优先匹配，不按泛化的 `fixtures` 名称过滤其他测试。
+- `.github/workflows/on-demand-suites.yml`（仅 `workflow_dispatch`）：工具的 `--list` 只输出可直接运行的未覆盖文件；workflow 在 Linux 与 Windows 上以 `--test-concurrency=1` 跑该清单，保留每个路径的参数边界及 Node 的失败退出码，并上传 TAP。空清单写出 `1..0 # SKIP` 的 TAP，不调用无文件参数的 Node 自动发现；该轨仍不是必需检查。
 
 CI 或打包规则变更除本地目标测试外，应在 clean checkout（或等价干净 worktree）运行其完整命令，防止未跟踪文件让本地验证产生假阳性。
 
@@ -107,6 +107,8 @@ TestRuntime
 
 测试通过 `withTestRuntime(...)` 或显式 `dispose()` 获取 RAII 式回收。插件依赖必须显式：database 要求 workspace，daemon 要求 database；缺少依赖时失败，不偷偷创建隐含全局状态。daemon 在进程内使用真实 HTTP JSON-RPC handler，因此能验证协议，同时不会遗留后台进程。
 
+依赖 Node 显式 GC 的堆增长检查只在 `global.gc` 可用时执行；不可用时通过 `node:test` 的 skip 报告未执行，不用恒真断言代替。`tests/core/robustness.test.ts` 的 HA 无 NaN 压力检查与堆增长检查是两个具名用例，缺少 GC 不跳过前者。堆检查的显式本地入口是 `node --expose-gc --experimental-strip-types --test tests/core/robustness.test.ts`；该见证不声明所有分配模式都无泄漏。执行目标与结果报告的取舍见[决策](../decisions/implemented/2026-10-13-runnable-suites-and-executed-checks.md)。
+
 测试资源按断言需观察的边界分为四类，按需取得最轻且隔离的资源（[决策](../decisions/implemented/2026-09-24-resource-matched-test-fixtures.md)）：
 
 | 断言边界                                  | 测试资源                                     | 可省的准备工作             |
@@ -119,6 +121,16 @@ TestRuntime
 观察文件或跨进程语义的测试保留真实边界；只断言控制平面策略、receipt 或 harness 编排时，可以注入固定的 `RepositoryProvider` 观察值，另由真实 Git 集成测试覆盖发现、dirty 范围、提交和 forge 绑定。集成 `testDatabase()` 使用真实文件路径供 daemon 共享。真实 Git fixture 保留 `init/add/commit`，提交身份只传给 `commit`，避免每项再启动两次 `git config`。资源类别只决定 fixture 和可安全减少的准备工作，不改变 Safety/Contract/Guardrail 分类、阻塞地位或 narrow/full 验证范围；后两者由既有 route 与验证契约决定。
 
 该层精确锁定 `@deepseek-ai/cordis@4.0.1` 作为 **devDependency**，只借用插件 effect/fiber 生命周期。NMG Core、daemon、Pi adapter 和发布包均不依赖 Cordis；不引入其 loader、HMR 或配置系统。Cordis adapter 与 NMG fixture composition 分离，未来若替换框架只需修改生命周期 adapter。
+
+### 4.1 行为片段与资源 fixture
+
+行为组合不属于资源生命周期层。场景构造留在消费者本地；`tests/support/task-board-behavior.ts` 的 `claimAndDeliver` 作用于调用者已有的 entry 引用，组合领取与交付。Task Board 交付和保留期测试共享该函数，显式传入身份、digest、租期及 `now`，取得实际交付快照。时间输入只控制这两个动作，不代表创建、最终处理或整个测试都使用可注入时钟。
+
+两个动作是独立写入，不保证原子性；交付失败保留已成功的领取，异常直接传播。需要观察两步之间的状态或单独验证拒绝动作时，测试直接调用 store API。
+
+`tests/support/node-graph-behavior.ts` 的 `linkNodePath(store, nodeIds, relationType)` 在已有节点上按输入顺序连接每一对相邻 ID，返回每次 `linkNodes` 的实际关系快照。空路径或单节点路径没有相邻对，返回空数组且不写入。重复端点与显式回边保留，重复边仍执行并保留 store 的重连结果；函数不创建节点、排序、去重、自动闭环或套用 memory-chain 的 DAG 限制。各边独立写入并使用产品时钟；后续边失败时异常原样传播，成功前缀仍可观察，不补事务或回滚。场景创建、关系元数据写入、幂等／evidence 合并判定，以及需要逐边中间观察的动作留在消费者。
+
+既有具名声明、断言与资源生命周期保留，不引入 DSL 或生成器；取舍由[已有对象上的行为组合决策](../decisions/implemented/2026-10-12-deliverable-tests-compose-behavior.zh-CN.md)记录。
 
 ## 5. Agent 原生仓库上下文
 

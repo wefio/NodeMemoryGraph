@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NmgStore } from "../../src/core/store.ts";
+import { linkNodePath } from "../support/node-graph-behavior.ts";
 
 function withStore(run: (store: NmgStore) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "anlg-"));
@@ -59,13 +60,10 @@ test("abstractSubgraph extracts all other pattern shapes from a mixed cluster", 
     const [t, a, b, c, d, p1, p2] = ["主题", "甲", "乙", "丙", "丁", "容器", "零件"].map((x) =>
       node(store, x),
     );
-    store.linkNodes({ sourceNodeId: a.node.id, targetNodeId: b.node.id, type: "contradicts" });
-    store.linkNodes({ sourceNodeId: b.node.id, targetNodeId: a.node.id, type: "contradicts" });
-    store.linkNodes({ sourceNodeId: a.node.id, targetNodeId: b.node.id, type: "depends_on" });
-    store.linkNodes({ sourceNodeId: b.node.id, targetNodeId: c.node.id, type: "depends_on" });
+    linkNodePath(store, [a.node.id, b.node.id, a.node.id], "contradicts");
+    linkNodePath(store, [a.node.id, b.node.id, c.node.id], "depends_on");
     store.linkNodes({ sourceNodeId: p1.node.id, targetNodeId: p2.node.id, type: "part_of" });
-    store.linkNodes({ sourceNodeId: c.node.id, targetNodeId: d.node.id, type: "causes" });
-    store.linkNodes({ sourceNodeId: d.node.id, targetNodeId: c.node.id, type: "causes" });
+    linkNodePath(store, [c.node.id, d.node.id, c.node.id], "causes");
     const sig = store.abstractSubgraph([
       t.node.id,
       a.node.id,

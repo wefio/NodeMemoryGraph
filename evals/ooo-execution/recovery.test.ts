@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   BoardAdmission,
+  type BoardTicket,
   type PatchTaskSpec,
   type ProbePlan,
 } from "../../src/integration/ooo-board.ts";
@@ -59,7 +60,7 @@ function store() {
  *  claimed owner, which `submit` re-validates against the frozen ticket. */
 function submitPatch(
   gate: BoardAdmission,
-  ticket: { owner: string },
+  ticket: Readonly<BoardTicket>,
   artifact: string,
 ): Promise<string> {
   const entry = gate.putTaskBoardEntry({
@@ -72,8 +73,14 @@ function submitPatch(
   return gate.submit(entry.id);
 }
 
-const patchArtifact = (digest: string, content = "x") =>
-  JSON.stringify({ digest, files: [{ path: "src/b.ts", content }] });
+function patchArtifact(ticket: Readonly<BoardTicket>, content = "x"): string {
+  assert.ok(ticket.declaration, "the patch recovery fixture requires a frozen declaration");
+  assert.equal(ticket.declaration.digest, ticket.inputDigest);
+  return JSON.stringify({
+    digest: ticket.declaration.digest,
+    files: [{ path: "src/b.ts", content }],
+  });
+}
 
 test("recovery: a crashed coordinator's successor finishes the round exactly once", async (t) => {
   const s = store();
@@ -86,11 +93,14 @@ test("recovery: a crashed coordinator's successor finishes the round exactly onc
   s.close(); // crash: the claim is still recorded, the worker is gone
 
   const second = s.open();
-  const artifact = patchArtifact(held.patch!.digest);
+  const artifact = patchArtifact(held);
   // The successor does not steal a live claim — the holder's identity is preserved —
   // and it does not select a task whose dependencies are still pending either.
   assert.equal(second.next(), null);
   assert.throws(() => second.claim("B", "worker-2"), /already claimed/);
+  const wrongDigest = JSON.stringify({ ...JSON.parse(artifact), digest: "not-the-frozen-work" });
+  assert.equal(await submitPatch(second, held, wrongDigest), "rejected");
+  assert.deepEqual(second.accepted(), {});
   assert.equal(await submitPatch(second, held, artifact), "accepted");
   assert.deepEqual(Object.keys(second.accepted()), ["B"]);
   // Completing B releases nothing that was not ready: C depends on A as well, and A is
@@ -125,13 +135,13 @@ test("recovery: a claim retired before the crash cannot be resubmitted afterward
   s.close();
 
   const second = s.open();
-  assert.equal(await submitPatch(second, held, patchArtifact(held.patch!.digest)), "stale");
+  assert.equal(await submitPatch(second, held, patchArtifact(held)), "stale");
   assert.deepEqual(second.accepted(), {});
   assert.equal(second.next(), "B");
   // The surviving generation is a different one, and only that one can complete.
   const fresh = second.claim("B", "worker-2");
   assert.notEqual(fresh.attempt, held.attempt);
-  assert.equal(await submitPatch(second, fresh, patchArtifact(fresh.patch!.digest)), "accepted");
+  assert.equal(await submitPatch(second, fresh, patchArtifact(fresh)), "accepted");
   assert.deepEqual(Object.keys(second.accepted()), ["B"]);
 });
 
@@ -149,8 +159,8 @@ test("recovery: a lapsed claim is a new generation, not a silent success", async
   const resumed = gate.claim("B", "worker-2");
   assert.equal(resumed.attempt, held.attempt + 1);
   // The retired ticket's artifact is not the resumed generation's artifact.
-  assert.equal(await submitPatch(gate, held, patchArtifact(held.patch!.digest)), "stale");
-  assert.equal(await submitPatch(gate, resumed, patchArtifact(resumed.patch!.digest)), "accepted");
+  assert.equal(await submitPatch(gate, held, patchArtifact(held)), "stale");
+  assert.equal(await submitPatch(gate, resumed, patchArtifact(resumed)), "accepted");
 });
 
 test("recovery: the first cancellation is the decision, and a second one does not rewrite it", (t) => {
@@ -217,7 +227,7 @@ test("recovery: cancellation fences the round so a late artifact cannot commit",
   assert.throws(() => gate.issueCheck("A", "host"), /round cancelled/);
   assert.throws(() => gate.externalReady("protocol-regression"), /round cancelled/);
   // The late artifact is rejected as a stale generation rather than accepted.
-  assert.equal(await submitPatch(gate, held, patchArtifact(held.patch!.digest)), "stale");
+  assert.equal(await submitPatch(gate, held, patchArtifact(held)), "stale");
   assert.deepEqual(gate.accepted(), {});
 });
 
@@ -246,11 +256,11 @@ test("recovery: the store migrates additively, keeping prior state", async (t) =
   const first = s.open();
   const held = first.claim("B", "worker-1");
   s.close();
-  // Reopening runs the schema and the additive migration again: a row written before the
-  // new columns existed keeps its claim, its attempt and its ticket identity.
+  // Reopening reapplies schema setup to this file database while preserving its claim,
+  // attempt and ticket identity. This fixture does not construct a legacy-version schema.
   const second = s.open();
   assert.equal(second.cancelled(), null);
   assert.throws(() => second.claim("B", "worker-1"), /already claimed/);
-  assert.equal(await submitPatch(second, held, patchArtifact(held.patch!.digest)), "accepted");
+  assert.equal(await submitPatch(second, held, patchArtifact(held)), "accepted");
   assert.equal(s.path.endsWith("store.sqlite"), true);
 });
