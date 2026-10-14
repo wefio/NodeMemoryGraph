@@ -26,6 +26,29 @@ test("先前 and 之前 give the same explicit recall decision for a fresh-sessi
   assert.deepEqual(decideMemoryLoad(question("先前")), expected);
 });
 
+test("Chinese recollection questions without a temporal prefix trigger recall", () => {
+  for (const question of [
+    "你记得 working-state-maintenance Skill装在哪里吗？",
+    "你记得我的偏好是什么？",
+    "您记得我们选的是哪个吗？",
+    "好像是不是要精简AG内容来着？还有其他几步其他的？",
+    "那个目录叫什么来着?",
+  ]) {
+    assert.deepEqual(decideMemoryLoad(question), decideMemoryLoad("之前决定了什么？"), question);
+  }
+});
+
+test("reminders and colorization are not recollection questions", () => {
+  for (const instruction of [
+    "记得保存文件。",
+    "你记得把测试跑完。",
+    "以后记得运行测试。",
+    "这个工具用来着色。",
+  ]) {
+    assert.equal(decideMemoryLoad(instruction).mode, "none", instruction);
+  }
+});
+
 // ── planning and recommendation (cue) ──
 
 test("planning and recommendation prompts receive recall cues", () => {

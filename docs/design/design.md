@@ -1975,6 +1975,9 @@ from both storage tiers and the STG/LTG lifecycle:
    calculations, formatting, and other self-contained turns therefore remain
    memory-free. Explicit Chinese temporal recall cues include both `之前` and
    `先前`; equivalent past-state questions use the same retrieval decision.
+   Chinese recollection questions also include `你记得` / `您记得` with an
+   interrogative marker and the question form `来着？`. These additional rules
+   do not treat bare reminders or `用来着色` as recall requests.
    The gate may retain bounded task anchors so a terse continuation
    can recall the immediately preceding task without treating every substantive
    prompt as a history query.

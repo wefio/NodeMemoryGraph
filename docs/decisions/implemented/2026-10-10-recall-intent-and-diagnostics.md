@@ -23,6 +23,14 @@ had completed.
 Repair the synonym in the shared memory gate, not a Pi-only special case. Keep
 memory-free turns and existing retrieval limits unchanged.
 
+The 2026-10-14 bounded diagnosis extends the same decision to Chinese
+recollection questions without a temporal prefix: `你记得` / `您记得` with an
+interrogative marker, and `来着？`. Use question forms, not a bare `记得` or
+`来着` substring, so reminders and colorization instructions stay outside these
+additional cues. The [matched lexical replay](../../experiments/retrieval-quality/shared-recall-entry-diagnosis-2026-10-14.md)
+locates the omission before search; it does not justify changing rankings or
+retrieval budgets.
+
 Normalize degraded reasons at the compact projection and rendering boundaries.
 Preserve a known embedding/index code or an HTTP status code; use `unknown` for
 unrecognized diagnostics. Keep the original structured result and daemon health
