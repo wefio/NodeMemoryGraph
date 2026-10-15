@@ -1969,7 +1969,7 @@ from both storage tiers and the STG/LTG lifecycle:
 1. **Resident layer:** a very small query-independent seed of critical
    constraints and stable profile information placed into every relevant AG.
 2. **Automatic recall layer:** bounded dynamic selection from STG and LTG based
-   on the current query, task, scope, time, and available budget. A harness-side
+   on the current query, task, scope, time, and available budget. A query-side
    memory gate first chooses `retrieve`, `cue`, or `none`; `none` must not search
    or inject dynamic long-term memory. Ordinary code inspection, tests,
    calculations, formatting, and other self-contained turns therefore remain
@@ -2122,6 +2122,45 @@ matched tests show that the model can use the folded directory without losing
 answer evidence. Concrete Pi settings, defaults, compatibility variables, and
 operator instructions belong in the README rather than this architecture
 contract.
+
+### Session-only recall cues
+
+The experimental `recall_gate` Lab capability is default-off and session-leased.
+It caches assistant-proposed intent hints, not memories, relevance judgments or
+claim outcomes. A client prepares a query revision and reports whether retrieval
+is already scheduled. An explicit correction names that revision, a literal
+phrase in its normalized unquoted query, and a short intent reason. This is
+reported query/assistant judgment, not independent verification of user intent.
+No successful search or positive factual label is inferred from the correction.
+
+Only an otherwise skipped query can reuse a hint; existing static and task-anchor
+recalls win. A hit uses the ordinary `cue` decision (five candidates, no graph
+hops), still bounded by host configuration, retrieval filters and output budgets.
+Confidence constants remain heuristics, not calibrated probabilities.
+A skipped-query notice says that no search ran, not that memory is unnecessary.
+Quotes/code, translation/no-memory forms and Latin word boundaries have
+conservative exclusions; they are not a semantic intent or permission model.
+
+The service owns at most 32 session entries with eight cues each: phrases are
+3–80 UTF-16 units, reasons at most 240, source excerpts at most 320, and query
+capture/matching at most 4,096. The shared high-confidence secret boundary rejects
+secret-bearing query capture and reasons; it is not a general privacy classifier.
+A project change drops the session's cues;
+remove/clear, disable, lease expiry or renewal, session release, and daemon
+replacement prevent their reuse. Nothing reseeds this cache from disk, saved
+memory aliases, answer overlap or silence. No model, training job, autonomous
+summarizer or independent per-turn judge is added.
+
+`beginDisclosureTurn` accepts optional recall input and returns a typed trial
+preparation when enabled; old clients/servers keep their existing decisions.
+Pi first reads activation metadata without sending the trial query. Only while
+enabled does it forward native input through Lab `prepare` (one additional local
+RPC), consuming the result in its single budgeted context message. Lab `prepare` exposes the same lifecycle-neutral
+boundary to other clients; their automatic injection behavior is not made
+equivalent by exposing the tool. Operations and examples are in the
+[optional capability manual](../../skills/nmg-memory/references/optional-capabilities.md#recall_gate-operations).
+Deterministic fixtures establish mechanics, not natural LLM correction quality,
+retrieval precision or token/latency savings.
 
 ## 12. Learnable routing and minimal differentiable query graphs
 

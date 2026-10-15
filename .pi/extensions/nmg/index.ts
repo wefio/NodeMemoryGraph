@@ -20,7 +20,8 @@ import {
   renderStateOutput,
   STATE_BOARD_READ_OPERATIONS,
 } from "../../../src/integration/state.ts";
-import type { NmgStateResult } from "../../../src/cli/protocol.ts";
+import type { NmgStateResult, NmgSessionActiveGraphResult } from "../../../src/cli/protocol.ts";
+import type { SessionRecallPreparation } from "../../../src/core/session-recall.ts";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
@@ -71,7 +72,10 @@ import {
   extractPromptText,
 } from "../../../src/integration/agent-attribution.ts";
 import { SessionRecallFlow } from "../../../src/integration/session-recall-flow.ts";
-import { SessionTaskWindow } from "../../../src/integration/session-task-window.ts";
+import {
+  type SessionRecallRequest,
+  SessionTaskWindow,
+} from "../../../src/integration/session-task-window.ts";
 import {
   isMemorableToolResult,
   isSuccessfulCommit,
@@ -248,6 +252,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       | "sessionActiveGraph"
       | "taskBoard"
       | "state"
+      | "lab"
       | "recordActiveGraphAttribution"
       | "recordClaimOutcomes"
       | "recordFeedback",
@@ -317,17 +322,30 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const beginDisclosureTurn = async (
     sessionId: string,
     enabled: boolean,
+    recall?: { prompt: string; scheduled: boolean; projectDir: string },
     options: HttpCallOptions = {},
-  ): Promise<void> => {
-    if (!enabled) return;
-    await invoke(
+  ): Promise<SessionRecallPreparation | undefined> => {
+    if (!enabled) return undefined;
+    const result = (await invoke(
       "sessionActiveGraph",
+      { action: "beginDisclosureTurn", sessionId },
+      options,
+    ).catch(() => undefined)) as NmgSessionActiveGraphResult | undefined;
+    if (result?.action !== "beginDisclosureTurn" || !result.recallGateActive || !recall)
+      return undefined;
+    // No trial query leaves the adapter while the capability is off.
+    const prepared = (await invoke(
+      "lab",
       {
-        action: "beginDisclosureTurn",
+        action: "invoke",
+        capability: "recall_gate",
         sessionId,
+        operation: "prepare",
+        input: recall,
       },
       options,
-    ).catch(() => undefined);
+    ).catch(() => undefined)) as { output?: SessionRecallPreparation } | undefined;
+    return prepared?.output;
   };
 
   // git commit via the bash tool is the strongest "milestone" signal available
@@ -494,36 +512,57 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       }
       return persistedContextResult(output, event.systemPrompt);
     };
+    let recallRequest: SessionRecallRequest | null = null;
     const prepare = async () => {
       const isNewUserTurn = recallFlow.beginTurn(
         sessionId,
         piUserTurnKey(ctx.sessionManager, event.prompt),
       );
       await budget.run("connection", () => connection());
-      await budget.run("disclosure.begin", (signal) =>
-        beginDisclosureTurn(sessionId, isNewUserTurn, { signal }),
+      recallRequest = taskWindow.prepare(sessionId, event.prompt);
+      const sessionRecall = await budget.run("disclosure.begin", (signal) =>
+        beginDisclosureTurn(
+          sessionId,
+          isNewUserTurn,
+          event.prompt.trim()
+            ? {
+                prompt: event.prompt,
+                scheduled: recallRequest !== null,
+                projectDir: projectDirectory(),
+              }
+            : undefined,
+          { signal },
+        ),
       );
+      if (
+        !recallRequest &&
+        sessionRecall?.status === "hint" &&
+        sessionRecall.decision.mode === "cue"
+      ) {
+        recallRequest = { ...sessionRecall.decision, mode: "cue", query: event.prompt };
+      }
       partial.base.push(...(await recallNudges(budget, sessionId, isNewUserTurn, event.prompt)));
       // Each completed typed stage survives later optional work or a deadline.
       partial.base.unshift(...(await reasoningCheckpointFor(budget, sessionId)));
       partial.base.push(...(await readTurnAgContext(budget, sessionId)));
+      partial.base.push(...contextNotice(sessionRecallNotice(sessionRecall), "diagnostic"));
     };
     const automatic = async () => {
       await prepare();
-      const recallRequest = taskWindow.prepare(sessionId, event.prompt);
-      if (!recallRequest) return surfaceResult(currentOutput());
+      const demand = recallRequest;
+      if (!demand) return surfaceResult(currentOutput());
       let context = (await automaticInvoke("search", {
-        query: recallRequest.query,
+        query: demand.query,
         autoRecallBudgetMs: Math.max(1, Math.floor(Math.min(4_500, budget.remainingMs - 100))),
         projectDir: projectDirectory(),
         sessionId,
-        maxTier: Math.min(configuredAutoRecallTier(), recallRequest.maxTier) as MemoryTier,
-        limit: Math.min(configuredAutoRecallLimit(), recallRequest.limit),
+        maxTier: Math.min(configuredAutoRecallTier(), demand.maxTier) as MemoryTier,
+        limit: Math.min(configuredAutoRecallLimit(), demand.limit),
         initialEvidenceTarget: configuredInitialTarget(),
         strongHitTopGap: configuredStrongHitTopGap(),
         strongHitInitialTarget: configuredStrongHitInitialTarget(),
         secondPass: qpp2Mode === "active",
-        graphHops: Math.min(1, recallRequest.graphHops),
+        graphHops: Math.min(1, demand.graphHops),
         tieredDisclosure: true,
         autoRecall: true,
       })) as MemoryContext;
@@ -1312,6 +1351,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       capability: Type.Optional(
         Type.Union([
           Type.Literal("reasoning_workspace"),
+          Type.Literal("recall_gate"),
           Type.Literal("memory_graph_reasoner"),
           Type.Literal("controller_shadow"),
           Type.Literal("controller_controlled"),
@@ -2570,6 +2610,17 @@ function piHistoryMessage(value: unknown): AgentHistoryMessage | undefined {
 
 type DisclosureLevel = "header" | "exact" | "evidence";
 
+function sessionRecallNotice(preparation: SessionRecallPreparation | undefined): string {
+  if (preparation?.status === "skipped")
+    return renderDisclosure(nmgPrompts.session_recall_skipped_notice, {
+      revision: String(preparation.revision),
+    });
+  if (preparation?.status === "hint")
+    return renderDisclosure(nmgPrompts.session_recall_hint_notice, {
+      phrase: JSON.stringify(preparation.phrase),
+    });
+  return "";
+}
 const nmgPrompts = loadPrompts();
 export const SKILLOPT_POLICY_CHANNELS = resolveSkillOptPolicyChannels(nmgPrompts.memory_policy);
 export const MEMORY_POLICY = `<nmg_policy>\n${SKILLOPT_POLICY_CHANNELS.agent.text}\n</nmg_policy>`;

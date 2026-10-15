@@ -32,7 +32,10 @@ const OPTIONAL_RECALL_PATTERNS = [
  * Chooses how much long-term memory to expose before a model turn.
  * It deliberately does not choose memories or decide whether they are true.
  */
-export function decideMemoryLoad(query: string): MemoryGateDecision {
+export function decideMemoryLoad(
+  query: string,
+  options: { sessionCue?: boolean } = {},
+): MemoryGateDecision {
   const normalized = query.trim();
   if (normalized && EXPLICIT_RECALL_PATTERNS.some((pattern) => pattern.test(normalized))) {
     return {
@@ -44,11 +47,12 @@ export function decideMemoryLoad(query: string): MemoryGateDecision {
       graphHops: 1,
     };
   }
-  if (normalized && OPTIONAL_RECALL_PATTERNS.some((pattern) => pattern.test(normalized))) {
+  const optional = OPTIONAL_RECALL_PATTERNS.some((pattern) => pattern.test(normalized));
+  if (normalized && (optional || options.sessionCue)) {
     return {
       mode: "cue",
       confidence: 0.75,
-      reason: "memory_may_help",
+      reason: optional ? "memory_may_help" : "session_recall_hint",
       maxTier: 3,
       limit: 5,
       graphHops: 0,

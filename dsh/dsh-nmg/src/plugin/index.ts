@@ -21,135 +21,149 @@
 // they are injected: cordis starts this plugin only after `tools`, `subprocess`
 // and `sandboxPolicy` are bound in composition.
 
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
-import { connect } from 'node:net'
-import type { Context } from '@deepseek-ai/cordis'
-import { coordinationEnabled as configuredCoordinationEnabled } from '../../../../src/integration/config.ts'
-import { COMMON_REMEMBER_ACTIONS } from '../../../../src/integration/tool-contract.ts'
-import { compactDisclosureEntries, compactSearchContext, memoryDisclosureEntries } from '../../../../src/integration/search-projection.ts'
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { connect } from "node:net";
+import type { Context } from "@deepseek-ai/cordis";
+import { coordinationEnabled as configuredCoordinationEnabled } from "../../../../src/integration/config.ts";
+import { COMMON_REMEMBER_ACTIONS } from "../../../../src/integration/tool-contract.ts";
+import {
+  compactDisclosureEntries,
+  compactSearchContext,
+  memoryDisclosureEntries,
+} from "../../../../src/integration/search-projection.ts";
 import {
   renderCompactSearchSurface,
   renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
-} from '../../../../src/integration/agent-surface.ts'
-import { loadPrompts, renderDisclosure } from '../../../../src/prompts/load.ts'
-import { contextOnlineLearningEnabled } from '../../../../src/lab/context-router-online.ts'
-import { STATE_OPERATIONS, stateOperation, captureStateInvocation, renderStateOutput } from '../../../../src/integration/state.ts'
-import { renderLabOutput } from '../../../../src/integration/lab-capabilities.ts'
+} from "../../../../src/integration/agent-surface.ts";
+import { loadPrompts, renderDisclosure } from "../../../../src/prompts/load.ts";
+import { contextOnlineLearningEnabled } from "../../../../src/lab/context-router-online.ts";
+import {
+  STATE_OPERATIONS,
+  stateOperation,
+  captureStateInvocation,
+  renderStateOutput,
+} from "../../../../src/integration/state.ts";
+import { renderLabOutput } from "../../../../src/integration/lab-capabilities.ts";
 
-const nmgPrompts = loadPrompts()
+const nmgPrompts = loadPrompts();
 
-export const inject = ['tools', 'subprocess', 'sandboxPolicy', 'systemPrompt', 'timer']
+export const inject = ["tools", "subprocess", "sandboxPolicy", "systemPrompt", "timer"];
 
 /** Tool output shape: a single pre-rendered text block. */
 const textOutput = {
-  schema: { type: 'string' },
-  render: (_args, value) => [{ type: 'text', text: String(value) }],
-}
+  schema: { type: "string" },
+  render: (_args, value) => [{ type: "text", text: String(value) }],
+};
 
 /** CJK-aware fallback token estimator used only when the daemon is down. */
 function estimateTokens(text) {
-  let cjk = 0
-  let latin = 0
-  for (const ch of String(text || '')) {
-    if (ch.codePointAt(0) > 0x2fff) cjk += 1
-    else if (!/\s/.test(ch)) latin += 1
+  let cjk = 0;
+  let latin = 0;
+  for (const ch of String(text || "")) {
+    if (ch.codePointAt(0) > 0x2fff) cjk += 1;
+    else if (!/\s/.test(ch)) latin += 1;
   }
-  return Math.ceil(cjk + latin / 4)
+  return Math.ceil(cjk + latin / 4);
 }
 
 export function apply(ctx: Context): () => void {
-  const tools = ctx.tools
-  const subprocess = ctx.subprocess
-  const sandboxPolicy = ctx.sandboxPolicy
-  const systemPrompt = ctx.systemPrompt
-  const coordinationEnabled = configuredCoordinationEnabled()
+  const tools = ctx.tools;
+  const subprocess = ctx.subprocess;
+  const sandboxPolicy = ctx.sandboxPolicy;
+  const systemPrompt = ctx.systemPrompt;
+  const coordinationEnabled = configuredCoordinationEnabled();
 
   const workspaceRoot =
     (process.env.NMG_PROJECT_DIR && process.env.NMG_PROJECT_DIR.trim()) ||
-    (sandboxPolicy && typeof sandboxPolicy.workspaceRoot === 'string' && sandboxPolicy.workspaceRoot) ||
-    'C:\\Documents\\GitHub\\NodeMemoryGraph'
-  const binPath = workspaceRoot.replace(/[\\/]+$/, '') + '\\bin\\nmg.mjs'
+    (sandboxPolicy &&
+      typeof sandboxPolicy.workspaceRoot === "string" &&
+      sandboxPolicy.workspaceRoot) ||
+    "C:\\Documents\\GitHub\\NodeMemoryGraph";
+  const binPath = workspaceRoot.replace(/[\\/]+$/, "") + "\\bin\\nmg.mjs";
 
-  let nodePromise
+  let nodePromise;
   function resolveNode() {
     if (nodePromise === undefined) {
-      nodePromise = subprocess.resolveExecutable('node').catch(() => 'node')
+      nodePromise = subprocess.resolveExecutable("node").catch(() => "node");
     }
-    return nodePromise
+    return nodePromise;
   }
 
   function truncate(value, max) {
-    const t = String(value == null ? '' : value).replace(/\s+/g, ' ').trim()
-    return t.length <= max ? t : t.slice(0, max - 1) + '…'
+    const t = String(value == null ? "" : value)
+      .replace(/\s+/g, " ")
+      .trim();
+    return t.length <= max ? t : t.slice(0, max - 1) + "…";
   }
 
   function clampInt(raw, min, max, fallback) {
-    const value = Number(raw)
-    return Number.isFinite(value) ? Math.max(min, Math.min(max, Math.floor(value))) : fallback
+    const value = Number(raw);
+    return Number.isFinite(value) ? Math.max(min, Math.min(max, Math.floor(value))) : fallback;
   }
 
   function isProcessAlive(pid) {
-    if (!Number.isInteger(pid) || pid <= 0) return false
+    if (!Number.isInteger(pid) || pid <= 0) return false;
     try {
-      process.kill(pid, 0)
-      return true
+      process.kill(pid, 0);
+      return true;
     } catch (error) {
-      return error.code !== 'ESRCH'
+      return error.code !== "ESRCH";
     }
   }
 
   // ── daemon JSON-RPC (fast path) ────────────────────────────────────────────
-  let daemon = null
+  let daemon = null;
   function resolveDaemon() {
-    if (daemon) return daemon
+    if (daemon) return daemon;
     try {
-      const home = process.env.USERPROFILE || process.env.HOME || ''
-      const envDir = (process.env.NMG_DATA_DIR || '').replace(/[\\/]+$/, '')
-      const candidates = []
-      if (envDir) candidates.push(envDir)
-      candidates.push(join(home, '.nmg'))
-      const projectDir = join(workspaceRoot, '.nmg')
-      if (!candidates.includes(projectDir)) candidates.push(projectDir)
+      const home = process.env.USERPROFILE || process.env.HOME || "";
+      const envDir = (process.env.NMG_DATA_DIR || "").replace(/[\\/]+$/, "");
+      const candidates = [];
+      if (envDir) candidates.push(envDir);
+      candidates.push(join(home, ".nmg"));
+      const projectDir = join(workspaceRoot, ".nmg");
+      if (!candidates.includes(projectDir)) candidates.push(projectDir);
       for (const dataDir of candidates) {
         try {
-          const state = JSON.parse(readFileSync(join(dataDir, 'nmg.sqlite.server.json'), 'utf8'))
-          if (state.transport !== 'http' || !state.host || !state.port || !state.token) continue
-          if (!isProcessAlive(state.pid)) continue
-          daemon = { host: state.host, port: state.port, token: state.token, pid: state.pid }
-          return daemon
+          const state = JSON.parse(readFileSync(join(dataDir, "nmg.sqlite.server.json"), "utf8"));
+          if (state.transport !== "http" || !state.host || !state.port || !state.token) continue;
+          if (!isProcessAlive(state.pid)) continue;
+          daemon = { host: state.host, port: state.port, token: state.token, pid: state.pid };
+          return daemon;
         } catch {
           // try the next candidate location
         }
       }
     } catch {
-      daemon = null
+      daemon = null;
     }
-    return daemon
+    return daemon;
   }
 
   async function daemonCall(method, params, signal?, propagateFailure = false) {
-    const endpoint = resolveDaemon()
-    if (!endpoint) return null
+    const endpoint = resolveDaemon();
+    if (!endpoint) return null;
     try {
-      const response = await fetch('http://' + endpoint.host + ':' + endpoint.port + '/', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: 'Bearer ' + endpoint.token },
-        body: JSON.stringify({ jsonrpc: '2.0', method, params, id: 1 }),
+      const response = await fetch("http://" + endpoint.host + ":" + endpoint.port + "/", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer " + endpoint.token },
+        body: JSON.stringify({ jsonrpc: "2.0", method, params, id: 1 }),
         signal,
-      })
-      const text = await response.text()
-      if (!response.ok) throw new Error(text || 'nmg ' + method + ' failed (' + response.status + ')')
-      const parsed = JSON.parse(text)
-      if (parsed.error) throw new Error(parsed.error.message || 'nmg ' + method + ' error')
-      return parsed.result
+      });
+      const text = await response.text();
+      if (!response.ok)
+        throw new Error(text || "nmg " + method + " failed (" + response.status + ")");
+      const parsed = JSON.parse(text);
+      if (parsed.error) throw new Error(parsed.error.message || "nmg " + method + " error");
+      return parsed.result;
     } catch (error) {
-      if (propagateFailure || (error && error.name === 'AbortError')) throw error
-      daemon = null
-      return null
+      if (propagateFailure || (error && error.name === "AbortError")) throw error;
+      daemon = null;
+      return null;
     }
   }
 
@@ -157,132 +171,141 @@ export function apply(ctx: Context): () => void {
   // resolveDaemon 会被 isProcessAlive 骗过）。超时短，失败即视为不可用。
   function probePort(host, port, timeoutMs = 800) {
     return new Promise((resolve) => {
-      let socket
+      let socket;
       try {
-        socket = connect({ host, port })
+        socket = connect({ host, port });
       } catch {
-        return resolve(false)
+        return resolve(false);
       }
-      let done = false
+      let done = false;
       const finish = (ok) => {
-        if (done) return
-        done = true
-        try { socket.destroy() } catch {}
-        resolve(ok)
-      }
-      socket.setTimeout(timeoutMs)
-      socket.once('connect', () => finish(true))
-      socket.once('timeout', () => finish(false))
-      socket.once('error', () => finish(false))
-    })
+        if (done) return;
+        done = true;
+        try {
+          socket.destroy();
+        } catch {}
+        resolve(ok);
+      };
+      socket.setTimeout(timeoutMs);
+      socket.once("connect", () => finish(true));
+      socket.once("timeout", () => finish(false));
+      socket.once("error", () => finish(false));
+    });
   }
 
   // "再叫一遍"：daemon 不可用（没起 / 僵尸）→ kill 残留进程 + `nmg daemon start`
   // 重启，等它就绪后重试探测。启动失败（如沙箱权限）静默，下个 tick 再试。
   async function ensureDaemon(signal?) {
-    let endpoint = resolveDaemon()
-    if (endpoint && (await probePort(endpoint.host, endpoint.port))) return endpoint
+    let endpoint = resolveDaemon();
+    if (endpoint && (await probePort(endpoint.host, endpoint.port))) return endpoint;
     if (endpoint && endpoint.pid) {
-      try { process.kill(endpoint.pid) } catch { /* already gone */ }
+      try {
+        process.kill(endpoint.pid);
+      } catch {
+        /* already gone */
+      }
     }
-    daemon = null
+    daemon = null;
     try {
-      await runNmg(['daemon', 'start'], signal)
-      await new Promise((resolve) => setTimeout(resolve, 2500))
+      await runNmg(["daemon", "start"], signal);
+      await new Promise((resolve) => setTimeout(resolve, 2500));
     } catch {
       // spawn/permission failure: silent, retried next tick
     }
-    daemon = null
-    endpoint = resolveDaemon()
-    if (endpoint && (await probePort(endpoint.host, endpoint.port))) return endpoint
-    return null
+    daemon = null;
+    endpoint = resolveDaemon();
+    if (endpoint && (await probePort(endpoint.host, endpoint.port))) return endpoint;
+    return null;
   }
 
   // ── one-shot CLI fallback ──────────────────────────────────────────────────
   async function runNmg(args, signal) {
-    const node = await resolveNode()
+    const node = await resolveNode();
     const handle = subprocess.spawn({
       argv: [node, binPath].concat(args),
       cwd: workspaceRoot,
       stdio: {
-        stdin: 'ignore',
+        stdin: "ignore",
         stdout: { maxBytes: 512 * 1024 },
         stderr: { maxBytes: 64 * 1024 },
       },
       graceMs: 8000,
       signal,
-    })
-    const outcome = await handle.done
-    const stdout = handle.collected.stdout ? handle.collected.stdout.readFrom(0).text : ''
-    const stderr = handle.collected.stderr ? handle.collected.stderr.readFrom(0).text : ''
-    return { exitCode: outcome.exitCode, stdout, stderr }
+    });
+    const outcome = await handle.done;
+    const stdout = handle.collected.stdout ? handle.collected.stdout.readFrom(0).text : "";
+    const stderr = handle.collected.stderr ? handle.collected.stderr.readFrom(0).text : "";
+    return { exitCode: outcome.exitCode, stdout, stderr };
   }
 
   async function nmgJson(args, signal) {
-    let run
+    let run;
     try {
-      run = await runNmg(args, signal)
+      run = await runNmg(args, signal);
     } catch (error) {
-      const msg = error && error.message ? error.message : String(error)
-      return { ok: false, error: 'NMG spawn failed: ' + truncate(msg, 500) }
+      const msg = error && error.message ? error.message : String(error);
+      return { ok: false, error: "NMG spawn failed: " + truncate(msg, 500) };
     }
     if (run.exitCode !== 0) {
-      const detail = (run.stderr || run.stdout || '').trim()
-      return { ok: false, error: 'NMG exit ' + run.exitCode + (detail ? ': ' + truncate(detail, 500) : '') }
+      const detail = (run.stderr || run.stdout || "").trim();
+      return {
+        ok: false,
+        error: "NMG exit " + run.exitCode + (detail ? ": " + truncate(detail, 500) : ""),
+      };
     }
-    let data
+    let data;
     try {
-      data = JSON.parse(run.stdout)
+      data = JSON.parse(run.stdout);
     } catch {
-      return { ok: false, error: 'NMG non-JSON output: ' + truncate(run.stdout, 500) }
+      return { ok: false, error: "NMG non-JSON output: " + truncate(run.stdout, 500) };
     }
-    return { ok: true, data }
+    return { ok: true, data };
   }
 
   function scopeArgs(scope) {
-    if (scope === null || typeof scope !== 'object') return []
-    return Object.keys(scope).map((key) => ['--scope', String(key) + '=' + String(scope[key])])
+    if (scope === null || typeof scope !== "object") return [];
+    return Object.keys(scope).map((key) => ["--scope", String(key) + "=" + String(scope[key])]);
   }
 
   function coerceScope(scope) {
-    const out = {}
-    for (const key of Object.keys(scope || {})) out[key] = String(scope[key])
-    return out
+    const out = {};
+    for (const key of Object.keys(scope || {})) out[key] = String(scope[key]);
+    return out;
   }
 
   function projectDaemonStatus(raw) {
-    const endpoint = resolveDaemon()
+    const endpoint = resolveDaemon();
     return {
       running: true,
       pid: endpoint && endpoint.pid != null ? endpoint.pid : null,
-      endpoint: endpoint ? endpoint.host + ':' + endpoint.port : null,
+      endpoint: endpoint ? endpoint.host + ":" + endpoint.port : null,
       compatible: true,
       status: raw,
-    }
+    };
   }
 
   async function invoke(method, params, cliArgs, signal, project) {
     try {
-      const raw = await daemonCall(method, params, signal)
-      if (raw != null) return { ok: true, data: project ? project(raw) : raw }
+      const raw = await daemonCall(method, params, signal);
+      if (raw != null) return { ok: true, data: project ? project(raw) : raw };
     } catch {
-      return { ok: false, error: 'NMG call aborted' }
+      return { ok: false, error: "NMG call aborted" };
     }
-    return nmgJson(cliArgs, signal)
+    return nmgJson(cliArgs, signal);
   }
 
   async function invokeRpcOnly(method, params, signal) {
     try {
-      let raw = await daemonCall(method, params, signal)
+      let raw = await daemonCall(method, params, signal);
       if (raw == null) {
-        await ensureDaemon(signal)
-        raw = await daemonCall(method, params, signal)
+        await ensureDaemon(signal);
+        raw = await daemonCall(method, params, signal);
       }
       return raw == null
-        ? { ok: false, error: 'NMG daemon is unavailable for ' + method }
-        : { ok: true, data: raw }
+        ? { ok: false, error: "NMG daemon is unavailable for " + method }
+        : { ok: true, data: raw };
     } catch {
-      return { ok: false, error: 'NMG call aborted' }
+      return { ok: false, error: "NMG call aborted" };
     }
   }
 
@@ -305,54 +328,57 @@ export function apply(ctx: Context): () => void {
   // snapshot appears from the next step — and, being runtime context, stays in
   // front of the model for the whole turn rather than only the first step.
 
-  const recallGenerations = new Map() // sessionId -> generation
-  const sessionTokenTotals = new Map() // sessionId -> total estimated recall tokens
-  const recallBatch = new Map() // sessionId -> recall[] (newest first, capped at MAX_RECALL_HISTORY)
-  const MAX_RECALL_HISTORY = 5 // per-session recall rounds kept for the floating indicator
-  const openSearches = new Map() // sessionId -> Promise that resolves once the stash is written
+  const recallGenerations = new Map(); // sessionId -> generation
+  const sessionTokenTotals = new Map(); // sessionId -> total estimated recall tokens
+  const recallBatch = new Map(); // sessionId -> recall[] (newest first, capped at MAX_RECALL_HISTORY)
+  const MAX_RECALL_HISTORY = 5; // per-session recall rounds kept for the floating indicator
+  const openSearches = new Map(); // sessionId -> Promise that resolves once the stash is written
 
   function nextGeneration(sessionId) {
-    const generation = (recallGenerations.get(sessionId) || 0) + 1
-    recallGenerations.set(sessionId, generation)
-    return generation
+    const generation = (recallGenerations.get(sessionId) || 0) + 1;
+    recallGenerations.set(sessionId, generation);
+    return generation;
   }
 
   async function disclose(sessionId, activeGraphId, disclosure, entries) {
-    const decision = await daemonCall('sessionActiveGraph', {
-      action: 'disclose',
+    const decision = await daemonCall("sessionActiveGraph", {
+      action: "disclose",
       sessionId,
       projectionId: activeGraphId || undefined,
       disclosure,
       entries,
-    })
+    });
     return decision && Array.isArray(decision.freshMemoryIds)
       ? decision
-      : { freshMemoryIds: entries.map((entry) => entry.memoryId), foldedMemoryIds: [] }
+      : { freshMemoryIds: entries.map((entry) => entry.memoryId), foldedMemoryIds: [] };
   }
 
   function foldedDisclosureText(memoryIds) {
-    if (!Array.isArray(memoryIds) || memoryIds.length === 0) return ''
-    return nmgPrompts.in_context_title + '\n' +
-      memoryIds.map((id) => '- memory=' + id + '; already_in_context=true').join('\n')
+    if (!Array.isArray(memoryIds) || memoryIds.length === 0) return "";
+    return (
+      nmgPrompts.in_context_title +
+      "\n" +
+      memoryIds.map((id) => "- memory=" + id + "; already_in_context=true").join("\n")
+    );
   }
 
   function extractUserPrompt(message) {
-    const parts = []
-    if (!message || typeof message !== 'object') return ''
+    const parts = [];
+    if (!message || typeof message !== "object") return "";
     for (const block of message.content || []) {
-      if (block.type === 'text' && block.text) parts.push(block.text)
+      if (block.type === "text" && block.text) parts.push(block.text);
     }
-    const joined = parts.join(' ').replace(/\s+/g, ' ').trim()
-    return joined.length > 500 ? joined.slice(0, 500) : joined
+    const joined = parts.join(" ").replace(/\s+/g, " ").trim();
+    return joined.length > 500 ? joined.slice(0, 500) : joined;
   }
 
   function formatRecall(recall, candidates) {
-    const chainCount = new Set(candidates.flatMap((candidate) => candidate.chains || [])).size
-    const deferred = Array.isArray(recall.deferredMemoryIds) ? recall.deferredMemoryIds : []
+    const chainCount = new Set(candidates.flatMap((candidate) => candidate.chains || [])).size;
+    const deferred = Array.isArray(recall.deferredMemoryIds) ? recall.deferredMemoryIds : [];
     const nextStep = deferred.length
-      ? nmgPrompts.deferred_hint + ' Memory IDs: ' + deferred.join(',')
-      : nmgPrompts.get_hint
-    const forget = candidates.some((candidate) => candidate.forgotten)
+      ? nmgPrompts.deferred_hint + " Memory IDs: " + deferred.join(",")
+      : nmgPrompts.get_hint;
+    const forget = candidates.some((candidate) => candidate.forgotten);
     return renderCompactSearchSurface(
       {
         candidates,
@@ -364,51 +390,61 @@ export function apply(ctx: Context): () => void {
         preamble: renderDisclosure(nmgPrompts.search_disclosure, {
           count: String(candidates.length),
           next_step: nextStep,
-          forget_hint: forget ? nmgPrompts.forget_hint : '',
+          forget_hint: forget ? nmgPrompts.forget_hint : "",
         }),
       },
-    )
+    );
   }
 
   function recallBudget(signal) {
     try {
-      return AbortSignal.any([signal, AbortSignal.timeout(1500)])
+      return AbortSignal.any([signal, AbortSignal.timeout(1500)]);
     } catch {
-      return signal
+      return signal;
     }
   }
 
   async function autoRecall(query, sessionId, signal) {
-    const limit = clampInt(process.env.NMG_AUTO_RECALL_LIMIT, 1, 50, 13)
-    const tier = clampInt(process.env.NMG_AUTO_RECALL_TIER, 0, 3, 1)
-    const budget = recallBudget(signal)
+    const limit = clampInt(process.env.NMG_AUTO_RECALL_LIMIT, 1, 50, 13);
+    const tier = clampInt(process.env.NMG_AUTO_RECALL_TIER, 0, 3, 1);
+    const budget = recallBudget(signal);
     try {
-      const context = await daemonCall('search', {
-        query,
-        limit,
-        maxTier: tier,
-        graphHops: 1,
-        tieredDisclosure: true,
-        autoRecall: true,
-        projectDir: workspaceRoot,
-        sessionId,
-      }, budget)
-      if (context) return compactSearchContext(context)
+      const context = await daemonCall(
+        "search",
+        {
+          query,
+          limit,
+          maxTier: tier,
+          graphHops: 1,
+          tieredDisclosure: true,
+          autoRecall: true,
+          projectDir: workspaceRoot,
+          sessionId,
+        },
+        budget,
+      );
+      if (context) return compactSearchContext(context);
     } catch {
-      return null
+      return null;
     }
     const argv = [
-      'search', query,
-      '--limit', String(limit),
-      '--max-tier', String(tier),
-      '--graph-hops', '1',
-      '--tiered-disclosure',
-      '--project-dir', workspaceRoot,
-      '--session-id', sessionId,
-      '--compact-json',
-    ]
-    const result = await nmgJson(argv, budget)
-    return result.ok ? result.data : null
+      "search",
+      query,
+      "--limit",
+      String(limit),
+      "--max-tier",
+      String(tier),
+      "--graph-hops",
+      "1",
+      "--tiered-disclosure",
+      "--project-dir",
+      workspaceRoot,
+      "--session-id",
+      sessionId,
+      "--compact-json",
+    ];
+    const result = await nmgJson(argv, budget);
+    return result.ok ? result.data : null;
   }
 
   // Kick the recall search when a user message enters the inbox. This precedes
@@ -417,52 +453,52 @@ export function apply(ctx: Context): () => void {
   // slow/failed search leaves the previous (or no) snapshot and the turn goes on.
   function onInboxInserted(payload) {
     try {
-      const { agent, message } = payload || {}
-      if (!agent || !message) return
+      const { agent, message } = payload || {};
+      if (!agent || !message) return;
       // 缓存活跃 agent 实例——定时器唤醒（agent.send）需要它，而事件
       // payload 只在用户消息进入时才有。多会话：每个 agent 独立缓存。
-      lastAgents.set(String(agent.id), agent)
-      const sessionId = String(agent.id)
-      const query = extractUserPrompt(message)
-      if (!query) return
-      const generation = nextGeneration(sessionId)
+      lastAgents.set(String(agent.id), agent);
+      const sessionId = String(agent.id);
+      const query = extractUserPrompt(message);
+      if (!query) return;
+      const generation = nextGeneration(sessionId);
       const run = (async () => {
         try {
-          await daemonCall('sessionActiveGraph', {
-            action: 'beginDisclosureTurn',
+          await daemonCall("sessionActiveGraph", {
+            action: "beginDisclosureTurn",
             sessionId,
-          })
+          });
           // An empty/no-match search for this new turn must NOT clear the
           // session's last successful recall snapshot — the floating indicator
           // (and the model context out-of-band) should keep showing the most
           // recent memory until a new successful recall overwrites it. Flickering
           // to "暂无召回" on every fresh round that happens to find nothing is the
           // bug we avoid by leaving the previous snapshot in place.
-          const recall = await autoRecall(query, sessionId, undefined)
+          const recall = await autoRecall(query, sessionId, undefined);
           if (!recall || !Array.isArray(recall.candidates) || recall.candidates.length === 0) {
-            return
+            return;
           }
           const disclosure = await disclose(
             sessionId,
             recall.activeGraphId,
-            'header',
+            "header",
             compactDisclosureEntries({
               candidates: recall.candidates,
               logicalChainCount: recall.logicalChainCount || 0,
               activeGraphId: recall.activeGraphId || null,
               deferredMemoryIds: recall.deferredMemoryIds || [],
             }),
-          )
-          const freshIds = new Set(disclosure.freshMemoryIds)
-          const fresh = recall.candidates.filter((candidate) => freshIds.has(candidate.id))
-          if (fresh.length === 0) return
+          );
+          const freshIds = new Set(disclosure.freshMemoryIds);
+          const fresh = recall.candidates.filter((candidate) => freshIds.has(candidate.id));
+          if (fresh.length === 0) return;
           const thisTokens =
             recall.tokens != null
               ? recall.tokens
-              : estimateTokens(fresh.map((c) => c.preview).join(' '))
-          const sessionTotal = (sessionTokenTotals.get(sessionId) || 0) + thisTokens
-          sessionTokenTotals.set(sessionId, sessionTotal)
-          const text = formatRecall(recall, fresh)
+              : estimateTokens(fresh.map((c) => c.preview).join(" "));
+          const sessionTotal = (sessionTokenTotals.get(sessionId) || 0) + thisTokens;
+          sessionTokenTotals.set(sessionId, sessionTotal);
+          const text = formatRecall(recall, fresh);
           const entry = {
             generation,
             text,
@@ -472,17 +508,17 @@ export function apply(ctx: Context): () => void {
             activeGraphId: recall.activeGraphId,
             nudgeShown: false,
             fedBack: false,
-          }
-          const history = recallBatch.get(sessionId)
-          recallBatch.set(sessionId, [entry, ...(history || [])].slice(0, MAX_RECALL_HISTORY))
+          };
+          const history = recallBatch.get(sessionId);
+          recallBatch.set(sessionId, [entry, ...(history || [])].slice(0, MAX_RECALL_HISTORY));
         } catch {
           // Keep the last successful snapshot on any recall failure.
         }
-      })()
-      openSearches.set(sessionId, run)
+      })();
+      openSearches.set(sessionId, run);
       run.finally(() => {
-        if (openSearches.get(sessionId) === run) openSearches.delete(sessionId)
-      })
+        if (openSearches.get(sessionId) === run) openSearches.delete(sessionId);
+      });
     } catch {
       // never let a recall computation throw into the inbox event
     }
@@ -494,8 +530,8 @@ export function apply(ctx: Context): () => void {
   // each recall snapshot — the DSH recall text is re-surfaced on later turns,
   // so a per-snapshot flag stops it from nagging every turn.
   function recallFeedbackAffordance(graphId) {
-    if (!graphId || !contextOnlineLearningEnabled()) return ''
-    return renderDisclosure(nmgPrompts.recall_feedback_affordance, { graph_id: String(graphId) })
+    if (!graphId || !contextOnlineLearningEnabled()) return "";
+    return renderDisclosure(nmgPrompts.recall_feedback_affordance, { graph_id: String(graphId) });
   }
 
   // The `systemPrompt.context` provider: return the current recall snapshot for
@@ -503,19 +539,19 @@ export function apply(ctx: Context): () => void {
   // materializes the resolved text as a user-role snapshot appended to the turn's
   // messages — DSH-native, no manual message fabrication.
   function recallTextFor(agent) {
-    if (!agent) return ''
+    if (!agent) return "";
     try {
-      const id = String(agent.id)
-      const stack = recallBatch.get(id)
-      const latest = Array.isArray(stack) ? stack[0] : stack
-      let recall = latest && latest.text ? latest.text : ''
+      const id = String(agent.id);
+      const stack = recallBatch.get(id);
+      const latest = Array.isArray(stack) ? stack[0] : stack;
+      let recall = latest && latest.text ? latest.text : "";
       if (latest && latest.text && latest.activeGraphId && !latest.nudgeShown && !latest.fedBack) {
-        latest.nudgeShown = true
-        recall = recall + '\n\n' + recallFeedbackAffordance(latest.activeGraphId)
+        latest.nudgeShown = true;
+        recall = recall + "\n\n" + recallFeedbackAffordance(latest.activeGraphId);
       }
-      return recall
+      return recall;
     } catch {
-      return ''
+      return "";
     }
   }
 
@@ -525,11 +561,11 @@ export function apply(ctx: Context): () => void {
   // first, capped) so the pill can show the latest recall's candidates and page
   // through earlier recalls, or null when the session has never recalled.
   function recallDataFor(sessionId) {
-    if (!sessionId) return null
+    if (!sessionId) return null;
     try {
-      const stack = recallBatch.get(String(sessionId))
-      const list = Array.isArray(stack) ? stack : (stack ? [stack] : [])
-      if (list.length === 0) return null
+      const stack = recallBatch.get(String(sessionId));
+      const list = Array.isArray(stack) ? stack : stack ? [stack] : [];
+      if (list.length === 0) return null;
       return {
         recalls: list.map((snapshot) => ({
           generation: snapshot.generation,
@@ -544,23 +580,23 @@ export function apply(ctx: Context): () => void {
             preview: c.preview,
           })),
         })),
-      }
+      };
     } catch {
-      return null
+      return null;
     }
   }
 
   function onAgentDisposed(payload) {
     try {
       if (payload && payload.agent) {
-        const id = String(payload.agent.id)
-        recallGenerations.delete(id)
-        sessionTokenTotals.delete(id)
-        recallBatch.delete(id)
-        openSearches.delete(id)
-        wakeBatch.delete(id)
-        lastAgents.delete(id)
-        void daemonCall('sessionActiveGraph', { action: 'release', sessionId: id })
+        const id = String(payload.agent.id);
+        recallGenerations.delete(id);
+        sessionTokenTotals.delete(id);
+        recallBatch.delete(id);
+        openSearches.delete(id);
+        wakeBatch.delete(id);
+        lastAgents.delete(id);
+        void daemonCall("sessionActiveGraph", { action: "release", sessionId: id });
       }
     } catch {
       // cleanup is best-effort
@@ -582,88 +618,103 @@ export function apply(ctx: Context): () => void {
   // work ("claim 决定谁工作") is the model's call via `nmg_state action=write space=board operation=claim`, so we
   // never auto-claim — we surface entries and let the model decide.
 
-  const hostSessionId = (process.env.DSH_SESSION_ID || '').trim() || 'dsh'
-  const projectName = workspaceRoot.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || 'dsh'
-  const WAKE_AGENT_ID = 'dsh:' + projectName // stable routing key (never the session id)
-  const WAKE_AGENT_NAME = projectName // display label; renaming never loses routing
-  const WAKE_WORLD_TASK = 'default' // the world channel is always scanned
-  const WAKE_MAX_ENTRIES = 50
+  const hostSessionId = (process.env.DSH_SESSION_ID || "").trim() || "dsh";
+  const projectName =
+    workspaceRoot
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .pop() || "dsh";
+  const WAKE_AGENT_ID = "dsh:" + projectName; // stable routing key (never the session id)
+  const WAKE_AGENT_NAME = projectName; // display label; renaming never loses routing
+  const WAKE_WORLD_TASK = "default"; // the world channel is always scanned
+  const WAKE_MAX_ENTRIES = 50;
   // 对齐 NMG 唤醒器参考实现 (kimi-plugin/nmg-hook.mjs isBoardWakeCandidate)：
   // 只有 actionable 种类会唤醒——推送 note/result/decision/goal 是"确认风暴"
   // (3f9d62b notify-only-is-silent)。广播 meta 条目永不唤醒 (ed51a8f)。
-  const WAKE_KINDS = new Set(['question', 'blocker', 'handoff'])
-  const KIND_RANK = { question: 0, blocker: 1, handoff: 2 }
-  const BROADCAST_PREFIX = '[NMG board 协作广播]'
+  const WAKE_KINDS = new Set(["question", "blocker", "handoff"]);
+  const KIND_RANK = { question: 0, blocker: 1, handoff: 2 };
+  const BROADCAST_PREFIX = "[NMG board 协作广播]";
   // 照抄 pi 版 (.pi/extensions/nmg/index.ts) 的世界广播设计：
   // - WORLD_BROADCAST_SESSION: 哨兵投递回执，每个条目最多广播一次（(entry, sentinel) 去重）
   // - BROADCAST_KINDS: 协作类才值得广播公告；note/result/decision 静默（世界频道保持安静）
   // - BROADCAST_TTL_SECONDS: RAII——广播是临时 pull 公告，TTL 回收而不是永久 open 死状态
-  const WORLD_BROADCAST_SESSION = 'world-broadcast'
-  const BROADCAST_KINDS = new Set(['question', 'blocker', 'handoff'])
-  const BROADCAST_TTL_SECONDS = 86_400
-  const WAKE_INTERVAL_MS = clampInt(process.env.NMG_BOARD_WAKE_INTERVAL_SEC, 5, 3600, 30) * 1000
+  const WORLD_BROADCAST_SESSION = "world-broadcast";
+  const BROADCAST_KINDS = new Set(["question", "blocker", "handoff"]);
+  const BROADCAST_TTL_SECONDS = 86_400;
+  const WAKE_INTERVAL_MS = clampInt(process.env.NMG_BOARD_WAKE_INTERVAL_SEC, 5, 3600, 30) * 1000;
 
-  const wakeBatch = new Map() // sessionId -> entry[] (deduped, newest first)
-  let wakeAgentRegistered = false
-  let wakeConfig = null // <dataDir>/board-wake.json (enabled/intervalMs/budget/cooldownMs)
-  const lastAgents = new Map() // 已注册的活跃 agent 实例（key=String(agent.id)），供定时器按会话唤醒用
+  const wakeBatch = new Map(); // sessionId -> entry[] (deduped, newest first)
+  let wakeAgentRegistered = false;
+  let wakeConfig = null; // <dataDir>/board-wake.json (enabled/intervalMs/budget/cooldownMs)
+  const lastAgents = new Map(); // 已注册的活跃 agent 实例（key=String(agent.id)），供定时器按会话唤醒用
 
   function wakeEntryKey(entry) {
-    return entry && entry.id ? String(entry.id) : ''
+    return entry && entry.id ? String(entry.id) : "";
   }
 
   function wakeEntryLine(entry) {
     return (
-      '#' + (entry.id || '?') + ' [' + entry.kind + '/' + entry.status + '] ' +
-      (entry.agentId || '?') + ': ' + truncate(entry.content, 200)
-    )
+      "#" +
+      (entry.id || "?") +
+      " [" +
+      entry.kind +
+      "/" +
+      entry.status +
+      "] " +
+      (entry.agentId || "?") +
+      ": " +
+      truncate(entry.content, 200)
+    );
   }
 
   function loadWakeConfig() {
     try {
-      const home = process.env.USERPROFILE || process.env.HOME || ''
-      const dataDir = (process.env.NMG_DATA_DIR || join(home, '.nmg')).replace(/[\\/]+$/, '')
-      wakeConfig = JSON.parse(readFileSync(join(dataDir, 'board-wake.json'), 'utf8'))
+      const home = process.env.USERPROFILE || process.env.HOME || "";
+      const dataDir = (process.env.NMG_DATA_DIR || join(home, ".nmg")).replace(/[\\/]+$/, "");
+      wakeConfig = JSON.parse(readFileSync(join(dataDir, "board-wake.json"), "utf8"));
     } catch {
-      wakeConfig = null
+      wakeConfig = null;
     }
   }
 
   function pushWakeEntry(entry, targetSessionId) {
-    if (!entry || !targetSessionId) return
-    const key = wakeEntryKey(entry)
-    if (!key) return
-    const existing = wakeBatch.get(targetSessionId) || []
-    if (existing.some((e) => wakeEntryKey(e) === key)) return
-    wakeBatch.set(targetSessionId, [entry].concat(existing).slice(0, WAKE_MAX_ENTRIES))
+    if (!entry || !targetSessionId) return;
+    const key = wakeEntryKey(entry);
+    if (!key) return;
+    const existing = wakeBatch.get(targetSessionId) || [];
+    if (existing.some((e) => wakeEntryKey(e) === key)) return;
+    wakeBatch.set(targetSessionId, [entry].concat(existing).slice(0, WAKE_MAX_ENTRIES));
   }
 
   // 唤醒候选判定，对齐 nmg-hook.mjs isBoardWakeCandidate：open && actionable
   // kind && 无活跃 claim && 非定向他人 && 非串行排队 && 非广播 meta。
   // 自回声（ownEcho）判断依赖具体会话，移到 per-agent delivery 阶段做。
   function isWakeCandidate(entry, extraTargets) {
-    const now = Date.now()
+    const now = Date.now();
     const liveClaim =
-      entry.claimExpiresAt != null && new Date(entry.claimExpiresAt).getTime() > now
+      entry.claimExpiresAt != null && new Date(entry.claimExpiresAt).getTime() > now;
     const addressedToOther =
-      entry.to != null && entry.to !== WAKE_AGENT_ID && entry.to !== WAKE_AGENT_NAME && !(extraTargets && extraTargets.has(entry.to))
-    const serialQueued = entry.serialState === 'pending'
+      entry.to != null &&
+      entry.to !== WAKE_AGENT_ID &&
+      entry.to !== WAKE_AGENT_NAME &&
+      !(extraTargets && extraTargets.has(entry.to));
+    const serialQueued = entry.serialState === "pending";
     return (
-      entry.status === 'open' &&
+      entry.status === "open" &&
       WAKE_KINDS.has(entry.kind) &&
       !liveClaim &&
       !addressedToOther &&
       !serialQueued &&
-      !String(entry.content || '').startsWith(BROADCAST_PREFIX)
-    )
+      !String(entry.content || "").startsWith(BROADCAST_PREFIX)
+    );
   }
 
   // 条目被 claim/resolve 后从所有会话的 wake batch 移除（谁处理的都可能）。
   function removeWakeEntry(entryId) {
     for (const [key, list] of wakeBatch) {
-      const next = list.filter((entry) => wakeEntryKey(entry) !== String(entryId))
-      if (next.length) wakeBatch.set(key, next)
-      else wakeBatch.delete(key)
+      const next = list.filter((entry) => wakeEntryKey(entry) !== String(entryId));
+      if (next.length) wakeBatch.set(key, next);
+      else wakeBatch.delete(key);
     }
   }
 
@@ -674,81 +725,97 @@ export function apply(ctx: Context): () => void {
   // 广播者被自己的帖子唤醒。广播条目本身（带 BROADCAST_PREFIX）绝不重播——
   // 否则广播唤醒会话、会话再广播，递归刷屏（实测 #12→#13→#16…）。
   async function maybeBroadcastToWorld(entry, agentId, sessionId) {
-    if (!entry || String(entry.content || '').startsWith(BROADCAST_PREFIX)) return false
-    if (!BROADCAST_KINDS.has(entry.kind)) return false
-    const worldCheck = await daemonCall('taskBoard', {
-      action: 'deliveryCheck',
+    if (!entry || String(entry.content || "").startsWith(BROADCAST_PREFIX)) return false;
+    if (!BROADCAST_KINDS.has(entry.kind)) return false;
+    const worldCheck = await daemonCall("taskBoard", {
+      action: "deliveryCheck",
       taskId: WAKE_WORLD_TASK,
       agentId,
       sessionId: WORLD_BROADCAST_SESSION,
       entryIds: [wakeEntryKey(entry)],
-    })
-    if (worldCheck && Array.isArray(worldCheck.delivered) && worldCheck.delivered.includes(wakeEntryKey(entry))) return false
-    const excerpt = String(entry.content || '').length > 140 ? String(entry.content || '').slice(0, 140) + '…' : String(entry.content || '')
-    const label = entry.kind === 'question' ? '问题' : entry.kind === 'blocker' ? '阻塞' : '交接'
+    });
+    if (
+      worldCheck &&
+      Array.isArray(worldCheck.delivered) &&
+      worldCheck.delivered.includes(wakeEntryKey(entry))
+    )
+      return false;
+    const excerpt =
+      String(entry.content || "").length > 140
+        ? String(entry.content || "").slice(0, 140) + "…"
+        : String(entry.content || "");
+    const label = entry.kind === "question" ? "问题" : entry.kind === "blocker" ? "阻塞" : "交接";
     const broadcast =
-      '[NMG board 协作广播] 频道 ' + (entry.taskId || '?') + ' 有 #' + (entry.id || '?') +
-      ' 未认领的' + label + '（open）：' + excerpt +
-      '。有空的 agent 可用 nmg_state space=board action=read taskId=' + (entry.taskId || '?') + ' 查看详情、action=write operation=claim 认领处理。'
-    await daemonCall('taskBoard', {
-      action: 'put',
+      "[NMG board 协作广播] 频道 " +
+      (entry.taskId || "?") +
+      " 有 #" +
+      (entry.id || "?") +
+      " 未认领的" +
+      label +
+      "（open）：" +
+      excerpt +
+      "。有空的 agent 可用 nmg_state space=board action=read taskId=" +
+      (entry.taskId || "?") +
+      " 查看详情、action=write operation=claim 认领处理。";
+    await daemonCall("taskBoard", {
+      action: "put",
       taskId: WAKE_WORLD_TASK,
       agentId,
       sourceSessionId: sessionId,
-      kind: 'handoff',
+      kind: "handoff",
       content: broadcast,
       ttlSeconds: BROADCAST_TTL_SECONDS,
-    })
-    await daemonCall('taskBoard', {
-      action: 'recordDelivery',
+    });
+    await daemonCall("taskBoard", {
+      action: "recordDelivery",
       entryId: wakeEntryKey(entry),
       sessionId: WORLD_BROADCAST_SESSION,
       agentId,
-      source: 'wake-broadcast',
-    })
-    return true
+      source: "wake-broadcast",
+    });
+    return true;
   }
 
   async function boardWakeOnce() {
     // "再叫一遍"：daemon 不可用（没起/僵尸）→ 自动 kill + restart
-    const endpoint = await ensureDaemon()
+    const endpoint = await ensureDaemon();
     if (!endpoint) {
-      wakeAgentRegistered = false
-      return
+      wakeAgentRegistered = false;
+      return;
     }
     try {
       // 配置门：读 <dataDir>/board-wake.json。enabled 显式 false 时停摆；无配置
       // 文件时默认开启（DSH 适配器是用户主动装的双面宿主包，不同于 NMG 本体
       // 保守默认 off）。intervalMs 可覆盖轮询间隔（当前配置 30000 与默认一致）。
-      loadWakeConfig()
-      if (wakeConfig && wakeConfig.enabled === false) return
+      loadWakeConfig();
+      if (wakeConfig && wakeConfig.enabled === false) return;
 
       // Register on first contact / after a daemon restart (upsert + last_seen).
       if (!wakeAgentRegistered) {
-        await daemonCall('taskBoard', {
-          action: 'registerAgent',
+        await daemonCall("taskBoard", {
+          action: "registerAgent",
           id: WAKE_AGENT_ID,
           agentName: WAKE_AGENT_NAME,
-          description: 'DSH NMG adapter (NodeMemoryGraph host package)',
-          capabilities: 'dsh-nmg',
-          supportedInterfaces: 'dsh-harness',
-        })
-        wakeAgentRegistered = true
+          description: "DSH NMG adapter (NodeMemoryGraph host package)",
+          capabilities: "dsh-nmg",
+          supportedInterfaces: "dsh-harness",
+        });
+        wakeAgentRegistered = true;
       }
       // Heartbeat keeps last_seen_at fresh (online window = 10 min).
-      await daemonCall('taskBoard', { action: 'heartbeat', id: WAKE_AGENT_ID })
+      await daemonCall("taskBoard", { action: "heartbeat", id: WAKE_AGENT_ID });
 
       // Collect candidates: directed inbox + world channel + subscribed channels.
-      const candidates = []
-      const seen = new Set()
+      const candidates = [];
+      const seen = new Set();
       const collect = (taskId, entries) => {
         for (const entry of entries || []) {
-          const key = wakeEntryKey(entry)
-          if (!key || seen.has(key)) continue
-          seen.add(key)
-          candidates.push(taskId == null ? entry : { ...entry, taskId })
+          const key = wakeEntryKey(entry);
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          candidates.push(taskId == null ? entry : { ...entry, taskId });
         }
-      }
+      };
       // Continuable subagents: enumerate the live parents' children, then read
       // each child's directed inbox. A child may be cold (persisted, no live
       // Agent), so delivery below goes through subagents.followup, which
@@ -759,72 +826,76 @@ export function apply(ctx: Context): () => void {
       // and the loop below would skip every child. Use the agents registry's
       // list() to seed lastAgents with every live agent (including the main
       // session), bridging the startup window without waiting for a user message.
-      const agentsService = ctx.get('agents')
-      if (agentsService && typeof agentsService.list === 'function') {
+      const agentsService = ctx.get("agents");
+      if (agentsService && typeof agentsService.list === "function") {
         for (const agent of agentsService.list()) {
-          if (agent && agent.id) lastAgents.set(String(agent.id), agent)
+          if (agent && agent.id) lastAgents.set(String(agent.id), agent);
         }
       }
       // Resolve the optional subagents service per tick (not at apply time):
       // dsh-subagent may mount after this plugin, and ctx.get() is a point-in-
       // time lookup — a captured constant would stay undefined forever.
-      const subagents = ctx.get('subagents')
-      const childTargets = new Set()
-      const childMap = new Map()
-      if (subagents && typeof subagents.listChildren === 'function') {
+      const subagents = ctx.get("subagents");
+      const childTargets = new Set();
+      const childMap = new Map();
+      if (subagents && typeof subagents.listChildren === "function") {
         for (const [parentSessionId, parent] of lastAgents) {
-          if (!parent) continue
-          let children
-          try { children = await subagents.listChildren(parentSessionId) } catch { continue }
+          if (!parent) continue;
+          let children;
+          try {
+            children = await subagents.listChildren(parentSessionId);
+          } catch {
+            continue;
+          }
           for (const child of children || []) {
-            if (!child || child.kind !== 'child' || child.mode !== 'continuable') continue
-            const childId = String(child.id)
-            childTargets.add(childId)
-            childMap.set(childId, parent)
-            const childDirected = await daemonCall('taskBoard', {
-              action: 'readDirected',
+            if (!child || child.kind !== "child" || child.mode !== "continuable") continue;
+            const childId = String(child.id);
+            childTargets.add(childId);
+            childMap.set(childId, parent);
+            const childDirected = await daemonCall("taskBoard", {
+              action: "readDirected",
               agentId: childId,
               agentName: childId,
               limit: WAKE_MAX_ENTRIES,
-            })
-            collect(null, childDirected && childDirected.entries)
+            });
+            collect(null, childDirected && childDirected.entries);
           }
         }
       }
       // or display name, across all named boards (no subscribe needed first).
-      const directed = await daemonCall('taskBoard', {
-        action: 'readDirected',
+      const directed = await daemonCall("taskBoard", {
+        action: "readDirected",
         agentId: WAKE_AGENT_ID,
         agentName: WAKE_AGENT_NAME,
         limit: WAKE_MAX_ENTRIES,
-      })
-      collect(null, directed && directed.entries)
+      });
+      collect(null, directed && directed.entries);
 
       // World-channel broadcast + subscribed named channels.
-      const world = await daemonCall('taskBoard', {
-        action: 'read',
+      const world = await daemonCall("taskBoard", {
+        action: "read",
         taskId: WAKE_WORLD_TASK,
         agentId: WAKE_AGENT_ID,
         limit: WAKE_MAX_ENTRIES,
-      })
-      collect(WAKE_WORLD_TASK, world && world.entries)
-      const subs = await daemonCall('taskBoard', {
-        action: 'listSubscriptions',
+      });
+      collect(WAKE_WORLD_TASK, world && world.entries);
+      const subs = await daemonCall("taskBoard", {
+        action: "listSubscriptions",
         agentId: WAKE_AGENT_ID,
         sessionId: hostSessionId,
-      })
+      });
       for (const board of (subs && Array.isArray(subs.subscriptions) && subs.subscriptions) || []) {
-        if (!board.taskId || board.taskId === WAKE_WORLD_TASK) continue
-        const read = await daemonCall('taskBoard', {
-          action: 'read',
+        if (!board.taskId || board.taskId === WAKE_WORLD_TASK) continue;
+        const read = await daemonCall("taskBoard", {
+          action: "read",
           taskId: board.taskId,
           agentId: WAKE_AGENT_ID,
           limit: WAKE_MAX_ENTRIES,
-        })
-        collect(board.taskId, read && read.entries)
+        });
+        collect(board.taskId, read && read.entries);
       }
 
-      const mine = candidates.filter((entry) => isWakeCandidate(entry, childTargets))
+      const mine = candidates.filter((entry) => isWakeCandidate(entry, childTargets));
 
       // 世界广播公告：独立于"唤醒谁"，对每个新的协作类条目（question/blocker/
       // handoff，非广播自身）广播到 world 频道一次，让其他 agent 看到并认领。
@@ -834,76 +905,79 @@ export function apply(ctx: Context): () => void {
       if (wakeConfig && wakeConfig.worldBroadcast) {
         for (const entry of mine) {
           try {
-            await maybeBroadcastToWorld(entry, WAKE_AGENT_ID, hostSessionId)
+            await maybeBroadcastToWorld(entry, WAKE_AGENT_ID, hostSessionId);
           } catch {
             // best-effort: 广播失败不打断唤醒循环
           }
         }
       }
 
-      if (mine.length === 0) return
+      if (mine.length === 0) return;
 
       // 多会话：对每个活跃 agent 分别做自回声过滤、投递回执（delivery
       // receipt 按 sessionId 区分）、入队和主动唤醒——同一 host 的多个 DSH
       // 会话各自独立收到黑板条目，互不抢占。
       for (const [agentSessionId, agent] of lastAgents) {
-        if (!agent || typeof agent.send !== 'function') continue
+        if (!agent || typeof agent.send !== "function") continue;
 
         // per-agent 自回声：条目是当前会话自己放的（或 agentId 是项目身份
         // 且无 sourceSession）→ 不催自己。
         const theirs = mine.filter((entry) => {
-          if (childTargets.has(String(entry.to || ''))) return false
+          if (childTargets.has(String(entry.to || ""))) return false;
           const ownEcho =
             (entry.sourceSessionId === agentSessionId && entry.agentId === WAKE_AGENT_ID) ||
             entry.sourceSessionId === agentSessionId ||
-            (entry.sourceSessionId == null && entry.agentId === WAKE_AGENT_ID)
-          return !ownEcho
-        })
-        if (theirs.length === 0) continue
+            (entry.sourceSessionId == null && entry.agentId === WAKE_AGENT_ID);
+          return !ownEcho;
+        });
+        if (theirs.length === 0) continue;
 
         // Delivery receipt + suppression: skip entries this agent already
         // received/acked, or on a suppressed channel.
-        const fresh = []
+        const fresh = [];
         for (const taskId of new Set(theirs.map((c) => c.taskId))) {
-          const group = theirs.filter((c) => c.taskId === taskId)
-          const check = await daemonCall('taskBoard', {
-            action: 'deliveryCheck',
+          const group = theirs.filter((c) => c.taskId === taskId);
+          const check = await daemonCall("taskBoard", {
+            action: "deliveryCheck",
             agentId: WAKE_AGENT_ID,
             sessionId: agentSessionId,
             taskId: taskId || WAKE_WORLD_TASK,
             entryIds: group.map(wakeEntryKey),
-          })
-          if (check && check.suppressed) continue
-          const delivered = new Set((check && Array.isArray(check.delivered) && check.delivered) || [])
-          const acked = new Set((check && Array.isArray(check.acked) && check.acked) || [])
+          });
+          if (check && check.suppressed) continue;
+          const delivered = new Set(
+            (check && Array.isArray(check.delivered) && check.delivered) || [],
+          );
+          const acked = new Set((check && Array.isArray(check.acked) && check.acked) || []);
           for (const entry of group) {
-            if (!delivered.has(wakeEntryKey(entry)) && !acked.has(wakeEntryKey(entry))) fresh.push(entry)
+            if (!delivered.has(wakeEntryKey(entry)) && !acked.has(wakeEntryKey(entry)))
+              fresh.push(entry);
           }
         }
-        if (fresh.length === 0) continue
+        if (fresh.length === 0) continue;
 
         // 只推最高优先级一个（question > blocker > handoff，再按创建时间）——
         // 与 nmg-hook.mjs 一致，避免一次把多个条目塞进上下文造成刷屏。
         fresh.sort(
           (left, right) =>
             (KIND_RANK[left.kind] ?? 9) - (KIND_RANK[right.kind] ?? 9) ||
-            String(left.createdAt || '').localeCompare(String(right.createdAt || '')),
-        )
-        const pick = fresh[0]
+            String(left.createdAt || "").localeCompare(String(right.createdAt || "")),
+        );
+        const pick = fresh[0];
 
         // 先把条目推入 wake batch（context 数据源，模型无论何时醒来都能看到
         // 待办列表），再主动唤醒 agent。发送成功后才写 delivery receipt
         // （at-least-once 通知去重），避免 send 失败（agent 已 dispose）时写
         // 回执但消息没入队导致条目"已送达但未通知"下轮不重试。
-        pushWakeEntry(pick, agentSessionId)
+        pushWakeEntry(pick, agentSessionId);
         if (wakeAgent(agent, pick)) {
-          await daemonCall('taskBoard', {
-            action: 'recordDelivery',
+          await daemonCall("taskBoard", {
+            action: "recordDelivery",
             agentId: WAKE_AGENT_ID,
             sessionId: agentSessionId,
             entryId: wakeEntryKey(pick),
-            source: 'wake',
-          })
+            source: "wake",
+          });
         }
       }
 
@@ -911,64 +985,79 @@ export function apply(ctx: Context): () => void {
       // resumes a persisted child), and only record the delivery receipt after
       // the inbox accepted the message so a failed resume retries next tick.
       for (const [childId, parent] of childMap) {
-        const theirs = mine.filter((entry) => String(entry.to || '') === childId && entry.sourceSessionId !== childId)
-        if (theirs.length === 0) continue
-        const fresh = []
+        const theirs = mine.filter(
+          (entry) => String(entry.to || "") === childId && entry.sourceSessionId !== childId,
+        );
+        if (theirs.length === 0) continue;
+        const fresh = [];
         for (const taskId of new Set(theirs.map((c) => c.taskId))) {
-          const group = theirs.filter((c) => c.taskId === taskId)
-          const check = await daemonCall('taskBoard', {
-            action: 'deliveryCheck',
+          const group = theirs.filter((c) => c.taskId === taskId);
+          const check = await daemonCall("taskBoard", {
+            action: "deliveryCheck",
             agentId: childId,
             sessionId: childId,
             taskId: taskId || WAKE_WORLD_TASK,
             entryIds: group.map(wakeEntryKey),
-          })
-          if (check && check.suppressed) continue
-          const delivered = new Set((check && Array.isArray(check.delivered) && check.delivered) || [])
-          const acked = new Set((check && Array.isArray(check.acked) && check.acked) || [])
+          });
+          if (check && check.suppressed) continue;
+          const delivered = new Set(
+            (check && Array.isArray(check.delivered) && check.delivered) || [],
+          );
+          const acked = new Set((check && Array.isArray(check.acked) && check.acked) || []);
           for (const entry of group) {
-            if (!delivered.has(wakeEntryKey(entry)) && !acked.has(wakeEntryKey(entry))) fresh.push(entry)
+            if (!delivered.has(wakeEntryKey(entry)) && !acked.has(wakeEntryKey(entry)))
+              fresh.push(entry);
           }
         }
-        if (fresh.length === 0) continue
+        if (fresh.length === 0) continue;
         fresh.sort(
           (left, right) =>
             (KIND_RANK[left.kind] ?? 9) - (KIND_RANK[right.kind] ?? 9) ||
-            String(left.createdAt || '').localeCompare(String(right.createdAt || '')),
-        )
-        const pick = fresh[0]
+            String(left.createdAt || "").localeCompare(String(right.createdAt || "")),
+        );
+        const pick = fresh[0];
         try {
           await subagents.followup(
             parent,
             childId,
-            [{ type: 'text', text: wakeMessageText(pick) }],
-            { source: { kind: 'plugin', plugin: '@nmg/dsh-nmg' }, signal: AbortSignal.timeout(5000) },
-          )
+            [{ type: "text", text: wakeMessageText(pick) }],
+            {
+              source: { kind: "plugin", plugin: "@nmg/dsh-nmg" },
+              signal: AbortSignal.timeout(5000),
+            },
+          );
         } catch {
-          continue
+          continue;
         }
-        await daemonCall('taskBoard', {
-          action: 'recordDelivery',
+        await daemonCall("taskBoard", {
+          action: "recordDelivery",
           agentId: childId,
           sessionId: childId,
           entryId: wakeEntryKey(pick),
-          source: 'wake',
-        })
-        pushWakeEntry(pick, childId)
+          source: "wake",
+        });
+        pushWakeEntry(pick, childId);
       }
     } catch {
       // A transient daemon/network error must never throw into the timer. Reset
       // the flag so a daemon restart re-registers cleanly on the next tick.
-      wakeAgentRegistered = false
+      wakeAgentRegistered = false;
     }
   }
 
   function wakeMessageText(entry) {
     return (
-      '[NMG board] 新黑板条目 #' + (entry.id || '?') + ' [' + entry.kind + '] ' +
-      (entry.taskId || '?') + ' by ' + (entry.agentId || '?') + ':\n' +
+      "[NMG board] 新黑板条目 #" +
+      (entry.id || "?") +
+      " [" +
+      entry.kind +
+      "] " +
+      (entry.taskId || "?") +
+      " by " +
+      (entry.agentId || "?") +
+      ":\n" +
       truncate(entry.content, 400)
-    )
+    );
   }
 
   // 构造一条 user-role 唤醒消息（MessageSource kind=plugin，与 dsh 生态一致）
@@ -981,42 +1070,44 @@ export function apply(ctx: Context): () => void {
   // 承担"没东西就发出去，有东西就等待"。内容直接携带黑板待办详情（纯展示，
   // 不带强制工具指令），模型看完自主决定是否用 nmg_state space=board 处理。
   function wakeAgent(agent, entry) {
-    if (!agent || typeof agent.send !== 'function') return false
+    if (!agent || typeof agent.send !== "function") return false;
     try {
       agent.send(
         {
           id: randomUUID(),
-          role: 'user',
-          content: [{ type: 'text', text: wakeMessageText(entry) }],
-          source: { kind: 'plugin', plugin: '@nmg/dsh-nmg' },
+          role: "user",
+          content: [{ type: "text", text: wakeMessageText(entry) }],
+          source: { kind: "plugin", plugin: "@nmg/dsh-nmg" },
         },
-        'next-turn',
+        "next-turn",
         true,
-      )
-      return true
+      );
+      return true;
     } catch {
-      return false
+      return false;
     }
   }
 
   function wakeTextFor(agent) {
-    if (!agent) return ''
+    if (!agent) return "";
     try {
-      const batch = wakeBatch.get(String(agent.id))
-      if (!Array.isArray(batch) || batch.length === 0) return ''
-      const lines = batch.map(wakeEntryLine)
-      lines.push('Use nmg_state action=write space=board operation=claim (claim=接手), operation=resolve to close.')
-      return 'NMG board wake (' + batch.length + ' pending):\n' + lines.join('\n')
+      const batch = wakeBatch.get(String(agent.id));
+      if (!Array.isArray(batch) || batch.length === 0) return "";
+      const lines = batch.map(wakeEntryLine);
+      lines.push(
+        "Use nmg_state action=write space=board operation=claim (claim=接手), operation=resolve to close.",
+      );
+      return "NMG board wake (" + batch.length + " pending):\n" + lines.join("\n");
     } catch {
-      return ''
+      return "";
     }
   }
 
   function wakeDataFor(targetSessionId) {
-    if (!targetSessionId) return null
+    if (!targetSessionId) return null;
     try {
-      const batch = wakeBatch.get(String(targetSessionId))
-      if (!Array.isArray(batch) || batch.length === 0) return null
+      const batch = wakeBatch.get(String(targetSessionId));
+      if (!Array.isArray(batch) || batch.length === 0) return null;
       return {
         entries: batch.map((entry) => ({
           id: entry.id,
@@ -1027,194 +1118,341 @@ export function apply(ctx: Context): () => void {
           claimedBy: entry.claimedBy || null,
           content: entry.content,
         })),
-      }
+      };
     } catch {
-      return null
+      return null;
     }
   }
 
   // ── tools ──────────────────────────────────────────────────────────────────
   const searchTool = {
-    name: 'nmg_search',
+    name: "nmg_search",
     description: nmgPrompts.search_description,
     parameters: {
-      type: 'object',
+      type: "object",
       properties: {
-        query: { type: 'string', description: 'Focused recall query.' },
-        limit: { type: 'integer', description: 'Return 1..50 records (default 8).' },
-        maxTier: { type: 'integer', description: 'Deepest memory tier 0..3.' },
-        graphHops: { type: 'integer', description: 'Graph expansion 0..3.' },
-        nodeName: { type: 'string', description: 'Restrict to one semantic node.' },
-        sourceActor: { type: 'string', enum: ['user', 'assistant', 'system', 'tool'], description: 'Restrict evidence actor.' },
-        includeHistorical: { type: 'boolean', description: 'Include inactive/superseded memories.' },
-        scope: { type: 'object', additionalProperties: true, description: 'Applicability scope, e.g. {"project":"nmg"}.' },
+        query: { type: "string", description: "Focused recall query." },
+        limit: { type: "integer", description: "Return 1..50 records (default 8)." },
+        maxTier: { type: "integer", description: "Deepest memory tier 0..3." },
+        graphHops: { type: "integer", description: "Graph expansion 0..3." },
+        nodeName: { type: "string", description: "Restrict to one semantic node." },
+        sourceActor: {
+          type: "string",
+          enum: ["user", "assistant", "system", "tool"],
+          description: "Restrict evidence actor.",
+        },
+        includeHistorical: {
+          type: "boolean",
+          description: "Include inactive/superseded memories.",
+        },
+        scope: {
+          type: "object",
+          additionalProperties: true,
+          description: 'Applicability scope, e.g. {"project":"nmg"}.',
+        },
       },
-      required: ['query'],
+      required: ["query"],
     },
     output: textOutput,
     async execute(args, exec) {
-      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-      const params: Record<string, unknown> = { query: args.query, projectDir: workspaceRoot, sessionId }
-      if (args.limit != null) params.limit = args.limit
-      if (args.maxTier != null) params.maxTier = args.maxTier
-      if (args.graphHops != null) params.graphHops = args.graphHops
-      if (args.nodeName) params.nodeName = args.nodeName
-      if (args.sourceActor) params.sourceActor = args.sourceActor
-      if (args.includeHistorical) params.includeHistorical = true
-      if (args.scope) params.scope = coerceScope(args.scope)
-      const argv = ['search', args.query]
-      if (args.limit != null) argv.push('--limit', String(args.limit))
-      if (args.maxTier != null) argv.push('--max-tier', String(args.maxTier))
-      if (args.graphHops != null) argv.push('--graph-hops', String(args.graphHops))
-      if (args.nodeName) argv.push('--node', args.nodeName)
-      if (args.sourceActor) argv.push('--source-actor', args.sourceActor)
-      if (args.includeHistorical) argv.push('--include-historical')
-      for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1])
-      argv.push('--project-dir', workspaceRoot, '--session-id', sessionId, '--json')
-      const r = await invoke('search', params, argv, exec.signal, null)
-      if (!r.ok) return r.error
+      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId;
+      const params: Record<string, unknown> = {
+        query: args.query,
+        projectDir: workspaceRoot,
+        sessionId,
+      };
+      if (args.limit != null) params.limit = args.limit;
+      if (args.maxTier != null) params.maxTier = args.maxTier;
+      if (args.graphHops != null) params.graphHops = args.graphHops;
+      if (args.nodeName) params.nodeName = args.nodeName;
+      if (args.sourceActor) params.sourceActor = args.sourceActor;
+      if (args.includeHistorical) params.includeHistorical = true;
+      if (args.scope) params.scope = coerceScope(args.scope);
+      const argv = ["search", args.query];
+      if (args.limit != null) argv.push("--limit", String(args.limit));
+      if (args.maxTier != null) argv.push("--max-tier", String(args.maxTier));
+      if (args.graphHops != null) argv.push("--graph-hops", String(args.graphHops));
+      if (args.nodeName) argv.push("--node", args.nodeName);
+      if (args.sourceActor) argv.push("--source-actor", args.sourceActor);
+      if (args.includeHistorical) argv.push("--include-historical");
+      for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1]);
+      argv.push("--project-dir", workspaceRoot, "--session-id", sessionId, "--json");
+      const r = await invoke("search", params, argv, exec.signal, null);
+      if (!r.ok) return r.error;
       const disclosure = await disclose(
         sessionId,
         r.data.activeGraph && r.data.activeGraph.id,
-        'header',
-        memoryDisclosureEntries(r.data, 'header'),
-      )
-      const freshIds = new Set(disclosure.freshMemoryIds)
-      const data = { ...r.data, results: r.data.results.filter((result) => freshIds.has(result.memory.id)) }
-      const deferred = data.progressiveDisclosure && data.progressiveDisclosure.deferredMemoryIds
-      const nextStep = Array.isArray(deferred) && deferred.length
-        ? 'More ranked records are folded. Expand selected memory IDs first; deferred IDs: ' + deferred.join(',')
-        : 'Select exact records with nmg_get (memory IDs + activeGraphId).'
+        "header",
+        memoryDisclosureEntries(r.data, "header"),
+      );
+      const freshIds = new Set(disclosure.freshMemoryIds);
+      const data = {
+        ...r.data,
+        results: r.data.results.filter((result) => freshIds.has(result.memory.id)),
+      };
+      const deferred = data.progressiveDisclosure && data.progressiveDisclosure.deferredMemoryIds;
+      const nextStep =
+        Array.isArray(deferred) && deferred.length
+          ? "More ranked records are folded. Expand selected memory IDs first; deferred IDs: " +
+            deferred.join(",")
+          : "Select exact records with nmg_get (memory IDs + activeGraphId).";
       const forget = data.results.some((result) =>
-        (result.memory.markers || []).some((marker) => marker.kind === 'forget'),
-      )
-      return [renderSearchSurface(data, {
-        preamble: renderDisclosure(nmgPrompts.search_disclosure, {}),
-        postamble: renderDisclosure(nmgPrompts.search_disclosure_metadata, {
-          count: String(data.results.length),
-          next_step: nextStep,
-          forget_hint: forget ? nmgPrompts.forget_hint : '',
+        (result.memory.markers || []).some((marker) => marker.kind === "forget"),
+      );
+      return [
+        renderSearchSurface(data, {
+          preamble: renderDisclosure(nmgPrompts.search_disclosure, {}),
+          postamble: renderDisclosure(nmgPrompts.search_disclosure_metadata, {
+            count: String(data.results.length),
+            next_step: nextStep,
+            forget_hint: forget ? nmgPrompts.forget_hint : "",
+          }),
         }),
-      }), foldedDisclosureText(disclosure.foldedMemoryIds)].filter(Boolean).join('\n')
+        foldedDisclosureText(disclosure.foldedMemoryIds),
+      ]
+        .filter(Boolean)
+        .join("\n");
     },
-  }
+  };
 
   const getTool = {
-    name: 'nmg_get',
+    name: "nmg_get",
     description: nmgPrompts.get_description,
     parameters: {
-      type: 'object',
+      type: "object",
       properties: {
-        memoryIds: { type: 'array', items: { type: 'string' }, description: 'Memory IDs from nmg_search.' },
-        activeGraphId: { type: 'string', description: 'activeGraphId returned by the matching nmg_search.' },
-        graphHops: { type: 'integer', description: 'Graph expansion 0..3.' },
+        memoryIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Memory IDs from nmg_search.",
+        },
+        activeGraphId: {
+          type: "string",
+          description: "activeGraphId returned by the matching nmg_search.",
+        },
+        graphHops: { type: "integer", description: "Graph expansion 0..3." },
       },
-      required: ['memoryIds'],
+      required: ["memoryIds"],
     },
     output: textOutput,
     async execute(args, exec) {
-      const ids = Array.isArray(args.memoryIds) ? args.memoryIds : []
-      if (ids.length === 0) return 'nmg_get requires at least one memory ID.'
-      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-      const params: Record<string, unknown> = { memoryIds: ids, projectDir: workspaceRoot, sessionId }
-      if (args.activeGraphId) params.activeGraphId = args.activeGraphId
-      if (args.graphHops != null) params.graphHops = args.graphHops
-      const argv = ['get'].concat(ids)
-      if (args.activeGraphId) argv.push('--active-graph-id', args.activeGraphId)
-      if (args.graphHops != null) argv.push('--graph-hops', String(args.graphHops))
-      argv.push('--project-dir', workspaceRoot, '--session-id', sessionId, '--json')
-      const r = await invoke('get', params, argv, exec.signal, null)
-      if (!r.ok) return r.error
+      const ids = Array.isArray(args.memoryIds) ? args.memoryIds : [];
+      if (ids.length === 0) return "nmg_get requires at least one memory ID.";
+      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId;
+      const params: Record<string, unknown> = {
+        memoryIds: ids,
+        projectDir: workspaceRoot,
+        sessionId,
+      };
+      if (args.activeGraphId) params.activeGraphId = args.activeGraphId;
+      if (args.graphHops != null) params.graphHops = args.graphHops;
+      const argv = ["get"].concat(ids);
+      if (args.activeGraphId) argv.push("--active-graph-id", args.activeGraphId);
+      if (args.graphHops != null) argv.push("--graph-hops", String(args.graphHops));
+      argv.push("--project-dir", workspaceRoot, "--session-id", sessionId, "--json");
+      const r = await invoke("get", params, argv, exec.signal, null);
+      if (!r.ok) return r.error;
       const disclosure = await disclose(
         sessionId,
         args.activeGraphId,
-        'evidence',
-        memoryDisclosureEntries(r.data, 'evidence'),
-      )
-      const freshIds = new Set(disclosure.freshMemoryIds)
-      const visible = { ...r.data, results: r.data.results.filter((result) => freshIds.has(result.memory.id)) }
+        "evidence",
+        memoryDisclosureEntries(r.data, "evidence"),
+      );
+      const freshIds = new Set(disclosure.freshMemoryIds);
+      const visible = {
+        ...r.data,
+        results: r.data.results.filter((result) => freshIds.has(result.memory.id)),
+      };
       const forget = visible.results.some((result) =>
-        (result.memory.markers || []).some((marker) => marker.kind === 'forget'),
-      )
-      return [renderEvidenceSurface(visible, {
-        preamble: renderDisclosure(nmgPrompts.get_disclosure, {}),
-        postamble: renderDisclosure(nmgPrompts.get_disclosure_metadata, {
-          count: String(r.data.results.length),
-          next_step: '',
-          forget_hint: forget ? nmgPrompts.forget_hint : '',
+        (result.memory.markers || []).some((marker) => marker.kind === "forget"),
+      );
+      return [
+        renderEvidenceSurface(visible, {
+          preamble: renderDisclosure(nmgPrompts.get_disclosure, {}),
+          postamble: renderDisclosure(nmgPrompts.get_disclosure_metadata, {
+            count: String(r.data.results.length),
+            next_step: "",
+            forget_hint: forget ? nmgPrompts.forget_hint : "",
+          }),
+          missingMemoryIds: Array.isArray(r.data.missingMemoryIds)
+            ? r.data.missingMemoryIds
+            : undefined,
         }),
-        missingMemoryIds: Array.isArray(r.data.missingMemoryIds) ? r.data.missingMemoryIds : undefined,
-      }), foldedDisclosureText(disclosure.foldedMemoryIds)].filter(Boolean).join('\n')
+        foldedDisclosureText(disclosure.foldedMemoryIds),
+      ]
+        .filter(Boolean)
+        .join("\n");
     },
-  }
+  };
 
   const rememberTool = {
-    name: 'nmg_remember',
-    description: 'Save or update durable memory through the shared NMG lifecycle contract. Never save secrets, chatter, unverified model claims, or transient failures. action=feedback rates a recalled graph (shared context-use learning) and is forwarded to the daemon; no labels = rejected.',
+    name: "nmg_remember",
+    description:
+      "Save or update durable memory through the shared NMG lifecycle contract. Never save secrets, chatter, unverified model claims, or transient failures. action=feedback rates a recalled graph (shared context-use learning) and is forwarded to the daemon; no labels = rejected.",
     parameters: {
-      type: 'object',
+      type: "object",
       properties: {
-        action: { type: 'string', enum: [...COMMON_REMEMBER_ACTIONS], description: 'Memory action (default save).' },
-        memoryId: { type: 'string', description: 'Existing memory for forget/resolve/reopen/claim_outcome.' },
-        newMemoryId: { type: 'string', description: 'Newer memory for supersede/relate.' },
-        supersededMemoryId: { type: 'string', description: 'Older memory replaced by newMemoryId.' },
-        relatedMemoryId: { type: 'string', description: 'Existing memory related to newMemoryId.' },
-        relatedMemoryIds: { type: 'array', items: { type: 'string' }, description: 'Evidence anchors for resolve/reopen.' },
-        relationJudgement: { type: 'string', enum: ['conflict', 'distinct', 'refines', 'related', 'same_entity'] },
-        relationConfidence: { type: 'number', description: 'Relation confidence 0..1.' },
-        resolutionReason: { type: 'string', description: 'Reason for supersede/resolve/reopen.' },
-        semanticTaskId: { type: 'string', description: 'Independent task identity for claim_outcome.' },
-        activeGraphId: { type: 'string', description: 'Active graph that produced the evaluated claim or the recall being rated (feedback).' },
-        taskSuccess: { type: 'boolean', description: 'feedback: the recalled context helped the task complete.' },
-        userCorrection: { type: 'boolean', description: 'feedback: the user visibly corrected a claim the recall led to.' },
-        evidenceSufficient: { type: 'boolean', description: 'feedback: the recalled evidence was sufficient (recall quality, not answer correctness).' },
-        expansionUseful: { type: 'boolean', description: 'feedback: expanding a folded memory added real value.' },
-        excessiveNoise: { type: 'boolean', description: 'feedback: the injected recall was mostly noise.' },
-        noMemoryNeeded: { type: 'boolean', description: 'feedback: no memory context was needed at all.' },
-        memoryMisleading: { type: 'boolean', description: 'feedback: the recalled memory itself was wrong/stale/contradictory for this use.' },
-        feedbackNote: { type: 'string', description: 'feedback: concise reason for the labels.' },
-        claimOutcome: { type: 'string', enum: ['supported', 'contradicted'] },
-        claimSourceLineage: { type: 'string', description: 'Stable attributable source lineage.' },
-        claimIndexes: { type: 'array', items: { type: 'integer' } },
-        claimWeight: { type: 'number', description: 'Claim reliability in (0,1].' },
-        statement: { type: 'string', description: 'Self-contained semantic statement.' },
-        nodeName: { type: 'string', description: 'Stable node grouping related memories.' },
-        memoryType: { type: 'string', enum: ['fact', 'state', 'event', 'preference', 'constraint', 'strategy'], description: 'Memory type.' },
-        recallTriggers: { type: 'array', maxItems: 16, items: { type: 'string', minLength: 1, maxLength: 80 }, description: nmgPrompts.recall_triggers_parameter_description },
-        stateKey: { type: 'string', description: 'Replaceable property identity; a new value in the same scope supersedes the old.' },
-        sourceActor: { type: 'string', enum: ['user', 'assistant', 'system', 'tool'], description: 'Evidence actor (default user).' },
-        truthStatus: { type: 'string', enum: ['asserted', 'inferred', 'unverified', 'verified'], description: 'Truth status.' },
-        evidence: { type: 'string', description: 'Exact supporting source excerpt.' },
-        eventTime: { type: 'string', description: 'ISO event time when it differs from write time.' },
-        tier: { type: 'integer', description: 'Initial tier 0..3.' },
-        importance: { type: 'number', description: 'Importance 0..1.' },
-        residence: { type: 'string', enum: ['ltg', 'stg'], description: 'ltg (durable) or stg (session/task-local).' },
-        writeReason: { type: 'string', description: 'Durable-write justification.' },
-        scope: { type: 'object', additionalProperties: true, description: 'Applicability scope, e.g. {"project":"nmg"}.' },
-        tesserae: { type: 'array', maxItems: 10, items: { type: 'object', properties: { path: { type: 'string', description: 'Project-relative file path the bookmark points into.' }, snippet: { type: 'string', description: 'Exact short content excerpt from that file used for relocation.' }, label: { type: 'string', description: 'Optional one-line searchable label.' }, kind: { type: 'string', description: 'Optional kind: code | doc | note.' } }, required: ['path', 'snippet'] }, description: 'Optional file bookmarks (tesserae): point this memory at file locations you actually saw. One bookmark per {path, snippet} — snippet is the relocation key, so copy it verbatim from the file.' },
+        action: {
+          type: "string",
+          enum: [...COMMON_REMEMBER_ACTIONS],
+          description: "Memory action (default save).",
+        },
+        memoryId: {
+          type: "string",
+          description: "Existing memory for forget/resolve/reopen/claim_outcome.",
+        },
+        newMemoryId: { type: "string", description: "Newer memory for supersede/relate." },
+        supersededMemoryId: {
+          type: "string",
+          description: "Older memory replaced by newMemoryId.",
+        },
+        relatedMemoryId: { type: "string", description: "Existing memory related to newMemoryId." },
+        relatedMemoryIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Evidence anchors for resolve/reopen.",
+        },
+        relationJudgement: {
+          type: "string",
+          enum: ["conflict", "distinct", "refines", "related", "same_entity"],
+        },
+        relationConfidence: { type: "number", description: "Relation confidence 0..1." },
+        resolutionReason: { type: "string", description: "Reason for supersede/resolve/reopen." },
+        semanticTaskId: {
+          type: "string",
+          description: "Independent task identity for claim_outcome.",
+        },
+        activeGraphId: {
+          type: "string",
+          description:
+            "Active graph that produced the evaluated claim or the recall being rated (feedback).",
+        },
+        taskSuccess: {
+          type: "boolean",
+          description: "feedback: the recalled context helped the task complete.",
+        },
+        userCorrection: {
+          type: "boolean",
+          description: "feedback: the user visibly corrected a claim the recall led to.",
+        },
+        evidenceSufficient: {
+          type: "boolean",
+          description:
+            "feedback: the recalled evidence was sufficient (recall quality, not answer correctness).",
+        },
+        expansionUseful: {
+          type: "boolean",
+          description: "feedback: expanding a folded memory added real value.",
+        },
+        excessiveNoise: {
+          type: "boolean",
+          description: "feedback: the injected recall was mostly noise.",
+        },
+        noMemoryNeeded: {
+          type: "boolean",
+          description: "feedback: no memory context was needed at all.",
+        },
+        memoryMisleading: {
+          type: "boolean",
+          description:
+            "feedback: the recalled memory itself was wrong/stale/contradictory for this use.",
+        },
+        feedbackNote: { type: "string", description: "feedback: concise reason for the labels." },
+        claimOutcome: { type: "string", enum: ["supported", "contradicted"] },
+        claimSourceLineage: { type: "string", description: "Stable attributable source lineage." },
+        claimIndexes: { type: "array", items: { type: "integer" } },
+        claimWeight: { type: "number", description: "Claim reliability in (0,1]." },
+        statement: { type: "string", description: "Self-contained semantic statement." },
+        nodeName: { type: "string", description: "Stable node grouping related memories." },
+        memoryType: {
+          type: "string",
+          enum: ["fact", "state", "event", "preference", "constraint", "strategy"],
+          description: "Memory type.",
+        },
+        recallTriggers: {
+          type: "array",
+          maxItems: 16,
+          items: { type: "string", minLength: 1, maxLength: 80 },
+          description: nmgPrompts.recall_triggers_parameter_description,
+        },
+        stateKey: {
+          type: "string",
+          description:
+            "Replaceable property identity; a new value in the same scope supersedes the old.",
+        },
+        sourceActor: {
+          type: "string",
+          enum: ["user", "assistant", "system", "tool"],
+          description: "Evidence actor (default user).",
+        },
+        truthStatus: {
+          type: "string",
+          enum: ["asserted", "inferred", "unverified", "verified"],
+          description: "Truth status.",
+        },
+        evidence: { type: "string", description: "Exact supporting source excerpt." },
+        eventTime: {
+          type: "string",
+          description: "ISO event time when it differs from write time.",
+        },
+        tier: { type: "integer", description: "Initial tier 0..3." },
+        importance: { type: "number", description: "Importance 0..1." },
+        residence: {
+          type: "string",
+          enum: ["ltg", "stg"],
+          description: "ltg (durable) or stg (session/task-local).",
+        },
+        writeReason: { type: "string", description: "Durable-write justification." },
+        scope: {
+          type: "object",
+          additionalProperties: true,
+          description: 'Applicability scope, e.g. {"project":"nmg"}.',
+        },
+        tesserae: {
+          type: "array",
+          maxItems: 10,
+          items: {
+            type: "object",
+            properties: {
+              path: {
+                type: "string",
+                description: "Project-relative file path the bookmark points into.",
+              },
+              snippet: {
+                type: "string",
+                description: "Exact short content excerpt from that file used for relocation.",
+              },
+              label: { type: "string", description: "Optional one-line searchable label." },
+              kind: { type: "string", description: "Optional kind: code | doc | note." },
+            },
+            required: ["path", "snippet"],
+          },
+          description:
+            "Optional file bookmarks (tesserae): point this memory at file locations you actually saw. One bookmark per {path, snippet} — snippet is the relocation key, so copy it verbatim from the file.",
+        },
       },
       required: [],
     },
     output: textOutput,
     async execute(args, exec) {
-      const action = args.action || 'save'
-      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-      if (action === 'feedback') {
+      const action = args.action || "save";
+      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId;
+      if (action === "feedback") {
         const labelled = [
-          'taskSuccess',
-          'userCorrection',
-          'evidenceSufficient',
-          'expansionUseful',
-          'excessiveNoise',
-          'noMemoryNeeded',
-          'memoryMisleading',
-        ].some((key) => args[key] !== undefined)
-        if (!labelled) return 'nmg_remember feedback requires at least one label.'
+          "taskSuccess",
+          "userCorrection",
+          "evidenceSufficient",
+          "expansionUseful",
+          "excessiveNoise",
+          "noMemoryNeeded",
+          "memoryMisleading",
+        ].some((key) => args[key] !== undefined);
+        if (!labelled) return "nmg_remember feedback requires at least one label.";
         // Shared layer: forward thin to the daemon-owned online learner. The
         // daemon trains only on the exact graph the feedback names (no
         // latest-staged fallback).
         const result = await invokeRpcOnly(
-          'recordFeedback',
+          "recordFeedback",
           {
             activeGraphId: args.activeGraphId,
             sessionId,
@@ -1229,249 +1467,317 @@ export function apply(ctx: Context): () => void {
             semanticTaskId: args.semanticTaskId,
           },
           exec.signal,
-        )
-        if (!result.ok) return result.error
+        );
+        if (!result.ok) return result.error;
         // Real feedback addressed the recall it names (the affordance rode with
         // the recall output; nothing queued to clear).
-        const stagedStack = recallBatch.get(sessionId)
-        if (Array.isArray(stagedStack) && stagedStack[0]) stagedStack[0].fedBack = true
+        const stagedStack = recallBatch.get(sessionId);
+        if (Array.isArray(stagedStack) && stagedStack[0]) stagedStack[0].fedBack = true;
         const data = result.data as
-          | { trained?: boolean; reward?: number; loss?: number }
-          | null
-          | undefined
+          { trained?: boolean; reward?: number; loss?: number } | null | undefined;
         return data && data.trained
-          ? 'Retrieval feedback applied: one online router update (reward=' + data.reward +
-            (data.loss != null ? ', loss=' + Number(data.loss).toFixed(4) : '') + ').'
-          : 'Retrieval feedback processed but not applied (no staged decision or no usable label); skipped.'
+          ? "Retrieval feedback applied: one online router update (reward=" +
+              data.reward +
+              (data.loss != null ? ", loss=" + Number(data.loss).toFixed(4) : "") +
+              ")."
+          : "Retrieval feedback processed but not applied (no staged decision or no usable label); skipped.";
       }
-      if (action === 'claim_outcome') {
-        if (!args.memoryId || !args.claimOutcome || !args.semanticTaskId || !args.claimSourceLineage) {
-          return 'nmg_remember claim_outcome requires memoryId, claimOutcome, semanticTaskId, and claimSourceLineage.'
+      if (action === "claim_outcome") {
+        if (
+          !args.memoryId ||
+          !args.claimOutcome ||
+          !args.semanticTaskId ||
+          !args.claimSourceLineage
+        ) {
+          return "nmg_remember claim_outcome requires memoryId, claimOutcome, semanticTaskId, and claimSourceLineage.";
         }
-        const result = await invokeRpcOnly('recordClaimOutcomes', {
-          semanticTaskId: args.semanticTaskId,
-          activeGraphId: args.activeGraphId,
-          sessionId,
-          collectionOrigin: 'natural',
-          projectDir: workspaceRoot,
-          votes: [{
-            memoryId: args.memoryId,
-            claimIndexes: args.claimIndexes,
-            outcome: args.claimOutcome,
-            source: 'task',
-            sourceLineage: args.claimSourceLineage,
-            weight: args.claimWeight,
-          }],
-        }, exec.signal)
-        return result.ok ? JSON.stringify(result.data) : result.error
+        const result = await invokeRpcOnly(
+          "recordClaimOutcomes",
+          {
+            semanticTaskId: args.semanticTaskId,
+            activeGraphId: args.activeGraphId,
+            sessionId,
+            collectionOrigin: "natural",
+            projectDir: workspaceRoot,
+            votes: [
+              {
+                memoryId: args.memoryId,
+                claimIndexes: args.claimIndexes,
+                outcome: args.claimOutcome,
+                source: "task",
+                sourceLineage: args.claimSourceLineage,
+                weight: args.claimWeight,
+              },
+            ],
+          },
+          exec.signal,
+        );
+        return result.ok ? JSON.stringify(result.data) : result.error;
       }
-      if (action !== 'save') {
-        const params: Record<string, any> = { action, projectDir: workspaceRoot, sessionId }
-        if (args.memoryId) params.memoryId = args.memoryId
-        if (args.newMemoryId) params.newMemoryId = args.newMemoryId
-        if (args.supersededMemoryId) params.supersededMemoryId = args.supersededMemoryId
-        if (args.relatedMemoryId) params.relatedMemoryId = args.relatedMemoryId
-        if (args.relatedMemoryIds) params.relatedMemoryIds = args.relatedMemoryIds
-        if (args.relationJudgement) params.relationJudgement = args.relationJudgement
-        if (args.relationConfidence != null) params.confidence = args.relationConfidence
-        if (args.resolutionReason) params.reason = args.resolutionReason
-        const result = await invokeRpcOnly('resolveRemember', params, exec.signal)
-        return result.ok ? JSON.stringify(result.data) : result.error
+      if (action !== "save") {
+        const params: Record<string, any> = { action, projectDir: workspaceRoot, sessionId };
+        if (args.memoryId) params.memoryId = args.memoryId;
+        if (args.newMemoryId) params.newMemoryId = args.newMemoryId;
+        if (args.supersededMemoryId) params.supersededMemoryId = args.supersededMemoryId;
+        if (args.relatedMemoryId) params.relatedMemoryId = args.relatedMemoryId;
+        if (args.relatedMemoryIds) params.relatedMemoryIds = args.relatedMemoryIds;
+        if (args.relationJudgement) params.relationJudgement = args.relationJudgement;
+        if (args.relationConfidence != null) params.confidence = args.relationConfidence;
+        if (args.resolutionReason) params.reason = args.resolutionReason;
+        const result = await invokeRpcOnly("resolveRemember", params, exec.signal);
+        return result.ok ? JSON.stringify(result.data) : result.error;
       }
       if (!args.statement || !args.nodeName) {
-        return 'nmg_remember save requires statement and nodeName.'
+        return "nmg_remember save requires statement and nodeName.";
       }
-      const params: Record<string, any> = { statement: args.statement, nodeName: args.nodeName, projectDir: workspaceRoot }
-      if (args.tesserae && Array.isArray(args.tesserae)) params.tesserae = args.tesserae
-      if (args.memoryType) params.memoryType = args.memoryType
-      if (args.recallTriggers) params.recallTriggers = args.recallTriggers
-      if (args.stateKey) params.stateKey = args.stateKey
-      if (args.sourceActor) params.sourceActor = args.sourceActor
-      if (args.truthStatus) params.truthStatus = args.truthStatus
-      if (args.evidence) params.evidence = args.evidence
-      if (args.eventTime) params.eventTime = args.eventTime
-      if (args.tier != null) params.tier = args.tier
-      if (args.importance != null) params.importance = args.importance
-      if (args.residence) params.residence = args.residence
-      if (args.writeReason) params.writeReason = args.writeReason
-      if (args.scope) params.scope = coerceScope(args.scope)
-      const argv = ['remember', args.statement, '--node', args.nodeName]
-      if (args.memoryType) argv.push('--type', args.memoryType)
-      for (const trigger of args.recallTriggers || []) argv.push('--recall-trigger', trigger)
-      if (args.stateKey) argv.push('--state-key', args.stateKey)
-      if (args.sourceActor) argv.push('--actor', args.sourceActor)
-      if (args.truthStatus) argv.push('--truth', args.truthStatus)
-      if (args.evidence) argv.push('--evidence', args.evidence)
-      if (args.eventTime) argv.push('--event-time', args.eventTime)
-      if (args.tier != null) argv.push('--tier', String(args.tier))
-      if (args.importance != null) argv.push('--importance', String(args.importance))
-      if (args.residence) argv.push('--residence', args.residence)
-      if (args.writeReason) argv.push('--write-reason', args.writeReason)
-      for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1])
-      argv.push('--project-dir', workspaceRoot, '--json')
-      const r = await invoke('remember', params, argv, exec.signal, null)
-      if (!r.ok) return r.error
-      return renderRememberSurface(r.data)
+      const params: Record<string, any> = {
+        statement: args.statement,
+        nodeName: args.nodeName,
+        projectDir: workspaceRoot,
+      };
+      if (args.tesserae && Array.isArray(args.tesserae)) params.tesserae = args.tesserae;
+      if (args.memoryType) params.memoryType = args.memoryType;
+      if (args.recallTriggers) params.recallTriggers = args.recallTriggers;
+      if (args.stateKey) params.stateKey = args.stateKey;
+      if (args.sourceActor) params.sourceActor = args.sourceActor;
+      if (args.truthStatus) params.truthStatus = args.truthStatus;
+      if (args.evidence) params.evidence = args.evidence;
+      if (args.eventTime) params.eventTime = args.eventTime;
+      if (args.tier != null) params.tier = args.tier;
+      if (args.importance != null) params.importance = args.importance;
+      if (args.residence) params.residence = args.residence;
+      if (args.writeReason) params.writeReason = args.writeReason;
+      if (args.scope) params.scope = coerceScope(args.scope);
+      const argv = ["remember", args.statement, "--node", args.nodeName];
+      if (args.memoryType) argv.push("--type", args.memoryType);
+      for (const trigger of args.recallTriggers || []) argv.push("--recall-trigger", trigger);
+      if (args.stateKey) argv.push("--state-key", args.stateKey);
+      if (args.sourceActor) argv.push("--actor", args.sourceActor);
+      if (args.truthStatus) argv.push("--truth", args.truthStatus);
+      if (args.evidence) argv.push("--evidence", args.evidence);
+      if (args.eventTime) argv.push("--event-time", args.eventTime);
+      if (args.tier != null) argv.push("--tier", String(args.tier));
+      if (args.importance != null) argv.push("--importance", String(args.importance));
+      if (args.residence) argv.push("--residence", args.residence);
+      if (args.writeReason) argv.push("--write-reason", args.writeReason);
+      for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1]);
+      argv.push("--project-dir", workspaceRoot, "--json");
+      const r = await invoke("remember", params, argv, exec.signal, null);
+      if (!r.ok) return r.error;
+      return renderRememberSurface(r.data);
     },
-  }
+  };
 
   const stateTool = {
-    name: 'nmg_state',
+    name: "nmg_state",
     description: nmgPrompts.state_description,
     parameters: {
-      type: 'object',
+      type: "object",
       properties: {
-        action: { type: 'string', enum: ['read', 'write'] },
-        space: { type: 'string', enum: ['ag', 'board'] },
-        operation: { type: 'string', enum: STATE_OPERATIONS },
-        text: { type: 'string' },
-        digest: { type: 'string' }, ref: { type: 'string' }, summary: { type: 'string' },
-        verdict: { type: 'string', enum: ['accepted', 'rejected', 'undecidable'] },
-        agentName: { type: 'string' },
-        taskId: { type: 'string', description: 'Task channel; omit for the shared world channel.' },
-        content: { type: 'string', description: 'Entry text (put).' },
-        kind: { type: 'string', enum: ['goal', 'note', 'question', 'result', 'handoff', 'decision', 'blocker'], description: 'Entry kind (put).' },
-        agentId: { type: 'string', description: 'Writer/reader identity (default "dsh").' },
-        entryId: { type: 'string', description: 'Entry to resolve/claim/release.' },
-        resolution: { type: 'string', description: 'Resolution note (resolve).' },
-        reason: { type: 'string', description: 'Reason for acknowledge/subscribe/unsubscribe.' },
-        afterCursor: { type: 'string', description: 'Opaque cursor: id of the last seen entry (read).' },
-        limit: { type: 'integer', description: 'Max entries (read).' },
-        includeResolved: { type: 'boolean', description: 'Include resolved entries (read).' },
-        ttlSeconds: { type: 'integer', description: 'Entry lifetime 60..2592000 (put).' },
-        to: { type: 'string', description: 'Directed delivery to a stable agent name (put).' },
-        leaseSeconds: { type: 'integer', description: 'Claim lease 60..86400 (claim).' },
-        capabilities: { type: 'string', description: 'Capability substring filter (discover).' },
+        action: { type: "string", enum: ["read", "write"] },
+        space: { type: "string", enum: ["ag", "board"] },
+        operation: { type: "string", enum: STATE_OPERATIONS },
+        text: { type: "string" },
+        digest: { type: "string" },
+        ref: { type: "string" },
+        summary: { type: "string" },
+        verdict: { type: "string", enum: ["accepted", "rejected", "undecidable"] },
+        agentName: { type: "string" },
+        taskId: { type: "string", description: "Task channel; omit for the shared world channel." },
+        content: { type: "string", description: "Entry text (put)." },
+        kind: {
+          type: "string",
+          enum: ["goal", "note", "question", "result", "handoff", "decision", "blocker"],
+          description: "Entry kind (put).",
+        },
+        agentId: { type: "string", description: 'Writer/reader identity (default "dsh").' },
+        entryId: { type: "string", description: "Entry to resolve/claim/release." },
+        resolution: { type: "string", description: "Resolution note (resolve)." },
+        reason: { type: "string", description: "Reason for acknowledge/subscribe/unsubscribe." },
+        afterCursor: {
+          type: "string",
+          description: "Opaque cursor: id of the last seen entry (read).",
+        },
+        limit: { type: "integer", description: "Max entries (read)." },
+        includeResolved: { type: "boolean", description: "Include resolved entries (read)." },
+        ttlSeconds: { type: "integer", description: "Entry lifetime 60..2592000 (put)." },
+        to: { type: "string", description: "Directed delivery to a stable agent name (put)." },
+        leaseSeconds: { type: "integer", description: "Claim lease 60..86400 (claim)." },
+        capabilities: { type: "string", description: "Capability substring filter (discover)." },
       },
-      required: ['action', 'space'],
+      required: ["action", "space"],
     },
     output: textOutput,
     async execute(args, exec) {
-      const operation = stateOperation(args)
-      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-      const result = args.space === 'ag'
-        ? await executeAgState(args, operation, sessionId, exec.signal)
-        : await executeBoardState(args, operation, sessionId, exec.signal)
-      return result.ok ? renderStateOutput(result.data) : result.error
+      const operation = stateOperation(args);
+      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId;
+      const result =
+        args.space === "ag"
+          ? await executeAgState(args, operation, sessionId, exec.signal)
+          : await executeBoardState(args, operation, sessionId, exec.signal);
+      return result.ok ? renderStateOutput(result.data) : result.error;
     },
-  }
+  };
 
   // State calls need a resident owner: no CLI fallback, lifecycle takeover or
   // automatic replay of a refused domain mutation.
   async function invokeState(params, signal) {
     try {
-      const data = await daemonCall('state', params, signal, true)
+      const data = await daemonCall("state", params, signal, true);
       return data == null
-        ? { ok: false, error: 'NMG daemon is unavailable for state' }
-        : { ok: true, data }
+        ? { ok: false, error: "NMG daemon is unavailable for state" }
+        : { ok: true, data };
     } catch (error) {
-      return { ok: false, error: 'NMG state request failed: ' + String(error.message || error) }
+      return { ok: false, error: "NMG state request failed: " + String(error.message || error) };
     }
   }
 
   async function executeAgState(args, operation, sessionId, signal) {
-    const params = await captureStateInvocation({
-      action: args.action, space: 'ag', operation, text: args.text,
-      sessionId, requester: 'agent:dsh', reason: args.reason, ttlSeconds: args.ttlSeconds,
-    }, async sessionId => {
-      const status = await invokeState({ action: 'read', space: 'ag', operation: 'status', sessionId }, signal)
-      if (!status.ok) throw new Error(status.error)
-      return status.data
-    })
-    return invokeState(params, signal)
+    const params = await captureStateInvocation(
+      {
+        action: args.action,
+        space: "ag",
+        operation,
+        text: args.text,
+        sessionId,
+        requester: "agent:dsh",
+        reason: args.reason,
+        ttlSeconds: args.ttlSeconds,
+      },
+      async (sessionId) => {
+        const status = await invokeState(
+          { action: "read", space: "ag", operation: "status", sessionId },
+          signal,
+        );
+        if (!status.ok) throw new Error(status.error);
+        return status.data;
+      },
+    );
+    return invokeState(params, signal);
   }
 
   async function executeBoardState(args, operation, sessionId, signal) {
-    if (!coordinationEnabled) throw new Error('Board coordination is disabled')
-    const agentId = args.agentId || WAKE_AGENT_ID
-    return invokeState({
-      ...args, operation, taskId: args.taskId || WAKE_WORLD_TASK,
-      sessionId, sourceSessionId: sessionId, agentId, id: agentId,
-      agentName: args.agentName || agentId,
-    }, signal)
+    if (!coordinationEnabled) throw new Error("Board coordination is disabled");
+    const agentId = args.agentId || WAKE_AGENT_ID;
+    return invokeState(
+      {
+        ...args,
+        operation,
+        taskId: args.taskId || WAKE_WORLD_TASK,
+        sessionId,
+        sourceSessionId: sessionId,
+        agentId,
+        id: agentId,
+        agentName: args.agentName || agentId,
+      },
+      signal,
+    );
   }
 
   const daemonTool = {
-    name: 'nmg_daemon',
-    description: 'Read-only NMG daemon health check. The adapter may ensure a daemon is running for requests, but it does not expose lifecycle ownership or stop it on plugin disposal.',
+    name: "nmg_daemon",
+    description:
+      "Read-only NMG daemon health check. The adapter may ensure a daemon is running for requests, but it does not expose lifecycle ownership or stop it on plugin disposal.",
     parameters: {
-      type: 'object',
+      type: "object",
       properties: {
-        action: { type: 'string', enum: ['status'], description: 'Health check.' },
+        action: { type: "string", enum: ["status"], description: "Health check." },
       },
-      required: ['action'],
+      required: ["action"],
     },
     output: textOutput,
     async execute(args, exec) {
-      const argv = ['daemon', args.action, '--json']
-      const r = await invoke('status', {}, argv, exec.signal, projectDaemonStatus)
-      if (!r.ok) return r.error
-      const data = r.data
-      if (args.action === 'status') {
-        if (!data.running) return 'NMG daemon: not running (one-shot CLI still works in-process).'
-        return 'NMG daemon: running pid=' + data.pid + ' endpoint=' + data.endpoint + ' compatible=' + data.compatible
+      const argv = ["daemon", args.action, "--json"];
+      const r = await invoke("status", {}, argv, exec.signal, projectDaemonStatus);
+      if (!r.ok) return r.error;
+      const data = r.data;
+      if (args.action === "status") {
+        if (!data.running) return "NMG daemon: not running (one-shot CLI still works in-process).";
+        return (
+          "NMG daemon: running pid=" +
+          data.pid +
+          " endpoint=" +
+          data.endpoint +
+          " compatible=" +
+          data.compatible
+        );
       }
-      return JSON.stringify(data)
+      return JSON.stringify(data);
     },
-  }
+  };
 
   function labParameterError(args) {
-    if (args.action !== 'list' && !args.capability) return args.action + ' requires capability.'
-    if (args.action === 'enable' && !args.reason) return 'enable requires reason.'
-    if (args.action === 'invoke' && !args.operation) return 'invoke requires operation.'
-    return null
+    if (args.action !== "list" && !args.capability) return args.action + " requires capability.";
+    if (args.action === "enable" && !args.reason) return "enable requires reason.";
+    if (args.action === "invoke" && !args.operation) return "invoke requires operation.";
+    return null;
   }
 
   function labCliArgs(args, sessionId) {
-    const argv = ['lab', args.action]
-    if (args.capability) argv.push(args.capability)
-    if (args.action !== 'list') argv.push('--session-id', sessionId)
-    if (args.action === 'enable') {
-      argv.push('--requester', 'agent:dsh', '--reason', args.reason)
-      if (args.ttlSeconds != null) argv.push('--ttl-seconds', String(args.ttlSeconds))
+    const argv = ["lab", args.action];
+    if (args.capability) argv.push(args.capability);
+    if (args.action !== "list") argv.push("--session-id", sessionId);
+    if (args.action === "enable") {
+      argv.push("--requester", "agent:dsh", "--reason", args.reason);
+      if (args.ttlSeconds != null) argv.push("--ttl-seconds", String(args.ttlSeconds));
     }
-    if (args.action === 'invoke') {
-      argv.push('--operation', args.operation)
-      if (args.input != null) argv.push('--input-json', JSON.stringify(args.input))
+    if (args.action === "invoke") {
+      argv.push("--operation", args.operation);
+      if (args.input != null) argv.push("--input-json", JSON.stringify(args.input));
     }
-    argv.push('--json')
-    return argv
+    argv.push("--json");
+    return argv;
   }
 
   async function executeLab(args, exec) {
-    if (args.capability === 'working_state') throw new Error('Working state uses nmg_state')
-    const error = labParameterError(args)
-    if (error) return error
-    const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
+    if (args.capability === "working_state") throw new Error("Working state uses nmg_state");
+    const error = labParameterError(args);
+    if (error) return error;
+    const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId;
     const params = {
-      action: args.action, capability: args.capability, sessionId,
-      requester: args.action === 'enable' ? 'agent:dsh' : undefined,
-      reason: args.reason, ttlSeconds: args.ttlSeconds, operation: args.operation, input: args.input,
-    }
-    const result = await invoke('lab', params, labCliArgs(args, sessionId), exec.signal, null)
-    return result.ok ? renderLabOutput(result.data) : result.error
+      action: args.action,
+      capability: args.capability,
+      sessionId,
+      requester: args.action === "enable" ? "agent:dsh" : undefined,
+      reason: args.reason,
+      ttlSeconds: args.ttlSeconds,
+      operation: args.operation,
+      input: args.input,
+    };
+    const result = await invoke("lab", params, labCliArgs(args, sessionId), exec.signal, null);
+    return result.ok ? renderLabOutput(result.data) : result.error;
   }
 
   const labTool = {
-    name: 'nmg_lab',
+    name: "nmg_lab",
     description: nmgPrompts.lab_description,
     parameters: {
-      type: 'object',
+      type: "object",
       properties: {
-        action: { type: 'string', enum: ['list', 'status', 'enable', 'disable', 'invoke'] },
-        capability: { type: 'string', enum: ['reasoning_workspace', 'memory_graph_reasoner', 'controller_shadow', 'controller_controlled', 'controller_active'] },
-        reason: { type: 'string' },
-        ttlSeconds: { type: 'integer' },
-        operation: { type: 'string' },
-        input: { type: 'object', additionalProperties: true },
+        action: { type: "string", enum: ["list", "status", "enable", "disable", "invoke"] },
+        capability: {
+          type: "string",
+          enum: [
+            "reasoning_workspace",
+            "recall_gate",
+            "memory_graph_reasoner",
+            "controller_shadow",
+            "controller_controlled",
+            "controller_active",
+          ],
+        },
+        reason: { type: "string" },
+        ttlSeconds: { type: "integer" },
+        operation: { type: "string" },
+        input: { type: "object", additionalProperties: true },
       },
-      required: ['action'],
+      required: ["action"],
     },
     output: textOutput,
     async execute(args, exec) {
-      return executeLab(args, exec)
+      return executeLab(args, exec);
     },
-  }
+  };
 
   // DSH-native automatic recall: a named systemPrompt.context contribution. The
   // agent loop materializes its resolved text as a user-role snapshot appended to
@@ -1480,20 +1786,20 @@ export function apply(ctx: Context): () => void {
   // assembly. order 90 places it after the persona (0) and before tool guidance
   // (100-199) so the memory surfaces as part of the runtime context.
   const contextDisposer = systemPrompt.context({
-    name: 'nmg:recall',
+    name: "nmg:recall",
     order: 90,
     text: (assembleContext) => recallTextFor(assembleContext && assembleContext.agent),
-  })
+  });
 
   // Board wake surfaces as a second native context contribution, ordered before
   // recall (85 < 90) so pending work reads ahead of memory.
   const boardWakeContextDisposer = coordinationEnabled
     ? systemPrompt.context({
-        name: 'nmg:board-wake',
+        name: "nmg:board-wake",
         order: 85,
         text: (assembleContext) => wakeTextFor(assembleContext && assembleContext.agent),
       })
-    : undefined
+    : undefined;
 
   // ── webServer route: persistent host→browser channel ───────────────────────
   // Persistent (host-composition) packages have no harness.handle/host.call RPC
@@ -1503,69 +1809,101 @@ export function apply(ctx: Context): () => void {
   // session's latest recall snapshot — plain JSON projected from recallBatch;
   // the daemon bearer token never leaves the host. The service binds late (like
   // genui's asset route), so probe now AND subscribe to `internal/service`.
-  const ROUTE_PATH = '/nmg/recall'
-  let routeRegistered = false
-  let routeDisposer = undefined
+  const ROUTE_PATH = "/nmg/recall";
+  let routeRegistered = false;
+  let routeDisposer = undefined;
   function tryRegisterRoute(server) {
-    if (routeRegistered || !server || typeof server.register !== 'function') return
+    if (routeRegistered || !server || typeof server.register !== "function") return;
     const dispose = server.register({
-      kind: 'prefix',
+      kind: "prefix",
       path: ROUTE_PATH,
       handler(req, res) {
         try {
-          const url = req.url || '/nmg/recall'
-          const sessionId = new URL(url, 'http://x').searchParams.get('session') || ''
-          const data = recallDataFor(sessionId)
-          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ ok: true, data }))
+          const url = req.url || "/nmg/recall";
+          const sessionId = new URL(url, "http://x").searchParams.get("session") || "";
+          const data = recallDataFor(sessionId);
+          res.writeHead(200, {
+            "content-type": "application/json; charset=utf-8",
+            "cache-control": "no-store",
+          });
+          res.end(JSON.stringify({ ok: true, data }));
         } catch (error) {
-          res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
-          res.end(JSON.stringify({ ok: false, error: error && error.message ? String(error.message) : String(error) }))
+          res.writeHead(500, { "content-type": "application/json; charset=utf-8" });
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: error && error.message ? String(error.message) : String(error),
+            }),
+          );
         }
       },
-    })
-    routeDisposer = typeof dispose === 'function' ? dispose : undefined
-    routeRegistered = true
+    });
+    routeDisposer = typeof dispose === "function" ? dispose : undefined;
+    routeRegistered = true;
   }
-  tryRegisterRoute((() => { try { return ctx.reflect.get('webServer', false) } catch { return undefined } })())
-  ctx.on('internal/service', (name, value) => {
-    if (name === 'webServer') tryRegisterRoute(value)
-  })
+  tryRegisterRoute(
+    (() => {
+      try {
+        return ctx.reflect.get("webServer", false);
+      } catch {
+        return undefined;
+      }
+    })(),
+  );
+  ctx.on("internal/service", (name, value) => {
+    if (name === "webServer") tryRegisterRoute(value);
+  });
 
   // Board-wake route: expose the pending board-wake batch to the browser pill
   // (same pattern as recall). Daemon token never crosses the boundary.
-  const WAKE_ROUTE_PATH = '/nmg/board-wake'
-  let wakeRouteRegistered = false
-  let wakeRouteDisposer = undefined
+  const WAKE_ROUTE_PATH = "/nmg/board-wake";
+  let wakeRouteRegistered = false;
+  let wakeRouteDisposer = undefined;
   function tryRegisterWakeRoute(server) {
-    if (wakeRouteRegistered || !server || typeof server.register !== 'function') return
+    if (wakeRouteRegistered || !server || typeof server.register !== "function") return;
     const dispose = server.register({
-      kind: 'prefix',
+      kind: "prefix",
       path: WAKE_ROUTE_PATH,
       handler(req, res) {
         try {
-          const url = req.url || WAKE_ROUTE_PATH
-          const targetSessionId = new URL(url, 'http://x').searchParams.get('session') || ''
-          const data = wakeDataFor(targetSessionId)
-          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ ok: true, data }))
+          const url = req.url || WAKE_ROUTE_PATH;
+          const targetSessionId = new URL(url, "http://x").searchParams.get("session") || "";
+          const data = wakeDataFor(targetSessionId);
+          res.writeHead(200, {
+            "content-type": "application/json; charset=utf-8",
+            "cache-control": "no-store",
+          });
+          res.end(JSON.stringify({ ok: true, data }));
         } catch (error) {
-          res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
-          res.end(JSON.stringify({ ok: false, error: error && error.message ? String(error.message) : String(error) }))
+          res.writeHead(500, { "content-type": "application/json; charset=utf-8" });
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: error && error.message ? String(error.message) : String(error),
+            }),
+          );
         }
       },
-    })
-    wakeRouteDisposer = typeof dispose === 'function' ? dispose : undefined
-    wakeRouteRegistered = true
+    });
+    wakeRouteDisposer = typeof dispose === "function" ? dispose : undefined;
+    wakeRouteRegistered = true;
   }
   if (coordinationEnabled) {
-    tryRegisterWakeRoute((() => { try { return ctx.reflect.get('webServer', false) } catch { return undefined } })())
+    tryRegisterWakeRoute(
+      (() => {
+        try {
+          return ctx.reflect.get("webServer", false);
+        } catch {
+          return undefined;
+        }
+      })(),
+    );
   }
   const wakeServiceDisposer = coordinationEnabled
-    ? ctx.on('internal/service', (name, value) => {
-        if (name === 'webServer') tryRegisterWakeRoute(value)
+    ? ctx.on("internal/service", (name, value) => {
+        if (name === "webServer") tryRegisterWakeRoute(value);
       })
-    : undefined
+    : undefined;
 
   // ── wake timer + startup ───────────────────────────────────────────────────
   // Single host-side timer polls the daemon for board entries every
@@ -1579,9 +1917,9 @@ export function apply(ctx: Context): () => void {
   // ctx.setInterval / ctx.setTimeout are deprecated in favor of these.
   const wakeTimerDisposer = coordinationEnabled
     ? ctx.interval(boardWakeOnce, WAKE_INTERVAL_MS)
-    : undefined
+    : undefined;
   // First poll on next tick (let the event loop settle).
-  const initialWakeDisposer = coordinationEnabled ? ctx.timeout(boardWakeOnce, 0) : undefined
+  const initialWakeDisposer = coordinationEnabled ? ctx.timeout(boardWakeOnce, 0) : undefined;
 
   const disposers = [
     tools.register(searchTool),
@@ -1591,30 +1929,29 @@ export function apply(ctx: Context): () => void {
     tools.register(stateTool),
     tools.register(daemonTool),
     contextDisposer,
-    ctx.on('agent/inbox/inserted', onInboxInserted),
-    ctx.on('agent/disposed', onAgentDisposed),
-  ]
+    ctx.on("agent/inbox/inserted", onInboxInserted),
+    ctx.on("agent/disposed", onAgentDisposed),
+  ];
   if (coordinationEnabled) {
     disposers.push(
       boardWakeContextDisposer,
       wakeServiceDisposer,
       wakeTimerDisposer,
       initialWakeDisposer,
-    )
+    );
   }
-  if (routeDisposer) disposers.push(routeDisposer)
-  if (wakeRouteDisposer) disposers.push(wakeRouteDisposer)
+  if (routeDisposer) disposers.push(routeDisposer);
+  if (wakeRouteDisposer) disposers.push(wakeRouteDisposer);
 
   // Return the cordis dispose-time cleanup for this plugin contribution.
   return () => {
     for (const dispose of disposers) {
-      if (typeof dispose === 'function') dispose()
+      if (typeof dispose === "function") dispose();
     }
-    recallGenerations.clear()
-    sessionTokenTotals.clear()
-    recallBatch.clear()
-    openSearches.clear()
-    wakeBatch.clear()
-  }
+    recallGenerations.clear();
+    sessionTokenTotals.clear();
+    recallBatch.clear();
+    openSearches.clear();
+    wakeBatch.clear();
+  };
 }
-

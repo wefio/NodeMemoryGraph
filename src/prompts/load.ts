@@ -6,6 +6,8 @@ import { GENERATED_NMG_PROMPTS } from "./nmg-prompts.generated.ts";
  */
 export interface NmgPrompts {
   search_description: string;
+  session_recall_skipped_notice: string;
+  session_recall_hint_notice: string;
   get_description: string;
   remember_description: string;
   mcp_remember_description: string;

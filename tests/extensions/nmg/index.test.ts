@@ -2391,6 +2391,105 @@ test("revoked records show metadata but withhold the statement", () => {
   assert.doesNotMatch(evidence, /modern electronic music festivals/);
 });
 
+test("session recall pilot carries a skipped intent through tool rescue, correction and later auto cue", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-session-recall-"));
+  const previousData = process.env.NMG_DATA_DIR;
+  process.env.NMG_DATA_DIR = directory;
+  const { handlers, tools } = extensionHarness();
+  const sessionManager = {
+    getSessionId: () => "session-recall-trial",
+    getSessionFile: () => null,
+  };
+  const ctx = { sessionManager };
+  try {
+    const store = new NmgStore(join(directory, "nmg.sqlite"));
+    const saved = store.remember({
+      statement: "Fixture palette prefers azure",
+      nodeName: "fixture-palette",
+      memoryType: "preference",
+      tier: 0,
+      recallTriggers: ["老规矩"],
+    });
+    store.close();
+    const lab = tools.get("nmg_lab")!;
+    await lab.execute(
+      "enable-trial",
+      {
+        action: "enable",
+        capability: "recall_gate",
+        reason: "session-only fixture",
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const skipped = (await handlers.get("before_agent_start")!(
+      { prompt: "Apply palette 老规矩", systemPrompt: "base" },
+      ctx,
+    )) as { message?: { content: string } };
+    const notice = skipped.message?.content ?? "";
+    assert.match(notice, /heuristic skip/u);
+    assert.doesNotMatch(notice, /No matching NMG memory found/u);
+    const revision = Number(notice.match(/revision:(\d+)/u)?.[1]);
+    assert.ok(Number.isInteger(revision) && revision > 0);
+    const rescued = (await tools.get("nmg_search")!.execute(
+      "rescue",
+      {
+        query: "palette azure",
+        limit: 5,
+      },
+      undefined,
+      undefined,
+      ctx,
+    )) as { details: MemoryContext };
+    assert.ok(rescued.details.results.some((entry) => entry.memory.id === saved.memory.id));
+    await lab.execute(
+      "correct-trial",
+      {
+        action: "invoke",
+        capability: "recall_gate",
+        operation: "correct",
+        input: {
+          revision,
+          phrase: "老规矩",
+          reason: "This query needs a past palette preference.",
+        },
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const cued = (await handlers.get("before_agent_start")!(
+      { prompt: "Use palette 老规矩", systemPrompt: "base" },
+      ctx,
+    )) as { message?: { content: string } };
+    assert.match(cued.message?.content ?? "", /temporary assistant-proposed cue/u);
+    assert.match(cued.message?.content ?? "", /fixture-palette/u);
+    await lab.execute(
+      "retire-trial",
+      {
+        action: "invoke",
+        capability: "recall_gate",
+        operation: "remove",
+        input: { phrase: "老规矩" },
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const retired = (await handlers.get("before_agent_start")!(
+      { prompt: "Use palette with 老规矩", systemPrompt: "base" },
+      ctx,
+    )) as { message?: { content: string } };
+    assert.match(retired.message?.content ?? "", /heuristic skip/u);
+    assert.doesNotMatch(retired.message?.content ?? "", /candidate preview/u);
+  } finally {
+    await handlers.get("session_shutdown")!({}, ctx);
+    if (previousData === undefined) delete process.env.NMG_DATA_DIR;
+    else process.env.NMG_DATA_DIR = previousData;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 test("composeNmgContextMessage: injects a completion nudge block when provided", async () => {
   const { composeNmgContextMessage, composeNmgSystemPrompt } =
     await import("../../../.pi/extensions/nmg/index.ts");

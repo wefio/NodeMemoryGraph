@@ -124,6 +124,7 @@ read it before calling `invoke`; do not guess an operation name.
   - `working_state`: replace/clear one provisional current AG text through `nmg_state`
     (`space=ag`); the Lab CLI/RPC is an administrative compatibility path;
   - `reasoning_workspace`: session-private scratch graph and checkpoints;
+  - `recall_gate`: experimental session-only literal intent cues; [operations](#recall_gate-operations);
   - `memory_graph_reasoner`: read-only differentiable traversal, fuzzy logic,
     and what-if analysis;
   - `controller_shadow`: controller observations without actuation.
@@ -134,6 +135,28 @@ read it before calling `invoke`; do not guess an operation name.
 - Leases are session-scoped (`--session-id`) and expire after the enable TTL.
   Lab output is scratch/experimental and is **not** durable truth until
   separately admitted through a governed `remember` call.
+
+### `recall_gate` operations
+
+Discover, then enable `recall_gate` for this session with a reason. This is an
+opt-in pilot, not the durable record `recallTriggers` field. The
+[retrieval owner](../../../docs/design/design.md#session-only-recall-cues) defines
+its budgets, lifetime, conservative matching and evidence limits.
+
+- `prepare`: input `{prompt, projectDir?, scheduled?}` returns a query `revision`,
+  status and entry decision. Pi supplies native turn input automatically; other
+  clients can report it explicitly. Set `scheduled:true` if a host already plans
+  retrieval. Reported input is not independently authenticated user evidence.
+- `correct`: input `{revision, phrase, reason}` proposes a weak intent hint from
+  the current skipped revision. Use literal words from that query and a brief
+  intent explanation, not hidden reasoning. No user annotation is required;
+  search success, truth and retrieval quality remain separate questions.
+- `list`: returns current hints with normalized source excerpts.
+- `remove`: input `{phrase}` retires one cue; `clear` drops the session cache.
+
+Use ordinary `nmg_search`/`nmg_get` for missed-memory recovery; correction does not
+perform that search or update relevance/claim feedback. Disable when finished.
+There is no automatic migration from experimental hints to permanent rules.
 
 ### `working_state` operations
 

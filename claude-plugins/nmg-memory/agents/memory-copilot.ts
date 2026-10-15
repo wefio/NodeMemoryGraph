@@ -352,6 +352,7 @@ server.registerTool(
       capability: z
         .enum([
           "reasoning_workspace",
+          "recall_gate",
           "memory_graph_reasoner",
           "controller_shadow",
           "controller_controlled",

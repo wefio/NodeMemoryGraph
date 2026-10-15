@@ -160,7 +160,33 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
       arguments: { action: "list" },
     });
     assert.match(textOf(capabilities), /reasoning_workspace/u);
+    assert.match(textOf(capabilities), /recall_gate/u);
     assert.doesNotMatch(textOf(capabilities), /working_state/u);
+    await client.callTool({
+      name: "nmg_lab",
+      arguments: { action: "enable", capability: "recall_gate", reason: "MCP session-only pilot" },
+    });
+    const preparedCue = await client.callTool({
+      name: "nmg_lab",
+      arguments: {
+        action: "invoke",
+        capability: "recall_gate",
+        operation: "prepare",
+        input: { prompt: "Apply 老规矩", projectDir: dataDir },
+      },
+    });
+    const cueRevision = (JSON.parse(textOf(preparedCue)) as { output: { revision: number } }).output
+      .revision;
+    const correctedCue = await client.callTool({
+      name: "nmg_lab",
+      arguments: {
+        action: "invoke",
+        capability: "recall_gate",
+        operation: "correct",
+        input: { revision: cueRevision, phrase: "老规矩", reason: "A past preference is needed." },
+      },
+    });
+    assert.match(textOf(correctedCue), /sourceRevision/u);
     await client.callTool({
       name: "nmg_state",
       arguments: {

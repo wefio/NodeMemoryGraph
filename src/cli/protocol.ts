@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { SessionRecallPreparation } from "../core/session-recall.ts";
 
 import type {
   ActiveGraphBudget,
@@ -424,7 +425,11 @@ export type NmgSessionActiveGraphParams =
       action: "snapshot" | "activate" | "release" | "clearDisclosures";
       sessionId: string;
     }
-  | { action: "beginDisclosureTurn"; sessionId: string }
+  | {
+      action: "beginDisclosureTurn";
+      sessionId: string;
+      recall?: { prompt: string; scheduled: boolean; projectDir: string };
+    }
   | {
       action: "disclose";
       sessionId: string;
@@ -441,7 +446,12 @@ export type NmgSessionActiveGraphResult =
     }
   | { action: "release"; released: boolean }
   | { action: "clearDisclosures"; cleared: boolean }
-  | { action: "beginDisclosureTurn"; turn: number }
+  | {
+      action: "beginDisclosureTurn";
+      turn: number;
+      recallGateActive?: boolean;
+      sessionRecall?: SessionRecallPreparation;
+    }
   | { action: "disclose"; freshMemoryIds: string[]; foldedMemoryIds: string[] };
 
 export interface NmgChainCreateParams {
