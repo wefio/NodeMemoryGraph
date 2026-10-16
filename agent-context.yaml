@@ -242,6 +242,29 @@ routes:
       blocking: [check, test:product, build]
       advisory: []
 
+  # Session flows are host-neutral loop state: the recall guard, the bounded task
+  # window, tool-result observation, answer attribution, agent identity, and the
+  # board wake loop. They were extracted from the pi adapter so every harness
+  # adapter forwards the same rules instead of forking them.
+  - id: session-flows
+    paths:
+      - src/integration/agent-attribution.ts
+      - src/integration/agent-identity.ts
+      - src/integration/board-wake.ts
+      - src/integration/session-recall-flow.ts
+      - src/integration/session-task-window.ts
+      - src/integration/tool-observation.ts
+    owners:
+      - docs/design/session-memory-lifecycle-hooks-2026-08-10.md
+    tests:
+      [
+        tests/integration/session-flows.test.ts,
+        tests/extensions/nmg/index.test.ts,
+      ]
+    verify:
+      blocking: [check, test:product, build]
+      advisory: []
+
   - id: ooo-execution
     paths:
       - src/integration/ooo-board.ts
