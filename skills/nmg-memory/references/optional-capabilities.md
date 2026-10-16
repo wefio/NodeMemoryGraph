@@ -143,16 +143,31 @@ opt-in pilot, not the durable record `recallTriggers` field. The
 [retrieval owner](../../../docs/design/design.md#session-only-recall-cues) defines
 its budgets, lifetime, conservative matching and evidence limits.
 
+While already making a supplemental `nmg_search`, optionally include `recallCue`
+with a literal phrase from the current user input. Native Pi supplies the observed
+source and fence privately; no separate diagnosis, preparation or correction call
+is needed. Native observation starts on the next user turn after enabling. This
+weak proposal may be ignored; ordinary search still runs. Do not make an extra
+search merely to teach a cue.
+
+For explicit clients (including resident MCP/DSH), call `prepare` when choosing to
+supply a source query, then include its `recallRevision` and `recallCue` in the
+normal search. The revision is consumed by admission and invalidated by a later
+native turn or lifecycle change. DSH CLI fallback does not learn cues.
+
 - `prepare`: input `{prompt, projectDir?, scheduled?}` returns a query `revision`,
-  status and entry decision. Pi supplies native turn input automatically; other
-  clients can report it explicitly. Set `scheduled:true` if a host already plans
+  status and entry decision. Set `scheduled:true` if a host already plans
   retrieval. Reported input is not independently authenticated user evidence.
 - `correct`: input `{revision, phrase, reason}` proposes a weak intent hint from
   the current skipped revision. Use literal words from that query and a brief
   intent explanation, not hidden reasoning. No user annotation is required;
   search success, truth and retrieval quality remain separate questions.
 - `list`: returns current hints with normalized source excerpts.
-- `remove`: input `{phrase}` retires one cue; `clear` drops the session cache.
+- `events`: inspects the bounded recent admission/removal/eviction ring. A
+  `reintroduced` event is another weak proposal, not evidence of genuine need.
+  Reading events is optional, not part of the per-turn loop.
+- `remove`: input `{phrase}` retires one cue and fences late proposals; `clear`
+  drops the session cache and event ring.
 
 Use ordinary `nmg_search`/`nmg_get` for missed-memory recovery; correction does not
 perform that search or update relevance/claim feedback. Disable when finished.

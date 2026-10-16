@@ -15,22 +15,30 @@ cross-session rule persistence.
 
 ## Decision
 
-The existing main LLM can recover with explicit search and propose a literal cue
-through the shared `recall_gate` Lab capability. A lease and a bounded in-memory
-cache keep this experiment separate from saved facts and candidate relevance
-learning. A revision ties correction to a supplied skipped query; it does not
-certify the assistant's intent judgment. The
+The existing main LLM can propose a literal cue while already making a normal
+supplemental search. The shared `recall_gate` lease and bounded active pool keep
+this weak signal separate from saved facts and candidate relevance learning.
+Proposal fences tie admission to a supplied skipped query; they do not certify
+the assistant's intent judgment. The
 [retrieval owner](../../design/design.md#session-only-recall-cues) defines the
 matching, budgets and lifetime; the
 [operation manual](../../../skills/nmg-memory/references/optional-capabilities.md#recall_gate-operations)
 contains the input contract.
 
-Pi forwards native turn observations and consumes the shared decision. MCP and
-DSH expose the same Lab operations; their automatic context lifecycle is not
-claimed equivalent. No new model or independent per-turn LLM judge is used.
+Pi receives a small pool snapshot in its existing turn response and uses the
+shared matcher. It sends bounded native source only with a proposed supplemental
+search, not through an extra per-turn `prepare` RPC or injected notice. MCP/DSH
+clients can piggyback an explicit preparation revision; their automatic context
+lifecycle is not claimed equivalent. A bounded, on-request event ring permits
+inspection without a second collector or automatic history injection.
 
 ## Alternatives considered
 
+- Per-turn preparation/diagnosis: adds work before any normal supplemental search;
+  the user rejected that overhead. Piggybacking still has schema, parameter and
+  transport costs; it is not a claim of zero or minimum total cost.
+- Whole-vocabulary activation by IDF/distribution: rarity and vocabulary share do
+  not establish need or query budget. These features are not runtime policy.
 - Cross-session/global rules: not the scope selected by the user; weak mistakes
   must not become permanent behavior in this trial.
 - Append generated regexes to source: lacks session scope and simple retirement.
@@ -46,8 +54,9 @@ Conservative lexical exclusions can miss valid requests, and learned cues can
 still retrieve noise. Default-off behavior and removal limit exposure without
 turning the cache into a truth or permission authority.
 
-Fixtures exercise explicit rescue, later cue reuse, retirement, isolation and
-lease lifecycle. They do not establish natural LLM self-correction, provider-send
+Fixtures exercise piggyback admission, later cue reuse, retirement, stale-fence
+rejection, isolation and lease lifecycle, including private Pi HTTP and MCP stdio
+transport. They do not establish natural LLM self-correction, provider-send
 behavior, precision or cost improvement.
 
 ## Deferred

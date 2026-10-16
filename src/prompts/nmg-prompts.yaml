@@ -30,17 +30,6 @@ search_description: >-
   node:"Conversation ..." state:key time:2026-01-01..2026-06-30), -term
   exclusions, and quoted phrases.
 
-session_recall_skipped_notice: >-
-  [session recall pilot] Automatic recall: heuristic skip, not memory absence.
-  nmg_search remains available. For a missed intent, nmg_lab invoke recall_gate
-  correct({revision:{revision},phrase,reason}) records a weak session cue,
-  not truth or relevance feedback.
-
-session_recall_hint_notice: >-
-  [session recall pilot] A temporary assistant-proposed cue {phrase} requested
-  shallow retrieval, not evidence. Retire with nmg_lab invoke recall_gate
-  remove({phrase:{phrase}}).
-
 get_description: >-
   Load exact memory records and source evidence using IDs from nmg_search (or
   nmg_automatic_recall). Copy ref: keys whole and supply their original
@@ -333,6 +322,15 @@ search_queries_parameter_description: >-
   alternate wording, or a hypothetical-answer (HyDE) clause. NMG does not
   generate these clauses; it searches them, removes duplicate records, and
   appends unique results after the primary query's ranking.
+
+search_recall_cue_parameter_description: >-
+  Optional 3-80 character literal phrase from the current user input, proposed
+  while already making a supplemental memory search. Weak session cue only;
+  ignored unless the pilot accepts it. Do not add a separate check or call.
+
+search_recall_revision_parameter_description: >-
+  Optional current recall_gate prepare revision for clients without a native
+  user-turn observation. Omit in native Pi; not needed for an ordinary search.
 
 search_progression_required: >-
   NMG paused another search because two searches were already completed without

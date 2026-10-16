@@ -1096,6 +1096,7 @@ export class NmgService {
       );
     }
     if (operation === "list") return this.#sessionRecall.list(sessionId);
+    if (operation === "events") return this.#sessionRecall.events(sessionId);
     if (operation === "remove")
       return { removed: this.#sessionRecall.remove(sessionId, requiredString(values, "phrase")) };
     if (operation === "clear") return { cleared: this.#sessionRecall.clear(sessionId) };
@@ -1117,6 +1118,33 @@ export class NmgService {
       recall.prompt,
       recall.scheduled,
     );
+  }
+
+  #recallTurnMetadata(
+    params: Extract<NmgSessionActiveGraphParams, { action: "beginDisclosureTurn" }>,
+  ) {
+    const lease = this.#labAuthority.status("recall_gate", params.sessionId);
+    if (!lease) {
+      this.#sessionRecall.clear(params.sessionId);
+      return {};
+    }
+    const projectDir = params.projectDir ? resolve(params.projectDir) : undefined;
+    if (projectDir) this.#sessionRecall.snapshot(params.sessionId, projectDir);
+    this.#sessionRecall.beginTurn(params.sessionId);
+    return {
+      recallGateActive: true as const,
+      ...(projectDir
+        ? {
+            recallGate: {
+              ...this.#sessionRecall.snapshot(params.sessionId, projectDir),
+              expiresAt: lease.expiresAt,
+            },
+          }
+        : {}),
+      ...(params.recall
+        ? { sessionRecall: this.#prepareRecallGate(params.sessionId, params.recall) }
+        : {}),
+    };
   }
 
   #sessionActiveGraph(params: NmgSessionActiveGraphParams): NmgMethodResult["sessionActiveGraph"] {
@@ -1142,12 +1170,7 @@ export class NmgService {
       return {
         action: "beginDisclosureTurn",
         turn: this.#sessionActiveGraphs.beginDisclosureTurn(params.sessionId),
-        ...(this.#labAuthority.isEnabled("recall_gate", params.sessionId)
-          ? { recallGateActive: true }
-          : {}),
-        ...(params.recall
-          ? { sessionRecall: this.#prepareRecallGate(params.sessionId, params.recall) }
-          : {}),
+        ...this.#recallTurnMetadata(params),
       };
     }
     if (params.action === "disclose") {
@@ -1774,12 +1797,44 @@ export class NmgService {
    *  exact graph the feedback names. Both host adapters (pi, dsh) just forward
    *  — no adapter holds learner logic. */
   async #search(params: NmgSearchParams): Promise<NmgMethodResult["search"]> {
-    const context = await this.#searchImpl(params);
-    if (params.persistTrace !== false) {
-      this.#stageOnlineDecision(params, context);
-      this.#recordRecallInstance(params, context);
+    this.#offerSearchCue(params);
+    const retrieval = { ...params };
+    delete retrieval.recallCue;
+    delete retrieval.recallRevision;
+    delete retrieval.recallSource;
+    const context = await this.#searchImpl(retrieval);
+    if (retrieval.persistTrace !== false) {
+      this.#stageOnlineDecision(retrieval, context);
+      this.#recordRecallInstance(retrieval, context);
     }
     return context;
+  }
+
+  #offerSearchCue(params: NmgSearchParams): void {
+    const { sessionId, recallCue, recallSource, recallRevision } = params;
+    if (!sessionId || !recallCue || params.autoRecall || params.persistTrace === false) return;
+    if (!this.#labAuthority.isEnabled("recall_gate", sessionId)) {
+      this.#sessionRecall.clear(sessionId);
+      return;
+    }
+    if (recallSource) {
+      const snapshot = this.#sessionRecall.snapshot(
+        sessionId,
+        resolve(params.projectDir ?? process.cwd()),
+      );
+      if (snapshot.generation !== recallSource.generation || snapshot.turn !== recallSource.turn)
+        return;
+      this.#sessionRecall.offerFromSearch(
+        sessionId,
+        resolve(params.projectDir ?? process.cwd()),
+        recallSource.prompt,
+        recallCue,
+        recallSource.turn,
+      );
+    } else if (recallRevision !== undefined) {
+      if (params.projectDir) this.#sessionRecall.snapshot(sessionId, resolve(params.projectDir));
+      this.#sessionRecall.offerPrepared(sessionId, recallRevision, recallCue);
+    }
   }
 
   /** Append one self-contained recall instance to the benchmark corpus for any
@@ -2806,11 +2861,30 @@ function parseRecordFeedbackParams(value: unknown): NmgRecordFeedbackParams {
   };
 }
 
+function recallSearchSource(value: unknown): NmgSearchParams["recallSource"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  if (typeof source.prompt !== "string" || source.prompt.length > 4096) return undefined;
+  if (!Number.isSafeInteger(source.generation) || Number(source.generation) < 1) return undefined;
+  if (!Number.isSafeInteger(source.turn) || Number(source.turn) < 1) return undefined;
+  return {
+    prompt: source.prompt,
+    generation: Number(source.generation),
+    turn: Number(source.turn),
+  };
+}
+
 function parseSearchParams(value: unknown): NmgSearchParams {
   const params = objectParams(value);
   return {
     query: requiredString(params, "query"),
     queries: optionalStringArray(params, "queries"),
+    recallCue: typeof params.recallCue === "string" ? params.recallCue : undefined,
+    recallRevision:
+      Number.isSafeInteger(params.recallRevision) && Number(params.recallRevision) > 0
+        ? Number(params.recallRevision)
+        : undefined,
+    recallSource: recallSearchSource(params.recallSource),
     nodeName: optionalString(params, "nodeName"),
     scope: optionalScope(params, "scope"),
     sourceActor: optionalEnum(params, "sourceActor", MEMORY_ACTORS),
@@ -2942,6 +3016,7 @@ function parseSessionActiveGraphParams(value: unknown): NmgSessionActiveGraphPar
     return {
       action,
       sessionId,
+      projectDir: optionalString(params, "projectDir"),
       recall: recall
         ? {
             prompt: requiredString(recall, "prompt"),

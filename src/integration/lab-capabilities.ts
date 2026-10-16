@@ -66,10 +66,10 @@ const DESCRIPTORS: readonly LabCapabilityDescriptor[] = [
   {
     id: "recall_gate",
     summary:
-      "Session-only weak intent cues, no facts/training/persistence. prepare({prompt,projectDir?,scheduled?}) returns a revision; correct({revision,phrase,reason}) proposes literal words from that skipped query.",
+      "Session-only weak intent cues, no facts/training/persistence. Normal search can propose recallCue; explicit clients can prepare a revision. list/events inspect the bounded pool; remove/clear retire it.",
     agentMayEnable: true,
     supportedScopes: ["session"],
-    operations: ["prepare", "correct", "list", "remove", "clear"],
+    operations: ["prepare", "correct", "list", "events", "remove", "clear"],
   },
   {
     id: "memory_graph_reasoner",

@@ -2127,37 +2127,50 @@ contract.
 
 The experimental `recall_gate` Lab capability is default-off and session-leased.
 It caches assistant-proposed intent hints, not memories, relevance judgments or
-claim outcomes. A client prepares a query revision and reports whether retrieval
-is already scheduled. An explicit correction names that revision, a literal
-phrase in its normalized unquoted query, and a short intent reason. This is
-reported query/assistant judgment, not independent verification of user intent.
-No successful search or positive factual label is inferred from the correction.
+claim outcomes. A main-model supplemental search can include `recallCue`, a literal
+phrase from the current input. Admission requires an otherwise skipped entry and
+a current session/project generation and proposal fence. Native Pi captures that
+observation outside model parameters; explicit clients can supply a `recallRevision`
+from Lab `prepare`. Explicit `correct` remains available with its short reason.
+The service excludes automatic searches and `persistTrace:false` probes. Invalid,
+stale or disabled proposals do not fail or alter the ordinary search. A proposal
+consumes its fence; it does not certify intent, search success, necessity or benefit.
 
 Only an otherwise skipped query can reuse a hint; existing static and task-anchor
 recalls win. A hit uses the ordinary `cue` decision (five candidates, no graph
 hops), still bounded by host configuration, retrieval filters and output budgets.
 Confidence constants remain heuristics, not calibrated probabilities.
-A skipped-query notice says that no search ran, not that memory is unnecessary.
-Quotes/code, translation/no-memory forms and Latin word boundaries have
+No per-turn skip/hint notice or event history is injected. Quotes/code,
+translation/no-memory forms and Latin word boundaries have
 conservative exclusions; they are not a semantic intent or permission model.
 
 The service owns at most 32 session entries with eight cues each: phrases are
 3–80 UTF-16 units, reasons at most 240, source excerpts at most 320, and query
 capture/matching at most 4,096. The shared high-confidence secret boundary rejects
 secret-bearing query capture and reasons; it is not a general privacy classifier.
-A project change drops the session's cues;
-remove/clear, disable, lease expiry or renewal, session release, and daemon
-replacement prevent their reuse. Nothing reseeds this cache from disk, saved
+Capacity eviction is FIFO by admission, not by automatic match count. Matching
+neither renews a cue nor extends the lease. A project change drops the session's
+cues; remove/clear, disable, lease expiry or renewal, session release, and daemon
+replacement prevent their reuse. No cross-session or permanent promotion is defined.
+A read-on-request ring retains at most 16 admission/removal/eviction events per
+session. Reintroduction means only that a recent retirement is still in that ring,
+not independently verified need or a complete relearning history. Clear/lifecycle
+reset drops the ring. IDF, distribution thresholds and random withdrawal are not
+runtime admission or retention rules. Nothing reseeds this cache from disk, saved
 memory aliases, answer overlap or silence. No model, training job, autonomous
 summarizer or independent per-turn judge is added.
 
-`beginDisclosureTurn` accepts optional recall input and returns a typed trial
-preparation when enabled; old clients/servers keep their existing decisions.
-Pi first reads activation metadata without sending the trial query. Only while
-enabled does it forward native input through Lab `prepare` (one additional local
-RPC), consuming the result in its single budgeted context message. Lab `prepare` exposes the same lifecycle-neutral
-boundary to other clients; their automatic injection behavior is not made
-equivalent by exposing the tool. Operations and examples are in the
+The existing `beginDisclosureTurn` response supplies a small phrase snapshot,
+lease expiry and opaque recall-owner fences when the capability is active and a
+project is supplied. Its proposal fence is independent of the resettable disclosure
+clock. Pi uses the shared matcher locally, preserving static/task-anchor priority;
+it makes no extra per-turn Lab `prepare` RPC. A safe bounded source input travels
+only with a proposed normal search, and is removed before retrieval, provider
+input and persisted traces. Optional legacy recall input remains supported.
+MCP/DSH expose explicit preparation and search parameters, not equivalent automatic
+user-turn observation. The MCP search does not invalidate an explicit preparation
+before its piggybacked request; DSH CLI fallback performs ordinary search without
+learning. Operations and examples are in the
 [optional capability manual](../../skills/nmg-memory/references/optional-capabilities.md#recall_gate-operations).
 Deterministic fixtures establish mechanics, not natural LLM correction quality,
 retrieval precision or token/latency savings.

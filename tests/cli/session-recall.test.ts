@@ -10,6 +10,222 @@ import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
 
+async function nativeTurn(service: NmgService, projectDir: string, sessionId = "trial") {
+  const result = await service.invoke("sessionActiveGraph", {
+    action: "beginDisclosureTurn",
+    sessionId,
+    projectDir,
+  });
+  assert.ok(result.action === "beginDisclosureTurn");
+  return result.recallGate;
+}
+
+async function inspectPool(service: NmgService, operation: "list" | "events" = "list") {
+  const result = await service.invoke("lab", {
+    action: "invoke",
+    capability: "recall_gate",
+    sessionId: "trial",
+    operation,
+  });
+  assert.ok(result.action === "invoke");
+  return result.output as Array<{ phrase: string; kind?: string; sourceTurn?: number }>;
+}
+
+// Contract/safety: admission is a weak proposal on an actual search, not an outcome label.
+test("native turn returns a small pool snapshot; a normal search piggybacks one literal proposal", async () => {
+  await fixture(async (service, directory) => {
+    assert.equal(await nativeTurn(service, directory), undefined);
+    await enable(service);
+    const gate = (await nativeTurn(service, directory))!;
+    assert.deepEqual(gate.phrases, []);
+    assert.ok(gate.generation > 0 && gate.turn > 0);
+    const source = { prompt: "Apply palette 老规矩", generation: gate.generation, turn: gate.turn };
+    const result = await service.invoke("search", {
+      query: "palette azure",
+      sessionId: "trial",
+      projectDir: directory,
+      retrievalMode: "fts5",
+      recallCue: "老规矩",
+      recallSource: source,
+    });
+    assert.doesNotMatch(
+      JSON.stringify(result),
+      /Apply palette/u,
+      "native observation must not enter the retrieval result",
+    );
+    assert.deepEqual(
+      (await inspectPool(service)).map((cue) => cue.phrase),
+      ["老规矩"],
+    );
+    assert.equal((await inspectPool(service, "events"))[0]?.sourceTurn, gate.turn);
+    await service.invoke("search", {
+      query: "palette",
+      sessionId: "trial",
+      projectDir: directory,
+      retrievalMode: "fts5",
+      recallCue: "老规矩",
+      recallSource: source,
+    });
+    assert.equal(
+      (await inspectPool(service, "events")).length,
+      1,
+      "a consumed fence cannot renew a cue",
+    );
+    assert.deepEqual((await nativeTurn(service, directory))!.phrases, ["老规矩"]);
+    assert.equal((await prepare(service, directory))?.status, "hint");
+  });
+});
+
+test("automatic searches, probes, absent fences and invalid proposals leave normal search usable", async () => {
+  await fixture(async (service, directory) => {
+    await enable(service);
+    const variants = [
+      { autoRecall: true },
+      { persistTrace: false },
+      { recallSource: undefined },
+      { sessionId: "other" },
+      { recallCue: "not in the source" },
+      { recallCue: 12 },
+      { recallSource: { prompt: "Apply 老规矩", generation: -1, turn: 1 } },
+    ];
+    for (const variant of variants) {
+      const gate = (await nativeTurn(service, directory))!;
+      await service.invoke("search", {
+        query: "palette",
+        sessionId: "trial",
+        projectDir: directory,
+        retrievalMode: "fts5",
+        recallCue: "老规矩",
+        recallSource: { prompt: "Apply 老规矩", generation: gate.generation, turn: gate.turn },
+        ...variant,
+      });
+      assert.deepEqual(await inspectPool(service), []);
+    }
+    for (const prompt of [
+      'Output "老规矩"',
+      "翻译老规矩",
+      "不用记忆照老规矩",
+      "Apply 老规矩 password=fixture-only",
+      "你记得老规矩吗？",
+    ]) {
+      const gate = (await nativeTurn(service, directory))!;
+      await service.invoke("search", {
+        query: "palette",
+        sessionId: "trial",
+        projectDir: directory,
+        retrievalMode: "fts5",
+        recallCue: "老规矩",
+        recallSource: { prompt, generation: gate.generation, turn: gate.turn },
+      });
+      assert.deepEqual(await inspectPool(service), [], prompt);
+    }
+    assert.deepEqual(await inspectPool(service, "events"), []);
+  });
+});
+
+test("turn, removal, clear, project and lease generations reject late proposals", async () => {
+  await fixture(async (service, directory) => {
+    await enable(service);
+    const first = (await nativeTurn(service, directory))!;
+    const offer = (gate: NonNullable<typeof first>, projectDir = directory) =>
+      service.invoke("search", {
+        query: "palette",
+        sessionId: "trial",
+        projectDir,
+        retrievalMode: "fts5",
+        recallCue: "老规矩",
+        recallSource: { prompt: "Apply 老规矩", generation: gate.generation, turn: gate.turn },
+      });
+    await service.invoke("sessionActiveGraph", { action: "clearDisclosures", sessionId: "trial" });
+    const second = (await nativeTurn(service, directory))!;
+    assert.notEqual(
+      second.turn,
+      first.turn,
+      "proposal fences do not reuse the reset disclosure clock",
+    );
+    await offer(first);
+    assert.deepEqual(await inspectPool(service), []);
+    await offer(second);
+    const beforeRemoval = (await nativeTurn(service, directory))!;
+    await service.invoke("lab", {
+      action: "invoke",
+      capability: "recall_gate",
+      sessionId: "trial",
+      operation: "remove",
+      input: { phrase: "老规矩" },
+    });
+    await offer(beforeRemoval);
+    assert.deepEqual(await inspectPool(service), []);
+    await offer((await nativeTurn(service, directory))!);
+    assert.deepEqual(
+      (await inspectPool(service, "events")).map((event) => event.kind),
+      ["admitted", "removed", "reintroduced"],
+    );
+    const beforeClear = (await nativeTurn(service, directory))!;
+    await service.invoke("lab", {
+      action: "invoke",
+      capability: "recall_gate",
+      sessionId: "trial",
+      operation: "clear",
+    });
+    await offer(beforeClear);
+    assert.deepEqual(await inspectPool(service), []);
+    const beforeProject = (await nativeTurn(service, directory))!;
+    await offer(beforeProject, join(directory, "other-project"));
+    assert.deepEqual(await inspectPool(service), []);
+    const beforeRenewal = (await nativeTurn(service, directory))!;
+    await enable(service);
+    await offer(beforeRenewal);
+    assert.deepEqual(await inspectPool(service), []);
+    await service.invoke("lab", {
+      action: "disable",
+      capability: "recall_gate",
+      sessionId: "trial",
+    });
+    await offer(beforeRenewal);
+    assert.equal(await nativeTurn(service, directory), undefined);
+  });
+});
+
+test("explicit clients can piggyback the current preparation revision, but cannot reuse it", async () => {
+  await fixture(async (service, directory) => {
+    await enable(service);
+    const prepared = (await prepare(service, directory))!;
+    const params = {
+      query: "palette",
+      sessionId: "trial",
+      projectDir: directory,
+      retrievalMode: "fts5",
+      recallCue: "老规矩",
+      recallRevision: prepared.revision,
+    };
+    await service.invoke("search", params);
+    await service.invoke("search", params);
+    assert.equal((await inspectPool(service, "events")).length, 1);
+    await service.invoke("lab", {
+      action: "invoke",
+      capability: "recall_gate",
+      sessionId: "trial",
+      operation: "clear",
+    });
+    const otherProject = (await prepare(service, directory))!;
+    await service.invoke("search", {
+      ...params,
+      projectDir: join(directory, "other-project"),
+      recallRevision: otherProject.revision,
+    });
+    assert.deepEqual(
+      await inspectPool(service),
+      [],
+      "a prepared proposal cannot cross a reported project change",
+    );
+    const stale = (await prepare(service, directory))!;
+    await nativeTurn(service, directory);
+    await service.invoke("search", { ...params, recallRevision: stale.revision });
+    assert.deepEqual(await inspectPool(service), []);
+  });
+});
+
 async function fixture(run: (service: NmgService, directory: string) => Promise<void>) {
   const directory = mkdtempSync(join(tmpdir(), "nmg-session-recall-rpc-"));
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
@@ -69,7 +285,14 @@ test("session recall pilot is discoverable and self-service only within a sessio
     assert.ok(capability, "session recall pilot must have an explicit discoverable lease");
     assert.equal(capability.agentMayEnable, true);
     assert.deepEqual(capability.supportedScopes, ["session"]);
-    assert.deepEqual(capability.operations, ["prepare", "correct", "list", "remove", "clear"]);
+    assert.deepEqual(capability.operations, [
+      "prepare",
+      "correct",
+      "list",
+      "events",
+      "remove",
+      "clear",
+    ]);
   } finally {
     service.close();
     rmSync(directory, { recursive: true, force: true });
@@ -158,7 +381,16 @@ test("lease expiry rejects correction and reactivation starts without old cues",
     await enable(service);
     const captured = (await prepare(service, directory))!;
     await correct(service, captured.revision);
+    const gate = (await nativeTurn(service, directory))!;
     t.mock.timers.tick(60_001);
+    await service.invoke("search", {
+      query: "palette",
+      sessionId: "trial",
+      projectDir: directory,
+      retrievalMode: "fts5",
+      recallCue: "老规矩",
+      recallSource: { prompt: "Apply 老规矩", generation: gate.generation, turn: gate.turn },
+    });
     await assert.rejects(correct(service, captured.revision), /not enabled/u);
     assert.equal(await prepare(service, directory), undefined);
     await enable(service);

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { SessionRecallPreparation } from "../core/session-recall.ts";
+import type { SessionRecallHints, SessionRecallPreparation } from "../core/session-recall.ts";
 
 import type {
   ActiveGraphBudget,
@@ -361,6 +361,12 @@ export interface NmgSearchParams {
   query: string;
   /** Extra retrieval clauses fused with the primary query (union of results). */
   queries?: string[];
+  /** Optional literal proposal piggybacked on an independently chosen search. */
+  recallCue?: string;
+  /** Explicit prepare revision for clients without a native turn observation. */
+  recallRevision?: number;
+  /** Host-only native observation; stripped before retrieval, providers and traces. */
+  recallSource?: { prompt: string; generation: number; turn: number };
   nodeName?: string;
   scope?: MemoryScope;
   sourceActor?: MemoryActor;
@@ -428,6 +434,7 @@ export type NmgSessionActiveGraphParams =
   | {
       action: "beginDisclosureTurn";
       sessionId: string;
+      projectDir?: string;
       recall?: { prompt: string; scheduled: boolean; projectDir: string };
     }
   | {
@@ -450,6 +457,7 @@ export type NmgSessionActiveGraphResult =
       action: "beginDisclosureTurn";
       turn: number;
       recallGateActive?: boolean;
+      recallGate?: SessionRecallHints & { expiresAt: string };
       sessionRecall?: SessionRecallPreparation;
     }
   | { action: "disclose"; freshMemoryIds: string[]; foldedMemoryIds: string[] };

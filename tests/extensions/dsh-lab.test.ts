@@ -17,4 +17,8 @@ test("DSH adapter exposes the unified daemon Lab capability tool", () => {
   assert.match(source, /action: 'disclose'/u);
   assert.doesNotMatch(source, /recallWindows/u);
   assert.match(source, /projectDir: workspaceRoot, sessionId/u);
+  assert.match(source, /recallCue: args\.recallCue/u);
+  assert.match(source, /recallRevision: args\.recallRevision/u);
+  assert.match(source, /nmgPrompts\.search_recall_cue_parameter_description/u);
+  assert.doesNotMatch(source, /recallSource:/u);
 });

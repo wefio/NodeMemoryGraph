@@ -93,6 +93,9 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     assert.match(JSON.stringify(board.inputSchema), /discover/u);
     assert.match(JSON.stringify(board.inputSchema), /capabilities/u);
     assert.match(JSON.stringify(board.inputSchema), /"to"/u);
+    assert.match(JSON.stringify(search.inputSchema), /recallCue/u);
+    assert.match(JSON.stringify(search.inputSchema), /recallRevision/u);
+    assert.doesNotMatch(JSON.stringify(search.inputSchema), /recallSource/u);
     assert.match(JSON.stringify(get.inputSchema), /activeGraphId/u);
     assert.match(JSON.stringify(remember.inputSchema), /claim_outcome/u);
 
@@ -177,16 +180,28 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     });
     const cueRevision = (JSON.parse(textOf(preparedCue)) as { output: { revision: number } }).output
       .revision;
-    const correctedCue = await client.callTool({
-      name: "nmg_lab",
+    const cueSearch = await client.callTool({
+      name: "nmg_search",
       arguments: {
-        action: "invoke",
-        capability: "recall_gate",
-        operation: "correct",
-        input: { revision: cueRevision, phrase: "老规矩", reason: "A past preference is needed." },
+        query: "stable Active Graph session",
+        recallCue: "老规矩",
+        recallRevision: cueRevision,
       },
     });
-    assert.match(textOf(correctedCue), /sourceRevision/u);
+    assert.notEqual(cueSearch.isError, true);
+    const events = await client.callTool({
+      name: "nmg_lab",
+      arguments: { action: "invoke", capability: "recall_gate", operation: "events" },
+    });
+    const admitted = (
+      JSON.parse(textOf(events)) as {
+        output: Array<{ phrase: string; sourceRevision: number; via: string }>;
+      }
+    ).output;
+    assert.equal(admitted.length, 1);
+    assert.equal(admitted[0]!.phrase, "老规矩");
+    assert.equal(admitted[0]!.sourceRevision, cueRevision);
+    assert.equal(admitted[0]!.via, "supplemental_search");
     await client.callTool({
       name: "nmg_state",
       arguments: {

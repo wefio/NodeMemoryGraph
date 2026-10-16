@@ -59,6 +59,13 @@ server.registerTool(
     description: nmgPrompts.search_description,
     inputSchema: {
       query: z.string().describe("Focused recall query"),
+      recallCue: z.string().optional().describe(nmgPrompts.search_recall_cue_parameter_description),
+      recallRevision: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(nmgPrompts.search_recall_revision_parameter_description),
       limit: z.number().int().min(1).max(50).default(8),
       maxTier: z.number().int().min(0).max(3).optional(),
       graphHops: z.number().int().min(0).max(3).optional(),
@@ -68,10 +75,13 @@ server.registerTool(
     },
   },
   async (params) => {
-    await invokeDaemon(connection, "sessionActiveGraph", {
-      action: "beginDisclosureTurn",
-      sessionId: BOARD_SESSION_ID,
-    }).catch(() => undefined);
+    // An explicit preparation must survive until its piggybacked search.
+    if (params.recallRevision === undefined) {
+      await invokeDaemon(connection, "sessionActiveGraph", {
+        action: "beginDisclosureTurn",
+        sessionId: BOARD_SESSION_ID,
+      }).catch(() => undefined);
+    }
     const r = (await invokeDaemon(connection, "search", {
       ...params,
       sessionId: BOARD_SESSION_ID,

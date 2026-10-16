@@ -4,6 +4,61 @@ import test from "node:test";
 import { decideMemoryLoad } from "../../src/core/gate.ts";
 import { SessionRecallTrial } from "../../src/core/session-recall.ts";
 
+// Contract: actual search proposals admit bounded cues, never a candidate-library import.
+test("search admission, project generation and current prepared revision are fenced", () => {
+  const trial = new SessionRecallTrial();
+  const first = trial.snapshot("a", "/project");
+  assert.deepEqual(first.phrases, []);
+  assert.equal(trial.offerFromSearch("a", "/project", "Apply 老规矩", "老规矩", 7), true);
+  assert.deepEqual(trial.snapshot("a", "/project").phrases, ["老规矩"]);
+  assert.equal(trial.offerFromSearch("a", "/project", "Apply 老规矩", "老规矩", 8), false);
+  assert.deepEqual(
+    trial.events("a").map((e) => [e.kind, e.via, e.sourceTurn]),
+    [["admitted", "supplemental_search", 7]],
+  );
+  trial.beginTurn("a");
+  const prepared = trial.prepare("a", "/project", "Use usual setup");
+  trial.beginTurn("a");
+  assert.equal(trial.offerPrepared("a", prepared.revision, "usual setup"), false);
+  assert.notEqual(trial.snapshot("a", "/other").generation, first.generation);
+  assert.deepEqual(trial.snapshot("a", "/other").phrases, []);
+});
+
+test("search proposals reject invalid source forms without throwing or admitting words", () => {
+  const trial = new SessionRecallTrial();
+  for (const prompt of [
+    'Output "老规矩"',
+    "翻译老规矩",
+    "不用记忆照老规矩",
+    "Apply 老规矩 password=fixture-only",
+  ]) {
+    assert.equal(trial.offerFromSearch("a", "/project", prompt, "老规矩"), false, prompt);
+  }
+  for (const phrase of ["ab", "unseen phrase", "a.*b", "x".repeat(81)]) {
+    assert.equal(trial.offerFromSearch("a", "/project", "Apply 老规矩", phrase), false);
+  }
+  assert.deepEqual(trial.list("a"), []);
+});
+
+test("retirement and reintroduction events are bounded, copied and never renewed by matching", () => {
+  const trial = new SessionRecallTrial();
+  const first = trial.snapshot("a", "/project");
+  assert.equal(trial.offerFromSearch("a", "/project", "Apply 老规矩", "老规矩", 1), true);
+  trial.remove("a", "老规矩");
+  assert.equal(trial.offerFromSearch("a", "/project", "Apply 老规矩", "老规矩", 2), true);
+  assert.equal(trial.events("a").at(-1)?.kind, "reintroduced");
+  for (let i = 0; i < 12; i++)
+    trial.offerFromSearch("a", "/project", `Apply phrase number ${i}`, `phrase number ${i}`, i + 3);
+  assert.equal(trial.list("a").length, 8);
+  assert.equal(trial.events("a").length, 16);
+  assert.ok(trial.events("a").some((e) => e.kind === "evicted"));
+  trial.events("a")[0]!.phrase = "mutated";
+  assert.notEqual(trial.events("a")[0]!.phrase, "mutated");
+  trial.clear("a");
+  assert.notEqual(trial.snapshot("a", "/project").generation, first.generation);
+  assert.deepEqual(trial.events("a"), []);
+});
+
 function learn(trial: SessionRecallTrial, phrase = "老规矩", session = "a", project = "/project") {
   const prepared = trial.prepare(session, project, `Apply ${phrase}`);
   assert.equal(prepared.status, "skipped");

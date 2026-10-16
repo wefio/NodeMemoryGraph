@@ -2391,7 +2391,18 @@ test("revoked records show metadata but withhold the statement", () => {
   assert.doesNotMatch(evidence, /modern electronic music festivals/);
 });
 
-test("session recall pilot carries a skipped intent through tool rescue, correction and later auto cue", async () => {
+test("session recall piggybacks a search proposal without a prepare RPC or injected notices", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+  t.mock.method(
+    globalThis,
+    "fetch",
+    (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      if (typeof init?.body === "string")
+        calls.push(JSON.parse(init.body) as (typeof calls)[number]);
+      return originalFetch(input, init);
+    },
+  );
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-session-recall-"));
   const previousData = process.env.NMG_DATA_DIR;
   process.env.NMG_DATA_DIR = directory;
@@ -2412,6 +2423,24 @@ test("session recall pilot carries a skipped intent through tool rescue, correct
     });
     store.close();
     const lab = tools.get("nmg_lab")!;
+    await tools.get("nmg_search")!.execute(
+      "unobserved-proposal",
+      {
+        query: "palette azure",
+        recallCue: "forged cue",
+        recallSource: { prompt: "forged cue", generation: 1, turn: 1 },
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    assert.equal(
+      calls
+        .filter((call) => call.method === "search")
+        .some((call) => call.params.recallSource !== undefined),
+      false,
+      "model parameters cannot supply the host-only native observation",
+    );
     await lab.execute(
       "enable-trial",
       {
@@ -2428,42 +2457,48 @@ test("session recall pilot carries a skipped intent through tool rescue, correct
       ctx,
     )) as { message?: { content: string } };
     const notice = skipped.message?.content ?? "";
-    assert.match(notice, /heuristic skip/u);
-    assert.doesNotMatch(notice, /No matching NMG memory found/u);
-    const revision = Number(notice.match(/revision:(\d+)/u)?.[1]);
-    assert.ok(Number.isInteger(revision) && revision > 0);
+    assert.doesNotMatch(notice, /heuristic skip|revision:|No matching NMG memory found/u);
+    const turnCalls = calls.filter(
+      (call) =>
+        call.method === "sessionActiveGraph" && call.params.action === "beginDisclosureTurn",
+    );
+    assert.equal(turnCalls.length, 1);
+    assert.equal(
+      "recall" in turnCalls[0]!.params,
+      false,
+      "the existing turn RPC carries no raw prompt",
+    );
+    assert.equal(
+      calls.some((call) => call.method === "lab" && call.params.operation === "prepare"),
+      false,
+    );
     const rescued = (await tools.get("nmg_search")!.execute(
       "rescue",
       {
         query: "palette azure",
         limit: 5,
+        recallCue: "老规矩",
       },
       undefined,
       undefined,
       ctx,
     )) as { details: MemoryContext };
     assert.ok(rescued.details.results.some((entry) => entry.memory.id === saved.memory.id));
-    await lab.execute(
-      "correct-trial",
-      {
-        action: "invoke",
-        capability: "recall_gate",
-        operation: "correct",
-        input: {
-          revision,
-          phrase: "老规矩",
-          reason: "This query needs a past palette preference.",
-        },
-      },
-      undefined,
-      undefined,
-      ctx,
+    const proposal = calls.find(
+      (call) => call.method === "search" && call.params.recallCue === "老规矩",
+    );
+    assert.equal(
+      (proposal?.params.recallSource as { prompt: string })?.prompt,
+      "Apply palette 老规矩",
     );
     const cued = (await handlers.get("before_agent_start")!(
       { prompt: "Use palette 老规矩", systemPrompt: "base" },
       ctx,
     )) as { message?: { content: string } };
-    assert.match(cued.message?.content ?? "", /temporary assistant-proposed cue/u);
+    assert.doesNotMatch(
+      cued.message?.content ?? "",
+      /temporary assistant-proposed cue|heuristic skip/u,
+    );
     assert.match(cued.message?.content ?? "", /fixture-palette/u);
     await lab.execute(
       "retire-trial",
@@ -2481,8 +2516,11 @@ test("session recall pilot carries a skipped intent through tool rescue, correct
       { prompt: "Use palette with 老规矩", systemPrompt: "base" },
       ctx,
     )) as { message?: { content: string } };
-    assert.match(retired.message?.content ?? "", /heuristic skip/u);
-    assert.doesNotMatch(retired.message?.content ?? "", /candidate preview/u);
+    assert.doesNotMatch(retired.message?.content ?? "", /heuristic skip|candidate preview/u);
+    assert.equal(
+      calls.some((call) => call.method === "lab" && call.params.operation === "prepare"),
+      false,
+    );
   } finally {
     await handlers.get("session_shutdown")!({}, ctx);
     if (previousData === undefined) delete process.env.NMG_DATA_DIR;
