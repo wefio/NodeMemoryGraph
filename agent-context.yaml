@@ -10,10 +10,10 @@ capabilities:
 
   - id: harness-adapters
     aliases: [agent-integration]
-    summary: Connect the shared Agent Surface to Pi, Claude MCP, WorkBuddy, or DSH without moving product policy into an adapter.
-    paths: [extensions, claude-plugins, workbuddy-plugin, dsh]
+    summary: Connect the shared Agent Surface to Pi, Claude MCP, WorkBuddy, DSH, or OpenCode without moving product policy into an adapter.
+    paths: [extensions, claude-plugins, workbuddy-plugin, dsh, opencode-plugin]
     entrypoints: [npm install node-memory-graph]
-    supports: [pi, claude-mcp, workbuddy, dsh]
+    supports: [pi, claude-mcp, workbuddy, dsh, opencode]
 
   - id: retrieval-evaluation
     aliases: [evidence-recall, retrieval-benchmark]
@@ -107,6 +107,16 @@ routes:
     tests: [tests/integration/workbuddy-hook.test.ts]
     verify:
       blocking: [check, test:product, build, package:check]
+      advisory: []
+
+  - id: opencode-adapter
+    paths: [opencode-plugin/**]
+    owners:
+      - opencode-plugin/README.md
+      - skills/nmg-memory/references/harness-adapters.md
+    tests: [tests/integration/lease-transport.test.ts, tests/integration/tool-contract.test.ts]
+    verify:
+      blocking: [check, test:product, build]
       advisory: []
 
   - id: documentation

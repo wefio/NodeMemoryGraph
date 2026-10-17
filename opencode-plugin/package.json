@@ -1,0 +1,12 @@
+{
+  "name": "nmg-opencode-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "OpenCode v2 thin adapter for node-memory-graph: passive lease transport, automatic recall injection, NMG tools, board wake",
+  "exports": {
+    ".": "./index.ts",
+    "./tui": "./tui.ts"
+  }
+}
