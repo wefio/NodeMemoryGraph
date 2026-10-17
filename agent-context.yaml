@@ -110,7 +110,7 @@ routes:
       advisory: []
 
   - id: opencode-adapter
-    paths: [opencode-plugin/**]
+    paths: [opencode-plugin/**, src/integration/lease-transport.ts]
     owners:
       - opencode-plugin/README.md
       - skills/nmg-memory/references/harness-adapters.md
