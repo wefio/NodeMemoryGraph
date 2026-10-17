@@ -383,7 +383,10 @@ An adapter must provide stable session and message IDs, normalized actors and
 text, an optional source reference, and lifecycle hooks for pre-turn recall,
 post-turn feedback, and shutdown. It must not parse SQLite rows, update graph
 topology, implement QPP, or construct embedding indexes. Pi is the first
-adapter, not part of the NMG data model. The [Pi session-hook contract](session-memory-lifecycle-hooks-2026-08-10.md#首次输出计时)
+adapter, not part of the NMG data model. Per-adapter coverage across the
+capability surface is compared in the
+[harness capability matrix](harness-capability-matrix.md). [The Pi
+session-hook contract](session-memory-lifecycle-hooks-2026-08-10.md#首次输出计时)
 also owns opt-in metadata-only first-response timing and slow-recall retention.
 Observation does not change recall waiting policy or issue provider probes.
 

@@ -11,7 +11,6 @@
 import { observeRecallPreparation, registerFirstResponseTiming } from "./first-response-timing.ts";
 import { registerWorkingStateView } from "./working-state-view.ts";
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { defineTool } from "@earendil-works/pi-coding-agent";
@@ -50,24 +49,52 @@ import {
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import { memoryDisclosureEntries } from "../../../src/integration/search-projection.ts";
 import { PI_BOARD_ACTIONS, PI_REMEMBER_ACTIONS } from "../../../src/integration/tool-contract.ts";
+import type { TaskBoardToolResult } from "../../../src/integration/tool-contract.ts";
+import {
+  type BoardWakeConfig,
+  type BoardWakeState,
+  collectWakeCandidates,
+  deliverBoardWake,
+  filterUndelivered,
+  loadWakeState as loadWakeStateShared,
+  readWakeConfig as readWakeConfigShared,
+  wakeBudgetGate,
+  writeWakeConfig as writeWakeConfigShared,
+} from "../../../src/integration/board-wake.ts";
+import {
+  loadOrCreateAgentIdentity,
+  renameAgentIdentity,
+} from "../../../src/integration/agent-identity.ts";
+import {
+  AgentAttributionFlow,
+  extractAnswerText,
+  extractPromptText,
+} from "../../../src/integration/agent-attribution.ts";
+import { SessionRecallFlow } from "../../../src/integration/session-recall-flow.ts";
+import { SessionTaskWindow } from "../../../src/integration/session-task-window.ts";
+import {
+  isMemorableToolResult,
+  isSuccessfulCommit,
+  messageText,
+  summarizeToolResult,
+} from "../../../src/integration/tool-observation.ts";
 import { renderLabOutput } from "../../../src/integration/lab-capabilities.ts";
 import { TASK_BOARD_VERDICTS } from "../../../src/core/types.ts";
-import { boardEntryView } from "../../../src/core/board-entry-view.ts";
 import { resolveSkillOptPolicyChannels } from "../../../src/lab/skillopt-policy.ts";
-import type {
-  ActiveGraphBudget,
-  MemoryContext,
-  MemorySearchResult,
-  MemoryTier,
-} from "../../../src/core/types.ts";
+import type { ActiveGraphBudget, MemoryContext, MemoryTier } from "../../../src/core/types.ts";
 import { WORLD_BOARD_ID } from "../../../src/core/types.ts";
 import {
-  coordinationEnabled,
+  configuredAutoRecallLimit,
+  configuredAutoRecallTier,
   configuredControllerRerankMode,
+  configuredInitialTarget,
   configuredQpp1Mode,
   configuredQpp2Mode,
   configuredQpp2RetainedMass,
   configuredSearchRecommendationMode,
+  configuredStrongHitInitialTarget,
+  configuredStrongHitTopGap,
+  coordinationEnabled,
   type SearchRecommendationMode,
 } from "../../../src/integration/config.ts";
 import {
@@ -94,7 +121,6 @@ import {
   contextStateViews,
 } from "../../../src/integration/context-information.ts";
 import { deriveAnswerOverlapMemoryIds } from "../../../src/core/feedback.ts";
-import { decideMemoryLoad } from "../../../src/core/gate.ts";
 import {
   REASONING_EDGE_KINDS,
   REASONING_NODE_KINDS,
@@ -171,6 +197,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   // forwards feedback — no learner logic or ask-scheduling lives here.
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
   const coordinationToolsEnabled = coordinationEnabled();
+  // Wake config/state persistence lives in src/integration/board-wake.ts; the
+  // adapter only binds the data directory once so the /nmg UI below keeps its
+  // one-argument surface without duplicating any load/save/gating logic.
+  const wakeDataDir = resolveNmgDataDir();
+  const readWakeConfig = (): BoardWakeConfig => readWakeConfigShared(wakeDataDir);
+  const writeWakeConfig = (config: BoardWakeConfig): void =>
+    writeWakeConfigShared(config, wakeDataDir);
+  const loadWakeState = (): BoardWakeState => loadWakeStateShared(wakeDataDir);
   // The online-learning gate is inlined here because the pi package cannot
   // import the learner module — it pulls node:fs + the learner dep tree across
   // the thin-extension pack boundary. The daemon owns the real gate; this only
@@ -980,7 +1014,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     // heartbeats it each tick). Never wakes an LLM. Capabilities come from
     // NMG_AGENT_CAPABILITIES (comma-separated) when set.
     try {
-      const identity = loadOrCreateAgentIdentity(sessionId);
+      const identity = loadOrCreateAgentIdentity(sessionId, "pi");
       await invoke("taskBoard", {
         action: "registerAgent",
         id: identity.id,
@@ -2017,17 +2051,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       );
     }
     const anchor = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
-    const identityFile = join(resolveNmgDataDir(), "agents", anchor, "identity.json");
-    const renamedIdentity = { id: agentId, agentName: newName };
-    cachedIdentities.set(anchor, renamedIdentity);
-    try {
-      mkdirSync(join(resolveNmgDataDir(), "agents", anchor), {
-        recursive: true,
-      });
-      writeFileSync(identityFile, JSON.stringify(renamedIdentity, null, 2), "utf8");
-    } catch {
-      // read-only dir — rename is in-memory only for this process
-    }
+    renameAgentIdentity({ anchor, id: agentId, agentName: newName });
     const result = (await invokeStateBoard({
       action: "rename",
       id: agentId,
@@ -2134,7 +2158,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // Identity chain: explicit NMG_AGENT_ID wins, then the session id (stable
       // across a session), then the pid as a last resort. A pid alone would
       // change every launch and fragment cross-session attribution.
-      const identity = loadOrCreateAgentIdentity(sessionId);
+      const identity = loadOrCreateAgentIdentity(sessionId, "pi");
       const agentId = identity.id;
       const agentName = identity.agentName;
       assertBoardVerbCall(params);
@@ -2301,7 +2325,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // ---- Board wake loop (config file + /nmg-wake command) ------------
+  // ---- Board wake loop ----------------------------------------------
   // Notification for an idle Agent: poll the subscribed spaces (the world
   // channel plus active named channels), and when a new open entry appears
   // that has not already been surfaced, wake the Agent with a broadcast-style
@@ -2309,80 +2333,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   // addressing a specific recipient. This is the notification half of the
   // claim+notify design: claims decide who works, notifications decide who
   // knows. Enabled and tuned via ~/.nmg/board-wake.json (edited by hand or
-  // toggled with /nmg-wake, which persists to the same file); dedup state is
+  // toggled with /nmg, which persists to the same file); dedup state is
   // kept in board-wake-state.json. Coordination is available by default and
   // this second-layer switch can explicitly silence automatic wake delivery.
-  const wakeConfigPath = join(resolveNmgDataDir(), "board-wake.json");
-  const wakeStatePath = join(resolveNmgDataDir(), "board-wake-state.json");
-  interface BoardWakeConfig {
-    enabled: boolean;
-    budget: number;
-    cooldownMs: number;
-    intervalMs: number;
-    /** When on, a collaboration-kind entry that wakes this session is also
-     * announced on the world channel so other agents can pull it in. */
-    worldBroadcast: boolean;
-  }
-  interface BoardWakeState {
-    budgetDate: string;
-    budgetUsed: number;
-    lastWakeAt: number;
-  }
-  const readWakeConfig = (): BoardWakeConfig => {
-    try {
-      const raw = JSON.parse(readFileSync(wakeConfigPath, "utf8")) as Partial<BoardWakeConfig>;
-      return {
-        enabled: raw.enabled !== false,
-        // 0 = unlimited: budget 0 disables the daily cap, cooldownMs 0 removes the cooldown.
-        budget: raw.budget === 0 ? 0 : Math.max(1, Number(raw.budget) || 8),
-        cooldownMs: raw.cooldownMs === 0 ? 0 : Math.max(30_000, Number(raw.cooldownMs) || 600_000),
-        intervalMs: Math.max(5_000, Number(raw.intervalMs) || 60_000),
-        worldBroadcast: raw.worldBroadcast === true,
-      };
-    } catch {
-      return {
-        enabled: true,
-        budget: 8,
-        cooldownMs: 600_000,
-        intervalMs: 60_000,
-        worldBroadcast: false,
-      };
-    }
-  };
-  const writeWakeConfig = (config: BoardWakeConfig): void => {
-    try {
-      writeFileSync(wakeConfigPath, JSON.stringify(config, null, 2), "utf8");
-    } catch {
-      // best-effort; a read-only directory just means the toggle cannot persist
-    }
-  };
-  const loadWakeState = (): BoardWakeState => {
-    try {
-      return JSON.parse(readFileSync(wakeStatePath, "utf8")) as BoardWakeState;
-    } catch {
-      return { budgetDate: "", budgetUsed: 0, lastWakeAt: 0 };
-    }
-  };
-  const saveWakeState = (state: BoardWakeState): void => {
-    try {
-      writeFileSync(wakeStatePath, JSON.stringify(state), "utf8");
-    } catch {
-      // best-effort; losing dedup state only means an entry could re-notify
-    }
-  };
-  // Wake budget gate: returns false when the tick should stop (disabled,
-  // cooling, budget exhausted) and mutates `state` for the daily budget reset.
-  const wakeBudgetGate = (config: BoardWakeConfig, state: BoardWakeState, now: number): boolean => {
-    if (!config.enabled) return false;
-    if (config.cooldownMs > 0 && now - state.lastWakeAt < config.cooldownMs) return false;
-    const today = new Date(now).toISOString().slice(0, 10);
-    if (state.budgetDate !== today) {
-      state.budgetDate = today;
-      state.budgetUsed = 0;
-    }
-    if (config.budget > 0 && state.budgetUsed >= config.budget) return false;
-    return true;
-  };
+  // Config/state persistence, the budget gate, candidate collection, delivery
+  // filtering, and world broadcasts live in src/integration/board-wake.ts —
+  // the adapter only binds its transport and emission primitives.
+  const wakeInvoke = invoke as (method: string, params: unknown) => Promise<unknown>;
 
   // Live session gate: a captured ctx goes stale after session replacement/
   // reload; isIdle and getSessionId on a stale ctx throw, which must never
@@ -2396,150 +2353,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }
   };
 
-  // Collect wake candidates from the world channel, the directed inbox, and
-  // subscribed named channels. Point-to-point delivery is an inbox, not topic
-  // membership: a target must receive a directed handoff even before it has
-  // discovered or joined the sender's named channel.
-  const collectWakeCandidates = async (
-    agentId: string,
-    agentName: string,
-    sessionId: string,
-  ): Promise<Array<TaskBoardToolEntry & { taskId: string }>> => {
-    const candidates: Array<TaskBoardToolEntry & { taskId: string }> = [];
-    const candidateIds = new Set<string>();
-    const collect = (taskId: string, entries: TaskBoardToolEntry[] | undefined) => {
-      for (const entry of entries ?? []) {
-        if (
-          !candidateIds.has(entry.id) &&
-          isBoardWakeCandidate(entry, { sessionId, agentId, agentName })
-        ) {
-          candidateIds.add(entry.id);
-          candidates.push({ ...entry, taskId });
-        }
-      }
-    };
-    const world = (await invoke("taskBoard", {
-      action: "read",
-      taskId: WORLD_BOARD_ID,
-      agentId,
-    })) as TaskBoardToolResult;
-    collect(WORLD_BOARD_ID, world.entries);
-    const directed = (await invoke("taskBoard", {
-      action: "readDirected",
-      agentId,
-      agentName,
-    })) as { action: "readDirected"; entries: TaskBoardToolEntry[] };
-    for (const entry of directed.entries ?? []) {
-      const taskId = entry.taskId?.trim();
-      if (taskId) collect(taskId, [entry]);
-    }
-    // Named channels: only channels this session explicitly subscribed to are
-    // scanned. Topic-based membership — a non-member never receives wake
-    // notices for a named channel, no matter how active it is. Discovery of
-    // new channels happens by reading the world channel lobby, then joining
-    // with subscribe.
-    const subs = (await invoke("taskBoard", {
-      action: "listSubscriptions",
-      agentId,
-      sessionId,
-    })) as {
-      action: "listSubscriptions";
-      subscriptions: Array<{ taskId: string }>;
-    };
-    for (const board of subs.subscriptions ?? []) {
-      const read = (await invoke("taskBoard", {
-        action: "read",
-        taskId: board.taskId,
-        agentId,
-      })) as TaskBoardToolResult;
-      collect(board.taskId, read.entries);
-    }
-    return candidates;
-  };
-
-  // Delivery protocol: ask the daemon which candidates are already delivered to
-  // this session and which channels are suppressed (do-not-send), then keep
-  // only undelivered, non-suppressed ones.
-  const filterUndelivered = async (
-    candidates: Array<TaskBoardToolEntry & { taskId: string }>,
-    agentId: string,
-    sessionId: string,
-  ): Promise<Array<TaskBoardToolEntry & { taskId: string }>> => {
-    const fresh: Array<TaskBoardToolEntry & { taskId: string }> = [];
-    for (const taskId of new Set(candidates.map((candidate) => candidate.taskId))) {
-      const check = (await invoke("taskBoard", {
-        action: "deliveryCheck",
-        taskId,
-        agentId,
-        sessionId,
-        entryIds: candidates
-          .filter((candidate) => candidate.taskId === taskId)
-          .map((candidate) => candidate.id),
-      })) as { delivered: string[]; acked: string[]; suppressed: boolean };
-      if (check.suppressed) continue; // unsubscribed channel — skip entirely
-      const delivered = new Set(check.delivered);
-      const acked = new Set(check.acked ?? []);
-      for (const candidate of candidates) {
-        if (
-          candidate.taskId === taskId &&
-          !delivered.has(candidate.id) &&
-          !acked.has(candidate.id)
-        ) {
-          fresh.push(candidate);
-        }
-      }
-    }
-    return fresh;
-  };
-
-  // Wake the agent for the top-priority fresh entry, record the delivery
-  // receipt, optionally broadcast to the world channel, and consume the budget.
-  const deliverWake = async (
-    pick: TaskBoardToolEntry & { taskId: string },
-    config: BoardWakeConfig,
-    state: BoardWakeState,
-    now: number,
-    agentId: string,
-    sessionId: string,
-  ): Promise<void> => {
-    const excerpt = pick.content.length > 140 ? `${pick.content.slice(0, 140)}…` : pick.content;
-    const label = kindLabel(pick.kind);
-    pi.sendUserMessage(
-      `[NMG board] 你订阅的频道 ${pick.taskId} 有新${label}：#${pick.id} — ${excerpt}（open，可认领）。需要的话用 nmg_state space=board action=read 查看详情、action=write operation=claim 认领处理。`,
-    );
-    // Delivery receipt: this session has been reached for this entry, so the
-    // wake loop will not re-notify it (idempotent in the store).
-    await invoke("taskBoard", {
-      action: "recordDelivery",
-      entryId: pick.id,
-      sessionId,
-      agentId,
-      source: "wake",
-    });
-    // Optional world-channel pull broadcast: when enabled and the entry is a
-    // collaboration kind, announce it on the world channel so OTHER agents
-    // notice and can pull it in. Broadcast is broadcast-style (a pull
-    // announcement, never addressed), deduped once per entry via the
-    // deliveries table under the sentinel session so an unanswered entry does
-    // not re-broadcast every tick. The loop's own echo filter (sourceSessionId
-    // === this session) stops the broadcaster from waking on its own post.
-    if (
-      config.worldBroadcast &&
-      BROADCAST_KINDS.has(pick.kind) &&
-      !pick.content.startsWith(BROADCAST_PREFIX)
-    ) {
-      await maybeBroadcastToWorld({
-        invoke: invoke as (method: string, params: unknown) => Promise<unknown>,
-        entry: pick,
-        agentId,
-        sessionId,
-      });
-    }
-    state.budgetUsed += 1;
-    state.lastWakeAt = now;
-    saveWakeState(state);
-  };
-
   const scanBoardWake = async (): Promise<void> => {
     const config = readWakeConfig();
     const state = loadWakeState();
@@ -2547,7 +2360,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     if (!wakeBudgetGate(config, state, now)) return;
     const sessionId = liveSessionId();
     if (!sessionId) return;
-    const identity = loadOrCreateAgentIdentity(sessionId);
+    const identity = loadOrCreateAgentIdentity(sessionId, "pi");
     const agentId = identity.id;
     const agentName = identity.agentName;
     // System-layer identity heartbeat (A2A AgentCard local edition): refresh
@@ -2566,9 +2379,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // best-effort: a daemon without the registerAgent method just skips it.
     }
     try {
-      const candidates = await collectWakeCandidates(agentId, agentName, sessionId);
+      const candidates = await collectWakeCandidates(wakeInvoke, {
+        agentId,
+        agentName,
+        sessionId,
+      });
       if (candidates.length === 0) return;
-      const fresh = await filterUndelivered(candidates, agentId, sessionId);
+      const fresh = await filterUndelivered(wakeInvoke, candidates, { agentId, sessionId });
       if (fresh.length === 0) return;
       const rank: Record<string, number> = {
         question: 0,
@@ -2584,7 +2401,17 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           (rank[left.kind] ?? 9) - (rank[right.kind] ?? 9) ||
           String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? "")),
       );
-      await deliverWake(fresh[0]!, config, state, now, agentId, sessionId);
+      await deliverBoardWake({
+        invoke: wakeInvoke,
+        sendWake: (message: string) => pi.sendUserMessage(message),
+        config,
+        state,
+        dataDir: wakeDataDir,
+        now,
+        agentId,
+        sessionId,
+        entry: fresh[0]!,
+      });
     } catch {
       // daemon unavailable or transient failure — retry next tick
     }
@@ -2741,285 +2568,7 @@ function piHistoryMessage(value: unknown): AgentHistoryMessage | undefined {
   return content ? { id: entry.id, actor, content } : undefined;
 }
 
-function messageText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((part) =>
-      part && typeof part === "object" && (part as { type?: unknown }).type === "text"
-        ? String((part as { text?: unknown }).text ?? "")
-        : "",
-    )
-    .filter(Boolean)
-    .join("\n");
-}
-
 type DisclosureLevel = "header" | "exact" | "evidence";
-
-interface SessionTaskState {
-  anchors: string[];
-}
-
-export interface SessionRecallRequest {
-  query: string;
-  mode: "retrieve" | "cue";
-  reason: string;
-  maxTier: MemoryTier;
-  limit: number;
-  graphHops: number;
-}
-
-/**
- * Bounded query-side task context for automatic recall. It does not inject
- * transcript text into the model and does not attempt semantic summarisation;
- * it only carries two recent substantive user task anchors across terse
- * continuation turns such as "reload 了，你试试".
- */
-export class SessionTaskWindow {
-  readonly #sessions = new Map<string, SessionTaskState>();
-  readonly maxAnchors: number;
-  readonly maxAnchorCharacters: number;
-
-  constructor(maxAnchors = 2, maxAnchorCharacters = 480) {
-    this.maxAnchors = Math.max(1, maxAnchors);
-    this.maxAnchorCharacters = Math.max(80, maxAnchorCharacters);
-  }
-
-  prepare(sessionId: string, prompt: string): SessionRecallRequest | null {
-    const normalized = normalizeTaskPrompt(prompt);
-    if (!normalized) return null;
-    const state = this.#state(sessionId);
-    const gate = decideMemoryLoad(normalized);
-    const substantive = isSubstantiveTaskPrompt(normalized);
-    const continuation = isTaskContinuation(normalized);
-    const prior = state.anchors.join("\n");
-    const continuePriorTask = continuation && prior.length > 0;
-    const usePriorContext = prior.length > 0 && (gate.mode === "retrieve" || continuePriorTask);
-
-    if (substantive) {
-      const anchor = excerpt(normalized, this.maxAnchorCharacters);
-      if (state.anchors.at(-1) !== anchor) state.anchors.push(anchor);
-      while (state.anchors.length > this.maxAnchors) state.anchors.shift();
-    }
-    if (gate.mode === "none" && !continuePriorTask) return null;
-    return {
-      query: [normalized, usePriorContext ? `Recent task context:\n${prior}` : ""]
-        .filter(Boolean)
-        .join("\n"),
-      mode: gate.mode === "none" ? "cue" : gate.mode,
-      reason: gate.mode === "none" ? "task_continuation" : gate.reason,
-      maxTier: (gate.mode === "none" ? 1 : gate.maxTier) as MemoryTier,
-      limit: gate.mode === "none" ? 5 : gate.limit,
-      graphHops: gate.mode === "none" ? 0 : gate.graphHops,
-    };
-  }
-
-  clear(sessionId: string): void {
-    this.#sessions.delete(sessionId);
-  }
-
-  #state(sessionId: string): SessionTaskState {
-    let state = this.#sessions.get(sessionId);
-    if (!state) {
-      state = { anchors: [] };
-      this.#sessions.set(sessionId, state);
-    }
-    return state;
-  }
-}
-
-/**
- * Per-turn tool-flow guard. It does not cap retrieval depth or result count;
- * it prevents repeated paraphrased searches when the model has not consumed
- * any returned evidence. A successful get opens the search phase again.
- */
-/**
- * Agent-end diagnostic-attribution cache. Independent of the SkillOpt shadow
- * bridge, it records which active graphs a session retrieved so agent_end can
- * derive answer overlap and persist attributed_memory_ids. The signal is useful
- * for coverage and feedback targeting but cannot train QPP or the controller.
- * Normal close() already checkpoints, so there is no per-turn cost beyond the
- * bounded in-memory list.
- */
-export class AgentAttributionFlow {
-  readonly #traces = new Map<string, Array<{ traceId: string; results: MemorySearchResult[] }>>();
-  readonly maxPerSession: number;
-
-  constructor(maxPerSession = 8) {
-    this.maxPerSession = Math.max(1, maxPerSession);
-  }
-
-  note(sessionId: string, context: MemoryContext): void {
-    if (!context.activeGraph) return;
-    let list = this.#traces.get(sessionId);
-    if (!list) {
-      list = [];
-      this.#traces.set(sessionId, list);
-    }
-    const existing = list.find((entry) => entry.traceId === context.activeGraph!.id);
-    if (existing) {
-      existing.results = context.results;
-      return;
-    }
-    list.push({ traceId: context.activeGraph.id, results: context.results });
-    if (list.length > this.maxPerSession) list.shift();
-  }
-
-  latestActiveGraphIdForMemories(sessionId: string, memoryIds: readonly string[]): string | null {
-    if (memoryIds.length === 0) return null;
-    const requested = new Set(memoryIds);
-    const traces = this.#traces.get(sessionId) ?? [];
-    for (let index = traces.length - 1; index >= 0; index -= 1) {
-      const trace = traces[index]!;
-      const available = new Set(trace.results.map((result) => result.memory.id));
-      if ([...requested].every((memoryId) => available.has(memoryId))) return trace.traceId;
-    }
-    return null;
-  }
-
-  /** All retrieved graphs for this session, cleared afterwards (one-shot). */
-  consume(sessionId: string): Array<{ traceId: string; results: MemorySearchResult[] }> {
-    const pending = this.#traces.get(sessionId) ?? [];
-    this.#traces.delete(sessionId);
-    return pending;
-  }
-
-  clear(sessionId: string): void {
-    this.#traces.delete(sessionId);
-  }
-}
-
-/** Concatenate assistant message content from an agent_end message list. */
-function extractAnswerText(messages: readonly unknown[]): string {
-  const parts: string[] = [];
-  for (const value of messages) {
-    if (!value || typeof value !== "object") continue;
-    const message = value as { role?: unknown; content?: unknown };
-    if (message.role !== "assistant") continue;
-    const text = messageText(message.content).trim();
-    if (text) parts.push(text);
-  }
-  return parts.join("\n").trim();
-}
-
-function extractPromptText(messages: readonly unknown[]): string {
-  const parts: string[] = [];
-  for (const value of messages) {
-    if (!value || typeof value !== "object") continue;
-    const message = value as { role?: unknown; content?: unknown };
-    if (message.role !== "user") continue;
-    const text = messageText(message.content).trim();
-    if (text) parts.push(text);
-  }
-  return parts.join("\n").trim();
-}
-
-export class SessionRecallFlow {
-  readonly #states = new Map<
-    string,
-    {
-      turnKey: string;
-      searchesSinceGet: number;
-      searchCalls: number;
-      recallCalls: number;
-      consecutiveNoGain: number;
-      candidateIds: Set<string>;
-      loadedIds: Set<string>;
-    }
-  >();
-  readonly maxSearchesBeforeGet: number;
-  readonly maxSearchCalls: number;
-  readonly maxRecallCalls: number;
-  readonly maxConsecutiveNoGain: number;
-
-  constructor(
-    maxSearchesBeforeGet = 2,
-    maxSearchCalls = 3,
-    maxRecallCalls = 5,
-    maxConsecutiveNoGain = 2,
-  ) {
-    this.maxSearchesBeforeGet = Math.max(1, maxSearchesBeforeGet);
-    this.maxSearchCalls = Math.max(this.maxSearchesBeforeGet, maxSearchCalls);
-    this.maxRecallCalls = Math.max(this.maxSearchCalls, maxRecallCalls);
-    this.maxConsecutiveNoGain = Math.max(1, maxConsecutiveNoGain);
-  }
-
-  beginTurn(sessionId: string, turnKey: string): boolean {
-    const current = this.#states.get(sessionId);
-    if (current?.turnKey === turnKey) return false;
-    this.#states.set(sessionId, this.#newState(turnKey));
-    return true;
-  }
-
-  allowSearch(sessionId: string): boolean {
-    const current = this.#state(sessionId);
-    if (this.searchBlockReason(sessionId) !== null) return false;
-    current.searchesSinceGet += 1;
-    current.searchCalls += 1;
-    current.recallCalls += 1;
-    return true;
-  }
-
-  searchBlockReason(sessionId: string): string | null {
-    const current = this.#state(sessionId);
-    if (current.recallCalls >= this.maxRecallCalls) return "recall_tool_budget_exhausted";
-    if (current.searchCalls >= this.maxSearchCalls) return "search_budget_exhausted";
-    if (current.consecutiveNoGain >= this.maxConsecutiveNoGain) return "no_new_evidence";
-    if (current.searchesSinceGet >= this.maxSearchesBeforeGet) {
-      return "evidence_progression_required";
-    }
-    return null;
-  }
-
-  recordSearch(sessionId: string, memoryIds: readonly string[]): void {
-    const current = this.#state(sessionId);
-    const newIds = memoryIds.filter((memoryId) => !current.candidateIds.has(memoryId));
-    for (const memoryId of memoryIds) current.candidateIds.add(memoryId);
-    current.consecutiveNoGain = newIds.length > 0 ? 0 : current.consecutiveNoGain + 1;
-  }
-
-  allowGet(sessionId: string): boolean {
-    const current = this.#state(sessionId);
-    if (current.recallCalls >= this.maxRecallCalls) return false;
-    current.recallCalls += 1;
-    return true;
-  }
-
-  recordGet(sessionId: string, memoryIds: readonly string[]): void {
-    const current = this.#state(sessionId);
-    const newIds = memoryIds.filter((memoryId) => !current.loadedIds.has(memoryId));
-    for (const memoryId of memoryIds) current.loadedIds.add(memoryId);
-    if (newIds.length > 0) {
-      current.searchesSinceGet = 0;
-      current.consecutiveNoGain = 0;
-    }
-  }
-
-  clear(sessionId: string): void {
-    this.#states.delete(sessionId);
-  }
-
-  #state(sessionId: string) {
-    let current = this.#states.get(sessionId);
-    if (!current) {
-      current = this.#newState("");
-      this.#states.set(sessionId, current);
-    }
-    return current;
-  }
-
-  #newState(turnKey: string) {
-    return {
-      turnKey,
-      searchesSinceGet: 0,
-      searchCalls: 0,
-      recallCalls: 0,
-      consecutiveNoGain: 0,
-      candidateIds: new Set<string>(),
-      loadedIds: new Set<string>(),
-    };
-  }
-}
 
 const nmgPrompts = loadPrompts();
 export const SKILLOPT_POLICY_CHANNELS = resolveSkillOptPolicyChannels(nmgPrompts.memory_policy);
@@ -3063,31 +2612,6 @@ function persistedContextResult(output: PreparedInformationOutput, systemPrompt:
         }
       : {}),
   };
-}
-
-function configuredAutoRecallTier(): MemoryTier {
-  const value = Number(process.env.NMG_AUTO_RECALL_TIER ?? 1);
-  return Math.max(0, Math.min(3, Number.isFinite(value) ? Math.floor(value) : 1)) as MemoryTier;
-}
-
-function configuredAutoRecallLimit(): number {
-  const value = Number(process.env.NMG_AUTO_RECALL_LIMIT ?? 13);
-  return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 13));
-}
-
-function configuredInitialTarget(): number {
-  const value = Number(process.env.NMG_AUTO_RECALL_INITIAL_TARGET ?? 13);
-  return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 13));
-}
-
-function configuredStrongHitTopGap(): number {
-  const value = Number(process.env.NMG_AUTO_RECALL_STRONG_HIT_TOP_GAP ?? 0.05);
-  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0.05));
-}
-
-function configuredStrongHitInitialTarget(): number {
-  const value = Number(process.env.NMG_AUTO_RECALL_STRONG_HIT_INITIAL_TARGET ?? 3);
-  return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 3));
 }
 
 export function controllerBudgetEnvelopes(context: MemoryContext): {
@@ -3168,24 +2692,6 @@ export function formatSearchRecommendation(
   return nmgPrompts.search_recommendation;
 }
 
-function normalizeTaskPrompt(prompt: string): string {
-  return prompt.replace(/\s+/gu, " ").trim();
-}
-
-function isSubstantiveTaskPrompt(prompt: string): boolean {
-  if (prompt.length >= 40) return true;
-  return /(?:[A-Za-z][\w.-]{2,}[-_/][\w./-]+|\b(?:fix|implement|debug|test|build|refactor|install|configure)\b|(?:修复|实现|测试|构建|重构|安装|配置|设计))/iu.test(
-    prompt,
-  );
-}
-
-function isTaskContinuation(prompt: string): boolean {
-  if (prompt.length > 100) return false;
-  return /(?:\b(?:continue|again|retry|reload|try|proceed|go on|fix it|test it)\b|(?:继续|再试|重试|试试|开始吧|接着|改吧|修一下|好了|可以了|然后呢))/iu.test(
-    prompt,
-  );
-}
-
 export function formatSearchHeaders(context: MemoryContext): string {
   const nextStep = formatProgressiveDisclosure(context) || nmgPrompts.get_hint;
   return renderSearchSurface(context, {
@@ -3239,224 +2745,6 @@ function toolResult(details: unknown, text: string) {
   return { content: [{ type: "text" as const, text }], details };
 }
 
-interface AgentIdentity {
-  /** Stable unique routing key — never changes (industry practice: A2A
-   * AgentCard id, Microsoft resolve-by-id). Equal to the anchor on first
-   * creation. */
-  id: string;
-  /** Mutable display label — runtime-renamable through state write board rename. */
-  agentName: string;
-}
-
-const cachedIdentities = new Map<string, AgentIdentity>();
-
-/** Stable agent identity: a persistent per-agent file under
- * ~/.nmg/agents/<anchor>/identity.json, where anchor = NMG_AGENT_ID (the
- * agent's own stable id, set by the agent itself) or the session id. The id
- * (routing key) never changes; agentName is a mutable display label that a
- * runtime `rename` updates. Multiple agents on one machine never collide
- * because each has its own anchor directory. Survives reload (session-boundary
- * fix): the identity file is re-read, so id and name persist across a pi
- * restart. */
-function loadOrCreateAgentIdentity(sessionId: string): AgentIdentity {
-  const anchor = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
-  const cachedIdentity = cachedIdentities.get(anchor);
-  if (cachedIdentity) return cachedIdentity;
-  const dir = join(resolveNmgDataDir(), "agents", anchor);
-  const file = join(dir, "identity.json");
-  try {
-    const raw = JSON.parse(readFileSync(file, "utf8")) as AgentIdentity;
-    if (raw.id && raw.agentName) {
-      const identity = { id: raw.id, agentName: raw.agentName };
-      cachedIdentities.set(anchor, identity);
-      return identity;
-    }
-  } catch {
-    // no identity file yet — create below
-  }
-  const identity: AgentIdentity = { id: anchor, agentName: anchor };
-  try {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(file, JSON.stringify(identity, null, 2), "utf8");
-  } catch {
-    // read-only directory — fall back to the in-memory identity
-  }
-  cachedIdentities.set(anchor, identity);
-  return identity;
-}
-
-interface TaskBoardToolEntry {
-  id: string;
-  taskId?: string;
-  sequence: number;
-  agentId: string;
-  sourceSessionId?: string | null;
-  kind: string;
-  status: string;
-  content: string;
-  claimedBy?: string | null;
-  claimExpiresAt?: string | null;
-  /** Directed delivery (A2A find→direct): stable agent_name to wake. Others
-   * read-but-stay-silent. Null = ordinary broadcast to subscribers. */
-  to?: string | null;
-  /** Reply-gated serial handoff: 'pending' entries are queued and must not
-   * wake until the outstanding one is claimed/resolved. */
-  serialState?: "outstanding" | "pending" | "stale" | null;
-  ackedBy?: string[];
-  createdAt?: string;
-}
-
-function kindLabel(kind: string): string {
-  switch (kind) {
-    case "question":
-      return "问题";
-    case "blocker":
-      return "阻塞";
-    case "handoff":
-      return "交接";
-    case "goal":
-      return "目标";
-    case "note":
-      return "记录";
-    case "decision":
-      return "决定";
-    case "result":
-      return "结果";
-    default:
-      return "条目";
-  }
-}
-
-interface TaskBoardToolResult {
-  action: "put" | "read" | "resolve" | "claim" | "release" | "acknowledge" | "discover";
-  entry?: TaskBoardToolEntry;
-  entries?: TaskBoardToolEntry[];
-  nextCursor?: string | null;
-  delivered?: string[];
-  acked?: string[];
-  /** discover: online agent roster (A2A discovery localised). */
-  agents?: Array<{
-    id: string;
-    agentName: string;
-    description: string | null;
-    capabilities: string | null;
-    lastSeenAt: string;
-  }>;
-  suppressed?: boolean;
-}
-
-/** Sentinel deliveries-table session used to dedup world-channel broadcasts:
- * each entry is broadcast at most once, keyed on (entry, this sentinel). */
-export const WORLD_BROADCAST_SESSION = "world-broadcast";
-/** Content prefix marking a world-channel pull broadcast (meta: it announces
- * another entry). Entries carrying it are never re-broadcast — otherwise a
- * broadcast wakes a session, which broadcasts the broadcast, recursively
- * flooding the world channel (observed live: #12→#13→#16…). */
-export const BROADCAST_PREFIX = "[NMG board 协作广播]";
-
-/** Pure wake-candidate predicate for the board wake loop (exported for unit
- * testing). An entry wakes a session when it is open, is not an echo of the
- * receiving session, has NO live claim, is not a broadcast pull announcement,
- * AND its kind asks for a response/action — the same set as BROADCAST_KINDS
- * (question/blocker/handoff). Notify-only kinds (note/result/decision/goal)
- * are SILENT: they record a fact and owe no reply, so waking on them is the
- * acknowledgement storm — N agents confirming one fact each emit a note, and
- * every note wakes every subscriber (observed live: #36/#37/#38/#39 were four
- * confirmations of the same fact). Notify-only entries are read on demand,
- * never pushed. Claim liveness matters: a lapsed claim (lease expired; holder
- * crashed or stopped, no sweeper clears the column) returns the entry to the
- * pool, so it must wake again rather than be permanently hidden from its
- * former holder (audit finding 2026-08-13). */
-export function isBoardWakeCandidate(
-  entry: TaskBoardToolEntry,
-  input: { sessionId: string; agentId: string; agentName?: string; now?: Date },
-): boolean {
-  const now = input.now ?? new Date();
-  const ownEcho =
-    entry.sourceSessionId === input.sessionId ||
-    (entry.sourceSessionId == null && entry.agentId === input.agentId);
-  const liveClaim =
-    entry.claimExpiresAt != null && new Date(entry.claimExpiresAt).getTime() > now.getTime();
-  // Directed delivery (find→direct): an entry addressed to another agent
-  // never wakes me — only the addressee's LLM is woken. Matched against the
-  // stable id OR the mutable display name (both are the same agent). Everyone
-  // else sees it on read but stays silent.
-  const addressedToOther =
-    entry.to != null && entry.to !== input.agentId && entry.to !== input.agentName;
-  // Reply-gated serial handoff: only the outstanding actionable wakes; pending
-  // entries sit in the queue (read-visible) until the outstanding one is
-  // claimed ("回复=接手") or resolved, which promotes them. Directed entries are
-  // exempt (serialState is null for them — parallel-safe).
-  const serialQueued = entry.serialState === "pending";
-  return (
-    entry.status === "open" &&
-    BROADCAST_KINDS.has(entry.kind) &&
-    !ownEcho &&
-    !liveClaim &&
-    !addressedToOther &&
-    !serialQueued &&
-    !entry.content.startsWith(BROADCAST_PREFIX)
-  );
-}
-/** Broadcasts are transient pull notices: they announce another entry and must
- * not outlive it. RAII: give them a short TTL so an unanswered broadcast is
- * recycled (with its receipts) instead of accumulating as permanent open dead
- * state on the world channel. */
-export const BROADCAST_TTL_SECONDS = 86_400;
-/** Collaboration kinds worth pulling other agents in on; note/result/decision
- * updates are not broadcast, to keep the world channel quiet. */
-export const BROADCAST_KINDS = new Set(["question", "blocker", "handoff"]);
-
-/** Post a collaboration-pull broadcast on the world channel for an open entry
- * that woke this session, so other agents notice and can pull it in.
- * Broadcast is broadcast-style (a pull announcement, never addressed); the
- * delivery receipt under WORLD_BROADCAST_SESSION dedups it (once per entry),
- * and the wake loop's echo filter (sourceSessionId === this session) stops the
- * broadcaster from waking on its own post. Returns true when a broadcast was
- * actually posted. Injected `invoke` keeps the function unit-testable. */
-export async function maybeBroadcastToWorld(input: {
-  invoke: (method: string, params: unknown) => Promise<unknown>;
-  entry: TaskBoardToolEntry & { taskId: string };
-  agentId: string;
-  sessionId: string;
-}): Promise<boolean> {
-  const { invoke, entry, agentId, sessionId } = input;
-  // A broadcast entry is meta — it announces another entry. Re-broadcasting it
-  // is how broadcast storms start (broadcast → wake → broadcast → …). The
-  // original entry gets one pull broadcast; the broadcast itself never does.
-  if (entry.content.startsWith(BROADCAST_PREFIX)) return false;
-  const worldCheck = (await invoke("taskBoard", {
-    action: "deliveryCheck",
-    taskId: WORLD_BOARD_ID,
-    agentId,
-    sessionId: WORLD_BROADCAST_SESSION,
-    entryIds: [entry.id],
-  })) as { delivered: string[]; suppressed: boolean };
-  if (worldCheck.delivered.includes(entry.id)) return false;
-  const excerpt = boardEntryView(entry.content, 140);
-  const label = kindLabel(entry.kind);
-  const broadcast = `[NMG board 协作广播] 频道 ${entry.taskId} 有 #${entry.id} 未认领的${label}（open）：${excerpt}。有空的 agent 可用 nmg_state space=board action=read taskId=${entry.taskId} 查看详情、action=write operation=claim 认领处理。`;
-  await invoke("taskBoard", {
-    action: "put",
-    taskId: WORLD_BOARD_ID,
-    agentId,
-    sourceSessionId: sessionId,
-    kind: "handoff",
-    content: broadcast,
-    // RAII: a broadcast is a transient pull notice — recycle it (with its
-    // receipts) after a day rather than leaving permanent open dead state.
-    ttlSeconds: BROADCAST_TTL_SECONDS,
-  });
-  await invoke("taskBoard", {
-    action: "recordDelivery",
-    entryId: entry.id,
-    sessionId: WORLD_BROADCAST_SESSION,
-    agentId,
-    source: "wake-broadcast",
-  });
-  return true;
-}
-
 function formatTaskBoardResult(
   result: TaskBoardToolResult,
   taskId: string,
@@ -3473,88 +2761,6 @@ function formatRememberResult(value: unknown): string {
   return renderRememberSurface(value as Parameters<typeof renderRememberSurface>[0]);
 }
 
-function excerpt(value: string, maxLength: number): string {
-  const normalized = value.replace(/\s+/gu, " ").trim();
-  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}…`;
-}
-
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-
-/**
- * PostToolUse runtime-state capture (the tool result is the one event that
- * carries input + content + isError + per-tool details).
- */
-
-/** True only when a git commit actually landed, so a failed or no-op commit
- *  never raises the completion nudge. */
-export function isSuccessfulCommit(event: {
-  toolName: string;
-  isError: boolean;
-  content: unknown;
-  input?: unknown;
-}): boolean {
-  if (event.toolName !== "bash" || event.isError) return false;
-  const command = String((event.input as { command?: unknown })?.command ?? "");
-  if (!/\bgit\s+commit\b/.test(command)) return false;
-  const output = messageText(event.content);
-  return !/(?:nothing to commit|no changes added to commit|nothing added to commit)/iu.test(output);
-}
-
-/** Only tool results with lasting information value are captured as traces. */
-export function isMemorableToolResult(event: {
-  toolName: string;
-  isError: boolean;
-  content: unknown;
-  input?: unknown;
-}): boolean {
-  if (event.isError) return true;
-  const text = messageText(event.content);
-  switch (event.toolName) {
-    case "bash": {
-      const command = String((event.input as { command?: unknown })?.command ?? "");
-      const testRun =
-        /\b(?:npm|pnpm|yarn|bun|npx|node|deno)\s+(?:run\s+)?test\b|(?:vitest|jest|pytest|go\s+test|cargo\s+test)/iu.test(
-          command,
-        );
-      return testRun || /(?:error|fail(?:ed|ure)?|fatal|warning|exception|✗|FAILED)/iu.test(text);
-    }
-    case "edit":
-    case "write":
-      // File mutations are structural changes; capture the path.
-      return true;
-    case "grep":
-      return text.trim().length > 0;
-    default:
-      return false;
-  }
-}
-
-export function summarizeToolResult(event: {
-  toolName: string;
-  isError: boolean;
-  content: unknown;
-  input?: unknown;
-}): { statement: string; nodeName: string } {
-  const input = event.input as Record<string, unknown> | undefined;
-  if (event.toolName === "edit" || event.toolName === "write") {
-    const path = String(input?.path ?? input?.filePath ?? "?");
-    const verb = event.toolName === "write" ? "Wrote" : "Edited";
-    return {
-      statement: `${verb} ${path}${event.isError ? " (tool returned an error)" : ""}.`,
-      nodeName: path,
-    };
-  }
-  const text = excerpt(messageText(event.content), 400);
-  const status = event.isError ? " [error]" : "";
-  return {
-    statement: `Tool ${event.toolName}${status}: ${text || "(no text output)"}`,
-    nodeName: `tool:${event.toolName}`,
-  };
-}
-
-/**
- * Session-local projection of recent tool state. It deliberately has no daemon
- * or SQLite path: explicit nmg_remember remains the durable-memory gate.
- */

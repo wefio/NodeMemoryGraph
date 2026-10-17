@@ -41,7 +41,16 @@ test("research and chaos suites remain explicit execution groups", () => {
 });
 
 test("format and format:check cover the same declared developer TypeScript surfaces", () => {
-  const expected = ["src", ".pi", "workbuddy-plugin", "tests", "evals", "scripts", "tools"].sort();
+  const expected = [
+    "src",
+    ".pi",
+    "workbuddy-plugin",
+    "opencode-plugin",
+    "tests",
+    "evals",
+    "scripts",
+    "tools",
+  ].sort();
   for (const name of ["format", "format:check"]) {
     const surfaces = [...packageJson.scripts[name]!.matchAll(/"([^"]+)\/\*\*\/\*\.ts"/gu)]
       .map((match) => match[1]!)

@@ -29,7 +29,7 @@ agent 平台——还有一些停留在论文阶段。NMG 走相反的方向：
   进程，记忆库本身永远不会。
 - **免费。** 没有任何计费面：FTS5 检索内置，本地嵌入路径零成本，也没有
   可以升级的账号。
-- **真实可用，不是概念。** CLI、JSON-RPC daemon、MCP server、三个 harness
+- **真实可用，不是概念。** CLI、JSON-RPC daemon、MCP server、四个 harness
   的可用 adapter——而且 NMG 正作为自己的开发记忆被跨会话日常使用，不是
   demo 里跑一次就完。
 
@@ -38,13 +38,14 @@ CLI + Skill 路径。但它刻意做到了**对 agent 友好、易于集成**：
 agent 会用 CLI，它大概率就能用 NMG；如果它会写插件，它甚至能基于稳定的
 JSON-RPC 边界自己完成集成。
 
-| 你的环境                                   | 接入路径                                                                                                    |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| [Pi](https://github.com/earendil-works/pi) | 原生扩展（[试试](#试试)）                                                                                   |
-| Claude Code                                | 本地 MCP 插件（[Claude Code 插件](#claude-code-插件)）                                                      |
-| DeepSeek Harness                           | Cordis 插件（[dsh/](dsh/README.md)）                                                                        |
-| 其他任意 agent                             | CLI + [Skill](skills/nmg-memory/SKILL.md)（[Agent 无关 CLI](#agent-无关-cli)、[Agent Skill](#agent-skill)） |
-| 自定义 harness                             | 基于 HTTP JSON-RPC 边界自写 adapter（[无头 Pi 控制](#无头-pi-控制)）                                        |
+| 你的环境 | 接入路径 |
+|---|---|
+| [Pi](https://github.com/earendil-works/pi) | 原生扩展（[试试](#试试)） |
+| OpenCode v2 | 薄传输插件（[opencode-plugin README](opencode-plugin/README.md)） |
+| Claude Code | 本地 MCP 插件（[Claude Code 插件](#claude-code-插件)） |
+| DeepSeek Harness | Cordis 插件（[dsh/](dsh/README.md)） |
+| 其他任意 agent | CLI + [Skill](skills/nmg-memory/SKILL.md)（[Agent 无关 CLI](#agent-无关-cli)、[Agent Skill](#agent-skill)） |
+| 自定义 harness | 基于 HTTP JSON-RPC 边界自写 adapter（[无头 Pi 控制](#无头-pi-控制)） |
 
 ## 架构
 

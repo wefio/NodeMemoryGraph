@@ -23,15 +23,14 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { compatibleLease, liveLease, rpcCall } from "../src/integration/lease-transport.ts";
 import { renderCompactSearchSurface } from "../src/integration/agent-surface.ts";
+import { RecallBudget } from "../src/integration/recall-budget.ts";
 import {
   compactDisclosureEntries,
   compactSearchContext,
 } from "../src/integration/search-projection.ts";
 import type { MemoryContext } from "../src/core/types.ts";
-import { assertDaemonProtocol } from "../src/cli/daemon-client.ts";
-import { RecallBudget } from "../src/integration/recall-budget.ts";
-import type { NmgHelloResult } from "../src/cli/protocol.ts";
 
 interface HookPayload {
   prompt?: unknown;
@@ -44,12 +43,9 @@ interface HookPayload {
   cwd?: string;
 }
 
-interface HttpLease {
-  host: string;
-  port: number;
-  token: string;
-  pid: number;
-}
+// The lease transport (liveLease/rpcCall/compatibleLease) moved to
+// src/integration/lease-transport.ts. liveLease is re-exported for tests.
+export { liveLease };
 
 interface WakeEntry {
   id: string;
@@ -91,7 +87,6 @@ const RECALL_LIMIT = 13;
 const RECALL_MAX_TIER = 1;
 const RECALL_GRAPH_HOPS = 1;
 const RECALL_QUERY_CHARS = 400;
-const RPC_TIMEOUT_MS = 2_000;
 
 const WORLD_BOARD_ID = "default";
 const FALSE_LIKE = new Set(["0", "false", "off", "no"]);
@@ -160,70 +155,6 @@ function writeJson(path: string, value: unknown) {
   }
 }
 
-function pidAlive(pid: unknown): boolean {
-  try {
-    process.kill(Number(pid), 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException | null)?.code === "EPERM";
-  }
-}
-
-export function liveLease(dir: string): HttpLease | null {
-  const lease = readJson(join(dir, "nmg.sqlite.server.json"));
-  if (
-    !lease ||
-    lease.transport !== "http" ||
-    lease.host !== "127.0.0.1" ||
-    !Number.isInteger(lease.port) ||
-    lease.port < 1 ||
-    lease.port > 65_535 ||
-    typeof lease.token !== "string" ||
-    lease.token.length < 16
-  )
-    return null;
-  return pidAlive(lease.pid) ? lease : null;
-}
-
-async function rpcCall(lease: HttpLease, method: string, params: unknown, signal?: AbortSignal) {
-  const response = await fetch(`http://${lease.host}:${lease.port}/`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${lease.token}`,
-    },
-    body: JSON.stringify({ jsonrpc: "2.0", method, params, id: 1 }),
-    signal: signal ?? AbortSignal.timeout(RPC_TIMEOUT_MS),
-  });
-  if (!response.ok) throw new Error(`NMG HTTP ${response.status}`);
-  const parsed = await response.json();
-  if (parsed?.jsonrpc !== "2.0") throw new Error("invalid NMG JSON-RPC response");
-  if (parsed.error) throw new Error(parsed.error.message ?? "rpc error");
-  return parsed.result;
-}
-
-const verifiedLeaseByDirectory = new Map<string, Promise<ReturnType<typeof liveLease>>>();
-
-async function compatibleLease(dir: string, signal?: AbortSignal) {
-  let pending = verifiedLeaseByDirectory.get(dir);
-  if (!pending) {
-    pending = (async () => {
-      const lease = liveLease(dir);
-      if (!lease) return null;
-      try {
-        const hello = (await rpcCall(lease, "hello", {}, signal)) as NmgHelloResult;
-        assertDaemonProtocol(hello);
-        if (!hello.capabilities.includes("session-active-graph")) return null;
-        return lease;
-      } catch {
-        return null;
-      }
-    })();
-    verifiedLeaseByDirectory.set(dir, pending);
-  }
-  return pending;
-}
-
 function agentIdentity(payload: HookPayload, environment = process.env) {
   const sessionId = payload?.session_id ?? payload?.sessionId ?? "workbuddy-hook";
   return {
@@ -261,7 +192,7 @@ export async function recallHeaders(payload: HookPayload, dir = dataDir()): Prom
   const budget = new RecallBudget();
   let timelySurface = "";
   try {
-    const lease = await budget.run("hello", (signal) => compatibleLease(dir, signal));
+    const lease = await budget.run("hello", () => compatibleLease(dir));
     if (!lease) return "";
     const query = promptText(payload).trim().slice(0, RECALL_QUERY_CHARS);
     if (!query) return "";

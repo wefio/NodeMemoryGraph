@@ -1,8 +1,11 @@
 # Harness adapters
 
 NMG ships a thin adapter per harness (Pi, Claude Code MCP, DeepSeek Harness,
-plus the installable WorkBuddy hook in `workbuddy-plugin/`).
-This reference is the recipe for writing one. Read it when you need to expose NMG
+plus the installable WorkBuddy hook in `workbuddy-plugin/` and the OpenCode v2
+plugin in `opencode-plugin/`). This reference is the recipe for writing one.
+Per-adapter coverage of the capability surface is compared in the
+[harness capability matrix](../../../docs/design/harness-capability-matrix.md).
+Read it when you need to expose NMG
 to a new tool-capable harness, or when an existing adapter misbehaves.
 
 ## The stable contract
