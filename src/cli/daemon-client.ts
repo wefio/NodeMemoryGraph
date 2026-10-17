@@ -229,7 +229,12 @@ export async function invokeDaemon(
   options: HttpCallOptions = {},
 ): Promise<unknown> {
   options.signal?.throwIfAborted();
-  await refreshDaemonConnection(connection);
+  // Reload awareness at the call boundary: wait out an in-progress handover,
+  // adopt a replacement endpoint through one authenticated hello (never spawn,
+  // probe or re-dial), and always let an aborted call fail with its deadline.
+  await waitForReload(connection.databasePath);
+  await adoptReplacedEndpoint(connection, options.signal);
+  options.signal?.throwIfAborted();
   assertDaemonCapability(connection.capabilities, method, connection.methods);
   const captured =
     method === "lab"
@@ -286,15 +291,41 @@ async function endpointReplacedDuringConnect(
 ): Promise<boolean> {
   await waitForReload(databasePath);
   const current = readServerState(serverStatePath(databasePath));
-  return (
-    !isProcessAlive(previous.pid) ||
-    (!!current && (current.pid !== previous.pid || current.token !== previous.token))
-  );
+  // Replacement needs evidence that a different owner wrote the endpoint
+  // (reload handover rewrites the state file). A dead owner with the same
+  // stale descriptor is not a replacement; dialing again belongs after the
+  // call's fetch-level failure.
+  return !!current && (current.pid !== previous.pid || current.token !== previous.token);
 }
 
-async function refreshDaemonConnection(connection: DaemonConnection): Promise<void> {
-  if (await endpointReplacedDuringConnect(connection.databasePath, connection.state))
-    replaceConnection(connection, await connectDaemon(connection.databasePath));
+/** Mid-call handover pickup: exactly one authenticated hello against the
+ * current state file - no probes, no recursion and never a spawn, so a call
+ * cannot claim ownership of a replacement. An unreachable replacement is left
+ * to the fetch-failure path; an incompatible hello is surfaced like hello
+ * protocol trouble; and an aborted call fails with its deadline, never with
+ * reconnect noise. */
+async function adoptReplacedEndpoint(
+  connection: DaemonConnection,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
+  if (!(await endpointReplacedDuringConnect(connection.databasePath, connection.state))) return;
+  signal?.throwIfAborted();
+  const candidate = readyState(serverStatePath(connection.databasePath));
+  if (!candidate) return;
+  try {
+    const hello = parseDaemonHello(await httpCall(candidate, "hello", {}, { signal }));
+    // An adopted replacement was never spawned by this call: the endpoint
+    // belongs to its starter (operator or reload controller), not to us.
+    connection.state = candidate;
+    connection.startedByCaller = false;
+    connection.capabilities = new Set(hello.capabilities);
+    connection.methods = hello.methods ? new Set(hello.methods) : undefined;
+    connection.catalogFingerprint = hello.catalogFingerprint;
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (error instanceof NmgDaemonCompatibilityError) throw error;
+  }
 }
 
 function replaceConnection(connection: DaemonConnection, next: DaemonConnection): void {
