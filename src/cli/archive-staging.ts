@@ -118,10 +118,13 @@ export async function archiveOrStage(
     statement: `Session ${entry.sessionId} archived${entry.summary ? `: ${entry.summary}` : ""}`,
     nodeName: `Session ${entry.sessionId}`,
   };
+  let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
       remember(params),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("archive timeout")), timeoutMs)),
+      new Promise((_, reject) => {
+        deadline = setTimeout(() => reject(new Error("archive timeout")), timeoutMs);
+      }),
     ]);
     return "remembered";
   } catch {
@@ -131,6 +134,8 @@ export async function archiveOrStage(
       // Staging failed too — nothing more we can do at shutdown time.
     }
     return "staged";
+  } finally {
+    if (deadline !== undefined) clearTimeout(deadline);
   }
 }
 

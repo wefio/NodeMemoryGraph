@@ -25,6 +25,30 @@ const ENTRY = {
   reason: "quit",
 };
 
+test("successful shutdown archive releases its deadline rather than keeping Node alive", async () => {
+  const dir = freshDir();
+  const timeoutCount = () =>
+    process.getActiveResourcesInfo().filter((resource) => resource === "Timeout").length;
+  const before = timeoutCount();
+  try {
+    assert.equal(await archiveOrStage(dir, ENTRY, async () => "ok", 5_000), "remembered");
+    assert.equal(timeoutCount(), before, "a completed archive must not retain its deadline");
+  } finally {
+    removeTempDirectory(dir);
+  }
+});
+
+test("archive deadline still stages a stalled write and allows teardown", async () => {
+  const dir = freshDir();
+  try {
+    const result = await archiveOrStage(dir, ENTRY, () => new Promise(() => {}), 1);
+    assert.equal(result, "staged");
+    assert.equal(pendingArchives(dir)[0]?.sessionId, ENTRY.sessionId);
+  } finally {
+    removeTempDirectory(dir);
+  }
+});
+
 test("stageArchive writes atomically and pendingArchives reads it back", () => {
   const dir = freshDir();
   const path = stageArchive(dir, ENTRY);

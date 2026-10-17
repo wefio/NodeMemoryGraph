@@ -31,11 +31,11 @@ search_description: >-
   exclusions, and quoted phrases.
 
 get_description: >-
-  Load exact memory records and source evidence for memory IDs returned by
-  nmg_search (or nmg_automatic_recall). When available, pass the activeGraphId
-  returned by search so NMG can attribute actual use; it is not required to
-  read a known memory ID. Returns the full statement plus evidence content and
-  source reference.
+  Load exact memory records and source evidence using IDs from nmg_search (or
+  nmg_automatic_recall). Copy ref: keys whole and supply their original
+  activeGraphId; refs require a unique match. Full memory IDs need no graph.
+  Pass activeGraphId to attribute use. Returns the full statement, canonical
+  memory ID, evidence content and source reference.
 
 remember_description: >-
   Save a durable record (fact, state, event, preference, constraint,
@@ -66,16 +66,28 @@ board_description: >-
   writer attribution (NMG_AGENT_ID). Use put/read/resolve; a claim can end in a
   deliverable (deliver: digest, optional ref/summary) that a *different* agent
   rules on (judge: accepted/rejected/undecidable with a reason) — a self-report
-  is not an acceptance. Full conventions (memory pointers, boundaries) are
-  disclosed in each tool result.
+  is not an acceptance. Read results retain entry identity and coordination
+  status; long display conventions are opt-in, not repeated on each call.
+  Expand memory=<id> pointers with nmg_get.
+
+state_description: >-
+  Read or write temporary state through one entry: select ag or board and a
+  domain operation. AG is private session working state: read/status, or
+  enable/disable its writer lease and replace(text)/clear. Board is shared
+  TTL/lease-based coordination: read, readInbox, readPreviews, discover/list;
+  write put, claim/release, acknowledge, deliver/judge, resolve, subscribe/
+  unsubscribe or rename. Writes retain the original owner permissions and
+  state machines. AG writes are provisional; a board self-report is not an
+  acceptance. Views retain source identities, required labels and budgets.
 
 lab_description: >-
   Discover and temporarily enable optional NMG capabilities for the current
   session. Use list before first use, enable only when the current task benefits,
   invoke a documented operation, and disable when finished. Reasoning workspace,
-  graph reasoner, and controller shadow are self-service; controlled or active
-  controller modes remain harness/operator gated. Lab output is provisional and
-  never becomes durable memory unless separately submitted through nmg_remember.
+  graph reasoner and controller shadow are self-service; controlled or active
+  controller modes remain harness/operator gated. Daily working-state maintenance
+  uses nmg_state, not Lab. Lab output is provisional and never becomes durable
+  memory unless separately submitted through nmg_remember.
 
 reason_description: >-
   Maintain a session-private, auditable reasoning scratchpad containing typed
@@ -333,10 +345,9 @@ completion_nudge: >-
 # Shown only when a staged decision for this session exists and has not been
 # rated; the daemon resolves the staged graph by session id (shared layer).
 recall_feedback_affordance: >-
-  This recall surfaced memory with activeGraphId={graph_id}. If that content
-  helped, went unused, or misled the current work, you may rate it: call
-  nmg_remember action=feedback with activeGraphId={graph_id} and only the
-  labels you can judge (evidenceSufficient, expansionUseful, excessiveNoise,
+  If this recall helped, went unused, or misled the current work, you may
+  rate it: call nmg_remember action=feedback with activeGraphId={graph_id} and
+  only the labels you can judge (evidenceSufficient, expansionUseful, excessiveNoise,
   noMemoryNeeded; optionally taskSuccess and userCorrection). Omit the call
   when any label would be a guess — never invent labels.
 
@@ -365,39 +376,33 @@ shadow_claim_outcome_nudge: >-
 # ---- 渐进披露（检索结果返回时附带） ---------------------------------------
 
 search_disclosure: |
-  NMG MEMORY CANDIDATES
-  format: one candidate per line; fields separated by "; ".
-  fields: memory=id; node=semantic cluster; type=memory type; time=event date; expires=expiry date; chains=logical chain names; preview=statement excerpt
-  Optional [external] and [open] markers describe provenance and unresolved state.
-  Records are ranked by retrieval score; order is not a guarantee of relevance.
+  NMG MEMORY CANDIDATES — previews, not evidence; order is not a guarantee of relevance.
+  node=semantic cluster; time=event date; expires=expiry date; chains=logical names.
+  [external]=external source; [open]=unresolved.
 
 search_disclosure_metadata: |
-  NMG search metadata: count={count}
+  count={count}
   {next_step}
   {forget_hint}
 
 get_disclosure: |
   NMG selected evidence:
-  - statement: the saved record content
-  - SOURCE=: original evidence content when it differs from the statement
-  - id/node/type/truth/scope identify the record
+  Saved records; SOURCE=original evidence when different.
 
 get_disclosure_metadata: |
-  NMG evidence metadata: count={count}
+  count={count}
   {next_step}
   {forget_hint}
 
 deferred_hint: >-
-  More ranked records are folded. If these are insufficient, call nmg_get
-  once with the deferred memory IDs; do not repeat nmg_search.
+  More ranked records are folded. If needed, nmg_get the deferred IDs once;
+  do not repeat nmg_search.
 
 get_hint: >-
-  Use nmg_get with selected memory IDs and the activeGraphId to load exact
-  records and source evidence.
+  Use nmg_get with selected IDs and activeGraphId for exact records and source evidence.
 
 forget_hint: >-
-  A line beginning with [forget] is a revocation boundary; treat it as
-  revoked.
+  [forget] means withdrawn content; do not rely on it.
 
 # ---- 其他 -----------------------------------------------------------------
 in_context_title: "NMG ALREADY IN CURRENT CONTEXT"
@@ -427,6 +432,18 @@ memory_policy: >-
   updates; search first when duplication is plausible. Ask instead of saving when attribution, scope, or
   durability is materially ambiguous. Save only attributable, durable information; do not save secrets,
   transient content, unconfirmed assistant proposals, unsupported guesses, or information already stored.
+  For ongoing multi-step work, maintain one compact session working_state through nmg_state:
+  select space=ag, explicitly enable its writer with action=write operation=enable and a reason,
+  then use action=write operation=replace with text=<complete current state> after meaningful progress,
+  plan changes or blockers, not every tool call or unchanged update. Keep the goal,
+  verified completion with source references, current step, next action and blockers visible;
+  distinguish planned, implemented and verified work. At a task change replace the previous
+  task status, without guessing semantic task identity. This is public provisional status,
+  not hidden reasoning, durable memory or collaboration acceptance. On completion leave
+  the final status readable and disable its writer lease; clear only when the state is
+  intentionally discarded. Missing state after session eviction or daemon restart must
+  be rebuilt from current evidence, the repository or explicit shared task references,
+  not assumed to survive. Necessary facts must remain recoverable outside this private AG.
 
 claim_outcome_parameter_description: >-
   Explicit result for selected saved claims: supported or contradicted. This is

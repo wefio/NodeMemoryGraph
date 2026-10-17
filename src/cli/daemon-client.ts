@@ -3,6 +3,8 @@ import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { resolveNmgDataDir } from "./data-path.ts";
+import { captureWorkingStateInvocation } from "../integration/lab-capabilities.ts";
+import { captureStateInvocation } from "../integration/state.ts";
 import { httpCall, type HttpCallOptions } from "./http-client.ts";
 import { isProcessAlive, readServerState, serverStatePath, type ServerState } from "./lifecycle.ts";
 import {
@@ -125,7 +127,9 @@ export function parseDaemonHello(value: unknown): NmgHelloResult {
     throw new NmgDaemonHandshakeError("result must be an object");
   }
   const hello = value as Record<string, unknown>;
-  assertDaemonProtocol({ protocol: typeof hello.protocol === "string" ? hello.protocol : "" });
+  assertDaemonProtocol({
+    protocol: typeof hello.protocol === "string" ? hello.protocol : "",
+  });
   if (hello.service !== "node-memory-graph")
     throw new NmgDaemonHandshakeError("service identity is not node-memory-graph");
   if (typeof hello.version !== "string")
@@ -216,8 +220,37 @@ export async function invokeDaemon(
 ): Promise<unknown> {
   options.signal?.throwIfAborted();
   assertDaemonCapability(connection.capabilities, method, connection.methods);
+  const captured =
+    method === "lab"
+      ? await captureWorkingStateInvocation(params, (sessionId) =>
+          invokeDaemon(
+            connection,
+            "lab",
+            {
+              action: "status",
+              capability: "working_state",
+              sessionId,
+            },
+            options,
+          ),
+        )
+      : method === "state"
+        ? await captureStateInvocation(params, (sessionId) =>
+            invokeDaemon(
+              connection,
+              "state",
+              {
+                action: "read",
+                space: "ag",
+                operation: "status",
+                sessionId,
+              },
+              options,
+            ),
+          )
+        : params;
   try {
-    return await httpCall(connection.state, method, params, options);
+    return await httpCall(connection.state, method, captured, options);
   } catch (error) {
     if (options.signal?.aborted || !(error instanceof TypeError)) throw error;
     // A live owner with a transiently broken endpoint must not cause a second
@@ -231,7 +264,7 @@ export async function invokeDaemon(
     connection.methods = reconnected.methods;
     connection.catalogFingerprint = reconnected.catalogFingerprint;
     assertDaemonCapability(connection.capabilities, method, connection.methods);
-    return await httpCall(connection.state, method, params, options);
+    return await httpCall(connection.state, method, captured, options);
   }
 }
 

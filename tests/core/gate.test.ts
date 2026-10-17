@@ -18,6 +18,14 @@ test("explicit questions about past or current user state trigger automatic reca
   assert.equal(decideMemoryLoad("What did Caroline research?").maxTier, 3);
 });
 
+test("先前 and 之前 give the same explicit recall decision for a fresh-session question", () => {
+  const question = (cue: string) =>
+    `用户对 NodeMemoryGraph 的 AG 状态与可见内容改进，${cue}提出过哪些实现约束？请仅报告本轮自动召回消息中的候选，不把候选当成已核实事实。`;
+  const expected = decideMemoryLoad(question("之前"));
+  assert.equal(expected.mode, "retrieve");
+  assert.deepEqual(decideMemoryLoad(question("先前")), expected);
+});
+
 // ── planning and recommendation (cue) ──
 
 test("planning and recommendation prompts receive recall cues", () => {

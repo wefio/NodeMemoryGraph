@@ -64,8 +64,28 @@ export function compactSearchContext(context: MemoryContext): CompactSearchConte
     ...(context.tesserae && context.tesserae.length > 0 ? { tesserae: context.tesserae } : {}),
     // Degraded retrieval must survive projection — a silently healthy-looking
     // lexical surface is how a dead provider went unnoticed for weeks.
-    ...(context.retrieval?.degraded ? { retrieval: context.retrieval } : {}),
+    ...(context.retrieval?.degraded
+      ? {
+          retrieval: {
+            ...context.retrieval,
+            reason: compactRetrievalReason(context.retrieval.reason),
+          },
+        }
+      : {}),
   };
+}
+
+/** Admit cause codes, not arbitrary provider bodies, into model-facing metadata.
+ * The original MemoryContext and daemon health retain the full diagnostic.
+ */
+export function compactRetrievalReason(reason?: string): string {
+  if (
+    reason &&
+    /^embedding_(?:unavailable|index_not_ready|index_missing_targets|http_[45]\d\d)$/u.test(reason)
+  )
+    return reason;
+  const status = /^embedding server returned ([45]\d\d)(?::|$)/u.exec(reason ?? "");
+  return status ? `embedding_http_${status[1]}` : "unknown";
 }
 
 /** Stable hash of the content that a particular disclosure depth will expose.

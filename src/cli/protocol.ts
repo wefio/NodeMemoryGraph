@@ -45,6 +45,7 @@ import type {
   SessionActiveGraphItem,
   SessionActiveGraphItemKind,
   SessionActiveGraphSnapshot,
+  WorkingStateBinding,
 } from "../core/session-active-graph.ts";
 import type {
   LabActivation,
@@ -52,6 +53,7 @@ import type {
   LabCapabilityDescriptor,
   LabScope,
 } from "../integration/lab-capabilities.ts";
+import type { PreparedInformationOutput } from "../core/information-view.ts";
 import type { ContextFeedbackLabels } from "../lab/context-reward.ts";
 import type { RunPlanTask, RunStatus } from "../integration/task-coordinator.ts";
 
@@ -103,6 +105,7 @@ export const NMG_CAPABILITIES = [
   "memory-chains",
   "lab-capabilities",
   "session-active-graph",
+  "state-spaces",
 ] as const;
 
 export type NmgCapability = (typeof NMG_CAPABILITIES)[number];
@@ -150,6 +153,7 @@ const RPC_DESCRIPTOR_SOURCE = {
   chainGet: {},
   chainList: {},
   lab: {},
+  state: { optionalCapability: "state-spaces" },
   sessionActiveGraph: { optionalCapability: "session-active-graph" },
   shutdown: {},
   status: {},
@@ -203,6 +207,8 @@ export interface NmgHelloResult {
 }
 
 export interface NmgStatusResult extends NmgHelloResult {
+  /** Get input attempts since service startup; optional for earlier same-epoch daemons. */
+  getReferenceUsage?: { fullIds: number; compoundRefs: number };
   process: {
     pid: number;
     node: string;
@@ -406,12 +412,17 @@ export type NmgSessionActiveGraphParams =
       sessionId: string;
       statement: string;
       sourceId?: string;
+      /** Temporary provenance, not durable evidence or a recovery assertion. */
+      sourceKind?: string;
       nodeId?: string;
       taskFrameId?: string;
-      kind?: Exclude<SessionActiveGraphItemKind, "semantic_memory">;
+      kind?: Exclude<SessionActiveGraphItemKind, "semantic_memory" | "working_state">;
       activation?: number;
     }
-  | { action: "snapshot" | "activate" | "release" | "clearDisclosures"; sessionId: string }
+  | {
+      action: "snapshot" | "activate" | "release" | "clearDisclosures";
+      sessionId: string;
+    }
   | { action: "beginDisclosureTurn"; sessionId: string }
   | {
       action: "disclose";
@@ -423,7 +434,10 @@ export type NmgSessionActiveGraphParams =
 
 export type NmgSessionActiveGraphResult =
   | { action: "observe"; added: boolean; item: SessionActiveGraphItem }
-  | { action: "snapshot" | "activate"; snapshot: SessionActiveGraphSnapshot | null }
+  | {
+      action: "snapshot" | "activate";
+      snapshot: SessionActiveGraphSnapshot | null;
+    }
   | { action: "release"; released: boolean }
   | { action: "clearDisclosures"; cleared: boolean }
   | { action: "beginDisclosureTurn"; turn: number }
@@ -881,12 +895,31 @@ export type NmgLabParams =
       sessionId: string;
       operation: string;
       input?: unknown;
+      /** Trusted client capture, separate from model-authored operation input. */
+      workingStateBinding?: WorkingStateBinding;
     };
 
 export type NmgLabResult =
   | { action: "list"; capabilities: LabCapabilityDescriptor[] }
-  | { action: "status" | "enable" | "disable"; activation: LabActivation | null }
-  | { action: "invoke"; capability: LabCapability; operation: string; output: unknown };
+  | {
+      action: "status" | "enable" | "disable";
+      activation: LabActivation | null;
+    }
+  | {
+      action: "invoke";
+      capability: LabCapability;
+      operation: string;
+      output: unknown;
+    };
+
+/** State dispatch preserves domain results; presentation reuses the existing output protocol. */
+export interface NmgStateResult {
+  action: "read" | "write";
+  space: "ag" | "board";
+  operation: string;
+  result: NmgLabResult | NmgSessionActiveGraphResult | NmgMethodResult["taskBoard"];
+  information?: PreparedInformationOutput;
+}
 
 export type NmgMethodResult = {
   hello: NmgHelloResult;
@@ -946,8 +979,12 @@ export type NmgMethodResult = {
   } | null;
   chainList: MemoryChain[];
   lab: NmgLabResult;
+  state: NmgStateResult;
   sessionActiveGraph: NmgSessionActiveGraphResult;
-  recordActiveGraphAttribution: { activeGraphId: string; attributedMemoryIds: string[] };
+  recordActiveGraphAttribution: {
+    activeGraphId: string;
+    attributedMemoryIds: string[];
+  };
   retentionCandidates: { candidates: RetentionCandidate[] };
   setStorageState: { memoryId: string; storageState: MemoryStorageState };
   perfAggregates: PerfAggregate[];
@@ -981,10 +1018,18 @@ export type NmgMethodResult = {
     | { action: "read"; entries: TaskBoardEntry[]; nextCursor: string | null }
     | { action: "readDirected"; entries: TaskBoardEntry[] }
     | { action: "readInbox"; entries: TaskBoardEntry[] }
-    | { action: "readPreviews"; previews: TaskBoardPreview[]; nextCursor: string | null }
+    | {
+        action: "readPreviews";
+        previews: TaskBoardPreview[];
+        nextCursor: string | null;
+      }
     | {
         action: "list";
-        boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }>;
+        boards: Array<{
+          taskId: string;
+          entryCount: number;
+          lastUpdatedAt: string;
+        }>;
       }
     | {
         action: "deliveryCheck";
@@ -998,7 +1043,11 @@ export type NmgMethodResult = {
         action: "listSubscriptions";
         subscriptions: Array<{ taskId: string; subscribedAt: string }>;
       }
-    | { action: "registerAgent" | "heartbeat" | "rename"; agentName: string; id: string }
+    | {
+        action: "registerAgent" | "heartbeat" | "rename";
+        agentName: string;
+        id: string;
+      }
     | {
         action: "discover";
         agents: Array<{

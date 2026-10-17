@@ -206,7 +206,12 @@ routes:
       - src/integration/controller-channel.ts
       - src/integration/evidence.ts
       - src/integration/first-response-timing.ts
+      - src/integration/information-output.ts
+      - src/integration/context-information.ts
+      - src/integration/working-state-input.ts
       - src/integration/lab-capabilities.ts
+      - src/integration/state.ts
+      - src/integration/memory-reference.ts
       - src/integration/reasoning-workspaces.ts
       - src/integration/recall-budget.ts
       - src/integration/search-projection.ts
@@ -222,8 +227,15 @@ routes:
         tests/integration/controller-channel.test.ts,
         tests/integration/evidence.test.ts,
         tests/integration/first-response-timing.test.ts,
+        tests/integration/information-output.test.ts,
+        tests/integration/context-information.test.ts,
         tests/integration/lab-capabilities.test.ts,
         tests/integration/recall-budget.test.ts,
+        tests/integration/state-client.test.ts,
+        tests/integration/memory-reference.test.ts,
+        tests/integration/memory-reference-snapshot.test.ts,
+        tests/integration/working-state-client.test.ts,
+        tests/integration/working-state-input.test.ts,
         tests/integration/tool-contract.test.ts,
       ]
     verify:
@@ -257,7 +269,12 @@ routes:
       - docs/design/ooo-execution-bootstrap.md
       - docs/design/task-unit-semantics.md
       - docs/design/ooo-fusion-planning.md
-    tests: [tests/integration/ooo-*.test.ts, tests/integration/task-semantics*.test.ts, tests/integration/task-refinement*.test.ts]
+    tests:
+      [
+        tests/integration/ooo-*.test.ts,
+        tests/integration/task-semantics*.test.ts,
+        tests/integration/task-refinement*.test.ts,
+      ]
     verify:
       blocking: [check, test:product, build]
       advisory: []

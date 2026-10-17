@@ -6,6 +6,8 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { httpCall } from "../../src/cli/http-client.ts";
+import { invokeDaemon } from "../../src/cli/daemon-client.ts";
+import type { NmgHelloResult, NmgLabResult } from "../../src/cli/protocol.ts";
 import { httpHandler } from "../../src/cli/http-server.ts";
 import type { ServerState } from "../../src/cli/lifecycle.ts";
 import { NMG_PROTOCOL_VERSION, NMG_RPC_CATALOG_FINGERPRINT } from "../../src/cli/protocol.ts";
@@ -44,7 +46,9 @@ function startServer(
 function withServer(fn: (state: EphemeralServer["state"]) => Promise<void>): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "nmg-http-"));
   const token = "test-token";
-  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite") });
+  const service = new NmgService({
+    databasePath: join(directory, "nmg.sqlite"),
+  });
   return startServer(service, token).then(async ({ server, state }) => {
     try {
       await fn(state);
@@ -83,6 +87,47 @@ test("JSON-RPC over HTTP round-trips hello, remember, search, and get", async ()
       memoryIds: [remembered.memory.id, "missing"],
     })) as { results: unknown[]; missingMemoryIds: string[] };
     assert.equal(got.missingMemoryIds.length, 1);
+  });
+});
+
+test("ordinary daemon client captures working-state metadata across the JSON-RPC wire", async () => {
+  await withServer(async (state) => {
+    const hello = (await httpCall(state, "hello")) as NmgHelloResult;
+    const connection = {
+      state,
+      startedByCaller: false,
+      databasePath: "unused-working-state-client.sqlite",
+      capabilities: new Set(hello.capabilities),
+      methods: new Set(hello.methods),
+    };
+    const enable = {
+      action: "enable",
+      capability: "working_state",
+      sessionId: "owner",
+      requester: "agent:wire",
+      reason: "current state",
+    };
+    const lease = (await invokeDaemon(connection, "lab", enable)) as NmgLabResult;
+    assert.equal(lease.action, "enable");
+    const invocation = {
+      action: "invoke",
+      capability: "working_state",
+      sessionId: "owner",
+      operation: "replace",
+      input: { text: "Wire state." },
+    };
+    const result = (await invokeDaemon(connection, "lab", invocation)) as NmgLabResult;
+    assert.equal(result.action === "invoke" && result.output, "updated");
+    const old = lease.action === "enable" ? lease.activation?.workingStateBinding : undefined;
+    assert.ok(old);
+    await invokeDaemon(connection, "lab", enable);
+    await assert.rejects(
+      invokeDaemon(connection, "lab", {
+        ...invocation,
+        workingStateBinding: old,
+      }),
+      /binding/u,
+    );
   });
 });
 

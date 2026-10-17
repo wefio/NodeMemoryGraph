@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { NmgStore } from "../../src/core/store.ts";
 import { boardEntryView } from "../../src/core/board-entry-view.ts";
+import { prepareTaskBoardSurface } from "../../src/integration/agent-surface.ts";
 
 function withStore(run: (store: NmgStore) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-task-board-"));
@@ -82,7 +83,10 @@ test("task board supports cursor reads, cross-agent resolution, and expiry", () 
       expiresAt: "2000-01-01T00:00:00.000Z",
     });
 
-    const page = store.readTaskBoard({ taskId: "task-a", afterCursor: first.id });
+    const page = store.readTaskBoard({
+      taskId: "task-a",
+      afterCursor: first.id,
+    });
     assert.deepEqual(
       page.entries.map((entry) => entry.id),
       [second.id],
@@ -131,7 +135,9 @@ test("compact preview read omits long bodies but keeps ordering and cursor", () 
       content: "A very long body that must not ride along on a compact sync. ".repeat(20).trim(),
       expiresAt: "2099-01-01T00:00:00.000Z",
     });
-    const { previews, nextCursor } = store.readTaskBoardPreviews({ taskId: "task-a" });
+    const { previews, nextCursor } = store.readTaskBoardPreviews({
+      taskId: "task-a",
+    });
     assert.equal(previews.length, 2);
     assert.equal(nextCursor, second.id);
     // Lone memory pointers are returned whole; long bodies collapse to <= 200 chars.
@@ -149,6 +155,56 @@ test("compact preview read omits long bodies but keeps ordering and cursor", () 
     // The full read still returns the complete body for the entry.
     const full = store.readTaskBoard({ taskId: "task-a" });
     assert.ok(full.entries[1]!.content.length > 200);
+  });
+});
+
+test("compact board views retain delivery and judgment changes without a new creation cursor", () => {
+  withStore((store) => {
+    const digest = "24fb32103aafae2bc963a7e7deecaf1bc36702d697bc7abd8e1f67af01b525b1";
+    const entry = store.putTaskBoardEntry({
+      taskId: "parser",
+      agentId: "coordinator",
+      kind: "handoff",
+      content: "Review parser.",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    store.claimTaskBoardEntry({
+      taskId: "parser",
+      entryId: entry.id,
+      agentId: "worker",
+    });
+    store.deliverTaskBoardEntry({
+      taskId: "parser",
+      entryId: entry.id,
+      agentId: "worker",
+      digest,
+    });
+    const before = store.readTaskBoardPreviews({ taskId: "parser" });
+    const first = prepareTaskBoardSurface(
+      { action: "readPreviews", ...before },
+      { taskId: "parser" },
+    );
+    assert.ok(first.text.includes(digest));
+    assert.doesNotMatch(first.text, /verdict accepted/u);
+
+    store.judgeTaskBoardEntry({
+      taskId: "parser",
+      entryId: entry.id,
+      agentId: "verifier",
+      verdict: "accepted",
+    });
+    const after = store.readTaskBoardPreviews({ taskId: "parser" });
+    const second = prepareTaskBoardSurface(
+      { action: "readPreviews", ...after },
+      { taskId: "parser" },
+    );
+    assert.equal(after.nextCursor, before.nextCursor);
+    assert.match(second.text, /verdict accepted by verifier/u);
+    assert.notEqual(second.included[0]?.contentHash, first.included[0]?.contentHash);
+    assert.equal(
+      store.readTaskBoardPreviews({ taskId: "parser", afterCursor: entry.id }).previews.length,
+      0,
+    );
   });
 });
 
@@ -314,7 +370,11 @@ test("task board lobby lists active named channels and hides the world channel",
       content: "Finished.",
       expiresAt: future,
     });
-    store.resolveTaskBoardEntry({ taskId: "done", entryId: done.id, agentId: "agent-e" });
+    store.resolveTaskBoardEntry({
+      taskId: "done",
+      entryId: done.id,
+      agentId: "agent-e",
+    });
 
     const boards = store.listTaskBoards();
     assert.deepEqual(boards.map((board) => board.taskId).sort(), ["alpha", "beta"]);
@@ -457,10 +517,16 @@ test("task board delivery receipts are idempotent and drive re-notify suppressio
       expiresAt: "2099-01-01T00:00:00.000Z",
     });
     assert.equal(store.hasTaskBoardDelivery({ entryId: entry.id, sessionId: "session-a" }), false);
-    store.recordTaskBoardDelivery({ entryId: entry.id, sessionId: "session-a" });
+    store.recordTaskBoardDelivery({
+      entryId: entry.id,
+      sessionId: "session-a",
+    });
     assert.equal(store.hasTaskBoardDelivery({ entryId: entry.id, sessionId: "session-a" }), true);
     // Idempotent: re-acking is not an error (UNIQUE(entry_id, session_id)).
-    store.recordTaskBoardDelivery({ entryId: entry.id, sessionId: "session-a" });
+    store.recordTaskBoardDelivery({
+      entryId: entry.id,
+      sessionId: "session-a",
+    });
     assert.equal(store.hasTaskBoardDelivery({ entryId: entry.id, sessionId: "session-a" }), true);
     // Another session is not affected.
     assert.equal(store.hasTaskBoardDelivery({ entryId: entry.id, sessionId: "session-b" }), false);
@@ -481,18 +547,29 @@ test("task board acknowledgements are per-agent, idempotent, visible on read, an
     assert.equal(store.taskBoardAckedIds([entry.id], ["agent-a"]).has(entry.id), false);
     // Ack by two agents — logical "N checkmarks", physical rows.
     store.acknowledgeTaskBoardEntry({ entryId: entry.id, agentId: "agent-a" });
-    store.acknowledgeTaskBoardEntry({ entryId: entry.id, agentId: "agent-b", reason: "agreed" });
+    store.acknowledgeTaskBoardEntry({
+      entryId: entry.id,
+      agentId: "agent-b",
+      reason: "agreed",
+    });
     // Re-ack is idempotent (UNIQUE(entry_id, agent_id)); updates reason/timestamp.
     store.acknowledgeTaskBoardEntry({ entryId: entry.id, agentId: "agent-a" });
     assert.equal(store.taskBoardAckedIds([entry.id], ["agent-a"]).has(entry.id), true);
     assert.equal(store.taskBoardAckedIds([entry.id], ["agent-a", "agent-b"]).size, 1);
     // Visible on read (the "N checkmarks" per entry).
-    const read = store.readTaskBoard({ taskId: "acks-1", includeResolved: true });
+    const read = store.readTaskBoard({
+      taskId: "acks-1",
+      includeResolved: true,
+    });
     assert.deepEqual(read.entries[0]!.ackedBy, ["agent-a", "agent-b"]);
     // An unrelated agent has not acked.
     assert.equal(store.taskBoardAckedIds([entry.id], ["agent-c"]).has(entry.id), false);
     // RAII: resolving the entry clears its acks (same binding as deliveries).
-    store.resolveTaskBoardEntry({ taskId: "acks-1", entryId: entry.id, agentId: "sender" });
+    store.resolveTaskBoardEntry({
+      taskId: "acks-1",
+      entryId: entry.id,
+      agentId: "sender",
+    });
     assert.equal(store.taskBoardAckedIds([entry.id], ["agent-a", "agent-b"]).size, 0);
   });
 });
@@ -525,21 +602,33 @@ test("task board subscriptions are explicit topic membership: join to be woken, 
   withStore((store) => {
     // Named channel: not a member until subscribe (no implicit subscription).
     assert.equal(
-      store.isTaskBoardSubscribed({ sessionId: "session-a", taskId: "review-x" }),
+      store.isTaskBoardSubscribed({
+        sessionId: "session-a",
+        taskId: "review-x",
+      }),
       false,
     );
     assert.deepEqual(store.listTaskBoardSubscriptions("session-a"), []);
     // Join the channel (idempotent).
     store.subscribeTaskBoard({ sessionId: "session-a", taskId: "review-x" });
     store.subscribeTaskBoard({ sessionId: "session-a", taskId: "review-x" });
-    assert.equal(store.isTaskBoardSubscribed({ sessionId: "session-a", taskId: "review-x" }), true);
+    assert.equal(
+      store.isTaskBoardSubscribed({
+        sessionId: "session-a",
+        taskId: "review-x",
+      }),
+      true,
+    );
     assert.deepEqual(
       store.listTaskBoardSubscriptions("session-a").map((item) => item.taskId),
       ["review-x"],
     );
     // Membership is per-session: session-b never joined.
     assert.equal(
-      store.isTaskBoardSubscribed({ sessionId: "session-b", taskId: "review-x" }),
+      store.isTaskBoardSubscribed({
+        sessionId: "session-b",
+        taskId: "review-x",
+      }),
       false,
     );
     // Another channel joined by the same session.
@@ -554,7 +643,10 @@ test("task board subscriptions are explicit topic membership: join to be woken, 
     // Leave: membership removed.
     store.unsubscribeTaskBoard({ sessionId: "session-a", taskId: "review-x" });
     assert.equal(
-      store.isTaskBoardSubscribed({ sessionId: "session-a", taskId: "review-x" }),
+      store.isTaskBoardSubscribed({
+        sessionId: "session-a",
+        taskId: "review-x",
+      }),
       false,
     );
     assert.deepEqual(
@@ -575,7 +667,11 @@ test("delivery receipts are RAII-bound: cleared when the entry resolves or expir
     });
     store.recordTaskBoardDelivery({ entryId: entry.id, sessionId: "sess-a" });
     assert.equal(store.hasTaskBoardDelivery({ entryId: entry.id, sessionId: "sess-a" }), true);
-    store.resolveTaskBoardEntry({ taskId: "raii-resolve", entryId: entry.id, agentId: "sender" });
+    store.resolveTaskBoardEntry({
+      taskId: "raii-resolve",
+      entryId: entry.id,
+      agentId: "sender",
+    });
     assert.equal(store.hasTaskBoardDelivery({ entryId: entry.id, sessionId: "sess-a" }), false);
   });
   withStore((store) => {
@@ -586,7 +682,10 @@ test("delivery receipts are RAII-bound: cleared when the entry resolves or expir
       content: "receipt lifecycle via expiry",
       expiresAt: "2020-01-01T00:00:00.000Z", // already expired
     });
-    store.recordTaskBoardDelivery({ entryId: expiring.id, sessionId: "sess-a" });
+    store.recordTaskBoardDelivery({
+      entryId: expiring.id,
+      sessionId: "sess-a",
+    });
     assert.equal(store.hasTaskBoardDelivery({ entryId: expiring.id, sessionId: "sess-a" }), true);
     store.pruneExpiredTaskBoardEntries();
     assert.equal(store.hasTaskBoardDelivery({ entryId: expiring.id, sessionId: "sess-a" }), false);
@@ -807,7 +906,11 @@ test("task board serial handoff promotes pending on claim, resolve, and expiry",
 
     // — No pending to promote is a safe no-op (last outstanding resolved).
     const n1 = putHandoff("serial-promo-4", "only", "2099-01-01T00:00:00.000Z");
-    store.resolveTaskBoardEntry({ taskId: "serial-promo-4", entryId: n1.id, agentId: "worker" });
+    store.resolveTaskBoardEntry({
+      taskId: "serial-promo-4",
+      entryId: n1.id,
+      agentId: "worker",
+    });
     // No throw, no phantom outstanding in a fresh channel.
     const fresh = putHandoff("serial-promo-5", "fresh", "2099-01-01T00:00:00.000Z");
     assert.equal(stateOf(store, "serial-promo-5", fresh.id), "outstanding");
@@ -832,7 +935,11 @@ test("veto flags a resolved entry by an independent reviewer and is auditable", 
     });
     // Resolver cannot veto its own resolve.
     assert.throws(() =>
-      store.vetoTaskBoardEntry({ taskId: "ch-v", entryId: entry.id, agentId: "claimer" }),
+      store.vetoTaskBoardEntry({
+        taskId: "ch-v",
+        entryId: entry.id,
+        agentId: "claimer",
+      }),
     );
     // Independent reviewer vetoes it.
     const vetoed = store.vetoTaskBoardEntry({
@@ -860,7 +967,11 @@ test("veto rejects an entry that is not resolved", () => {
       expiresAt: future,
     });
     assert.throws(() =>
-      store.vetoTaskBoardEntry({ taskId: "ch-v", entryId: entry.id, agentId: "reviewer" }),
+      store.vetoTaskBoardEntry({
+        taskId: "ch-v",
+        entryId: entry.id,
+        agentId: "reviewer",
+      }),
     );
   });
 });

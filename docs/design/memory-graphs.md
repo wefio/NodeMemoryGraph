@@ -18,11 +18,11 @@ state.
 
 ## 1. The three graphs
 
-| Graph   | Ownership                      | Content                                                                                                                         | Lifetime                             |
-| ------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| **STG** | private to one Agent session   | new, provisional, task-local, or not-yet-consolidated semantic information                                                      | session; expiry is a policy decision |
-| **LTG** | the only shared graph          | durable atomic memories and consolidated semantic structure                                                                     | persistent                           |
-| **AG**  | private to one Agent session   | mutable, budget-constrained runtime graph over STG/LTG references, task frames, tool observations, activation and temporary reasoning | session; memory-resident only        |
+| Graph   | Ownership                    | Content                                                                                                                               | Lifetime                             |
+| ------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| **STG** | private to one Agent session | new, provisional, task-local, or not-yet-consolidated semantic information                                                            | session; expiry is a policy decision |
+| **LTG** | the only shared graph        | durable atomic memories and consolidated semantic structure                                                                           | persistent                           |
+| **AG**  | private to one Agent session | mutable, budget-constrained runtime graph over STG/LTG references, task frames, tool observations, activation and temporary reasoning | session; memory-resident only        |
 
 AG is **not** a third authoritative or shared memory graph. It is the private
 working graph owned by one model session and must remain in memory. Agents never
@@ -255,6 +255,17 @@ exact-evidence progression after two searches, and stops after two consecutive
 searches introduce no new candidate IDs. Thus a small final AG cannot be reached
 through an unbounded tool loop. These counters are session-local, reset on a new
 user turn, and remain hard limits outside learned/QPP budget allocation.
+
+The opt-in `working_state` Lab capability keeps one replaceable provisional text
+inside each frame's existing items. Dedicated replace/clear preserves exact
+content; ordinary observe cannot write it. Failed, stale, secret or over-budget
+writes preserve the old value. It consumes the shared resident cap but is
+protected from ordinary-item eviction; frame/session eviction and release remove
+it. Captured context fences late writes without conferring authentication or
+fact/acceptance authority. Current adapters explicitly use a session working
+frame while enabled, not query-derived task switching. Host-history selection,
+actual exposure commitment and matched cost/quality evidence remain deferred;
+see the [working-state decision](../decisions/implemented/2026-10-08-ag-working-state.md).
 
 AG contains references and runtime annotations, not authoritative copies. It
 may mutate across turns and compaction, but session release destroys it. Only
@@ -515,6 +526,19 @@ Consumers (each reads the same persisted field):
 `selectivity` is measured after SQL but before sort, so it reflects what a
 future pushdown would actually save (see the index-decision sketch in
 docs/design/improvement-areas.md).
+
+### Shared information-output boundary
+
+AG and Task Board share admitted source-bound views and pure output preparation,
+not storage, graph identity or collaboration authority. Text preparation keeps
+body and necessary labels together, reports omissions and cannot commit a
+content-disclosure ledger. A matching rendered fragment yields reader-local
+acknowledgement candidates; another session cannot confirm private AG content.
+View fingerprints do not replace immutable retrieval projections or attest truth.
+Host exposure/authorization confirmation, combined input budgeting and maintained
+current-state writes remain separate work. The
+[implemented foundation](../decisions/implemented/2026-10-07-shared-information-output.md)
+defines the current library/text boundary and its limitations.
 
 ### Projection lifecycle and the tiered disclosure design
 

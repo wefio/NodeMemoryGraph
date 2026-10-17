@@ -99,7 +99,10 @@ export class NmgStoreBase {
   protected scopeWriteIndexes = new Map<string, ScopeWriteIndex>();
   protected scopeWriteIndexEnabled: boolean;
   /** The open write transaction, if any. A port is the only way to join it. */
-  private openTransaction: { port: TransactionPort; rollbackOnly: boolean } | null = null;
+  private openTransaction: {
+    port: TransactionPort;
+    rollbackOnly: boolean;
+  } | null = null;
   /** The run whose coordinated write scope is open, if any: the store's own state, set only by
    *  `coordinateRunWrite` while its callback runs. */
   private coordinatedRun: string | null = null;
@@ -597,6 +600,10 @@ export class NmgStoreBase {
       ackCount: entry.ackedBy.length,
       createdAt: entry.createdAt,
       resolvedAt: entry.resolvedAt,
+      deliveredBy: entry.deliveredBy,
+      deliverableDigest: entry.deliverableDigest,
+      verdict: entry.verdict,
+      judgedBy: entry.judgedBy,
       preview: boardEntryView(entry.content),
     }));
     return { previews, nextCursor };

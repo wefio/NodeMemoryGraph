@@ -23,7 +23,7 @@ other way:
 - **Own the memory layer.** Agents come and go — Pi today, another harness
   tomorrow. NMG exists independently of all of them; adapters are replaceable,
   the store is not tied to any product. This is also why the multi-agent task
-  board passes memory *IDs*, not content: memory outlives any single agent.
+  board passes memory _IDs_, not content: memory outlives any single agent.
 - **Local and private.** All durable memory lives in one SQLite file you can
   back up by copying. Retrieval works with zero configuration (SQLite FTS5);
   the optional semantic layer can use a bundled local model, a separately hosted
@@ -37,21 +37,22 @@ other way:
 
 **Honest boundary:** NMG is not plug-and-play yet. Native integrations need
 setup, and generic agents use the CLI + Skill path. But it is deliberately
-*agent-friendly to integrate*: if your agent can use a CLI, it can probably use
+_agent-friendly to integrate_: if your agent can use a CLI, it can probably use
 NMG; if it can write plugins, it can integrate NMG itself from the stable
 JSON-RPC boundary.
 
-| Your setup | Path |
-|---|---|
-| [Pi](https://github.com/earendil-works/pi) | Native extension ([Try it](#try-it)) |
-| Claude Code | Local MCP plugin ([Claude Code plugin](#claude-code-plugin)) |
-| DeepSeek Harness | Cordis plugin ([dsh/](dsh/README.md)) |
-| Any other agent | CLI + [Skill](skills/nmg-memory/SKILL.md) ([Agent-independent CLI](#agent-independent-cli), [Agent Skill](#agent-skill)) |
-| Custom harness | Build an adapter on the HTTP JSON-RPC boundary ([Headless control](#headless-pi-control)) |
+| Your setup                                 | Path                                                                                                                     |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| [Pi](https://github.com/earendil-works/pi) | Native extension ([Try it](#try-it))                                                                                     |
+| Claude Code                                | Local MCP plugin ([Claude Code plugin](#claude-code-plugin))                                                             |
+| DeepSeek Harness                           | Cordis plugin ([dsh/](dsh/README.md))                                                                                    |
+| Any other agent                            | CLI + [Skill](skills/nmg-memory/SKILL.md) ([Agent-independent CLI](#agent-independent-cli), [Agent Skill](#agent-skill)) |
+| Custom harness                             | Build an adapter on the HTTP JSON-RPC boundary ([Headless control](#headless-pi-control))                                |
 
 NMG stores mutable semantic memory over immutable evidence and retrieves a
 small, progressively deeper subset instead of flattening all history into one
 global prompt.
+
 - Ordinary prompts load no dynamic long-term memory. Automatic retrieval
   overfetches and type-reranks candidates before applying the final record budget.
 - Stable `stateKey` values identify one replaceable property—not a topic or
@@ -140,11 +141,11 @@ claude-plugins/nmg-memory/
 The root `.mcp.json` registers `nmg` as a local MCP server. Claude Code
 auto-discovers it at session start and exposes three tools:
 
-| Tool | Purpose |
-|------|---------|
-| `nmg_search` | Return compact memory headers (mid/node/type/tier/preview) |
-| `nmg_get` | Load exact memory statements and source evidence |
-| `nmg_remember` | Save durable facts/preferences/states/constraints/events |
+| Tool           | Purpose                                                    |
+| -------------- | ---------------------------------------------------------- |
+| `nmg_search`   | Return compact memory headers (mid/node/type/tier/preview) |
+| `nmg_get`      | Load exact memory statements and source evidence           |
+| `nmg_remember` | Save durable facts/preferences/states/constraints/events   |
 
 Daemon lifecycle is automatic: the MCP server starts the NMG daemon when it
 launches and safely stops it on exit. If a daemon was already running (e.g.,
@@ -184,6 +185,13 @@ Pi provides [opt-in first-output timing](docs/design/session-memory-lifecycle-ho
 through `/nmg-latency on|off|status`; it records metadata only and does not change
 recall waiting policy. The hook contract defines slow-recall retention and
 host-event interpretation.
+
+For ongoing work, the maintained-state widget shows a labelled current-status
+preview; `/nmg state` reads the complete session state without searching history, and
+`/nmg state on|off` toggles only that preview.
+See the [daily work-status workflow](skills/nmg-memory/references/optional-capabilities.md#daily-work-status)
+for updates, evidence and restart boundaries. The state is provisional, not a
+completion certificate or a durable task store.
 
 The Pi adapter is deliberately thin. It lazily starts the local daemon over
 JSON-RPC/HTTP, reuses one connection for automatic recall and the default tool
@@ -231,12 +239,13 @@ entry point, the shared Task Board, and a typed write/use policy:
   the existing daemon connection. Reasoning workspace, read-only graph reasoning,
   and controller shadow are Agent-selectable; controlled/active actuation remains
   receipt- and gate-protected.
-- `nmg_board`: publish, discover, claim, acknowledge, and resolve temporary
-  cross-Agent work. It is available by default so a newly attached Agent can
-  immediately discover peers and shared tasks.
+- `nmg_state`: read/write private AG working state or shared board coordination
+  through one space-specific entry. AG writers explicitly enable a bounded lease;
+  board operations retain their TTL, claim and independent-judgement lifecycle.
+  See [state spaces](docs/design/state-spaces.md).
 
-Set `NMG_ENABLE_COORDINATION=0` (also `false`, `off`, or `no`) to hide the
-model-facing `nmg_board` tool and disable adapter wake polling. The daemon RPC
+Set `NMG_ENABLE_COORDINATION=0` (also `false`, `off`, or `no`) to reject
+model-facing board operations and disable adapter wake polling; AG remains available. The daemon RPC
 and `nmg board ...` CLI remain available for administration. Board entries are
 temporary, attributed, task-scoped coordination data; they never enter LTG or
 semantic retrieval.

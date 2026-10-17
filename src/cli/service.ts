@@ -29,8 +29,28 @@ import type {
 } from "../core/types.ts";
 import { NmgStore } from "../core/store.ts";
 import {
+  prepareSessionActiveGraphSurface,
+  prepareTaskBoardSurface,
+} from "../integration/agent-surface.ts";
+import {
+  STATE_AG_FIELDS,
+  STATE_AG_READ_OPERATIONS,
+  STATE_AG_WRITE_OPERATIONS,
+  STATE_BOARD_READ_OPERATIONS,
+  STATE_BOARD_WRITE_OPERATIONS,
+} from "../integration/state.ts";
+import {
+  captureMemoryReferenceTargets,
+  createMemoryReferences,
+  isMemoryReference,
+  type MemoryReferenceTarget,
+  MemoryReferenceError,
+  resolveMemoryReferences,
+} from "../integration/memory-reference.ts";
+import {
   SessionActiveGraphRuntime,
   type ActiveGraphProjectionPart,
+  type WorkingStateBinding,
 } from "../core/session-active-graph.ts";
 import {
   consolidateStgMemoryToLtg,
@@ -171,7 +191,12 @@ import {
 import { resolveNmgDataDir } from "./data-path.ts";
 
 const SERVICE_VERSION = "0.1.0";
-type ActiveGraphStorePart = { store: NmgStore; traceId: string; memoryIds: Set<string> };
+type ActiveGraphStorePart = {
+  store: NmgStore;
+  traceId: string;
+  memoryIds: Set<string>;
+  referenceTargets?: readonly MemoryReferenceTarget[];
+};
 export interface NmgServiceOptions {
   dataDirectory?: string;
   databasePath?: string;
@@ -203,7 +228,8 @@ export class NmgService {
   #onlineLearner: ContextRouterOnlineLearner | null | undefined;
   #store: NmgStore | undefined;
   readonly #stgStores = new Map<string, NmgStore>();
-  readonly #sessionActiveGraphs = new SessionActiveGraphRuntime<NmgStore>();
+  readonly #sessionActiveGraphs = new SessionActiveGraphRuntime<ActiveGraphStorePart>();
+  readonly #getReferenceUsage = { fullIds: 0, compoundRefs: 0 };
   #embeddingClient: EmbeddingClient | undefined | null;
   #embeddingError: string | null = null;
   /** When the embedding provider last failed; search skips provider calls
@@ -233,7 +259,12 @@ export class NmgService {
   readonly #maintenanceJobs = new Map<NmgStore, NodeJS.Immediate>();
   readonly #maintenanceSignals = new Map<
     NmgStore,
-    { writes: number; accesses: number; backlogChecked: boolean; localBatches: number }
+    {
+      writes: number;
+      accesses: number;
+      backlogChecked: boolean;
+      localBatches: number;
+    }
   >();
 
   constructor(options: NmgServiceOptions = {}) {
@@ -451,41 +482,10 @@ export class NmgService {
           return this.#getStore().splitNode(parseSplitNodeParams(params)) as NmgMethodResult[M];
         case "topologyProposal":
           return this.#topologyProposal(params) as NmgMethodResult[M];
-        case "memoryMaintenanceProposal": {
-          const parsed = parseMemoryMaintenanceProposalParams(params);
-          if (parsed.action === "list") {
-            return {
-              action: "list",
-              proposals: this.#getStore().memoryMaintenanceProposals(parsed.status),
-            } as NmgMethodResult[M];
-          }
-          if (parsed.action === "review") {
-            return {
-              action: "review",
-              proposal: this.#getStore().reviewMemoryMaintenanceProposal(
-                parsed.proposalId,
-                parsed.decision,
-                parsed.reason,
-              ),
-            } as NmgMethodResult[M];
-          }
-          return {
-            action: "propose",
-            proposal: this.#getStore().createMemoryMaintenanceProposal({
-              defectType: parsed.defectType,
-              action: parsed.maintenanceAction,
-              targetMemoryIds: parsed.targetMemoryIds,
-              evidenceMemoryIds: parsed.evidenceMemoryIds,
-              evidenceTraceIds: parsed.evidenceTraceIds,
-              proposedStatement: parsed.proposedStatement,
-              proposedScope: parsed.proposedScope,
-              policy: parsed.policy,
-              longHorizonScore: parsed.longHorizonScore,
-              evaluationKind: parsed.evaluationKind,
-              evaluationRef: parsed.evaluationRef,
-            }),
-          } as NmgMethodResult[M];
-        }
+        case "memoryMaintenanceProposal":
+          return this.#memoryMaintenanceProposal(
+            parseMemoryMaintenanceProposalParams(params),
+          ) as NmgMethodResult[M];
         case "syncStg": {
           const parsed = parseSyncStgParams(params);
           return {
@@ -503,7 +503,10 @@ export class NmgService {
             this.#getStgStore(parsed.projectDir, parsed.sessionId),
             parsed.sessionId,
           );
-          return { purged, projectDir: parsed.projectDir } as NmgMethodResult[M];
+          return {
+            purged,
+            projectDir: parsed.projectDir,
+          } as NmgMethodResult[M];
         }
         case "taskBoard": {
           const parsed = parseTaskBoardParams(params);
@@ -527,6 +530,8 @@ export class NmgService {
           return this.#chainGet(parseChainGetParams(params)) as NmgMethodResult[M];
         case "chainList":
           return this.#chainList(parseChainListParams(params)) as NmgMethodResult[M];
+        case "state":
+          return this.#state(params) as NmgMethodResult[M];
         case "lab":
           return this.#lab(parseLabParams(params)) as NmgMethodResult[M];
         case "sessionActiveGraph":
@@ -585,6 +590,7 @@ export class NmgService {
     return {
       ...this.#hello(),
       process: { pid: process.pid, node: process.version },
+      getReferenceUsage: { ...this.#getReferenceUsage },
       storage: {
         databasePath: this.databasePath,
         exists,
@@ -604,6 +610,135 @@ export class NmgService {
     };
   }
 
+  #memoryMaintenanceProposal(
+    parsed: NmgMemoryMaintenanceProposalParams,
+  ): NmgMethodResult["memoryMaintenanceProposal"] {
+    if (parsed.action === "list")
+      return {
+        action: "list",
+        proposals: this.#getStore().memoryMaintenanceProposals(parsed.status),
+      };
+    if (parsed.action === "review")
+      return {
+        action: "review",
+        proposal: this.#getStore().reviewMemoryMaintenanceProposal(
+          parsed.proposalId,
+          parsed.decision,
+          parsed.reason,
+        ),
+      };
+    return {
+      action: "propose",
+      proposal: this.#getStore().createMemoryMaintenanceProposal({
+        defectType: parsed.defectType,
+        action: parsed.maintenanceAction,
+        targetMemoryIds: parsed.targetMemoryIds,
+        evidenceMemoryIds: parsed.evidenceMemoryIds,
+        evidenceTraceIds: parsed.evidenceTraceIds,
+        proposedStatement: parsed.proposedStatement,
+        proposedScope: parsed.proposedScope,
+        policy: parsed.policy,
+        longHorizonScore: parsed.longHorizonScore,
+        evaluationKind: parsed.evaluationKind,
+        evaluationRef: parsed.evaluationRef,
+      }),
+    };
+  }
+
+  #state(value: unknown): NmgMethodResult["state"] {
+    const params = objectParams(value);
+    const action = requiredEnum(params, "action", ["read", "write"] as const);
+    const space = requiredEnum(params, "space", ["ag", "board"] as const);
+    const operation = optionalString(params, "operation") ?? (action === "read" ? "read" : "");
+    const allowed =
+      space === "ag"
+        ? action === "read"
+          ? STATE_AG_READ_OPERATIONS
+          : STATE_AG_WRITE_OPERATIONS
+        : action === "read"
+          ? STATE_BOARD_READ_OPERATIONS
+          : STATE_BOARD_WRITE_OPERATIONS;
+    if (!(allowed as readonly string[]).includes(operation))
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        `unsupported ${space} ${action} operation: ${operation}`,
+      );
+    if (space === "ag") return this.#stateAg(action, operation, params);
+    const parsed = parseTaskBoardParams({
+      ...params,
+      action: operation,
+      taskId: params.taskId ?? "default",
+    });
+    const result = taskBoardHandlers[parsed.action](this.#getStore(), parsed);
+    const taskId = "taskId" in parsed ? parsed.taskId : "default";
+    const directory =
+      operation === "list" && result.action === "list"
+        ? result.boards
+        : operation === "read" && taskId === "default"
+          ? this.#getStore().listTaskBoards()
+          : undefined;
+    const presentsContent = [
+      "read",
+      "readInbox",
+      "readPreviews",
+      "discover",
+      "list",
+      "put",
+      "claim",
+      "release",
+      "acknowledge",
+      "deliver",
+      "judge",
+      "resolve",
+    ].includes(operation);
+    const information = presentsContent
+      ? prepareTaskBoardSurface(result, { taskId, directory })
+      : undefined;
+    return { action, space, operation, result, information };
+  }
+
+  #stateAg(
+    action: "read" | "write",
+    operation: string,
+    params: Record<string, unknown>,
+  ): NmgMethodResult["state"] {
+    const sessionId = requiredString(params, "sessionId");
+    if (Object.keys(params).some((key) => !(STATE_AG_FIELDS as readonly string[]).includes(key)))
+      throw new NmgProtocolError("INVALID_PARAMS", "unsupported AG state field");
+    if (operation === "read") {
+      const snapshot = this.#sessionActiveGraphs.snapshot(sessionId);
+      return {
+        action,
+        space: "ag",
+        operation,
+        result: { action: "snapshot", snapshot },
+        information: prepareSessionActiveGraphSurface(snapshot),
+      };
+    }
+    const lab =
+      operation === "replace" || operation === "clear"
+        ? {
+            action: "invoke",
+            capability: "working_state",
+            sessionId,
+            operation,
+            workingStateBinding: params.workingStateBinding,
+            input: operation === "replace" ? { text: params.text } : {},
+          }
+        : {
+            ...params,
+            action: operation,
+            capability: "working_state",
+            sessionId,
+          };
+    return {
+      action,
+      space: "ag",
+      operation,
+      result: this.#lab(parseLabParams(lab)),
+    };
+  }
+
   #lab(params: NmgLabParams): NmgMethodResult["lab"] {
     if (params.action === "list") {
       return { action: "list", capabilities: this.#labAuthority.list() };
@@ -615,6 +750,13 @@ export class NmgService {
       };
     }
     if (params.action === "enable") {
+      if (params.capability === "working_state" && params.scope && params.scope !== "session") {
+        throw new NmgProtocolError("INVALID_PARAMS", "working_state requires session scope");
+      }
+      const workingStateBinding =
+        params.capability === "working_state"
+          ? this.#sessionActiveGraphs.bindWorkingState(params.sessionId)
+          : undefined;
       return {
         action: "enable",
         activation: this.#labAuthority.enable({
@@ -624,24 +766,77 @@ export class NmgService {
           requester: params.requester,
           reason: params.reason,
           ttlSeconds: params.ttlSeconds,
+          workingStateBinding,
         }),
       };
     }
     if (params.action === "disable") {
+      const binding = this.#labAuthority.status(
+        params.capability,
+        params.sessionId,
+      )?.workingStateBinding;
+      if (binding) this.#sessionActiveGraphs.unbindWorkingState(binding);
       return {
         action: "disable",
         activation: this.#labAuthority.disable(params.capability, params.sessionId),
       };
     }
 
-    this.#labAuthority.requireEnabled(params.capability, params.sessionId);
+    const activation = this.#labAuthority.requireEnabled(params.capability, params.sessionId);
+    if (params.capability === "working_state") {
+      const output = this.#invokeWorkingState(params, activation.workingStateBinding);
+      return {
+        action: "invoke",
+        capability: params.capability,
+        operation: params.operation,
+        output,
+      };
+    }
     const output = this.#invokeLabCapability(
       params.capability,
       params.sessionId,
       params.operation,
       params.input,
     );
-    return { action: "invoke", capability: params.capability, operation: params.operation, output };
+    return {
+      action: "invoke",
+      capability: params.capability,
+      operation: params.operation,
+      output,
+    };
+  }
+
+  #invokeWorkingState(
+    params: Extract<NmgLabParams, { action: "invoke" }>,
+    expected: WorkingStateBinding | undefined,
+  ): "updated" | "unchanged" | "cleared" {
+    const binding = params.workingStateBinding;
+    if (
+      !binding ||
+      !expected ||
+      binding.sessionId !== params.sessionId ||
+      binding.agId !== expected.agId ||
+      binding.taskFrameId !== expected.taskFrameId ||
+      binding.bindingId !== expected.bindingId
+    ) {
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        "working_state requires its captured host binding",
+      );
+    }
+    const input = objectParams(params.input ?? {});
+    const allowed = params.operation === "replace" ? ["text"] : [];
+    if (Object.keys(input).some((key) => !allowed.includes(key))) {
+      throw new NmgProtocolError("INVALID_PARAMS", "unsupported working_state input field");
+    }
+    if (params.operation === "clear") return this.#sessionActiveGraphs.clearWorkingState(binding);
+    if (params.operation !== "replace" || typeof input.text !== "string") {
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        "working_state requires replace(text) or clear()",
+      );
+    }
+    return this.#sessionActiveGraphs.replaceWorkingState(binding, input.text);
   }
 
   #invokeLabCapability(
@@ -799,7 +994,11 @@ export class NmgService {
       );
     }
     const reasoner = new MemoryGraphReasoner(queryVector.length);
-    const envelope = { projectionId, agId: projection.agId, persisted: false } as const;
+    const envelope = {
+      projectionId,
+      agId: projection.agId,
+      persisted: false,
+    } as const;
     if (operation === "traverse") {
       return {
         ...envelope,
@@ -853,10 +1052,16 @@ export class NmgService {
 
   #sessionActiveGraph(params: NmgSessionActiveGraphParams): NmgMethodResult["sessionActiveGraph"] {
     if (params.action === "observe") {
-      return { action: "observe", ...this.#sessionActiveGraphs.observe(params) };
+      return {
+        action: "observe",
+        ...this.#sessionActiveGraphs.observe(params),
+      };
     }
     if (params.action === "snapshot") {
-      return { action: "snapshot", snapshot: this.#sessionActiveGraphs.snapshot(params.sessionId) };
+      return {
+        action: "snapshot",
+        snapshot: this.#sessionActiveGraphs.snapshot(params.sessionId),
+      };
     }
     if (params.action === "activate") {
       return {
@@ -883,6 +1088,7 @@ export class NmgService {
       };
     }
     const released = this.#sessionActiveGraphs.release(params.sessionId);
+    this.#labAuthority.disable("working_state", params.sessionId);
     this.#store?.clearSessionActivation(params.sessionId);
     for (const store of this.#stgStores.values()) store.clearSessionActivation(params.sessionId);
     return { action: "release", released };
@@ -1021,7 +1227,10 @@ export class NmgService {
     return { results };
   }
 
-  #prepareRemember(params: NmgRememberParams): { store: NmgStore; input: RememberInput } {
+  #prepareRemember(params: NmgRememberParams): {
+    store: NmgStore;
+    input: RememberInput;
+  } {
     const external = params.markers?.some((marker) => marker.kind === "external_source") ?? false;
     const assessment = assessMemoryWrite({
       statement: params.statement,
@@ -1327,8 +1536,14 @@ export class NmgService {
       const events: NmgMethodResult["recordClaimOutcomes"]["events"] = [];
       const posteriors: NmgMethodResult["recordClaimOutcomes"]["posteriors"] = [];
       const consolidationCandidates: string[] = [];
-      const consolidatedMemories: Array<{ sourceMemoryId: string; memoryId: string }> = [];
-      const retractedMemories: Array<{ sourceMemoryId: string; memoryId: string }> = [];
+      const consolidatedMemories: Array<{
+        sourceMemoryId: string;
+        memoryId: string;
+      }> = [];
+      const retractedMemories: Array<{
+        sourceMemoryId: string;
+        memoryId: string;
+      }> = [];
       const assigned = new Set<string>();
       for (const part of parts) {
         const votes = input.votes.filter((vote) => part.memoryIds.has(vote.memoryId));
@@ -1383,8 +1598,14 @@ export class NmgService {
     const events: NmgMethodResult["recordClaimOutcomes"]["events"] = [];
     const posteriors: NmgMethodResult["recordClaimOutcomes"]["posteriors"] = [];
     const consolidationCandidates: string[] = [];
-    const consolidatedMemories: Array<{ sourceMemoryId: string; memoryId: string }> = [];
-    const retractedMemories: Array<{ sourceMemoryId: string; memoryId: string }> = [];
+    const consolidatedMemories: Array<{
+      sourceMemoryId: string;
+      memoryId: string;
+    }> = [];
+    const retractedMemories: Array<{
+      sourceMemoryId: string;
+      memoryId: string;
+    }> = [];
     for (const [store, votes] of grouped) {
       const result = store.recordClaimOutcomes({ ...input, votes });
       events.push(...result.events);
@@ -1460,7 +1681,10 @@ export class NmgService {
             marker.attributes?.sourceMemoryId === memoryId,
         )
       ) {
-        consolidated.push({ sourceMemoryId: memoryId, memoryId: promoted.memory.id });
+        consolidated.push({
+          sourceMemoryId: memoryId,
+          memoryId: promoted.memory.id,
+        });
       }
     }
   }
@@ -1705,7 +1929,10 @@ export class NmgService {
     syncTimes.set(scopeKey, now);
     this.#stgSyncTimes.set(store, syncTimes);
     try {
-      copyLtgSubsetToStg(this.#getStore(), store, { scope, limit: policy.limit });
+      copyLtgSubsetToStg(this.#getStore(), store, {
+        scope,
+        limit: policy.limit,
+      });
     } catch {
       // Read-through caching is optional. LTG fallback remains authoritative.
     }
@@ -1851,11 +2078,23 @@ export class NmgService {
     return null;
   }
 
+  #countGetReferences(memoryIds: readonly string[]): void {
+    for (const id of memoryIds) {
+      const kind = isMemoryReference(id) ? "compoundRefs" : "fullIds";
+      this.#getReferenceUsage[kind] += 1;
+    }
+  }
+
   #get(params: NmgGetParams): NmgMethodResult["get"] {
+    this.#countGetReferences(params.memoryIds);
     const sharedStore = this.#getStore();
     const localStore = params.projectDir
       ? this.#getStgStore(params.projectDir, params.sessionId)
       : undefined;
+    params = this.#resolveGetReferences(
+      params,
+      [localStore, sharedStore].filter((store): store is NmgStore => store !== undefined),
+    );
     const shared = sharedStore.getContext(params.memoryIds, params.graphHops ?? 0);
     const local = localStore
       ? localStore.getContext(params.memoryIds, params.graphHops ?? 0, params.sessionId)
@@ -1917,29 +2156,78 @@ export class NmgService {
 
   #registerSearchProjection(context: MemoryContext, parts: ActiveGraphStorePart[]): MemoryContext {
     if (!context.activeGraph) return context;
+    const binding = this.#labAuthority.status(
+      "working_state",
+      context.activeGraph.sessionId ?? "",
+    )?.workingStateBinding;
     const graph = {
       ...context.activeGraph,
+      taskId: binding?.taskFrameId ?? context.activeGraph.taskId,
       memoryIds: context.results.map((result) => result.memory.id),
       nodeIds: [...new Set(context.results.map((result) => result.node.id))],
     };
+    const targets = captureMemoryReferenceTargets(
+      referenceTargets(parts, this.#getStore(), graph.sessionId ?? undefined),
+    );
     const projection = this.#sessionActiveGraphs.registerProjection(
       graph,
-      parts.map((part): ActiveGraphProjectionPart<NmgStore> => ({
+      parts.map((part): ActiveGraphProjectionPart<ActiveGraphStorePart> => ({
         traceId: part.traceId,
         memoryIds: part.memoryIds,
-        value: part.store,
+        value: Object.freeze({
+          ...part,
+          referenceTargets: Object.freeze(
+            targets.filter((target) => part.memoryIds.has(target.memory.id)),
+          ),
+        }),
       })),
     );
-    return { ...context, activeGraph: projection.graph };
+    const projected = { ...context, activeGraph: projection.graph };
+    const memoryReferences = createMemoryReferences(projected, targets);
+    return Object.keys(memoryReferences).length > 0
+      ? { ...projected, memoryReferences }
+      : projected;
+  }
+
+  #resolveGetReferences(params: NmgGetParams, stores: NmgStore[]): NmgGetParams {
+    if (!params.memoryIds.some(isMemoryReference)) return params;
+    if (!params.activeGraphId)
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        "Memory references require their activeGraphId.",
+      );
+    const graphId = params.activeGraphId;
+    const owner = this.#sessionActiveGraphs.projectionOwner(graphId);
+    if (owner && owner !== (params.sessionId?.trim() || "__anonymous__"))
+      throw new NmgProtocolError("NOT_FOUND", "Memory reference graph is absent or not owned.");
+    const parts = this.#projectionParts(graphId, params.sessionId) ?? [];
+    const readableParts = parts.filter((part) => stores.includes(part.store));
+    if (readableParts.length === 0)
+      throw new NmgProtocolError("NOT_FOUND", "Memory reference graph is absent or not owned.");
+    try {
+      return {
+        ...params,
+        memoryIds: resolveMemoryReferences(
+          params.memoryIds,
+          readableParts.flatMap((part) => part.referenceTargets ?? []),
+          referenceTargets(readableParts, this.#getStore(), params.sessionId),
+        ),
+      };
+    } catch (error) {
+      if (error instanceof MemoryReferenceError)
+        throw new NmgProtocolError("INVALID_PARAMS", error.message);
+      throw error;
+    }
   }
 
   #projectionParts(activeGraphId: string, sessionId?: string): ActiveGraphStorePart[] | undefined {
     const projection = this.#sessionActiveGraphs.projection(activeGraphId, sessionId);
     if (!projection) return undefined;
     return projection.parts.map((part) => ({
-      store: part.value,
+      store: part.value.store,
       traceId: part.traceId,
       memoryIds: new Set(part.memoryIds),
+      referenceTargets: part.value.referenceTargets,
     }));
   }
 
@@ -2479,7 +2767,10 @@ function parseSearchParams(value: unknown): NmgSearchParams {
   };
 }
 
-function parsePerfPruneParams(value: unknown): { maxDays?: number; maxRows?: number } {
+function parsePerfPruneParams(value: unknown): {
+  maxDays?: number;
+  maxRows?: number;
+} {
   const params = objectParams(value);
   return {
     maxDays: optionalInteger(params, "maxDays", 1, 3650),
@@ -2540,6 +2831,20 @@ function parseLabParams(value: unknown): NmgLabParams {
     sessionId,
     operation: requiredString(params, "operation"),
     input: params.input,
+    workingStateBinding:
+      params.workingStateBinding === undefined
+        ? undefined
+        : parseWorkingStateBinding(params.workingStateBinding),
+  };
+}
+
+function parseWorkingStateBinding(value: unknown): WorkingStateBinding {
+  const values = objectParams(value);
+  return {
+    sessionId: requiredString(values, "sessionId"),
+    agId: requiredString(values, "agId"),
+    taskFrameId: requiredString(values, "taskFrameId"),
+    bindingId: requiredString(values, "bindingId"),
   };
 }
 
@@ -2587,6 +2892,7 @@ function parseSessionActiveGraphParams(value: unknown): NmgSessionActiveGraphPar
     sessionId,
     statement: requiredString(params, "statement"),
     sourceId: optionalString(params, "sourceId"),
+    sourceKind: optionalString(params, "sourceKind"),
     nodeId: optionalString(params, "nodeId"),
     taskFrameId: optionalString(params, "taskFrameId"),
     kind: optionalEnum(params, "kind", [
@@ -2932,7 +3238,11 @@ function optionalAdoption(
 }
 
 /** A board put's adoption request, or the shape it must have to be one. */
-function parseAdoption(value: unknown): { runId: string; taskId: string; attempt?: number } {
+function parseAdoption(value: unknown): {
+  runId: string;
+  taskId: string;
+  attempt?: number;
+} {
   const params = objectParams(value);
   return {
     runId: requiredString(params, "runId"),
@@ -2979,7 +3289,11 @@ function parseTaskRunParams(value: unknown): NmgTaskRunParams {
         `tasks must be an array of 1..${TASK_RUN_PLAN_LIMIT} tasks`,
       );
     }
-    return { action, runId, tasks: tasks.map((task) => parseRunPlanTask(task)) };
+    return {
+      action,
+      runId,
+      tasks: tasks.map((task) => parseRunPlanTask(task)),
+    };
   }
   if (action === "bind") {
     return {
@@ -3101,7 +3415,10 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
         store.hasTaskBoardDelivery({ entryId, sessionId: p.sessionId }),
       ),
       acked: [...store.taskBoardAckedIds(p.entryIds, [p.sessionId, p.agentId])],
-      suppressed: store.isTaskBoardSuppressed({ sessionId: p.sessionId, taskId: p.taskId }),
+      suppressed: store.isTaskBoardSuppressed({
+        sessionId: p.sessionId,
+        taskId: p.taskId,
+      }),
     };
   },
   recordDelivery: (store, parsed) => {
@@ -3246,7 +3563,10 @@ const taskRunHandlers: Record<NmgTaskRunParams["action"], TaskRunHandler> = {
   },
   freeze: (store, parsed) => {
     const p = parsed as TaskRunParamsOf<"freeze">;
-    return { action: "freeze", ...freezeRunPlan(store, { runId: p.runId, tasks: p.tasks }) };
+    return {
+      action: "freeze",
+      ...freezeRunPlan(store, { runId: p.runId, tasks: p.tasks }),
+    };
   },
   bind: (store, parsed) => {
     const p = parsed as TaskRunParamsOf<"bind">;
@@ -3498,6 +3818,18 @@ function boundedReasonerSteps(values: Record<string, unknown>, graphHopBudget: n
   return Math.min(
     optionalInteger(values, "maxSteps", 1, 100) ?? 8,
     Math.max(1, graphHopBudget + 1),
+  );
+}
+
+function referenceTargets(
+  parts: ActiveGraphStorePart[],
+  sharedStore: NmgStore,
+  sessionId?: string,
+): MemoryContext["results"] {
+  return parts.flatMap((part) =>
+    part.store
+      .getContext([...part.memoryIds], 0, part.store === sharedStore ? undefined : sessionId)
+      .results.filter((result) => part.memoryIds.has(result.memory.id)),
   );
 }
 

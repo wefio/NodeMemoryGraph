@@ -77,11 +77,18 @@ test("loadPrompts reads every prompt section from the yaml source", () => {
   }
 });
 
-test("search disclosure owns the progressive candidate header and delimiter contract", () => {
+test("search disclosure explains previews and safeguards without repeating the row template", () => {
   const text = loadPrompts().search_disclosure;
   assert.match(text, /NMG MEMORY CANDIDATES/u);
-  assert.match(text, /fields separated by "; "/u);
-  assert.match(text, /fields: memory=id/u);
+  assert.match(text, /previews, not evidence/u);
+  assert.match(text, /order is not a guarantee of relevance/u);
+  assert.match(text, /node=semantic cluster/u);
+  assert.match(text, /time=event date/u);
+  assert.match(text, /expires=expiry date/u);
+  assert.match(text, /chains=logical/u);
+  assert.match(text, /\[external\]=external source/u);
+  assert.match(text, /\[open\]=unresolved/u);
+  assert.doesNotMatch(text, /^format:|^fields:/mu);
   assert.doesNotMatch(text, /tier=L|score=|qpp=|latency=|tokens?=/iu);
 });
 
@@ -108,6 +115,19 @@ test("memory policy makes model-mediated durable capture proactive but attributa
   assert.match(text, /information already stored/u);
 });
 
+test("ongoing work has a current-state protocol separate from durable memory", () => {
+  const text = loadPrompts().memory_policy;
+  assert.match(text, /multi-step work/u);
+  assert.match(text, /working_state/u);
+  assert.match(text, /nmg_state/u);
+  assert.match(text, /space=ag/u);
+  assert.doesNotMatch(text, /working_state through nmg_lab/u);
+  assert.match(text, /meaningful progress/u);
+  assert.match(text, /verified completion/u);
+  assert.match(text, /daemon restart/u);
+  assert.match(text, /repository or explicit shared task references/u);
+});
+
 test("tool descriptions are neutral: they state capability, not when to call", () => {
   const prompts = loadPrompts();
   for (const key of [
@@ -115,6 +135,7 @@ test("tool descriptions are neutral: they state capability, not when to call", (
     "get_description",
     "remember_description",
     "board_description",
+    "state_description",
     "reason_description",
   ] as const) {
     const text = prompts[key];
@@ -146,6 +167,30 @@ test("memory policy exposes the independently verified claim-outcome boundary", 
   assert.match(text, /silence, or lack of correction are not claim evidence/u);
 });
 
+test("shared recall feedback names its graph once without weakening attribution or safety", () => {
+  const template = loadPrompts().recall_feedback_affordance;
+  const graphId = "f73c88d7-2b4a-46ce-b0a3-f8324cbf1bb9";
+  const text = renderDisclosure(template, { graph_id: graphId });
+  assert.equal([...template.matchAll(/\{graph_id\}/gu)].length, 1);
+  assert.equal(text.split(graphId).length - 1, 1);
+  assert.ok(text.includes(`nmg_remember action=feedback with activeGraphId=${graphId}`));
+  assert.match(text, /helped, went unused, or misled the current work/u);
+  assert.match(text, /you may rate it/u);
+  for (const label of [
+    "evidenceSufficient",
+    "expansionUseful",
+    "excessiveNoise",
+    "noMemoryNeeded",
+    "taskSuccess",
+    "userCorrection",
+  ]) {
+    assert.ok(text.includes(label), `${label} remains available`);
+  }
+  assert.match(text, /only the labels you can judge/u);
+  assert.match(text, /Omit the call when any label would be a guess/u);
+  assert.match(text, /never invent labels/u);
+});
+
 test("claim-outcome reminder is advisory and keeps the exact evidence boundary", () => {
   const text = loadPrompts().shadow_claim_outcome_nudge;
   assert.match(text, /\{memory_ids\}/u);
@@ -166,6 +211,19 @@ test("disclosures keep placeholders for runtime substitution", () => {
   assert.match(prompts.get_disclosure, /NMG selected evidence:/u);
   assert.match(prompts.get_disclosure_metadata, /\{count\}/);
   assert.match(prompts.get_disclosure_metadata, /\{next_step\}/);
+});
+
+test("short disclosure guidance keeps exact reads, folding, and withdrawal boundaries", () => {
+  const prompts = loadPrompts();
+  assert.match(prompts.get_disclosure, /Saved records; SOURCE=original evidence when different/u);
+  assert.match(prompts.get_hint, /nmg_get/u);
+  assert.match(prompts.get_hint, /selected IDs and activeGraphId/u);
+  assert.match(prompts.get_hint, /exact records and source evidence/u);
+  assert.match(prompts.deferred_hint, /If needed/u);
+  assert.match(prompts.deferred_hint, /deferred IDs once/u);
+  assert.match(prompts.deferred_hint, /do not repeat nmg_search/u);
+  assert.match(prompts.forget_hint, /\[forget\].*withdrawn content/u);
+  assert.match(prompts.forget_hint, /do not rely on it/u);
 });
 
 test("multi-query guidance leaves query generation to the Agent", () => {
