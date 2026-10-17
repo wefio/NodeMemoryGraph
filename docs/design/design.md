@@ -2032,7 +2032,6 @@ Search signals are separated by purpose:
 - regular expression only as an advanced/debug fallback over a bounded candidate
   set or raw session subset.
 
-<<<<<<< HEAD
 Structured scope conjunctions and inclusive event-time bounds constrain the SQL
 candidate pool before scoring and limiting. A missing event time fails a supplied
 bound. Hybrid lexical priority does not exempt candidates from these filters:
