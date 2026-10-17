@@ -22,6 +22,7 @@
 ## 目录说明
 
 - **从这里开始：**先用[概念地图](guides/concept-map.zh-CN.md)理解术语和 owner，再运行[第一次回忆教程](guides/first-recall.zh-CN.md)。
+- **共享协作设计：**[事件记录与 Agent 任务状态](design/board-event-records.md)负责兼容增强的事件空间契约；交付状态留在完成台账。
 - **`guides/`**：非规范导航与经过测试的演练。
 - **`design/`**：架构、数据模型、算法和流程契约；被取代的设计移入 `design/archived/`。[实现沿革索引](design/implementation-lineage.md)只记录能显著降低重新定位或重复犯错成本的 commit。
 - **`decisions/`**：带生命周期的设计与流程决策，见 [decisions/README.zh-CN.md](decisions/README.zh-CN.md)。

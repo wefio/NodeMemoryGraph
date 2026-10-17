@@ -940,6 +940,11 @@ Task-Unit declaration semantics and storage encoding belong to the default proto
 restoration to its adopter, and persistence/transactions to the store. The board owns coordination
 state rather than another task body. The [declaration storage contract](task-unit-semantics.md#声明存储与恢复)
 retains typed task authority and binds immutable attempt inputs for restart recovery.
+The accepted [event-record and Agent-status design](board-event-records.md) adds
+coarse collaboration history, channel associations and event-scoped subscriptions
+without replacing ordinary world-channel messaging or existing channel behavior.
+It is an additive design target; delivery evidence belongs in the
+[completion audit](completion-audit.md).
 
 AG and Task Board share admitted information views and pure text preparation
 through `core/information-view.ts` and `integration/information-output.ts`.

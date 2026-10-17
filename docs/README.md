@@ -46,6 +46,7 @@ copying the whole implementation narrative.
 
 - **Start here:** [concept map](guides/concept-map.md) for terminology and owner
   routes, then the executable [first-recall tutorial](guides/first-recall.md).
+- **Shared coordination design:** [event records and Agent task status](design/board-event-records.md) owns the additive event-space contract; delivery status stays in the completion audit.
 - **`guides/`** — non-normative navigation and tested walkthroughs.
 - **`design/`** — architecture, data models, algorithms, and process contracts.
   Superseded designs move to `design/archived/`. The
