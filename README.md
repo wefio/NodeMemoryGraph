@@ -32,7 +32,7 @@ other way:
 - **Free.** No billing surface at all: FTS5 retrieval is built in, the local
   embedding path costs nothing, and there is no account to upgrade.
 - **Real, not conceptual.** A CLI, a JSON-RPC daemon, an MCP server, working
-  adapters for three harnesses — and NMG is used daily across sessions as its
+  adapters for four harnesses — and NMG is used daily across sessions as its
   own development memory, not demonstrated once in a demo.
 
 **Honest boundary:** NMG is not plug-and-play yet. Native integrations need
@@ -41,13 +41,14 @@ _agent-friendly to integrate_: if your agent can use a CLI, it can probably use
 NMG; if it can write plugins, it can integrate NMG itself from the stable
 JSON-RPC boundary.
 
-| Your setup                                 | Path                                                                                                                     |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| [Pi](https://github.com/earendil-works/pi) | Native extension ([Try it](#try-it))                                                                                     |
-| Claude Code                                | Local MCP plugin ([Claude Code plugin](#claude-code-plugin))                                                             |
-| DeepSeek Harness                           | Cordis plugin ([dsh/](dsh/README.md))                                                                                    |
-| Any other agent                            | CLI + [Skill](skills/nmg-memory/SKILL.md) ([Agent-independent CLI](#agent-independent-cli), [Agent Skill](#agent-skill)) |
-| Custom harness                             | Build an adapter on the HTTP JSON-RPC boundary ([Headless control](#headless-pi-control))                                |
+| Your setup | Path |
+|---|---|
+| [Pi](https://github.com/earendil-works/pi) | Native extension ([Try it](#try-it)) |
+| OpenCode v2 | Thin transport plugin ([opencode-plugin README](opencode-plugin/README.md)) |
+| Claude Code | Local MCP plugin ([Claude Code plugin](#claude-code-plugin)) |
+| DeepSeek Harness | Cordis plugin ([dsh/](dsh/README.md)) |
+| Any other agent | CLI + [Skill](skills/nmg-memory/SKILL.md) ([Agent-independent CLI](#agent-independent-cli), [Agent Skill](#agent-skill)) |
+| Custom harness | Build an adapter on the HTTP JSON-RPC boundary ([Headless control](#headless-pi-control)) |
 
 NMG stores mutable semantic memory over immutable evidence and retrieves a
 small, progressively deeper subset instead of flattening all history into one
