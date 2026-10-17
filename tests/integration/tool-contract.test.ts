@@ -36,10 +36,10 @@ test("Pi, MCP, and DSH schemas consume the shared action contract", () => {
     ["../../.pi/extensions/nmg/index.ts", /PI_BOARD_ACTIONS/u, /PI_REMEMBER_ACTIONS/u],
     [
       "../../claude-plugins/nmg-memory/agents/memory-copilot.ts",
-      /COMMON_BOARD_ACTIONS/u,
+      /STATE_OPERATIONS/u,
       /COMMON_REMEMBER_ACTIONS/u,
     ],
-    ["../../dsh/dsh-nmg/src/plugin/index.ts", /COMMON_BOARD_ACTIONS/u, /COMMON_REMEMBER_ACTIONS/u],
+    ["../../dsh/dsh-nmg/src/plugin/index.ts", /STATE_OPERATIONS/u, /COMMON_REMEMBER_ACTIONS/u],
   ] as const;
   for (const [relativePath, boardContract, rememberContract] of sources) {
     const source = readFileSync(resolve(import.meta.dirname, relativePath), "utf8");
@@ -70,7 +70,7 @@ test("Pi, MCP, and DSH render through the shared agent surface", () => {
     assert.match(source, /renderSearchSurface/u);
     assert.match(source, /renderEvidenceSurface/u);
     assert.match(source, /renderRememberSurface/u);
-    assert.match(source, /renderTaskBoardSurface/u);
+    assert.match(source, /renderTaskBoardSurface|renderStateOutput/u);
   }
 });
 

@@ -17,13 +17,13 @@ spawn (~180 ms) while a daemon is up.
 
 Expose exactly this surface, with compact output:
 
-| Tool | Daemon RPC (CLI fallback) |
-|------|---------------------------|
-| `nmg_search(query, limit?, maxTier?, nodeName?, scope?, ...)` | RPC `search` · fallback `nmg search "<q>" --compact-json` |
-| `nmg_get(memoryIds[], activeGraphId?)` | RPC `get` · fallback `nmg get <ids...> --json` |
-| `nmg_remember(statement, nodeName, ...)` | RPC `remember` · fallback `nmg remember "<s>" --node "<n>" --json` |
-| `nmg_board(action, taskId?, ...)` | RPC `taskBoard` · fallback `nmg board <action> --json` |
-| `nmg_daemon(status)` (optional) | RPC `status` · fallback `nmg daemon status --json` |
+| Tool                                                          | Daemon RPC (CLI fallback)                                          |
+| ------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `nmg_search(query, limit?, maxTier?, nodeName?, scope?, ...)` | RPC `search` · fallback `nmg search "<q>" --compact-json`          |
+| `nmg_get(memoryIds[], activeGraphId?)`                        | RPC `get` · fallback `nmg get <ids...> --json`                     |
+| `nmg_remember(statement, nodeName, ...)`                      | RPC `remember` · fallback `nmg remember "<s>" --node "<n>" --json` |
+| `nmg_board(action, taskId?, ...)`                             | RPC `taskBoard` · fallback `nmg board <action> --json`             |
+| `nmg_daemon(status)` (optional)                               | RPC `status` · fallback `nmg daemon status --json`                 |
 
 Do not hand-build those four tools' result strings in the adapter. Import the
 pure functions from `src/integration/agent-surface.ts`:
@@ -64,6 +64,32 @@ Rules every adapter must preserve:
   may retain official output formats but must not redefine the product contract.
 - the board is temporary cross-agent coordination, never durable memory.
 - the adapter never owns or stops a shared daemon — the one-shot CLI reuses it.
+
+### Optional maintained state through existing Lab
+
+For `working_state`, keep model input limited to `replace(input={text})` or
+`clear(input={})`. Enablement captures the explicit session working frame; use
+`captureWorkingStateInvocation` from `integration/lab-capabilities.ts` before
+transport to attach the current lease binding outside model-authored input.
+`invokeDaemon` and the ordinary CLI already do this. Preserve a supplied fence
+across retries; never re-read status to borrow a newer activation, or fall back
+to a fresh CLI invocation after capturing a write. Raw JSON-RPC callers provide
+that metadata explicitly. It fences context changes, not authentication.
+
+Render the ordinary acknowledgement with `renderLabOutput`; JSON keeps the
+normal RPC result. Neither field naming nor rendering proves actual model
+visibility. Current adapters use a session-frame fallback, not semantic task
+detection. Full operation/lifecycle limits are owned by
+[optional capabilities](optional-capabilities.md#working_state-operations).
+
+For input-capable hosts, use `integration/working-state-input.ts` against the
+existing snapshot RPC, mapping only dedicated state fragments and intact direct
+call/result witnesses. Do not remove mixed recall or tool history. Pi maps it
+through `context` on every inference; its final provider confirmation is explicitly
+unsupported. Other hosts must report `append-only` unless they supply actual input
+selection. The shared plan never writes disclosures; capability, protection and
+compaction boundaries are owned by
+[the runtime input contract](../../../docs/design/session-active-graph-runtime-design.md#dedicated-state-input-selection).
 
 ### Automatic recall (hook, optional but recommended)
 
@@ -114,7 +140,7 @@ decide where a row goes:
 So an NMG adapter's tools go in an agent preset.
 
 > **Newer recommended route — dual-face host package.** To make the adapter
-> global *and* persist client tool cards across restarts in one artifact, build a
+> global _and_ persist client tool cards across restarts in one artifact, build a
 > community-standard dual-face package (node half hosts the tools + recall in the
 > host composition; browser half ships the cards through the
 > `window.__ModuleLoader__` bundle handoff). See
@@ -141,7 +167,7 @@ So an NMG adapter's tools go in an agent preset.
 3. Append one row to the preset's `agent.cordis.yml`:
    ```yaml
    - id: nmg
-     name: './nmg-plugin.mjs'
+     name: "./nmg-plugin.mjs"
    ```
 4. Write `preset.yml` with `name` and `description`.
 5. Set the default so new sessions load it (`~/.dsh/settings.yaml`):

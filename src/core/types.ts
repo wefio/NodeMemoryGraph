@@ -942,6 +942,8 @@ export const TESSERA_REF_MARKER = "tessera_ref";
 
 export interface MemoryContext {
   results: MemorySearchResult[];
+  /** Derived graph-scoped text selectors; canonical DTOs and record IDs stay unchanged. */
+  memoryReferences?: Readonly<Record<string, string>>;
   /** Tessera (bookmark) hits, an independent searchable source alongside
    *  memory. Each hit carries the resolved line in the current file, or a
    *  staleness marker when the snippet no longer exists. */
@@ -1242,6 +1244,11 @@ export interface TaskBoardPreview {
   ackCount: number;
   createdAt: string;
   resolvedAt: string | null;
+  /** Coordination metadata survives compact reads; older clients may omit it. */
+  deliveredBy?: TaskBoardEntry["deliveredBy"];
+  deliverableDigest?: TaskBoardEntry["deliverableDigest"];
+  verdict?: TaskBoardEntry["verdict"];
+  judgedBy?: TaskBoardEntry["judgedBy"];
   /** Bounded one-line preview of content (a lone `memory=<id>` pointer is whole). */
   preview: string;
 }

@@ -13,52 +13,52 @@ NMG 的使命 = 给 coding agent 持久、可检索的记忆。三个动作：
 
 ### Recall —— 唯一 1 个需求
 
-| 需要 | 钩子 | 为什么唯一 |
-|---|---|---|
+| 需要                          | 钩子                 | 为什么唯一                                                                                     |
+| ----------------------------- | -------------------- | ---------------------------------------------------------------------------------------------- |
 | 每次 agent 思考前注入相关记忆 | `before_agent_start` | 只有它能返回 systemPrompt、且在 LLM 调用前；`turn_start` 无注入能力，`context` 只能改 messages |
-| 用户显式搜索 | `nmg_search` 工具 | 无钩子 |
+| 用户显式搜索                  | `nmg_search` 工具    | 无钩子                                                                                         |
 
 ### Capture —— 按信息源拆
 
-| 信息源 | 价值 | 钩子 | 唯一性 |
-|---|---|---|---|
-| 用户**显式**「记住 X」 | 最高 | `nmg_remember` 工具 | 无钩子 |
-| 用户**隐式**事实/偏好/约束/决定 | 高 | 当前 Agent 按 memory policy 主动调用 `nmg_remember` | 不另启后台抽取模型 |
-| **工具执行结果** | 会话工作状态 | `tool_result` | 唯一：只有它同时有 input + content + isError + 按工具 details；默认只进运行时 AG |
-| **轮/会话结局** | 高 | `agent_settled`（语义） | 唯一；但无 messages payload，需 `agent_end` 缓存 |
-| **会话归档** | 中 | `session_shutdown` | 唯一：daemon 死前必须归档 |
-| staging 补刷 | — | `session_start` | 唯一：上次会话后首次唤醒 |
-| **compact 前状态** | 工作上下文 | `session_before_compact` | 清理注入窗口；Pi 负责摘要，NMG 不自动持久化原始片段 |
+| 信息源                          | 价值         | 钩子                                                | 唯一性                                                                           |
+| ------------------------------- | ------------ | --------------------------------------------------- | -------------------------------------------------------------------------------- |
+| 用户**显式**「记住 X」          | 最高         | `nmg_remember` 工具                                 | 无钩子                                                                           |
+| 用户**隐式**事实/偏好/约束/决定 | 高           | 当前 Agent 按 memory policy 主动调用 `nmg_remember` | 不另启后台抽取模型                                                               |
+| **工具执行结果**                | 会话工作状态 | `tool_result`                                       | 唯一：只有它同时有 input + content + isError + 按工具 details；默认只进运行时 AG |
+| **轮/会话结局**                 | 高           | `agent_settled`（语义）                             | 唯一；但无 messages payload，需 `agent_end` 缓存                                 |
+| **会话归档**                    | 中           | `session_shutdown`                                  | 唯一：daemon 死前必须归档                                                        |
+| staging 补刷                    | —            | `session_start`                                     | 唯一：上次会话后首次唤醒                                                         |
+| **compact 前状态**              | 工作上下文   | `session_before_compact`                            | 清理注入窗口；Pi 负责摘要，NMG 不自动持久化原始片段                              |
 
 ## 二、Pi 实际 API（核对 `dist/core/extensions/types.d.ts`）
 
 ### 33 个事件全景（按生命周期分组）
 
-| 分组 | 事件 | 触发时机 / payload 要点 | NMG |
-|---|---|---|---|
-| 会话 | `project_trust` | 信任判定前；仅 user/global/CLI 扩展 | ❌ |
-| 会话 | `resources_discover` | 资源发现（startup/new/resume/fork） | ❌ |
-| 会话 | `session_start` | reason, previousSessionFile | ✅ staging 补刷 |
-| 会话 | `session_info_changed` | /name 改名 | ❌ |
-| 会话 | `session_before_switch` | /new /resume 前；可取消 | ❌ |
-| 会话 | `session_before_fork` | /fork /clone 前；可取消 | ❌ |
-| 会话 | `session_before_compact` | **preparation, branchEntries, reason, willRetry, signal**；可取消/自定义摘要 | ✅ 清理注入窗口；运行时 AG 原样保留 |
-| 会话 | `session_compact` | compact 后 | ❌ |
-| 会话 | `session_shutdown` | 会话 teardown 前 | ✅ 归档 + 清理 |
-| 会话 | `session_before_tree` / `session_tree` | /tree 导航 | ❌ |
-| Agent | `before_agent_start` | prompt, systemPrompt(+Options)；可注入 | ✅ recall + nudge |
-| Agent | `agent_start` | run 开始 | ❌ |
-| Agent | `agent_end` | **messages: AgentMessage[]** | ✅ shadow outcome |
-| Agent | `agent_settled` | 完全落定（无 retry/compact/续跑）；**无 payload** | ➖ 明确不用于自动写入 |
-| Turn/消息 | `turn_start` / `turn_end` | turnIndex / message + toolResults | ❌ |
-| Turn/消息 | `message_start` / `message_update` / `message_end` | token 级热路径 | ❌ |
-| 工具 | `tool_execution_start` / `tool_execution_update` | 开始 / 流式部分输出 | ❌ |
-| 工具 | `tool_call` | 执行前，**可拦截**，input 可变 | ❌（已并入 tool_result） |
-| 工具 | `tool_result` | 执行后，**可改**；input + content + isError + details | ✅ 运行时 AG 捕获 + nudge |
-| 工具 | `tool_execution_end` | 完成；result + isError，**无 input** | ❌ |
-| Provider | `context` | 每次 LLM 调用前，可改 messages | ❌ |
-| Provider | `before_provider_request` / `before_provider_headers` / `after_provider_response` | 请求/响应层 | ❌ |
-| 配置/交互 | `model_select` / `thinking_level_select` / `user_bash` / `input` | 换模型/级别、!/!! 命令、原始输入 | ❌ |
+| 分组      | 事件                                                                              | 触发时机 / payload 要点                                                      | NMG                                 |
+| --------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------- |
+| 会话      | `project_trust`                                                                   | 信任判定前；仅 user/global/CLI 扩展                                          | ❌                                  |
+| 会话      | `resources_discover`                                                              | 资源发现（startup/new/resume/fork）                                          | ❌                                  |
+| 会话      | `session_start`                                                                   | reason, previousSessionFile                                                  | ✅ staging 补刷                     |
+| 会话      | `session_info_changed`                                                            | /name 改名                                                                   | ❌                                  |
+| 会话      | `session_before_switch`                                                           | /new /resume 前；可取消                                                      | ❌                                  |
+| 会话      | `session_before_fork`                                                             | /fork /clone 前；可取消                                                      | ❌                                  |
+| 会话      | `session_before_compact`                                                          | **preparation, branchEntries, reason, willRetry, signal**；可取消/自定义摘要 | ✅ 清理注入窗口；运行时 AG 原样保留 |
+| 会话      | `session_compact`                                                                 | compact 后                                                                   | ❌                                  |
+| 会话      | `session_shutdown`                                                                | 会话 teardown 前                                                             | ✅ 归档 + 清理                      |
+| 会话      | `session_before_tree` / `session_tree`                                            | /tree 导航                                                                   | ❌                                  |
+| Agent     | `before_agent_start`                                                              | prompt, systemPrompt(+Options)；可注入                                       | ✅ recall + nudge                   |
+| Agent     | `agent_start`                                                                     | run 开始                                                                     | ❌                                  |
+| Agent     | `agent_end`                                                                       | **messages: AgentMessage[]**                                                 | ✅ shadow outcome                   |
+| Agent     | `agent_settled`                                                                   | 完全落定（无 retry/compact/续跑）；**无 payload**                            | ➖ 明确不用于自动写入               |
+| Turn/消息 | `turn_start` / `turn_end`                                                         | turnIndex / message + toolResults                                            | ❌                                  |
+| Turn/消息 | `message_start` / `message_update` / `message_end`                                | token 级热路径                                                               | ❌                                  |
+| 工具      | `tool_execution_start` / `tool_execution_update`                                  | 开始 / 流式部分输出                                                          | ❌                                  |
+| 工具      | `tool_call`                                                                       | 执行前，**可拦截**，input 可变                                               | ❌（已并入 tool_result）            |
+| 工具      | `tool_result`                                                                     | 执行后，**可改**；input + content + isError + details                        | ✅ 运行时 AG 捕获 + nudge           |
+| 工具      | `tool_execution_end`                                                              | 完成；result + isError，**无 input**                                         | ❌                                  |
+| Provider  | `context`                                                                         | 每次 LLM 调用前，可改 messages                                               | ❌                                  |
+| Provider  | `before_provider_request` / `before_provider_headers` / `after_provider_response` | 请求/响应层                                                                  | ❌                                  |
+| 配置/交互 | `model_select` / `thinking_level_select` / `user_bash` / `input`                  | 换模型/级别、!/!! 命令、原始输入                                             | ❌                                  |
 
 ### 两个关键 API 事实
 
@@ -129,6 +129,7 @@ Pi 的 `/nmg-latency on|off|status` 控制当前扩展运行时的观测开关�
 含压缩尝试的 trace 标记为排除，不用于普通首响应对比。运行中的 steer/follow-up 输入也使当前 trace 排除，不能把旧请求的输出误配给新输入。失败尝试保留标记，等待 `agent_settled` 才结束整个 trace，允许同一输入重试后获得首个输出；中止、替代、关闭和观测存储失败均不伪装成成功或零耗时。存储失败关闭观测并在 `status` 中标明，不阻断对话。
 
 这些时间是 Pi 扩展事件边界：`input` 不是客户端点击发送，`provider_request` 不是已证明的网络发包，解析后的供应商事件也不是 HTTP 原始字节，文字/工具事件不证明 UI 已绘制。缺失阶段保持缺失，不补成零。不从 assistant 消息完成时间推断首个可见输出，也不把受控回归当作自然慢轮次的根因。自然样本按活跃分支对齐模型、供应商和思考设置，只使用配置已确认匹配且没有排除标记的普通输入；同会话不等于同配置。选择理由见[首次输出观测决策](../decisions/implemented/2026-10-04-first-response-timing-is-opt-in.zh-CN.md)。
+
 ### 自动召回等待预算
 
 Pi 的整个 `before_agent_start` 上下文准备共用五秒绝对等待期限，不是每个 RPC 五秒。已完成搜索的候选头是检查点；后续披露、重排或遥测超时不能清空它们。期限后返回的搜索数据不注入。支持取消的 HTTP 请求连同响应体读取一起中止；显式 `nmg_search` 不套用这个自动期限。
@@ -140,6 +141,8 @@ daemon 自动搜索使用调用方剩余预算（最多 4.5 秒）；项目与�
 ### 3. 不变的钩子
 
 `before_agent_start`（recall + runtime AG + nudge）、`session_start`（staging 补刷）、`agent_end`（controller shadow outcome）、`session_shutdown`（归档 + daemon teardown + `runtimeAg.clear`）。
+
+关闭时的 `archiveOrStage` 在成功、失败或超时后释放自己的 deadline 计时器；已完成归档不因残余计时器延长进程存活。归档等待上限不是整个 Pi 进程的退出时限，daemon 仍按调用方所有权清理。
 
 ## 四、刻意不做（设计决定，非缺陷）
 
@@ -158,18 +161,18 @@ daemon 自动搜索使用调用方剩余预算（最多 4.5 秒）；项目与�
 
 ## 六、实现清单（含未做项）
 
-| 项 | 改动 | 状态 |
-|---|---|---|
-| `tool_result` 钩子（合并 nudge + 运行时状态） | 取代 `tool_call` | ✅ 已实现 |
-| `isSuccessfulCommit` | 纯函数（成功感知 nudge） | ✅ 已实现，已测 |
-| `isMemorableToolResult` / `summarizeToolResult` | 纯函数过滤 + 摘要 | ✅ 已实现，已测 |
-| `SessionRuntimeAg` | session 隔离、去重、双预算小滑窗 | ✅ 已实现，已测 |
-| `<nmg_runtime_ag>` 注入 | 临时工具状态在轮间和压缩后可见 | ✅ 已实现，已测 |
-| `session_before_compact` 边界 | 清理 recall window，不自动持久化原文 | ✅ 已实现，已测 |
-| 测试 | 纯函数 + 注册 + nudge/运行时 AG 端到端 | ✅ 已实现 |
-| `agent_settled` 后台结局写入 | 会复制上下文并绕过语义边界 | ➖ 明确不做 |
-| 第二套隐式写入 LLM | Agent 直接调用 `nmg_remember` 即是自动路径 | ➖ 明确不做 |
-| strict 同工具延迟 flush | 运行时 FIFO 不写持久层 | ➖ 不再适用 |
+| 项                                              | 改动                                       | 状态            |
+| ----------------------------------------------- | ------------------------------------------ | --------------- |
+| `tool_result` 钩子（合并 nudge + 运行时状态）   | 取代 `tool_call`                           | ✅ 已实现       |
+| `isSuccessfulCommit`                            | 纯函数（成功感知 nudge）                   | ✅ 已实现，已测 |
+| `isMemorableToolResult` / `summarizeToolResult` | 纯函数过滤 + 摘要                          | ✅ 已实现，已测 |
+| `SessionRuntimeAg`                              | session 隔离、去重、双预算小滑窗           | ✅ 已实现，已测 |
+| `<nmg_runtime_ag>` 注入                         | 临时工具状态在轮间和压缩后可见             | ✅ 已实现，已测 |
+| `session_before_compact` 边界                   | 清理 recall window，不自动持久化原文       | ✅ 已实现，已测 |
+| 测试                                            | 纯函数 + 注册 + nudge/运行时 AG 端到端     | ✅ 已实现       |
+| `agent_settled` 后台结局写入                    | 会复制上下文并绕过语义边界                 | ➖ 明确不做     |
+| 第二套隐式写入 LLM                              | Agent 直接调用 `nmg_remember` 即是自动路径 | ➖ 明确不做     |
+| strict 同工具延迟 flush                         | 运行时 FIFO 不写持久层                     | ➖ 不再适用     |
 
 **边界已确定**：`tool_result` 提供运行时状态，但不会自动成为记忆；`session_before_compact` 提供 doomed 消息，但 NMG 不因压缩而复制它们。持久化仍以显式 `nmg_remember` 为语义接入点。
 

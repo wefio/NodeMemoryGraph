@@ -1,7 +1,7 @@
 # Session Active Graph runtime
 
-**Status:** current — 0.12: core + task/branch lifecycle + bounded runtime items + TTL artifacts + adapter-neutral disclosure ledger
-**Updated:** 2026-09-01
+**Status:** current — core + task/branch lifecycle + bounded items + maintained current state + adapter-neutral disclosure ledger
+**Updated:** 2026-10-08
 
 This topic document is the implementation blueprint for the session-owned Active
 Graph (AG) runtime. It refines the normative model in [design.md](design.md) §7
@@ -48,12 +48,58 @@ Implemented and covered by tests:
 - Bounded sessions/items/characters/projections with deterministic eviction
   (`compareEvictionPriority`: activation, then last-activated time).
 - `release(sessionId)` removes the session and its projection ownership.
-- `snapshot()` projects active items plus (when the temporary projection is
-  active) observations.
+- `snapshot()` projects active semantic references and `working_state`, plus
+  ordinary observations when the temporary projection is active.
+- Dedicated `bindWorkingState`/`replaceWorkingState`/`clearWorkingState` maintain
+  one exact provisional text per frame. `observe` cannot write this kind. A
+  replacement keeps the item ID, updates its content hash and captured binding
+  provenance, and never creates a disclosure or semantic record. Blank, secret,
+  oversize, stale or capacity-rejected writes preserve the previous value.
+- State consumes the same resident item/character caps; ordinary item eviction
+  protects it. Explicit clear, frame/session eviction and release remove it.
+  Clearing the disclosure window does not. The default state ceiling is the
+  smaller of resident capacity and the 8,000-code-unit preparation ceiling minus
+  the required temporary label and separator; configuration cannot raise it.
+- Existing `working_state` Lab enablement captures a new session working-frame
+  fence. Ordinary clients attach it outside model input before transport and keep
+  it unchanged on retry. Session/AG incarnation, active frame and binding must
+  still match at the synchronous write. Rebinding, switching or release invalidates
+  old writes. These metadata are fencing, not authentication.
+- Current tool/RPC adapters explicitly use a session working frame while the
+  lease is enabled, rather than query hashes. Library callers may bind an actual
+  trusted task frame. Semantic task detection and adapter A→B→A restoration are
+  not implemented; do not infer a task from a board channel.
 
-Runtime tests: `tests/core/session-active-graph.test.ts` (identity/projection
-immutability, temporary observation hiding, release cleanup, plus the task-frame
-behavior tests added in the current change).
+Runtime tests: `tests/core/session-active-graph.test.ts` and
+`tests/core/working-state.test.ts`; service/client contracts:
+`tests/cli/working-state.test.ts` and `tests/integration/working-state-client.test.ts`.
+The [working-state decision](../decisions/implemented/2026-10-08-ag-working-state.md)
+records this bounded slice. Short write acknowledgements and surface preparation
+are not host-input replacement, visibility commitment or cost/continuity proof.
+
+### Dedicated state carriage
+
+The shared `working-state-input.ts` contract reads the current snapshot and
+prepares one complete provisional body under the shared output budget, fenced by
+session, AG incarnation, frame, captured binding and content/text hashes. It owns
+no history, no visibility cache and no competing store, and it always remains
+unconfirmed.
+
+Pi carries that body once per user turn as a labelled block in the persisted
+`nmg-context` message returned by `before_agent_start`; the extension registers
+no per-inference `context` hook, so later model calls in the same turn re-send
+nothing and rewrite or remove no earlier position. State stays out of the mixed
+recall projection. A mid-turn read uses the history already in the session or the
+read-only `/nmg state` view. An unavailable owner, a foreign or incompletely
+prepared snapshot or a session changed during the read contributes no body and
+never presents old progress as current. Clear/release ends carriage from the next
+turn without deleting resident content, and a compacted turn message is simply
+carried again by the next turn.
+The installed Pi 1.1.0 hooks permit later input/payload replacement and provide no
+final request body confirmation; the adapter reports confirmation unsupported
+and commits no state exposure to the disclosure ledger. This is carriage, not a
+guarantee of final provider input. Scope and proof:
+[carriage decision](../decisions/implemented/2026-10-08-ag-working-state-input.md).
 
 ## 3. Independent verification against the literature (surveyed 2026-09-01)
 
@@ -68,23 +114,23 @@ engineering practice. It is not a source of requirements.
 
 ### 3.1 Research context
 
-| Work | Reference | Mechanism | Cross-check against §4 |
-| --- | --- | --- | --- |
-| **MemGPT** | [arXiv:2310.08560](https://arxiv.org/abs/2310.08560) | OS-style virtual context; LLM manages fast (core) vs slow (archival) memory; pressure heuristic triggers archival | §4.3 unified budget covers the same problem (bounded working context) with a deterministic hard ledger instead of a learned/LLM-driven signal. |
-| **A-MEM** | [arXiv:2502.12110](https://arxiv.org/abs/2502.12110), NeurIPS 2025 | Zettelkasten dynamic memory: notes linked by similarity, memory "evolves" | NMG's typed node/edge graphs + relation proposals are stricter: co-occurrence never creates edges; AG state never becomes durable structure. |
-| **Zep** | [arXiv:2501.13956](https://arxiv.org/abs/2501.13956) | Temporal knowledge graph for agent memory + Graph RAG | NMG's HistoryRecord + temporal/logical chains cover temporal structure; the AG runtime adds session working memory with immutable exposure revisions. |
-| **AgentFold** | [arXiv:2510.24699](https://arxiv.org/abs/2510.24699), ICLR 2026 | Treats context as a "dynamic cognitive workspace"; learns multi-scale **folding** (granular condensation vs deep consolidation) | Same problem as §4.1 cooling set + task return, but NMG uses deterministic task-frame eviction rather than a learned folding policy; NMG keeps details retrievable instead of irreversibly consolidating them. |
-| **Memory surveys** | [arXiv:2512.13564](https://arxiv.org/abs/2512.13564); [arXiv:2505.00675](https://arxiv.org/pdf/2505.00675) | Function taxonomy: factual / experiential / **working** memory | Confirms NMG's placement: AG = working memory; STG/LTG = factual + experiential. The "working memory" function is exactly what §4.1–4.4 operationalize. |
+| Work               | Reference                                                                                                  | Mechanism                                                                                                                       | Cross-check against §4                                                                                                                                                                                         |
+| ------------------ | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **MemGPT**         | [arXiv:2310.08560](https://arxiv.org/abs/2310.08560)                                                       | OS-style virtual context; LLM manages fast (core) vs slow (archival) memory; pressure heuristic triggers archival               | §4.3 unified budget covers the same problem (bounded working context) with a deterministic hard ledger instead of a learned/LLM-driven signal.                                                                 |
+| **A-MEM**          | [arXiv:2502.12110](https://arxiv.org/abs/2502.12110), NeurIPS 2025                                         | Zettelkasten dynamic memory: notes linked by similarity, memory "evolves"                                                       | NMG's typed node/edge graphs + relation proposals are stricter: co-occurrence never creates edges; AG state never becomes durable structure.                                                                   |
+| **Zep**            | [arXiv:2501.13956](https://arxiv.org/abs/2501.13956)                                                       | Temporal knowledge graph for agent memory + Graph RAG                                                                           | NMG's HistoryRecord + temporal/logical chains cover temporal structure; the AG runtime adds session working memory with immutable exposure revisions.                                                          |
+| **AgentFold**      | [arXiv:2510.24699](https://arxiv.org/abs/2510.24699), ICLR 2026                                            | Treats context as a "dynamic cognitive workspace"; learns multi-scale **folding** (granular condensation vs deep consolidation) | Same problem as §4.1 cooling set + task return, but NMG uses deterministic task-frame eviction rather than a learned folding policy; NMG keeps details retrievable instead of irreversibly consolidating them. |
+| **Memory surveys** | [arXiv:2512.13564](https://arxiv.org/abs/2512.13564); [arXiv:2505.00675](https://arxiv.org/pdf/2505.00675) | Function taxonomy: factual / experiential / **working** memory                                                                  | Confirms NMG's placement: AG = working memory; STG/LTG = factual + experiential. The "working memory" function is exactly what §4.1–4.4 operationalize.                                                        |
 
 ### 3.2 Engineering practice
 
-| Source | Best practice | NMG AG runtime correspondence |
-| --- | --- | --- |
-| [Anthropic: effective context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) | **Context rot**: model recall degrades as context grows (finite attention budget); curate the smallest high-signal set | §4.3 hard token/item budget + §4.5 disclosure ledger directly enforce "smallest high-signal set". |
-| Anthropic (same) | **Structured note-taking / agentic memory**: notes outside context, pulled back later | AG's semantic items + task frames are NMG's structured working memory; durable notes are LTG via governed `remember`. |
-| Anthropic (same) | **Tool result clearing**: drop raw tool output once used | §4.5 disclosure ledger + `observe()` dedup/eviction: tool observations are temporary and hidden until projected. |
-| Anthropic (same) | **Sub-agent architectures**: isolate focused work in clean contexts | Task-frame isolation (§4.1/4.2) is the in-graph analogue; the Task Board covers cross-agent coordination. |
-| [Context as an Environment](https://arxiv.org/html/2608.21690) | Programmatic context management: stale spans evicted but **recoverable via an eviction index** | §4.1 cooling set is the recoverability mechanism: evicted frames stay retrievable (until the bounded cap), unlike irreversible compaction. |
+| Source                                                                                                                        | Best practice                                                                                                          | NMG AG runtime correspondence                                                                                                              |
+| ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| [Anthropic: effective context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) | **Context rot**: model recall degrades as context grows (finite attention budget); curate the smallest high-signal set | §4.3 hard token/item budget + §4.5 disclosure ledger directly enforce "smallest high-signal set".                                          |
+| Anthropic (same)                                                                                                              | **Structured note-taking / agentic memory**: notes outside context, pulled back later                                  | AG's semantic items + task frames are NMG's structured working memory; durable notes are LTG via governed `remember`.                      |
+| Anthropic (same)                                                                                                              | **Tool result clearing**: drop raw tool output once used                                                               | §4.5 disclosure ledger + `observe()` dedup/eviction: tool observations are temporary and hidden until projected.                           |
+| Anthropic (same)                                                                                                              | **Sub-agent architectures**: isolate focused work in clean contexts                                                    | Task-frame isolation (§4.1/4.2) is the in-graph analogue; the Task Board covers cross-agent coordination.                                  |
+| [Context as an Environment](https://arxiv.org/html/2608.21690)                                                                | Programmatic context management: stale spans evicted but **recoverable via an eviction index**                         | §4.1 cooling set is the recoverability mechanism: evicted frames stay retrievable (until the bounded cap), unlike irreversible compaction. |
 
 **Conclusion of the cross-check:** the surveyed research and practice solve the
 same working-memory problem with learned folding, pressure heuristics, or
@@ -98,14 +144,14 @@ and LTG-governed writes avoid by design.
 
 The decision's acceptance criteria and their current status:
 
-| # | Capability | Status | Owner surface |
-| --- | --- | --- | --- |
-| 4.1 | Task-frame lifecycle: switch + bounded cooling set + return | **Implemented** | `session-active-graph.ts` |
-| 4.2 | Branch ownership: same-frame branches with correct parent chains, no cross-frame contamination | **Implemented** | `session-active-graph.ts` |
-| 4.3 | Unified semantic + tool + reasoning budget ledger | **Partial**: runtime item/character bounds exist; the full multidimensional shared account remains open | `session-active-graph.ts` + retrieval budget |
-| 4.4 | TTL/provenance for reasoning artifacts (bounded MGR output) | **Runtime primitive implemented**; automatic MGR admission remains deferred | `session-active-graph.ts` |
-| 4.5 | Host-neutral disclosure ledger (adapter windows move into AG) | **Implemented** for Pi, DSH, WorkBuddy and MCP | runtime + adapter RPC calls |
-| 4.6 | HA admission/rescoring on the AG (optional, gated) | **Intentionally deferred** until natural utility evidence exists; explicit Lab and isolation remain available | HA + runtime wiring |
+| #   | Capability                                                                                     | Status                                                                                                        | Owner surface                                |
+| --- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| 4.1 | Task-frame lifecycle: switch + bounded cooling set + return                                    | **Implemented**                                                                                               | `session-active-graph.ts`                    |
+| 4.2 | Branch ownership: same-frame branches with correct parent chains, no cross-frame contamination | **Implemented**                                                                                               | `session-active-graph.ts`                    |
+| 4.3 | Unified semantic + tool + reasoning budget ledger                                              | **Partial**: runtime item/character bounds exist; the full multidimensional shared account remains open       | `session-active-graph.ts` + retrieval budget |
+| 4.4 | TTL/provenance for reasoning artifacts (bounded MGR output)                                    | **Runtime primitive implemented**; automatic MGR admission remains deferred                                   | `session-active-graph.ts`                    |
+| 4.5 | Host-neutral disclosure ledger (adapter windows move into AG)                                  | **Implemented** for Pi, DSH, WorkBuddy and MCP                                                                | runtime + adapter RPC calls                  |
+| 4.6 | HA admission/rescoring on the AG (optional, gated)                                             | **Intentionally deferred** until natural utility evidence exists; explicit Lab and isolation remain available | HA + runtime wiring                          |
 
 ### 4.1 Task-frame lifecycle
 
@@ -154,9 +200,12 @@ Current `ActiveGraphBudget` (`types.ts`) covers retrieval dimensions only
 - the ledger gains dimensions for `tool_observations` and `reasoning_artifacts`
   so `budgetLedger` reports a single shared account, not per-call snapshots.
 
-The runtime enforces the shared account at `observe()` (tool observations) and at
-reasoning-artifact admission (3.4): consuming one reduces the same pool that
-retrieval selections consume.
+The runtime enforces the shared resident account at `observe()` (tool
+observations), reasoning-artifact admission and dedicated current-state admission:
+consuming one reduces the same item/character pool that retrieval selections
+consume. Maintained state has explicit admission refusal and is not silently
+removed by ordinary-item trimming; it can reduce available retrieval capacity.
+This remains distinct from the full multidimensional and model-input budget.
 
 ### 4.4 TTL/provenance for reasoning artifacts
 
@@ -191,6 +240,15 @@ same immutable projection mechanism.
   shutdown event, so its bounded ledger lives until daemon eviction or restart.
 - RPC failure degrades toward showing requested evidence, never silently folding
   content whose disclosure cannot be confirmed.
+
+The [shared information-output foundation](../decisions/implemented/2026-10-07-shared-information-output.md)
+now separates pure preparation from exact rendered-fragment confirmation. It
+snapshots admitted views, fingerprints only sourced rows that fit, and returns
+reader-local candidates without writing this ledger. Legacy text interfaces use
+that same preparation. Actual next-input/authorization confirmation and ledger
+commitment are not wired by this foundation; `details` or `structuredContent`
+field names alone cannot establish model visibility. Its character cap is per
+prepared text, not §4.3's unified semantic/tool/reasoning budget.
 
 ### 4.6 HA admission (optional, gated)
 

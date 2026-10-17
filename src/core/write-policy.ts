@@ -13,6 +13,11 @@ const SECRET_PATTERNS = [
   /\bsk-[A-Za-z0-9_-]{12,}\b/i,
 ];
 
+/** Shared secret boundary; temporary state does not use persistent-intent filters. */
+export function containsSecret(text: string): boolean {
+  return SECRET_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 const DO_NOT_RETAIN_PATTERNS = [
   /\b(?:do not|don't|never)\s+(?:retain|remember|store|save)\b/i,
   /(?:不要|别|请勿)(?:保存|记住|记录|留存)/u,
@@ -53,7 +58,7 @@ export function assessMemoryWrite(input: {
   // Secret detection scans the full text (statement + evidence): credentials
   // can hide inside a quoted source excerpt, so evidence must never exempt
   // them.
-  if (SECRET_PATTERNS.some((pattern) => pattern.test(fullText))) {
+  if (containsSecret(fullText)) {
     return { allowed: false, reason: "secret" };
   }
   // The intent filters (explicit "do not retain" refusal, transient wording)

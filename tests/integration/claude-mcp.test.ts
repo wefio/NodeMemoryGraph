@@ -32,7 +32,11 @@ test("MCP adapter permits coordination to be explicitly disabled", async () => {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: ["--experimental-strip-types", serverPath],
-    env: { ...process.env, NMG_DATA_DIR: dataDir, NMG_ENABLE_COORDINATION: "0" },
+    env: {
+      ...process.env,
+      NMG_DATA_DIR: dataDir,
+      NMG_ENABLE_COORDINATION: "0",
+    },
     stderr: "pipe",
   });
   const client = new Client({ name: "nmg-mcp-default-test", version: "1.0.0" });
@@ -40,8 +44,8 @@ test("MCP adapter permits coordination to be explicitly disabled", async () => {
     await client.connect(transport);
     const tools = await client.listTools();
     assert.equal(
-      tools.tools.some((tool) => tool.name === "nmg_board"),
-      false,
+      tools.tools.some((tool) => tool.name === "nmg_state"),
+      true,
     );
     assert.equal(
       tools.tools.some((tool) => tool.name === "nmg_search"),
@@ -72,7 +76,11 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
   try {
     await client.connect(transport);
     const tools = await client.listTools();
-    const board = tools.tools.find((tool) => tool.name === "nmg_board");
+    const board = tools.tools.find((tool) => tool.name === "nmg_state");
+    assert.equal(
+      tools.tools.some((tool) => tool.name === "nmg_board"),
+      false,
+    );
     const lab = tools.tools.find((tool) => tool.name === "nmg_lab");
     const search = tools.tools.find((tool) => tool.name === "nmg_search");
     const get = tools.tools.find((tool) => tool.name === "nmg_get");
@@ -105,7 +113,8 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     });
     const activeGraphId = /activeGraphId=([^\s]+)/u.exec(textOf(recalled))?.[1];
     assert.ok(activeGraphId);
-    assert.match(textOf(recalled), new RegExp(memoryId, "u"));
+    const memoryReference = /memory=([^;]+);/u.exec(textOf(recalled))?.[1];
+    assert.ok(memoryReference?.startsWith("ref:"));
     const repeated = await client.callTool({
       name: "nmg_search",
       arguments: { query: "stable Active Graph session", limit: 4 },
@@ -113,33 +122,69 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     assert.match(textOf(repeated), /already_in_context=true/u);
     const exact = await client.callTool({
       name: "nmg_get",
-      arguments: { memoryIds: [memoryId], activeGraphId },
+      arguments: { memoryIds: [memoryReference], activeGraphId },
     });
     assert.match(textOf(exact), /stable Active Graph session/u);
+    assert.match(textOf(exact), new RegExp(memoryId, "u"));
 
     const roster = await client.callTool({
-      name: "nmg_board",
-      arguments: { action: "discover", capabilities: "typescript" },
+      name: "nmg_state",
+      arguments: {
+        action: "read",
+        space: "board",
+        operation: "discover",
+        capabilities: "typescript",
+      },
     });
     assert.match(textOf(roster), /claude-reviewer/u);
 
     await client.callTool({
-      name: "nmg_board",
+      name: "nmg_state",
       arguments: {
-        action: "put",
+        action: "write",
+        space: "board",
+        operation: "put",
         content: "Review the adapter boundary",
         kind: "handoff",
         to: "claude-reviewer",
       },
     });
     const read = await client.callTool({
-      name: "nmg_board",
-      arguments: { action: "read" },
+      name: "nmg_state",
+      arguments: { action: "read", space: "board" },
     });
     assert.match(textOf(read), /Review the adapter boundary/u);
 
-    const capabilities = await client.callTool({ name: "nmg_lab", arguments: { action: "list" } });
+    const capabilities = await client.callTool({
+      name: "nmg_lab",
+      arguments: { action: "list" },
+    });
     assert.match(textOf(capabilities), /reasoning_workspace/u);
+    assert.doesNotMatch(textOf(capabilities), /working_state/u);
+    await client.callTool({
+      name: "nmg_state",
+      arguments: {
+        action: "write",
+        space: "ag",
+        operation: "enable",
+        reason: "Maintain MCP current state.",
+      },
+    });
+    const stateWrite = await client.callTool({
+      name: "nmg_state",
+      arguments: {
+        action: "write",
+        space: "ag",
+        operation: "replace",
+        text: "MCP current work.",
+      },
+    });
+    assert.equal(textOf(stateWrite), "updated");
+    const stateRead = await client.callTool({
+      name: "nmg_state",
+      arguments: { action: "read", space: "ag" },
+    });
+    assert.equal(textOf(stateRead), "[temporary] MCP current work.");
     await client.callTool({
       name: "nmg_lab",
       arguments: {
@@ -154,7 +199,10 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
         action: "invoke",
         capability: "reasoning_workspace",
         operation: "add",
-        input: { kind: "hypothesis", content: "The MCP adapter owns this scratch node." },
+        input: {
+          kind: "hypothesis",
+          content: "The MCP adapter owns this scratch node.",
+        },
       },
     });
     assert.match(textOf(added), /MCP adapter owns this scratch node/u);
@@ -195,14 +243,26 @@ test("MCP adapter exposes shared logical-chain structure", async () => {
     chainType: "logical",
     topic: "Claude shared projection",
   });
-  store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: ids[0]!, targetMemoryId: ids[1]! });
-  store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: ids[2]!, targetMemoryId: ids[1]! });
+  store.addMemoryChainEdge({
+    chainId: chain.id,
+    sourceMemoryId: ids[0]!,
+    targetMemoryId: ids[1]!,
+  });
+  store.addMemoryChainEdge({
+    chainId: chain.id,
+    sourceMemoryId: ids[2]!,
+    targetMemoryId: ids[1]!,
+  });
   store.close();
 
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: ["--experimental-strip-types", serverPath],
-    env: { ...process.env, NMG_DATA_DIR: dataDir, NMG_ENABLE_COORDINATION: "0" },
+    env: {
+      ...process.env,
+      NMG_DATA_DIR: dataDir,
+      NMG_ENABLE_COORDINATION: "0",
+    },
     stderr: "pipe",
   });
   const client = new Client({ name: "nmg-mcp-chain-test", version: "1.0.0" });

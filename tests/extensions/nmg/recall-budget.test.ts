@@ -5,8 +5,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 import nmgExtension from "../../../.pi/extensions/nmg/index.ts";
+import { ControllerShadowBridge } from "../../../.pi/extensions/nmg/controller-shadow.ts";
 import { acquireServerLease } from "../../../src/cli/lifecycle.ts";
 import { NMG_PROTOCOL_VERSION } from "../../../src/cli/protocol.ts";
+import { SessionActiveGraphRuntime } from "../../../src/core/session-active-graph.ts";
 import { NmgStore } from "../../../src/core/store.ts";
 import { decideMemoryLoad } from "../../../src/core/gate.ts";
 
@@ -14,7 +16,10 @@ type HookResult = {
   message?: {
     content: string;
     details?: {
-      recallTiming?: { expired: boolean; stages: Array<{ phase: string; outcome: string }> };
+      recallTiming?: {
+        expired: boolean;
+        stages: Array<{ phase: string; outcome: string }>;
+      };
     };
   };
 };
@@ -28,17 +33,13 @@ function assertTimedOutPhase(result: HookResult, phase: string): void {
   );
 }
 
-for (const delayed of ["hello", "search", "disclosure"] as const) {
+for (const delayed of ["hello", "state", "search", "telemetry"] as const) {
   test(
-    `automatic recall stops at five seconds during ${delayed} and keeps only timely results`,
+    `automatic recall stops at five seconds during ${delayed} and keeps only timely typed items`,
     { timeout: 10_000 },
     async (t) => {
       const prompt = "What did we previously decide about Atlas SQLite offline storage?";
-      assert.equal(
-        decideMemoryLoad(prompt).mode,
-        "retrieve",
-        "the fixture must actually enter automatic recall",
-      );
+      assert.equal(decideMemoryLoad(prompt).mode, "retrieve");
       const directory = mkdtempSync(join(tmpdir(), "nmg-recall-budget-"));
       const priorData = process.env.NMG_DATA_DIR;
       const priorLab = process.env.NMG_ENABLE_LAB_TOOLS;
@@ -56,33 +57,57 @@ for (const delayed of ["hello", "search", "disclosure"] as const) {
         statement: "Atlas uses SQLite for offline storage",
         nodeName: "Atlas storage",
       }).memory;
-      const context = store.searchContext("Atlas SQLite offline storage", { maxTier: 1, limit: 1 });
+      const context = store.searchContext("Atlas SQLite offline storage", {
+        maxTier: 1,
+        limit: 1,
+      });
       store.close();
+      const runtime = new SessionActiveGraphRuntime();
+      runtime.replaceWorkingState(
+        runtime.bindWorkingState("budget-session"),
+        "Retain this state through optional recall work.",
+      );
       let reached!: () => void;
       const atDelay = new Promise<void>((resolve) => {
         reached = resolve;
       });
+      const seenRequests: string[] = [];
       t.mock.timers.enable({ apis: ["setTimeout"] });
+      if (delayed === "telemetry") {
+        t.mock.method(ControllerShadowBridge.prototype, "retrieval", async () => {
+          reached();
+          await new Promise<void>((resolve) => setTimeout(resolve, 6_000));
+        });
+      }
       t.mock.method(globalThis, "fetch", async (_url: unknown, init: RequestInit) => {
         const request = JSON.parse(String(init.body)) as {
           method: string;
           params: { action?: string };
         };
+        seenRequests.push(`${request.method}:${request.params.action ?? ""}`);
         let result: unknown = {};
         if (request.method === "hello")
           result = {
             protocol: NMG_PROTOCOL_VERSION,
             service: "node-memory-graph",
             version: "test",
-            capabilities: ["session-active-graph"],
+            capabilities: ["session-active-graph", "state-spaces"],
+          };
+        if (request.method === "state")
+          result = {
+            action: "read",
+            space: "ag",
+            operation: "read",
+            result: {
+              action: "snapshot",
+              snapshot: runtime.snapshot("budget-session"),
+            },
           };
         if (request.method === "search") result = context;
-        if (request.method === "sessionActiveGraph" && request.params.action === "disclose")
-          result = { freshMemoryIds: [memory.id], foldedMemoryIds: [] };
         if (
           (delayed === "hello" && request.method === "hello") ||
-          (delayed === "search" && request.method === "search") ||
-          (delayed === "disclosure" && request.params.action === "disclose")
+          (delayed === "state" && request.method === "state") ||
+          (delayed === "search" && request.method === "search")
         ) {
           reached();
           await new Promise<void>((resolve) => setTimeout(resolve, 6_000));
@@ -119,24 +144,31 @@ for (const delayed of ["hello", "search", "disclosure"] as const) {
         ]);
         t.mock.timers.tick(5_000);
         await new Promise<void>((resolve) => setImmediate(resolve));
-        assert.equal(
-          settled,
-          true,
-          "a slow daemon phase must not hold up the user turn past the total budget",
-        );
+        assert.equal(settled, true, "a late phase must not exceed the shared turn budget");
         const result = await pending;
-        if (delayed === "disclosure")
-          assert.match(result.message?.content ?? "", new RegExp(memory.id));
-        else assert.doesNotMatch(result.message?.content ?? "", new RegExp(memory.id));
-        assertTimedOutPhase(result, delayed === "hello" ? "connection" : delayed);
-        const before = result.message?.content;
+        const content = result.message?.content ?? "";
+        if (delayed === "telemetry") assert.match(content, new RegExp(memory.id));
+        else assert.doesNotMatch(content, new RegExp(memory.id));
+        if (delayed === "search" || delayed === "telemetry") {
+          assert.match(content, /<nmg_working_state>/u);
+          assert.match(content, /Retain this state through optional recall work/u);
+        } else assert.doesNotMatch(content, /Retain this state through optional recall work/u);
+        const phase = {
+          hello: "connection",
+          state: "state.read",
+          search: "search",
+          telemetry: "controller.telemetry",
+        }[delayed];
+        assertTimedOutPhase(result, phase);
+        assert.equal(
+          seenRequests.includes("sessionActiveGraph:disclose"),
+          false,
+          "preparing typed context is not a disclosure write",
+        );
+        assert.ok(seenRequests.filter((request) => request.startsWith("state:")).length <= 1);
         t.mock.timers.tick(6_000);
         await new Promise<void>((resolve) => setImmediate(resolve));
-        assert.equal(
-          result.message?.content,
-          before,
-          "a late search/disclosure cannot alter returned context",
-        );
+        assert.equal(result.message?.content, content, "late work cannot alter persisted context");
       } finally {
         t.mock.timers.tick(6_000);
         await pending;

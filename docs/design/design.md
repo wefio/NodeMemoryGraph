@@ -158,8 +158,8 @@ semantic embedding provider may be enabled by configuration, but local Qwen,
 vLLM, CUDA, USearch, general-purpose ML frameworks, and Cloudflare are not
 default dependencies.
 
-The target default model-facing surface is three durable-memory tools plus one
-Lab capability entry point:
+The default model-facing surface is three durable-memory tools, one state entry
+and one Lab capability entry point:
 
 ```text
 nmg_search(query, filters, budget)
@@ -171,12 +171,15 @@ nmg_get(ids)
 nmg_remember(statement, type?, scope?)
   -> explicit/hot-path durable write through the same governed write policy
 
+nmg_state(action, space, operation?, ...)
+  -> read/write private AG or shared board state through its existing owner
+
 nmg_lab(action, capability?, ...)
-  -> discover and explicitly lease optional session capabilities
+  -> discover and explicitly lease optional experimental session capabilities
 ```
 
 Cross-Agent coordination is an independent capability, but its discovery surface
-is enabled by default: adapters expose `nmg_board` and wake polling unless
+is enabled by default: adapters expose board operations through `nmg_state` and wake polling unless
 `NMG_ENABLE_COORDINATION` is explicitly set to `0`, `false`, `off`, or `no`.
 This lets a newly attached Agent discover and join shared work without every peer
 first performing a manual enable step. Daemon RPC and CLI board operations remain
@@ -400,7 +403,54 @@ follow-up rules. Storage tiers, ranking scores, QPP internals, timings, and toke
 estimates remain in Core traces or diagnostic output and never enter the
 Agent-facing candidate DTO. Structured daemon results remain canonical and the
 Agent Surface is a replaceable presentation boundary, never another store or
-protocol version.
+protocol version. Degraded search keeps its mode and bounded cause code in
+both candidate and empty-result output. Known embedding HTTP failures expose
+`embedding_http_<status>`; admitted embedding/index codes remain unchanged;
+unrecognized diagnostics expose `unknown`. Provider response bodies stay in
+the original structured result and daemon diagnostics, not in compact candidate
+DTOs or their rendering.
+
+Shared service search derives `ref:<hex-prefix>|<quote>` selectors for eligible
+visible text headers. Prefixes grow from four hex digits by two until the
+combination is unique in the original readable candidate set; quotes use the
+first six whitespace-normalized Unicode code points, without case folding or
+NFKC. Get accepts whole selectors with their original `activeGraphId` and read
+scope. Original ID/quote witnesses live inside the existing immutable private AG
+projection. Resolution first identifies the original canonical ID, then checks
+that ID against current readable content; a quote moving to another record cannot
+rebind the selector. Missing/foreign/expired projections, malformed selectors,
+zero matches and ambiguity fail closed without latest-graph inference or retries.
+Durable traces alone have no content witness and do not resolve compound RPC
+selectors. The shared library helpers accept an original captured scope and a
+current-content guard; Core exact lookup remains canonical-ID based.
+
+Full IDs remain usable without a graph and identify records in exact output,
+compact JSON, lifecycle actions and attribution. Derived text-reference maps are
+presentation data, not a separate store. Withdrawal, unusable quotes and long
+collisions retain full IDs. Deferred/folded ID-only rows retain UUIDs rather than
+disclosing a new quote. These selectors are temporary locators, not durable IDs,
+authentication or immutable whole-record version hashes.
+
+The existing status RPC exposes `getReferenceUsage` (`fullIds`, `compoundRefs`),
+visible through `nmg status --json`. Each validated get input array entry counts
+once before resolution: non-`ref:` IDs (including legacy IDs) and `ref:` attempts
+are separate. Duplicates, missing IDs and rejected selectors count; invalid RPC
+parameters and internal reads do not. Counters start at zero per service instance,
+reset on restart, and status returns a copy without opening storage. They measure
+input usage, not successful reads or reference quality.
+
+Shared search/get disclosure copy lives in `src/prompts/nmg-prompts.yaml` and
+reaches runtime consumers through generation. Named candidate/evidence fields
+carry the record data; surrounding copy explains preview versus evidence,
+semantic node/temporal/chain labels, external and unresolved markers, and the
+non-guarantee of ranking. Counts and conditional exact-read/withdrawal guidance
+close the body without repeating its field template. Wrapper changes do not
+shorten previews or saved statements, change structured results or candidate
+selection, replace historical injections, or remove feedback/completion duties.
+Bare renderers and caller-supplied wrapping remain available. A feedback
+affordance names its full graph ID once at the actionable call; its accompanying
+search header independently retains the graph ID for exact-read attribution.
+Standalone and empty-result feedback remain attributable without an earlier header.
 
 The package dependency boundary follows that architecture. NMG Core, the daemon,
 and non-interactive CLI paths do not import Pi. The Pi adapter type-checks against
@@ -874,12 +924,11 @@ the current query-derived task identifier.
 
 The shared Task Board is implemented in SQLite and
 exposed by daemon RPC and CLI (`nmg board put/read/resolve`). Adapters expose the
-`nmg_board` tool and wake polling by default; false-like
-`NMG_ENABLE_COORDINATION` values explicitly suppress that model-facing surface.
+`nmg_state` board operations and wake polling by default; false-like
+`NMG_ENABLE_COORDINATION` values suppress board operations, not private AG state.
 It records `agentId` and source session, supports task
-isolation, cursor reads, TTL deletion, and explicit resolution. Pi reads are
-added to the caller's shared daemon-owned session AG as temporary
-`board_projection` items.
+isolation, cursor reads, TTL deletion, and explicit resolution. Ordinary Pi reads stage open entries in the caller's daemon-owned session AG
+as temporary `board_projection` items; history reads do not stage entries.
 Membership/ACLs and remote
 multi-device transport are not implemented; local callers sharing the daemon
 must agree on a task ID and should set stable `NMG_AGENT_ID` values.
@@ -888,6 +937,54 @@ Task-Unit declaration semantics and storage encoding belong to the default proto
 restoration to its adopter, and persistence/transactions to the store. The board owns coordination
 state rather than another task body. The [declaration storage contract](task-unit-semantics.md#声明存储与恢复)
 retains typed task authority and binds immutable attempt inputs for restart recovery.
+
+AG and Task Board share admitted information views and pure text preparation
+through `core/information-view.ts` and `integration/information-output.ts`.
+Domain owners still enforce access and lifecycle. Body plus required labels
+are indivisible under the per-surface character budget; private temporary AG
+statements are not shortened by a display preview. Long board conventions are
+opt-in, and compact reads retain delivery/verdict metadata. Prepared source
+fingerprints are not `projectionId`, acceptance, or proof of disclosure. Exact
+fragment confirmation returns reader-local candidates only; host-confirmed
+ledger commitment remains open. Pi's grouped dynamic context uses the
+[shared information-item contract](state-spaces.md#统一上下文信息项), including
+one combined preparation budget; this does not establish provider-send or cost
+confirmation. See the
+[foundation decision](../decisions/implemented/2026-10-07-shared-information-output.md).
+
+The accepted [state-space entry contract](state-spaces.md) directly uses this
+view/output foundation for one `state read/write` entry across AG and board
+spaces, without merging their owners. Its interface and implementation boundary
+are owned by the topic and [interface decision](../decisions/implemented/2026-10-12-state-space-entry.md).
+
+The explicitly leased AG working-state writer maintains one exact provisional
+text per frame through `state` through dedicated replace/clear, never ordinary `observe`.
+Admission checks the resident cap and prepared-text ceiling before mutation;
+ordinary item eviction protects this state, while frame/session eviction and
+release remove it. A captured session/AG/frame generation fences late writes,
+not caller authentication. Ordinary tools supply only text or empty clear input;
+clients attach context metadata outside those model parameters. Current adapters
+explicitly use a session working frame while enabled so query changes cannot
+move the state. That fallback is not semantic task detection or A→B→A recovery.
+Acknowledgements are only updated/unchanged/cleared; no acceptance, durable write,
+disclosure or host-history removal follows from the write. Dedicated state input
+carriage is a separate shared contract: Pi carries one prepared body per user
+turn inside the persisted turn message and registers no per-inference hook, so
+nothing is re-sent or reordered inside a turn. Final provider confirmation
+remains unsupported; see
+[the runtime input owner](session-active-graph-runtime-design.md#dedicated-state-carriage)
+and the [working-state decision](../decisions/implemented/2026-10-08-ag-working-state.md).
+
+The shared Agent policy maintains a compact status anchor for ongoing multi-step
+work at meaningful progress, plan or blocker changes, distinguishing verified
+completion from implementation and plans. Necessary facts remain recoverable
+from repository or explicit shared task references, not only private AG lifetime.
+Pi's read-only widget and `/nmg state` sub-command use the existing snapshot/preparation
+path, without semantic search or a second store. The widget is a labelled preview;
+the command returns complete admitted text. Owner/read failures and obsolete
+responses cannot present stale progress as current. Neither user presentation nor
+state maintenance commits disclosure or collaboration acceptance. See the
+[daily-use decision](../decisions/implemented/2026-10-12-working-state-daily-use.md).
 
 AG update is working-memory management, not graph copying. It identifies
 candidate nodes, updates task-local runtime state, allocates one total budget,
@@ -1852,7 +1949,9 @@ from both storage tiers and the STG/LTG lifecycle:
    memory gate first chooses `retrieve`, `cue`, or `none`; `none` must not search
    or inject dynamic long-term memory. Ordinary code inspection, tests,
    calculations, formatting, and other self-contained turns therefore remain
-   memory-free. The gate may retain bounded task anchors so a terse continuation
+   memory-free. Explicit Chinese temporal recall cues include both `之前` and
+   `先前`; equivalent past-state questions use the same retrieval decision.
+   The gate may retain bounded task anchors so a terse continuation
    can recall the immediately preceding task without treating every substantive
    prompt as a history query.
 3. **Agent-directed recall layer:** compact headers/cues that let the model call
@@ -2642,8 +2741,7 @@ runtime loop has been implemented.
 Implemented and verified in the current prototype:
 
 - a normal Pi package manifest, stable extension entry, three durable-memory
-  tools plus the Lab capability entry point, and an opt-in `nmg_board`
-  coordination tool;
+  tools plus the Lab capability entry point and the unified `nmg_state` tool;
 - progressive `nmg_search` headers followed by exact `nmg_get` evidence loading;
 - a persistent Inbox/Delta path that survives restart, participates in hierarchy
   retrieval before compaction, and is acknowledged only after external leaf

@@ -42,6 +42,8 @@ import { NmgService } from "./service.ts";
 import { histogramQuantile } from "../core/perf.ts";
 import type { MemoryContext } from "../core/types.ts";
 import { compactSearchContext } from "../integration/search-projection.ts";
+import { captureStateInvocation, renderStateOutput } from "../integration/state.ts";
+import { captureWorkingStateInvocation, renderLabOutput } from "../integration/lab-capabilities.ts";
 import { assertDaemonCapability, assertDaemonProtocol, parseDaemonHello } from "./daemon-client.ts";
 
 // The CLI surface (synopsis, option details, known options/flags) is
@@ -123,7 +125,7 @@ export async function runCli(
     io.stdout.write(
       parsed.json || parsed.compactJson
         ? `${JSON.stringify(output, null, 2)}\n`
-        : humanResult(result),
+        : renderCliHumanResult(result),
     );
     return 0;
   } catch (error) {
@@ -151,7 +153,26 @@ async function invokeCliMethod(
     } else if (state.protocol !== NMG_PROTOCOL_VERSION) {
       assertDaemonProtocol((await httpCall(state, "hello")) as NmgHelloResult);
     }
-    return httpCall(state, method, parsed.params ?? {});
+    const params =
+      method === "lab"
+        ? await captureWorkingStateInvocation({ ...parsed.params }, (sessionId) =>
+            httpCall(state, "lab", {
+              action: "status",
+              capability: "working_state",
+              sessionId,
+            }),
+          )
+        : method === "state"
+          ? await captureStateInvocation({ ...parsed.params }, (sessionId) =>
+              httpCall(state, "state", {
+                action: "read",
+                space: "ag",
+                operation: "status",
+                sessionId,
+              }),
+            )
+          : (parsed.params ?? {});
+    return httpCall(state, method, params);
   }
   if (parsed.requiresResident) throw new Error("session observations require a running NMG daemon");
   return service.invoke(method, parsed.params);
@@ -462,6 +483,15 @@ function sourceSectionLines(
   return lines;
 }
 
+function renderCliHumanResult(value: unknown): string {
+  if (value && typeof value === "object" && "space" in value)
+    return renderStateOutput(value as import("./protocol.ts").NmgStateResult);
+  const lab = value as { action?: string; capability?: string } | null;
+  if (lab?.action === "invoke" && lab.capability === "working_state")
+    return `${renderLabOutput(value)}\n`;
+  return humanResult(value);
+}
+
 function humanResult(value: unknown): string {
   const result = value as Record<string, unknown>;
   if (result.action === "discover" && Array.isArray(result.agents)) {
@@ -606,10 +636,20 @@ function humanResult(value: unknown): string {
   if ("results" in result) {
     const context = result as unknown as {
       results: Array<{
-        memory: { id: string; memoryType: string; tier: number; statement: string };
+        memory: {
+          id: string;
+          memoryType: string;
+          tier: number;
+          statement: string;
+        };
         node: { canonicalName: string };
       }>;
-      tesserae?: Array<{ path: string; label: string; line?: number; stale?: boolean }>;
+      tesserae?: Array<{
+        path: string;
+        label: string;
+        line?: number;
+        stale?: boolean;
+      }>;
       timings?: { timings?: Record<string, number>; totalMs?: number };
     };
     const lines = context.results.map(

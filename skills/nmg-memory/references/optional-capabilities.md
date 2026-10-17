@@ -7,14 +7,14 @@ not turn benchmark evidence into production authorization.
 
 ## Retrieval controls
 
-| Capability | Default | Enable | Boundary |
-| --- | --- | --- | --- |
-| QPP1 allocation | `shadow` | `NMG_QPP1_MODE=active` | Pi explicit searches only; a caller-supplied `limit` wins. |
-| QPP2 progressive fold | `off` | `NMG_QPP2_MODE=active` | Keeps top-1 and folded IDs in AG; `NMG_QPP2_RETAINED_MASS` defaults to `0.98`. |
-| Search recommendation | `off` | `NMG_SEARCH_RECOMMENDATION=advisory` or `guardrail` | `guardrail` recommends search only for hard recall failures. |
-| Deterministic Fibonacci pass | explicit | `nmg search "..." --second-pass` | Re-selects one over-sampled pool; no second vector search. |
-| Sequential storage tiers | explicit | `nmg search "..." --tiered-disclosure` | Opens L0 first, then deeper tiers while deterministic QPP says insufficient. |
-| Full warm window | folded | `nmg search "..." --full-warm` | Diagnostic override; normally load deferred IDs with `nmg get`. |
+| Capability                   | Default  | Enable                                              | Boundary                                                                       |
+| ---------------------------- | -------- | --------------------------------------------------- | ------------------------------------------------------------------------------ |
+| QPP1 allocation              | `shadow` | `NMG_QPP1_MODE=active`                              | Pi explicit searches only; a caller-supplied `limit` wins.                     |
+| QPP2 progressive fold        | `off`    | `NMG_QPP2_MODE=active`                              | Keeps top-1 and folded IDs in AG; `NMG_QPP2_RETAINED_MASS` defaults to `0.98`. |
+| Search recommendation        | `off`    | `NMG_SEARCH_RECOMMENDATION=advisory` or `guardrail` | `guardrail` recommends search only for hard recall failures.                   |
+| Deterministic Fibonacci pass | explicit | `nmg search "..." --second-pass`                    | Re-selects one over-sampled pool; no second vector search.                     |
+| Sequential storage tiers     | explicit | `nmg search "..." --tiered-disclosure`              | Opens L0 first, then deeper tiers while deterministic QPP says insufficient.   |
+| Full warm window             | folded   | `nmg search "..." --full-warm`                      | Diagnostic override; normally load deferred IDs with `nmg get`.                |
 
 Observe QPP before active use:
 
@@ -121,6 +121,8 @@ read it before calling `invoke`; do not guess an operation name.
 ### Enablement rules
 
 - Agent-self-service capabilities (`agentMayEnable=true`) are:
+  - `working_state`: replace/clear one provisional current AG text through `nmg_state`
+    (`space=ag`); the Lab CLI/RPC is an administrative compatibility path;
   - `reasoning_workspace`: session-private scratch graph and checkpoints;
   - `memory_graph_reasoner`: read-only differentiable traversal, fuzzy logic,
     and what-if analysis;
@@ -133,6 +135,75 @@ read it before calling `invoke`; do not guess an operation name.
   Lab output is scratch/experimental and is **not** durable truth until
   separately admitted through a governed `remember` call.
 
+### `working_state` operations
+
+One current text in the existing private AG, not the reasoning scratch graph or
+STG/LTG. Use `nmg_state(action="write", space="ag", operation="enable", reason="…")`
+to lease the writer explicitly; then `operation="replace", text="<complete current state>"`
+or `operation="clear"`. No frame, permission, schema or patch fields are accepted.
+The resident-daemon CLI equivalents are:
+
+```text
+nmg state write ag enable --session-id <SESSION> --reason "<why>" --json
+nmg state write ag replace --session-id <SESSION> --text "<complete current state>"
+nmg state read ag --session-id <SESSION>
+nmg state write ag clear --session-id <SESSION>
+nmg state write ag disable --session-id <SESSION>
+```
+
+The [state-space contract](../../../docs/design/state-spaces.md) owns the shared
+AG/board interface and legacy administrative compatibility. Preserve
+necessary exact values, constraints, source references and hypothesis labels;
+write only when the current state actually changes. Do not put secrets or hidden
+chain-of-thought in it. State maintenance cannot certify facts, success or
+collaboration acceptance.
+
+Ordinary tool/CLI text is only `updated`, `unchanged` or `cleared`; JSON retains
+the normal RPC envelope. The owner enforces resident and prepared-text ceilings,
+rejects oversize writes without truncating, and preserves the old value on
+failure. Disabling/expiry revokes the writer lease, not its text. State survives
+visibility clearing but not frame/session eviction, release or daemon restart.
+
+Current adapters use an explicit **session working frame** while this lease is
+active: query changes do not migrate it. This is not semantic task detection or
+an A→B→A restoration guarantee. The ordinary client captures a binding outside
+model input before transport and does not refresh it on retry; late operations
+cannot borrow a re-enabled lease or recreated graph. Raw RPC/library callers
+must supply captured metadata themselves. A binding fences context changes; it
+is not authentication.
+
+Pi carries the state once per user turn through the separate
+[carriage contract](../../../docs/decisions/implemented/2026-10-08-ag-working-state-input.md),
+inside the persisted turn message; it registers no per-inference injection, and
+final provider confirmation remains unsupported. Neither a
+state write nor its user view establishes disclosure, acceptance, model continuity
+or cost savings. See the
+[working-state decision](../../../docs/decisions/implemented/2026-10-08-ag-working-state.md).
+
+### Daily work status
+
+For ongoing multi-step work, use the shared Agent protocol in
+[`memory_policy`](../../../src/prompts/nmg-prompts.yaml), not a history search
+to rediscover the current step. For choosing, pruning, and correcting the
+snapshot content, use [working-state maintenance](../../working-state-maintenance/SKILL.md).
+
+Enable the AG writer, then replace it with the complete current text using `nmg_state`
+or the resident-daemon `nmg state write ag` CLI above. The text remains provisional; the
+referenced task/repository evidence owns progress facts. Missing state after a
+restart is rebuilt only from that evidence, not restored from a cached display.
+
+Pi displays a read-only widget from the same snapshot used for carriage.
+It refreshes on startup/reload and state-tool results, without idle polling, extra
+searches or a snapshot read per model call. The widget previews six source lines and explicitly
+names `/nmg state` when more exist. `/nmg state` reads and notifies the complete
+admitted text, and `/nmg state on|off` toggles only the preview; neither writes
+state, carriage or model/session history. Both actions are entries of the `/nmg`
+interactive menu, so no top-level `/nmg-state` command exists. RPC clients with
+notification UI can use the command without terminal widgets. Owner failures
+show unavailable, not stale progress; obsolete/session-switched responses are
+ignored. Disable a completed task's writer lease while leaving its final status
+readable; clear only when intentionally discarding it.
+
 ### `reasoning_workspace` operations
 
 Session-private auditable scratch graph for multi-step reasoning and compaction
@@ -140,15 +211,15 @@ recovery. Every node carries one `kind`. Confirmed `kind` values:
 `goal`, `observation`, `hypothesis`, `evidence`, `conclusion`, `decision`,
 `open_question`, `next_action`.
 
-| Operation | Required input keys | Returns | Status |
-| --- | --- | --- | --- |
-| `add` | `id`, `kind`, `content` | node `{id, kind, content, status, importance, evidenceRefs, createdAt, updatedAt}` | verified live |
-| `link` | `sourceId`, `targetId`, `type` | `{sourceId, targetId, type, createdAt}` | verified live |
-| `checkpoint` | `label` (optional) | snapshot `{sessionId, nodes, edges, omittedNodes, text}` | verified live |
-| `update` | node id + fields | node | not re-verified |
-| `mark_compacted` | session | compaction marker | not re-verified |
-| `consume_checkpoint` | session | checkpoint consumption | not re-verified |
-| `clear` | session | cleared workspace | not re-verified |
+| Operation            | Required input keys            | Returns                                                                            | Status          |
+| -------------------- | ------------------------------ | ---------------------------------------------------------------------------------- | --------------- |
+| `add`                | `id`, `kind`, `content`        | node `{id, kind, content, status, importance, evidenceRefs, createdAt, updatedAt}` | verified live   |
+| `link`               | `sourceId`, `targetId`, `type` | `{sourceId, targetId, type, createdAt}`                                            | verified live   |
+| `checkpoint`         | `label` (optional)             | snapshot `{sessionId, nodes, edges, omittedNodes, text}`                           | verified live   |
+| `update`             | node id + fields               | node                                                                               | not re-verified |
+| `mark_compacted`     | session                        | compaction marker                                                                  | not re-verified |
+| `consume_checkpoint` | session                        | checkpoint consumption                                                             | not re-verified |
+| `clear`              | session                        | cleared workspace                                                                  | not re-verified |
 
 `link` uses `sourceId`/`targetId`/`type` — not `from`/`to`/`relation`.
 `checkpoint` output includes a ready-to-inject `text` projection; treat it as an
@@ -171,16 +242,16 @@ query the LTG store; you pass the graph in every call. A graph node is
 array** (not a query string). The daemon converts a JSON array of nodes into the
 internal `Map<id, node>`.
 
-| Operation | Required input keys | Returns | Status |
-| --- | --- | --- | --- |
-| `traverse` | `queryVector`, `graph`, `maxSteps` | `{path:[{nodeId,score,queryBefore,queryAfter,gate}], finalQuery, pathScore}` | verified live |
-| `logic_search` | `expr`, `graph`, `topK` | `[{nodeId, membership, atomScores}]` (ranked by `membership`) | from source (`logicSearch`) |
-| `what_if` | `queryVector`, `graph`, `hypotheticalNode`, `maxSteps` (+`impactThreshold`) | `{baseline, withNode, impacted:[{nodeId, scoreBefore, scoreAfter, delta, pathChange}]}` | from source (`whatIf`) |
+| Operation      | Required input keys                                                         | Returns                                                                                 | Status                      |
+| -------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | --------------------------- |
+| `traverse`     | `queryVector`, `graph`, `maxSteps`                                          | `{path:[{nodeId,score,queryBefore,queryAfter,gate}], finalQuery, pathScore}`            | verified live               |
+| `logic_search` | `expr`, `graph`, `topK`                                                     | `[{nodeId, membership, atomScores}]` (ranked by `membership`)                           | from source (`logicSearch`) |
+| `what_if`      | `queryVector`, `graph`, `hypotheticalNode`, `maxSteps` (+`impactThreshold`) | `{baseline, withNode, impacted:[{nodeId, scoreBefore, scoreAfter, delta, pathChange}]}` | from source (`whatIf`)      |
 
 - `queryVector` must be a non-empty finite number array (sends `queryVector is
-  required` otherwise); it is the traversal anchor.
+required` otherwise); it is the traversal anchor.
 - `graph` is a JSON array of node objects (`graph must contain between 1 and
-  10000 nodes`).
+10000 nodes`).
 - `traverse` greedily advances from the globally best start node; each step's
   `queryAfter` becomes the next step's `queryBefore`.
 - When any node declares `outgoing: string[]`, traversal is topology-constrained

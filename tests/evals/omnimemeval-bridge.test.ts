@@ -49,7 +49,11 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
     })) as { text: string };
 
     assert.match(alice.text, /NMG selected evidence:/);
-    assert.match(alice.text, /id\/node\/type\/truth\/scope identify the record/);
+    assert.match(
+      alice.text,
+      /memory=[^;\n]+; node=[^;\n]+; type=conversation_evidence; truth=asserted; scope=\{/,
+    );
+    assert.match(alice.text, /"benchmark":"OmniMemEval","user":"[a-f\d]+"/);
     assert.doesNotMatch(alice.text, /retrieval guidance/);
     assert.match(alice.text, /Kepler/);
     assert.doesNotMatch(alice.text, /Admon the Sunday day shift/);

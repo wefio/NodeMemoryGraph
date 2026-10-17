@@ -38,13 +38,13 @@ CLI + Skill 路径。但它刻意做到了**对 agent 友好、易于集成**：
 agent 会用 CLI，它大概率就能用 NMG；如果它会写插件，它甚至能基于稳定的
 JSON-RPC 边界自己完成集成。
 
-| 你的环境 | 接入路径 |
-|---|---|
-| [Pi](https://github.com/earendil-works/pi) | 原生扩展（[试试](#试试)） |
-| Claude Code | 本地 MCP 插件（[Claude Code 插件](#claude-code-插件)） |
-| DeepSeek Harness | Cordis 插件（[dsh/](dsh/README.md)） |
-| 其他任意 agent | CLI + [Skill](skills/nmg-memory/SKILL.md)（[Agent 无关 CLI](#agent-无关-cli)、[Agent Skill](#agent-skill)） |
-| 自定义 harness | 基于 HTTP JSON-RPC 边界自写 adapter（[无头 Pi 控制](#无头-pi-控制)） |
+| 你的环境                                   | 接入路径                                                                                                    |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| [Pi](https://github.com/earendil-works/pi) | 原生扩展（[试试](#试试)）                                                                                   |
+| Claude Code                                | 本地 MCP 插件（[Claude Code 插件](#claude-code-插件)）                                                      |
+| DeepSeek Harness                           | Cordis 插件（[dsh/](dsh/README.md)）                                                                        |
+| 其他任意 agent                             | CLI + [Skill](skills/nmg-memory/SKILL.md)（[Agent 无关 CLI](#agent-无关-cli)、[Agent Skill](#agent-skill)） |
+| 自定义 harness                             | 基于 HTTP JSON-RPC 边界自写 adapter（[无头 Pi 控制](#无头-pi-控制)）                                        |
 
 ## 架构
 
@@ -96,11 +96,11 @@ claude-plugins/nmg-memory/
 根目录 `.mcp.json` 把 `nmg` 注册为本地 MCP server。Claude Code 在会话启动时
 自动发现它并暴露三个工具：
 
-| 工具 | 用途 |
-|------|------|
-| `nmg_search` | 返回紧凑的记忆头（mid/node/type/tier/preview） |
-| `nmg_get` | 加载精确的记忆陈述与来源证据 |
-| `nmg_remember` | 保存持久的事实/偏好/状态/约束/事件 |
+| 工具           | 用途                                           |
+| -------------- | ---------------------------------------------- |
+| `nmg_search`   | 返回紧凑的记忆头（mid/node/type/tier/preview） |
+| `nmg_get`      | 加载精确的记忆陈述与来源证据                   |
+| `nmg_remember` | 保存持久的事实/偏好/状态/约束/事件             |
 
 daemon 生命周期自动管理：MCP server 启动时拉起 NMG daemon，退出时安全停止。
 如果 daemon 已在运行（比如另一个 Agent 启动的），直接复用且不碰它。
@@ -137,6 +137,11 @@ Pi 提供[显式开启的首次输出计时](docs/design/session-memory-lifecycl
 通过 `/nmg-latency on|off|status` 控制，只记录元数据，不改变召回等待策略。
 慢召回保留条件和 host 事件的解释边界由会话钩子契约定义。
 
+持续工作时，当前状态 widget 显示有明确标记的进度预览；`/nmg state` 直接读取
+本会话完整状态，不搜索历史（`/nmg state on|off` 只切换该预览显示）。更新、证据和重启边界见
+[日常状态维护流程](skills/nmg-memory/references/optional-capabilities.md#daily-work-status)。
+状态是临时摘要，不是完成证明，也不是持久任务库。
+
 Pi adapter 刻意做薄：它通过 JSON-RPC/HTTP 惰性启动本地 daemon，自动回忆和
 四个稳定工具复用同一条连接，且只在本次 adapter 调用启动了 daemon 时才在
 会话关闭时停掉它。已在运行的共享 daemon 不会被碰。
@@ -166,10 +171,11 @@ Pi 扩展把权威 LTG 放在 `NMG_DATA_DIR` 或 `~/.nmg/nmg.sqlite`，把当前
   也更新不了那个 AG。
 - `nmg_lab`：发现、租用、调用和关闭可选的会话能力；受控或 active 执行仍需
   原有评估门和授权回执。
-- `nmg_board`：多个 agent 通过带署名的条目、TTL 过期、增量游标和显式 resolve
-  交换临时的任务范围笔记。它默认可用，让新 Agent 能立即发现共享任务；设置
-  `NMG_ENABLE_COORDINATION=0`（也接受 `false`、`off`、`no`）可关闭模型工具和
-  adapter 唤醒。板面条目不是 LTG 记忆，也永远不进入语义检索。
+- `nmg_state`：以 read/write 和 ag/board 空间统一操作私有工作状态与共享协作状态。
+  AG writer 显式启用有界租约；board 保留 TTL、接手和独立裁定语义。
+  参见[状态空间](docs/design/state-spaces.md)。设置 `NMG_ENABLE_COORDINATION=0`
+  （也接受 `false`、`off`、`no`）拒绝模型侧 board 操作并关闭 adapter 唤醒，
+  AG 仍可用。旧 board RPC/CLI 保留管理兼容，板面不进入 LTG 或语义检索。
 
 图维护、QPP、索引和实验性推理组件留在 core/CLI 层，不做成 Pi 工具。adapter
 从不直接打开 SQLite 或 import 那些实现。
