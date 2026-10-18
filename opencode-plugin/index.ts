@@ -63,9 +63,9 @@ import {
   captureStateInvocation,
   renderStateOutput,
   stateOperation,
-  STATE_BOARD_READ_OPERATIONS,
   STATE_OPERATIONS,
 } from "../src/integration/state.ts";
+import { assembleBoardStateParams, resolveBoardOperation } from "./state-args.ts";
 import { COMMON_REMEMBER_ACTIONS } from "../src/integration/tool-contract.ts";
 import type { TaskBoardToolResult } from "../src/integration/tool-contract.ts";
 import {
@@ -948,7 +948,7 @@ export default {
       args: Record<string, unknown>,
     ): Promise<string> => {
       const identity = loadOrCreateAgentIdentity(sessionId, "opencode");
-      const operation = String(args.action);
+      const operation = resolveBoardOperation(args);
       if (operation === "rename") {
         return renameBoardAgent(sessionId, identity, String(args.agentName ?? ""));
       }
@@ -966,19 +966,8 @@ export default {
           ? `已退出频道 ${joined?.taskId ?? args.taskId}：不再接收该频道新条目的唤醒通知（重新加入用 nmg_state space=board action=write operation=subscribe）。`
           : `已加入频道 ${String(joined?.taskId ?? args.taskId)}：接收该频道新条目的唤醒通知（未订阅频道保持安静）。`;
       }
-      const direction = (STATE_BOARD_READ_OPERATIONS as readonly string[]).includes(operation)
-        ? "read"
-        : "write";
       const taskId = String(args.taskId ?? "").trim() || WORLD_BOARD_ID;
-      const result = await boardState({
-        ...args,
-        action: direction,
-        space: "board",
-        operation,
-        taskId,
-        agentId: identity.id,
-        sourceSessionId: sessionId,
-      });
+      const result = await boardState(assembleBoardStateParams(args, sessionId, identity));
       const entries = result.entries ?? (result.entry ? [result.entry] : []);
       if (result.action === "read" && entries.length > 0) {
         await Promise.allSettled([
