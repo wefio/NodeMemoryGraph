@@ -16,6 +16,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { ensureMemoryFts, MEMORY_FTS_SCHEMA } from "./fts-index.ts";
 import { encodeVector, parseVector } from "./vector-codec.ts";
 import { TASK_UNIT_DECLARATION_SCHEMA } from "../../integration/task-unit-declaration-store.ts";
+import { ensureCoordinationSchema } from "./coordination-schema.ts";
 
 type Row = Record<string, string | number | Uint8Array | null>;
 
@@ -656,6 +657,7 @@ export function migrate(db: DatabaseSync): void {
   ensureBinaryVectors(db);
   ensureTaskBoardColumns(db);
   ensureTaskBoardDeliverableColumns(db);
+  ensureCoordinationSchema(db);
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_history_source_message
       ON history_records(session_id, source_message_id)

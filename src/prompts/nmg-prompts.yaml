@@ -76,9 +76,44 @@ state_description: >-
   enable/disable its writer lease and replace(text)/clear. Board is shared
   TTL/lease-based coordination: read, readInbox, readPreviews, discover/list;
   write put, claim/release, acknowledge, deliver/judge, resolve, subscribe/
-  unsubscribe or rename. Writes retain the original owner permissions and
-  state machines. AG writes are provisional; a board self-report is not an
+  unsubscribe or rename. Event records supplement ordinary world/channel
+  messages: eventRead (eventId optional; event.afterRevision paginates history;
+  event.offset paginates the directory; event.historyOnly omits repeated snapshot),
+  eventCreate (event: title/summary/participants/resources/parentId/dependencies;
+  participants use stable Agent IDs),
+  eventUpdate (eventId and event: expectedRevision, kind, text; kind is note,
+  channel, relations, effect, close or reopen), eventSubscribe/eventUnsubscribe,
+  or eventDelete (ended archive, no active effects/references). Channel data is
+  event.channel {channelId,summary,state:active|ended|abandoned}; effect data is
+  event.effect {id,resource,condition,state:active|released}. Participants may
+  update records; only an effect owner can release it. agentStatus reads default
+  idle/task associations or writes a public note via text; presence is separate.
+  put may carry notification {key,scopes:[direct|channel|event],recipients?:stable
+  Agent IDs,invite?:boolean}. Reuse key only for retries of the same notice.
+  Explicit notification messages use default kind=note; task handoffs are separate.
+  invite:true directly notifies invitees and enrolls them plus the organizer in
+  taskId; no prior subscription or claim is required. Channel discussion follows
+  channel subscriptions; eventId association alone does not notify the event.
+  Leaving a channel stops its reminders; old invitation retries do not re-enroll.
+  System ACKs stay silent; do not post a confirmation merely to acknowledge.
+  There is no new chain-length/round cap or mandatory manual continuation.
+  Writes retain the original owner permissions and state machines. AG writes are provisional; a board self-report is not an
   acceptance. Views retain source identities, required labels and budgets.
+
+board_discussion_disclosure: >-
+  [NMG discussion] {content} {enrollment} Read source with nmg_state action=read
+  space=board taskId={channelId}. This notice is not a task handoff: no claim
+  or confirmation reply required. Use acknowledge for protocol acknowledgement,
+  not a new chat confirmation. Continue substantive discussion in that channel;
+  notification scopes do not automatically re-broadcast the whole event.
+  Leave with action=write space=board operation=unsubscribe taskId={channelId}.
+
+board_event_update_disclosure: >-
+  [NMG event update] {content} Read the record with nmg_state action=read
+  space=board operation=eventRead eventId={eventId}. This is a versioned update,
+  not a task handoff: no claim or confirmation required. Ending an event does
+  not finish tasks or release resource restrictions. Opt out with action=write
+  operation=eventUnsubscribe and the same eventId; history remains readable.
 
 lab_description: >-
   Discover and temporarily enable optional NMG capabilities for the current

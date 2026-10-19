@@ -78,32 +78,11 @@ and conditions; the event record carries observable associations and statements 
 impersonate infrastructure health or execution authority. That boundary applies to general
 collaboration, not to one event type.
 
-## Event subscription and update notifications
+## Event subscription and update notificationssubscription are three different things.
 
-Participants associated with an event record may receive its new-update notifications and
-may leave the subscription. Event subscription and channel subscription express separate
-scopes of interest; joining an event does not mean receiving every message of every
-associated channel. Event association, historical participation and current notification
-subscription are three different things.
-
-A notification corresponds to a committed update of the event record: a channel added, a
-discussion closed, a direction dropped or an event closed. Each update carries an
-identifiable version or change identity; a receiver that read the old revision has not
-therefore seen the new one. Change observation cannot rely only on the ordinary message
-creation cursor, or in-place closes and edits would be missed.
-
-Notifications reuse existing identity, subscription, suppression and delivery-deduplication
-principles; the sender need not write a duplicate broadcast to close the loop. The same
-receiver is not notified repeatedly for the same change, and a full round of "acknowledged"
-replies is not the completion condition. The world channel can still carry ordinary messages
-and open collaboration, but each event update does not force every Agent to wake.
-
-Leaving an event subscription stops new notifications for that scope without closing the
-event, deleting history, automatically leaving other channels or completing and releasing
-tasks on the leaver's behalf. Automatic task association does not override a user's opt-out.
-Re-following reads the event's current content and process record instead of an early
-announcement snapshot. Concrete wake budgets and delivery on an idle host remain bounded by
-existing host policy.
+The association-versus-notification distinction, the three notification audiences,
+first-invitation delivery and the receipt-loop boundary are owned by
+[event subscription and notification](board-event-records/event-subscription-and-notification.md#event-subscription-and-update-notifications).
 
 ## Closing, archive and retention
 
@@ -174,21 +153,20 @@ their own owners and are not replaced by event records.
 Verification must cover at least the following paths; document agreement alone is not
 evidence that these capabilities passed:
 
-- Without events, world messages, finding collaborators, named channels and old client paths
-  behave as before.
-- Opening an event, adding channels B and C, closing A's discussion, dropping an old
-  direction and closing the event can be reviewed in order, with detail expanded on demand.
-- After members read or acknowledge old content, later updates and the close remain
-  discoverable; the sender need not resend notifications by hand.
-- Retrying delivery of the same update causes neither duplicate wake-ups nor an
-  acknowledgement storm; after leaving a subscription that scope no longer notifies.
-- A failed close does not assume effects were lifted; archiving does not erase still-valid
-  effects or their source.
-- No task means idle by default, a self-written note is preserved, and ending multiple tasks
-  removes only their own associations until the last one returns the Agent to idle.
-- Receiving messages or subscribing does not accept work, and transfers plus late updates
-  leave no wrong busy association behind.
-
-Concrete storage migration, cross-adapter protocol, update/takeover write rules, subscription
-delivery and archive policy land with their own owners and executable tests during
-implementation; this document change does not announce that they are enabled.
+- An ordinary message that merely associates with an event wakes no one; an explicit event
+  notification targets current event subscribers only and requires neither confirmation from
+  everyone nor automatic acceptance of work.
+- Named, channel and event audiences resolve independently; subscribing to an event does not
+  implicitly subscribe to every associated channel.
+- A first invitation forms a notification without any prior subscription; being invited
+  subscribes the invitee to the named channel, later discussion is reminded under that channel
+  subscription, and leaving that channel is possible.
+- After leaving, a retry of the old invitation and ordinary messages do not re-subscribe; an
+  invitation neither accepts work for the invitee nor subscribes other channels incidentally.
+- When one notification matches the same Agent under several explicit scopes, that Agent is
+  notified once; opting out of one scope does not revoke another.
+- System ACKs and ordinary acknowledgement replies do not automatically produce the next round
+  of notifications; new discussion may continue without being cut off by chain length or round
+  count.
+- Undelivered notifications may coalesce per event while the original messages and history stay
+  readable; different new notifications must not be mistaken for one version.

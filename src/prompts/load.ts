@@ -11,6 +11,8 @@ export interface NmgPrompts {
   mcp_remember_description: string;
   board_description: string;
   state_description: string;
+  board_event_update_disclosure: string;
+  board_discussion_disclosure: string;
   lab_description: string;
   reason_description: string;
   reason_action_parameter_description: string;

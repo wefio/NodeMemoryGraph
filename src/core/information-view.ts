@@ -16,7 +16,9 @@ export type InformationSource =
     }>
   | Readonly<{ kind: "board"; taskId: string; entryId: string }>
   | Readonly<{ kind: "memory"; memoryId: string; activeGraphId?: string }>
-  | Readonly<{ kind: "workspace"; sessionId: string; generatedAt: string }>;
+  | Readonly<{ kind: "workspace"; sessionId: string; generatedAt: string }>
+  | Readonly<{ kind: "event"; eventId: string; revision: number; part: "record" | "change" }>
+  | Readonly<{ kind: "agent"; agentId: string }>;
 
 /** An admitted display view, not a raw graph or an authoritative state store. */
 export interface InformationView {

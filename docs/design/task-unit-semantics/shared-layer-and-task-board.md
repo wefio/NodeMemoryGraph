@@ -15,6 +15,10 @@
 | Shared Agent Surface | One tool catalogue, parameter/result semantics and discoverable entry points |
 | Thin harness adapter | Encode native tool schemas; start/recover/terminate sessions; call models; report capabilities and usage |
 
+Event association and explicit subscriber-group notification are distinct; the [notification and
+autonomous-collaboration boundaries](../board-event-records/event-subscription-and-notification.md#event-subscription-and-update-notifications)
+are owned by the topic contract.
+
 The board is a tool and carrier. It does not infer dependencies from natural-language entries or act as judge. The shared runtime uses board lease, attempt, `deliver` and `judge` operations for state transitions; the next section fixes persistence and write ownership.
 
 A shared protocol does not mean every harness has equal execution capability. Adapters report capability. Without session reuse or isolation, fall back to independent execution; do not let adapters reinterpret correctness rules.

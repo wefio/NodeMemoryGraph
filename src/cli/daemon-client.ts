@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 
 import { resolveNmgDataDir } from "./data-path.ts";
 import { captureWorkingStateInvocation } from "../integration/lab-capabilities.ts";
-import { captureStateInvocation } from "../integration/state.ts";
+import { captureStateInvocation, stateRequiresBoardEvents } from "../integration/state.ts";
 import { httpCall, type HttpCallOptions } from "./http-client.ts";
 import {
   isProcessAlive,
@@ -222,6 +222,12 @@ export async function shutdownOwnedDaemon(connection: DaemonConnection): Promise
  * 退出后的 ECONNREFUSED）时自动重连一次并重试。HTTP 层 4xx/5xx 与协议
  * 错误是普通 Error，不重试；owner 换代后只自动重试读取，写入结果不确定时显式拒绝重放。
  */
+function requiresBoardEvents(method: NmgMethod, params: Record<string, unknown>): boolean {
+  return method === "state"
+    ? stateRequiresBoardEvents(params)
+    : method === "taskBoard" && (params.eventId !== undefined || params.notification !== undefined);
+}
+
 export async function invokeDaemon(
   connection: DaemonConnection,
   method: NmgMethod,
@@ -236,6 +242,8 @@ export async function invokeDaemon(
   await adoptReplacedEndpoint(connection, options.signal);
   options.signal?.throwIfAborted();
   assertDaemonCapability(connection.capabilities, method, connection.methods);
+  if (requiresBoardEvents(method, params) && !connection.capabilities.has("board-events"))
+    throw new NmgDaemonCapabilityError(method, "board-events");
   const captured =
     method === "lab"
       ? await captureWorkingStateInvocation(params, (sessionId) =>
