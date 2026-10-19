@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
 import type { SessionRecallHints, SessionRecallPreparation } from "../core/session-recall.ts";
+import type {
+  CoordinationStateResult,
+  CoordinationEventSummary,
+} from "../integration/coordination-state.ts";
+import type { AgentWorkStatus } from "../core/coordination-events.ts";
 
 import type {
   ActiveGraphBudget,
@@ -108,6 +113,7 @@ export const NMG_CAPABILITIES = [
   "session-active-graph",
   "state-spaces",
   "controlled-reload",
+  "board-events",
 ] as const;
 
 export type NmgCapability = (typeof NMG_CAPABILITIES)[number];
@@ -549,6 +555,8 @@ interface NmgTaskBoardBase {
 }
 
 export interface NmgTaskBoardPutParams extends NmgTaskBoardBase {
+  notification?: import("../core/board-notifications.ts").BoardNotificationRequest;
+  eventId?: string;
   action: "put";
   content: string;
   kind?: TaskBoardKind;
@@ -936,16 +944,11 @@ export interface NmgStateResult {
   action: "read" | "write";
   space: "ag" | "board";
   operation: string;
-  result: NmgLabResult | NmgSessionActiveGraphResult | NmgMethodResult["taskBoard"];
-  information?: PreparedInformationOutput;
-}
-
-/** State dispatch preserves domain results; presentation reuses the existing output protocol. */
-export interface NmgStateResult {
-  action: "read" | "write";
-  space: "ag" | "board";
-  operation: string;
-  result: NmgLabResult | NmgSessionActiveGraphResult | NmgMethodResult["taskBoard"];
+  result:
+    | NmgLabResult
+    | NmgSessionActiveGraphResult
+    | NmgMethodResult["taskBoard"]
+    | CoordinationStateResult;
   information?: PreparedInformationOutput;
 }
 
@@ -1043,7 +1046,13 @@ export type NmgMethodResult = {
         action: "resolve" | "claim" | "release" | "acknowledge" | "veto" | "deliver" | "judge";
         entry: TaskBoardEntry;
       }
-    | { action: "read"; entries: TaskBoardEntry[]; nextCursor: string | null }
+    | {
+        action: "read";
+        entries: TaskBoardEntry[];
+        nextCursor: string | null;
+        events?: CoordinationEventSummary[];
+        agents?: Array<{ id: string; agentName: string; lastSeenAt: string } & AgentWorkStatus>;
+      }
     | { action: "readDirected"; entries: TaskBoardEntry[] }
     | { action: "readInbox"; entries: TaskBoardEntry[] }
     | {
@@ -1063,6 +1072,7 @@ export type NmgMethodResult = {
         action: "deliveryCheck";
         delivered: string[];
         acked: string[];
+        inactive?: string[];
         suppressed: boolean;
       }
     | { action: "recordDelivery"; recorded: boolean }
@@ -1084,6 +1094,10 @@ export type NmgMethodResult = {
           description: string | null;
           capabilities: string | null;
           lastSeenAt: string;
+          activity?: AgentWorkStatus["activity"];
+          statusNote?: string;
+          tasks?: AgentWorkStatus["tasks"];
+          taskCount?: number;
         }>;
       };
   shutdown: { shuttingDown: true };

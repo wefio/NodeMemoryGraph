@@ -1,3 +1,5 @@
+import type { BoardNoticeMetadata } from "../core/board-notifications.ts";
+
 /** Host-neutral action contracts. Adapters keep their native schema library and
  * host-only fields, but must not silently omit these shared lifecycle actions. */
 export const COMMON_REMEMBER_ACTIONS = [
@@ -33,7 +35,10 @@ export const PI_BOARD_ACTIONS = [...COMMON_BOARD_ACTIONS, "rename"] as const;
 
 /** A single board entry as it comes back over the daemon `taskBoard` RPC.
  * Adapters may extend it with host-only fields, but must not drop these. */
-export interface TaskBoardToolEntry {
+export interface TaskBoardToolEntry extends BoardNoticeMetadata {
+  eventId?: string;
+  eventRevision?: number;
+  eventNotice?: boolean;
   id: string;
   taskId?: string;
   sequence: number;

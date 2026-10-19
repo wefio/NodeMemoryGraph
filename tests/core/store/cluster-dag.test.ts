@@ -12,7 +12,7 @@ import test from "node:test";
  * `with<Cluster>(Base)`, and store.ts assembles the final class as
  *
  *   export class NmgStore
- *     extends withGraph(withRetrieval(withWrites(withMaintenance(NmgStoreBase)))) {}
+ *     extends withCoordination(withGraph(withRetrieval(withWrites(withMaintenance(NmgStoreBase))))) {}
  *
  * Pins the new boundary:
  *
@@ -39,6 +39,21 @@ const FINAL_ANCHOR = "NmgStore";
 
 /** Cluster → methods assigned to it (single source of truth for the guard). */
 const CLUSTERS: Record<string, string[]> = {
+  coordination: [
+    "postBoardMessage",
+    "setBoardChannelSubscription",
+    "listBoardChannelSubscriptions",
+    "createCoordinationEvent",
+    "updateCoordinationEvent",
+    "readCoordinationEvent",
+    "listCoordinationEvents",
+    "subscribeCoordinationEvent",
+    "unsubscribeCoordinationEvent",
+    "deleteCoordinationEvent",
+    "setAgentStatusNote",
+    "getAgentWorkStatus",
+    "inactiveTaskBoardEntries",
+  ],
   graph: [
     "linkNodes",
     "getRelations",
@@ -122,10 +137,16 @@ const CLUSTERS: Record<string, string[]> = {
   ],
 };
 
-// Applied to whitespace-stripped source (see assertion below), so the pattern
-// is written compactly and matches prettier's wrapped form as well as single-line.
-const MIXIN_CHAIN_RE =
-  /classNmgStoreextendswithGraph\(withAnalogy\(withCommunity\(withRetrieval\(withWrites\(withMaintenance\(NmgStoreBase\)\)\)\)\),\)\{/;
+// Pin every mixin in order; the assertion normalizes only whitespace and trailing commas.
+const MIXIN_CHAIN = [
+  "withCoordination",
+  "withGraph",
+  "withAnalogy",
+  "withCommunity",
+  "withRetrieval",
+  "withWrites",
+  "withMaintenance",
+].reduceRight((base, mixin) => `${mixin}(${base})`, "NmgStoreBase");
 
 function methodDef(name: string, source: string, indent = 2): boolean {
   // Class method: `<indent>[protected ]name(` at class-member indent; also
@@ -240,7 +261,7 @@ test("cluster split: store.ts assembles the mixin chain in order", () => {
   assert.ok(
     // Match against whitespace-stripped source so the assertion is formatting-
     // independent (prettier may wrap the mixin chain across lines).
-    MIXIN_CHAIN_RE.test(text.replace(/\s+/gu, "")),
-    `${STORE} must define class NmgStore extends withGraph(withAnalogy(withCommunity(withRetrieval(withWrites(withMaintenance(NmgStoreBase))))))`,
+    text.replace(/\s+/gu, "").replace(/,\)/gu, ")").includes(`classNmgStoreextends${MIXIN_CHAIN}{`),
+    `${STORE} must define class NmgStore extends ${MIXIN_CHAIN}`,
   );
 });

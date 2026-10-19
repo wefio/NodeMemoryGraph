@@ -48,6 +48,30 @@ routes:
       blocking: [check, test:product, build]
       advisory: []
 
+  - id: board-coordination
+    paths:
+      - src/core/coordination-events.ts
+      - src/core/board-notifications.ts
+      - src/core/store/coordination.ts
+      - src/core/store/coordination-schema.ts
+      - src/core/store/board-notifications.ts
+    owners:
+      - docs/design/design.md
+      - docs/design/board-event-records.md
+    tests:
+      - tests/core/coordination-events.test.ts
+      - tests/core/coordination-history.test.ts
+      - tests/core/coordination-membership.test.ts
+      - tests/core/board-notifications.test.ts
+      - tests/cli/board-notifications.test.ts
+      - tests/cli/coordination-events.test.ts
+      - tests/integration/coordination-events.test.ts
+      - tests/integration/coordination-opencode.test.ts
+      - tests/extensions/dsh-state.test.ts
+    verify:
+      blocking: [check, test:product, build]
+      advisory: []
+
   - id: core-memory
     paths: [src/core/**]
     owners:
@@ -221,6 +245,8 @@ routes:
       - src/integration/working-state-input.ts
       - src/integration/lab-capabilities.ts
       - src/integration/state.ts
+      - src/integration/coordination-state.ts
+      - src/integration/board-delivery.ts
       - src/integration/memory-reference.ts
       - src/integration/reasoning-workspaces.ts
       - src/integration/recall-budget.ts
@@ -242,6 +268,7 @@ routes:
         tests/integration/lab-capabilities.test.ts,
         tests/integration/recall-budget.test.ts,
         tests/integration/state-client.test.ts,
+        tests/integration/coordination-events.test.ts,
         tests/integration/memory-reference.test.ts,
         tests/integration/memory-reference-snapshot.test.ts,
         tests/integration/working-state-client.test.ts,

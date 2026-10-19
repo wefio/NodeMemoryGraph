@@ -50,6 +50,52 @@ test("state CLI keeps direction and space in command words with domain arguments
   );
 });
 
+test("state CLI preserves event payload objects and independent status notes", () => {
+  assert.deepEqual(
+    build("state write board", ["eventUpdate"], {
+      agent: "worker",
+      "event-id": "event-1",
+      "event-json": JSON.stringify({ expectedRevision: 2, kind: "close", text: "Ended" }),
+    }),
+    {
+      action: "write",
+      space: "board",
+      operation: "eventUpdate",
+      agentId: "worker",
+      eventId: "event-1",
+      event: { expectedRevision: 2, kind: "close", text: "Ended" },
+    },
+  );
+  assert.equal(
+    (
+      build("state write board", ["agentStatus"], { agent: "worker", text: "Waiting" }) as Record<
+        string,
+        unknown
+      >
+    ).text,
+    "Waiting",
+  );
+  assert.throws(
+    () => build("state write board", ["eventCreate"], { agent: "worker", "event-json": "{" }),
+    /JSON/,
+  );
+});
+
+test("state CLI preserves notification retry identity and rejects invalid JSON", () => {
+  const notification = { key: "invite-1", scopes: ["direct"], recipients: ["b"], invite: true };
+  const params = build("state write board", ["put"], {
+    agent: "a",
+    "task-id": "discussion",
+    content: "Compare options",
+    "notification-json": JSON.stringify(notification),
+  }) as Record<string, unknown>;
+  assert.deepEqual(params.notification, notification);
+  assert.throws(
+    () => build("state write board", ["put"], { agent: "a", "notification-json": "{" }),
+    /JSON/,
+  );
+});
+
 test("state AG commands require a resident daemon and reject extra positionals", () => {
   for (const name of ["state read ag", "state write ag"]) {
     assert.equal(

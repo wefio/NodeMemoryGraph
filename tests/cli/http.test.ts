@@ -60,6 +60,41 @@ function withServer(fn: (state: EphemeralServer["state"]) => Promise<void>): Pro
   });
 }
 
+test("event capability is additive; older daemons cannot silently ignore new board fields", async () => {
+  await withServer(async (state) => {
+    const connection = {
+      state,
+      databasePath: "unused",
+      startedByCaller: false,
+      capabilities: new Set(["state-spaces"]),
+      methods: new Set(["state"]),
+    };
+    await assert.rejects(
+      invokeDaemon(connection, "state", {
+        action: "write",
+        space: "board",
+        operation: "put",
+        eventId: "event-1",
+      }),
+      /board-events/u,
+    );
+    await assert.rejects(
+      invokeDaemon(connection, "state", { action: "read", space: "board", operation: "eventRead" }),
+      /board-events/u,
+    );
+    const hello = (await httpCall(state, "hello")) as NmgHelloResult;
+    assert.ok(hello.capabilities.includes("board-events"));
+    const created = await httpCall(state, "state", {
+      action: "write",
+      space: "board",
+      operation: "eventCreate",
+      agentId: "http-agent",
+      event: { title: "HTTP event" },
+    });
+    assert.match(JSON.stringify(created), /HTTP event/u);
+  });
+});
+
 test("JSON-RPC over HTTP round-trips hello, remember, search, and get", async () => {
   await withServer(async (state) => {
     const hello = (await httpCall(state, "hello")) as {

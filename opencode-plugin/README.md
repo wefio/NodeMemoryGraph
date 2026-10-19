@@ -45,6 +45,7 @@ Spawned tools are named `nmg_search`, `nmg_get`, `nmg_remember`, and
 | Memory tools | `nmg_search` / `nmg_get` / `nmg_remember` render through the shared Agent Surface (`renderSearchSurface` / `renderEvidenceSurface` / `renderRememberSurface`); session-AG disclosure ledger dedups both injected and tool-surfaced candidates |
 | Working state | `nmg_state space=ag` (read/status/replace/clear/enable/disable) with the shared `captureStateInvocation` fence |
 | Task board | `nmg_state space=board` (put/read/claim/deliver/judge/subscribe/… + rename), world-channel lobby surfaced on world reads; `nmg_state` itself is SDK-neutral — see the lossy list below |
+| Event records and task status | `board-events` capability over `nmg_state space=board`; typed event payloads, public notes and task-owner-derived status; versioned notices use shared wake delivery without a claim or world broadcast |
 | Observation | `execute.after` observes memorable tool results into the runtime AG (`tool_observation`) and arms the weak completion nudge on a `git commit` |
 | Attribution | `session.execution.succeeded` (plus any `session.idle` other builds emit) → answer-overlap attribution for recalled traces via `recordActiveGraphAttribution` (diagnostic only) |
 | Board wake | Timer loop shared with Pi (`board-wake.json` / `board-wake-state.json` in the NMG data dir); delivery is a real user turn via `ctx.session.prompt` |

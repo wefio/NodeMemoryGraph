@@ -28,6 +28,11 @@ import { connect } from 'node:net'
 import type { Context } from '@deepseek-ai/cordis'
 import { coordinationEnabled as configuredCoordinationEnabled } from '../../../../src/integration/config.ts'
 import { COMMON_REMEMBER_ACTIONS } from '../../../../src/integration/tool-contract.ts'
+import { stateRequiresBoardEvents } from '../../../../src/integration/state.ts'
+import { renderEventNotice, renderDiscussionNotice } from '../../../../src/integration/coordination-state.ts'
+import { isBoardDiscussionNotice } from '../../../../src/core/board-notifications.ts'
+import { canDeliverBoardEntry } from '../../../../src/integration/board-delivery.ts'
+import { isCoordinationEventNotice } from '../../../../src/core/coordination-events.ts'
 import { compactDisclosureEntries, compactSearchContext, memoryDisclosureEntries } from '../../../../src/integration/search-projection.ts'
 import {
   renderCompactSearchSurface,
@@ -650,7 +655,8 @@ export function apply(ctx: Context): () => void {
     const serialQueued = entry.serialState === 'pending'
     return (
       entry.status === 'open' &&
-      WAKE_KINDS.has(entry.kind) &&
+      !entry.notificationOrigin &&
+      (WAKE_KINDS.has(entry.kind) || isCoordinationEventNotice(entry) || isBoardDiscussionNotice(entry)) &&
       !liveClaim &&
       !addressedToOther &&
       !serialQueued &&
@@ -874,10 +880,8 @@ export function apply(ctx: Context): () => void {
             entryIds: group.map(wakeEntryKey),
           })
           if (check && check.suppressed) continue
-          const delivered = new Set((check && Array.isArray(check.delivered) && check.delivered) || [])
-          const acked = new Set((check && Array.isArray(check.acked) && check.acked) || [])
           for (const entry of group) {
-            if (!delivered.has(wakeEntryKey(entry)) && !acked.has(wakeEntryKey(entry))) fresh.push(entry)
+            if (canDeliverBoardEntry(check, wakeEntryKey(entry))) fresh.push(entry)
           }
         }
         if (fresh.length === 0) continue
@@ -896,7 +900,7 @@ export function apply(ctx: Context): () => void {
         // （at-least-once 通知去重），避免 send 失败（agent 已 dispose）时写
         // 回执但消息没入队导致条目"已送达但未通知"下轮不重试。
         pushWakeEntry(pick, agentSessionId)
-        if (wakeAgent(agent, pick)) {
+        if (await wakeAgent(agent, pick)) {
           await daemonCall('taskBoard', {
             action: 'recordDelivery',
             agentId: WAKE_AGENT_ID,
@@ -924,10 +928,8 @@ export function apply(ctx: Context): () => void {
             entryIds: group.map(wakeEntryKey),
           })
           if (check && check.suppressed) continue
-          const delivered = new Set((check && Array.isArray(check.delivered) && check.delivered) || [])
-          const acked = new Set((check && Array.isArray(check.acked) && check.acked) || [])
           for (const entry of group) {
-            if (!delivered.has(wakeEntryKey(entry)) && !acked.has(wakeEntryKey(entry))) fresh.push(entry)
+            if (canDeliverBoardEntry(check, wakeEntryKey(entry))) fresh.push(entry)
           }
         }
         if (fresh.length === 0) continue
@@ -964,6 +966,8 @@ export function apply(ctx: Context): () => void {
   }
 
   function wakeMessageText(entry) {
+    if (isBoardDiscussionNotice(entry)) return renderDiscussionNotice(entry)
+    if (isCoordinationEventNotice(entry)) return renderEventNotice(entry)
     return (
       '[NMG board] 新黑板条目 #' + (entry.id || '?') + ' [' + entry.kind + '] ' +
       (entry.taskId || '?') + ' by ' + (entry.agentId || '?') + ':\n' +
@@ -980,10 +984,10 @@ export function apply(ctx: Context): () => void {
   // wakeRequested/hasPending 再唤醒）。这里直接 send 即可，由 native 队列
   // 承担"没东西就发出去，有东西就等待"。内容直接携带黑板待办详情（纯展示，
   // 不带强制工具指令），模型看完自主决定是否用 nmg_state space=board 处理。
-  function wakeAgent(agent, entry) {
+  async function wakeAgent(agent, entry) {
     if (!agent || typeof agent.send !== 'function') return false
     try {
-      agent.send(
+      await agent.send(
         {
           id: randomUUID(),
           role: 'user',
@@ -1005,7 +1009,9 @@ export function apply(ctx: Context): () => void {
       const batch = wakeBatch.get(String(agent.id))
       if (!Array.isArray(batch) || batch.length === 0) return ''
       const lines = batch.map(wakeEntryLine)
-      lines.push('Use nmg_state action=write space=board operation=claim (claim=接手), operation=resolve to close.')
+      if (batch.some(entry => !isBoardDiscussionNotice(entry) && !isCoordinationEventNotice(entry)))
+        lines.push('Use nmg_state action=write space=board operation=claim (claim=接手), operation=resolve to close.')
+      lines.push('Discussion/event notices need no claim or chat confirmation; channel subscriptions can be left.')
       return 'NMG board wake (' + batch.length + ' pending):\n' + lines.join('\n')
     } catch {
       return ''
@@ -1026,6 +1032,15 @@ export function apply(ctx: Context): () => void {
           agentId: entry.agentId,
           claimedBy: entry.claimedBy || null,
           content: entry.content,
+          to: entry.to,
+          eventId: entry.eventId,
+          eventRevision: entry.eventRevision,
+          eventNotice: entry.eventNotice,
+          notificationSourceId: entry.notificationSourceId,
+          notificationChannelId: entry.notificationChannelId,
+          notificationScopes: entry.notificationScopes,
+          invitation: entry.invitation,
+          notificationOrigin: entry.notificationOrigin,
         })),
       }
     } catch {
@@ -1326,6 +1341,9 @@ export function apply(ctx: Context): () => void {
         action: { type: 'string', enum: ['read', 'write'] },
         space: { type: 'string', enum: ['ag', 'board'] },
         operation: { type: 'string', enum: STATE_OPERATIONS },
+        notification: { type: 'object', additionalProperties: true, description: 'Explicit notice: key, scopes [direct|channel|event], optional recipients (stable IDs); invite:true enrolls invitees and sender in taskId. Reuse key for retries.' },
+        eventId: { type: 'string' },
+        event: { type: 'object', additionalProperties: true, description: 'Event payload; mutation requires expectedRevision, kind and text.' },
         text: { type: 'string' },
         digest: { type: 'string' }, ref: { type: 'string' }, summary: { type: 'string' },
         verdict: { type: 'string', enum: ['accepted', 'rejected', 'undecidable'] },
@@ -1362,6 +1380,10 @@ export function apply(ctx: Context): () => void {
   // automatic replay of a refused domain mutation.
   async function invokeState(params, signal) {
     try {
+      if (stateRequiresBoardEvents(params)) {
+        const hello = await daemonCall('hello', {}, signal, true)
+        if (!hello || !hello.capabilities || !hello.capabilities.includes('board-events')) throw new Error('NMG daemon does not advertise board-events')
+      }
       const data = await daemonCall('state', params, signal, true)
       return data == null
         ? { ok: false, error: 'NMG daemon is unavailable for state' }
@@ -1385,7 +1407,7 @@ export function apply(ctx: Context): () => void {
 
   async function executeBoardState(args, operation, sessionId, signal) {
     if (!coordinationEnabled) throw new Error('Board coordination is disabled')
-    const agentId = args.agentId || WAKE_AGENT_ID
+    const agentId = stateRequiresBoardEvents({ ...args, operation }) ? WAKE_AGENT_ID : args.agentId || WAKE_AGENT_ID
     return invokeState({
       ...args, operation, taskId: args.taskId || WAKE_WORLD_TASK,
       sessionId, sourceSessionId: sessionId, agentId, id: agentId,

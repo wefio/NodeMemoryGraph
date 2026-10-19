@@ -26,7 +26,8 @@ Adapters compared:
 | OpenCode v2 | `opencode-plugin/` | [adapter decision](../decisions/implemented/2026-10-17-opencode-adapter.md) |
 | WorkBuddy hook | `workbuddy-plugin/nmg-hook.ts` | installable hook in `workbuddy-plugin/README.md` |
 | Claude code (MCP stdio) | `claude-plugins/nmg-memory/agents/memory-copilot.ts` | [MCP plugin card](../../claude-plugins/nmg-memory/CLAUDE.md) |
-| DeepSeek Harness | `dsh/nmg-plugin.mjs` | [dsh README](../../dsh/README.md) |
+| DeepSeek Harness (legacy) | `dsh/nmg-plugin.mjs` | [dsh README](../../dsh/README.md) |
+| DeepSeek Harness host package | `dsh/dsh-nmg/src/plugin/index.ts` | [host package](../../dsh/dsh-nmg/README.md); extension table below |
 
 ## Matrix
 
@@ -34,7 +35,7 @@ Adapters compared:
 |---|---|---|---|---|---|
 | Automatic recall (staged headers per admitted turn) | full | full* | full | none | none |
 | Memory tools (`nmg_search`/`get`/`remember`) on the shared Agent Surface | full | full | none | full | full |
-| Working state (`space=ag` with the invocation fence) | full | full | none | none | none |
+| Working state (`space=ag` with the invocation fence) | full | full | none | full | none |
 | Tool-result observation + weak completion nudge | full | full | partial | none | none |
 | Attribution flush + agent identity heartbeat | full | full | partial | partial | none |
 | Board wake (poll → directed/world delivery) | full | partial | partial | none | none |
@@ -42,6 +43,26 @@ Adapters compared:
 | Transport: lease fast path, CLI fallback, shared-daemon non-ownership | full | full | partial | partial | full |
 
 `*` usable without qualification; the qualifier lists the one lossy nuance.
+
+## Coordination extension
+
+The DSH column above is the legacy adapter, not the separate host package.
+These rows distinguish them and describe source wiring, not deployment or a
+live idle-Agent/model test. `board-events` gates additive event/notification
+fields; an older owner must refuse them rather than silently drop them.
+
+| Capability | Pi | OpenCode | WorkBuddy | MCP | DSH legacy | DSH host package |
+|---|---|---|---|---|---|---|
+| Event records and public task status | full | full | none | full | none | full |
+| Direct/channel/event notification payload and invite-driven channel enrollment | full | full | none | full | none | full |
+| Discussion/event wake emission and enqueue-before-receipt | full | partial | none | none | none | partial |
+| Unified working state through `nmg_state` | full | full | none | full | none | full |
+
+OpenCode and the DSH host package have private HTTP registration/forwarding
+fixtures. Shared wake tests cover successful/rejected enqueue, no world
+rebroadcast and no automatic claim. They do not establish live desktop idle wake
+or model comprehension. MCP/CLI provide explicit reads, not push wake.
+The [event contract](board-event-records.md) owns subscription boundaries.
 
 ## Per-adapter partials
 
@@ -63,7 +84,7 @@ Adapters compared:
 - **MCP** — the server starts its own daemon subprocess when none is running,
   reuses an existing daemon, and stops only what it started. There is no CLI
   fallback (the server guarantees its lease) and no turn-level observation,
-  working state, attribution, wake loop, or console; board use heartbeats and
+  attribution, wake loop, or console; working state uses the shared fenced state API; board use heartbeats and
   reads write delivery receipts.
 - **DSH** — five model-visible tools (`nmg_search`, `nmg_get`,
   `nmg_remember`, `nmg_board`, `nmg_daemon status`) over the shared

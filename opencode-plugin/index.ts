@@ -61,6 +61,8 @@ import { SessionRecallFlow } from "../src/integration/session-recall-flow.ts";
 import { SessionTaskWindow } from "../src/integration/session-task-window.ts";
 import {
   captureStateInvocation,
+  COORDINATION_OPERATIONS,
+  requireBoardEventCapability,
   renderStateOutput,
   stateOperation,
   STATE_OPERATIONS,
@@ -967,7 +969,11 @@ export default {
           : `已加入频道 ${String(joined?.taskId ?? args.taskId)}：接收该频道新条目的唤醒通知（未订阅频道保持安静）。`;
       }
       const taskId = String(args.taskId ?? "").trim() || WORLD_BOARD_ID;
-      const result = await boardState(assembleBoardStateParams(args, sessionId, identity));
+      const params = assembleBoardStateParams(args, sessionId, identity);
+      await requireBoardEventCapability(params, () => invoke("hello", {}));
+      if (COORDINATION_OPERATIONS.has(String(params.operation)))
+        return renderStateOutput((await invoke("state", params)) as NmgStateResult);
+      const result = await boardState(params);
       const entries = result.entries ?? (result.entry ? [result.entry] : []);
       if (result.action === "read" && entries.length > 0) {
         await Promise.allSettled([
@@ -1027,6 +1033,19 @@ export default {
           action: { type: "string", enum: ["read", "write"] },
           space: { type: "string", enum: ["ag", "board"] },
           operation: { type: "string", enum: [...STATE_OPERATIONS] },
+          notification: {
+            type: "object",
+            additionalProperties: true,
+            description:
+              "Explicit notice: key, scopes [direct|channel|event], optional recipients (stable IDs), invite:true to enroll invitees and sender in taskId. Reuse key for retries.",
+          },
+          eventId: { type: "string" },
+          event: {
+            type: "object",
+            additionalProperties: true,
+            description:
+              "Event create/mutation payload; updates require expectedRevision, kind and text.",
+          },
           text: { type: "string" },
           reason: { type: "string" },
           ttlSeconds: { type: "integer", minimum: 60, maximum: 86400 },
@@ -1262,9 +1281,8 @@ export default {
         );
         await deliverBoardWake({
           invoke,
-          sendWake: (message) => {
-            void ctx.session.prompt?.({ sessionID: target.sessionId, text: message });
-          },
+          sendWake: (message) =>
+            ctx.session.prompt?.({ sessionID: target.sessionId, text: message }),
           config,
           state,
           dataDir,

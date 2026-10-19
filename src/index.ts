@@ -1,4 +1,20 @@
 export { NmgStore } from "./core/store.ts";
+export type {
+  CoordinationEvent,
+  CoordinationEventChange,
+  CoordinationMutation,
+  CoordinationChannel,
+  CoordinationEffect,
+  CreateCoordinationEvent,
+  UpdateCoordinationEvent,
+  AgentWorkStatus,
+} from "./core/coordination-events.ts";
+export type {
+  BoardNotificationRequest,
+  BoardNotificationScope,
+  BoardMessageInput,
+  BoardNoticeMetadata,
+} from "./core/board-notifications.ts";
 export { HashingVectorEmbedder } from "./core/vector.ts";
 export { OpenAIEmbeddingClient } from "./core/openai-embedding.ts";
 export { GeminiEmbeddingClient } from "./core/embedding-providers/gemini.ts";

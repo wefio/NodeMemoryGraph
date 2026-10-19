@@ -428,6 +428,19 @@ server.registerTool(
       action: z.enum(["read", "write"]),
       space: z.enum(["ag", "board"]),
       operation: z.enum(STATE_OPERATIONS).optional(),
+      notification: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe(
+          "Explicit notice: key, scopes [direct|channel|event], optional recipients (stable IDs), invite:true enrolls invitees and sender in taskId; reuse key for retries.",
+        ),
+      eventId: z.string().optional(),
+      event: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe(
+          "Event create/mutation payload; mutations require expectedRevision, kind and text.",
+        ),
       text: z.string().optional(),
       agentName: z.string().optional(),
       taskId: z.string().optional().describe(nmgPrompts.board_task_id_parameter_description),

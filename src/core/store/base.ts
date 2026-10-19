@@ -57,6 +57,7 @@ import { updateRelationStrength } from "../edge-activation.ts";
 import { serializeScope } from "../scope.ts";
 import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import { ScopeWriteIndex, type ScopeWriteIndexRow, writeTokens } from "./scope-write-index.ts";
+import type { TransactionPort } from "./store-ctor.ts";
 import {
   ftsExpression,
   memoryEmbeddingText,
@@ -75,10 +76,7 @@ import {
   mapSearchResult,
 } from "./rows.ts";
 
-export interface TransactionPort {
-  /** Which transition this port belongs to; the store matches it against the open one. */
-  readonly generation: number;
-}
+export type { TransactionPort } from "./store-ctor.ts";
 
 /** A callback that would keep a transaction open across an await is refused where it is handed in. */
 function refuseThenable(value: unknown, message: string): void {
@@ -387,6 +385,7 @@ export class NmgStoreBase {
       expiresAt: string;
       /** Directed delivery: stable agent_name to wake for this entry. */
       to?: string;
+      eventId?: string;
     },
     port?: TransactionPort,
   ): TaskBoardEntry {
@@ -406,6 +405,7 @@ export class NmgStoreBase {
     content: string;
     expiresAt: string;
     to?: string;
+    eventId?: string;
   }): TaskBoardEntry {
     const now = new Date().toISOString();
     this.pruneExpiredTaskBoardEntries(now, input.taskId);
@@ -447,8 +447,8 @@ export class NmgStoreBase {
         .prepare(
           `INSERT INTO task_board_entries(
              id, task_id, sequence, agent_id, source_session_id, kind, content,
-             status, created_at, expires_at, [to], serial_state
-           ) VALUES (?, ?, 0, ?, ?, ?, ?, 'open', ?, ?, ?, ?)`,
+             status, created_at, expires_at, [to], serial_state, coordination_event_id
+           ) VALUES (?, ?, 0, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -461,10 +461,24 @@ export class NmgStoreBase {
           input.expiresAt,
           input.to ?? null,
           serialState,
+          input.eventId ?? null,
         );
     }
+    if (input.kind === "goal" && input.to == null)
+      this.associateBoardEventWork(input.eventId, input.agentId);
     return this.taskBoardEntry(id)!;
   }
+
+  /** Work participation is historical; explicit subscription opt-outs are never reset. */
+  private associateBoardEventWork(eventId: string | null | undefined, agentId: string): void {
+    if (!eventId) return;
+    this.db
+      .prepare(
+        "INSERT INTO coordination_event_members(event_id,agent_id,subscribed,associated) VALUES(?,?,1,1) ON CONFLICT(event_id,agent_id) DO UPDATE SET associated=1",
+      )
+      .run(eventId, agentId);
+  }
+
   readTaskBoard(input: {
     taskId: string;
     afterCursor?: string;
@@ -563,7 +577,7 @@ export class NmgStoreBase {
       .prepare(
         `SELECT * FROM task_board_entries
          WHERE status = 'open' AND expires_at > ?
-           AND kind IN ('handoff', 'question', 'blocker')
+           AND notification_origin = 0 AND (kind IN ('handoff', 'question', 'blocker') OR coordination_notice = 1 OR notification_source_id IS NOT NULL)
            AND ([to] IN (${placeholders}) OR ([to] IS NULL AND serial_state = 'outstanding'))
          ORDER BY created_at ASC, id ASC LIMIT ?`,
       )
@@ -604,6 +618,8 @@ export class NmgStoreBase {
       deliverableDigest: entry.deliverableDigest,
       verdict: entry.verdict,
       judgedBy: entry.judgedBy,
+      ...(entry.eventId ? { eventId: entry.eventId } : {}),
+      ...(entry.eventNotice ? { eventNotice: true, eventRevision: entry.eventRevision } : {}),
       preview: boardEntryView(entry.content),
     }));
     return { previews, nextCursor };
@@ -839,6 +855,8 @@ export class NmgStoreBase {
     if (!existing || existing.taskId !== input.taskId) {
       throw new Error(`task board entry not found in task ${input.taskId}`);
     }
+    if (existing.eventNotice || existing.notificationSourceId)
+      throw new Error("Updates are notices, not claimable tasks");
     if (existing.serialState === "pending") {
       throw new Error(
         `task board entry ${input.entryId} is pending until the prior serial entry is claimed, resolved, or expires`,
@@ -900,6 +918,7 @@ export class NmgStoreBase {
         .run(input.entryId);
       this.promoteNextSerialPending(input.taskId);
     }
+    this.associateBoardEventWork(existing.eventId, input.agentId);
     return this.taskBoardEntry(input.entryId)!;
   }
   /** Release a claim back to the open pool. Only the current holder may release. */
@@ -1726,7 +1745,7 @@ export class NmgStoreBase {
         .prepare(
           `SELECT task_id, COUNT(*) AS entry_count, MAX(created_at) AS last_updated_at
            FROM task_board_entries
-           WHERE expires_at > ? AND status = 'open' AND task_id != ?
+           WHERE expires_at > ? AND status = 'open' AND task_id != ? AND coordination_notice = 0
            GROUP BY task_id
            ORDER BY last_updated_at DESC`,
         )
@@ -2957,6 +2976,23 @@ function mapTaskBoardEntry(row: Row): TaskBoardEntry {
     verdictReason: optionalText(row.verdict_reason),
     judgedDigest: optionalText(row.judged_digest),
     ackedBy: [],
+    ...(row.notification_origin === 1 ? { notificationOrigin: true } : {}),
+    ...(typeof row.notification_source_id === "string"
+      ? {
+          notificationSourceId: row.notification_source_id,
+          notificationChannelId: String(row.notification_channel_id),
+          notificationScopes: JSON.parse(
+            String(row.notification_scopes_json),
+          ) as import("../board-notifications.ts").BoardNotificationScope[],
+          invitation: row.notification_invitation === 1,
+        }
+      : {}),
+    ...(typeof row.coordination_event_id === "string"
+      ? { eventId: row.coordination_event_id }
+      : {}),
+    ...(row.coordination_notice === 1
+      ? { eventNotice: true, eventRevision: Number(row.coordination_event_revision) }
+      : {}),
   };
 }
 

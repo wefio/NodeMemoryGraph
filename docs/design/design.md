@@ -949,6 +949,9 @@ retains typed task authority and binds immutable attempt inputs for restart reco
 The accepted [event-record and Agent-status design](board-event-records.md) adds
 coarse collaboration history, channel associations and event-scoped subscriptions
 without replacing ordinary world-channel messaging or existing channel behavior.
+Event association and explicit subscriber-group notification are distinct; the
+[notification and autonomous-collaboration boundaries](board-event-records.md#事件订阅与更新通知)
+are owned by the topic contract.
 It is an additive design target; delivery evidence belongs in the
 [completion audit](completion-audit.md).
 
