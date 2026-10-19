@@ -1,0 +1,94 @@
+version: 2
+terms:
+  - term: MemoryRecord
+    aliases: [检索单元记录, memory record, 记忆记录]
+    definition: >-
+      A scoped, retrievable semantic statement with provenance and an STG or LTG lifecycle; embeddings, FTS, provenance and lifecycle all operate at record granularity, and one record may carry several atomic claims.
+      一条带作用域的可检索语义陈述，带 provenance 与 STG 或 LTG 生命周期；embedding、FTS、provenance 与生命周期都在记录粒度上运作，且一条记录可以携带若干原子 claim。
+    owner: docs/design/design/core-data-model.md
+    anchor: Core data model
+    status: canonical
+  - term: MemoryNode
+    aliases: [语义地址节点, memory node, 记忆节点]
+    definition: >-
+      A stable semantic address for a coherent group of records without replacing their identities; creating one permanent node for every new memory would reproduce a flat store with extra graph overhead and is explicitly not the target model.
+      针对一组连贯记录的稳定语义地址，不替代各记录的身份；为每条新记忆创建一个永久节点会重现一个扁平存储并额外付出图开销，被明确排除在目标模型之外。
+    owner: docs/design/design/core-data-model.md
+    anchor: Core data model
+    status: canonical
+  - term: resolution state
+    aliases: [open/reopened, 未解决状态]
+    definition: >-
+      The record-level state `resolved` (default), `open` or `reopened`, where open records carry `openedAt` and one or more `relatedMemoryIds` as attributable anchors rather than inferred graph edges, remain indexed, are excluded from LTG heat-based retention and STG expiry, and every transition is appended to `memory_resolution_events`; retrieval guarantees only bounded reachability (at most two related open records near the end of the first evidence window) and the Agent must explicitly resolve or reopen.
+      记录级状态 `resolved`（默认）、`open` 或 `reopened`：open 记录携带 `openedAt` 与一个或多个 `relatedMemoryIds` 作为可归因锚点而非推断图边、保持被索引、被排除在 LTG 基于热度的保留与 STG 过期之外，且每次转换追加到 `memory_resolution_events`；检索只保证有界可达性（最多两条相关 open 记录出现在首个证据窗口末尾附近），Agent 必须显式 resolve 或 reopen。
+    owner: docs/design/design/core-data-model.md
+    anchor: Core data model
+    status: canonical
+  - term: MemoryClaim
+    aliases: [atomic claim, 原子声明]
+    definition: >-
+      An atomic item inside a record's `claims` array with its own text, polarity, predicate key, confidence and extraction provenance; the record-level polarity/predicate/confidence columns are a derived rollup cache (first non-neutral claim), never the source of truth, and contradiction detection joins claims rather than records.
+      记录 `claims` 数组内的原子项，各有自己的文本、极性、谓词键、置信度与抽取 provenance；记录级的 polarity/predicate/confidence 列是派生汇总缓存（首个非中性 claim），永远不是真值来源，而矛盾检测连接的是 claim 而不是记录。
+    owner: docs/design/design/core-data-model.md
+    anchor: Core data model
+    status: canonical
+  - term: scope and time compatibility model
+    aliases: [scope intersection, half-open validity, 作用域与时间兼容模型]
+    definition: >-
+      The single deterministic model used for ingestion, relation proposals and contradiction rendering: a scope is a conjunction of exact `key=value` constraints, two scopes overlap when no key constrained by both has different values, their intersection is the union of both compatible maps, validity is the half-open interval `[validFrom, validUntil)` with a missing end unbounded, adjacent intervals do not overlap, and malformed, empty or reversed explicit ranges fail at the write boundary.
+      用于摄取、关系提议与矛盾渲染的单一确定性模型：作用域是精确 `key=value` 约束的合取，当双方共同约束的任何键没有不同取值时两个作用域重叠，其交集是两个兼容映射的并集，有效性是半开区间 `[validFrom, validUntil)`（缺失结束端视为无界），相邻区间不重叠，而畸形、空或倒序的显式区间在写入边界失败。
+    owner: docs/design/design/core-data-model.md
+    anchor: Core data model
+    status: canonical
+  - term: influence permission
+    aliases: [reasoning_context/presentation_style/scoped_constraint, 影响权限]
+    definition: >-
+      The orthogonal dimension that states how a recalled record is allowed to change the Agent's result — `reasoning_context`, `presentation_style`, `interaction_hint`, `task_continuation`, `scoped_constraint` or `experience_advisory` — each with permitted and forbidden influence; retrieval relevance alone never grants authority, and the promotion threshold grows with scope breadth and influence strength.
+      说明一条被召回记录被允许如何改变 Agent 结果的正交维度——`reasoning_context`、`presentation_style`、`interaction_hint`、`task_continuation`、`scoped_constraint` 或 `experience_advisory`——各有允许与禁止的影响；仅检索相关性从不授权，而晋升阈值随作用域广度与影响强度一起增长。
+    owner: docs/design/design/core-data-model.md
+    anchor: Influence permissions
+    status: canonical
+  - term: transferable experience
+    aliases: [experience_advisory artifact, 可迁移经验]
+    definition: >-
+      Descriptive evidence about what happened under which conditions — summary, preconditions, observed action, outcome, explanation, applicability, limitations, counterexamples, confidence, independent-task count and source references — formed from multiple compatible episodes or one explicitly confirmed experience; it is never an instruction that must be executed, and NMG does not create or modify a `SKILL.md`, system prompt, runbook, script, policy or model weights from it.
+      关于在何种条件下发生了什么的描述性证据——摘要、前提、观察到的动作、结果、解释、适用性、限制、反例、置信度、独立任务数与来源引用——由多个兼容片段或一条被显式确认的经验形成；它绝不是必须执行的指令，NMG 也不会据此创建或修改 `SKILL.md`、系统提示、runbook、脚本、策略或模型权重。
+    owner: docs/design/design/core-data-model.md
+    anchor: Transferable experience
+    status: canonical
+  - term: posterior confidence loop
+    aliases: [outcome feedback loop, 后验置信回路]
+    definition: >-
+      The loop in which claim confidence moves from an extraction prior to `posterior = f(extraction prior, accumulated outcome votes)` only through verified outcome attribution (explicit user confirmation/correction, a validating tool result or official benchmark evidence); retrieval, disclosure and heuristic answer overlap remain separate diagnostic events, broad task success is never sprayed across rendered claims, same-task votes are deduplicated, and the raw prior is preserved.
+      回路：claim 置信度只通过已验证的结果归因（显式用户确认／纠正、验证性工具结果或官方 benchmark 证据）从抽取先验变为 `posterior = f(extraction prior, accumulated outcome votes)`；检索、披露与启发式答案重叠仍是彼此独立的诊断事件，宽泛任务成功永不喷洒到被渲染的 claim 上，同任务票被去重，且原始先验被保留。
+    owner: docs/design/design/core-data-model.md
+    anchor: "Confidence as a posterior: the outcome feedback loop"
+    status: canonical
+  - term: interaction profile
+    aliases: [optional user-scoped defaults, 互动画像]
+    definition: >-
+      A future explicit, inspectable profile of repeated cross-task behaviour that may tune only user-scoped defaults such as evidence budget, automatic-recall aggressiveness or whether to recommend another search, using decay, a minimum number of independent tasks and reset/export controls; a single interaction remains telemetry, and the profile may never change fact truth, claim confidence, graph stability, node merging or global controller weights.
+      未来一种显式、可检视的跨任务重复行为画像，只可调节用户作用域默认值（例如证据预算、自动召回激进程度或是否建议再检索一次），并使用衰减、最小独立任务数与重置／导出控制；单次互动仍是遥测，而画像永远不能改变事实真值、claim 置信度、图稳定性、节点合并或全局控制器权重。
+    owner: docs/design/design/core-data-model.md
+    anchor: Optional interaction profile, not a hidden user model
+    status: canonical
+  - term: harness-local execution observation
+    aliases: [Pi tool-result observation, Harness 本地执行观察]
+    definition: >-
+      Selected recent tool errors, test outcomes and edited paths captured by the Pi extension as temporary session-local Active Graph observations through `observe()`; runtime per-session item/character bounds constrain retention, and this is not a separate FIFO ring buffer or durable store. When turn metadata is available, the normal Pi projection includes tool observations only from the current and immediately preceding model turn; compaction activates the bounded Active Graph projection for the next turn. They are not `MemoryRecord`s, are never written to SQLite merely because a tool ran, disappear when the owning session ends, and only an explicit semantically judged `nmg_remember` call may turn an outcome into STG/LTG memory.
+      Pi 扩展通过 `observe()` 将选定的近期工具错误、测试结果与被编辑路径捕获为临时的会话本地 Active Graph 观察；运行时的会话级条目数／字符数上限限制其保留量，这不是独立的 FIFO 环形缓冲或持久存储。turn 元数据可用时，常规 Pi 投影只包含当前及紧邻前一个模型 turn 的工具观察；压缩时激活有界 Active Graph 投影供下一轮使用。它们不是 `MemoryRecord`，不会仅因工具运行过就写入 SQLite，并在所属会话结束时消失；只有显式且经语义判断的 `nmg_remember` 调用才能把结果变成 STG/LTG 记忆。
+    owner: docs/design/design/core-data-model.md
+    anchor: Core data model
+    status: canonical
+  - term: HistoryRecord
+    aliases: [历史记录]
+    definition: >-
+      Normally immutable retained source evidence with stable session/message/tool identity, exact content, timestamp and provenance; it is distinct from a derived semantic memory statement.
+      通常不可变的来源证据，带有稳定的 session／message／tool 身份、精确内容、时间戳和来源信息；它不同于派生的语义记忆陈述。
+    owner: docs/design/design/core-data-model.md
+    anchor: Core data model
+    status: canonical
+references:
+  - Active Graph
+  - claim outcome
+  - same-scope supersession

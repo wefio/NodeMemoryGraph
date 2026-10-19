@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: matched-question comparison
+    aliases: [synonym-controlled recall check, 匹配问题对照]
+    definition: >-
+      A comparison that holds the question constant and changes only the discovery wording, so candidate-count differences can be attributed to that controlled wording change.
+      固定问题、只改变 discovery 措辞的对照，使候选数差异可归因于该受控措辞变化。
+    owner: docs/experiments/fresh-pi-recall-diagnostics-2026-10-10.md
+    anchor: Historical comparison
+    status: canonical
+  - term: recall preparation result
+    aliases: [pre-model recall observation, 召回准备结果]
+    definition: >-
+      Evidence that the installed hooks prepared candidate context before a model call; it does not prove that a later model request included the context or that end-to-end task behavior changed.
+      证明已安装 hooks 在模型调用前准备了候选上下文；它不证明后续模型请求包含该上下文，也不证明端到端任务行为发生变化。
+    owner: docs/experiments/fresh-pi-recall-diagnostics-2026-10-10.md
+    anchor: Controlled native SDK preparation
+    status: canonical

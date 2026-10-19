@@ -1,0 +1,11 @@
+version: 2
+terms:
+  - term: retrieval sufficiency
+    aliases: [检索充分性]
+    definition: >-
+      An estimate of whether the currently selected retrieval set is sufficient to continue; it is not answer correctness or the number of evidence records required.
+      对当前选中检索结果集是否足以继续的估计；它不等于答案正确性，也不表示所需 evidence 记录数量。
+    owner: docs/design/retrieval-confidence-controller.md
+    anchor: Scope
+    status: canonical
+references: [QPP, learnable controller, cumulative Fibonacci evidence tier, same-pool progressive re-selection, QPP expansion trace]

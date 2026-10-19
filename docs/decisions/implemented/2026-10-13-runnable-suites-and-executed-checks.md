@@ -1,6 +1,6 @@
 # Separate runnable suites from test inputs, and passes from skipped checks
 
-[中文](2026-10-13-runnable-suites-and-executed-checks.zh-CN.md)
+[中文](2026-10-13-runnable-suites-and-executed-checks.zh-CN.md) · [Terms used](2026-10-13-runnable-suites-and-executed-checks.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

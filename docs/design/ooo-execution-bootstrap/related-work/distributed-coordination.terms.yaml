@@ -1,0 +1,30 @@
+version: 2
+terms:
+  - term: fenced attempt identity
+    aliases: [attempt plus inputDigest, 围栏尝试身份]
+    definition: >-
+      A re-claim generation paired with the digest of the bound input; the authoritative commit boundary must recheck it and reject stale generations. It is an analogy to a fencing token, not proof that every product resource enforces one.
+      重新认领时推进的 generation 与绑定输入 digest 组合；权威提交边界必须重新校验并拒绝过期 generation。它是 fencing token 的类比，不证明每个产品资源都已强制执行。
+    owner: docs/design/ooo-execution-bootstrap/related-work/distributed-coordination.md
+    anchor: Mechanism mapping
+    status: canonical
+  - term: failure-detector assumption
+    aliases: [undecidable on silence, 失败检测器假设]
+    definition: >-
+      A silent asynchronous check cannot be classified as failed or successful from silence alone; its outcome remains undecidable until an authoritative event is available.
+      异步检查无响应时，不能仅凭沉默判定失败或成功；在出现权威事件前，其结果保持 undecidable。
+    owner: docs/design/ooo-execution-bootstrap/related-work/distributed-coordination.md
+    anchor: Mechanism mapping
+    status: canonical
+  - term: at-least-once with idempotent receiver
+    aliases: [outbox/inbox deduplication, 至少一次投递与幂等接收方]
+    definition: >-
+      A delivery may repeat, while the receiver uses an identity to make duplicate effects inert; this is an application-level pattern, not an exactly-once transport guarantee.
+      投递可能重复，但接收方通过身份标识使重复效果无害；这是应用层模式，不是 exactly-once 传输保证。
+    owner: docs/design/ooo-execution-bootstrap/related-work/distributed-coordination.md
+    anchor: Mechanism mapping
+    status: canonical
+references:
+  - run record
+  - research-instrument evidence
+  - product-loop activation boundary

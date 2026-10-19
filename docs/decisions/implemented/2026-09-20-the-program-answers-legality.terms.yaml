@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: declared constraint
+    aliases: [plan-enabled constraint, 已声明约束]
+    definition: >-
+      A protocol-named rule whose application is enabled by the plan; the program computes under the enabled set and must refuse an unknown name rather than silently ignore it.
+      由协议命名、由计划启用的规则；程序按已启用集合计算，并必须按名称拒绝未知项，不能静默忽略。
+    owner: docs/decisions/implemented/2026-09-20-the-program-answers-legality.md
+    anchor: Decision
+    status: canonical
+references:
+  - legality read
+  - Task Board

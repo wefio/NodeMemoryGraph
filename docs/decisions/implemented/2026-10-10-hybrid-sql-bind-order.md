@@ -1,6 +1,6 @@
 # Bind hybrid candidates in SQL placeholder order
 
-[中文](2026-10-10-hybrid-sql-bind-order.zh-CN.md)
+[中文](2026-10-10-hybrid-sql-bind-order.zh-CN.md) · [Terms used](2026-10-10-hybrid-sql-bind-order.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

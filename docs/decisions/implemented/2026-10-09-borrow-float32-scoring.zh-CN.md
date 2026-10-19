@@ -1,6 +1,6 @@
 # 仅在同步打分期间借用 Float32 向量
 
-[English](2026-10-09-borrow-float32-scoring.md)
+[English](2026-10-09-borrow-float32-scoring.md) · [术语](2026-10-09-borrow-float32-scoring.terms.yaml)
 
 **Status:** implemented
 **Approved:** auto

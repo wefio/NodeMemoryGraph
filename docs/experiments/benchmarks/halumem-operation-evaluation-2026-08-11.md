@@ -1,5 +1,13 @@
 # HaluMem operation-level evaluation — 2026-08-11
 
+[English](halumem-operation-evaluation-2026-08-11.md) | [简体中文](halumem-operation-evaluation-2026-08-11.zh-CN.md) · [Terms](halumem-operation-evaluation-2026-08-11.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a historical
+experiment record. The configurations, measurements, implementation descriptions
+and follow-up proposals below are scoped to that experiment. This review did not
+rerun the experiment or independently revalidate its original artifacts; these
+are not current test receipts, default-policy decisions or general guarantees.
+
 This evaluation measures write-time extraction pollution, expected-memory
 coverage, interference rejection, and update retrieval. It is not a QA score
 and is not yet a direct score of STG-to-LTG promotion.

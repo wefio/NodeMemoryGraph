@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: central entry-point catalogue proposal
+    aliases: [invocable-surface registry proposal, 中央入口目录提案]
+    definition: >-
+      The rejected proposal for one `docs/scripts.yaml` inventory of package scripts, `bin` commands, RCP subcommands and standalone files, each with a reader trigger; the decision retained existing capability/route discovery instead.
+      已拒绝的 `docs/scripts.yaml` 提案，用一个清单登记 package scripts、`bin` 命令、RCP 子命令和独立文件，并为每项写出读者触发条件；该决定选择保留既有 capability／route 发现入口。
+    owner: docs/decisions/rejected/2026-09-09-register-every-entry-point.md
+    anchor: Proposal
+    status: canonical
+references:
+  - route
+  - decision record

@@ -1,0 +1,11 @@
+version: 2
+terms:
+  - term: memory quality invariant suite
+    aliases: [eval:quality, 记忆质量不变量套件]
+    definition: >-
+      The deterministic development suite run by `npm run eval:quality` covering seven P1 failure classes — temporal state, multi-record aggregation, conflicting evidence, multi-hop graph reachability, exact cold detail, secret refusal and transient pollution; it tests mechanisms and invariants without an LLM, so it complements rather than replaces LongMemEval and Pi end-to-end agent cases.
+      由 `npm run eval:quality` 运行的确定性开发套件，覆盖七个 P1 失败类别：时态状态、多记录聚合、冲突证据、多跳图可达性、精确冷细节、密钥拒绝与瞬时记忆污染；它在没有 LLM 的情况下测试机制与不变量，因此补充而不是替代 LongMemEval 与 Pi 端到端 agent case。
+    owner: evals/memory-quality/README.md
+    anchor: Memory quality invariant suite
+    status: canonical
+references: []

@@ -1,0 +1,35 @@
+version: 2
+terms:
+  - term: operation-level memory evaluation
+    aliases: [HaluMem operation evaluation, 操作级记忆评测]
+    definition: >-
+      Scoring write-time extraction, expected-memory coverage, interference rejection and update retrieval without QA fields; it is neither a QA score nor a direct score of STG-to-LTG promotion.
+      在省略 QA 字段的情况下对写入时抽取、期望记忆覆盖、干扰拒绝与更新检索计分；它既不是 QA 分数，也不是 STG-to-LTG promotion 的直接分数。
+    owner: docs/experiments/benchmarks/halumem-operation-evaluation-2026-08-11.md
+    anchor: Protocol
+    status: canonical
+  - term: benchmark raw-message ingress
+    aliases: [raw-message ingress, 基准原始消息入口]
+    definition: >-
+      The benchmark bridge materializing every dialogue message, including long assistant suggestions, as `conversation_evidence`; it scores benchmark-adapter behavior, not the Pi product ingress where a durable write is an explicit model-mediated `nmg_remember`.
+      基准 bridge 把每条对话消息（包括冗长的 assistant 建议）都物化为 `conversation_evidence`；它评分的是基准适配器行为，而不是 Pi 产品入口——后者的持久写入是经模型中介的显式 `nmg_remember`。
+    owner: docs/experiments/benchmarks/halumem-operation-evaluation-2026-08-11.md
+    anchor: Product boundary and decision
+    status: canonical
+  - term: agent-filtered remember-policy arm
+    aliases: [Agent-filtered ingress, Agent 过滤写入策略组]
+    definition: >-
+      An arm in which the configured Agent model applies the current NMG durable write policy without seeing HaluMem memory points or questions, returning atomic statements with exact evidence; it measures candidate formation before repeated cross-task outcome evidence.
+      配置的 Agent 模型在不看 HaluMem memory point 与问题的前提下执行当前 NMG 持久写入策略，返回带精确 evidence 的原子陈述；它衡量的是重复的跨任务结果 evidence 出现之前的 candidate 形成。
+    owner: docs/experiments/benchmarks/halumem-operation-evaluation-2026-08-11.md
+    anchor: Agent-filtered remember-policy arm
+    status: canonical
+  - term: posterior STG promotion audit
+    aliases: [promotion audit arm, 后验 STG promotion 审计]
+    definition: >-
+      An arm that follows the product lifecycle instead of treating filtered candidates as durable: an attributable candidate is written through a real session-owned STG remember, later sessions are inspected without gold points, and an exact later user excerpt becomes an independent support or contradiction vote for the existing posterior gate.
+      按产品生命周期而非把过滤后的 candidate 当作已持久化的组：可归因的 candidate 经真实 session-owned STG remember 写入，后续 session 在不看 gold point 的情况下被检查，精确的后续用户摘录成为现有后验 gate 的独立支持或反驳 vote。
+    owner: docs/experiments/benchmarks/halumem-operation-evaluation-2026-08-11.md
+    anchor: Posterior STG promotion audit
+    status: canonical
+references: [Short-Term Graph, Long-Term Graph]

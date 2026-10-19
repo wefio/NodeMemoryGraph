@@ -1,5 +1,7 @@
 # Repository Control Plane beyond agent:verify
 
+[简体中文](control-plane.zh-CN.md) · [Terms used](control-plane.terms.yaml)
+
 `npm run agent:verify` auto-discovers the contract that uniquely covers the
 current scope and runs the equivalent reconcile — that is the default for
 ordinary changes (see [`ci-cd-and-quality.md` §7.11](../../../docs/design/ci-cd-and-quality.md)).
@@ -42,4 +44,4 @@ only avoids include-unreachable subtrees; it is not a size guard, and broad
 patterns may still reach large trees. Never silently omit in-scope files to
 reduce cost, since that would change observation/digest semantics. Runtime
 observation behavior is owned by
-[`ci-cd-and-quality.md` §7.2](../../../docs/design/ci-cd-and-quality.md#72-真相域).
+[RCP truth domains](../../../docs/design/ci-cd-and-quality/repository-control-plane.md#keep-each-truth-domain-at-its-owner).

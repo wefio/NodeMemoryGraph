@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { checkDocumentHygiene, DOCUMENT_HYGIENE_PATHS } from "./document-hygiene.ts";
 
 export interface DocumentationReport {
   files: number;
@@ -15,21 +16,15 @@ export interface DocumentationReport {
 
 const lifecycle = new Set(["proposed", "implemented", "rejected", "archived"]);
 
-// Byte ceilings for standing rule documents that generative Agents read every
-// session. Policy owner is docs/README.md#ci-contract (the byte-budget row).
-// Budgets are set by the maintainer: rule/skill docs are capped at 2,000 words
-// (~15,000 B at ~7.3 B/word, rounded); AGENTS.md and indexes at 5,000 B each.
-// Raise a ceiling only when the content genuinely needs the space, never to
-// absorb bloat.
-const BYTE_BUDGETS: Record<string, number> = {
-  "AGENTS.md": 5000,
-  "skills/doc-maintenance/SKILL.md": 15000, // 2,000 words x ~7.3 B/word
-  "skills/repo-development/SKILL.md": 15000, // 2,000 words x ~7.3 B/word
-  "skills/nmg-memory/SKILL.md": 15000, // 2,000 words x ~7.3 B/word
-  "skills/verification-traceability/SKILL.md": 15000, // 2,000 words x ~7.3 B/word
-  "skills/script-reuse/SKILL.md": 15000, // 2,000 words x ~7.3 B/word
-  "docs/decisions/README.md": 5000,
-};
+// Role-based UTF-8 byte ceilings are owned by docs/README.md#ci-contract.
+// Directory coverage includes new topics; relocating a design must not escape it.
+function documentByteBudget(display: string): number | undefined {
+  if (display === "AGENTS.md" || display === "docs/decisions/README.md") return 5000;
+  if (/^skills\/[^/]+\/SKILL\.md$/.test(display)) return 15000;
+  if (display.startsWith("docs/design/") && !display.startsWith("docs/design/archived/"))
+    return 15000;
+  return undefined;
+}
 const publicPairs = [
   ["README.md", "README.zh-CN.md"],
   ["docs/README.md", "docs/README.zh-CN.md"],
@@ -138,6 +133,41 @@ function checkSkillEntry(path: string, text: string, report: DocumentationReport
   if (!description) report.errors.push(`${display}: Skill description must be non-empty`);
 }
 
+function decisionRelationshipTargets(
+  text: string,
+  label: "Supersedes" | "Superseded by",
+): string[] {
+  const header = text.split(/^##\s/m, 1)[0];
+  const field = new RegExp(`^\\*\\*${label}:\\*\\*([^\\r\\n]*)$`, "gim");
+  return [...header.matchAll(field)].flatMap((match) =>
+    [...match[1].matchAll(/\[[^\]]+\]\(([^)]+)\)/g)].map((link) => link[1]),
+  );
+}
+
+function checkDecisionRelationships(
+  path: string,
+  text: string,
+  display: string,
+  report: DocumentationReport,
+): void {
+  for (const [label, reciprocalLabel] of [
+    ["Supersedes", "Superseded by"],
+    ["Superseded by", "Supersedes"],
+  ] as const) {
+    for (const link of decisionRelationshipTargets(text, label)) {
+      const target = resolve(dirname(path), link.split("#", 1)[0]);
+      if (!existsSync(target)) continue;
+      const targetText = readFileSync(target, "utf8");
+      const reciprocated = decisionRelationshipTargets(targetText, reciprocalLabel).some(
+        (back) => resolve(dirname(target), back.split("#", 1)[0]) === resolve(path),
+      );
+      if (!reciprocated) {
+        report.warnings.push(`${display}: '${label}' link is not reciprocated by ${link}`);
+      }
+    }
+  }
+}
+
 function checkDecision(
   path: string,
   text: string,
@@ -202,24 +232,7 @@ function checkDecision(
     report.warnings.push(`${display}: bilingual decision counterpart is missing`);
   }
 
-  const relationship = /^\*\*(Supersedes|Superseded by):\*\*\s*\[[^\]]+\]\(([^)]+)\)\s*$/gim;
-  for (const match of text.matchAll(relationship)) {
-    const target = resolve(dirname(path), match[2].split("#", 1)[0]);
-    if (!existsSync(target)) continue;
-    const targetText = readFileSync(target, "utf8");
-    const reciprocalLabel =
-      match[1].toLowerCase() === "supersedes" ? "Superseded by" : "Supersedes";
-    const reciprocal = new RegExp(
-      `^\\*\\*${reciprocalLabel}:\\*\\*\\s*\\[[^\\]]+\\]\\(([^)]+)\\)\\s*$`,
-      "gim",
-    );
-    const reciprocated = [...targetText.matchAll(reciprocal)].some(
-      (candidate) => resolve(dirname(target), candidate[1].split("#", 1)[0]) === resolve(path),
-    );
-    if (!reciprocated) {
-      report.warnings.push(`${display}: '${match[1]}' link is not reciprocated by ${match[2]}`);
-    }
-  }
+  checkDecisionRelationships(path, text, display, report);
 }
 
 // The header block of a decision is the lines before its first section. It
@@ -721,6 +734,51 @@ function checkCounterexamples(root: string, report: DocumentationReport): void {
   }
 }
 
+function checkByteBudgets(
+  root: string,
+  candidates: Set<string>,
+  report: DocumentationReport,
+): void {
+  const files = new Set([...candidates, join(root, "AGENTS.md")]);
+  for (const path of files) {
+    const display = relative(root, path).split("\\").join("/");
+    const maxBytes = documentByteBudget(display);
+    if (maxBytes === undefined || !existsSync(path)) continue;
+    const size = statSync(path).size;
+    if (size > maxBytes) {
+      report.errors.push(
+        `${display}: ${size}B exceeds ${maxBytes}B byte budget (docs/README.md#ci-contract)`,
+      );
+    }
+  }
+}
+
+function checkHygieneDocuments(
+  root: string,
+  candidates: Iterable<string>,
+  report: DocumentationReport,
+): void {
+  const paths = new Set<string>(DOCUMENT_HYGIENE_PATHS);
+  for (const file of candidates) {
+    const path = relative(root, file).replaceAll("\\", "/");
+    if (
+      (path.startsWith("docs/design/") && !path.startsWith("docs/design/archived/")) ||
+      path.startsWith("skills/")
+    )
+      paths.add(path);
+  }
+  for (const path of paths) {
+    const file = join(root, path);
+    if (!existsSync(file)) {
+      report.errors.push(`${path}: missing hygiene pilot document`);
+      continue;
+    }
+    for (const error of checkDocumentHygiene(readFileSync(file, "utf8"))) {
+      report.errors.push(`${path}: ${error}`);
+    }
+  }
+}
+
 export function verifyDocumentation(rootDirectory = process.cwd()): DocumentationReport {
   const root = resolve(rootDirectory);
   const report: DocumentationReport = {
@@ -737,6 +795,8 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
   for (const directory of ["docs", "skills"]) {
     for (const path of markdownFiles(join(root, directory))) candidates.add(path);
   }
+
+  checkHygieneDocuments(root, candidates, report);
 
   for (const pair of publicPairs) {
     const missing = pair.filter((name) => !existsSync(join(root, name)));
@@ -793,7 +853,7 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
     if (
       parts[0] === "docs" &&
       parts.length === 2 &&
-      !new Set(["README.md", "README.zh-CN.md", "AGENTS.md"]).has(parts[1])
+      !new Set(["README.md", "README.zh-CN.md", "AGENTS.md", "AGENTS.zh-CN.md"]).has(parts[1])
     ) {
       report.warnings.push(
         `${display}: documentation content must live in design/, decisions/, experiments/, or postmortem/`,
@@ -808,7 +868,7 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
     if (parts[0] === "docs" && parts[1] === "postmortem") {
       checkPostmortemFile(path, text, display, report);
     }
-    const experimentName = parts[parts.length - 1];
+    const experimentName = parts[parts.length - 1].replace(/\.zh-CN\.md$/, ".md");
     if (
       parts[0] === "docs" &&
       parts[1] === "experiments" &&
@@ -823,16 +883,7 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
   checkPartsShelf(root, report);
   checkCounterexamples(root, report);
   checkPostmortems(root, report);
-  for (const [rel, maxBytes] of Object.entries(BYTE_BUDGETS)) {
-    const p = join(root, rel);
-    if (!existsSync(p)) continue; // budget applies to present standing docs, not synthetic trees
-    const size = statSync(p).size;
-    if (size > maxBytes) {
-      report.errors.push(
-        `${rel}: ${size}B exceeds ${maxBytes}B byte budget (docs/README.md#ci-contract)`,
-      );
-    }
-  }
+  checkByteBudgets(root, candidates, report);
   return report;
 }
 

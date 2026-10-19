@@ -1,0 +1,35 @@
+version: 2
+terms:
+  - term: three-arm development gate
+    aliases: [三种臂开发闸门]
+    definition: >-
+      The strict LongMemEval development comparison of no-memory, deterministic NMG, and the identical deterministic NMG with non-ranking shadow logging, each arm scored separately with the pinned official protocol; shadow decisions cannot affect ranking, but the observed 2/7 versus 3/7 difference is unexplained by the available record, may include model/judge or other run variation, and does not establish a shadow-logging effect.
+      严格的 LongMemEval 开发对照：无记忆、确定性 NMG、以及带非排序影子日志的同一确定性 NMG 三种臂，各自用钉住的官方协议单独打分；影子决策无法影响排序，但现有记录无法解释观察到的 2/7 与 3/7 差异，其原因可能包括模型/裁判或其他运行变化，不能据此确立影子日志的效果。
+    owner: docs/design/design/evaluation-and-falsifiable-claims.md
+    anchor: Evaluation and falsifiable claims
+    status: canonical
+  - term: pre-gate historical diagnostic
+    aliases: [闸门前历史诊断]
+    definition: >-
+      A dated, earlier LongMemEval comparison recorded before the development gate existed, reported with its fixed case count; it is historical evidence of direction, not a current receipt, capability claim, or product guarantee.
+      在开发闸门出现之前记录的、带日期的较早 LongMemEval 对照，连同其固定用例数一并报告；它是方向性的历史证据，不是当前 receipt、能力主张或产品保证。
+    owner: docs/design/design/evaluation-and-falsifiable-claims.md
+    anchor: Evaluation and falsifiable claims
+    status: canonical
+  - term: matched empty-retrieval-context control
+    aliases: [匹配空检索上下文对照]
+    definition: >-
+      A control that keeps the same questions, prompt, reader and judge but supplies no retrieved context; the paired gain over it is dataset-specific utility for that run, while the accompanying abstention regression shows it is not a blanket safety or generalization claim.
+      保持相同问题、提示词、reader 与 judge 但不提供检索上下文的对照；相对它的配对增益是该次运行的数据集特定效用，而同报告的弃答回退表明这不构成笼统的安全性主张或泛化主张。
+    owner: docs/design/design/evaluation-and-falsifiable-claims.md
+    anchor: Evaluation and falsifiable claims
+    status: canonical
+references:
+  - Active Graph
+  - NMG Lite
+  - consolidation
+  - activation
+  - learnable controller
+  - QPP
+  - Short-Term Graph
+  - Long-Term Graph

@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: acknowledged root
+    aliases: [acknowledged directory prefix, 已认领目录根]
+    definition: >-
+      A reasoned path prefix in the uncovered-test inventory whose files are deliberately acknowledged rather than required to belong to a CI suite; the exception applies to descendants of that root.
+      在未覆盖测试清单中附有理由、其文件被明确认领而非要求属于 CI 套件的路径前缀；例外适用于该根目录下的文件。
+    owner: docs/decisions/implemented/2026-09-19-acknowledge-archived-run-directories.md
+    anchor: Decision
+    status: canonical
+references:
+  - gate
+  - evidence

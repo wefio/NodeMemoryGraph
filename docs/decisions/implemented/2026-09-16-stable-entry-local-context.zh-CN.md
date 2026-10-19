@@ -1,6 +1,6 @@
 # 稳定入口与局部上下文查找
 
-[English](2026-09-16-stable-entry-local-context.md)
+[English](2026-09-16-stable-entry-local-context.md) · [术语](2026-09-16-stable-entry-local-context.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

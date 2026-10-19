@@ -1,12 +1,9 @@
 # 非阻塞的轨道也必须可见
 
-[English](2026-09-12-visible-non-blocking-research-track.md)
+[English](2026-09-12-visible-non-blocking-research-track.md) · [术语](2026-09-12-visible-non-blocking-research-track.terms.yaml)
 
 **Status:** implemented
 **Approved:** unrecorded
-Date: 2026-09-12
-Branch: feat/ci-visible-research-track
-
 ## Problem
 
 `research-tests` 这个 job 带 `continue-on-error: true`，设计文档（`docs/design/ci-cd-and-quality.md`）把它描述为

@@ -1,5 +1,7 @@
 # Float32 scoring-kernel observation — 2026-10-09
 
+[中文](float32-scoring-2026-10-09.zh-CN.md) · [Terms used](float32-scoring-2026-10-09.terms.yaml)
+
 Measured at `2026-10-09T14:09:25.937Z`, against the unchanged decoder and the
 working-tree scoring view based on `7c18f6f61b375a129fc04ad6ba5ee62ebb0522ab`.
 Raw samples and configuration: [JSON](float32-scoring-2026-10-09.json).

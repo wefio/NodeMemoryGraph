@@ -1,6 +1,6 @@
 # 按断言观察的资源选择测试 fixture
 
-[English](2026-09-24-resource-matched-test-fixtures.md)
+[English](2026-09-24-resource-matched-test-fixtures.md) · [术语](2026-09-24-resource-matched-test-fixtures.terms.yaml)
 
 **Status:** implemented
 **Approved:** auto

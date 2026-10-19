@@ -1,6 +1,6 @@
 # 独立的相关性训练数据
 
-[English](2026-09-15-independent-relevance-training.md)
+[English](2026-09-15-independent-relevance-training.md) · [术语](2026-09-15-independent-relevance-training.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

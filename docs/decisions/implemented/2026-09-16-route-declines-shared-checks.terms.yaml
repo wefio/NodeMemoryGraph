@@ -1,0 +1,14 @@
+version: 2
+terms:
+  - term: shared-check opt-out
+    aliases: [verify.sharedChecks: none, 共享检查例外]
+    definition: >-
+      A route-level declaration that omits shared invariants only for an eligible, exclusively owned narrow change; cross-cutting or ambiguous changes still escalate, route tests remain required, and the reason is recorded in the receipt.
+      路由级声明，仅在归属明确的 narrow 改动中排除共享不变量；横切或有歧义的改动仍会升级，路由测试仍必需，且原因记录在 receipt 中。
+    owner: docs/decisions/implemented/2026-09-16-route-declines-shared-checks.md
+    anchor: Decision
+    status: canonical
+references:
+  - gate
+  - route
+  - receipt

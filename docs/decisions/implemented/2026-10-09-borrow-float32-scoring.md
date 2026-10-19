@@ -1,6 +1,6 @@
 # Borrow Float32 payloads only during synchronous scoring
 
-[中文](2026-10-09-borrow-float32-scoring.zh-CN.md)
+[中文](2026-10-09-borrow-float32-scoring.zh-CN.md) · [Terms used](2026-10-09-borrow-float32-scoring.terms.yaml)
 
 **Status:** implemented
 **Approved:** auto

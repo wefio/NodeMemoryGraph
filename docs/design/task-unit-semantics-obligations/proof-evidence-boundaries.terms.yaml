@@ -1,0 +1,24 @@
+version: 2
+terms:
+  - term: product-runtime evidence
+    aliases: [product-path evidence, 产品运行时证据]
+    definition: >-
+      Evidence from a test that exercises the daemon-owned product call path and asserts its behavior; a research-instrument test or a similarly named fixture does not establish it by name alone.
+      来自实际经过 daemon 所有的产品调用路径并断言其行为的测试证据；研究工具测试或名称相似的 fixture 不能仅凭名称证明产品行为。
+    owner: docs/design/task-unit-semantics-obligations/proof-evidence-boundaries.md
+    anchor: "Where a proof lives: two evidence bases, and neither stands for the other"
+    status: canonical
+  - term: research-instrument evidence
+    aliases: [offline-instrument evidence, 研究工具证据]
+    definition: >-
+      Evidence about the separately constructed `BoardAdmission`/`ooo_probe_*` research path; it proves only the instrument behavior exercised by its test and does not transfer to the product runtime.
+      关于独立构造的 `BoardAdmission`/`ooo_probe_*` 研究路径的证据；它只证明测试所覆盖的工具行为，不自动转移为产品运行时证明。
+    owner: docs/design/task-unit-semantics-obligations/proof-evidence-boundaries.md
+    anchor: "Where a proof lives: two evidence bases, and neither stands for the other"
+    status: canonical
+references:
+  - proven obligation
+  - task unit
+  - run record
+  - managed board entry
+  - Task Board

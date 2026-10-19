@@ -1,6 +1,6 @@
 # Windows 混沌测试只在推送到 main 时运行
 
-[English](2026-09-09-chaos-tests-on-main-pushes.md)
+[English](2026-09-09-chaos-tests-on-main-pushes.md) · [术语](2026-09-09-chaos-tests-on-main-pushes.terms.yaml)
 
 **Status:** implemented  
 **Approved:** unrecorded

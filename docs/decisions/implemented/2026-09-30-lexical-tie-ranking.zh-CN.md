@@ -1,6 +1,6 @@
 # 在选出证据后处理词法分数并列
 
-[English](2026-09-30-lexical-tie-ranking.md)
+[English](2026-09-30-lexical-tie-ranking.md) · [术语](2026-09-30-lexical-tie-ranking.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

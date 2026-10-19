@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: access pressure
+    aliases: [access-counter pressure, 访问压力]
+    definition: >-
+      The aggregate and per-node access-counter signal that schedules maintenance; it must count only records whose counters the selected maintenance work can consume.
+      用于调度维护的全局及逐节点访问计数信号；它只能统计所选维护操作能够消耗其计数的记录。
+    owner: docs/postmortem/0005-maintenance-pressure-cannot-drain.md
+    anchor: Root cause
+    status: canonical
+references:
+  - post-mortem
+  - guardrail

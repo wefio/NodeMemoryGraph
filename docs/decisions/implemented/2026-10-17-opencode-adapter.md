@@ -1,6 +1,6 @@
 # OpenCode V2 Adapter as a Thin Transport Plugin
 
-[中文](2026-10-17-opencode-adapter.zh-CN.md)
+[中文](2026-10-17-opencode-adapter.zh-CN.md) · [Terms used](2026-10-17-opencode-adapter.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

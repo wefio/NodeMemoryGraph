@@ -1,6 +1,6 @@
 # The complexity gate measures a diff in two linter runs, and keeps the source extension
 
-[中文](2026-09-13-complexity-gate-batched-probes.zh-CN.md)
+[中文](2026-09-13-complexity-gate-batched-probes.zh-CN.md) · [Terms used](2026-09-13-complexity-gate-batched-probes.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit

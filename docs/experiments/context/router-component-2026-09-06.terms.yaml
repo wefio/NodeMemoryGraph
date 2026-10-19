@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: context router component probe
+    aliases: [上下文路由组件探针, 组件探针]
+    definition: >-
+      The offline LoCoMo probe of this report, which runs four context actions under a fixed custom lexical ranking and an equal hard envelope; it exercises the component collection/replay/training/report path and is neither the product retrieval path nor a live-model efficacy test.
+      本报告中的离线 LoCoMo 探针：在固定自定义词法排序与相同硬包络下执行四种上下文动作；它走通的是组件的采集／回放／训练／报告路径，既不是产品检索路径，也不是真实模型上的效能测试。
+    owner: docs/experiments/context/router-component-2026-09-06.md
+    anchor: Protocol
+    status: canonical
+  - term: sparse-group warning
+    aliases: [稀疏分组告警]
+    definition: >-
+      A transparency notice that many action rows descend from few independent source groups; in this report it is not a statistical-power test and not an activation gate.
+      一种透明性提示：大量动作行来自很少的独立来源单元；在本报告中它既不是统计功效检验，也不是启用闸门。
+    owner: docs/experiments/context/router-component-2026-09-06.md
+    anchor: "Review follow-up: costs, independence and durability"
+    status: canonical
+  - term: evidence-coverage objective
+    aliases: [证据覆盖目标, gold 证据覆盖度]
+    definition: >-
+      This report's reward, which counts gold-evidence coverage only and contains no main-model answer or downstream success term; a policy optimizing it alone is expected to favor appending ranked source content rather than choosing cue.
+      本报告的奖励只计 gold 证据覆盖度，不含主模型答案或下游成功项；只优化该目标的策略预期会偏好追加已排序的来源内容，而不是选择 cue。
+    owner: docs/experiments/context/router-component-2026-09-06.md
+    anchor: Interpretation and limits
+    status: canonical

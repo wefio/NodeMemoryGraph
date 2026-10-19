@@ -4,7 +4,7 @@
 **Approved:** explicit
 **Relates to:** [State writer](2026-10-08-ag-working-state.md), [Turn carriage](2026-10-08-ag-working-state-input.md)
 
-[中文](2026-10-12-working-state-daily-use.zh-CN.md)
+[中文](2026-10-12-working-state-daily-use.zh-CN.md) · [Terms used](2026-10-12-working-state-daily-use.terms.yaml)
 
 ## Problem
 

@@ -1,0 +1,35 @@
+version: 2
+terms:
+  - term: compatibility epoch
+    aliases: [协议兼容 epoch, nmg.v9]
+    definition: >-
+      The protocol-version label (nmg.v5 through nmg.v9) recorded in the resident daemon's PID lease; additive RPCs, optional fields and optional behaviours do not advance it, while a live daemon on a different epoch makes clients fail closed and require an explicit coordinated restart, and same-epoch differences show up only as capability gating and a discovery fingerprint.
+      记录在常驻 daemon PID 租约里的协议版本标签（nmg.v5 到 nmg.v9）；增量 RPC、可选字段与可选行为不推进它，而活着的 daemon 处于不同 epoch 时客户端失败即关闭并要求显式协调重启；同 epoch 内的差异只表现为能力闸门与发现指纹。
+    owner: docs/design/design/product-boundary/agent-cli-and-resident-service.md
+    anchor: Agent-independent CLI and resident service
+    status: canonical
+  - term: single resident authority
+    aliases: [单一常驻权威]
+    definition: >-
+      One resident daemon is the application-level authority for one LTG database and for every project STG handle it opened, with phase-based concurrency (synchronous SQLite phases serialize, external calls never hold a transaction across an await); it does not promise distributed transactions or linearizable ordering across independent OS processes, and SQLite WAL/busy_timeout are not semantic ordering.
+      一个常驻 daemon 是一个 LTG 数据库及其打开的每个项目 STG 句柄在应用层的权威，采用阶段式并发（同步 SQLite 阶段串行、外部调用绝不跨 await 持有事务）；它不承诺分布式事务或跨独立 OS 进程的线性化顺序，SQLite WAL/busy_timeout 也不构成语义顺序。
+    owner: docs/design/design/product-boundary/agent-cli-and-resident-service.md
+    anchor: Runtime ownership and concurrency contract
+    status: canonical
+  - term: answer-to-memory overlap
+    aliases: [答案与记忆重叠]
+    definition: >-
+      Adapter-recorded overlap between an answer and recalled memories; it is provider-dependent diagnostic telemetry, not proof of causal use and not a training label, and only auditable user confirmation, tool-verified outcomes or official benchmark evidence may mark records useful/contradicted.
+      适配器记录的答案与召回记忆之间的重叠；它是取决于 provider 的诊断遥测，不是因果使用的证明，也不是训练标签；只有可审计的用户确认、工具核验结果或官方 benchmark 证据才可把记录标记为 useful/contradicted。
+    owner: docs/design/design/product-boundary/agent-cli-and-resident-service.md
+    anchor: Agent-independent CLI and resident service
+    status: canonical
+references:
+  - disclosure
+  - access signal
+  - collection origin
+  - projection revision
+  - Active Graph
+  - Task Board
+  - Lab
+  - harness

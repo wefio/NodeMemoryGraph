@@ -1,6 +1,9 @@
 # LoCoMo adapter
 
-Place the official `locomo10.json` at `evals/locomo/data/locomo10.json`, or set
+[English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
+
+The official dataset is not included in the repository; obtain it separately.
+Place `locomo10.json` at `evals/locomo/data/locomo10.json`, or set
 `NMG_LOCOMO_DATA` to its path.
 
 ```powershell

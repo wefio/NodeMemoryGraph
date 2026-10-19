@@ -1,44 +1,35 @@
-# QPP 工程经验：审计暴露的两个问题
+# QPP engineering lessons: two audit failures
 
-> 伴随 commit dd41829（QPP shadow wiring）→ d86b658（squash 修复）之间的复盘。
-> 记录"为什么发生"和可迁移的教训，不重复设计文档（见 retrieval-confidence-controller.md）。
+[English](engineering-notes.md) | [简体中文](engineering-notes.zh-CN.md) · [Terms](engineering-notes.terms.yaml)
 
-## 问题 1：clamp 归一化饱和，qpp 无区分度
+> **Status:** Historical retrospective from the work between commits `dd41829` (QPP shadow wiring) and `d86b658` (the squash fix), with a later correction at `86c837f`. These incidents explain how the prototype changed; they are not a description of the current score. See the [current QPP design](../../design/retrieval-confidence-controller.md).
 
-**现象**：在 7 题 LongMemEval run 上跑 `audit-qpp-signal.ts`，qpp 双峰 0.15（空检索）/ 1.35（非空），两桶准确率均 0.33——完全无区分度。
+## Failure 1: clamping saturated the score and erased gradation
 
-**根因**：`mapSearchResult`（`store.ts:3835`）设 `combinedScore = score`（原始词法分，实测 ~84），**不是 `hybridScore`（≤1）**。而 `contextUsefulness = combinedScore + bonus` 也在词法量纲。QPP 初版对 usefulness 做 `clamp(0,1)` → 非空检索时 usefulness 全部 >1 → 饱和到 1.0 → **top1 恒 1.0、variance 恒 0**。公式塌缩成"检索有没有返回东西"的二元值。
+**Observed at the time:** On a seven-question LongMemEval run, `audit-qpp-signal.ts` produced two QPP clusters: about `0.15` for empty retrieval and `1.35` for non-empty retrieval. Both buckets had `0.33` accuracy, so the score did not discriminate within this tiny sample.
 
-**教训**：
-- **不要假设分数尺度**。combinedScore / usefulness 的量纲是从代码路径（mapSearchResult 设值）决定的，不是 [0,1]。归一化实现前必须在真实 trace 上验证分数分布，否则 clamp/sigmoid 这类有界函数会静默饱和。
-- 单元测试用的是人造 [0,1] usefulness，掩盖了真实量纲问题。**信号分量的测试要包含真实量纲的样本**（这里就是 ~84 的词法分），不只干净的小数。
+**Cause:** A result-mapping path assigned `combinedScore` the raw lexical score (measured around `84`), rather than the bounded `hybridScore`. `contextUsefulness` inherited that scale. The prototype clamped usefulness to `[0,1]`, so non-empty results saturated at `1.0`; `Top1` became constant and variance became zero. The formula collapsed to “did retrieval return anything?”
 
-**修复**：bounded-squash `s(x)=max(0,x)/(max(0,x)+10)`（同 `boundedLexical` 惯例），替 clamp。84→0.894 / 20→0.667 / 5→0.333，恢复 gradation。见 commit d86b658。
+**First attempted fix:** Replace the clamp with a bounded squash, `s(x) = max(0,x)/(max(0,x)+10)`. It mapped `84 → 0.894`, `20 → 0.667`, and `5 → 0.333`, restoring gradation for the observed raw-scale values. Commit `d86b658` records this intermediate repair.
 
-> **后续修正（squash 本身也被推翻）**：实测 live searchContext 的 combinedScore=0.623（有界），不是审计里的 84——根因更深：**combinedScore 跨路径量纲不一**（lexical 路径 `store.ts:2915` 设=hybridScore ~0.6 / vector 路径 `:2654` 设=leafScore*0.9+lexical*0.1 ~84 / `#resultsForNode` 设=0）。squash 任何 k 都顾此失彼（k=10 对 live 0.6 过压→0.059→好匹配误触发）。最终改为**从 `selections.scores.{lexical,vector,route}` 重算 hybridScore**（恒有界 [0,1]、跨路径一致）作 `strength`，回退 squash。见 commit 86c837f。教训升级：不只"不假设分数尺度"，更要"警惕同一字段跨代码路径量纲不一"。
+**Later correction:** The audit's raw lexical scale did not describe every live path. The same `combinedScore` field could be a bounded hybrid score on one path, raw lexical-scale (~84) on another, or zero for `#resultsForNode`. No single squash constant preserved both scales. The final score path recomputes `hybridScore` from `selections.scores.{lexical,vector,route}` and uses that bounded `[0,1]` value as strength. See commit `86c837f` and the current [`qpp.ts`](../../../src/core/qpp.ts).
 
-## 问题 2：intentCoverage 在所有 benchmark 上退化
+**Lesson:** Do not infer scale from a field name. Inspect the producing paths and real traces before applying clamp, sigmoid, or squash. Tests need examples from every scale-bearing path, not only clean `[0,1]` fixtures.
 
-**现象**：7/7 题 intentCoverage=0.5（中性，无信号）。
+## Failure 2: `intentCoverage` had no variation in benchmark traces
 
-**根因**：`evals/longmemeval/run.ts:316` 硬编码 `memoryType: "conversation_evidence"`。**所有 benchmark（LongMemEval / LoCoMo / PersonaMem / BEAM）的 ingest 都这么存**——无 preference/fact/event 等类型记忆。intentCoverage 双重失效：查询多不命中意图正则（AutoRecall 的 query 是整段 prompt）；命中时库里也无对应类型。所以该分量在任何 benchmark trace 上恒 0.5/0。
+**Observed at the time:** All seven benchmark questions had `intentCoverage=0.5` (neutral), so the signal had no variation in that sample.
 
-**教训**：
-- **benchmark 的 ingest shape 会让信号退化**。intentCoverage 设计上依赖类型化记忆，但 benchmark 全存 conversation_evidence → 信号在目标数据上恒定。信号分量要在目标数据形态上验证，不只单元测试。
-- 评估一个分量是否有用，先看它在真实 trace 上的方差——恒常数即无区分度，权重再学也是 0。
+**Cause:** LongMemEval ingest stored records as `conversation_evidence`; the benchmark import paths did not produce preference, fact, event, or state types. In addition, many AutoRecall queries did not match the intent patterns. The feature therefore had no expected type to check or no matching typed record to find.
 
-**未解**：要验 intentCoverage 必须有类型化 ingest——真实 Pi session（`nmg_remember(memoryType:"preference")`）或改 benchmark ingest 抽类型。当前所有 benchmark trace 都不行。
+**Lesson:** A feature can depend on the data shape, not only the algorithm. Check its distribution on the target traces before training weights; a constant feature has no discriminating value there. The current runtime retains `intentCoverage` for diagnostics but excludes it from the QPP score.
 
-## 方法论收获（最有价值的部分）
+## Method lessons
 
-1. **shadow-first 让 bug 廉价暴露**：QPP 先"算+记到 trace"不改检索行为（shadow），使 qpp 在真实检索上可观测却零风险。审计正是靠 shadow 记录的 selections 才离线重算出 qpp、抓到饱和 bug。若直接上线触发，bug 会以"误触发/漏触发"的形式隐秘生效，难定位。
+1. **Shadow-first makes failures cheap to observe.** The prototype recorded QPP without changing retrieval behavior. Shadow traces made it possible to find the saturation bug before it could silently cause false triggers or missed triggers.
+2. **Pure-function replay can avoid model calls.** When a metric is a pure function of persisted selections and records, historical traces can be recomputed without rerunning an LLM or paying provider cost. `audit-qpp-signal.ts` was an example of this approach.
+3. **Audit before calibration.** First inspect feature distributions and path scales on real traces. Tuning weights on a tiny sample or on constant features learns noise, not a reliable policy.
 
-2. **离线重算模式**：qpp 是持久化 `selections_json` + `memory_records` 的纯函数 → 可在历史 trace 上重算，**无需重跑 LLM**（不花 API、不依赖 deepseek judge）。这是标定/审计工具的通用模式：凡纯函数 of 持久化状态，都能离线 replay。`audit-qpp-signal.ts` 即此模式的实例。
+## Historical next steps
 
-3. **审计先于标定**：在学权重/阈值（Stage 1 贝叶斯优化）前，必须先验证各分量在真实数据上有 gradation。否则在小 N（7 题）上学到的是噪声，且分量退化（如 intentCoverage 恒 0.5）会让学出的权重无意义。**标定流程第 1 步永远是"看分量分布"，不是"调权重"**。
-
-## 指向下一步
-
-- intentCoverage 数据缺口 → 需类型化 ingest（独立工作流，非 QPP bug）。
-- Stage 0 plumbing（第二趟+expandedMaximum+统一池）→ 才能跑全贝叶斯目标（"触发后变对"需第二趟真跑）。
-- 标定前先在更大/更杂的 trace 上重跑审计，确认 top1/variance 有 gradation（squash 后已恢复）。
+The original note proposed typed ingest as a prerequisite for an informative `intentCoverage` signal and additional trace review before calibration. Stage-0 progressive wiring has since been implemented; current defaults, score composition, and remaining calibration boundaries are owned by the [current QPP design](../../design/retrieval-confidence-controller.md). This retrospective does not claim that a calibrated trigger or general retrieval improvement followed from the seven-question audit.

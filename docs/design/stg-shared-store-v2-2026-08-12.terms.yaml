@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: project-shared STG
+    aliases: [STG shared store v2, 项目共享 STG]
+    definition: >-
+      One project-local STG database whose provisional rows are filtered by session_id; shared cached_from_ltg hints remain project-visible, while LTG remains authoritative.
+      每项目一个本地 STG 数据库，provisional rows 按 session_id 过滤；cached_from_ltg hints 在项目内共享，LTG 仍是权威数据。
+    owner: docs/design/stg-shared-store-v2-2026-08-12.md
+    anchor: Current source contract
+    status: canonical
+references:
+  - STG row visibility rule

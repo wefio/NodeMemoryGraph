@@ -1,0 +1,51 @@
+version: 2
+terms:
+  - term: AG update step
+    aliases: [candidates/update/freeze, AG 更新步骤]
+    definition: >-
+      The per-query cycle that projects candidates from STG and LTG under the current task belief, updates the mutable session-owned Active Graph under one hard multidimensional budget covering injected tokens, nodes, edges, record/evidence excerpts, temporary observations, task frames, reasoning steps, local tier/depth, graph expansion and latency, and then freezes only the visible subset as an immutable projection.
+      逐查询循环：在当前任务信念下从 STG 与 LTG 投影候选，在唯一一个硬性多维预算（覆盖注入 token、节点、边、记录／证据片段、临时观察、任务帧、推理步骤、本地 tier/depth、图扩展与延迟）下更新可变且归会话所有的 Active Graph，然后只把可见子集冻结为不可变投影。
+    owner: docs/design/design/active-graph-activation-and-consolidation/session-ag-and-projection-revisions.md
+    anchor: Session AG update and projection revisions
+    status: canonical
+  - term: construction-process budget
+    aliases: [per-turn search limits, 构建过程预算]
+    definition: >-
+      The Pi-side deterministic per-turn limits that are separate from the projection budget — three explicit searches, five total recall tool calls, at most two searches without an intervening exact-evidence progression, and a stop after two consecutive searches add no candidate IDs — reset by each new user turn; they sit outside QPP and the differentiable controller, and learned allocation may choose a smaller AG but cannot relax them.
+      Pi 侧与投影预算分开的逐 turn 确定性限制——三次显式 search、总计五次 recall 工具调用、至多两次没有插入精确证据推进的 search、以及连续两次 search 未增加候选 ID 后停止——每个新用户 turn 都会重置；它们位于 QPP 与可微控制器之外，学习到的分配可以选择更小的 AG 但无法放松它们。
+    owner: docs/design/design/active-graph-activation-and-consolidation/session-ag-and-projection-revisions.md
+    anchor: Session AG update and projection revisions
+    status: canonical
+  - term: board projection
+    aliases: [board_projection items, board 投影]
+    definition: >-
+      The temporary `board_projection` items that ordinary Pi reads stage from open Task Board entries into the caller's daemon-owned session Active Graph, while history reads do not stage entries; board content is never inserted into memory records, FTS, embeddings, QPP or LTG search, and an Agent may separately admit a supported durable conclusion through `remember`.
+      普通 Pi 读取把开放 Task Board 条目作为临时 `board_projection` 项暂存进调用者的 daemon 所属会话 Active Graph，而历史读取不暂存条目；board 内容永不插入记忆记录、FTS、embedding、QPP 或 LTG 检索，Agent 可以另经 `remember` 接纳一条受支持的持久结论。
+    owner: docs/design/design/active-graph-activation-and-consolidation/session-ag-and-projection-revisions.md
+    anchor: Session AG update and projection revisions
+    status: canonical
+  - term: prepared source fingerprint
+    aliases: [not projectionId, 准备好的来源指纹]
+    definition: >-
+      The hash recorded for prepared input, which is not a `projectionId`, not acceptance and not proof of disclosure; exact fragment confirmation returns reader-local candidates only, and host-confirmed ledger commitment remains open.
+      为准备好的输入记录的哈希，它不是 `projectionId`、不是验收、也不是披露证明；精确片段确认只返回读者本地候选，而宿主确认的账本承诺仍未完成。
+    owner: docs/design/design/active-graph-activation-and-consolidation/session-ag-and-projection-revisions.md
+    anchor: Session AG update and projection revisions
+    status: canonical
+  - term: session runtime identity fields
+    aliases: [agId/taskFrameId/projectionId/boardChannelId, 会话运行时身份字段]
+    definition: >-
+      The explicit, non-overloaded identities — `agId` owning the session runtime, `taskFrameId` partitioning semantic work inside the AG, `projectionId` naming one immutable exposure/feedback boundary and `boardChannelId` naming a coordination channel; current `activeGraphId` and query-hash `taskId` behaviour is implementation evidence to migrate rather than a compatibility constraint, and reliable automatic semantic task-frame classification remains open.
+      显式且不被重载的多个身份——`agId` 拥有会话运行时、`taskFrameId` 划分 AG 内的语义工作、`projectionId` 命名一个不可变的暴露／反馈边界、`boardChannelId` 命名协调频道；当前的 `activeGraphId` 与查询哈希 `taskId` 行为是需要迁移的实现证据而非兼容性约束，而可靠的自动语义任务帧分类仍未完成。
+    owner: docs/design/design/active-graph-activation-and-consolidation/session-ag-and-projection-revisions.md
+    anchor: Session AG update and projection revisions
+    status: canonical
+references:
+  - Active Graph
+  - projection revision
+  - task frame
+  - Task Board
+  - working state
+  - state space
+  - QPP
+  - learnable controller

@@ -1,5 +1,7 @@
 # The parts shelf
 
+[中文](parts.zh-CN.md) · [Terms used](parts.terms.yaml)
+
 One-off scripts are the normal answer to a one-off question. Writing a second copy
 of a part that already exists is not.
 
@@ -248,10 +250,10 @@ const env = definedEnvironment(benchmarkCredentialEnvironment(root));
 
 ### The percentile family, from `tools/parts/stats.ts`
 
-Four conventions lived in the eval scripts and they **disagree on purpose**: the same
-input and the same `q` give different numbers. So each got its own name instead of a
-`method` flag, and the 11 local copies now import these. All of them sort a copy of
-the input first and return `0` for an empty series.
+The percentile functions keep their conventions in separate names because the same
+input and `q` can produce different numbers. Each percentile function sorts a copy
+before ranking and returns `0` for an empty series. `median` uses the upper middle
+rank; `mean` is the arithmetic mean.
 
 | Part                               | Index                      | On `[10,20,30,40,50]` |
 | ---------------------------------- | -------------------------- | --------------------- |
@@ -269,9 +271,7 @@ const p95 = percentileNearestRank(latencies, 0.95);
 
 ### Integers, from `tools/parts/numbers.ts`
 
-The eval scripts had three different helpers called `positiveInteger`. Two of them are
-parts; the third — truncate a number, fall back when it is absent — has a single
-caller and stays where it is.
+These helpers keep strict numeric validation separate from lenient parsing with a fallback.
 
 | Part                                    | Behaviour                                                   |
 | --------------------------------------- | ----------------------------------------------------------- |
@@ -285,29 +285,15 @@ const epochs = requirePositiveInteger(options.epochs ?? 40, "epochs");
 const concurrency = positiveIntegerOr(process.env.NMG_BENCH_CONCURRENCY, 4);
 ```
 
-## Still duplicated locally
+## When no part fits
 
-Measured on 2026-09-09 by counting definitions that appear in two or more one-off
-scripts under `tools/`, `scripts/`, and `evals/`:
+This shelf lists callable parts that exist now; it is not a backlog of helpers to
+build. If no entry fits, follow the [script-reuse workflow](../../skills/script-reuse/SKILL.md#when-a-part-is-missing).
 
-| Family            | Local copies left | State                                                                                      |
-| ----------------- | ----------------- | ------------------------------------------------------------------------------------------ |
-| `percentile`      | 0                 | migrated — every site kept its formula under its own name                                  |
-| `mean`            | 1                 | `src/lab/controller-protocol.ts` keeps its own; product code must not import a script part |
-| `positiveInteger` | 2                 | split into `requirePositiveInteger` / `positiveIntegerOr`; the truncating one has 1 caller |
-| `ratio`           | 8                 | not looked at yet                                                                          |
-| `parseArgs`       | 7                 | delete — `node:util` already has `parseArgs`                                               |
-| `createClient`    | 5                 | **not a part**: all five wire different clients                                            |
+## Ownership boundary
 
-Put one on the shelf when a **second** script needs it, and put it where both can
-import it — not in `src/rcp`, unless it is about the control plane. A family whose
-members disagree does not get merged into one name; it gets one name per meaning.
-
-## What a part never carries
-
-A part carries **assembly**, never **judgement**. Choosing narrow versus full, or
-deciding whether a change is acceptable, stays in one reviewed place. See
-`docs/decisions/implemented/2026-09-09-gates-assert-results-not-tools.md`.
+The [script-reuse Skill](../../skills/script-reuse/SKILL.md#rules-about-parts)
+owns when to add a part and which decisions must remain outside it.
 
 ## How this page stays honest
 

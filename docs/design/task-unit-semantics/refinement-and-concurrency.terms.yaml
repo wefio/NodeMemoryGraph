@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: task refinement
+    aliases: [parent-task refinement, 任务细化]
+    definition: >-
+      A record that splits a parent task into child units and a join while preserving parent obligations, mapping obligations to child artifacts, retaining joint obligations and specifying a join validator.
+      将父任务拆为子单元与 join、同时保留父任务义务的记录；它映射义务与子产物、保留联合义务，并指定 join 验证器。
+    owner: docs/design/task-unit-semantics/refinement-and-concurrency.md
+    anchor: "Task refinement: split a parent contract"
+    status: proposed
+references:
+  - task unit
+  - Task Board

@@ -1,0 +1,14 @@
+version: 2
+terms:
+  - term: generated build output
+    aliases: [generated artifact, 构建生成物]
+    definition: >-
+      A file regenerated from maintained source by a build tool; this decision rejects tracking selected generated outputs and instead assigns buildability verification to CI and the Repository Control Plane.
+      由构建工具根据维护源码重新生成的文件；本决定拒绝跟踪特定生成物，并将可构建性验证交由 CI 和 Repository Control Plane 负责。
+    owner: docs/decisions/rejected/2026-09-02-track-build-artifacts-in-git.md
+    anchor: Why rejected
+    status: canonical
+references:
+  - Repository Control Plane
+  - gate
+  - evidence

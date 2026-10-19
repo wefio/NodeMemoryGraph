@@ -1,0 +1,31 @@
+version: 2
+terms:
+  - term: first code slice
+    aliases: [第一段代码切片, 首个实现切片]
+    definition: >-
+      The narrowly enumerated set of files a first increment actually puts in place (here `src/rcp/session-feedback.ts` and `src/lab/context-router.ts`); it establishes only the mechanisms its tests exercise — not natural task success, convergence, causal intervention benefit, or system completion.
+      某个首个增量真正落实的那一小份被逐一列出的文件（此处为 `src/rcp/session-feedback.ts` 与 `src/lab/context-router.ts`）；它只确立其测试演练到的机制——不确立自然任务成功、收敛、因果干预收益或系统完成。
+    owner: docs/design/agent-convergence-feedback-design/implementation-boundary.md
+    anchor: Implementation boundary (partial, not system completion)
+    status: canonical
+  - term: receipt delivery failure as diagnostic
+    aliases: [receipt 投递失败作为诊断]
+    definition: >-
+      A failure to hand a validated receipt into a named session/task frame is reported as diagnostics and does not change the verifier's own decision; the CLI opt-in also does not start or stop a daemon, write durable memory, mark a quest complete, or train a router.
+      把通过校验的 receipt 送入具名会话/任务帧的失败被报告为诊断信息，不改变验证者自身的决定；该 CLI opt-in 同样不启动或停止 daemon、不写持久记忆、不把任务标记为完成，也不训练路由。
+    owner: docs/design/agent-convergence-feedback-design/implementation-boundary.md
+    anchor: Implementation boundary (partial, not system completion)
+    status: canonical
+  - term: admitted intervention row
+    aliases: [被准入的干预行]
+    definition: >-
+      A row that may enter a dataset only after `src/lab/context-intervention.ts` validates a versioned decision/execution/outcome envelope and a caller-supplied independent evidence verifier admits it; shadow choices, cancelled or timed-out execution, scope/version mismatch, reopened outcomes, invalid windows and missing evidence cannot produce one.
+      只有在 `src/lab/context-intervention.ts` 校验带版本的 decision/execution/outcome 信封、且调用方提供的独立证据验证者准入之后，才能进入数据集的行；影子选择、被取消或超时的执行、scope/version 不匹配、被重新打开的结果、无效窗口与缺失证据都不能产生这样的行。
+    owner: docs/design/agent-convergence-feedback-design/implementation-boundary.md
+    anchor: Implementation boundary (partial, not system completion)
+    status: canonical
+references:
+  - learnable controller
+  - Lab
+  - task frame
+  - tessera

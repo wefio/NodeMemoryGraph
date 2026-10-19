@@ -4,7 +4,7 @@
 **Approved:** explicit
 **Relates to:** [Maintained-state proposal](../proposed/2026-10-06-ag-state-transitions.md)
 
-中文版: [2026-10-08-ag-working-state.zh-CN.md](2026-10-08-ag-working-state.zh-CN.md)
+中文版: [2026-10-08-ag-working-state.zh-CN.md](2026-10-08-ag-working-state.zh-CN.md) · [Terms used](2026-10-08-ag-working-state.terms.yaml)
 
 ## Problem
 

@@ -1,6 +1,6 @@
 # The static gate names its surface, and leaves liveness findings to a human
 
-[中文](2026-09-16-ci-static-coverage.zh-CN.md)
+[中文](2026-09-16-ci-static-coverage.zh-CN.md) · [Terms used](2026-09-16-ci-static-coverage.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

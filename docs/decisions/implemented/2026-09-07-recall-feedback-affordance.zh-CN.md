@@ -2,12 +2,9 @@
 
 **Status:** implemented  
 **Approved:** unrecorded
-Date: 2026-09-07
-Branch: pr/feedback-affordance
-
 治理元规则: [self-governance meta-rule](../implemented/2026-09-07-self-governance-meta-rule.md) —— 这是对既有反馈/暂存约定的改动,故按治理决策记录。
 
-English: [2026-09-07-recall-feedback-affordance.md](2026-09-07-recall-feedback-affordance.md)
+English: [2026-09-07-recall-feedback-affordance.md](2026-09-07-recall-feedback-affordance.md) · [术语](2026-09-07-recall-feedback-affordance.terms.yaml)
 
 ## 问题
 

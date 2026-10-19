@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: tooth-retirement witness
+    aliases: [rule-stating test witness, 退役突变牙见证]
+    definition: >-
+      A test assertion that states exactly the violation protected by a tooth and is shown to fail under that tooth; a merely correlated behavioural difference is insufficient.
+      精确陈述某突变牙所保护违规、且已证明会被该突变牙击败的测试断言；仅相关的行为差异不足以作为见证。
+    owner: docs/decisions/implemented/2026-09-24-mutants-are-derived-not-anchored.md
+    anchor: Decision
+    status: canonical
+references:
+  - mutation tooth

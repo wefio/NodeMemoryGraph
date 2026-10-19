@@ -1,6 +1,6 @@
 # 词法 FTS 保留倒排索引，不再保存重复全文
 
-[English](2026-10-07-contentless-lexical-fts.md)
+[English](2026-10-07-contentless-lexical-fts.md) · [术语](2026-10-07-contentless-lexical-fts.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

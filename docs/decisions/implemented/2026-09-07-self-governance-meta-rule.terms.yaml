@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: self-governance meta-rule
+    aliases: [rules-govern-rule, 自我治理元规则]
+    definition: >-
+      A rule requiring changes to standing rules and conventions to be deliberate, recorded at their owner, non-duplicated, reversible and grounded; recurring obligations should prefer one mechanical gate over repeated reminders.
+      要求对常设规则和约定的修改必须经过审慎决定、在其 owner 处记录、避免重复、可逆且有依据；对反复发生的义务，应优先采用一个机械 gate，而不是重复提醒。
+    owner: docs/decisions/implemented/2026-09-07-self-governance-meta-rule.md
+    anchor: Decision
+    status: canonical
+references:
+  - gate
+  - evidence

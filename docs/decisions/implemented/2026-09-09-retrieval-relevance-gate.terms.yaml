@@ -1,0 +1,29 @@
+version: 2
+terms:
+  - term: program relevance gate
+    aliases: [program-side relevance filter, 程序侧相关度门]
+    definition: >-
+      The deterministic retrieval filter that uses a bounded absolute relevance floor and optional query-shape rules; it treats the result limit as a maximum and may return no candidates.
+      确定性检索过滤器，使用有界绝对相关度下限及可选的逐查询形状规则；结果数量上限是最大值，候选可以为空。
+    owner: docs/decisions/implemented/2026-09-09-retrieval-relevance-gate.md
+    anchor: Decision
+    status: canonical
+  - term: learned relevance gate
+    aliases: [model-side relevance gate, 学习式相关度门]
+    definition: >-
+      An opt-in in-process model that scores candidate features and applies a learned threshold; in the current retrieval implementation it can rerank the surfaced pool before the program gate and filter its survivors afterward, and an inference exception is not guaranteed to fall back.
+      可选启用的进程内模型，对候选特征打分并应用学习得到的阈值；当前检索实现会在程序门之前重排 surfaced pool，再过滤程序门的幸存候选；推理异常不保证回退。
+    owner: docs/decisions/implemented/2026-09-09-retrieval-relevance-gate.md
+    anchor: Decision
+    status: canonical
+  - term: two-loose-gate relevance composition
+    aliases: [program-and-learned gate intersection, 双松门相关度组合]
+    definition: >-
+      In the default daemon retrieval path, candidate membership passes the deterministic program gate and, when a validated model is loaded, also passes its learned threshold; with no usable model, the default path remains program-gated and deterministic.
+      在默认 daemon 检索路径中，候选必须通过确定性程序门；若加载了经验证的模型，还必须通过其学习阈值；没有可用模型时，默认路径仍只使用程序门且保持确定性。
+    owner: docs/decisions/implemented/2026-09-09-retrieval-relevance-gate.md
+    anchor: Decision
+    status: canonical
+references:
+  - gate
+  - evidence

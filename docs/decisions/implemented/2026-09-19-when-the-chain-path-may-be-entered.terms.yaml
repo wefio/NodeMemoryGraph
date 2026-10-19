@@ -1,0 +1,21 @@
+version: 2
+terms:
+  - term: chain-path entry conditions
+    aliases: [fusion entry conditions, 链式路径准入条件]
+    definition: >-
+      The three required checks for session reuse: shared semantics permit the successor, a legal successor is ready at the boundary, and the host supplies a continuable session runner.
+      复用会话所需的三项检查：共享语义允许该后继、边界处已有合法且就绪的后继、宿主提供可延续的 session runner。
+    owner: docs/decisions/implemented/2026-09-19-when-the-chain-path-may-be-entered.md
+    anchor: Decision
+    status: canonical
+  - term: unfused fallback
+    aliases: [fresh-session fallback, 未融合回退]
+    definition: >-
+      When any chain-path entry condition is absent, the run proceeds with a fresh session rather than failing or claiming that fusion occurred.
+      任一链式路径准入条件缺失时，运行以新会话继续，而不是失败或声称已经融合。
+    owner: docs/decisions/implemented/2026-09-19-when-the-chain-path-may-be-entered.md
+    anchor: Decision
+    status: canonical
+references:
+  - execution fusion
+  - Task Board

@@ -1,0 +1,30 @@
+version: 2
+terms:
+  - term: memory resolution
+    aliases: [resolution, 记忆 resolution]
+    definition: >-
+      The open/resolved/reopened lifecycle field for an unresolved memory structure; it is distinct from record status and storage state.
+      用于表示记忆结构 open/resolved/reopened 生命周期的字段；它与记录状态和存储状态相互独立。
+    owner: docs/design/memory-loop-design.md
+    anchor: Open and resolved
+    status: canonical
+  - term: open structure
+    aliases: [open memory, 未闭合结构]
+    definition: >-
+      A memory record with resolution open or reopened, retained as an unresolved item and connected to one or more existing related-memory anchors.
+      resolution 为 open 或 reopened 的记忆记录，作为未解决事项保留，并连接到一个或多个现存相关记忆锚点。
+    owner: docs/design/memory-loop-design.md
+    anchor: Open and resolved
+    status: canonical
+  - term: related-memory anchor
+    aliases: [relatedMemoryId, 关联记忆锚点]
+    definition: >-
+      An existing memory in the same store referenced by an open structure so retrieval can make that structure reachable from related evidence.
+      open 结构引用的同一 store 中现存记忆，使检索可以从相关证据触达该结构。
+    owner: docs/design/memory-loop-design.md
+    anchor: Retain
+    status: canonical
+references:
+  - same-scope supersession
+  - claim outcome
+  - recall trigger

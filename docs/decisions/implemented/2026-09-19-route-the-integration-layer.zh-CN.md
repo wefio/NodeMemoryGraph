@@ -1,6 +1,6 @@
 # 给 integration 层配路由，改它才会跑到检查
 
-[English](2026-09-19-route-the-integration-layer.md)
+[English](2026-09-19-route-the-integration-layer.md) · [术语](2026-09-19-route-the-integration-layer.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

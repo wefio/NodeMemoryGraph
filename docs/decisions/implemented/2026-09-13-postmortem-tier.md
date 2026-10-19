@@ -1,18 +1,18 @@
 # A post-mortem tier for escaped failures
 
-[中文](2026-09-13-postmortem-tier.zh-CN.md)
+[中文](2026-09-13-postmortem-tier.zh-CN.md) · [Terms used](2026-09-13-postmortem-tier.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit
 
 ## Problem
 
-NMG documents design, decisions, measurements, completion, and unresolved work.
-It has no home for a failure that reached a place it should not have, so the part
-that costs the most to rediscover — why the safety nets missed it — has nowhere to
-land.
+At the time this decision was written, NMG documented design, decisions,
+measurements, completion, and unresolved work, but had no home for a failure that
+reached a place it should not have. The part that costs the most to rediscover —
+why the safety nets missed it — had nowhere to land.
 
-Two escaped failures are currently recorded by accident:
+Two escaped failures were then recorded by accident:
 
 - A family migration overwrote a batch of files with `git show HEAD:<path>`
   versions that predated an earlier migration, restored them from a wrong backup
@@ -25,9 +25,9 @@ Two escaped failures are currently recorded by accident:
   [the venv decision](2026-09-11-benchmark-venv-consolidation.md), because that
   section is where a decision motivates its choice.
 
-Both were found by accident, and no rule was missing the day they happened: the
-gap is that a failure story has no owner, and each of the existing surfaces makes
-it unwelcome. A decision record's subject is a choice, not an incident, and its
+Both were found by accident, and no rule was missing the day they happened. At the
+decision's snapshot, the gap was that a failure story had no owner and each existing
+surface made it unwelcome. A decision record's subject is a choice, not an incident, and its
 format has no slot for a timeline or a root cause. `docs/experiments/` holds
 forward-looking measurements that become normative only when a decision accepts
 them. `docs/design/improvement-areas.md` lists gaps that have no failure behind
@@ -146,8 +146,9 @@ header and sections`). The first version of the naming rule failed the
   localized field says so: `**状态：**` is reported as an unknown field, not only as
   the English field it replaced being missing (`a translated header field is
 reported as the unknown field it is`).
-- `npm run docs:check` reports zero errors and zero warnings with the tier in
-  place and no records yet.
+- At the initial landing snapshot, `npm run docs:check` reported zero errors and
+  zero warnings with the tier in place and no records yet. The current tier now
+  indexes five numbered records; see the [post-mortem index](../../postmortem/README.md#index).
 
 ## Consequences
 

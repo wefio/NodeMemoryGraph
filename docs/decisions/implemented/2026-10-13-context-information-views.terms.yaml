@@ -1,0 +1,14 @@
+version: 2
+terms:
+  - term: InformationView
+    aliases: [shared context information view, 共享上下文信息视图]
+    definition: >-
+      A protocol that presents typed, complete information items from existing or future owners in a shared context message; presentation purpose does not create a new source owner or state store.
+      将现有或未来 owner 的类型化完整信息项呈现到共享上下文消息中的协议；呈现目的不会创建新的来源 owner 或状态 store。
+    owner: docs/decisions/implemented/2026-10-13-context-information-views.md
+    anchor: Decision
+    status: canonical
+references:
+  - working state
+  - Active Graph
+  - projection revision

@@ -1,6 +1,6 @@
 # 用需求可追溯矩阵与变异测试支撑验证
 
-[English](2026-09-08-requirements-traceability-matrix.md)
+[English](2026-09-08-requirements-traceability-matrix.md) · [术语](2026-09-08-requirements-traceability-matrix.terms.yaml)
 
 **Status:** implemented  
 **Approved:** unrecorded

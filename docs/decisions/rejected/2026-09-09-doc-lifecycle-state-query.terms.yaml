@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: derived decision-state query
+    aliases: [decision state command, 派生决策状态查询]
+    definition: >-
+      The rejected proposal for a read-only command that derives an observed decision state from declared criteria and receipts; it was rejected because the query had no consumer, not because a lifecycle directory was unreliable.
+      已拒绝的只读命令提案：根据声明的条件与 receipts 派生观测到的决策状态；拒绝原因是没有消费方，而不是生命周期目录不可靠。
+    owner: docs/decisions/rejected/2026-09-09-doc-lifecycle-state-query.md
+    anchor: Proposal
+    status: canonical
+references:
+  - receipt
+  - evidence

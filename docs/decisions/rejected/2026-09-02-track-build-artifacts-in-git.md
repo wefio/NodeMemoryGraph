@@ -1,6 +1,6 @@
 # Track build artifacts in version control
 
-[中文](2026-09-02-track-build-artifacts-in-git.zh-CN.md)
+[中文](2026-09-02-track-build-artifacts-in-git.zh-CN.md) · [Terms used](2026-09-02-track-build-artifacts-in-git.terms.yaml)
 
 **Status:** rejected  
 

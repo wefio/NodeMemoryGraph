@@ -1,6 +1,6 @@
 # 会话级 Active Graph 运行时
 
-[English](2026-08-29-session-active-graph-runtime.md)
+[English](2026-08-29-session-active-graph-runtime.md) · [术语](2026-08-29-session-active-graph-runtime.terms.yaml)
 
 **Status:** implemented
 **Approved:** unrecorded
@@ -42,7 +42,8 @@ AG_(t+1) = Update_B(AG_t, candidates_t, observations_t, TaskBelief_t)
 Projection_t = Freeze(VisibleSubset(AG_(t+1)))
 ```
 
-`B` 是节点、边、证据、token、图深度、临时观察、推演步数、任务分区和延迟的总硬预算。
+在目标设计中，`B` 是节点、边、证据、token、图深度、临时观察、推演步数、任务分区和延迟的总硬预算。
+当前实现的运行时只在各分区间执行共享的条目数／字符预算；完整的多维度账本仍属未完成项。
 HA 负责激活、降温、重新激活和预算分配；MGR 可遍历选中的 AG 子图并产生受限的假设
 节点或推理边；随后 HA 可在冻结 projection 前重新评分这些产物。
 
@@ -60,12 +61,12 @@ query-scoped `ActiveGraph` 改为 projection revision，Pi 适配器的扁平
 `SessionRuntimeAg` 已删除，injection window 并入 AG 的披露账本。当时的 API 是实现
 现状，不构成目标设计的兼容要求。
 
-本决策设定的条件，每条都是对运行时及其宿主接线的要求：
+本决策设定的目标条件，每条都是对运行时及其宿主接线的要求：
 
 - 规范设计明确区分 AG、task frame、projection revision 和 Task Board channel；
 - AG 只存在内存并归属会话；AG 内容不会作为权威语义记忆持久化；
-- projection revision 冻结模型实际看到的证据，并在 AG 变化后仍支持精确 get、归因、
-  验证结果与回放；
+- projection revision 冻结宿主披露边界记录的精确选择／披露内容，并在 AG 变化后仍支持精确 get、归因、
+  验证结果与回放；它不证明 provider 最终接收的输入；
 - 工具观察和语义记忆引用共享一份 AG 总预算，但不会因此成为持久写入；
 - HA 快状态按 session/branch 隔离；激活本身不能提高语义置信度或边稳定度；
 - MGR 只消费受预算约束的 AG 子图，保留派生来源，并输出带 TTL 的假设产物；

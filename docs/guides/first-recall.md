@@ -1,6 +1,6 @@
 # First-recall tutorial
 
-[中文](first-recall.zh-CN.md) · [Concept map](concept-map.md)
+[中文](first-recall.zh-CN.md) · [Concept map](concept-map.md) · [Terms used](first-recall.terms.yaml)
 
 This executable walkthrough teaches NMG's smallest complete memory loop:
 

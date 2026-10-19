@@ -1,0 +1,19 @@
+version: 2
+terms:
+  - term: hierarchical activation mode
+    aliases: [hierarchical-activation, 层次化激活模式]
+    definition: >-
+      An explicit experimental scoring mode for vector routing; the route defaults to cosine, and the explicit mode does not itself enforce training, benchmark, persistence, or rollout gates.
+      vector routing 的显式实验评分模式；路由默认使用 cosine，而显式模式本身不会强制执行训练、benchmark、持久化或 rollout gate。
+    owner: docs/design/hierarchical-activation.md
+    anchor: Current source behavior
+    status: canonical
+  - term: "hierarchical activation"
+    aliases: ["HA","HierarchicalActivation","层次化激活"]
+    definition: >-
+      The experimental activation engine behind an explicit vector-scoring mode, not evidence of default routing, Active Graph admission, persistent session training or quality gains.
+      显式 vector 评分模式背后的实验激活引擎，不证明默认路由、Active Graph admission、持久化 session 训练或质量收益。
+    owner: docs/design/hierarchical-activation.md
+    anchor: "Current source behavior"
+    status: canonical
+references: []

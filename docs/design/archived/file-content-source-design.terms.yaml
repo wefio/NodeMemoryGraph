@@ -1,0 +1,54 @@
+version: 2
+terms:
+  - term: file content source
+    aliases: [file search source, 文件内容源]
+    definition: >-
+      A second content source for `nmg search` that indexes project files as a search index rather than as memory: file content is never written to LTG/STG, never receives provenance, scope or verification semantics, and is physically separate, so "current project state" becomes searchable beside memory without turning files into facts.
+      为 `nmg search` 增加的第二个内容源，把项目文件作为检索索引而不是记忆来建：文件内容永不写入 LTG/STG，永不带 provenance、作用域或验证语义，且物理分离，使「项目当前状态」能在记忆旁边被检索，而不把文件变成事实。
+    owner: docs/design/archived/file-content-source-design.md
+    anchor: "2. Goal"
+    status: canonical
+  - term: search scope file
+    aliases: [.nmg-search-scope, 检索范围文件]
+    definition: >-
+      A path-list file at the project root that is semantically opposite to `.gitignore`: `.gitignore` excludes paths from Git, while this file includes paths as search hot zones; it holds one path or comment line per entry, a directory implies recursion, and the Agent grows it by appending newly discovered hot paths with deduplication.
+      项目根目录下的路径清单文件，语义上与 `.gitignore` 相反：`.gitignore` 把路径从 Git 中排除，而本文件把路径纳入为检索热点区；每条为一行路径或注释，目录意味着递归，Agent 通过追加新发现的热点路径（去重）来生长它。
+    owner: docs/design/archived/file-content-source-design.md
+    anchor: "3.1 The scope file: `.nmg-search-scope`"
+    status: canonical
+  - term: scope evolution
+    aliases: [Agent as first crawler, 范围演化]
+    definition: >-
+      The Agent-driven step that grows the search scope from its own retrieval behaviour: a non-empty `grep`/`read` result is a weak signal that the searched paths are candidate hot zones, while a `grep` hit followed by `read` and later `edit`/reference is a strong signal that the file is genuinely used; on DSH it is a `tools/result` listener that observes and never intercepts.
+      Agent 驱动的步骤，从自身检索行为生长检索范围：非空的 `grep`/`read` 结果是「被检索路径为候选热点区」的弱信号，而 `grep` 命中后接 `read`、随后又有 `edit`／引用则是该文件确实被用到的强信号；在 DSH 上它是一个只观察、从不拦截的 `tools/result` 监听器。
+    owner: docs/design/archived/file-content-source-design.md
+    anchor: "3.2 Scope evolution: the Agent is the first crawler"
+    status: canonical
+  - term: bounded passive scan
+    aliases: [crawler, 有界被动扫描]
+    definition: >-
+      The indexing step that runs automatically (on daemon maintenance or an explicit `nmg crawl`) but only over paths under the scope file: exclusion follows `.gitignore`, git status/diff selects only changed files for re-indexing, and it never scans outside the scope, which bounds both cost and privacy exposure.
+      索引步骤：自动运行（由 daemon 维护或显式 `nmg crawl` 触发），但只作用于范围文件下的路径；排除依据 `.gitignore`，git status/diff 只挑出变更文件重建索引，且绝不扫描范围之外，从而同时约束成本与隐私暴露。
+    owner: docs/design/archived/file-content-source-design.md
+    anchor: "3.3 The crawler: bounded passive scan"
+    status: canonical
+  - term: search fusion presentation
+    aliases: [mixed versus separated, 检索融合呈现]
+    definition: >-
+      The switchable presentation of one `nmg search` result surface: mixed (one ranked list with file items tagged `file:`) or separated (a memory block plus a file block); fusion avoids naive score weighting across incompatible scales and prefers rank-based handling (RRF-style) or separation instead.
+      单一 `nmg search` 结果表面的可切换呈现：混合（一份排序列表，文件项打 `file:` 标签）或分离（记忆块加文件块）；融合避免在不可比尺度之间做朴素加权评分，而优先基于名次的处理（RRF 式）或直接分离。
+    owner: docs/design/archived/file-content-source-design.md
+    anchor: 3.4 Search fusion
+    status: canonical
+  - term: structured-unit extraction slot
+    aliases: [unit rows, 结构化单元抽取槽位]
+    definition: >-
+      A deferred extension point in which a crawler feeds a per-type extractor that emits unit rows (`path, kind, name, start_line, end_line`) for code via tree-sitter and for Markdown via mdast heading sections, giving file:line anchors instead of trigram fragments; document-side "concept units" have no deterministic parser because prose structure lives at the semantic layer, so that part is deliberately not pursued.
+      被推迟的扩展点：爬虫喂给按类型抽取器，为代码（tree-sitter）与 Markdown（mdast 标题章节）产出单元行（`path, kind, name, start_line, end_line`），给出 file:line 锚点而不是 trigram 片段；文档侧的「概念单元」没有确定性解析器，因为散文结构住在语义层，所以那一部分刻意不追求。
+    owner: docs/design/archived/file-content-source-design.md
+    anchor: 5. Boundaries (explicitly out of scope)
+    status: canonical
+references:
+  - Long-Term Graph
+  - Short-Term Graph
+  - tessera

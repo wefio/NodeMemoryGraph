@@ -1,0 +1,34 @@
+version: 2
+terms:
+  - term: feedback density
+    aliases: [反馈密度]
+    definition: >-
+      The design model in which convergence is decided by the ratio of external calibration rate to self-generated drift rate rather than by step count; the critical-ratio claim that separates converging from diverging regimes is unverified in this system and is a candidate contribution, not a law.
+      以"外部校准率与自生成漂移率之比"（而非步数）决定收敛的设计模型；其中把收敛态与发散态分开的临界比率主张在本系统中未经验证，属候选贡献而非定律。
+    owner: docs/design/agent-convergence-feedback-design.md
+    anchor: The feedback-density model
+    status: canonical
+  - term: quest
+    aliases: [受托任务, 可判定工作单元]
+    definition: >-
+      A bounded, judgeable unit of commissioned work that the agent has externalized into an object the world or the agent can later judge completed or failed (board entry, bookmark, document); completion read from an object lifecycle is an external fact, whereas a mere self-declaration of "done" is a biased intermediate that may guide but never gate.
+      被外部化为某个对象的有界、可判定的受托工作单元（看板条目、定位书签、文档），世界或 Agent 之后可判定其已完成或失败；从对象生命周期读出的完成是外部事实，而仅仅自我宣布"完成"是有偏的中间产物，可以引导但永不为收敛把关。
+    owner: docs/design/agent-convergence-feedback-design.md
+    anchor: The feedback-density model
+    status: canonical
+  - term: biased intermediate goal
+    aliases: [自撰中间目标, 有偏中间产物]
+    definition: >-
+      Any goal, subgoal decomposition, plan refinement or self-interpretation the agent writes for itself; it is usable for organizing execution and guiding search but never for gating convergence, because nothing external validated it.
+      Agent 为自己写下的任何目标、子目标分解、计划细化或自我解释；它可用于组织执行与引导搜索，但绝不用于为收敛把关，因为没有任何外部东西验证过它。
+    owner: docs/design/agent-convergence-feedback-design.md
+    anchor: Validation gates what may gate
+    status: canonical
+references:
+  - Active Graph
+  - task frame
+  - projection revision
+  - tessera
+  - tessera drift fingerprint
+  - Task Board
+  - NMG Lite

@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: hybrid retrieval arm
+    aliases: [混合臂, 混合检索臂]
+    definition: >-
+      The retrieval arm that ranks with SQLite FTS5 plus a local BGE embedding endpoint, sharing the same ingested store as the lexical arm so paired numbers are same-data comparisons.
+      在 SQLite FTS5 之外接入本地 BGE embedding 端点的检索臂；它与词法臂共用同一份已摄取 store，因此配对数值是同数据比较。
+    owner: docs/experiments/retrieval-quality/hybrid-2026-08-16.md
+    anchor: LongMemEval-S, full 500 questions (new — all six question types)
+    status: canonical
+  - term: paired same-store comparison
+    aliases: [同 store 配对比较, 同数据配对]
+    definition: >-
+      Comparing two arms over the same ingested memories, holding that input constant. Isolating a causal retrieval effect also requires matching other settings and conditions; a shared store alone is insufficient.
+      在相同的已摄取记忆上比较两个臂，以固定该输入。要单独识别检索的因果效果，还需匹配其他设置与条件；仅共用 store 并不足够。
+    owner: docs/experiments/retrieval-quality/hybrid-2026-08-16.md
+    anchor: LongMemEval-S, full 500 questions (new — all six question types)
+    status: canonical
+  - term: supersede scan
+    aliases: [supersede 候选扫描, supersedeScan]
+    definition: >-
+      The write-time candidate scan discussed in this historical benchmark, with reported O(scope) cost. That judge-less ingestion path skipped the optional scan; this record is not the current default contract for every write caller.
+      本历史 benchmark 讨论的写入时候选扫描，报告成本为 O(scope)。当时无 judge 的摄取路径跳过该可选扫描；本记录不定义所有当前写入调用方的默认契约。
+    owner: docs/experiments/retrieval-quality/hybrid-2026-08-16.md
+    anchor: Reading
+    status: canonical

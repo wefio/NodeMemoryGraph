@@ -1,9 +1,10 @@
 # RCP lightweight verification by default
 
-[中文](2026-09-07-rcp-lightweight-verification-default.zh-CN.md)
+[中文](2026-09-07-rcp-lightweight-verification-default.zh-CN.md) · [Terms used](2026-09-07-rcp-lightweight-verification-default.terms.yaml)
 
 **Status:** implemented  
 **Approved:** unrecorded
+**Relates to:** [Narrow per-domain verification](2026-09-07-narrow-route-verification.md)
 
 ## Problem
 
@@ -17,7 +18,7 @@ statement that a partial run "verified" the change overstated what happened.
 
 The fixed trusted baseline
 ([RCP decision](2026-08-29-repository-control-plane.md),
-[operating contract](../../design/ci-cd-and-quality.md#713-fixed-trusted-baseline-verification))
+[operating contract](../../design/ci-cd-and-quality/repository-control-plane/trusted-baseline-verification.md#fixed-trusted-baseline-verification))
 protects the acceptance rules from a candidate weakening them. It does not, by
 itself, reduce the cost of an ordinary change, and it is a separate explicit
 command.
@@ -33,32 +34,36 @@ sound and the record is honest.
   `package-lock.json`, `tsconfig.json`, `tsconfig.build.json`,
   `agent-context.yaml`, `AGENTS.md`). Cross-route, unowned, ambiguous,
   shared-root, or empty scope sets escalate to the declared blocking set.
-  `--full` forces full; `--narrow` forces narrow; they are mutually exclusive.
-  When in doubt the gate is full.
+  `--full` forces full; `--narrow` requests narrow but does not override
+  eligibility, so an ineligible scope still escalates to full. The flags are
+  mutually exclusive. When in doubt the gate is full.
 - **Narrow is a first-class RCP mode.** It runs through `reconcileOnce` and
   writes a `.rcp/receipts/` receipt like any other run. When no authored
   contract covers the change, an in-memory contract is synthesized for the
   reconciliation. There is no side execution path.
-- **Always-run shared set.** Every narrow run runs `check`, `docs:check`,
-  `format:check`, `lint`, `package:check` plus the owning route's own tests: its
-  `tests:` patterns resolved to concrete files (a synthetic `node-test:<routeId>`
-  check, because route tests are not npm scripts). Resolution excludes matched
-  directories and fails closed when a route's patterns match no files; the child
-  run does not inherit the parent's `NODE_TEST_CONTEXT`, which would make node
-  skip the files and record a vacuous pass. Route tests use the same TAP
-  acceptance rule as the trusted baseline (`tests > 0`, `pass == tests`, and no
-  `fail`/`cancelled`/`skipped`/`todo`), so a skipped, empty, or non-executed run
-  is not a pass. A route's `verify.blocking` set is what a full escalation runs.
+- **Shared checks and route tests.** The initial narrow implementation ran
+  `check`, `docs:check`, `format:check`, `lint` and `package:check` plus the owning
+  route's tests. The current shared-check set and the route-level
+  `verify.sharedChecks: none` exception are owned by
+  [Narrow and full verification gates](../../design/ci-cd-and-quality/repository-control-plane/lightweight-verification.md).
+  Route `tests:` patterns resolve to concrete files (excluding matched
+  directories) and fail closed when they match no files; the child run does not
+  inherit the parent's `NODE_TEST_CONTEXT`, which could make Node skip execution
+  and record a vacuous pass. Route tests use the trusted-baseline TAP acceptance
+  rule (`tests > 0`, `pass == tests`, and no `fail`/`cancelled`/`skipped`/`todo`).
+  A route's `verify.blocking` set is what a full escalation runs.
 - **Honest gate record.** `RepositoryReceipt.gate` carries
   `{ mode: "narrow" | "full"; reason?: string; fullGateRun: boolean }`.
   `fullGateRun` is `false` for every narrow run, so "the full gate did not run"
   is a machine-readable fact rather than an inference. `validateReceipt`
   rejects a receipt whose `fullGateRun` contradicts its `mode`, and
-  `nmg-rcp receipt-verify` / `agent:verify --receipt <id>` re-checks a receipt
-  independently.
-- **Binding and fail-closed rules unchanged.** Results still bind candidate,
-  baseline, verifier, policy and invocation digests; no evidence reuse;
-  missing, skipped, empty, timed-out, mutated or dependency-changed inputs fail.
+  Use `nmg-rcp receipt-verify <path>` to check receipt self-consistency
+  independently; this does not authenticate execution.
+- **Binding and fail-closed rules unchanged.** Results bind candidate, baseline,
+  verifier, policy and invocation digests; missing, skipped, empty, timed-out,
+  mutated or dependency-changed inputs fail. Identity-valid same-state receipt
+  reuse follows the [reconciliation contract](../../design/ci-cd-and-quality/repository-control-plane/run-to-completion-cli.md),
+  not evidence that certifies a different revision.
 
 Narrow reduces the checks that run. It does not widen what may be claimed:
 `gate.fullGateRun: false` says exactly that a partial gate ran, and no receipt
@@ -82,8 +87,7 @@ asserts that a design is fully implemented.
   proof needs a justified connection to the running implementation, which is not
   claimed here.
 - **Keep explicit narrow/full selection only.** Rejected as the default because
-  the selection rule is deterministic and auditable; the flags remain as
-  explicit overrides.
+  the selection rule is deterministic and auditable; the explicit flags remain available, with narrow still subject to eligibility.
 
 ## Consequences
 
@@ -93,8 +97,9 @@ asserts that a design is fully implemented.
   A change whose real impact spans a shared path but does not touch a shared
   root can still be incomplete. This is why `fullGateRun` is recorded and why
   escalation is the default when ownership is unclear.
-- Narrow runs shared checks plus route tests, not the route's full
-  `verify.blocking` set. Route blocking remains the full-escalation contract.
+- Narrow runs applicable shared checks plus route tests, subject to the route's
+  `verify.sharedChecks` declaration, not the route's full `verify.blocking` set.
+  Route blocking remains the full-escalation contract.
 - The trusted baseline and this default are separate. A green narrow run is not
   a trusted-baseline pass, and neither is a general correctness proof.
 - Reliability is bounded by the local trust model: same-user modification of the

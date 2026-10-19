@@ -1,6 +1,6 @@
 # Experiments
 
-[中文](README.zh-CN.md)
+[中文](README.zh-CN.md) · [Terms used](README.terms.yaml)
 
 Measured evidence. A record here reports what was observed; it becomes normative
 only when a decision or design owner accepts the result

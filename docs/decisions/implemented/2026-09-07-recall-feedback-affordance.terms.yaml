@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: recall feedback affordance
+    aliases: [per-recall feedback ask, recall 反馈 affordance]
+    definition: >-
+      A compact prompt shown with a recall result that identifies the exact `activeGraphId` to rate; feedback never falls back to the session's latest staged graph, and a missing graph identity is not trained.
+      随 recall 结果展示的简短提示，指明待评价的确切 `activeGraphId`；反馈不会回退到会话最近 staged 的图，缺少图身份时不进行训练。
+    owner: docs/decisions/implemented/2026-09-07-recall-feedback-affordance.md
+    anchor: Decision
+    status: canonical
+references:
+  - evidence

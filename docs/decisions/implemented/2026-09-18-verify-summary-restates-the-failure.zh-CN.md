@@ -9,7 +9,7 @@
 治理 meta-rule：[self-governance meta-rule](2026-09-07-self-governance-meta-rule.md) ——
 本变更改动了验证工具的行为，因此自带决策与替代方案。
 
-English version: [2026-09-18-verify-summary-restates-the-failure.md](2026-09-18-verify-summary-restates-the-failure.md)
+English version: [2026-09-18-verify-summary-restates-the-failure.md](2026-09-18-verify-summary-restates-the-failure.md) · [术语](2026-09-18-verify-summary-restates-the-failure.terms.yaml)
 
 ## 问题
 

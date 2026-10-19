@@ -1,5 +1,14 @@
 # A task row's three kinds of fact, split into three tables — 2026-09-13
 
+[English](ooo-task-tables-2026-09-13.md) | [简体中文](ooo-task-tables-2026-09-13.zh-CN.md) · [Terms](ooo-task-tables-2026-09-13.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a dated research
+or fixture record. Table names, source positions, status statements, test counts
+and unresolved-work labels belong to its snapshot, not current daemon `taskRun`
+integration. No listed suite or mutation was rerun here, and historical/local
+replay commands are not confirmed available in this checkout. The current
+[task-unit contract](../../design/task-unit-semantics.md) owns product boundaries.
+
 The design's persistence section (`docs/design/task-unit-semantics.md:200-208`) says a persisted
 fact may be one of two kinds — the immutable run manifest, or an append-only run fact the board does
 not have — and that **derived state has no authoritative storage**: `ready`/`blocked`/`accepted`,
@@ -14,7 +23,8 @@ rather than a test.
 source_revision, wait_event, operation, kind, patch_files, patch_editable)` — written once when the
   plan is installed, never updated afterwards.
 - `ooo_probe_facts (…, attempt, artifact, entry_id, external_ready, observed_revision, owner,
-claim_time)` — what the round appended and the board does not carry.
+claim_time)` — the round's latest stored facts that the board does not carry;
+  keyed by `(run_id, id)`, not an append-only history of every attempt.
 - `ooo_probe_derived (…, input_digest)` — one column, because one thing is recomputable here.
 - `ooo_probe_task_view` — a projection (manifest ⋈ facts ⋈ cache), not storage. Reads use it, so a
   missing cache row degrades to the manifest's own answer instead of a lost fact.
@@ -62,5 +72,6 @@ rewrapped the line this tooth targets, so a hand-typed marker matched nothing un
 - **Facts are keyed by `(run_id, id)`, not append-only by sequence.** The attempt counter and the
   latest candidate are facts; earlier attempts are not separately retained. The design's
   `runFactsThroughSequence` view would want them, and the split is the place that would hold them.
-- **The run-level manifest is still `ooo_probe_runs`** (policy, cancellation). It is immutable in
-  practice, but it is not yet expressed in the manifest's terms.
+- **Run-level metadata is still `ooo_probe_runs`** (policy, cancellation).
+  This mixes declaration and lifecycle fields; this split does not establish
+  that the whole row is an immutable run manifest.

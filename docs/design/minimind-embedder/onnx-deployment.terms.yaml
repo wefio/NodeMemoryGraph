@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: encoder-output cache boundary
+    aliases: [256-side cache, 编码器输出缓存边界]
+    definition: >-
+      The historical prototype's proposed cache of frozen 256-dimensional encoder outputs so retraining a separate 128-dimensional adapter would not invalidate those cached vectors.
+      历史原型提出缓存冻结的 256 维编码器输出，使单独重训 128 维 adapter 时无需使该缓存失效。
+    owner: docs/design/minimind-embedder/onnx-deployment.md
+    anchor: Cache boundary between encoder and differentiable graph
+    status: canonical
+references:
+  - MiniMind-NMG encoder prototype
+  - graph-space adapter

@@ -1,6 +1,6 @@
 # Stable entry and local context discovery
 
-[中文](2026-09-16-stable-entry-local-context.zh-CN.md)
+[中文](2026-09-16-stable-entry-local-context.zh-CN.md) · [Terms used](2026-09-16-stable-entry-local-context.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

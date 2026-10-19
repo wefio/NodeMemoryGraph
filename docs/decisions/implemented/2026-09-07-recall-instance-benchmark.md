@@ -2,15 +2,12 @@
 
 **Status:** implemented  
 **Approved:** unrecorded
-Date: 2026-09-07
-Branch: pr/recall-instance-benchmark
-
 Governed by the self-governance meta-rule and the hidden-features rule
 (`docs/decisions/implemented/2026-09-07-register-hidden-features.md`): this adds
 a default-on env-gated feature (`NMG_RECALL_INSTANCES`), so it is registered in
 the hidden-features registry in the same change.
 
-zh: [2026-09-07-recall-instance-benchmark.zh-CN.md](2026-09-07-recall-instance-benchmark.zh-CN.md)
+zh: [2026-09-07-recall-instance-benchmark.zh-CN.md](2026-09-07-recall-instance-benchmark.zh-CN.md) · [Terms used](2026-09-07-recall-instance-benchmark.terms.yaml)
 
 ## Problem
 

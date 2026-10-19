@@ -1,0 +1,44 @@
+version: 2
+terms:
+  - term: implementation lineage
+    aliases: [lineage index, 实现沿革]
+    definition: >-
+      A curated map from selected implementation commits to the current contract owners; it is not a changelog or a substitute for source and tests.
+      将经过筛选的实现提交映射到当前契约 owner 的索引；它不是 changelog，也不替代源码与测试。
+    owner: docs/design/implementation-lineage.md
+    anchor: Why this index exists
+    status: canonical
+  - term: Introduced
+    aliases: [引入]
+    definition: >-
+      A lineage label for the first commit that established a capability.
+      表示首次建立某项能力的沿革标记。
+    owner: docs/design/implementation-lineage.md
+    anchor: Lineage notation
+    status: canonical
+  - term: Hardened
+    aliases: [加固]
+    definition: >-
+      A lineage label for a commit that fixes or completes a contract that remains current.
+      表示修复或补齐当前仍有效契约的沿革标记。
+    owner: docs/design/implementation-lineage.md
+    anchor: Lineage notation
+    status: canonical
+  - term: Validated
+    aliases: [验证]
+    definition: >-
+      A lineage label for tests or measured evidence; it does not imply default activation.
+      表示测试或测量证据的沿革标记；不代表默认激活。
+    owner: docs/design/implementation-lineage.md
+    anchor: Lineage notation
+    status: canonical
+  - term: Superseded
+    aliases: [被取代]
+    definition: >-
+      A lineage label for a historical implementation whose current replacement is named.
+      表示已被明确命名的当前替代方案取代的历史实现。
+    owner: docs/design/implementation-lineage.md
+    anchor: Lineage notation
+    status: canonical
+references:
+  - doc-maintenance

@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: evidence has no third state
+    aliases: [unreproduced failure stays open, 证据没有第三态]
+    definition: >-
+      An intermittent failure is recorded with its reproduction attempt and rate, or remains open; it is not closed by calling it flaky. While a mutation sweep holds its lock, its target may contain a live mutant and the working tree is unreadable evidence for other checks.
+      间歇性失败要记录复现尝试及发生率，或保持 open；不能用“flaky”标签将问题关闭。mutation sweep 持有 lock 时，目标文件可能正是 live mutant，其他检查读取该工作树所得结果不构成有效证据。
+    owner: docs/decisions/implemented/2026-09-19-sweep-and-evidence-rules.md
+    anchor: Decision
+    status: canonical
+references:
+  - evidence
+  - gate

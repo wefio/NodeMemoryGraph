@@ -1,4 +1,6 @@
-# One acceptance predicate, adopted by the round
+# One Acceptance Predicate, Adopted by the Round
+
+[English](ooo-acceptance-predicate-2026-09-13.md) | [简体中文](ooo-acceptance-predicate-2026-09-13.zh-CN.md) · [Terms](ooo-acceptance-predicate-2026-09-13.terms.yaml)
 
 **Related:** [task-unit semantics design](../../design/task-unit-semantics.md) ·
 [proposed decision record](../../decisions/implemented/2026-09-13-task-unit-semantics.md) ·

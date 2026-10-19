@@ -1,6 +1,6 @@
 # 将构建产物纳入版本控制
 
-[English](2026-09-02-track-build-artifacts-in-git.md)
+[English](2026-09-02-track-build-artifacts-in-git.md) · [术语](2026-09-02-track-build-artifacts-in-git.terms.yaml)
 
 **Status:** rejected  
 

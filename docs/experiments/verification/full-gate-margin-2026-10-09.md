@@ -1,5 +1,7 @@
 # Full-gate budget margin — 2026-10-09
 
+[中文](full-gate-margin-2026-10-09.zh-CN.md) · [Terms used](full-gate-margin-2026-10-09.terms.yaml)
+
 ## Scope and prior evidence
 
 The original nine-path clean verification at `eb093bf6a492d81d782d2a31ef1f26e80893fcf5`

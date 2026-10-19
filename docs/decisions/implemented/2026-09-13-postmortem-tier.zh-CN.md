@@ -1,20 +1,20 @@
 # 为逃逸出去的失败新增事故复盘层
 
-[English](2026-09-13-postmortem-tier.md)
+[English](2026-09-13-postmortem-tier.md) · [术语](2026-09-13-postmortem-tier.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit
 
 ## 问题
 
-NMG 已经记录了设计、决策、测量、完成度与未完成事项，但没有一处安放"到达了它不该到达的地方"的失败。于是重新发现代价最高的部分——每一道安全网为什么都没拦住——无处落地。
+本决策作出时，NMG 已记录设计、决策、测量、完成度与未完成事项，却没有一处安放"到达了它不该到达的地方"的失败。于是重新发现代价最高的部分——每一道安全网为什么都没拦住——无处落地。
 
-已经有两次逃逸出去的失败是被顺带记录的：
+当时已有两次逃逸出去的失败被顺带记录：
 
 - 一次家族迁移用 `git show HEAD:<path>` 覆盖了一批文件，取到的是更早迁移之前的版本，又从错误的备份路径恢复，只把后一次迁移重新应用。于是更早那次迁移在同时出现在两批里的四个文件中静默消失，而 `evals/` 没有任何校验覆盖。它是一次一次性的重复度测量偶然发现的（`90178712`）。
 - `omni-venv` 被删除后，`benchmark:omni` 改用 `PATH` 上碰巧存在的 `python` 继续运行——产出的是错数字而不是错误——而另一个脚本则大声失败。这条只落进了[ venv 决策](2026-09-11-benchmark-venv-consolidation.zh-CN.md)的 `## Problem` 里，因为那一节正是决策用来交代动机的地方。
 
-两次都是偶然发现的，而且它们发生当天并不存在哪条规则缺失：缺的是失败叙述没有 owner，而已有的每一层都不欢迎它。决策记录的主题是一次选择而不是一次事故，其格式也没有时间线或根因的位置。`docs/experiments/` 保存的是向前看的测量，且只有被决策接纳后才成为规范。`docs/design/improvement-areas.md` 列的是尚未造成失败的缺口。而[精简清单](../../../skills/doc-maintenance/SKILL.md#one-home-per-fact-and-the-slop-checklist)禁止在设计散文里叙述历史，这条禁令本身是对的。剩下唯一的去处就是 commit body，而只有已经知道是哪个 commit 的人才找得到它。
+两次都是偶然发现的，而且它们发生当天并不存在哪条规则缺失。本决策时点的缺口是失败叙述没有 owner，而已有的每一层都不欢迎它。决策记录的主题是一次选择而不是一次事故，其格式也没有时间线或根因的位置。`docs/experiments/` 保存的是向前看的测量，且只有被决策接纳后才成为规范。`docs/design/improvement-areas.md` 列的是尚未造成失败的缺口。而[精简清单](../../../skills/doc-maintenance/SKILL.md#one-home-per-fact-and-the-slop-checklist)禁止在设计散文里叙述历史，这条禁令本身是对的。剩下唯一的去处就是 commit body，而只有已经知道是哪个 commit 的人才找得到它。
 
 ## 决策
 
@@ -54,7 +54,7 @@ NMG 已经记录了设计、决策、测量、完成度与未完成事项，但�
 - 记录未进索引、以及索引行出现两次，都会失败（`the post-mortem index lists every record exactly once`）。
 - 记录与它的 `.zh-CN.md` 译文是**同一篇记录**：两个文件名都通过，编号与索引行按英文名计一次，译文同样要满足头部与章节要求（`a record and its translation are one record, not two names and not a naming error`、`a translation still has to carry the record's header and sections`）。这条命名规则的第一版会判译文违规，于是这个层里没有任何一篇记录能带上译文——这是当天另一条工作流写进这个层里的真实记录发现的，而不是测试发现的（当时还没有译文用例）。
 - 头部字段保持英文、章节标题可翻译；**被翻译的字段会自己说明问题**：`**状态：**` 会被报为未知字段，而不只是"它替换掉的那个英文字段缺失"（`a translated header field is reported as the unknown field it is`）。
-- 加入该层且尚无任何记录时，`npm run docs:check` 报告 0 错误、0 警告。
+- 在该层初次落地、尚无任何记录时，`npm run docs:check` 报告 0 错误、0 警告。当前索引已有五篇编号记录，见[事故复盘索引](../../postmortem/README.zh-CN.md#索引)。
 
 ## 后果
 

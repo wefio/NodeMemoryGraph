@@ -4,7 +4,7 @@
 **Approved:** explicit
 **Relates to:** [持续状态提案](../proposed/2026-10-06-ag-state-transitions.zh-CN.md)
 
-English: [2026-10-07-shared-information-output.md](2026-10-07-shared-information-output.md)
+English: [2026-10-07-shared-information-output.md](2026-10-07-shared-information-output.md) · [术语](2026-10-07-shared-information-output.terms.yaml)
 
 ## 问题
 

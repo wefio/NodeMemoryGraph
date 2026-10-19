@@ -1,0 +1,29 @@
+version: 2
+terms:
+  - term: SimHash
+    aliases: [64-bit SimHash, 局部敏感哈希指纹]
+    definition: >-
+      A locality-sensitive fingerprint that maps token features to a fixed-width bit signature; in this proposal it is only a candidate-recall signal, not semantic identity or a supersession verdict.
+      将 token 特征映射为固定宽度位签名的局部敏感指纹；在本提案中它只用于候选召回信号，不表示语义身份或 supersession 裁定。
+    owner: docs/design/simhash-lexical-complement-design.md
+    anchor: "3. Candidate proposal"
+    status: canonical
+  - term: Hamming distance
+    aliases: [汉明距离]
+    definition: >-
+      The number of bit positions at which two equal-width fingerprints differ; a proposed threshold must be measured for the target corpus and use case.
+      两个等宽指纹中取值不同的位数；针对目标数据集和用途提出的阈值必须经过实测。
+    owner: docs/design/simhash-lexical-complement-design.md
+    anchor: "3. Candidate proposal"
+    status: canonical
+  - term: supersession-candidate recall
+    aliases: [取代候选召回]
+    definition: >-
+      Retrieving possible stale predecessors for caller review; candidate recall is separate from deciding whether a predecessor is semantically superseded.
+      检索可能过时的前驱供调用方审阅；候选召回与判断前驱是否在语义上被取代是两个步骤。
+    owner: docs/design/simhash-lexical-complement-design.md
+    anchor: "2. Goal and boundaries"
+    status: canonical
+references:
+  - same-scope supersession
+  - supersedeCandidates

@@ -1,5 +1,12 @@
 # Topology identity-gate evaluation — 2026-08-09
 
+[English](gate-evaluation-2026-08-09.md) | [简体中文](gate-evaluation-2026-08-09.zh-CN.md) · [Terms](gate-evaluation-2026-08-09.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a historical
+record. Its configurations, measured results and implementation-status statements
+are not current test receipts or default-policy authorization. This review did
+not rerun the experiment or independently revalidate the original run artifacts.
+
 ## Question
 
 Can NMG's conservative, read-only `same_as` gate distinguish repeated evidence
@@ -17,17 +24,20 @@ LoCoMo's stable speaker labels are treated as held-out identity supervision:
 - the early/late pair is an injected positive `same_as` candidate;
 - the two different speakers in each conversation form an injected negative
   candidate;
-- five independent proposal observations at confidence `0.99`, with evidence
+- five constructed proposal observations at confidence `0.99`, with evidence
   on both nodes, exercise the production automation gate;
 - after each positive assessment, a pending `distinct_from` proposal is added
   and the same gate is assessed again;
-- accepted relations and node merges are never invoked.
+- the assessment arm never invokes accepted relations or node merges.
 
 The gate arm still uses oracle candidate construction. A second, non-oracle
 discovery arm embeds only the early/late utterance content with NMG's local
 hashing embedder (no node name, scope, or speaker label), then selects the most
 similar late fragment for each early fragment. Official speaker labels are
-consulted only after ranking to score the candidate.
+consulted only after ranking to score the candidate. A separate damage probe
+force-merges the four discovered false pairs and rolls them back; this bypasses
+ordinary admission to measure contamination and recovery, not unattended actuation.
+The constructed proposal observations do not establish independent natural confirmations.
 
 ## Result
 
@@ -45,7 +55,7 @@ Dataset: official LoCoMo `locomo10.json` (10 conversations).
 | Candidate discovery precision                |          80% |
 | Candidate discovery recall                   |          80% |
 | Naturally discovered false candidates        |             4 |
-| Foreign records co-located if forcibly merged | 12 (3 each) |
+| Foreign records co-located if forcibly merged | 12 (3 per forced pair) |
 | False-merge probes successfully rolled back  |    4/4 (100%) |
 | Topology mutations caused by assessment     |            0 |
 
@@ -69,10 +79,11 @@ not an answer-accuracy score. Candidate similarity therefore cannot authorize me
   measures blocking/ranking and does not submit or actuate proposals;
 - LoCoMo does not contain labelled homonyms, identity corrections, or ambiguous
   alias chains;
-- no actuator is enabled in this benchmark. Journaled physical merge rollback
+- no unattended actuator is enabled in this benchmark. Journaled physical merge rollback
   is covered by deterministic store/service tests, including refusal after a
-  later topology edit, but it is not exercised on naturally discovered false
-  merges here;
+  later topology edit. The four forced false-pair probes above exercise physical
+  rollback, but bypass normal admission and do not demonstrate safe unattended
+  discovery-to-actuation;
 - the cost of a false merge still needs a real-use corpus or a dedicated entity
   resolution dataset with naturally generated candidates.
 

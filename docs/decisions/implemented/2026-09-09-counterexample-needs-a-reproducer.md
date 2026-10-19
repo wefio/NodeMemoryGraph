@@ -1,6 +1,6 @@
 # A counterexample needs a reproducer
 
-[中文](2026-09-09-counterexample-needs-a-reproducer.zh-CN.md)
+[中文](2026-09-09-counterexample-needs-a-reproducer.zh-CN.md) · [Terms used](2026-09-09-counterexample-needs-a-reproducer.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit  

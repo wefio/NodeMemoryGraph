@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: Dense Small configuration
+    aliases: [MiniMind Dense Small baseline, Dense Small 配置]
+    definition: >-
+      The historical 6-layer, hidden-512, approximately 30M-parameter encoder configuration proposed as the MiniMind-NMG Phase 1 baseline; it was not adopted by the current runtime.
+      MiniMind-NMG 提议的历史 Phase 1 基线：6 层、hidden=512、约 30M 参数；未被当前运行时采用。
+    owner: docs/design/minimind-embedder/model-configuration.md
+    anchor: "Phase 1 baseline: Dense Small"
+    status: canonical
+references:
+  - MiniMind-NMG encoder prototype

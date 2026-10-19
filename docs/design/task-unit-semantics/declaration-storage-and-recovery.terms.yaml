@@ -1,0 +1,10 @@
+version: 2
+terms:
+  - term: frozen patch-input receipt
+    aliases: ["task-unit.patch-inputs-frozen","冻结补丁输入回执"]
+    definition: >-
+      The default patch adopter's attempt-bound record of original input bytes, budget/limits, allowed conclusions and declaration digest; it does not serialize acceptance callbacks or duplicate task definitions. 默认补丁采用方绑定 attempt 的原始输入、预算限制、允许结论及声明摘要记录；不序列化验收回调，也不复制任务定义。
+    owner: docs/design/task-unit-semantics/declaration-storage-and-recovery.md
+    anchor: Frozen input receipts
+    status: canonical
+references: []

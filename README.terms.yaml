@@ -1,0 +1,30 @@
+version: 2
+terms:
+  - term: Agent Surface
+    aliases: [共享 Agent 面]
+    definition: >-
+      The single shared surface that Pi, Claude MCP, DSH and the benchmark bridge use for compact search, exact evidence, remember follow-up, Task Board output, redaction and logical-chain projection; adapters keep only native tool schemas, lifecycle hooks, transport fallback, genuinely host-only actions and official benchmark envelopes or audit fields.
+      Pi、Claude MCP、DSH 与 benchmark 桥共用的单一共享面，承载紧凑检索、精确证据、remember 后续、任务板输出、脱敏与逻辑链投影；adapter 只保留原生工具 schema、生命周期钩子、传输回退、真正的宿主专属动作，以及官方 benchmark 信封或审计字段。
+    owner: README.md
+    anchor: Try it
+    status: canonical
+  - term: honest boundary
+    aliases: [诚实的边界]
+    definition: >-
+      The README's own statement that NMG is not plug-and-play: native integrations need setup and generic agents use the CLI plus Skill path, while the stable JSON-RPC boundary makes self-integration possible; it is a scope statement, not a quality or readiness guarantee.
+      README 自述的边界：NMG 还不是开箱即用，原生集成需要安装配置、通用 agent 走 CLI 加 Skill 路径，而稳定的 JSON-RPC 边界使自行集成成为可能；它是范围声明，不是质量或就绪度保证。
+    owner: README.md
+    anchor: Node Memory Graph (NMG)
+    status: canonical
+references:
+  - Active Graph
+  - task frame
+  - disclosure
+  - Lab
+  - QPP
+  - Task Board
+  - Short-Term Graph
+  - Long-Term Graph
+  - learnable controller
+  - promotion gate
+  - tessera

@@ -1,6 +1,6 @@
 # Recovery tests consume the frozen declaration
 
-[中文](2026-10-13-recovery-tests-use-frozen-declarations.zh-CN.md)
+[中文](2026-10-13-recovery-tests-use-frozen-declarations.zh-CN.md) · [Terms used](2026-10-13-recovery-tests-use-frozen-declarations.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: seven-question matched backend probe
+    aliases: [2026-08-09 matched probe, 七问配对后端探针]
+    definition: >-
+      The 2026-08-09 engineering probe that took one fixed case from each locally sampled LongMemEval category, ran one repeat with two question-level workers, and compared no-memory, flat hybrid, NMG Lite and NMG Graph; it establishes that the matched protocol executes and that NMG adds memory over the no-memory arm, not a capability ranking.
+      2026-08-09 的工程探针：从本地抽样的每个 LongMemEval 类别各取一个固定案例，用两个问题级 worker 重复一次，比较无记忆、flat hybrid、NMG Lite 与 NMG Graph；它确立配对 protocol 可执行、以及 NMG 相对无记忆组增加了记忆，而不是能力排序。
+    owner: docs/experiments/runtime/matched-evaluation-2026-08-09.md
+    anchor: Matched LongMemEval backend probe — 2026-08-09
+    status: canonical
+  - term: causal controller comparison
+    aliases: [controller causal arm, 因果 controller 对比]
+    definition: >-
+      A `matched` run in which deterministic and candidate NMG arms share QPP1/QPP2 mechanics, corpus, prompt, model, thinking level and hard budgets while only the candidate arm receives a frozen, trained controller state; causal eligibility is derived from the recorded runtime `allocate|fold|rerank` actions instead of a static ranking-effect declaration.
+      deterministic 组与 candidate NMG 组共享 QPP1／QPP2 机制、语料、prompt、模型、thinking level 与硬预算，而只有 candidate 组接收冻结、已训练 controller state 的 `matched` run；因果资格由记录到的运行时 `allocate|fold|rerank` 动作推导，而不是静态的排序效应声明。
+    owner: docs/experiments/runtime/matched-evaluation-2026-08-09.md
+    anchor: Causal controller protocol update — 2026-08-20
+    status: canonical
+  - term: controller-quality gate versus product bounds
+    aliases: [quality passed cost failed, controller 质量 gate 与产品界限]
+    definition: >-
+      The split outcome in which feeding the official score into `eval:controller` passes the controller-quality gate while the same run fails the product gate's token and latency bounds, leaving eligibility at `shadow=true`, `active=false`, `defaultPi=false`.
+      把官方分数送入 `eval:controller` 通过了 controller 质量 gate，而同一次 run 未通过产品 gate 的 token 与延迟界限，资格因此停留在 `shadow=true`、`active=false`、`defaultPi=false` 的分离结果。
+    owner: docs/experiments/runtime/matched-evaluation-2026-08-09.md
+    anchor: Evidence-diverse development comparison — 2026-08-20
+    status: canonical
+references: [QPP, learnable controller, retrieval sufficiency]

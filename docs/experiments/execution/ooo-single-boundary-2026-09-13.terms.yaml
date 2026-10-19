@@ -1,0 +1,19 @@
+version: 2
+terms:
+  - term: single-boundary invariant as a test
+    aliases: [one place for BEGIN, 单边界不变量测试]
+    definition: >-
+      The reported source-pattern check for ownership of recognized BEGIN, COMMIT, ROLLBACK and rollback() sites. A passing behavioral suite alone does not prove that structural property, and the pattern check covers only statements it recognizes, not every possible transaction mechanism.
+      报告中检查已识别 BEGIN、COMMIT、ROLLBACK 与 rollback() 位置归属的源码模式检查。仅通过行为套件不能证明该结构性质；模式检查也只覆盖其识别的语句，不覆盖所有可能的事务机制。
+    owner: docs/experiments/execution/ooo-single-boundary-2026-09-13.md
+    anchor: What changed
+    status: canonical
+  - term: cache refresh outside the transaction
+    aliases: [uncommitted batch must not warm cache, 事务外的 cache 刷新]
+    definition: >-
+      The recorded requirement that an embedding batch warms its cache only after its transaction commits successfully. Merely placing refresh outside a transaction is not the whole condition; a failed or uncommitted batch must not warm it.
+      记录中的要求是 embedding 批次只有在事务成功提交后才预热 cache。仅把刷新放在事务之外并非完整条件；失败或未提交的批次不得预热。
+    owner: docs/experiments/execution/ooo-single-boundary-2026-09-13.md
+    anchor: What changed
+    status: canonical
+references: []

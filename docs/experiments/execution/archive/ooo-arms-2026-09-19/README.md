@@ -1,12 +1,13 @@
 # Archive: the arms' paid runs (2026-09-19)
 
+[中文](README.zh-CN.md) · [Terms used](README.terms.yaml)
+
 **Why this is here.** The D arm (fusion) and the E arm (bounded speculation) were run from a worktree
 whose scratch lives in `.temp/`, which `.gitignore` excludes. The records before this directory quoted
 numbers - 22 498 against 22 533 tokens, 12 948 against 11 048 ms, the E arm's quality failures - and the
 files those numbers came from would have gone with the next temp cleanup. This is the second time on
 this branch: `archive/ooo-continuation-2026-09-14/README.md` was written for the same failure mode after
-row G7, and the lesson did not survive the session it was learned in. Every sample a claim in
-`ooo-arms-pilot-2026-09-18.md` depends on is now inside the repository.
+row G7, and the lesson did not survive the session it was learned in. The D/E and cap samples quoted by `ooo-arms-pilot-2026-09-18.md` are now inside the repository. A/B/C have summary results but their per-run samples are not stored here; the later scope note below records that limit.
 
 **What was run.** Provider `deepseek`, model `deepseek-v4-flash`, `--live` required in both entry points.
 Every run's own report is kept verbatim; nothing here was edited after the fact.
@@ -50,16 +51,16 @@ Tests the offline ceiling's prediction that one session carrying four units save
 Entry point: `aggregate.json` (per-bound medians and the measured saving); the four runs are
 `bound{1,4}-rep{1,2}.json` and the two specs are `spec-{1,4}.json`, built from
 `evals/ooo-execution/fixtures/pipeline/fine.spec.json` with the canned answers stripped, so the units
-really run. Measured: 5 796 ms saved against the predicted 5 700 ms, with tokens up 1.3-1.9x.
+really run. Measured: 5 796 ms saved against the predicted 5 700 ms. The early unpaired token reading was 1.3–1.9x; later cache accounting supersedes that comparison.
 
 ## cap-cache/ - the cap experiment with cache accounting (2026-09-19)
 
 Re-runs the cap experiment recording cache reads beside tokens, because a chain carries its context
 forward and most of what it resends is served from cache. Entry point: `aggregate.json`.
-Measured: cap 1 to cap 2 saves 8 753 ms (predicted 3 800 ms, so the startup constant is plan-dependent),
-fresh input stays flat at 7 925 / 7 942 / 9 142 tokens, and cap 2 is the knee - it takes most of the
-available wall clock at the fewest tokens. The earlier `cap4-darm/` reading of a 1.3-1.9x token
-multiplier came from unpaired medians and is superseded.
+Measured: cap 1 to cap 2 saves 8 753 ms (predicted 3 800 ms, so the startup term is plan-dependent),
+and cap 2 takes most of the available wall clock at the fewest tokens. The two-rep `tokens - cacheRead`
+counts (7 925 / 7 942 / 9 142) were initially read as flat input, but they do not isolate uncached input
+or price; see the correction below. The earlier `cap4-darm/` token multiplier came from unpaired medians and is superseded.
 
 ## Later note (2026-09-19, after this archive was written)
 

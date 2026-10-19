@@ -1,6 +1,6 @@
 # Item-based shared context information
 
-[中文](2026-10-13-context-information-views.zh-CN.md)
+[中文](2026-10-13-context-information-views.zh-CN.md) · [Terms used](2026-10-13-context-information-views.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit
@@ -14,7 +14,7 @@ board reads and old tool failures can continue to appear as current material.
 
 ## Decision
 
-The [state-space owner](../../design/state-spaces.md#统一上下文信息项) defines one
+The [state-space owner](../../design/state-spaces.md#unified-context-information-items) defines one
 InformationView protocol for existing and future state content and the dynamic message.
 Typed entries remain the basic unit. Purpose-based presentation does not create a source owner,
 a state table, a graph store, a Task abstraction or an orchestration language.

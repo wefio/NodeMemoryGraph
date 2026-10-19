@@ -1,27 +1,26 @@
 # NMG 决策记录
 
-[English](README.md)
+[English](README.md) · [术语](README.terms.yaml)
 
-决策记录保存无法从当前设计或 Git 差异中安全还原的理由。它们解释非平凡的架构和流程选择；规范行为仍由 `docs/design/` 定义。
+决策记录保留无法仅从当前设计或 Git diff 安全重建的理由。它们说明非平凡的架构与流程选择；规范行为仍由 `docs/design/` 拥有。
 
 ## 生命周期
 
-- `proposed/`：开放提案。必需章节：问题、提案、考虑过的替代方案、验收标准、风险。
-- `implemented/`：已接受并实现的决策。必需章节：问题、决策、考虑过的替代方案、后果。提案期标题（`## Proposal`、`## Plan`、`## Acceptance criteria`）会让 `docs:check` 失败；未完成或未验证的项归入 `## Deferred`。
-- `rejected/`：保留供以后参考的被拒提案；保留提案与替代方案，并说明拒绝原因。
-- `archived/`：曾经实现、但已不再约束当前系统的决策；写明归档日期和后继者（如有）。
+- `proposed/` — 开放提案。必需章节：Problem、Proposal、Alternatives considered、Acceptance criteria、Risks。
+- `implemented/` — 已接受并实现的决策。必需章节：Problem、Decision、Alternatives considered、Consequences。`docs:check` 会拒绝提案阶段遗留的标题（`## Proposal`、`## Plan`、`## Acceptance criteria`）；未完成或未经验证的事项应放在 `## Deferred` 下。
+- `rejected/` — 为后续参考保留的已拒绝提案。保留原提案和备选方案，并说明拒绝原因。
+- `archived/` — 不再支配当前系统的既有已实现决策。注明归档日期，并在存在后继决策时链接它。
 
-目录表示生命周期，每份记录还应包含一致的 `Status:` 行。状态变化时移动文档，不要复制到另一个目录。
-决策文件使用 `YYYY-MM-DD-kebab-case.md`；译文在 `.md` 前增加 `.zh-CN`。同一个带日期的 slug 只能存在于一个生命周期目录。必需章节必须包含正文，不能只有标题。
+目录本身表示生命周期。每条记录还须有匹配的 `Status:` 行。状态变化时移动记录，不要复制到另一个目录。决策文件名使用 `YYYY-MM-DD-kebab-case.md`；译文在 `.md` 前加 `.zh-CN`。相同日期 slug 只能存在于一个生命周期目录中。必需章节必须包含正文，不能只有标题。
 
-## 头部字段块
+## 文件头字段
 
-在第一个章节之前，决策带有一个固定的字段块，由 `docs:check` 强制：
+第一节之前，决策记录必须包含 `docs:check` 会检查的固定字段块：
 
 ```markdown
-# <标题>
+# <title>
 
-[<对照语言>](<slug>.<lang>.md)
+[<counterpart>](<slug>.<lang>.md)
 
 **Status:** <proposed|implemented|rejected|archived>
 [**Approved:** <explicit|auto|unrecorded>]
@@ -31,27 +30,21 @@
 [**Archived:** YYYY-MM-DD]
 ```
 
-`**Status:**` 必填，且必须等于生命周期目录名。`**Archived:**` 只在 `archived/` 下
-有效。关系字段取相对链接。每个字段最多出现一次；块内出现其它 `**字段：**` 行会
-让检查失败——散文式说明写在块下方。日期住在文件名里，因此没有 `**Date:**` 字段。
+`**Status:**` 为必填，且必须与生命周期目录一致。只有 `archived/` 下的记录才可使用 `**Archived:**`。关系字段必须使用相对链接；每个字段最多出现一次。字段块里的其他 `**Field:**` 行会使检查失败；说明性文字应放到字段块之后。日期在文件名中，不使用 `**Date:**` 字段。
 
-`**Approved:**` 在 `implemented/` 下必填，说明谁接受了这条记录：`explicit` 是用户，
-`auto` 是 Agent 按[批准分层](implemented/2026-09-09-approval-tiers.zh-CN.md)接受，
-`unrecorded` 是该规则存在之前被接受、没有留下行为的记录——欠账，下次触碰时改成
-`explicit`。
+`implemented/` 下必须有 `**Approved:**`，注明谁接受了记录：`explicit` 表示用户，`auto` 表示 Agent 按[批准等级](implemented/2026-09-09-approval-tiers.md)接受，`unrecorded` 表示规则建立前接受的记录。这属于待偿债务；该记录下次被修改时应改为 `explicit`。
 
-创建记录前先搜索已有的信息所有者。同一决策被细化时更新原记录；完全替代时双向链接并归档旧记录；部分替代时保留双方并明确剩余适用范围。使用元数据时，采用本地 Markdown 链接，双方必须互相指向：
+新建记录前，先搜索现有 owner。如果新选择细化的是同一项决策，就更新原记录。如果一项决策完全取代另一项，应双向链接两条记录并归档旧记录；如果只部分取代，则保留两条并说明各自剩余的范围。使用元数据时，写本地 Markdown 链接，并让译文和原文双向指向：
 
 ```markdown
-**Supersedes:** [旧决策](../archived/2026-01-01-old-decision.md)
-**Superseded by:** [新决策](../implemented/2026-02-01-new-decision.md)
+**Supersedes:** [old decision](../archived/2026-01-01-old-decision.md)
+**Superseded by:** [new decision](../implemented/2026-02-01-new-decision.md)
 ```
 
-决策记录通常应提供互相链接的英文版和 `.zh-CN.md` 版。缺少译文只产生警告，不作为硬错误。
+`Supersedes` 或 `Superseded by` 字段可以在一行内列出多个相对链接；每个目标均须在头部给出反向链接。首节之后的关系示例是正文，不是记录元数据；此一致性诊断仍沿用 CI 契约的 warning 级别。
 
-## 如何找到一条决策
+决策记录按 [CI 契约](../README.zh-CN.md#ci-契约)提供英文、`.zh-CN.md` 和 `.terms.yaml` 配套。缺件使 `docs:check` 失败；双向链接和标题漂移仍以 warning 交由审阅处理。
 
-生命周期目录树就是清单：浏览 `docs/decisions/{proposed,implemented,rejected,archived}/`，
-或搜索仓库。这里没有条目化索引，因为那种列表会重述每份记录的标题与未完成项、重复它们
-的家，并且在无人检查时逐渐漂移。`npm run docs:check` 会打印有多少条决策已实现、
-其中多少条带着未完成项。
+## 查找决策
+
+生命周期目录树就是清单：浏览 `docs/decisions/{proposed,implemented,rejected,archived}/` 或搜索仓库。不维护逐条索引，因为这种列表会重复每条记录的标题和未完成事项、产生第二个 owner，并且在没有检查机制时逐渐过期。`npm run docs:check` 会报告已实现决策数量以及含开放事项的记录数量。

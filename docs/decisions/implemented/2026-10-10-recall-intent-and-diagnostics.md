@@ -1,6 +1,6 @@
 # Recall intent and bounded degraded diagnostics
 
-[中文](2026-10-10-recall-intent-and-diagnostics.zh-CN.md)
+[中文](2026-10-10-recall-intent-and-diagnostics.zh-CN.md) · [Terms used](2026-10-10-recall-intent-and-diagnostics.terms.yaml)
 
 **Status:** implemented
 **Approved:** auto

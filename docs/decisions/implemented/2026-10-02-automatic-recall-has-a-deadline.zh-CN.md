@@ -1,6 +1,6 @@
 # 自动召回有总等待期限
 
-[English](2026-10-02-automatic-recall-has-a-deadline.md)
+[English](2026-10-02-automatic-recall-has-a-deadline.md) · [术语](2026-10-02-automatic-recall-has-a-deadline.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

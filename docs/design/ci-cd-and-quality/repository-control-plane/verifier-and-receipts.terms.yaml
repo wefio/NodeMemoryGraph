@@ -1,0 +1,8 @@
+version: 2
+terms: []
+references:
+  - receipt
+  - work order
+  - gate
+  - evidence
+  - Long-Term Graph

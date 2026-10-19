@@ -1,6 +1,6 @@
 # OpenCode V2 适配器作为薄传输插件
 
-[English](2026-10-17-opencode-adapter.md)
+[English](2026-10-17-opencode-adapter.md) · [术语](2026-10-17-opencode-adapter.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

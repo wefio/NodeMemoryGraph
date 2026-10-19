@@ -1,0 +1,20 @@
+version: 2
+terms:
+  - term: board-carried session identity
+    aliases: [board session identity, 黑板承载的会话身份]
+    definition: >-
+      The caller's session identity already recorded with the board entry and used to associate subsequent units with the same runner; it is not a new grouping declaration or a separately maintained store field.
+      已记录在黑板条目上的调用方会话身份，用于将后续单元关联到同一 runner；它不是新的分组声明，也不是另行维护的存储字段。
+    owner: docs/decisions/implemented/2026-09-19-session-identity-comes-from-the-board.md
+    anchor: Decision
+    status: canonical
+  - term: session-move run fact
+    aliases: [session move, 会话迁移 run fact]
+    definition: >-
+      A run fact recording whether the next unit is admitted to the current session or the session is closed, together with the condition and facts used for that decision.
+      记录是否将下一单元纳入当前会话或关闭会话的 run fact，同时记录该决策使用的条件与事实。
+    owner: docs/decisions/implemented/2026-09-19-session-identity-comes-from-the-board.md
+    anchor: Decision
+    status: canonical
+references:
+  - Task Board

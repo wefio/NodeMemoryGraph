@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: reusable Pi session runner
+    aliases: [one-session-per-run mechanism, 可复用 Pi 会话 runner]
+    definition: >-
+      A live Pi execution mechanism that keeps one in-memory session, tool surface and prompt loop for consecutive logical units in a run, while repointing unit state and reporting the session actually used; it does not itself add a product-side caller.
+      live Pi 执行机制，在一次 run 中让连续逻辑单元共用一个内存会话、tool surface 和 prompt loop，同时重新绑定单元状态并报告实际使用的会话；它本身不增加产品侧调用方。
+    owner: docs/decisions/implemented/2026-09-19-fusion-session-mechanism.md
+    anchor: Decision
+    status: canonical
+references:
+  - evidence

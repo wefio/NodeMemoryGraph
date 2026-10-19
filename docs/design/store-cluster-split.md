@@ -1,96 +1,31 @@
-# Store Cluster Split（store.ts 方法簇拆分）
+# Store cluster split: historical implementation record
 
-**Status:** current — 2026-08-01 完成；2026-08-03 消除基类 stub，见 §2.2
-**Related:** [memory-graphs.md](memory-graphs.md), [stg-isolated-store.md](stg-isolated-store.md)
+[English](store-cluster-split.md) | [简体中文](store-cluster-split.zh-CN.md) · [Terms](store-cluster-split.terms.yaml)
 
-实现提交：f3cd3b7（#private → protected）、5bcc4ef（守卫测试，红）、444983d（组装 + 98 测试）、stub 消除（helper 上移）。
+Historical implementation record for the 2026-08 store decomposition. Its line counts, method inventories, compiler/test totals, and commit references describe that dated report, not the current repository state.
 
-## 1. 背景
+## Design decision
 
-`src/core/store.ts` 原 4258 行（`NmgStore` 类 101–4225 行），是仓库最大单体文件。
-拆分后为 7 行组装点 + 5 个模块（基类 + 4 簇）。方法体零改动，外部 API 面不变。
+The recorded change decomposed the large `NmgStore` implementation into typed TypeScript mixins and a base class. The rationale was to keep class-member `this` typing without introducing a `StoreDeps` structural contract and forwarding wrappers. The decomposition also aimed to keep inter-module imports acyclic and to assign each method to one owner cluster.
 
-```
-src/core/store.ts             7 行   组装点
-src/core/store/base.ts        1358 行 构造/close + 50 保留成员 + 4 个 stub
-src/core/store/graph.ts       748 行  16 方法
-src/core/store/retrieval.ts   787 行  11 方法（热区：search.direct 占 ~50% 总延迟）
-src/core/store/writes.ts      246 行  9 方法
-src/core/store/maintenance.ts 1238 行 29 方法
-```
+The earlier attempt and compiler failure are preserved as historical engineering evidence; they are not a claim that every alternative implementation would fail or that the original cluster boundaries remain unchanged.
 
-## 2. 为什么是这个方案（关键决策）
+## Current source boundary
 
-### 2.1 官方 Mixin 模式，而非自由函数
+As source-checked on 2026-10-16, [`src/core/store.ts`](../../src/core/store.ts) composes `withGraph`, `withAnalogy`, `withCommunity`, `withRetrieval`, `withWrites`, and `withMaintenance` over `NmgStoreBase`. This differs from the four-cluster composition and inventories recorded in the 2026-08 note.
 
-**上次失败方案**（2026-07-31）：自由函数 + `this: StoreDeps` 参数 + 65 个转发器。
-根因：转发器 `graphX.call(this, ...)` 对 `this`（NmgStore）做 → StoreDeps 的
-**结构可赋值检查**，115 签名 × 116 方法交叉比较时 tsc 类型展开递归爆栈
-（`store: any` / `as any` 均不爆，证实根因）。
+[`tests/core/store/cluster-dag.test.ts`](../../tests/core/store/cluster-dag.test.ts) retains a structural guard for cluster ownership, the mixin assembly, and import boundaries. This is a source/test inspection only; no test was run during this documentation pass.
 
-**本方案**：TypeScript Handbook 官方 mixin——泛型类表达式继承：
+## Evidence boundary
 
-```ts
-export function withRetrieval<TBase extends Constructor>(Base: TBase) {
-  return class extends Base { /* 方法体原样，this. 直接可用 */ };
-}
+The original report recorded 480/480 tests, a clean typecheck and lint/format/build checks at that time. Do not present those historical results as a current verification receipt. The current method inventory and behavior live in source and tests; see [implementation lineage](implementation-lineage.md) for the curated history-to-owner map.
 
-export class NmgStore
-  extends withGraph(withRetrieval(withWrites(withMaintenance(NmgStoreBase)))) {}
-```
+## Current source references
 
-`this` 类型自动正确（继承而非结构赋值），无转发器，方法体逐字节保留。
-
-### 2.2 关键约束（均为实证）
-
-| 约束 | 原因 |
-| --- | --- |
-| `Constructor` 必须 `new (...args: any[])` | `never[]` 触发 TS2545（mixin 构造器须 `...args: any[]` rest 透传） |
-| 基类用 **stub**（签名 + `throw`）而非 `abstract` | 测试用 `node --experimental-strip-types` 直接跑源码，而 strip-types 不支持 abstract 方法（须 abstract class，不可实例化） |
-| 字段 `#private` → `protected` | `#` 跨文件类不可访问；mixin 不能声明 protected 属性但可访问基类 protected 字段（Phase 0 已剥离 422 处） |
-| ~~基类调簇方法处声明 stub~~（2026-08-03 已消除） | 原 3 处反向调用（现名 `recordActiveGraphAttributionInner`→recordUsage/trainRouter、`searchWithVector`→routeNodes、`redirectRelations`→linkNodes）的根因是 helper 放错了层；已分别上移到唯一消费簇（maintenance / retrieval / graph），stub 全部删除，基类不再依赖簇方法 |
-| mixin 链顺序 graph ⊃ retrieval ⊃ writes ⊃ maintenance ⊃ Base | 依赖图无环（graph→maintenance；retrieval→graph,maintenance；writes→maintenance,graph；maintenance→∅），跨簇调用走原型链 |
-| 簇文件不 import store.ts / base.ts / 兄弟簇 | 模块图保持 DAG，只 import 类型/工具模块 |
-
-### 2.3 方法分配（单一事实源：tests/core/store/cluster-dag.test.ts 的 CLUSTERS）
-
-- **graph (16)**：linkNodes, getRelations, mergeNodes, splitNode, getNodeTransform,
-  routeNodes, routeNodesByVector, trainRouter, edgeStability, nodeActivation,
-  relationActivation, reconcileConsolidation, consolidationEvents,
-  proposeTopologyChanges, topologyProposals, reviewTopologyProposal
-- **retrieval (12)**：searchContext, searchContextWithSecondPass, getContext,
-  residentKernel, recallCues, search, searchByVector, searchByVectorCandidates,
-  searchHierarchyByVector, searchLeafBlocks, routeLeafBlocksByFts, searchNodeFirst
-- **writes (9)**：remember, rememberInner, addMemory, appendHistory, deriveMemory,
-  recordRejectedWrite, recordUsage, archiveSession, getSessionArchive
-- **maintenance (31)**：deleteMemory, setMemoryStorageState, retentionCandidates,
-  promoteMemory, demoteMemory, expireShortTermMemories, memoryWriteEvents,
-  getHistoryBySourceMessage, rebuildVectorIndex, rebuildLeafBlocks,
-  rebuildDueLeafBlocks, dirtyLeafNodeIds, pendingLeafSummaries, setLeafSummary,
-  pendingIndexDelta, acknowledgeIndexDelta,
-  beginEmbeddingIndex, completeEmbeddingIndex, failEmbeddingIndex,
-  embeddingIndexHealth, contradictionNotes, recordRetrievalTrace, perfAggregates,
-  retrievalTracesCount, pruneRetrievalTraces, retrievalTrace,
-  recordActiveGraphDisclosure, recordActiveGraphAttribution,
-  recordConsolidationEvent, rebalanceNode, rebalanceDueNodes, upsertNode
-- **Base (50)**：构造/close + 16 外部 embedding API + routeLeafBlocksByVector +
-  33 共享 protected helpers（requireNode、searchWithVector、markIndexDelta 等）
-
-## 3. 测试
-
-- `tests/core/store/cluster-dag.test.ts`（守卫，4 项）：簇文件只导出 `with<Cluster>`
-  且定义簇方法、方法不在 store.ts/base.ts 残留、簇间无 import（DAG）、store.ts
-  组装链存在。持续防护方法回滚/循环依赖。
-- 簇行为测试 98 例：graph 22 / retrieval 21 / writes 15 / maintenance 40。
-
-## 4. 验证
-
-- 当前完整测试套件 480/480 全绿；其中簇拆分的 4 个结构守卫持续通过。
-- tsc 0 错误（含 `--noUnusedLocals`）、eslint 0 警告、prettier 通过
-- `npm run build`（dist）通过；dist 冒烟 + nmg CLI 端到端（remember/search/status）正常
-
-## 5. 非目标
-
-- 不改任何方法体逻辑（纯搬移）
-- 不引入新依赖（无 mixin 库，纯 TS 官方模式）
-- 不做转发器/自由函数/StoreDeps 接口（上次方案，弃用）
+- [Store assembly](../../src/core/store.ts)
+- [Base class and shared helpers](../../src/core/store/base.ts)
+- [Graph cluster](../../src/core/store/graph.ts)
+- [Retrieval cluster](../../src/core/store/retrieval.ts)
+- [Write cluster](../../src/core/store/writes.ts)
+- [Maintenance cluster](../../src/core/store/maintenance.ts)
+- [Cluster boundary guard](../../tests/core/store/cluster-dag.test.ts)

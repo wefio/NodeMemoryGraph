@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: clock grace
+    aliases: [current-value grace, 时钟宽限]
+    definition: >-
+      A named 50 ms margin applied in opposite directions to the current-value timestamp bounds so small disagreement between JavaScript and SQLite clock reads does not hide a just-written value; it widens, never narrows, the window.
+      分别向当前值时间戳上下界反向应用的具名 50 ms 边界，以免 JavaScript 与 SQLite 时钟读数的微小偏差隐藏刚写入的值；它只扩宽窗口，不会缩窄。
+    owner: docs/decisions/implemented/2026-09-18-clock-grace-window.md
+    anchor: Decision
+    status: canonical
+references:
+  - current-value window
+  - evidence

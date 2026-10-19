@@ -1,6 +1,6 @@
 # NMG post-mortems
 
-[中文](README.zh-CN.md)
+[中文](README.zh-CN.md) · [Terms used](README.terms.yaml)
 
 Incident write-ups. A failure reached a place it should not have — a user, `main`,
 a merged pull request, a published number — and the part worth keeping is _why the
@@ -141,6 +141,7 @@ nothing catches yet, which is the point of writing it down.
 | wrong-tree verification | 0002           |                  |
 | mutant-in-tree reading  | 0003           | the sweep's lock: `agent:verify` refuses to report, and a new sweep refuses to start, while one holds the tree (`tools/mutation-lock.ts`) |
 | mislabelled flake       | 0004           | an intermittent failure is recorded with its reproduction attempt and rate, or left open - never as "flaky" (`skills/repo-development/SKILL.md`) |
+| undrainable backlog | 0005 | [store regression](../../tests/core/store/maintenance.test.ts), [service regression](../../tests/cli/service.test.ts) |
 | -----                   | -------------- | ---------------- |
 
 A class name is a short noun phrase, not a sentence, and it is not invented before
@@ -156,3 +157,4 @@ one place to read the whole taxonomy.
 | 0002 | [The tree I verified was not the tree I pushed](0002-wrong-tree-verification.md)              | wrong-tree verification  |
 | 0003 | [The checks I read were reading a mutant](0003-checks-read-a-live-mutant.md)                  | mutant-in-tree reading   |
 | 0004 | ["Flaky" was a clock boundary](0004-flaky-was-a-clock-boundary.md)                            | mislabelled flake        |
+| 0005 | [Maintenance pressure that could not drain](0005-maintenance-pressure-cannot-drain.md) | undrainable backlog |

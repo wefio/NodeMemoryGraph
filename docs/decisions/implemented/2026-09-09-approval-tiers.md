@@ -1,6 +1,6 @@
 # Approval tiers: most documentation needs no approval
 
-[中文](2026-09-09-approval-tiers.zh-CN.md)
+[中文](2026-09-09-approval-tiers.zh-CN.md) · [Terms used](2026-09-09-approval-tiers.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit
@@ -28,7 +28,7 @@ and not to documentation as a class. The test is one question:
 | Content                                                        | Who approves | Examples                                                                                                                          |
 | -------------------------------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------- |
 | Descriptive — a wrong file costs one edit                      | **nobody**   | `docs/experiments/**`, `docs/guides/**`, READMEs, `**Status:** draft` designs, notes                                              |
-| Watched by a check — a wrong file turns a gate red             | **the check** | the parts shelf, `docs/glossary.yaml`, `.rcp/contracts/**`, `.rcp/counterexamples.yaml`, receipts                                  |
+| Watched by a check — a wrong file turns a gate red             | **the check** | the parts shelf, `*.terms.yaml` metadata (not word-meaning correctness), `.rcp/contracts/**`, `.rcp/counterexamples.yaml`, receipts                                  |
 | Normative with no check that can decide                        | **`explicit` or `auto`** | `AGENTS.md`, standing rules in `skills/*/SKILL.md`, `**Status:** current` designs, `docs/decisions/implemented/**` |
 
 ### Where the check is missing, write the check instead of asking

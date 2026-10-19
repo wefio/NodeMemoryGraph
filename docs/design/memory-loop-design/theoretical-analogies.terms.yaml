@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: design analogy
+    aliases: [theoretical analogy, 设计类比, 理论类比]
+    definition: >-
+      A comparison used to frame a design question; it does not establish implementation equivalence, shared guarantees, or product evidence.
+      用于提出设计问题的比较；它不证明实现等价、保证相同或构成产品证据。
+    owner: docs/design/memory-loop-design/theoretical-analogies.md
+    anchor: Status and scope
+    status: canonical
+references:
+  - open structure
+  - memory resolution

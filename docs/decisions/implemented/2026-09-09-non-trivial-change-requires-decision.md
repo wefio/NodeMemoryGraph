@@ -1,6 +1,6 @@
 # A non-trivial change carries a decision record
 
-[中文](2026-09-09-non-trivial-change-requires-decision.zh-CN.md)
+[中文](2026-09-09-non-trivial-change-requires-decision.zh-CN.md) · [Terms used](2026-09-09-non-trivial-change-requires-decision.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit

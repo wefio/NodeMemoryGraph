@@ -1,6 +1,6 @@
 # 按 SQL 占位符顺序绑定 hybrid 候选
 
-[English](2026-10-10-hybrid-sql-bind-order.md)
+[English](2026-10-10-hybrid-sql-bind-order.md) · [术语](2026-10-10-hybrid-sql-bind-order.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

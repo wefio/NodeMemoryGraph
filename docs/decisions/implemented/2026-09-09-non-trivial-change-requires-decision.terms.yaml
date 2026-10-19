@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: non-trivial change
+    aliases: [decision-worthy change, 非琐碎变更]
+    definition: >-
+      A change to behavior, a cross-file/package contract, package/module structure, process/tooling, test strategy or an on-disk, wire or configuration format; purely mechanical/local edits with no behavioral consequence are exempt.
+      对行为、跨文件／包合同、包／模块结构、流程／工具、测试策略或磁盘／线上／配置格式的更改；无行为后果的纯机械或局部编辑可豁免。
+    owner: docs/decisions/implemented/2026-09-09-non-trivial-change-requires-decision.md
+    anchor: Decision
+    status: canonical
+references:
+  - decision record
+  - gate

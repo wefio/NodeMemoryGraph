@@ -1,6 +1,6 @@
 # 用小型 Skill 维护工作状态正文
 
-[English](2026-10-14-working-state-maintenance-skill.md)
+[English](2026-10-14-working-state-maintenance-skill.md) · [术语](2026-10-14-working-state-maintenance-skill.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

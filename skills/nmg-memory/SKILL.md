@@ -5,6 +5,8 @@ description: Use NMG as durable memory or temporary multi-Agent coordination whe
 
 # NMG Memory
 
+[中文](SKILL.zh-CN.md) · [Terms used](SKILL.terms.yaml)
+
 Use this quick-start directly once known. Read references only for the current
 operation or a missing detail; do not reload the whole Skill every turn.
 
@@ -52,7 +54,6 @@ installation or local changes. No periodic sync script is needed for a link.
    ID to `get` for attribution. Candidate count does not prove completeness.
    If recall is insufficient, read [recall limits and escalation](references/recall.md)
    before more calls; do not paraphrase around guards or dump all evidence.
-
 4. Save confirmed durable information with `nmg remember`. For exact forms,
    attribution, state replacement or unresolved structures, read
    [writes](references/writes.md). Keep meaningful time/scope; an open record
@@ -67,19 +68,19 @@ use an `rtk` prefix only when the active `AGENTS.md` requires it.
 
 ## When to read the manual
 
-| Current task                                                                | Read before acting                                                         |
-| --------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Exact write, source attribution, state/scope change, resolve/reopen         | [writes](references/writes.md)                                             |
-| Incomplete/conflicting/deep recall, JSON result fields or retrieval tuning  | [recall](references/recall.md)                                             |
-| Shared task, handoff, in-flight registry or board lifecycle                 | [board](references/board.md)                                               |
-| Daemon failure, ownership, storage selection or cleanup                     | [operations](references/operations.md)                                     |
-| Embedding configuration or semantic search                                  | [embedding](references/embedding.md)                                       |
-| QPP calibration from real Agent usage                                       | [QPP calibration](references/qpp-calibration.md)                           |
-| Choosing, pruning, or correcting temporary working-state content            | [working-state maintenance](../working-state-maintenance/SKILL.md)         |
+| Current task | Read before acting |
+| --- | --- |
+| Exact write, source attribution, state/scope change, resolve/reopen | [writes](references/writes.md) |
+| Incomplete/conflicting/deep recall, JSON result fields or retrieval tuning | [recall](references/recall.md) |
+| Shared task, handoff, in-flight registry or board lifecycle | [board](references/board.md) |
+| Daemon failure, ownership, storage selection or cleanup | [operations](references/operations.md) |
+| Embedding configuration or semantic search | [embedding](references/embedding.md) |
+| QPP calibration from real Agent usage | [QPP calibration](references/qpp-calibration.md) |
+| Choosing, pruning, or correcting temporary working-state content | [working-state maintenance](../working-state-maintenance/SKILL.md) |
 | Ongoing multi-step work, current progress/status, or working-state recovery | [daily work status](references/optional-capabilities.md#daily-work-status) |
-| Non-default QPP/controller/STG/topology/ANN or Lab                          | [optional capabilities](references/optional-capabilities.md)               |
-| Natural evidence collection and gated updates                               | [natural evidence loop](references/natural-evidence.md)                    |
-| New harness integration                                                     | [harness adapters](references/harness-adapters.md)                         |
+| Non-default QPP/controller/STG/topology/ANN or Lab | [optional capabilities](references/optional-capabilities.md) |
+| Natural evidence collection and gated updates | [natural evidence loop](references/natural-evidence.md) |
+| New harness integration | [harness adapters](references/harness-adapters.md) |
 
 Use `nmg_state` for normal temporary AG/board operations. Use Lab only when ordinary memory/state operations are insufficient; reuse the
 existing daemon. Read its reference and `nmg lab list` before enabling/invoking;

@@ -1,6 +1,6 @@
 # 查询决策记录的派生态
 
-[English](2026-09-09-doc-lifecycle-state-query.md)
+[English](2026-09-09-doc-lifecycle-state-query.md) · [术语](2026-09-09-doc-lifecycle-state-query.terms.yaml)
 
 **Status:** rejected
 

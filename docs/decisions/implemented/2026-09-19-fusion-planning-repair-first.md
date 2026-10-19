@@ -1,6 +1,6 @@
 # Fusion planning: repair-first online, ceiling offline
 
-[中文](2026-09-19-fusion-planning-repair-first.zh-CN.md)
+[中文](2026-09-19-fusion-planning-repair-first.zh-CN.md) · [Terms used](2026-09-19-fusion-planning-repair-first.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

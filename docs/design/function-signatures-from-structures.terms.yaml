@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: structure-to-API analogy
+    aliases: [structural API analogy, 结构到 API 的类比]
+    definition: >-
+      A reasoning aid that borrows vocabulary from a familiar structure to propose questions or interface shapes; it does not establish that NMG has the borrowed structure's semantics or guarantees.
+      借用熟悉结构的词汇来提出问题或接口形状的思考辅助；它不表示 NMG 具有该结构的语义或保证。
+    owner: docs/design/function-signatures-from-structures.md
+    anchor: Analogy catalogue
+    status: canonical
+references:
+  - design analogy

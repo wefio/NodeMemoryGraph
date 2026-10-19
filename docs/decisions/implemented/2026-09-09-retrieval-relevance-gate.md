@@ -1,22 +1,23 @@
 # Retrieval relevance gate: two loose gates, ANDed into one strict gate
 
-[中文](2026-09-09-retrieval-relevance-gate.zh-CN.md)
+[中文](2026-09-09-retrieval-relevance-gate.zh-CN.md) · [Terms used](2026-09-09-retrieval-relevance-gate.terms.yaml)
 
 **Status:** implemented
 **Approved:** unrecorded
 
 ## Problem
 
-The disclosure path injects recalled memories with no absolute relevance floor.
-A candidate only needs `combinedScore > 0` (`src/core/store/retrieval.ts`), and
-`selectWithinActiveGraphBudget` (`src/core/store/active-graph.ts`) takes the top
-N in rank order until the evidence target / budget is met, never comparing a
-score against a minimum. QPP (`src/core/qpp.ts`) decides only whether to deepen
-with a later pass, not what enters context.
+At the decision's pre-implementation snapshot, the disclosure path injected
+recalled memories with no absolute relevance floor. A candidate only needed
+`combinedScore > 0` (`src/core/store/retrieval.ts`), and
+`selectWithinActiveGraphBudget` (`src/core/store/active-graph.ts`) took the top
+N in rank order until the evidence target / budget was met, never comparing a
+score against a minimum. QPP (`src/core/qpp.ts`) decided only whether to deepen
+with a later pass, not what entered context.
 
-Measured on 19 real recalls (auto + explicit, labeled through the
-recall-instance corpus): precision 0.211 — 0 on_target, 4 partial, 15 noise.
-Host automatic recall is the worst offender: 13 of 15 noise.
+In the initial 2026-09-09 sample of 19 real recalls (auto + explicit, labeled
+through the recall-instance corpus), precision was 0.211 — 0 on_target, 4
+partial, 15 noise. Host automatic recall was the worst offender: 13 of 15 noise.
 
 Relevance scores do not separate the two classes, so a score-only gate cannot
 fix this:
@@ -51,9 +52,11 @@ evaluator) is exactly what discards useful context.
 
 **Program gate (deterministic and cheap; strong at structure, score, exactness):**
 
-- Runs on the deterministic signals — lexical match, embedding similarity, and
-  structural/score features — normalized to one bounded, path-consistent score
-  before comparison.
+- Runs on deterministic lexical, embedding, structural and score signals. The
+  absolute floor uses bounded, path-consistent relevance; query-shape dispersion
+  and relative comparisons use raw-scale scores by default, so the bounded score
+  does not flatten the signal. Callers may also supply an optional relative
+  `relevanceMinZ` floor.
 - Treat k as a maximum, not a target: return fewer — or zero — candidates.
 - Drop only clearly-broken results (a loose floor), keep the existing strong-hit /
   margin early stop, and abstain when nothing clears the loose floor.
@@ -73,10 +76,15 @@ evaluator) is exactly what discards useful context.
   abstain (inject nothing).
 - Each gate operates where it is strong and stays loose there, so neither alone
   over-filters; the strictness is entirely in the AND.
-- The learned gate runs only on candidates that already cleared the program
-  gate, so the per-recall cost stays bounded. It is best-effort: on error the
-  recall degrades to the program gate alone and never blocks. With no trained
-  model available the path is deterministic.
+- When a validated model is loaded, retrieval first uses it to rerank the
+  surfaced candidate pool, then applies the program gate and learned threshold;
+  the intersection controls membership while learned scores also affect
+  ordering. The pool is bounded by retrieval's `MAX_SEARCH_CANDIDATES`, but
+  model work is not limited to candidates that already passed the program gate.
+  Missing, unreadable or embedder-mismatched models are refused during loading and leave
+  the default product path deterministic. Inference-time model exceptions are
+  not converted here into program-gate-only success, so this path does not
+  promise that every model error is non-blocking.
 
 **Asymmetry:** automatic (unprompted) injection can raise either gate, because
 injected noise costs the consumer model every turn, not only the turn it asked.
@@ -91,7 +99,7 @@ injected noise costs the consumer model every turn, not only the turn it asked.
 - Abstain is representable: an empty intersection injects nothing.
 - With no trained model available the recall path is fully deterministic and
   gated by the program gate alone.
-- Recall is never blocked: a learned-gate failure degrades to the program gate.
+- Missing or invalid model files leave the default path deterministic; runtime inference failures are not promised to degrade gracefully.
 
 ## Alternatives considered
 
@@ -129,35 +137,38 @@ consequences to watch, not blockers.
 - **The learned gate needs training data.** Until the recall-instance labels are
   plentiful it is under-trained; a loosely-gated, under-trained model can still
   discard useful context. Looseness is the mitigation, not a guarantee.
-- The learned gate adds inference cost on every recall whose candidates clear the
-  program gate.
+- When a validated model is loaded, it reranks the surfaced pool before the program gate and then scores program-gate survivors for the learned threshold; its cost is not limited to candidates that passed the program gate.
 - The store's homogeneity is a data problem the gate suppresses rather than
   fixes.
 
 ## Implementation status
+
+The source-level statements below were checked against the current implementation; the benchmark and calibration figures are historical measurements, not a run performed for this documentation review.
 
 **Program gate — ON by default, no env switch.** `src/core/relevance-gate.ts` +
 `src/core/store/retrieval.ts`; code constants `DEFAULT_RELEVANCE_FLOOR = 0.05`
 (≈ BM25 0.53 on the lexical path — a genuinely loose cut; 0.4 would have meant
 BM25 ≈ 6.7, which a test run showed is a hard filter, not a loose one) and
 `DEFAULT_RELEVANCE_MAX_CV = 0.002`, the flatness abstain, applied only when the
-list has at least `MIN_CV_COUNT = 4` candidates (dispersion is not estimable
-below that, and the rule was calibrated on full k≈20 lists). It is deterministic and only ever removes
-candidates, so it cannot add error; the LoCoMo regression
-(`tools/relevance-gate-calibration.ts`) shows the flat-list rule keeps **81%** of
-hit questions (217/268) while lifting kept precision 5.9% → 13.1% and keeping 36.8%
-of candidates. A gate that has to be
-switched on is a gate that never runs, which is why there is no
+list has at least `MIN_CV_COUNT = 3` candidates (the rule was calibrated on full k≈20 lists, and a
+2-item list is not treated as evidence of flatness). Flatness uses raw-scale score dispersion while the
+absolute floor uses bounded, path-consistent relevance; an optional `relevanceMinZ` adds a relative
+floor. The gate is deterministic and only removes candidates: it cannot add candidates, but it can
+introduce false negatives. The recorded LoCoMo regression
+(`tools/relevance-gate-calibration.ts`) records the original `MIN_CV_COUNT = 4`
+calibration snapshot: the flat-list rule kept **81%** of hit questions (217/268)
+while lifting kept precision 5.9% → 13.1% and keeping 36.8% of candidates. A gate
+that has to be switched on is a gate that never runs, which is why there is no
 `NMG_RELEVANCE_GATE`.
 
-**Model gate — opt-in by producing a model.** `src/core/relevance-features.ts` +
+**Model gate — opt-in by producing and placing a model.** `src/core/relevance-features.ts` +
 `src/core/learned-gate.ts` + `src/lab/relevance-model.ts`, trained by
 `tools/relevance-model-train.ts`; enabled by placing a validated model at
 `<dataDir>/relevance-model.json` (no env switch), ANDed after the program gate.
 LoCoMo held-out: AUC ≈0.89, ECE ≤0.012 (Platt-calibrated). It is **not**
 default-on because the AND caps gold recall at the learned half — on gold
 questions `program 0.729 / learned 0.271 / AND 0.271 / OR 0.729` — and because
-the shipped model is LoCoMo-specific (out of distribution on the live store).
+the measured LoCoMo model is distribution-specific and not default-on for the live store.
 
 **The enablement bar is a procedure, not a number.**
 `tools/relevance-model-train.ts --certify` treats (set-level cut, model floor) as a

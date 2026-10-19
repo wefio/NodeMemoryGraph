@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: literature scan
+    aliases: [文献扫描, 外部文献综述]
+    definition: >-
+      This report's web-search-based synthesis of external work, not a formal or systematic survey; it can support or challenge a premise and set design controls, but it cannot establish that an untested router beats a fixed fallback.
+      本报告基于网络检索对外部工作所做的综合，不是正式或系统性综述；它可以支持或质疑某个前提并给出设计控制，但不能证明一个未经检验的路由器优于固定回退。
+    owner: docs/experiments/context/intervention-literature-2026-09-07.md
+    anchor: Headline
+    status: canonical
+  - term: adaptive retrieval routing
+    aliases: [自适应检索路由]
+    definition: >-
+      Deciding per query whether and how much to retrieve. The scan interprets its examples as emphasizing complexity or uncertainty and leaves history-sensitive routing open; its unsystematic source list does not establish field-wide coverage or novelty.
+      逐查询决定是否检索以及检索多少。本扫描把所引例子解释为侧重复杂度或不确定性，并保留历史敏感路由问题；非系统性的来源清单不证明领域覆盖或新颖性。
+    owner: docs/experiments/context/intervention-literature-2026-09-07.md
+    anchor: What supports the premise
+    status: canonical
+  - term: position/order confound
+    aliases: [位置／顺序混淆]
+    definition: >-
+      The risk that where relevant evidence sits inside the injected block dominates the retrieve-versus-none effect; controlling it means fixing whole-fragment rendering and deterministic order across policies so the tested effect is the injection decision.
+      相关证据位于注入块中的位置可能主导 retrieve-versus-none 效应的风险；控制它意味着在各策略间固定整片段渲染与确定性顺序，使被测效应是注入决策本身。
+    owner: docs/experiments/context/intervention-literature-2026-09-07.md
+    anchor: Caveats and controls this implies for the run (design-level, before any outcome)
+    status: canonical

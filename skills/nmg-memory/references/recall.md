@@ -1,5 +1,7 @@
 # Recall manual
 
+[中文](recall.zh-CN.md) · [Terms used](recall.terms.yaml)
+
 ## Progressive recall and process limits
 
 Treat automatically injected recall and search results as candidate headers.

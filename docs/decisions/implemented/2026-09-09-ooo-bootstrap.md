@@ -1,6 +1,6 @@
 # Bootstrap restricted OoO through real development
 
-[中文](2026-09-09-ooo-bootstrap.zh-CN.md)
+[中文](2026-09-09-ooo-bootstrap.zh-CN.md) · [Terms used](2026-09-09-ooo-bootstrap.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit
@@ -23,10 +23,12 @@ owns the task contracts, first development cycle, phase gates and rollback rules
 The seed enables bounded patch artifacts, real external check events and separate
 candidate verification; it does not require completing every production surface.
 
-The bootstrap-first direction reflects the user's preference. This record remains
-proposed because its concrete execution and promotion contracts need implementation
-and validation; it does not introduce a repository-wide workflow rule or enable
-normal-session scheduling.
+The bootstrap-first direction reflects the user's preference. This implemented
+decision accepts a bounded development bootstrap; it does not claim production
+readiness, establish a repository-wide workflow rule, or enable normal-session
+scheduling. The linked design owns the concrete execution, promotion and rollback
+contracts; remaining work and evidence limits stay there and in the linked pilot
+records.
 
 ## Alternatives considered
 
@@ -41,9 +43,12 @@ normal-session scheduling.
 
 ## Consequences
 
-The criteria this record set are met; the evidence line at the top of this file names what implements them. Anything still owed stays written down in the design or pilot document this record links to.
+This decision sets the development direction, not production readiness or a
+speedup claim. Implementation evidence is summarized at the top. The linked design
+owns the S0–S4 gates and remaining execution and rollback contracts; pilot records
+own measured evidence.
 
-Apply the draft's S0–S4 gates. In particular, a real external wait must permit an
+Apply the design's S0–S4 gates. In particular, a real external wait must permit an
 independent development task to run; a useful OoO change must be independently
 accepted and used by the next cycle. Artificial delays, model self-approval and
 manual task ordering are not substitutes. Production and speedup claims require

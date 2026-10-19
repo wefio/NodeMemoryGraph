@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: experiment-specific QPP2 local selector
+    aliases: [local evidence probe, 实验版 QPP2 局部选择器]
+    definition: >-
+      The 2026-07-29 prototype that ranked necessary evidence within an already retrieved candidate set; its name is historical and does not define the current QPP2 runtime switch.
+      2026-07-29 原型在已检索候选集中对必要 evidence 排序；该名称属于历史实验，不定义当前 QPP2 运行时开关。
+    owner: docs/experiments/qpp/qpp2-local-probe-experiment-2026-07-29.md
+    anchor: Experimental role definitions
+    status: canonical
+  - term: evidence retention
+    aliases: [recall retention, evidence 保留率]
+    definition: >-
+      The fraction of evidence found by the expanded QPP1 set that remains after QPP2 filtering; it is distinct from recall against the full labelled evidence set.
+      QPP2 过滤后仍保留的、由扩展 QPP1 集合找回的 evidence 比例；它不同于相对完整标注 evidence 集合的 recall。
+    owner: docs/experiments/qpp/qpp2-local-probe-experiment-2026-07-29.md
+    anchor: "Pairwise QPP2 and dynamic compression: 150-question follow-up"
+    status: canonical
+  - term: oracle Fibonacci budget
+    aliases: [oracle budget, oracle Fibonacci 预算]
+    definition: >-
+      A research upper-bound budget selected with access to labelled evidence; it is not an online policy available to the product.
+      使用标注 evidence 选择的研究上界预算；它不是产品可在线使用的策略。
+    owner: docs/experiments/qpp/qpp2-local-probe-experiment-2026-07-29.md
+    anchor: Full LoCoMo evidence test
+    status: canonical
+references: [QPP, learnable controller, cumulative Fibonacci evidence tier]

@@ -1,6 +1,6 @@
 # NMG decision records
 
-[中文](README.zh-CN.md)
+[中文](README.zh-CN.md) · [Terms used](README.terms.yaml)
 
 Decision records preserve rationale that cannot be reconstructed safely from the
 current design or Git diff alone. They explain non-trivial architecture and
@@ -66,8 +66,14 @@ links and make the pair point both ways:
 **Superseded by:** [new decision](../implemented/2026-02-01-new-decision.md)
 ```
 
-Decision notes should normally have an English and `.zh-CN.md` version that link
-to one another. Missing translations are reported as warnings, not hard errors.
+A `Supersedes` or `Superseded by` field may contain several relative links on
+one line. Each target needs the reciprocal link in its header. Relationship
+examples below the first section are prose, not record metadata; these
+consistency diagnostics retain the CI contract's warning severity.
+
+Decision notes require English, `.zh-CN.md` and `.terms.yaml` companions under
+the [CI contract](../README.md#ci-contract). Missing members fail `docs:check`;
+reciprocal-link and heading drift remain warnings for review.
 
 ## Finding a decision
 

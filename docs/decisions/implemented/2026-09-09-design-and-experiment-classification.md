@@ -1,24 +1,25 @@
 # Classify designs and experiments by their own axis
 
-[中文](2026-09-09-design-and-experiment-classification.zh-CN.md)
+[中文](2026-09-09-design-and-experiment-classification.zh-CN.md) · [Terms used](2026-09-09-design-and-experiment-classification.terms.yaml)
 
 **Status:** implemented  
 **Approved:** unrecorded
 
 ## Problem
 
-`docs/design/` had no state discipline. Nineteen of forty documents carried a
-`**Status:**` line, and those nineteen used **21 distinct values**:
+At the time of the 2026-09-09 review, `docs/design/` had no state discipline.
+Nineteen of forty documents carried a `**Status:**` line, and those nineteen
+used **21 distinct values**:
 `诚实评估 / honest assessment`, `requirement ledger`,
 `documentation convention and curated recovery index`,
 `the actuator exists behind an explicit, default-off policy…`. No machine could
 read a lifecycle from them, and a design marked `superseded` sat in the same
 directory as the live ones with no enforced successor link.
 
-`docs/experiments/` had the opposite problem. Thirty-eight of forty reports are
-concluded, so a lifecycle axis carries no information there, while four lines of
-related runs — `retrieval-quality-*` ×6, `context-*` ×6, `topology-*` ×3,
-`qpp-*` ×3 — had no grouping at all.
+The same review found the opposite problem in `docs/experiments/`: thirty-eight
+of forty reports were concluded, so a lifecycle axis carried little information
+there, while four lines of related runs — `retrieval-quality-*` ×6, `context-*`
+×6, `topology-*` ×3, `qpp-*` ×3 — had no grouping at all.
 
 ## Decision
 
@@ -76,25 +77,28 @@ and last-commit dates, so the one-home rule argues for deleting them across 20
 documents. Left in place: they are not the drift this decision fixes, and the
 churn is not justified yet. Recorded under Deferred.
 
-**Reject bare `Word:` header lines.** The same deferred gap as the decision
-header block, for the same reason: an uncommitted decision still carries them.
+**Reject bare `Word:` header lines.** The decision header block leaves unbolded
+lines as prose rather than expanding the metadata syntax. The legacy decision
+headers that carried `Date:` and `Branch:` were in flight during the original
+review and have since been cleaned; this record does not change the validator.
 
 ## Deferred
 
 `Created:` and `Updated:` still restate git's first- and last-commit dates.
 Revisit if they drift; today they are stable and cheap.
 
-Bare `Word:` header lines are still treated as prose, in both decisions and
-designs.
+Bare `Word:` header lines are still treated as prose in both decisions and
+designs; the documented check recognizes the bold field syntax only. A broader
+ban is outside this decision.
 
 ## Consequences
 
-`docs/design/` has one archived document
+At implementation time, `docs/design/` had one archived document
 (`archived/file-content-source-design.md`) and no free-form status values.
 Eighteen status sentences became enum tokens with their caveats kept as
-qualifiers, so no information was lost. Six fields outside the closed set
-(`Date`, `Owner`, `Commits`, `Purpose`, `Normative source`,
-`Implementation recovery`) became `Updated:` or prose. `docs/experiments/` has eight topic directories holding every run, and its
-filename gate now checks the basename, so a report inside a topic directory is
-still date-checked. `benchmark-results.md` remains the only top-level record,
-because it spans topics.
+qualifiers; six fields outside the closed set (`Date`, `Owner`, `Commits`,
+`Purpose`, `Normative source`, `Implementation recovery`) became `Updated:` or
+prose. The initial experiment reorganization placed the then-current runs in
+eight topic directories and added basename-based date checking; it left the
+cross-topic `benchmark-results.md` at the top level. Current inventory and names
+belong to [the experiment index](../../experiments/README.md).

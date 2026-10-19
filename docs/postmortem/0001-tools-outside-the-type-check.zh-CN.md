@@ -1,6 +1,6 @@
 # 0001 - 检查别人的工具，自己没被检查
 
-[English](0001-tools-outside-the-type-check.md)
+[English](0001-tools-outside-the-type-check.md) · [术语](0001-tools-outside-the-type-check.terms.yaml)
 
 **Status:** open
 

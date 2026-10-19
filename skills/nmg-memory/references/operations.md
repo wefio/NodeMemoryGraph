@@ -1,5 +1,7 @@
 # Daemon operations
 
+[中文](operations.zh-CN.md) · [Terms used](operations.terms.yaml)
+
 ## Development CLI path
 
 The examples in this skill assume `nmg` is on `PATH` (global install). In a
@@ -29,6 +31,10 @@ restart, or replace it automatically: it may be shared by another Agent. Report
 the old and required protocol versions and ask the owner/user to run
 `nmg daemon restart` at a safe point. Once restarted, reconnect normally; never
 fall back to an older RPC name or silently omit the failed operation.
+
+## Controlled code reload
+
+This section routes to the [retained source-branch protocol](../../../docs/design/daemon-lifecycle-design/controlled-code-reload.md); it does not advertise command availability in this checkout. This documentation change adds no reload implementation. Use the protocol only when the installed CLI and validated handshake explicitly support it and an operator authorizes the operation. Otherwise follow the ownership-safe lifecycle above; deleting a handover file or forcing a second owner is not a workaround.
 
 ## Storage selection
 

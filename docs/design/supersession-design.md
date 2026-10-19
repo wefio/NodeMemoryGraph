@@ -1,110 +1,59 @@
-# Supersession（记忆取代）设计
+# Memory supersession design
 
-> nmg 的写路径能力：当一个新记忆是某个旧记忆的**更新值**（"Employed" 被 "self-employed" 取代、"salary 20k" 被 "salary 30k" 取代），把旧记忆标记为 superseded，检索侧自动过滤并带出后继新值。参照 MemStrata / MemClaw 的写时确定性取代模式，nmg 的 schema 从一开始就预留了 `supersedes_id` / `valid_until`。
+[English](supersession-design.md) | [简体中文](supersession-design.zh-CN.md) · [Terms](supersession-design.terms.yaml)
 
-## 分工：nmg 只做确定性的部分
+**Status:** Current contract summary, reviewed against `src/core/store/writes.ts`, retrieval projection, the Pi remember surface, and the OmniMemEval bridge. The previous draft's persona score and “96 unit tests” claim had no linked run artifact and are not used as evidence here.
 
-| 层 | 做什么 | 谁 |
-|---|---|---|
-| 候选检测 | 找"可能是旧值的同 scope 记忆" | **nmg 核心**（文本/结构信号） |
-| 语义判断 | 哪个候选真的是被取代的旧值 | **外部 judge**（LLM，由调用方提供） |
-| 应用 | 标记 superseded + 指针 + valid_until | **nmg 核心** |
-| 检索 | 过滤 superseded + 带出后继新值 | **nmg 核心** |
+Supersession records that a newer value replaces an older value for the same scoped property. The old record becomes `superseded`; the newer record points back to it through `supersedes_id`, and retrieval can surface the current successor when a query matches old wording. Supersession is not a generic synonym for similarity, contradiction, or relatedness.
 
-nmg 不内置任何 LLM 调用（同嵌入 provider 的原则：nmg 不带模型）。judge 是**调用方注入**的——插件借 agent 的 LLM、评测借评测的 LLM、daemon 自主运行时可配独立端点。
+## Ownership and decision boundary
 
-## nmg 核心接入点（src/core/）
+| Step | Owner | Contract |
+| --- | --- | --- |
+| Detect possible stale-value candidates | NMG core | Text/transition/polarity heuristics only; no semantic verdict. |
+| Decide whether one candidate is truly replaced | Caller or evaluation judge | Similarity is not identity. The current Pi surface presents bounded candidates and asks the Agent to choose; the OmniMemEval bridge has a separate evaluation-only judge path. |
+| Apply a declared relation | NMG core | Validates scope and chain constraints, then records the relation transactionally. |
+| Project retrieval results | NMG core | By default, a stale lexical/vector hit resolves to the current successor (or the value valid at an as-of time); `includeHistorical` bypasses successor projection. |
 
-### 类型（`src/core/types.ts`）
+The ordinary duplicate-merge callback and supersession are separate. `RememberInput.judgeDuplicates` is used by the near-duplicate path; `supersedeCandidates` are surfaced separately and are not automatically judged or applied by `remember()`.
 
-```ts
-// remember 返回的候选（文本启发式，非语义）
-interface RememberResult {
-  supersedeCandidates?: DuplicateCandidate[];  // { memoryId, statement, eventTime, similarity }
-}
+## Candidate discovery
 
-// judge 的返回（外部 LLM 判定）
-interface DuplicateJudgement {
-  merge: boolean;               // 与某候选是重复 → 走合并
-  supersede?: boolean;          // 新语句是新值，取代某旧值
-  supersededMemoryId?: string;  // 被取代的旧值候选 id
-}
+`RememberResult.supersedeCandidates` is a heuristic list, not a verdict. By default `supersedeScan` is enabled; it can be disabled for bulk ingestion that has no candidate consumer. The scan is O(scope size), so a caller that neither judges nor displays the results should set `supersedeScan: false`.
 
-// remember 的扩展点：调用方注入 judge 回调（同步）
-interface RememberInput {
-  judgeDuplicates?: DuplicateJudge;
-}
-```
+The current scan:
 
-### 候选检测（`src/core/store/writes.ts` → `supersedeCandidates`）
+- considers same-scope records in `active` or `disputed` status, without restricting candidates to the most recent N records;
+- uses token prefiltering and normalized overlap, but excludes near-duplicates (those belong to merge review);
+- places explicit `from X to Y` transition and caller-supplied polarity-flip hits ahead of token-only candidates; transition/polarity candidates are then ordered by similarity;
+- caps the returned list at `SUPERSEDE_CANDIDATE_MAX` (`10`).
 
-纯文本启发式，**不判语义**，把"可能被取代的旧值"找出来交给 judge：
+Transition and polarity signals improve candidate order; they do not prove that a single-valued property changed. A caller must still determine whether the old and new statements refer to the same scoped property. NMG's existing `src/core/simhash.ts` utility is currently used for tessera file-drift recovery; it is not used to recall memory supersession candidates. The separate [SimHash lexical-complement proposal](simhash-lexical-complement-design.md) remains a draft.
 
-- **全 scope 候选池**：不限制"最近 N 条"——旧值可以隔 10 年（2025 的 employment 被 2035 的 self-employment 取代）
-- **instr 子串预过滤**（`lower(statement)` 匹配 token）避免全表扫；不用 `LIKE ... ESCAPE`（node:sqlite 对 `ESCAPE '\'` 报错）
-- **token 规范化**：小写 + 去标点（"Employed" ≡ "employed"、"healthcare." ≡ "healthcare"）
-- **转换结构检测**（`transitionFromTokens`）：`moving / transition / switch / shift ... from X to Y` 的 **X 就是旧值侧关键词**，反查召回该主题的前任——相似度（lexical 或 vector）无法可靠分离"真前任"和"同主题闲聊"，但语言结构给确定性信号
-- 排序：转换命中优先 → 相似度；上限 `SUPERSEDE_CANDIDATE_MAX = 10`
+## Applying supersession
 
-### 应用（`src/core/store/writes.ts` → `applySupersession`）
+The core has two deterministic entry paths:
 
-```ts
-store.applySupersession({
-  newMemoryId,          // 新记录 id
-  supersededMemoryId,   // 旧值 id（judge 判定）
-  validUntil?,          // 可选
-});
-// 旧值 → status='superseded' + valid_until
-// 新记录 → supersedes_id 指向旧值 + evidence_role='update'
-// 事务（BEGIN IMMEDIATE）
-```
+1. **Explicit pointer on write:** `RememberInput.supersedesId` declares the old record. The write requires the same scope, a non-deleted predecessor, and no existing successor; it marks the predecessor superseded and records the new record's `supersedes_id` pointer in the write transaction.
+2. **Post-write application:** `applySupersession({ newMemoryId, supersededMemoryId, validUntil? })` applies an independently chosen relation. It rejects missing IDs, self-supersession, deleted records, scope mismatch, predecessor overwrite, successor branching, and cycles. The old value becomes `status='superseded'`; the new value points back with `supersedes_id` and gets `evidence_role='update'`.
 
-`applySupersession` 维护单一版本链而不是任意分支图：新旧记录必须是同一
-scope、均未删除且不能相同；一个新记录不能改写为指向另一个前驱，一个旧
-记录也不能再接第二个直接后继。重复提交同一 `(new, old)` 关系是幂等的，
-不会重写第一次确定的 `valid_until`。这些约束防止后置 judge 重试或重复反馈
-把已标记为 superseded 的记录留成无后继孤儿。
+Repeated application of the same pair is idempotent. `valid_until` is set only if it has not already been set, so a retry does not rewrite the first boundary. The schema is a single-parent/single-successor chain, not a branching version graph.
 
-### 检索侧（`src/core/store/retrieval.ts`）
+A separate, explicit state-key rule applies when a write has `memoryType: "state"` and a resolved `stateKey`: the current active record with the same `stateKey` and identical scope is superseded transactionally. This is property-addressed replacement, not semantic inference over arbitrary memories.
 
-- 候选阶段允许旧记录作为旧措辞的检索锚点；最终投影才决定当前/历史可见值。
-- 若候选是 superseded 且 `!includeHistorical`，沿完整 `supersedes_id` 反向链
-  找到当前 active 版本，或找到 `eventTimeTo` 时刻有效的版本。目标记录即使
-  没进入原始 lexical/vector 候选池，也会按稳定 ID 物化并继承锚点得分及
-  `SUPERSEDE_SUCCESSOR_BOOST`。
-- 多个旧锚点解析到同一链头时按 memory ID 去重。没有可达 active 后继的
-  孤立旧记录不会成为“当前”答案，但仍可通过 `includeHistorical` 或时间窗
-  查询恢复。
+## Caller and feedback paths
 
-## judge 实现（归评测侧，非 nmg 核心）
+- The Pi remember surface shows up to three possible stale values and says similarity alone is insufficient. If the Agent confirms a genuine same-scope replacement, it calls `nmg_remember` with `action=supersede`, `newMemoryId`, and `supersededMemoryId`.
+- `NmgStore.recordFeedback({ supersede })` is a write-path maintenance method. With both IDs it applies full supersession; with only the stale ID it marks that record `disputed` because the replacement has not yet been written. The later new-value write can then surface it as a candidate.
+- The daemon/MCP `recordFeedback` method is a different API: it consumes labeled automatic-recall feedback for the online learner and requires the named graph. Do not conflate it with `NmgStore.recordFeedback` or with `recordClaimOutcomes`.
+- `evals/omnimemeval/bridge.ts` has an evaluation-only external-judge path. It drops candidates known not to be strictly older than the incoming event (unknown candidate or incoming times remain eligible), keeps only strong `transition`/`polarity` priorities, caps the judge set at three, and applies accepted results. This harness behavior does not make the core store call an LLM or establish that product callers use the same judge.
 
-`evals/omnimemeval/judge-provider.ts` — OpenAi 兼容 judge 客户端（DeepSeek 格式：`thinking:{type:enabled}` + `reasoning_effort` 或 `temperature:0`）。**这是评测桥模拟插件时"借评测 LLM"的实现，不是 nmg 的一部分**。
+## Retrieval projection
 
-```ts
-// 评测桥：ingest 时收集 supersedeCandidates → 并行调 judge（复用评测 LLM）→ applySupersession
-const remembered = store.remember({ statement, scope, ... });
-if (judge && remembered.supersedeCandidates?.length) {
-  const cands = remembered.supersedeCandidates
-    .filter((c) => 候选时间早于新语句)   // 旧值必早于新值
-    .slice(0, 3);                        // 保留核心排序，不按 sim 重排
-  const j = await judge.judge({ statement, supersedeCandidates: cands });
-  if (j.supersede && j.supersededMemoryId)
-    store.applySupersession({ newMemoryId: remembered.memory.id, supersededMemoryId: j.supersededMemoryId });
-}
-```
+A superseded result can act as a lexical/vector anchor for its version chain. Unless `includeHistorical` is true, final projection resolves the chain to an active successor, or for `eventTimeTo` queries to the value valid at that time. The resolved target can be materialized by stable ID even when its wording was absent from the original candidate pool. Multiple stale anchors resolving to the same target are deduplicated; its combined score is at least the best anchor's combined score plus `SUPERSEDE_SUCCESSOR_BOOST` (`0.3`), unless its own score is higher.
 
-评测桥的 judge 配置：`NMG_JUDGE_BASE_URL/MODEL/API_KEY` → 回退 `EVAL_*` → `ANSWER_*`（复用评测的 DeepSeek），`NMG_JUDGE_DISABLED=1` 关闭。
+An orphaned stale record is not treated as a current answer. A historical/as-of query can still return the value that was current at that time, including when its later successor falls outside the requested window. `includeHistorical` explicitly bypasses successor substitution.
 
-## 调用方接入（真实插件 / daemon）
+## Source references
 
-nmg 核心不调 LLM。接入方两种方式：
-
-1. **同步回调**（`RememberInput.judgeDuplicates`）：调用方在 remember 时注入 judge 回调（插件在线时用 agent 的 LLM）。
-2. **候选 + 后置应用**（评测桥模式）：remember 返回 `supersedeCandidates`，调用方用任意 LLM（agent / 独立便宜模型 / 评测 LLM）判定后调 `applySupersession`。
-
-**反馈驱动**（0-annotation）：`store.recordFeedback({ supersede })` 在**回答后**应用 supersede——LLM 在反馈内，摄入时不做语义标注。完整设计见
-`docs/design/feedback-loop-design.md`（统一记忆维护反馈通道：nmg 自动 + LLM 主动）。
-
-## 验证
-
-Martin persona 一条（trial6）：Dynamic Update 2/6 → 4/6（含 self-employment 那条），Generalization 0.645 → 0.710，整体 QA 0.811 → 0.835（+0.024，无回退）。96 单测全绿。
+See [`types.ts`](../../src/core/types.ts), [`writes.ts`](../../src/core/store/writes.ts), [`retrieval.ts`](../../src/core/store/retrieval.ts), [`graph-policy.ts`](../../src/core/store/graph-policy.ts), the [Pi remember surface](../../src/integration/agent-surface.ts), the [daemon supersede handler](../../src/cli/service.ts), and the [OmniMemEval judge bridge](../../evals/omnimemeval/bridge.ts). The separate [feedback-loop design](feedback-loop-design.md) owns broader feedback and evidence-source semantics.

@@ -1,0 +1,17 @@
+version: 2
+terms:
+  - term: evidence-driver daemon boundary
+    aliases: [D14 client boundary, 证据驱动 daemon 边界]
+    definition: >-
+      The evidence-driver process boundary in which board-worker, board-deliver and board-judge call a research-store host through round-client instead of opening the Store; it does not establish that plan-driver or live-continuation uses daemon taskRun.
+      证据驱动进程边界：board-worker、board-deliver、board-judge 经 round-client 调用研究 store host，而不自行打开 Store；这不能证明 plan-driver 或 live-continuation 使用了 daemon taskRun。
+    owner: docs/design/task-unit-semantics-obligations/lifecycle-and-integration-prerequisites/host-lifecycle-run-records-and-daemon-clients.md
+    anchor: Host lifecycle, run records and daemon client boundaries
+    status: canonical
+references:
+  - proven obligation
+  - run record
+  - managed board entry
+  - transaction port
+  - product-runtime evidence
+  - research-instrument evidence

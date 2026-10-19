@@ -1,0 +1,58 @@
+version: 2
+namespace: memory.architecture
+terms:
+  - term: memory residence
+    aliases: [记忆驻留]
+    definition: >-
+      The semantic persistence location of a memory, distinguished from its current runtime exposure through the session Active Graph.
+      记忆语义内容的持久化位置，与它通过会话 Active Graph 获得的当前运行时暴露相区分。
+    owner: docs/design/design.md
+    anchor: Definition
+    status: canonical
+  - term: activation
+    aliases: [激活]
+    definition: >-
+      A runtime decision about current use or visibility of a memory; it does not change whether the memory resides in STG or LTG.
+      关于记忆当前是否使用或可见的运行时决策；它不会改变记忆驻留在 STG 还是 LTG。
+    owner: docs/design/design/active-graph-activation-and-consolidation.md
+    anchor: HA activation, MGR reasoning, and typed edge layers
+    status: canonical
+  - term: consolidation
+    aliases: [巩固]
+    definition: >-
+      Evidence-governed promotion of stable semantic structure; it is a separate decision from storing a fact and activating it for current use.
+      由证据治理的稳定语义结构晋升；它与保存事实以及为当前使用激活事实是不同的决策。
+    owner: docs/design/design/active-graph-activation-and-consolidation.md
+    anchor: Edge stability and structural consolidation
+    status: canonical
+  - term: NMG Lite
+    aliases: [Lite 默认界面]
+    definition: >-
+      NMG's default product surface, consisting of the zero-configuration Pi integration and its admitted core path; non-default Lab capabilities remain separately gated.
+      NMG 的默认产品界面，由零配置 Pi 集成及获准的核心路径组成；非默认 Lab 能力仍由独立 gate 控制。
+    owner: docs/design/design.md
+    anchor: "Product boundary: NMG Lite"
+    status: canonical
+  - term: Memory-Graph Reasoner
+    aliases: [MGR, 记忆图推理器]
+    definition: >-
+      A retained numerical Lab prototype for differentiable reasoning over memory graph representations; it is not required by ordinary retrieval.
+      保留的数值型 Lab 原型，用于对记忆图表示执行可微推理；普通检索不依赖它。
+    owner: docs/design/design/memory-graph-reasoner.md
+    anchor: Experimental status
+    status: canonical
+references:
+  - Active Graph
+  - Long-Term Graph
+  - Short-Term Graph
+  - projection revision
+  - Task Board
+  - HistoryRecord
+  - MemoryRecord
+  - MemoryNode
+  - QPP
+  - memory chain
+  - learnable controller
+  - Lab
+  - state space
+  - working state

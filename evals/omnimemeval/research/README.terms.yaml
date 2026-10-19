@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: research utility
+    aliases: [evidence tool, 研究工具]
+    definition: >-
+      A diagnostic or hypothesis-testing file under `research/` that does not define the public benchmark execution path, official prompts or NMG runtime defaults: audits inspect completed artifacts, probes are bounded mechanism checks, ablations are paired counterfactual arms that must not silently become product policy, and polarity files hold offline extraction and normalisation experiments; only maintained audit and ablation entry points are exposed through `package.json`.
+      `research/` 下的诊断或假设检验文件，不定义公开 benchmark 执行路径、官方 prompt 或 NMG 运行时默认值：审计检视已完成工件，探针是有界机制检查，消融是不得静默变成产品策略的配对反事实臂，极性文件是离线抽取与规范化实验；只有受维护的审计与消融入口通过 `package.json` 暴露。
+    owner: evals/omnimemeval/research/README.md
+    anchor: OmniMemEval research utilities
+    status: canonical
+  - term: prefix-cache fake API
+    aliases: [fake-cache-api.ts, 前缀缓存假 API]
+    definition: >-
+      An independent OpenAI-compatible test endpoint that returns a fixed compatible completion without calling NMG, a tokenizer or a model, and that for each real UTF-8 request body computes chained SHA-256 checkpoints at fixed byte boundaries retaining only `(cumulative length, hash, arrival time)`; matching hashes are compared only at equal lengths so the last match estimates the longest common byte prefix with an error smaller than one block, prompt text is discarded after hashing, and the measurement is serialised byte-prefix potential rather than provider token-cache semantics.
+      独立的 OpenAI 兼容测试端点：返回固定的兼容完成而不调用 NMG、tokenizer 或模型；对每个真实 UTF-8 请求体在固定字节边界上计算链式 SHA-256 检查点，只保留 `(cumulative length, hash, arrival time)`；匹配哈希只在长度相等时比较，因此最后一次匹配估计最长公共字节前缀、误差小于一个块；prompt 文本在哈希后丢弃；该测量是序列化字节前缀潜力，而不是 provider 的 token 缓存语义。
+    owner: evals/omnimemeval/research/README.md
+    anchor: Prefix-cache fake API
+    status: canonical
+  - term: cache cost profile
+    aliases: [local/normal-cloud/slow-cache, 缓存成本画像]
+    definition: >-
+      One of the built-in `local`, `normal-cloud` and `slow-cache` profiles that estimate queue, network, cache-build and expiry costs for the fake endpoint, selected with `?profile=` on the report route, over a default 512-byte block that `CACHE_PREFIX_BLOCK_BYTES` can change.
+      假端点内置的 `local`、`normal-cloud` 与 `slow-cache` 画像之一，用于估计队列、网络、缓存构建与过期成本，经报告路由的 `?profile=` 选择，默认块为 512 字节，可用 `CACHE_PREFIX_BLOCK_BYTES` 更改。
+    owner: evals/omnimemeval/research/README.md
+    anchor: Prefix-cache fake API
+    status: canonical
+references: []

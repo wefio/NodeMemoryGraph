@@ -1,6 +1,6 @@
 # 每个 embedding 只持久化一份向量
 
-[English](2026-10-07-single-vector-payload.md)
+[English](2026-10-07-single-vector-payload.md) · [术语](2026-10-07-single-vector-payload.terms.yaml)
 
 **Status:** implemented
 **Approved:** auto

@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: zero-config lexical arm
+    aliases: [零配置词法臂, 词法臂]
+    definition: >-
+      The retrieval arm that runs SQLite FTS5 alone, with no embedding endpoint, so a run stays fully offline and deterministic; its measurements are a configuration-specific baseline, not a proved performance bound or a hybrid result.
+      仅运行 SQLite FTS5、不接任何 embedding 端点的检索臂，因此运行完全离线且确定性；其数值是该配置的基线，不是经过证明的性能界限或混合臂结果。
+    owner: docs/experiments/retrieval-quality/baseline-2026-08-16.md
+    anchor: Overall
+    status: canonical
+  - term: sample stratification
+    aliases: [样本分层, 未分层样本]
+    definition: >-
+      Sampling through explicit subgroups and their allocation rules. In this report, the first-100 subset contains only two question types, so its unadjusted aggregate is not directly comparable with the six-type full-500 aggregate; merely covering all types would not itself prove representativeness.
+      按明确子群及分配规则进行抽样。本报告的前 100 题仅含两类问题，其未经调整的总体指标不能直接与包含六类的完整 500 题总体指标比较；仅覆盖所有类别也不等于证明样本具有代表性。
+    owner: docs/experiments/retrieval-quality/baseline-2026-08-16.md
+    anchor: Sample caveats
+    status: canonical
+  - term: verbatim gold matching
+    aliases: [逐字 gold 匹配, 严格 gold 匹配]
+    definition: >-
+      Scoring a hit only when the retrieved evidence matches the gold evidence exactly; it measures pool entry and ordering under a strict condition and does not stand for answer quality.
+      仅当检索到的证据与 gold 证据逐字一致时才计为命中；它在严格条件下衡量候选池进入与排序，不代表回答质量。
+    owner: docs/experiments/retrieval-quality/baseline-2026-08-16.md
+    anchor: Reading
+    status: canonical

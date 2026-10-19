@@ -1,0 +1,34 @@
+version: 2
+namespace: memory.runtime
+terms:
+  - term: Active Graph
+    aliases: [AG, 活动图]
+    definition: >-
+      A bounded session/task runtime graph that can contain memory references and temporary
+      observations and produces frozen retrieval projections; it is not identical to one projection.
+      会话或任务的有界运行时工作图，可包含记忆引用与临时观察并生成冻结检索投影，不等于单次投影。
+    owner: docs/design/memory-graphs/session-runtime-graph-and-projection-revisions.md
+    anchor: "AG: session runtime graph and projection revisions"
+    status: canonical
+  - term: Long-Term Graph
+    aliases: [LTG, 长期记忆图]
+    definition: >-
+      The shared persistent memory graph for durable claims and consolidated structure.
+      保存持久声明与归并结构的共享持久记忆图。
+    owner: docs/design/memory-graphs.md
+    anchor: "LTG: durable memory"
+    status: canonical
+  - term: Short-Term Graph
+    aliases: [STG, 短期记忆图]
+    definition: >-
+      Provisional or current-task semantic memory private to its owning session, distinct from index Delta
+      and from shared cached LTG hints in the same project file.
+      所属会话私有的暂定或当前任务语义记忆，区别于索引 Delta 和同一项目文件中的共享 LTG 缓存提示。
+    owner: docs/design/memory-graphs.md
+    anchor: "STG: provisional memory"
+    status: canonical
+references:
+  - projection revision
+  - task frame
+  - Task Board
+  - state space

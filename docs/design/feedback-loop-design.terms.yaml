@@ -1,0 +1,45 @@
+version: 2
+terms:
+  - term: disclosure
+    aliases: [recall disclosure, 召回披露]
+    definition: >-
+      A record of the memory IDs actually exposed by a recall/render path; exposure alone does not prove that an answer used or was supported by them.
+      记录召回／渲染路径实际暴露的 memory ID；仅有暴露不能证明回答使用或得到这些记忆支持。
+    owner: docs/design/feedback-loop-design.md
+    anchor: Four distinct signals
+    status: canonical
+  - term: answer_overlap
+    aliases: [answer-text overlap, 回答文本重叠]
+    definition: >-
+      A textual-overlap diagnostic between an answer and surfaced memory text; it is not causal attribution, truth evidence, or a training label.
+      回答与已展示记忆文本之间的表面重叠诊断；它不是因果归因、真实性证据或训练标签。
+    owner: docs/design/feedback-loop-design.md
+    anchor: Four distinct signals
+    status: canonical
+  - term: access signal
+    aliases: [attributedMemoryIds, 访问信号]
+    definition: >-
+      A caller-provided indication that named memories were accessed or attributed for usage accounting; it does not establish causal model reliance.
+      调用方提供的、用于使用量统计的记忆访问或归因信号；它不能证明模型存在因果依赖。
+    owner: docs/design/feedback-loop-design.md
+    anchor: "`NmgStore.recordFeedback(RecordFeedbackInput)` — write-path maintenance"
+    status: canonical
+  - term: collection origin
+    aliases: [collectionOrigin, 采集来源]
+    definition: >-
+      The classification of claim-outcome evidence as natural, controlled, or legacy, kept distinct so controlled probes and benchmarks are not reported as natural product evidence.
+      将 claim outcome 证据分类为 natural、controlled 或 legacy，避免把受控探针与 benchmark 报告为自然产品证据。
+    owner: docs/design/feedback-loop-design.md
+    anchor: "`recordClaimOutcomes` — attributable claim evidence"
+    status: canonical
+  - term: claim outcome
+    aliases: [声明结果, claim_outcome]
+    definition: >-
+      An attributable explicit result that supports or contradicts a saved claim; retrieval, reuse, completion alone, silence or lack of correction does not establish one.
+      对已保存声明提供支持或反驳的、可归因的明确结果；检索、复用、单独的任务完成、沉默或没有纠正都不能确立该结果。
+    owner: skills/nmg-memory/references/writes.md
+    anchor: Claim outcomes and STG consolidation evidence
+    status: canonical
+references:
+  - recall trigger
+  - Active Graph

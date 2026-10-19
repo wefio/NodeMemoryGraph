@@ -1,0 +1,44 @@
+version: 2
+terms:
+  - term: shared-output surface cell
+    aliases: [paired search/get cell, 共享输出表面单元]
+    definition: >-
+      One fixture/surface pair in this historical baseline/candidate comparison. Twelve fixture types each have search and get surfaces, giving 24 paired cells; 22 ordinary cells and two reconstructed folded-only cells are not 24 independent tasks or a count of the two arms. Each preserves its listed protected information.
+      本历史基线／候选比较中的一个 fixture／表面组合。十二种 fixture 各有 search 与 get 表面，共 24 个配对单元；22 个普通单元和两个重建的仅 folded 单元不是 24 个独立任务，也不是两臂数量。每个单元保留所列受保护信息。
+    owner: docs/experiments/retrieval-quality/shared-output-2026-10-10.md
+    anchor: Fixed cells
+    status: canonical
+  - term: unwrapped body identity
+    aliases: [identical projections, 未包装正文同一性]
+    definition: >-
+      This historical comparison's condition that projections and unwrapped bodies remain identical, ordinary nonempty non-folded wrapped outputs shrink, and empty/folded-only outputs do not grow. Identity of data bodies does not establish unchanged model interpretation of shorter explanatory copy.
+      本历史比较的条件：projection 与未包装正文保持相同，普通非空、非 folded 的包装输出变短，空／仅 folded 的输出不增长。数据正文相同不证明模型对更短说明文案的解释不变。
+    owner: docs/experiments/retrieval-quality/shared-output-2026-10-10.md
+    anchor: Measures and stopping rule
+    status: canonical
+  - term: UTF-16 unit measurement
+    aliases: [character count is not tokens, UTF-16 单元测量]
+    definition: >-
+      The study's UTF-16 code-unit and UTF-8 byte counts, separating body from wrapping. They do not measure provider tokens, billing, cache hits, compact frequency or natural garbage rate; later named-encoding work does not retroactively convert these character counts into model-matched token measurements.
+      研究中的 UTF-16 码单元与 UTF-8 字节计数，区分正文与包装。它们不测量 provider token、计费、cache 命中、compact 触发频率或自然垃圾率；后来的具名编码研究不会追溯地把这些字符计数变成与模型匹配的 token 测量。
+    owner: docs/experiments/retrieval-quality/shared-output-2026-10-10.md
+    anchor: Measures and stopping rule
+    status: canonical
+  - term: reconstructed folded-only envelope
+    aliases: [two remaining cells, 重建的仅 folded envelope]
+    definition: >-
+      The reported two folded-only surface cells reconstructed outside the ordinary public-formatter path, compared with 22 ordinary surface cells. Formatter parity remains a synthetic surface comparison; neither those two cells nor the ordinary ones establish final model-input or cache behavior.
+      报告中在普通公开 formatter 路径之外重建的两个仅 folded 表面单元，与 22 个普通表面单元对比。Formatter 一致性仍是合成表面对比；这两个或其余普通单元都不证明最终模型输入或 cache 行为。
+    owner: docs/experiments/retrieval-quality/shared-output-2026-10-10.md
+    anchor: Results
+    status: canonical
+  - term: dirty precommit verification
+    aliases: [eight-path precommit run, 脏工作树 precommit 验证]
+    definition: >-
+      The historical eight-path dirty-worktree observation with reported exit 0/null signal and reused junction dependencies. It is not a clean-revision receipt; a separately collected clean run needs its own source-bound evidence, and none of these older observations verifies the current documentation edits.
+      历史八路径脏工作树观察，报告 exit 0／signal null 并复用 junction 依赖。它不是干净修订回执；另行采集的干净运行需要自己的来源绑定证据，这些旧观察均不验证当前文档改动。
+    owner: docs/experiments/retrieval-quality/shared-output-2026-10-10.md
+    anchor: Results
+    status: canonical
+references:
+  - shared disclosure copy

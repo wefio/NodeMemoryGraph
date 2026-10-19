@@ -1,6 +1,6 @@
 # 程序只回答合法性，别的都不管
 
-[English](2026-09-20-the-program-answers-legality.md)
+[English](2026-09-20-the-program-answers-legality.md) · [术语](2026-09-20-the-program-answers-legality.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

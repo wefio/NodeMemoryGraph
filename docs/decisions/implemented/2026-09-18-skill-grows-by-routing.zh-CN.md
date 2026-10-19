@@ -10,7 +10,7 @@
 治理 meta-rule：[self-governance meta-rule](2026-09-07-self-governance-meta-rule.md) ——
 本变更改动了 Skill 的结构约定，因此自带决策与替代方案。
 
-English version: [2026-09-18-skill-grows-by-routing.md](2026-09-18-skill-grows-by-routing.md)
+English version: [2026-09-18-skill-grows-by-routing.md](2026-09-18-skill-grows-by-routing.md) · [术语](2026-09-18-skill-grows-by-routing.terms.yaml)
 
 ## 问题
 

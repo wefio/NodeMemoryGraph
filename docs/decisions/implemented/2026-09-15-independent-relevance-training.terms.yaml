@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: independent relevance data
+    aliases: [independently verified relevance data, 独立相关性数据]
+    definition: >-
+      Attributable external or independently verified relevance labels with explicit train, calibration and test roles; unknown judgements are excluded rather than converted to negatives.
+      可归因的外部或独立验证的相关性标签，具有明确的训练、校准和测试角色；未知判断会被排除，而不是转换为负例。
+    owner: docs/decisions/implemented/2026-09-15-independent-relevance-training.md
+    anchor: Decision
+    status: canonical
+references:
+  - evidence
+  - natural evidence

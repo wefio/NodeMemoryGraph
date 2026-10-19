@@ -1,0 +1,31 @@
+version: 2
+terms:
+  - term: candidate recall versus ranking recall
+    aliases: [候选召回与排序召回]
+    definition: >-
+      The report separation that is essential to controller evaluation: a controller cannot recover an evidence item that candidate generation never returned, so candidate recall is reported apart from the ranking recall of the same held-out candidates and Top-N budget.
+      控制器评测中本质性的报告区分：候选生成从未返回的证据项控制器无法找回，因此候选召回与同一批留出候选、同一 Top-N 预算上的排序召回分开报告。
+    owner: evals/controller/README.md
+    anchor: Differentiable controller evaluation
+    status: canonical
+  - term: dual controller and retrieval gates
+    aliases: [控制器与检索双闸门]
+    definition: >-
+      Two independent gates: `controllerGate` checks labelled training volume, held-out recall and precision non-degradation plus bounded inference cost, while `retrievalGate` checks whether upstream candidate recall is at least 0.8. A passed controller gate permits shadow evaluation even when candidate generation is still weak, but Active/default Pi eligibility requires both; the runner reports these states without ever changing the Pi extension configuration.
+      两个独立闸门：`controllerGate` 检查带标注训练量、留出召回的精确率不退化与有界推理成本；`retrievalGate` 检查上游候选召回是否至少 0.8。通过 controller gate 即使候选生成仍弱也允许 shadow 评测，但 Active/默认 Pi 资格要求两者都通过；runner 报告这些状态，从不改动 Pi 扩展配置。
+    owner: evals/controller/README.md
+    anchor: Differentiable controller evaluation
+    status: canonical
+  - term: reproducible-result requirement
+    aliases: [结果可复现要求]
+    definition: >-
+      New controller results must come from the current runner, retain their `sampleFingerprint`, use official benchmark evidence IDs, report the candidate and controller gates separately, and include repeated trials for stochastic reader models; historical ad-hoc runs with changing samples, prompts and corpus-rebuild policies were removed as non-reproducible capability evidence, and raw results stay in ignored local directories.
+      新的控制器结果必须来自当前 runner、保留其 `sampleFingerprint`、使用官方 benchmark 证据 ID、分别报告候选闸门与控制器闸门，并为随机 reader 模型包含重复试验；样本/提示词/语料重建策略变化的临时历史运行已作为不可复现的能力证据移除，原始结果留在被忽略的本地目录。
+    owner: evals/controller/README.md
+    anchor: Result policy
+    status: canonical
+references:
+  - learnable controller
+  - promotion gate
+  - evidence
+  - gate

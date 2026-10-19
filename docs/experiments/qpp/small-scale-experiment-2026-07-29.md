@@ -1,101 +1,74 @@
-# QPP 小规模配对实验（2026-07-29）
+# QPP small paired experiment (2026-07-29)
 
-## 目的
+[English](small-scale-experiment-2026-07-29.md) | [简体中文](small-scale-experiment-2026-07-29.zh-CN.md) · [Terms](small-scale-experiment-2026-07-29.terms.yaml)
 
-验证当前 Stage 0 的池内重选是否能在不进行第二次 ANN 检索的情况下，补回被正常
-`topK` / token 预算截断的多会话证据。
+> **Status:** Historical directional study on ten consecutive LongMemEval-S multi-session cases (original indices 70–79). It is not a full benchmark, its manually checked answer result was not scored by the official judge, and no rerun was performed for this documentation update. The experiment's `NMG_QPP_SECOND_PASS` switch is historical; current caller defaults are documented in the [QPP design](../../design/retrieval-confidence-controller.md).
 
-这不是完整 benchmark。实验只使用 LongMemEval-S 中连续的 10 条
-`multi-session` 样本（原始索引 70–79），避免为了方向判断运行全量评测。
+## Objective
 
-## 对照设置
+Test whether same-pool re-selection could recover multi-session evidence truncated by the normal `topK`/token budget without a second ANN search.
 
-两组使用相同的数据、BGE embedding、检索候选池和 `topK=20`：
+## Compared setups
 
-- Normal：`NMG_QPP_SECOND_PASS=0`
-- Adaptive：`NMG_QPP_SECOND_PASS=1`
+Both groups used the same data, BGE embeddings, candidate pool, and `topK=20`:
 
-Adaptive 只从首次检索已经产生的同一候选池中按扩展预算重新选择，不重新计算
-embedding，也不进行第二次 ANN 搜索。
+- Normal: `NMG_QPP_SECOND_PASS=0`
+- Adaptive: `NMG_QPP_SECOND_PASS=1`
 
-回答阶段两组各调用 10 次相同的官方 LongMemEval answer prompt，使用
-`deepseek-chat`（当前 DeepSeek v4-flash），temperature 设定由官方流水线保持一致。
-未运行额外的 LLM judge。
+Adaptive re-selected from the candidate pool produced by the first retrieval under an expanded budget. It did not recompute embeddings or run a second ANN search.
 
-## 检索结果
+For the answer step, each group made ten calls using the same official LongMemEval answer prompt and `deepseek-chat` (then identified as DeepSeek v4-flash), with the official pipeline's temperature setting. No additional LLM judge was run.
 
-| 指标 | Normal | Adaptive | 变化 |
-|---|---:|---:|---:|
-| 严格证据命中 | 22 / 32 | 27 / 32 | +5 |
+## Retrieval results
+
+| Metric | Normal | Adaptive | Change |
+| --- | ---: | ---: | ---: |
+| Strict evidence hits | 22 / 32 | 27 / 32 | +5 |
 | Evidence recall | 68.75% | 84.38% | +15.63 pp |
-| 至少命中一条证据的问题 | 9 / 10 | 9 / 10 | 0 |
-| 命中全部证据的问题 | 5 / 10 | 8 / 10 | +3 |
-| 平均上下文字符数 | 3,470 | 7,421 | 2.14× |
-| 平均搜索延迟 | 3,789 ms | 3,782 ms | -7 ms |
+| Questions with at least one evidence hit | 9 / 10 | 9 / 10 | 0 |
+| Questions with all evidence hit | 5 / 10 | 8 / 10 | +3 |
+| Mean context characters | 3,470 | 7,421 | 2.14× |
+| Mean search latency | 3,789 ms | 3,782 ms | -7 ms |
 
-逐题配对结果：
+Paired outcomes: four questions gained evidence hits; five remained complete; one had no evidence in either group; none regressed in evidence recall.
 
-- 4 题增加证据命中；
-- 5 题保持全部证据命中；
-- 1 题两组都没有命中证据；
-- 0 题发生证据召回退化。
+The latency difference is smaller than the measurement noise expected from this sample and does not support a performance claim. The observed cost was larger reader context, not the local pool re-selection itself.
 
-延迟差异小于本次小样本的测量噪声，不能据此主张性能提升。当前可确认的代价主要是
-交给 reader 的上下文增长，而不是池内重选本身。
+## Answer results
 
-## 回答结果
+Manual comparison against the reference answers found approximately 8/10 correct for Normal and 9/10 for Adaptive. The clearest improvement was a bicycle-expense question: Normal lacked the helmet record and answered `$65`; Adaptive recovered that evidence and answered the reference `$185`.
 
-人工按金标准逐题核验：
+Two counterexamples bound the claim:
 
-- Normal：约 8 / 10；
-- Adaptive：约 9 / 10。
+1. A project-count question lacked its evidence in both groups and remained wrong; re-selection cannot recover candidates that were never in the pool.
+2. A clothing-count answer remained wrong even though Adaptive retrieved one more evidence item; retrieval coverage does not replace reader aggregation or counting.
 
-明确改善的样本是自行车支出：Normal 因缺少头盔记录回答 `$65`，Adaptive 补回该
-证据后回答金标准 `$185`。
+Because answer accuracy was not evaluated by the official LLM judge, these answers are directional diagnostics, not comparable LongMemEval scores.
 
-两个重要反例：
+## Conclusions
 
-1. 项目数量问题在两组中都缺证据并回答错误，池内扩展无法找回候选池之外的内容。
-2. 服装数量问题虽然多命中一条证据，最终答案仍错误，表明召回覆盖只解决 retrieval
-   侧问题，不能替代 reader 的聚合与计数能力。
+The experiment reported a limited capability: when correct evidence was already in the over-sampled pool but hidden by the normal display budget, re-selection could improve evidence recall with little local computation.
 
-回答准确率没有经过官方 LLM judge，因此只能作为方向性诊断，不能作为可对外比较的
-LongMemEval 分数。
+It also showed the cost of unconditional expansion: mean context grew by 2.14×, all ten contexts grew, and one case increased from 2,928 to 16,534 characters. Some additional evidence did not improve the answer. The report therefore recommended improving trigger selectivity before expanding more.
 
-## 结论
+## Engineering review recorded at the time
 
-当前 Stage 0 已证明一个有限但真实的能力：
+1. The then-used OmniMemEval bridge did not enable `secondPass`; earlier benchmark results therefore did not exercise this feature. The report added `NMG_QPP_SECOND_PASS=1` as an explicit opt-in, with the default still off at that time.
+2. Stage 0 was same-pool re-selection, not a second retrieval.
+3. `expandActiveGraphBudget()` increased `maxGraphHops`, but relation expansion had already run before the budget increase and was not rerun; the experiment did not actually gain extra graph hops.
+4. Benchmark memories were all stored as `conversation_evidence`, so `intentCoverage` was nearly constant and could not distinguish triggers on those data.
+5. “The first selection was truncated” was too common to be a selective trigger and made Adaptive behave like unconditional expansion.
 
-> 当正确证据已进入过采样候选池、但被正常显示预算截断时，池内重选可以用很小的
-> 本地计算成本提高多证据召回，并可能改善最终答案。
+These are findings about the code and experiment at that time; current implementation boundaries and caller defaults are in the [QPP design](../../design/retrieval-confidence-controller.md).
 
-实验同时否定了“无条件扩大越多越好”：
+## Historical next experiment proposal
 
-- 平均上下文增长到 2.14 倍；
-- 10 / 10 查询的上下文都扩大；
-- 单个样本从 2,928 字符膨胀到 16,534 字符；
-- 部分额外证据没有转化为答案收益。
+The original note proposed, without adding LLM or embedding calls:
 
-因此下一步应优先提高触发选择性，而不是继续扩大预算。
+1. Separate `evidence-truncated` from `token-truncated` and measure which kind tracks recall gains.
+2. Compare marginal scores, redundancy, and diversity of newly added evidence.
+3. Replay expansion multipliers of `1.25×`, `1.5×`, and `2×` rather than using one fixed multiplier.
+4. Record trigger decisions as a shadow policy before changing visible context.
+5. Run another 10–20 paired model cases only if offline results show selective triggering.
 
-## 工程审查发现
-
-1. OmniMemEval bridge 过去没有启用 `secondPass`，旧 benchmark 结果没有测试该功能。
-   现在可以通过 `NMG_QPP_SECOND_PASS=1` 显式启用，默认仍关闭，便于严格配对。
-2. 当前 Stage 0 是同池重选，不是真正的二次检索。
-3. `expandActiveGraphBudget()` 虽然增加 `maxGraphHops`，但当前关系扩展发生在预算升档
-   之前，升档后没有重新计算关系；因此它目前不会真正增加图跳数。
-4. benchmark 记忆统一写成 `conversation_evidence`，`intentCoverage` 在这些数据上接近
-   常数，不能承担有效的触发区分。
-5. “首次选择发生截断”在大型记忆库中太常见，目前会使 Adaptive 近似无条件扩展。
-
-## 下一步最小实验
-
-在不增加 LLM 或 embedding 调用的前提下，可基于现有检索 artifact 和 trace 继续：
-
-1. 分离 `evidence-truncated` 与 `token-truncated`，统计哪种截断真正对应召回增益；
-2. 比较扩展前后的边际分数、冗余度和新增证据多样性；
-3. 将扩展倍率从固定 2× 改为 1.25× / 1.5× / 2× 离线回放；
-4. 先把触发器作为 shadow policy 记录决策，不影响正式上下文；
-5. 只有离线证据显示选择性成立后，再做下一批 10–20 条配对模型实验。
-
+This is a historical proposal, not a current implementation plan.

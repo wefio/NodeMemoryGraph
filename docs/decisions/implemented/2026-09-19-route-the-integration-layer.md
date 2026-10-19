@@ -1,6 +1,6 @@
 # The integration layer gets routes, so editing it runs checks
 
-[中文](2026-09-19-route-the-integration-layer.zh-CN.md)
+[中文](2026-09-19-route-the-integration-layer.zh-CN.md) · [Terms used](2026-09-19-route-the-integration-layer.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

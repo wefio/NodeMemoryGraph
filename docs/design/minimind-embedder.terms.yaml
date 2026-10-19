@@ -1,0 +1,30 @@
+version: 2
+terms:
+  - term: MiniMind-NMG encoder prototype
+    aliases: [MiniMind 专用编码器原型, 专用向量模型原型]
+    definition: >-
+      An unadopted, deleted historical proposal for a small bidirectional encoder trained for NMG; it is not part of the current runtime or roadmap.
+      为 NMG 训练小型双向编码器的未采用且已删除的历史提案；它不属于当前运行时或路线图。
+    owner: docs/design/minimind-embedder.md
+    anchor: Core judgment and design principles
+    status: canonical
+  - term: graph-space adapter
+    aliases: [DifferentiableAdapter, 图空间适配层]
+    definition: >-
+      The proposed trainable projection from the prototype encoder's 256-dimensional output to a 128-dimensional graph vector; no current MiniMind adapter is shipped.
+      原型中将编码器 256 维输出投影为 128 维图向量的拟议可训练层；当前没有随产品发布的 MiniMind adapter。
+    owner: docs/design/minimind-embedder.md
+    anchor: Three-layer overview
+    status: canonical
+  - term: benchmark leakage
+    aliases: [benchmark exposure, 基准集泄漏]
+    definition: >-
+      Using benchmark examples or results during model training or selection in a way that contaminates an evaluation intended to remain held out.
+      在模型训练或选择中使用 benchmark 示例或结果，从而污染原本应保持隔离的评估。
+    owner: docs/design/minimind-embedder.md
+    anchor: Training strategy
+    status: canonical
+references:
+  - VectorEmbedder
+  - hierarchical activation
+  - Memory-Graph Reasoner

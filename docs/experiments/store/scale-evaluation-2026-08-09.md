@@ -1,5 +1,12 @@
 # NMG lexical scale evaluation — 2026-08-09
 
+[English](scale-evaluation-2026-08-09.md) | [简体中文](scale-evaluation-2026-08-09.zh-CN.md) · [Terms](scale-evaluation-2026-08-09.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a historical
+record. Its configurations, measured results and implementation-status statements
+are not current test receipts or default-policy authorization. This review did
+not rerun the experiment or independently revalidate the original run artifacts.
+
 This is a synthetic storage/retrieval engineering check, not an answer-quality
 benchmark. It used `evals/scale/run.ts`, disabled every external embedding
 provider, and measured eight fixed probes among generated unrelated records.
@@ -42,6 +49,6 @@ answer logic was used.
 sessions through one `NmgService` and its single synchronous SQLite writer, then
 ran one scoped FTS lookup per session. It completed with zero write/search
 failures in 1.11 s (about 720 writes/s). Observed write latency was 38.3 ms P50,
-52.9 ms P95, 117.5 ms P99, and 133.8 ms maximum. This verifies correctness and
-bounded behavior for modest local concurrency; it is not a multi-process load
-claim and does not justify a distributed writer.
+52.9 ms P95, 117.5 ms P99, and 133.8 ms maximum. This records zero failures and the listed sample latencies for that 800-write
+probe; a sampled maximum is not a guaranteed latency bound. It is not a
+multi-process load claim and does not justify a distributed writer.

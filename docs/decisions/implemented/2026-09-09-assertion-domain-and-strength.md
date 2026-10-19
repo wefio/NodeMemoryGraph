@@ -1,9 +1,10 @@
 # An assertion records its domain, its assumptions, and its evidence strength
 
-[中文](2026-09-09-assertion-domain-and-strength.zh-CN.md)
+[中文](2026-09-09-assertion-domain-and-strength.zh-CN.md) · [Terms used](2026-09-09-assertion-domain-and-strength.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit
+**Relates to:** [The traceability report is evidence, not a count](2026-09-20-rtm-evidence-aggregation.md)
 
 ## Problem
 
@@ -47,8 +48,8 @@ statement, an owner, and how the assumption would be falsified.
 
 - fails when an assertion that is not `documented-only` omits `domain`;
 - fails when an `assumes` id is absent from the register;
-- reports `bound` and `proven` separately with the strength breakdown, e.g.
-  `12 bound (0 proven / decision, 12 witness), 1 documented-only`;
+- reports `bound` checks with the separate `decision` / `witness` strength
+  breakdown, e.g. `12 bound checks (0 decision / 12 witness), 1 documented-only`;
 - keeps `documented-only` assertions out of the bound count, as today.
 
 `strength` defaults to `witness` when absent, so the report can never overstate while
@@ -80,9 +81,10 @@ the backfill is incomplete.
 - the strength breakdown in the output equals the counts in the contracts;
 - all 13 existing assertions carry a `domain` and an explicit `assumes` (possibly
   `[]`);
-- `proven` counts only assertions whose evidence is a decision procedure. **Today that
-  count is 0** — the two decision procedures in the code are not bound to any
-  assertion — and the report says so rather than leaving it implied.
+- The `decision` strength count includes only assertions whose evidence is a
+  decision procedure. **At the time of this record that count was 0** — the two
+  decision procedures in the code were not bound to any assertion. Current report
+  standings are owned by [the RTM aggregation decision](2026-09-20-rtm-evidence-aggregation.md).
 
 ## Consequences
 
@@ -90,11 +92,10 @@ the backfill is incomplete.
   the first two, so every contract that compiles states what its evidence covers and
   what it rests on.
 - All 13 authored assertions carry a `domain` and an explicit `assumes`.
-- `tools/rtm-check.ts` reports `12 bound (0 proven / decision, 12 witness), 1
-documented-only` and resolves `assumes` against `docs/design/assumptions.yaml`
-  (5 entries).
-- `proven` is 0: neither decision procedure in the code is bound to an assertion. The
-  gap is now visible instead of implied.
+- At the time of this record, `tools/rtm-check.ts` reported `12 bound checks (0
+  decision / 12 witness), 1 documented-only` and resolved `assumes` against
+  `docs/design/assumptions.yaml` (5 entries). The zero decision-strength count
+  made the unbound procedures visible rather than implied.
 - Cost: two new failure modes on a shared contract, and a `domain` that goes stale is
   detected by nothing.
 

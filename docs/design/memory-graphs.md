@@ -1,35 +1,47 @@
 # Memory Graphs: STG / LTG / AG
 
+[中文](memory-graphs.zh-CN.md) · [Terms used](memory-graphs.terms.yaml)
+
 **Status:** current
+**Updated:** 2026-10-16
+**Related:** [Design baseline](design.md), [STG shared store](stg-shared-store-v2-2026-08-12.md), [Session AG runtime](session-active-graph-runtime-design.md), [Tiered disclosure](tiered-disclosure-design.md), [Edge activation](edge-activation-design.md)
 
-Implementation note: isolated STG is wired through the core, daemon, CLI, and
-Pi adapter. One physical STG database is stored per `projectDir`; records and
-derived retrieval paths are isolated by `sessionId` rows. Pi propagates its
-native session identity through automatic recall and the memory tools.
-**Updated:** 2026-08-29
-**Related:** [design.md](design.md) §1/§5/§6/§7.1, [tiered-disclosure-design.md](tiered-disclosure-design.md), [edge-activation-design.md](edge-activation-design.md)
+Use this lifecycle reference to distinguish provisional memory, durable truth and
+session working context. Implementation owners separate existing mechanisms from
+targets; a consolidation proposal is not a shipped default.
 
-This document is the standalone reference for NMG's three-graph model:
-the Short-Term Graph (STG), the Long-Term Graph (LTG), and the Active Graph
-(AG). It reorganizes the material that lives across design.md §1, §5, §6,
-§7.1, and §8, adds the theoretical lineage (which classical and modern memory
-theories the model corresponds to), and records the current implementation
-state.
+## Read by task
 
-## 1. The three graphs
+| Question | Entry |
+| --- | --- |
+| What is private, durable or currently visible? | [The three graphs](#the-three-graphs) |
+| Where does a new candidate belong? | [STG](#stg-provisional-memory) |
+| Which structure may become durable? | [LTG](#ltg-durable-memory) and [promotion](#promotion-and-demotion) |
+| What is the difference between AG and a retrieval result? | [AG and projection revisions](memory-graphs/session-runtime-graph-and-projection-revisions.md) |
+| What is implemented or still deferred? | [Implementation state](#implementation-state) and its owning contracts |
 
-| Graph   | Ownership                    | Content                                                                                                                               | Lifetime                             |
-| ------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| **STG** | private to one Agent session | new, provisional, task-local, or not-yet-consolidated semantic information                                                            | session; expiry is a policy decision |
-| **LTG** | the only shared graph        | durable atomic memories and consolidated semantic structure                                                                           | persistent                           |
-| **AG**  | private to one Agent session | mutable, budget-constrained runtime graph over STG/LTG references, task frames, tool observations, activation and temporary reasoning | session; memory-resident only        |
+## The three graphs
 
-AG is **not** a third authoritative or shared memory graph. It is the private
-working graph owned by one model session and must remain in memory. Agents never
-write a shared AG or STG. Durable collaboration occurs through admitted LTG
-memories; temporary coordination occurs through a separate Task Board whose
-entries are projected into each caller's private AG. Immutable
-`ProjectionRevision` snapshots record each concrete model-visible surface.
+| Graph | Semantic ownership | Content | Lifetime |
+| --- | --- | --- | --- |
+| **STG** | Private provisional content for one Agent session | New, task-local or not-yet-consolidated information | Session; expiry is policy, not a requirement for RAM-only storage. |
+| **LTG** | Shared authoritative semantic memory | Durable atoms and consolidated structure | Persistent. |
+| **AG** | One Agent session; non-authoritative | Mutable, budget-constrained STG/LTG references, frames, observations, activation and temporary reasoning | Live graph is memory-resident and released with the session. |
+
+AG is not a third shared or authoritative semantic store. Agents do not publish
+private AG/STG content by merely activating or retrieving it. Durable sharing
+requires admitted LTG writes; temporary coordination uses the separate Task Board,
+whose views enter each caller's private AG. Frozen projection revisions identify
+particular retrieval/disclosure surfaces; they are not the mutable AG itself.
+
+The current STG storage implementation uses one SQLite file per `projectDir`,
+`<project>/.nmg/stg.sqlite`. Provisional rows carry the owning `sessionId`;
+`cached_from_ltg` rows with a null session are shared project hints, not another
+shared truth source. This physical sharing does not make provisional memories
+cross-session visible. [The shared-store owner](stg-shared-store-v2-2026-08-12.md)
+and `src/core/stg.ts` / `src/cli/service.ts` own that boundary.
+
+The following is the lifecycle model, not an inventory proving all integrations:
 
 ```text
 HistoryRecord
@@ -70,501 +82,116 @@ Task Board (shared coordination, not a memory graph)
   - never enters LTG search; each caller receives a private AG projection
 ```
 
-Residence (STG vs LTG) describes persistence; AG describes current
-visibility; activation describes current use; stability determines whether
-provisional structure should be consolidated. **Residence, activation, and
-consolidation are different decisions** (design.md first principle 7).
+STG/LTG residence selects provisional or durable semantic lifecycle, not RAM
+versus disk. AG maintains the current working graph; a projection selects a
+visible surface. Activation records current use; stability governs consolidation.
+Residence, activation and consolidation are separate decisions.
 
-## 2. Theoretical lineage
+## Theoretical lineage
 
-The three-graph model is not invented ad hoc: it maps onto classical and
-modern memory theories with a long evidence base.
+[Theoretical lineage](memory-graphs/theoretical-lineage.md) owns the comparisons
+with classical and modern memory theories. Analogies explain choices; they do
+not prove an implementation or authorize promotion.
 
-### 2.1 Atkinson–Shiffrin multi-store model (1968)
+## STG: provisional memory
 
-The three-stage sensory / short-term / long-term store (Atkinson & Shiffrin, 1968) is the structural ancestor:
-
-| NMG | Atkinson–Shiffrin                  | Notes                                                              |
-| --- | ---------------------------------- | ------------------------------------------------------------------ |
-| AG  | working memory (~20 s, 7±2 chunks) | current task context, limited capacity, attention-gated            |
-| STG | short-term store                   | temporary; enters LTM only through consolidation/rehearsal         |
-| LTG | long-term store                    | near-unlimited capacity; semantic/episodic/procedural subdivisions |
-
-The A-S point that information enters STM only when attended and reaches LTM
-only through consolidation is exactly NMG's governed write path
-(section 5 below).
-
-### 2.2 Complementary Learning Systems (McClelland, McNaughton & O'Reilly, 1995)
-
-The deepest mechanism-level correspondence. CLS (Psychological Review 102,
-419–457; PMID 7624455) explains _why_ two learning systems are needed:
-
-| NMG               | CLS                   | Mechanism                                                         |
-| ----------------- | --------------------- | ----------------------------------------------------------------- |
-| STG               | hippocampus           | fast encoding, sparse, temporary, interference-prone              |
-| LTG               | neocortex             | slow integration, overlapping, persistent, robust to interference |
-| STG→LTG promotion | systems consolidation | hippocampal replay drives cortical integration                    |
-
-Consequences for NMG design:
-
-- STG→LTG promotion requiring stability thresholds is not arbitrary: CLS
-  shows the fast system must not immediately train the slow system, or
-  new learning catastrophically interferes with old (catastrophic
-  interference is the classic failure of single-learning-rate systems).
-- "Repeated co-activation → consolidation" maps to replay-driven cortical
-  integration.
-- The reason atomic facts may enter LTG immediately (governed promotion)
-  while relations must wait matches CLS's distinction between
-  instance-level and regularity-level learning.
-
-### 2.3 ACT-R / SOAR cognitive architectures
-
-The AG concept corresponds to the bounded buffers of ACT-R (goal buffer)
-and SOAR (working memory) — Laird's 2022 comparison (arXiv:2201.09305)
-confirms the common structure: working memory buffers hold the current
-retrieval, declarative memory holds facts/experiences, procedural memory
-holds skills. NMG's AG is the query-conditioned projection of declarative
-memory into a bounded buffer.
-
-### 2.4 Modern agent memory systems (engineering validation)
-
-MemGPT/Letta independently arrived at the same split: core memory (always in
-context) ≈ AG, archival memory (vector search) ≈ LTG, recall memory
-(conversation history) ≈ evidence store. Mem0/Zep add extraction and graph
-construction but remain extract-store-retrieve pipelines without the
-provenance/verification layer that is NMG's differentiator.
-
-### 2.5 Boundary notes
-
-- AG is not exactly A-S short-term memory: AG is a _projection from_ the
-  long-term store conditioned on the query, not a raw capture buffer. The
-  closer cognitive analogue is the focus of attention within working
-  memory (Cowan's focused-attention view, capacity ≈ 4 chunks) — noted as
-  a pointer, not verified in this pass.
-- CLS's fast system is prone to forgetting; NMG's STG is a _semantic_
-  provisional store, not raw traces. NMG's immutable HistoryRecord layer is
-  closer to CLS's episodic traces; STG/LTG are its semantic
-  interpretations (design.md §5).
-
-## 3. STG: provisional memory
-
-New semantic candidates first enter STG unless a governed rule can safely
-promote the atomic memory immediately:
+New candidates enter STG unless a governed rule admits a durable atom immediately:
 
 ```text
 HistoryRecord
   -> governed extraction
   -> STG semantic inbox
-       |- confirmed durable atom -> preserve ID and promote to LTG
+       |- confirmed durable atom -> admit to LTG with provenance
        |- high-confidence match  -> attach to an existing STG/LTG node
        |- explicit new concept   -> create provisional STG node
-       `- ambiguous              -> remain globally searchable and unassigned
+       `- ambiguous              -> remain searchable and unassigned
 ```
 
-- **Immediate promotion path** (atomic content only, no speculative
-  structure): confirmed user facts, preferences, constraints, replaceable
-  states, explicit remember requests, tool-verified facts.
-- **Delayed path** (structure): relations inferred from co-occurrence,
-  reasoning, or one task stay in STG as observations or candidates until
-  consolidation criteria are met.
-- STG records and isolated/provisional nodes participate in global FTS,
-  exact, recency, and optional vector search. Graph traversal is a candidate
-  expansion mechanism, never the only retrieval entry point.
-- STG may be persisted in SQLite for crash recovery and cross-turn
-  continuity; **expiry is a policy decision, not an implication that
-  short-term data must live only in RAM**.
-- A single successful action remains an event or provisional STG strategy
-  (design.md §5b); repeated outcome-linked episodes may consolidate.
+- Confirmed user facts, preferences, constraints, replaceable states, explicit
+  remember requests and tool-verified facts may use governed immediate atomic
+  admission. This does not automatically admit speculative structure.
+- Co-occurrence-, reasoning- or single-task-derived relations stay observations
+  or candidates until structural consolidation criteria are met.
+- Provisional records and isolated nodes remain eligible for FTS, exact, recency
+  and optional vector retrieval. Traversal expands candidates; it is not the only
+  entry point. Searchability remains subject to the session boundary below.
+- Persistence in SQLite supports recovery and continuity. Expiry remains policy.
+  One successful action is an event or provisional strategy, not evidence of a
+  general strategy; consolidation needs independent outcome-linked episodes.
 
 ### Isolation
 
-"Global" means all retrieval modes inside the owning session, not
-visibility across sessions. A multi-Agent runtime must carry a
-non-forgeable `runtime_id` and `session_id` through search and exact access;
-every STG row, temporary edge, AG trace, and feedback event must be filtered
-by that identity. A separate `semantic_task_id` deduplicates repeated
-evidence across Agents; it must not be used as the isolation identity.
-**Current state:** physical session-specific SQLite stores provide isolation.
-A session never scans another session's semantic rows; tests cover two
-sessions inside one project through both daemon and Pi adapter. Authenticating
-a claimed session ID remains a harness security concern, not a memory-row
-filter.
+“Global” STG retrieval means all admitted retrieval modes within the owning
+session, not access to another session's provisional rows. A multi-Agent harness must supply non-forgeable runtime/session identity
+(`runtime_id`, `session_id` in the logical model). Search, exact access, every
+provisional row, temporary edge, AG trace and feedback event must honor that
+ownership. `semantic_task_id` deduplicates evidence; it is not an isolation key.
+
+Current isolation is row-level in the project STG file, not session-specific
+physical databases. The daemon applies the caller's session filter and admits
+shared LTG-cache hints separately. Authentication of the claimed session remains
+with the trusted harness/client boundary; filtering is not identity issuance or
+database-kernel row-level security. Tests exercise separate sessions through the
+daemon and adapters; they do not prove resistance to a malicious trusted caller.
 
 ### STG vs index Delta
 
-The semantic STG is distinct from the index `Inbox/Delta`. STG tracks memory
-lifecycle and provisional meaning; index Delta tracks records whose derived
-leaf/vector index has not yet been compacted. A long-term memory may be in
-index Delta, and a short-term memory may already have a compacted index.
-The two dimensions are orthogonal (design.md §10).
+STG tracks provisional meaning; index `Inbox/Delta` tracks records whose derived
+leaf/vector index is not yet compacted. A durable memory can be in Delta, and a
+short-term memory can already have a compacted index. Semantic lifecycle and
+index maintenance are orthogonal.
 
-## 4. LTG: durable memory
+## LTG: durable memory
 
-- Holds durable atomic fact | state | event | preference | constraint,
-  consolidated strategy | derived concept | typed relation.
-- The semantic graph is not required to be connected; components may
-  represent unrelated projects, preferences, people, or topics.
-- **Connections in three classes:**
-  1. **Provenance links** — immediate and mandatory; every memory reaches
-     its exact source.
-  2. **Deterministic identity links** — immediate when known (explicit
-     scope, matching `stateKey + scope`, supported supersession).
-  3. **Inferred semantic links** — delayed (`related_to`, causal,
-     dependency, merge, split proposals require accumulated evidence or
-     explicit confirmation).
-- General semantic relations may cycle; derivation and supersession
-  dependencies must remain acyclic. Each query may materialize a bounded,
-  visited-set-protected local expansion DAG even when the persistent graph
-  contains cycles.
-- An isolated node may later be merged as an alias, refined under a parent,
-  linked to another concept, or remain isolated. Adding an edge does not
-  imply merging node identity (see edge-activation-design.md §4.4 for the
-  merge-as-compression view).
+LTG holds durable facts, states, events, preferences and constraints, together
+with admitted strategies, concepts and typed relations. It need not be connected:
+unrelated projects, people, preferences or topics may remain separate components.
 
-## 5. AG: session runtime graph and projection revisions
+Three link classes have different admission rules:
 
-```text
-candidates_t = Project(STG, LTG, q_t, TaskBelief_t)
-AG_(t+1) = Update_B(AG_t, candidates_t, observations_t, TaskBelief_t)
-Projection_t = Freeze(VisibleSubset(AG_(t+1)))
-```
+1. **Provenance:** immediate and mandatory; each memory reaches its exact source.
+2. **Deterministic identity:** immediate when known, such as explicit scope,
+   matching `stateKey + scope` or supported supersession.
+3. **Inferred semantics:** delayed; `related_to`, causality, dependency and
+   merge/split proposals need accumulated evidence or explicit confirmation.
 
-`B` is one hard multidimensional budget over injected tokens, nodes, edges,
-records/evidence excerpts, temporary observations, task frames, reasoning
-steps, local tier/depth, graph expansion, and latency. AG may contain:
+General semantic relations may cycle; derivation and supersession dependencies
+must remain acyclic. Bounded query expansion uses a visited set and may form a
+local DAG even over a cyclic persistent graph. An isolated node may later become
+an alias, be refined or linked, or remain isolated. Adding a relation does not
+merge identity; [edge activation](edge-activation-design.md) owns that distinction.
 
-- resident critical LTG constraints;
-- newly active STG observations and task state;
-- retrieved LTG nodes and bounded local content;
-- selected persistent relations;
-- temporary STG-to-LTG, LTG-to-LTG, or query-local relations used only for
-  the current task;
-- bounded tool observations, unresolved working state, activation metadata,
-  and hypothetical reasoning artifacts;
-- one active task frame and a small bounded cooling set.
+## AG: session runtime graph and projection revisions
 
-AG update is **working-memory management, not graph copying**: identify
-candidates, update the appropriate task frame, allocate the total runtime
-budget, then freeze one immutable model-visible revision. The model can request
-progressive expansion, but the harness enforces both the total budget and the
-projection provenance boundary.
+[The AG reference](memory-graphs/session-runtime-graph-and-projection-revisions.md)
+owns budgets, projections, disclosure and trace limits. `agId`, `taskFrameId`,
+`projectionId` and coordination-channel identity are distinct; `boardChannelId`
+is the design name, while board APIs select it through `taskId`. Runtime core
+exists; combined budgets, semantic switching and reasoning integration remain
+partial.
 
-The harness also enforces a separate per-turn construction-process budget. Pi
-currently allows at most three searches and five total search/get calls, requires
-exact-evidence progression after two searches, and stops after two consecutive
-searches introduce no new candidate IDs. Thus a small final AG cannot be reached
-through an unbounded tool loop. These counters are session-local, reset on a new
-user turn, and remain hard limits outside learned/QPP budget allocation.
+## Promotion and demotion
 
-The opt-in `working_state` Lab capability keeps one replaceable provisional text
-inside each frame's existing items. Dedicated replace/clear preserves exact
-content; ordinary observe cannot write it. Failed, stale, secret or over-budget
-writes preserve the old value. It consumes the shared resident cap but is
-protected from ordinary-item eviction; frame/session eviction and release remove
-it. Captured context fences late writes without conferring authentication or
-fact/acceptance authority. Current adapters explicitly use a session working
-frame while enabled, not query-derived task switching. Host-history selection,
-actual exposure commitment and matched cost/quality evidence remain deferred;
-see the [working-state decision](../decisions/implemented/2026-10-08-ag-working-state.md).
+Distinguish residence changes inside a store from cross-store consolidation.
+Within-store `promoteMemory` / demotion preserves record identity and provenance.
+The project STG and authoritative LTG are separate databases:
+`consolidateStgMemoryToLtg` materializes or deduplicates an LTG record through
+`remember`, retaining evidence and a `consolidated_from_stg` marker with
+`attributes.sourceMemoryId`. It does not promise the same record/node ID in both
+stores.
+Cached LTG hints cannot be consolidated back into LTG. These are the current
+`src/core/stg.ts` boundaries, not permission to copy provisional material freely.
+Demotion/expiry does not rewrite the underlying historical evidence.
 
-AG contains references and runtime annotations, not authoritative copies. It
-may mutate across turns and compaction, but session release destroys it. Only
-projection traces, explicitly recorded outcomes, stability observations, and
-accepted writes survive.
+The consolidation design raises the promotion threshold with scope breadth and
+influence: session/task < project/workspace < user < team/organization;
+interaction hint < reasoning context < scoped constraint. Wider or more
+behavior-changing material needs stronger independent evidence/provenance and an
+explicit correction/rollback path.
 
-The AG target owns a bounded **disclosure ledger**. It records only the stable
-memory ID, a content hash, the greatest disclosure depth already rendered, and
-the turn number.
-Within 12 turns, unchanged content already disclosed deeply enough is folded
-to an `already_in_context` reference. A deeper request, changed evidence,
-expiry from the window, or another session renders it again. The window is
-bounded to 128 references, cleared when compaction removes model context, and
-destroyed at session shutdown. It is context-cache metadata inside AG, not an
-authoritative usage outcome. Pi, DSH, WorkBuddy and MCP use the same daemon-owned
-ledger while retaining host-specific rendering; a failed ledger call reveals
-requested evidence rather than silently suppressing it.
-
-Every persisted projection trace carries its owning harness `sessionId`. Trace reads,
-disclosure, diagnostic attribution, and verified feedback must present the same identity;
-cross-session access is rejected before any learning or stability signal is
-updated. Protocol v9 distinguishes session `agId` from immutable
-`projectionId`; the public `activeGraphId` argument now names that projection,
-which resolves internally to one or more persisted retrieval traces.
-Sending the projection identity with an explicit `nmg_get` makes exact evidence
-expansion observable disclosure. Automatic recall and answer overlap remain diagnostic exposure,
-not proof that the model used a memory. Only verified user/tool/benchmark
-outcomes may train. Pi's `session_before_compact` event clears the daemon
-disclosure ledger so evidence removed by compaction can be rendered again.
-
-### Shared Task Board (cross-Agent coordination, not a memory graph)
-
-One private AG cannot transmit state to another Agent. NMG therefore maintains
-an independent, task-scoped coordination table in the daemon. `nmg_board` and
-`nmg board put/read/resolve` operate on attributed, expiring entries; reads
-return a task-local cursor so callers avoid reinjecting old entries. Pi places
-read entries in the caller's bounded runtime AG projection.
-
-The board is deliberately outside `memory_records`, FTS, embeddings, QPP, and
-controller training. It may contain concise goals, questions, blockers,
-results, handoffs, or decisions, but not secrets or hidden chain-of-thought.
-Board content becomes durable semantic memory only through a separate,
-attributable `remember` operation. Current local sharing trusts callers that
-know the task ID; ACLs and multi-device transport remain future infrastructure.
-
-**In-flight work registry.** An open attributed `goal` entry may represent one
-coherent unit of work currently being attempted. It records only the goal, the
-intended approach, and the owned scope. The initial writer does not need to
-claim its own entry; a replacement Agent may claim it after interruption and
-derive actual progress from Git and verification evidence. The entry is
-resolved when the work completes or is deliberately abandoned. It is not a
-progress log: phases, files, tool calls, completed-item lists, and periodic
-checkpoints must not create additional entries by default. This keeps takeover
-discoverable without imposing continuous bookkeeping. _Status:_ operating
-convention over the implemented board lifecycle.
-
-**Channel model — world channel + named channels.** `taskId` is a channel, not
-a visibility hierarchy. There is one _world channel_ (the default when no
-`taskId` is given) and independently _named channels_; any Agent can read or
-write any channel it knows by name. The world channel acts as a lobby: reading
-it surfaces the names and recency of active named channels (a directory), so an
-Agent that does not know a channel name can still discover and join one. Naming
-is public; joining is implicit (read/write by name); there is deliberately no
-per-channel access control. _Status:_ implemented.
-
-**Writer identity.** Entries are attributed to the writing Agent so readers can
-tell which Agent posted each entry. `NMG_AGENT_ID` is the readable username;
-fallbacks are the session id, then the pid. _Status:_ implemented.
-
-**System identity and directed delivery.** Client adapters register their stable
-agent name and optional `NMG_AGENT_CAPABILITIES` outside model context. Pi does
-so at session start and on its wake loop; the MCP adapter registers on connect
-and heartbeats on board use; the passive Kimi hook reports presence on each user
-turn when a daemon already exists. `nmg_board discover` returns the online
-roster, optionally filtered by capability, and `put` with `to=<agent name>`
-wakes only that stable target while remaining read-visible to other clients.
-Registration, discovery, and heartbeat never wake an LLM. _Status:_ implemented
-for Pi, MCP-compatible clients, and the Kimi event hook.
-
-**Claiming (who works an entry).** An open entry can be claimed by exactly one
-Agent, so parallel Agents do not duplicate work on the same item. A claim is a
-single atomic compare-and-set `UPDATE` (open + unclaimed, or a lapsed lease,
-or the holder's own heartbeat) with a lease that expires; a losing CAS is
-diagnosed against a fresh read so callers are never sent chasing a holder that
-does not exist. Only the holder may release; resolving clears the claim; lease
-expiry is lazy (no background sweeper). _Status:_ implemented (`claim`/`release`
-actions, `claimedBy`/`claimExpiresAt` columns).
-
-**Notification (who knows an entry exists).** Because an idle Agent never looks
-at the board on its own, a claim would starve: entries would wait for someone
-to notice. A wake loop polls the subscribed spaces (world channel plus active
-named channels) and, when a new open entry appears that has not already been
-surfaced, wakes the Agent with a broadcast-style `pi.sendUserMessage` ("your
-subscribed channel has a new question") — never addressing a specific
-recipient, so this is notification, not a DM or @. It is enabled and tuned via
-`~/.nmg/board-wake.json` (hand-edited or toggled through the `/nmg` TUI menu:
-`/nmg wake on|off|status|budget N|cooldown M|interval S`), no environment
-variables. The loop is guarded by a daily budget and a cooldown
-(notification-budget philosophy).
-
-Delivery is a _flow constraint_, not a prompt rule. Every wake writes a
-**delivery receipt** (`task_board_deliveries`, idempotent per session+entry,
-cf. Pub/Sub ack semantics): once the loop wakes a session for an entry it does
-not re-notify it. A session can opt out of a channel via the **suppression
-registry** (`task_board_suppressions`, do-not-send, fed by `nmg_board
-unsubscribe`/`subscribe`), which is checked before every delivery. So "already
-notified", "read", "unsubscribed", and "resolved" entries never re-wake a
-session — by mechanism, not by asking the Agent to remember.
-_Status:_ implemented.
-
-**Ownership and RAII (the two load-bearing principles).** Two classical
-disciplines govern the board's state machinery. _Ownership (who holds the
-key):_ the claim lease is an ownership capability — an atomic CAS gives a
-single working Agent the entry, an expired lease returns it to the pool, only
-the holder can release, and resolving clears the claim; a session's
-suppression (suppression registry) and its delivery receipts (deliveries
-table) are owned by that session. _RAII (who owns the lifetime):_ every board
-resource closes deterministically — resolve closes an entry and, with it, its
-delivery receipts (receipts are bound to the entry lifecycle and are cleared
-on resolve/expiry, so the table cannot grow unbounded), a TTL/expiresAt
-recycles entries, a lapsed lease auto-expires lazily, and the wake timer is
-`unref()`'d so it never pins the process. Resolve is deliberately NOT
-ownership-restricted: the board is open collaboration, so any Agent that can
-answer a request may close it (the claim, by contrast, is the single-writer
-key). _Status:_ implemented.
-
-**Conversation closure (no infinite confirmations).** A request — a question,
-handoff, or anything awaiting an answer — is resolved once it is answered, and
-a resolved entry is closed: it must not be replied to (reopen only with new
-substance). This bounds acknowledgement chains — a question is answered once
-and then closed, so two Agents cannot ping-pong "confirmed" forever. _Status:_
-convention, disclosed in the board result and the tool description.
-
-**Memory pointers.** An entry may carry `memory=<id>` references to LTG records
-instead of copying their content, using the same `memory=<id>` format that
-automatic recall renders; a reader expands them with `nmg_get`. The board
-therefore transmits _references_ to durable knowledge, never a second copy —
-consistent with "LTG is the only shared graph" (§1). Pointers are progressive
-disclosure: the board carries only the short id, and content is fetched on
-demand via `nmg_get`, so reading the board never inflates context with the
-referenced memory bodies. _Status:_ implemented by convention — content
-accepts `memory=<id>` as plain text; there is no structured pointer type or
-separate validation, kept intentionally minimal.
-
-**AG projection.** On read, entries are projected into the _reading_ Agent's
-private runtime AG, never into any shared graph. _Status:_ implemented.
-
-**Design lineage (not validated standards).**
-
-- the world channel is a _common ground_ surface (Clark): shared, continually
-  aligned baseline facts for joint activity;
-- memory pointers implement a _transactive memory_ pattern: the group knows
-  where knowledge lives and points to it rather than duplicating it;
-- the board as a whole is a bounded, expiring, group-visible coordination layer
-  between private AGs and per-Agent LTG — engineering precedents include
-  IRC-style channel discovery and recent "governed shared memory" proposals.
-  Treat these as lineage, not consensus: definitions vary and most sources are
-  preprints.
-
-**Guardrail.** The board must stay temporary and non-authoritative: entries
-expire (TTL), never enter LTG search, and become durable memory only through an
-explicit attributable `remember`. It is not, and must not become, a shared
-authoritative graph — that would break per-Agent memory ownership and the
-immutable-content red line.
-
-### AG lifecycle: mutable in memory, revision trace persistent
-
-AG itself is **pure memory, mutable within and released with the session**. What
-persists is not a copy of AG but immutable **projection observation traces**:
-which nodes/edges/records were selected, rendered, expanded, fetched via
-`nmg_get`, diagnostically matched to an answer, and independently verified or
-rejected. These stages are separate; API-answer overlap is not proof of causal use.
-
-The trace is not bookkeeping — it is the input to persistence decisions.
-Active content is a _candidate signal_ for persistence, not persistence
-itself:
-
-```text
-STG + LTG ──update──▶ session AG (mutable, memory-resident)
-                            │ freeze visible subset
-                            ▼
-                    ProjectionRevision
-                            │ render / expand / nmg_get / verify
-                            ▼
-                    observation trace (persistent)
-                            │ dedupe by session/task/source lineage
-                            │ + outcome attribution (design.md §5c)
-                            ▼
-                 persistence decision: promote LTG / demote / keep
-                            │
-                            └────────── updates LTG ──▶ next projection
-```
-
-Rules:
-
-- **Activity alone never promotes.** Repeated retrieval does not increase
-  stability (design.md §7.3); the trace is deduplicated per
-  session/task/source lineage and gated by outcome attribution, exactly the
-  credit discipline of §5c. AG active + cross-task reuse + positive outcome
-  → LTG promotion candidate.
-- **Inactivity is a demotion signal.** Content AG never selects across
-  queries is a candidate for L4/L5, feeding the same retention lifecycle as
-  `access_count` + `importance` (semantic activity signal, not a
-  replacement).
-- **The closure is CLS replay.** Re-activating selected traces to inform
-  consolidation mirrors hippocampal replay selecting active traces for
-  cortical integration (Complementary Learning Systems, §2.2). This is the
-  mechanism-level reason the trace must persist even though AG does not.
-
-#### Resident critical constraints: theoretical candidates
-
-"Resident critical LTG constraints" enter every AG projection. Two existing
-theories give this a name (candidate status; not yet adopted as design):
-
-- **Intention superiority effect** (Goschke & Kuhl 1993; Marsh et al. 1999,
-  PMID 10226441): intentions to perform an activity are stored in a
-  _heightened state of activation_, and once fulfilled are _inhibited_
-  relative to neutral material. Resident constraints are exactly unfinished
-  intentions: persistently high activation until satisfied, suppressed after.
-  This justifies both the "always resident" property and the post-satisfaction
-  demotion path.
-- **MemGPT core memory** (engineering): the always-in-context core block the
-  agent self-edits — the closest engineered precedent for a small resident
-  set carved out of the archive.
-
-Open question (kept): how the resident set is maintained — explicit `pinned`
-/ `safety_constraint` markers (existing mechanism) is the current proposal,
-and whether resident content counts against the token budget (proposal:
-counts, but allocated first, before discretionary content).
-
-#### Filter usage: a cross-cutting trace field
-
-Every trace records which retrieval filters were effective and what they
-cost — one record, many consumers (not a filter-counter dedicated to index
-decisions):
-
-```ts
-// RetrievalTraceInput.filterUsage
-{
-  dimensions: string[];      // e.g. ["scope.project", "node", "sourceActor", "maxTier:1"]
-  candidatesBefore: number;  // rows scanned by SQL
-  candidatesAfter: number;   // rows surviving post-filter, before sort
-  selectivity: number;       // 1 − after/before
-}
-```
-
-Consumers (each reads the same persisted field):
-
-| Consumer                       | Question answered                                                                                                               |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| Index decision                 | does a dimension get used enough and reduce candidates enough to justify an index? (`usage rate × selectivity × latency share`) |
-| Budget projection (controller) | filtered queries have smaller candidate pools — budget dimensions can tighten                                                   |
-| QPP calibration                | filtered queries carry different top1/variance semantics; thresholds may differ                                                 |
-| Router learning                | filter context is a routing signal: within one scope, node ranking should be stable                                             |
-| Retention                      | a scope never filtered for is a candidate for cold demotion                                                                     |
-| Agent feedback                 | "slow because unscoped" → suggest `--scope` to narrow                                                                           |
-
-`selectivity` is measured after SQL but before sort, so it reflects what a
-future pushdown would actually save (see the index-decision sketch in
-docs/design/improvement-areas.md).
-
-### Shared information-output boundary
-
-AG and Task Board share admitted source-bound views and pure output preparation,
-not storage, graph identity or collaboration authority. Text preparation keeps
-body and necessary labels together, reports omissions and cannot commit a
-content-disclosure ledger. A matching rendered fragment yields reader-local
-acknowledgement candidates; another session cannot confirm private AG content.
-View fingerprints do not replace immutable retrieval projections or attest truth.
-Host exposure/authorization confirmation, combined input budgeting and maintained
-current-state writes remain separate work. The
-[implemented foundation](../decisions/implemented/2026-10-07-shared-information-output.md)
-defines the current library/text boundary and its limitations.
-
-### Projection lifecycle and the tiered disclosure design
-
-The tiered gate ([tiered-disclosure-design.md](tiered-disclosure-design.md))
-is the time dimension of projection construction: AG opens tiers sequentially
-and exposes `tiersOpened` to the model; `nmg_get` is the explicit deep unlock.
-The activation rules ([edge-activation-design.md](edge-activation-design.md))
-are the within-AG mechanics: node activation is state, edge activation is a
-derived function of it, and budgets apply after (not before) the bounded
-propagation.
-
-## 6. Promotion and demotion
-
-- Promotion preserves the same stable record/node identity and provenance
-  rather than copying content into a second graph. Demotion or expiry
-  changes normal visibility but never rewrites the underlying
-  `HistoryRecord`.
-- **Promotion threshold grows with scope breadth and influence strength**
-  (design.md §5a): session/task < project/workspace < user <
-  team/organization; interaction hint < reasoning context < scoped
-  constraint. Wider or more behaviour-changing memories require more
-  independent evidence, stronger provenance, and an explicit
-  correction/rollback path.
-- A local subgraph is eligible for LTG materialization only when it
-  satisfies minimum independent evidence, usefulness, scope consistency,
-  provenance coverage, conflict, and stability thresholds:
+A local structure is eligible only with sufficient independent evidence,
+usefulness, consistent scope, provenance coverage and stability, and sufficiently
+little unresolved conflict. The symbolic model is not a calibrated default:
 
 ```text
 consolidate(G') iff
@@ -575,20 +202,15 @@ consolidate(G') iff
   unresolved_conflict <= max_conflict
 ```
 
-- Consolidation uses **hysteresis**: demotion or reopening requires a lower
-  threshold than promotion, preventing promote/demote oscillation. The
-  operation is versioned and auditable, preserves evidence, and must be
-  reversible by rebuilding the semantic projection from history.
-- Atomic-memory promotion and structural consolidation remain separate.
-  A clear fact, preference, constraint, state, or explicit remember request
-  may enter LTG immediately; new relations, derived concepts, aggregated
-  strategies, and node merges/splits require the stronger stability
-  process.
+Hysteresis separates promotion from lower demotion/reopen thresholds to avoid
+oscillation. Operations are versioned, auditable and preserve evidence; semantic
+projections must remain rebuildable for reversal. Atomic admission is separate:
+a clear durable atom can enter LTG immediately, while new structure, aggregated
+strategies and merges/splits require the stronger process.
 
-## 7. Information-theoretic interpretation
+## Information-theoretic interpretation
 
-The three-graph model reads as a codec (design.md §8; not a literal
-implementation claim):
+The codec analogy explains the design; it is not a literal implementation claim:
 
 ```text
 Historical stream       information source
@@ -601,76 +223,42 @@ Active Graph builder    query-conditioned decoder
 Raw evidence            lossless fallback and error check
 ```
 
-STG retains recent or provisional symbols before structural coding is
-stable; LTG stores the consolidated codebook; AG decodes only the bounded
-projection needed by the current task. Node headers are short lossy codes,
-leaf headers add discriminating bits, typed relations provide side
-information, and raw history prevents irreversible loss. A structural
-change is justified only when it reduces expected retrieval distortion
-enough to pay for its added complexity and maintenance (rate-distortion
-objective, design.md §8).
+STG retains provisional symbols before structural coding stabilizes; LTG is the
+consolidated codebook; AG decodes a bounded working set for the task. Headers are
+lossy access codes, relations supply side information, and raw history preserves
+the fallback. Structural change must reduce expected retrieval distortion enough
+to justify complexity/maintenance: a rate-distortion objective, not measured
+quality improvement merely from this analogy.
 
-## 8. Implementation state
+## Implementation state
 
-Implemented (design.md §13):
+The owning contracts distinguish implementation from targets:
 
-- explicit STG/LTG residence on memories and nodes;
-- governed immediate atomic LTG writes;
-- ID-preserving promotion/demotion, STG expiry, append-only history;
-- a first-class query-scoped `ActiveGraph` returned by `searchContext`, with
-  persistent and query-local projection traits; this is the current
-  implementation that the target design renames to `ProjectionRevision`;
-- Pi propagation of AG IDs from `nmg_search` to `nmg_get`;
-- automatic turn-end maintenance in the Pi harness: STG expiry, due-node
-  batch rebalance;
-- LTG-only L4 Dormant/Unindexed and L5 Quarantine lifecycle states.
-- session-private STG stores keyed by project and harness session identity;
-- deterministic tiered sequential disclosure in CLI/Pi, with a shared
-  deep-evidence budget and AG ledger (calibrated SPRT evaluation remains open);
-- query-local typed edge activation with bounded propagation, fan dilution,
-  regulatory-channel separation, trace visibility, and feedback-driven
-  prediction-error strength updates.
-- a shared Task Board with task isolation, immutable writer attribution,
-  task-local cursors, TTL expiry, explicit resolution, lease-based claiming
-  (claim/release, one Agent per entry, lazy lease expiry), an opt-in
-  broadcast-style wake notification loop (configured via `~/.nmg/board-wake.json`
-  or the `/nmg` TUI menu, daily budget +
-  cooldown + per-entry dedup), private Pi AG projection, a world channel with
-  a lobby directory of active named channels (an omitted `taskId` targets the
-  world channel), and convention-based `memory=<id>` pointers readers expand
-  via `nmg_get`;
+| Surface | Current boundary and owner |
+| --- | --- |
+| Residence, atomic writes, expiry and history | Explicit STG/LTG residence, governed atomic admission and append-only evidence belong to core store contracts; cross-store consolidation has the exception above. |
+| Physical STG | [Shared-store v2](stg-shared-store-v2-2026-08-12.md): project file, session row filtering, LTG-cache hints and session cleanup; not private files per session. |
+| Session graph and immutable projections | [Runtime blueprint](session-active-graph-runtime-design.md): existing session graph, four identities, frames, bounded items, freeze/provenance, release and host-neutral disclosure. Existing `ActiveGraph` retrieval objects represent projections, not the session container. |
+| Working state | [State-space contract](state-spaces.md): `nmg_state` is the normal AG/board entry. Existing internal lease/RPC compatibility does not make daily state a model-facing Lab operation. |
+| Tiered access and budgets | [Tiered disclosure](tiered-disclosure-design.md): deterministic sequential disclosure/deep evidence/ledger. Natural calibrated SPRT and promotion of a learned budget into Lite default remain separate evidence gates. |
+| Edge mechanics | [Edge activation](edge-activation-design.md): typed bounded propagation, fan dilution, regulatory channels, traces and outcome-linked updates. Learned direction, unlearning and automatic compression need their own maturity/evidence interpretation. |
+| Coordination | [Task Board](memory-graphs/session-runtime-graph-and-projection-revisions/shared-task-board.md): task isolation, attribution, cursors, TTL, resolution/leases, private projection and optional wakes/world discovery. ACLs/multi-device transport are not implied. |
 
-Implemented but not promoted or naturally calibrated:
+LTG-only L4 Dormant/Unindexed and L5 Quarantine, Pi identity propagation and
+turn-end expiry/rebalance do not establish whole-graph integration.
+[Runtime acceptance gaps](session-active-graph-runtime-design.md#acceptance-criteria-from-the-decision)
+include combined semantic/observation budgets, full switch/restoration coverage
+and bounded reasoning integration. The Lab AG-budget boundary defaults to
+`shadow`; explicit Lab enablement is not natural calibration or Lite promotion.
 
-- promotion of the implemented Lab AG budget projection into the default Lite
-  policy (the typed runtime boundary exists and defaults to shadow; it may be
-  enabled explicitly while still in Lab, but no candidate has passed the natural
-  matched-evidence gate for active/default use);
-- calibrated SPRT evaluation for tier opening;
-- learned temporal edge direction, contrastive unlearning, and automatic
-  compression merge (see
-  [edge-activation-design.md](edge-activation-design.md));
-- Task Board ACLs and multi-device transport (still future infrastructure).
+## Open questions
 
-Designed but not implemented:
-
-- one mutable session-owned AG shared by semantic retrieval, tool observations,
-  task frames, HA activation, and bounded MGR artifacts;
-- distinct `agId`, `taskFrameId`, `projectionId`, and `boardChannelId` identities;
-- migration of Pi `SessionRuntimeAg`, the injection window, and daemon
-  continuation maps into the shared runtime and immutable revision contract.
-
-## 9. Open questions
-
-1. How should the implemented STG retention, expiry, and demotion priors be
-   calibrated so useful provisional information survives without turning STG
-   into a second unbounded archive?
-2. How should the session AG allocate one total token, node, edge, evidence,
-   task-frame, reasoning, graph-hop, and tier budget across natural work?
-3. What natural contradiction and reversal evidence is sufficient to calibrate
-   the implemented LTG relation demotion/reopen hysteresis?
-4. Is CLS's replay analogy actionable (e.g., scheduled STG re-integration
-   passes), or only a justification for the promotion thresholds?
-5. Which deterministic task-switch baseline is sufficient before HA learns
-   task-frame activation, and how many cooling frames have positive marginal
-   value?
+1. How should STG retention/expiry/demotion priors preserve useful provisional
+   meaning without becoming an unbounded archive?
+2. How should one total token/node/edge/evidence/frame/reasoning/hop/tier budget
+   be allocated across natural work?
+3. What independent natural contradiction/reversal evidence calibrates LTG
+   relation demotion/reopen hysteresis?
+4. Is scheduled STG replay actionable or only an analogy for thresholds?
+5. Which deterministic switch baseline is enough before learned activation, and
+   how many cooled frames provide positive marginal value?

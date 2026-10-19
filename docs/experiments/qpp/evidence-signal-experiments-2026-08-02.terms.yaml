@@ -1,0 +1,19 @@
+version: 2
+terms:
+  - term: evidence completeness
+    aliases: [complete@k, evidence 完备性]
+    definition: >-
+      Whether the retrieved set contains all labelled evidence for a query under a specified cutoff; it is an offline benchmark label, not answer correctness.
+      在指定截断位置前，检索结果集是否包含该查询的全部标注 evidence；这是离线 benchmark 标签，不等同于答案正确性。
+    owner: docs/experiments/qpp/evidence-signal-experiments-2026-08-02.md
+    anchor: "Experiment 1: retrieval-signal audit"
+    status: canonical
+  - term: evidence-count prediction
+    aliases: [multi_evidence prediction, 证据数量预测]
+    definition: >-
+      Predicting whether a question requires one or multiple supporting evidence records; the reported offline signals were near chance for this target.
+      预测问题需要一条还是多条支持 evidence 记录；报告中的离线信号对该目标接近随机。
+    owner: docs/experiments/qpp/evidence-signal-experiments-2026-08-02.md
+    anchor: Conclusions
+    status: canonical
+references: [QPP, NQC dispersion]

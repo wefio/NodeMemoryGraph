@@ -1,5 +1,7 @@
 # OoO result admission probes — 2026-09-08
 
+[简体中文](ooo-admission-2026-09-08.zh-CN.md) · [Terms used](ooo-admission-2026-09-08.terms.yaml)
+
 ## Question and scope
 
 Can coordinator-owned verification admit out-of-order results without releasing
@@ -8,9 +10,11 @@ including work moving between independent processes?
 
 These are research probes, not a product design decision. The small-trusted-core
 idea is borrowed from the external verification approach described in
-[CI/RCP §7.13](../design/ci-cd-and-quality.md#713-fixed-trusted-baseline-verification).
+[CI/RCP Fixed trusted baseline verification](../design/ci-cd-and-quality/repository-control-plane/trusted-baseline-verification.md#fixed-trusted-baseline-verification).
 These probes do not import RCP or inherit its fixed-installation isolation. No
 default NMG protocol, Task Board semantics, AG, or host-session behavior changes.
+
+**Later status:** the dedicated research `ooo_round` tool left the product-facing tool directory on 2026-09-14. This report records that earlier instrument; it does not authorize another run or establish product-runtime integration. See the [historical S3/S4 tooling record](../design/ooo-execution-bootstrap/historical-round-tooling.md).
 
 ## Reproduce
 
@@ -385,8 +389,6 @@ plan changes, pagination beyond this tiny board, autonomous wake/re-poll behavio
 and external-side-effect idempotency are not demonstrated. Notification repair
 runs at explicit fixture/coordinator boundaries rather than a production background
 reconciler.
-
-The deterministic fault tests use simulated workers; the separate live run uses
 
 ## S1 round 3 — 2026-09-11
 
@@ -954,8 +956,7 @@ beyond this repository's own check protocol.
 
 ## Trust boundary and remaining proof
 
-real Pi SDK agents. Neither exercises background tool continuation, AG context
-restoration or same-session safe-point activation. This establishes restricted
-multi-process admission and a real-agent execution adapter, not a general Agent
-OoO scheduler or a measured speedup. HA/MGR scoring is not required for these
-probes.
+The recorded live run used real Pi SDK agents. It does not exercise background tool
+continuation, AG context restoration, or same-session safe-point activation. This establishes
+restricted multi-process admission and a real-agent execution adapter, not a general Agent
+OoO scheduler or a measured speedup. HA/MGR scoring is not required for these probes.

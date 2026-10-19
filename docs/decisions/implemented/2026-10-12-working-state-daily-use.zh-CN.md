@@ -4,7 +4,7 @@
 **Approved:** explicit
 **Relates to:** [状态写入](2026-10-08-ag-working-state.md), [按回合携带](2026-10-08-ag-working-state-input.md)
 
-[English](2026-10-12-working-state-daily-use.md)
+[English](2026-10-12-working-state-daily-use.md) · [术语](2026-10-12-working-state-daily-use.terms.yaml)
 
 ## Problem
 

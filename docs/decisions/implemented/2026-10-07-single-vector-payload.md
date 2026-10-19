@@ -1,6 +1,6 @@
 # Persist one payload per embedding
 
-[中文](2026-10-07-single-vector-payload.zh-CN.md)
+[中文](2026-10-07-single-vector-payload.zh-CN.md) · [Terms used](2026-10-07-single-vector-payload.terms.yaml)
 
 **Status:** implemented
 **Approved:** auto

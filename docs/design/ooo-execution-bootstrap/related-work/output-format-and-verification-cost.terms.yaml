@@ -1,0 +1,78 @@
+version: 2
+terms:
+  - term: constraint stacking
+    aliases: [stacked constraints, 约束叠加]
+    definition: >-
+      Repeating or accumulating overlapping instructions across prompts and tool responses; it can reduce compliance rather than strengthen a format rule.
+      在 prompt 与工具响应中重复或堆叠重叠指令；这可能降低服从率，而不是加强格式规则。
+    owner: docs/design/ooo-execution-bootstrap/related-work/output-format-and-verification-cost.md
+    anchor: Format compliance and verification cost
+    status: canonical
+  - term: remaining model capacity
+    aliases: [spare capacity, 模型剩余容量]
+    definition: >-
+      The model's capacity left after task reasoning and context demands; format constraints can add overhead when the task consumes most of that capacity.
+      完成任务推理与上下文需求后模型剩余的容量；当任务消耗大部分容量时，格式约束会增加额外负担。
+    owner: docs/design/ooo-execution-bootstrap/related-work/output-format-and-verification-cost.md
+    anchor: Format compliance and verification cost
+    status: canonical
+  - term: provider constrained sampling
+    aliases: [constrained decoding, provider 约束采样]
+    definition: >-
+      Provider-side decoding constrained by a schema; it can prevent syntactically invalid output but does not establish structural or semantic correctness.
+      由 schema 约束的 provider 侧解码；它能防止语法无效的输出，但不能证明结构或语义正确。
+    owner: docs/design/ooo-execution-bootstrap/related-work/output-format-and-verification-cost.md
+    anchor: Format compliance and verification cost
+    status: canonical
+  - term: verification cost term
+    aliases: [verification overhead, 验证成本项]
+    definition: >-
+      The host time and work required to establish acceptance of a candidate; it is a primary cost to compare against any latency speculation may hide.
+      为确认 candidate 可接受而产生的 host 时间与工作；它是必须与 speculation 可能隐藏的延迟对比的主要成本。
+    owner: docs/design/ooo-execution-bootstrap/related-work/output-format-and-verification-cost.md
+    anchor: Format compliance and verification cost
+    status: canonical
+  - term: prompt-constrained artifact submission
+    aliases: [submit artifacts with a tool, 通过工具提交受约束产物]
+    definition: >-
+      Submit a result through a tool whose argument schema defines the artifact shape and requests provider constrained sampling; retain host-side structural and semantic verification because constrained decoding does not prove correctness.
+      通过参数 schema 定义产物形状并请求 provider constrained sampling 的工具提交结果；仍须保留 host 侧结构与语义验证，因为受约束解码不证明正确性。
+    owner: docs/design/ooo-execution-bootstrap/related-work/output-format-and-verification-cost.md
+    anchor: Artifact submission and visible sets
+    status: canonical
+  - term: per-task admitted conclusions
+    aliases: [admittedConclusions, 按任务准入的结论]
+    definition: >-
+      The conclusion channels derived from a task's frozen acceptance rules and bound into its digest; a tool should expose only channels the host can accept for that task.
+      从任务冻结接受规则派生并绑定进 digest 的结论通道；工具只应开放 host 对该任务可能接受的通道。
+    owner: docs/design/ooo-execution-bootstrap/related-work/output-format-and-verification-cost.md
+    anchor: Artifact submission and visible sets
+    status: canonical
+  - term: task-visible snapshot
+    aliases: [visible set, 任务可见快照]
+    definition: >-
+      The host-declared task view bound into the digest; writable paths cannot be hidden, and the host still verifies against the full baseline.
+      由 host 声明并绑定进 digest 的任务视图；不得隐藏可写路径，host 仍按完整 baseline 验证。
+    owner: docs/design/ooo-execution-bootstrap/related-work/output-format-and-verification-cost.md
+    anchor: Visible sets and tickets
+    status: canonical
+  - term: frozen-work ticket
+    aliases: [ticket carrying frozen work, 携带冻结工作的票据]
+    definition: >-
+      A ticket that expands the task's frozen work so the driver can rebuild from the same fields, preventing silent field omission and making digest differences diagnosable.
+      展开任务冻结工作的票据，使 driver 能从相同字段重建，避免字段静默遗漏并能诊断 digest 差异。
+    owner: docs/design/ooo-execution-bootstrap/related-work/output-format-and-verification-cost.md
+    anchor: Visible sets and tickets
+    status: canonical
+  - term: provider cache accounting
+    aliases: [cacheRead/cacheWrite, 提供方缓存账目]
+    definition: >-
+      Record provider cache reads and writes separately when measuring worker spend; omitting cache accounting can systematically misstate cost.
+      测量 worker 花费时分别记录 provider cache reads 与 writes；省略缓存账目可能系统性误算成本。
+    owner: docs/design/ooo-execution-bootstrap/related-work/output-format-and-verification-cost.md
+    anchor: Visible sets and tickets
+    status: canonical
+references:
+  - constrained OoO bootstrap
+  - bounded speculation
+  - research-instrument evidence

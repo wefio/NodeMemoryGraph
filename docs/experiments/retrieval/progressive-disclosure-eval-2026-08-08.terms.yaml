@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: capability discovery
+    aliases: [tool discovery, 能力发现]
+    definition: >-
+      Whether an Agent knows a tool exists and decides to call it; this is separate from what memory content becomes visible after the call.
+      Agent 是否知道工具存在并决定调用；这不同于调用后哪些记忆内容可见。
+    owner: docs/experiments/retrieval/progressive-disclosure-eval-2026-08-08.md
+    anchor: Disclosure versus capability discovery
+    status: canonical
+  - term: memory-content disclosure
+    aliases: [retrieval disclosure, 记忆内容披露]
+    definition: >-
+      Which memory candidates or exact evidence are shown after a retrieval call, and whether the caller expands or stops; it does not measure whether the caller chose to search.
+      检索调用后展示哪些记忆候选或精确证据，以及调用方是否扩展或停止；它不测量调用方是否选择搜索。
+    owner: docs/experiments/retrieval/progressive-disclosure-eval-2026-08-08.md
+    anchor: What was evaluated
+    status: canonical

@@ -1,5 +1,7 @@
 # Contentless lexical FTS: bounded local storage probe
 
+[中文](contentless-fts-2026-10-07.zh-CN.md) · [Terms used](contentless-fts-2026-10-07.terms.yaml)
+
 ## Scope and setup
 
 Measured **2026-10-07T13:12:49.636Z**, Node **v24.19.0**, SQLite **3.53.3**,

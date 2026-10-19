@@ -1,0 +1,19 @@
+version: 2
+terms:
+  - term: LoCoMo adapter
+    aliases: [eval:locomo, LoCoMo 适配器]
+    definition: >-
+      The adapter that reads the official `locomo10.json` from `evals/locomo/data/locomo10.json` or the path in `NMG_LOCOMO_DATA`, preserves session timestamps and `dia_id` evidence references, and scores through LoCoMo's pinned official QA and evidence-recall code after a one-time `npm run benchmark:setup`.
+      适配器：从 `evals/locomo/data/locomo10.json` 或 `NMG_LOCOMO_DATA` 给出的路径读取官方 `locomo10.json`，保留会话时间戳与 `dia_id` 证据引用，并在一次性运行 `npm run benchmark:setup` 之后经 LoCoMo 锁定的官方 QA 与证据召回代码评分。
+    owner: evals/locomo/README.md
+    anchor: LoCoMo adapter
+    status: canonical
+  - term: matched LoCoMo run
+    aliases: [matched 1, 匹配 LoCoMo 运行]
+    definition: >-
+      A run comparing no memory, ranked raw sessions, flat hybrid turns, NMG node/leaf retrieval and one-hop NMG graph expansion under one context budget.
+      在同一上下文预算下比较无记忆、排序原始会话、扁平混合轮次、NMG 节点／leaf 检索与一跳 NMG 图扩展的运行。
+    owner: evals/locomo/README.md
+    anchor: LoCoMo adapter
+    status: canonical
+references: []

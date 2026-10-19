@@ -1,6 +1,6 @@
 # 用实测收益为推测设门，并且不靠推测掩盖等待
 
-[English](2026-09-11-ooo-speculation.md)
+[English](2026-09-11-ooo-speculation.md) · [术语](2026-09-11-ooo-speculation.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

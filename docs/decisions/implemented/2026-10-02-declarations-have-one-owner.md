@@ -1,6 +1,6 @@
 # Declarations have one owner
 
-[中文](2026-10-02-declarations-have-one-owner.zh-CN.md)
+[中文](2026-10-02-declarations-have-one-owner.zh-CN.md) · [Terms used](2026-10-02-declarations-have-one-owner.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

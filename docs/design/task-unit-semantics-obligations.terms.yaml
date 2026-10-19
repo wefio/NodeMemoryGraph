@@ -1,0 +1,50 @@
+version: 2
+terms:
+  - term: obligation ledger
+    aliases: [design-obligation ledger, 义务台账]
+    definition: >-
+      A row-based evidence index for the obligations of its owning design and responsibility documents; it tracks the status and scope of proofs without replacing the contracts or claiming that the ledger itself reran them.
+      按行索引所属设计及其责任文档义务的证据台账；它记录证明状态与范围，但不取代契约，也不声称台账自身重新运行了验证。
+    owner: docs/design/task-unit-semantics-obligations.md
+    anchor: How to read this ledger
+    status: canonical
+  - term: proven obligation
+    aliases: [proven row, 已证明义务]
+    definition: >-
+      A ledger row whose named test asserts the obligation and fails for its violation; the conclusion is limited to the test's actual product or research path.
+      具名测试断言了该义务且在其被违反时会失败的台账行；结论仅限于测试实际经过的产品或研究路径。
+    owner: docs/design/task-unit-semantics-obligations.md
+    anchor: How to read this ledger
+    status: canonical
+  - term: partly covered obligation
+    aliases: [partial row, 部分覆盖的义务]
+    definition: >-
+      A ledger obligation for which some behavior or path is implemented or tested, but the full contract or intended product path remains incomplete.
+      已实现或测试了部分行为或路径，但完整契约或预期产品路径仍未完成的台账义务。
+    owner: docs/design/task-unit-semantics-obligations.md
+    anchor: How to read this ledger
+    status: canonical
+  - term: owed obligation
+    aliases: [open obligation row, 尚欠义务]
+    definition: >-
+      A current contract requirement for which the intended behavior is not implemented or proven on the required path.
+      当前契约要求、但预期行为尚未在要求的路径上实现或证明的义务。
+    owner: docs/design/task-unit-semantics-obligations.md
+    anchor: How to read this ledger
+    status: canonical
+  - term: measured research result
+    aliases: [bounded experiment result, 有界研究结果]
+    definition: >-
+      An empirical result limited to its experiment's model, task family, instrument and sample; it is not proof of general behavior or product-runtime integration.
+      受实验模型、任务族、工具与样本量限制的经验结果；它不证明一般行为或产品运行时接入。
+    owner: docs/design/task-unit-semantics-obligations.md
+    anchor: How to read this ledger
+    status: canonical
+references:
+  - mutation tooth
+  - product-runtime evidence
+  - research-instrument evidence
+  - task unit
+  - Task Board
+  - run record
+  - execution fusion

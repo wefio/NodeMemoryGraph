@@ -1,12 +1,9 @@
 # A non-blocking track must still be visible
 
-[中文](2026-09-12-visible-non-blocking-research-track.zh-CN.md)
+[中文](2026-09-12-visible-non-blocking-research-track.zh-CN.md) · [Terms used](2026-09-12-visible-non-blocking-research-track.terms.yaml)
 
 **Status:** implemented
 **Approved:** unrecorded
-Date: 2026-09-12
-Branch: feat/ci-visible-research-track
-
 ## Problem
 
 The `research-tests` job ran with `continue-on-error: true`, and the design record

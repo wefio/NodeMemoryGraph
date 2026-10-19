@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: resume-state note
+    aliases: [续跑状态记录, 工作状态记录]
+    definition: >-
+      A historical continuity record with an initial 2026-08-18 checkpoint and dated 2026-08-24/25 follow-ups, not a single as-of snapshot or a complete current resume plan. Protocol, live store identity and current work require their owners; old test counts and provider observations are not present readiness receipts.
+      含 2026-08-18 初始检查点及 2026-08-24／25 跟进的历史连续性记录，不是单一截至日期快照或完整当前续跑计划。协议、当前 store 身份与工作需查各自 owner；旧测试计数和 provider 观察不是当前就绪回执。
+    owner: docs/experiments/retrieval-quality/status-2026-08-18.md
+    anchor: Where we are
+    status: canonical
+  - term: historical quota incident clue
+    aliases: [GoUsageLimitError context, 历史配额线索]
+    definition: >-
+      The record's reported quota/429 episode and zero-generation drain. A +0 generated line alone does not diagnose quota exhaustion, failed calls or gateway behavior; a historical fallback/reset estimate neither verifies today's balance nor authorizes endpoint switching.
+      记录中报告的配额／429 episode 与零生成 drain。单凭 +0 generated 行不能诊断配额耗尽、失败调用或网关行为；历史回退／重置估计既不验证今天余额，也不授权切换端点。
+    owner: docs/experiments/retrieval-quality/status-2026-08-18.md
+    anchor: Historical quota/provider observations
+    status: canonical

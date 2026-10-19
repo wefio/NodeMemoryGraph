@@ -1,0 +1,10 @@
+version: 2
+terms:
+  - term: automatic recall deadline
+    aliases: ["自动召回期限"]
+    definition: >-
+      One absolute waiting budget for automatic context preparation, preserving timely results while later phases expire; it is not a per-RPC allowance or an explicit-search limit. 自动上下文准备共用的绝对等待预算；后续阶段到期时保留及时结果，不是逐 RPC 额度或显式搜索限制。
+    owner: docs/design/session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.md
+    anchor: Budget and completed results
+    status: canonical
+references: []

@@ -1,0 +1,45 @@
+version: 2
+terms:
+  - term: discriminating case
+    aliases: [enumerated design case, 鉴别用例]
+    definition: >-
+      A row mapping one design obligation to a historical compiler/model or controlled-suite check, with its actual coverage limits. Not implemented, unmodelled and not started remain visible; a passed subcondition does not complete the whole bullet or prove arbitrary Agent behavior.
+      把一项设计义务映射到历史编译器／模型或受控套件检查的行，须保留真实覆盖边界。未实现、未建模、未开始保持可见；子条件通过不等于整条完成，也不证明任意 Agent 行为。
+    owner: docs/experiments/execution/task-semantics-design-cases-2026-09-13.md
+    anchor: Bullet by bullet
+    status: canonical
+  - term: teeth harness outcome triple
+    aliases: [three reported outcomes, teeth 三结局]
+    definition: >-
+      The historical harness required a clean pass, the expected named case to fail under the mutant, and byte-identical restoration. These are three separate observations, not a fresh current-tool receipt; applicability failure and surviving mutants are not credited as caught.
+      历史 harness 要求干净运行通过、mutant 下预期点名用例失败及逐字节还原。三者是分开的观察，不是当前工具新回执；不适用及存活项不能算抓到。
+    owner: docs/experiments/execution/task-semantics-design-cases-2026-09-13.md
+    anchor: What the teeth check caught
+    status: canonical
+  - term: stale anchor
+    aliases: [pre-#56 line, stale marker, 过期 anchor]
+    definition: >-
+      A historical mutation marker/target that no longer locates its intended rule. It may fail applicability or alter other code; finding text alone cannot establish the intended fault was tested. The report's pre-#56 repair checked the actual failing case rather than assuming it.
+      不再定位预期规则的历史 mutation marker／target。可能无法适用或改到别处；找到文本本身不证明预期故障已受测。报告中 pre-#56 的修复核对实际失败用例，而非假定。
+    owner: docs/experiments/execution/task-semantics-design-cases-2026-09-13.md
+    anchor: What the teeth check caught
+    status: canonical
+  - term: harness self-coverage drift
+    aliases: [one suite per target, 检查自身覆盖漂移]
+    definition: >-
+      The historical target-to-suite coverage gap: a selected suite list omitted the newly added design cases, so assumption-may-carry-a-dependency was not exercised against them. Adding suite coverage addressed that observed gap, not all possible future harness drift.
+      历史 target 到 suite 的覆盖缺口：所选套件列表漏掉新增设计用例，导致 assumption-may-carry-a-dependency 未对着它们运行。补充套件覆盖解决该观察到的缺口，不是所有未来 harness 漂移。
+    owner: docs/experiments/execution/task-semantics-design-cases-2026-09-13.md
+    anchor: What the teeth check caught
+    status: canonical
+  - term: single-run probe namespace limit
+    aliases: [one run per private store, 单运行探针命名空间限制]
+    definition: >-
+      The first checkpoint's one-run probe schema, with CHECK(id=1), task rows keyed only by id and channel ooo-process-probe. It could not represent the cross-run equal-task-ID case; the later namespace report is a separate research slice, not proof of a current product namespace limitation.
+      首检查点的单运行探针 schema：CHECK(id=1)、任务行仅以 id 为键、通道 ooo-process-probe。无法表示跨 run 同 task ID 的情形；后续命名空间报告是独立研究切片，不证明当前产品仍有限制。
+    owner: docs/experiments/execution/task-semantics-design-cases-2026-09-13.md
+    anchor: What this does not do
+    status: canonical
+references:
+  - task unit
+  - execution fusion

@@ -1,0 +1,63 @@
+version: 2
+namespace: repository.verification
+terms:
+  - term: assertion
+    aliases: [contract assertion, 断言]
+    definition: >-
+      A reviewable Contract claim with a stable assertion ID, retaining its statement and declaring check or documentedOnly, kind, stage and context. Name resolution or passing a check does not establish the claim in untested contexts.
+      契约中一项具有稳定 ID 的可审查主张，保留原文 statement，并用 check 或
+      documentedOnly、kind、stage、context 说明证据、方法和适用范围。
+      名称可解析或检查通过不等于主张在未测上下文中成立。
+    owner: docs/decisions/implemented/2026-09-08-requirements-traceability-matrix.md
+    anchor: "Decision"
+    status: canonical
+  - term: check
+    aliases: [verification check, 仓库检查]
+    definition: >-
+      A resolvable verification entry named by an assertion, such as a package script, route or named route test. It locates evidence but is not the assertion; resolution, execution and success are different facts.
+      断言命名的可解析验证入口，例如 package script、route 或 route 中的具名测试。
+      它说明到哪里取得证据，不是 assertion 本身；可解析、实际运行和运行成功是不同事实。
+    owner: docs/decisions/implemented/2026-09-08-requirements-traceability-matrix.md
+    anchor: "Decision"
+    status: canonical
+  - term: check kind
+    aliases: [kind, 检查种类]
+    definition: >-
+      The verification method used for assertion evidence, such as tests, properties, runtime assertions, metamorphic relations, coverage or formal proof. It identifies a method and its limits, not a delivery stage or a passing verdict.
+      断言证据采用的验证方法类别，如测试、性质检查、运行时断言、变形关系、覆盖分析或形式证明。
+      Kind 区分方法及其边界，不说明执行链阶段，也不单独提供通过结论。
+    owner: docs/decisions/implemented/2026-09-08-requirements-traceability-matrix.md
+    anchor: "Decision"
+    status: canonical
+  - term: stage
+    aliases: [chain stage, 链节]
+    definition: >-
+      The delivery-chain position an assertion checks, from requirement, acceptance, unit, integration and e2e through deploy, observability and outcome. A stage is not a method; early-stage success does not close a later-stage claim.
+      断言所验证的交付链位置，从 requirement、acceptance、unit、integration、e2e 到
+      deploy、observability、outcome。阶段不是验证方法；较早阶段的通过不能关闭较晚阶段的主张。
+    owner: docs/decisions/implemented/2026-09-08-requirements-traceability-matrix.md
+    anchor: "Decision"
+    status: canonical
+  - term: evidence
+    aliases: [evidence source, 证据]
+    definition: >-
+      An attributable record or source supporting a specific claim, version and context. Assertions name sources such as node-test, eval, metric, review or documented-only. Declaring a source does not produce evidence; historical success is not current execution.
+      支持特定主张、版本和上下文的可归因记录或来源。断言使用带 namespace 的来源标识，
+      如 node-test、eval、metric、review 或 documented-only；声明来源不证明证据已产生，
+      历史通过也不等于当前版本实际执行。
+    owner: docs/decisions/implemented/2026-09-08-requirements-traceability-matrix.md
+    anchor: "Decision"
+    status: canonical
+  - term: assertion context
+    aliases: [context, 断言上下文]
+    definition: >-
+      The platforms, entry points, inputs and versions covered by an assertion's evidence, interpreted with its stage. This is not Agent session context; a passing sample does not cover all environments or inputs.
+      一项断言的证据适用的具体平台、入口、输入和版本范围，随阶段一同解释结果。
+      它不是 Agent 会话上下文；检查样本通过不能被扩大为所有环境或所有输入均成立。
+    owner: docs/decisions/implemented/2026-09-08-requirements-traceability-matrix.md
+    anchor: "Decision"
+    status: canonical
+references:
+  - route
+  - gate
+  - harness

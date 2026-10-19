@@ -1,0 +1,10 @@
+version: 2
+terms:
+  - term: hidden-feature gate
+    aliases: [non-default capability switch, 隐藏功能 gate]
+    definition: >-
+      A control that prevents a capability from being active by default, such as an environment variable or mode flag; it must be inventoried with its default and ownership.
+      阻止某项能力默认启用的控制项，例如环境变量或模式 flag；必须登记其默认值与 owner。
+    owner: docs/design/hidden-features-registry.md
+    anchor: "Feature register"
+    status: canonical

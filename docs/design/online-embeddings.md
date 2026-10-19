@@ -1,4 +1,6 @@
-# Online embedding providers
+# Online Embedding Providers
+
+[English](online-embeddings.md) | [简体中文](online-embeddings.zh-CN.md) · [Terms](online-embeddings.terms.yaml)
 
 NMG can keep its memory database and ANN index local while sending only the
 text that needs embedding to a hosted provider. The Pi extension, index
@@ -92,3 +94,10 @@ For backward compatibility, setting `NMG_EMBED_BASE_URL` without
 
 API keys are read from the environment, never stored in benchmark parameter
 snapshots, index IDs, or the memory database.
+
+## Core embedding interface
+
+Core's [`VectorEmbedder`](../../src/core/types.ts) is a synchronous text-to-vector
+interface with `dimensions`, `model` and `embed(text): readonly number[]`.
+The interface alone does not select a hosted provider or establish compatibility
+between embedding spaces.

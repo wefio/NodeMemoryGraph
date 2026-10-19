@@ -1,0 +1,20 @@
+version: 2
+terms:
+  - term: bounded parallel static check
+    aliases: [有界并行静态检查]
+    definition: >-
+      Running adjacent approved static checks with a fixed maximum number of asynchronous npm processes while every other stage keeps its declared ordering; in this report the cap is three and the static group still finishes before the product tests start.
+      在固定的异步 npm 进程数上限内并行运行相邻的已批准静态检查，同时其他各阶段保持其声明的顺序；本报告中上限为三个，且静态组仍在产品测试开始前结束。
+    owner: docs/experiments/verification/full-gate-parallel-static-2026-09-23.md
+    anchor: Protocol
+    status: canonical
+  - term: serial barrier
+    aliases: [串行屏障]
+    definition: >-
+      A stage that may not overlap with the parallel group, used here for build and package checks so generated inputs are not written concurrently; it bounds which checks the parallel group may contain.
+      不得与并行组重叠的阶段，本报告将其用于构建与打包检查，以避免并发写入生成的输入；它界定了并行组可以包含哪些检查。
+    owner: docs/experiments/verification/full-gate-parallel-static-2026-09-23.md
+    anchor: Protocol
+    status: canonical
+references:
+  - whole-run verification deadline

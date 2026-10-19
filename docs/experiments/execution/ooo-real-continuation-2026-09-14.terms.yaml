@@ -1,0 +1,35 @@
+version: 2
+terms:
+  - term: accepted continuation boundary
+    aliases: [legal continuation boundary, 已接受 continuation 边界]
+    definition: >-
+      The handoff point after part 1 is accepted: part 2 may proceed only after retrieving the delivered bytes from the view and verifying their digest against the Store's record.
+      part 1 被接受后的 handoff 点：part 2 只有从 view 取回已交付 bytes，并将其 digest 与 Store 记录核对后才能继续。
+    owner: docs/experiments/execution/ooo-real-continuation-2026-09-14.md
+    anchor: Method: what makes the boundary real
+    status: canonical
+  - term: stage-specific delivery
+    aliases: [stage-bound delivery, 按阶段绑定的交付]
+    definition: >-
+      A delivery selected by its named run stage; a missing stage delivery is refused rather than replaced by the latest artifact from another stage.
+      按运行中明确指定的 stage 选择交付；若该 stage 没有交付就拒绝，不用其他 stage 的最新 artifact 替代。
+    owner: docs/experiments/execution/ooo-real-continuation-2026-09-14.md
+    anchor: Defects this run found in its own runner, and what they show
+    status: canonical
+  - term: fixed parent check
+    aliases: [frozen parent check, 固定 parent check]
+    definition: >-
+      The predeclared case list applied to the composed parent artifact; it is not edited during a run and is separate from the part-1 boundary cases.
+      用于组合后 parent artifact 的预先声明用例列表；运行期间不修改，并且与 part-1 边界用例分开。
+    owner: docs/experiments/execution/ooo-real-continuation-2026-09-14.md
+    anchor: The five tasks
+    status: canonical
+references:
+  - task unit
+  - Task Board
+  - run record
+  - managed board entry
+  - measured research result
+  - product-runtime evidence
+  - research-instrument evidence
+  - obligation ledger

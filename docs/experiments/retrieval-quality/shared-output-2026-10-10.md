@@ -1,5 +1,13 @@
 # Shared output wrapping — 2026-10-10
 
+[English](shared-output-2026-10-10.md) | [简体中文](shared-output-2026-10-10.zh-CN.md) · [Terms](shared-output-2026-10-10.terms.yaml)
+
+**Evidence boundary (2026-10-17):** this is a historical isolated comparison at
+the named baseline. Branch states, host wiring and test/LSP/DAP readings describe
+that checkpoint, not current acceptance of this dirty documentation worktree.
+Cited experiment artifacts, external sources and run receipts were not
+independently revalidated or rerun by this documentation review.
+
 ## Questions and frozen comparison
 
 Registered before implementation. Does shorter shared search/get copy reduce
@@ -19,22 +27,25 @@ exact-read guidance? This does not test retrieval relevance or answer quality.
 
 ## Fixed cells
 
-| Cell                        | Protected information                                                    |
-| --------------------------- | ------------------------------------------------------------------------ |
-| Healthy empty               | Empty-result semantics; no extra wrapper                                 |
-| Degraded empty              | Lexical-only warning, mode and bounded reason                            |
-| One English record          | Statement preview, full memory ID, exact-get guidance                    |
-| One Chinese record          | Same, without language-specific shortening                               |
-| Thirteen mixed long records | Same count/order and existing 320-character previews                     |
+| Fixture type | Protected information |
+| --- | --- |
+| Healthy empty | Empty-result semantics; no extra wrapper |
+| Degraded empty | Lexical-only warning, mode and bounded reason |
+| One English record | Statement preview, full memory ID, exact-get guidance |
+| One Chinese record | Same, without language-specific shortening |
+| Thirteen mixed long records | Same count/order and existing 320-character previews |
 | Exact values and provenance | Values, scope, event/expiry dates, external source, truth and open state |
-| Withdrawn record            | Withdrawal boundary and redaction of statement/source                    |
-| Logical structure           | Membership, local labels, chain structure and independent budget         |
-| Deferred records            | Deferred IDs, conditional single get, no repeated search                 |
-| Already in context          | Existing title/IDs/flag unchanged; no historical-message replacement     |
-| Conflicting statements      | Both statements and their distinct scope/truth retained                  |
-| Degraded nonempty           | Candidates plus lexical-only warning, mode and reason                    |
+| Withdrawn record | Withdrawal boundary and redaction of statement/source |
+| Logical structure | Membership, local labels, chain structure and independent budget |
+| Deferred records | Deferred IDs, conditional single get, no repeated search |
+| Already in context | Existing title/IDs/flag unchanged; no historical-message replacement |
+| Conflicting statements | Both statements and their distinct scope/truth retained |
+| Degraded nonempty | Candidates plus lexical-only warning, mode and reason |
 
-Search and get are separate output cells where applicable. Already-in-context
+The results measure twelve fixture types on two surfaces, search and get:
+24 paired surface cells. The 22 ordinary cells are eleven fixture types × two
+surfaces; the remaining two are the already-in-context/folded-only envelope.
+These are not 24 independent tasks, nor a count of the two arms. Already-in-context
 text is an unchanged adapter envelope; the ordinary Pi regression checks its
 real disclosure path. No new folding or retrieval rules are introduced.
 
@@ -48,7 +59,7 @@ was added. A later, separate named-encoding study does not turn these character
 measurements into token measurements.
 
 Accept only if projections and unwrapped bodies are identical, every protected
-value/marker and guidance obligation survives, every nonempty shared-wrapped
+value/marker and guidance obligation survives, every ordinary nonempty, non-folded shared-wrapped
 search/get fixture gets shorter, and empty/folded-only output does not grow.
 Run targeted surface/prompt/Pi regressions, LSP checks, a build before
 `agent:verify`, and the selected blocking checks. Otherwise revert the candidate
@@ -69,20 +80,20 @@ cells. The remaining two are the explicitly reconstructed folded-only envelope,
 not a real model-input or cache confirmation. Probe source, inputs, source hashes
 and per-cell metrics are preserved in the receipt; the throwaway source is removed.
 
-| Fixture                | Search UTF-16 units, baseline → candidate | Get UTF-16 units, baseline → candidate |
-| ---------------------- | ----------------------------------------- | -------------------------------------- |
-| Healthy empty          | 29 → 29                                   | 210 → 86                               |
-| Degraded empty         | 153 → 153                                 | 210 → 86                               |
-| One English            | 732 → 522                                 | 406 → 282                              |
-| One Chinese            | 720 → 510                                 | 394 → 270                              |
-| Thirteen mixed long    | 6,241 → 6,031                             | 9,339 → 9,215                          |
-| Values/provenance      | 813 → 603                                 | 687 → 563                              |
-| Withdrawn              | 939 → 704                                 | 649 → 500                              |
-| Logical structure      | 1,125 → 915                               | 845 → 721                              |
-| Deferred               | 823 → 595                                 | 599 → 442                              |
-| Conflicting statements | 864 → 654                                 | 596 → 472                              |
-| Degraded nonempty      | 824 → 614                                 | 377 → 253                              |
-| Already in context     | 223 → 223                                 | 223 → 223                              |
+| Fixture | Search UTF-16 units, baseline → candidate | Get UTF-16 units, baseline → candidate |
+| --- | --- | --- |
+| Healthy empty | 29 → 29 | 210 → 86 |
+| Degraded empty | 153 → 153 | 210 → 86 |
+| One English | 732 → 522 | 406 → 282 |
+| One Chinese | 720 → 510 | 394 → 270 |
+| Thirteen mixed long | 6,241 → 6,031 | 9,339 → 9,215 |
+| Values/provenance | 813 → 603 | 687 → 563 |
+| Withdrawn | 939 → 704 | 649 → 500 |
+| Logical structure | 1,125 → 915 | 845 → 721 |
+| Deferred | 823 → 595 | 599 → 442 |
+| Conflicting statements | 864 → 654 | 596 → 472 |
+| Degraded nonempty | 824 → 614 | 377 → 253 |
+| Already in context | 223 → 223 | 223 → 223 |
 
 Ordinary nonempty search wrapping saves 210 UTF-16 units / 208 UTF-8 bytes
 per block; get saves 124 / 124. Withdrawal and deferred hints add their own
@@ -108,6 +119,6 @@ are reused through the main checkout's junction, not freshly installed.
 
 Data-body identity does not establish unchanged model interpretation of shorter
 copy. No relevance, task-success, paid-provider, live-harness token/cache, or
-deployment claim is made. The DSH automatic formatter already supplies only the preamble,
-not the shared metadata footer; that existing host wiring is not repaired or
-claimed complete by this copy-only change.
+deployment claim is made. At that checkpoint, the record reported DSH automatic formatting with only the
+preamble, not the shared metadata footer. That historical host wiring was neither
+repaired nor certified by the copy-only change; it is not a fresh DSH audit.

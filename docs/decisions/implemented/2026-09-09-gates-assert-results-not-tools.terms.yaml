@@ -1,0 +1,15 @@
+version: 2
+terms:
+  - term: result-property gate
+    aliases: [outcome-property gate, 结果性质门]
+    definition: >-
+      A gate that asserts a property of the produced result without requiring a particular tool, entry point, or file; an implementation-specific path requires separate justification.
+      断言产出结果性质、但不要求特定工具、入口或文件的门；若规则只能经特定实现路径满足，须另行论证。
+    owner: docs/decisions/implemented/2026-09-09-gates-assert-results-not-tools.md
+    anchor: Decision
+    status: canonical
+references:
+  - gate
+  - entry point
+  - evidence
+  - decision record

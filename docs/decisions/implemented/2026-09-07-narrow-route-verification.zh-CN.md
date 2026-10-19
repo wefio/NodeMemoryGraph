@@ -2,12 +2,10 @@
 
 **Status:** implemented  
 **Approved:** unrecorded
-Date: 2026-09-07
-Branch: pr/rcp-narrow-verify
-
+**Relates to:** [RCP 默认轻量验证](2026-09-07-rcp-lightweight-verification-default.zh-CN.md)
 治理元规则: [self-governance meta-rule](../implemented/2026-09-07-self-governance-meta-rule.md) —— 这是对既有验证约定(RCP/agent-verify 路由语义)的改动,故记治理决策。
 
-English: [2026-09-07-narrow-route-verification.md](2026-09-07-narrow-route-verification.md)
+English: [2026-09-07-narrow-route-verification.md](2026-09-07-narrow-route-verification.md) · [术语](2026-09-07-narrow-route-verification.terms.yaml)
 
 ## 问题
 
@@ -36,8 +34,8 @@ verify:
 
 ## 后果
 
-- 路由声明保持每域验证的唯一来源:拥有它的路由自己的 `tests` 即窄集。窄以 opt-in `agent:verify --narrow` 快路径暴露;默认权威门在覆盖规则被信任前不变。适配器叶子路由的默认阻塞(今天比同行 `dsh-adapter` 多跑 `test:product`)对齐是窄被采纳后的后续。
-- 开发/agent 快路径(`agent:verify --narrow`/按路径)组合必跑共享项 + 每个命中路由自己的测试;结果正是权威门对一次被完全拥有的改动会跑的那套。这让“轻量组合=完整 RCP”对可本地化的改动成立,而任一共享文件时权威门仍整包。
+**当前实现。** 后续的 [RCP 默认轻量验证](2026-09-07-rcp-lightweight-verification-default.zh-CN.md)
+将本记录描述的 opt-in 快路径改为对合格改动默认使用窄验证，并通过 RCP reconciliation 写入 receipt。该决定取代本记录早期“默认 full”的说明；本记录仍拥有两级组合原则及其理由。当前选择与证据语义见 [Narrow and full verification gates](../../design/ci-cd-and-quality/repository-control-plane/lightweight-verification.zh-CN.md)。
 - 不新增执行器、不建 primitive 注册表:底层工具(`node --test`/`eslint`/`prettier`/`tsc`)本就吃窄参数。我们只加路由粒度 + 一条覆盖规则,不加机器。
 
 ## 考虑过的替代方案

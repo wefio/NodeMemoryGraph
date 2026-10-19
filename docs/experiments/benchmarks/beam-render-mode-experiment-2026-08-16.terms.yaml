@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: BEAM rendering mode
+    aliases: [memory-context rendering format, BEAM 渲染模式]
+    definition: >-
+      A presentation choice for retrieved memory rows and chain blocks; results from one rendering experiment do not establish a universal model-behavior effect or the current product default.
+      检索记忆行与链块的呈现选择；单次渲染实验结果不能证明普遍的模型行为效应或当前产品默认值。
+    owner: docs/experiments/benchmarks/beam-render-mode-experiment-2026-08-16.md
+    anchor: Question and protocol
+    status: canonical
+  - term: sample-bounded rendering result
+    aliases: [BEAM smoke8 result, 样本限定的渲染结果]
+    definition: >-
+      A result from the dated 16-question BEAM smoke8 protocol; it must not be generalized to other datasets, prompts, judges, or current renderer behavior without reproduction.
+      来自带日期的 BEAM smoke8 16 问 protocol 的结果；未经复现，不得推广到其他数据集、提示词、judge 或当前 renderer 行为。
+    owner: docs/experiments/benchmarks/beam-render-mode-experiment-2026-08-16.md
+    anchor: Reported results
+    status: canonical

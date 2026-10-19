@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: shared dispatch loop
+    aliases: [programmatic plan dispatch, 共享派发循环]
+    definition: >-
+      A single programmatic `dispatchPlan` loop that consumes a board port's admitted candidates and a worker port, owns claim/run/result/verdict ordering and accounting, and delegates legality and session decisions to their owners; extraction alone is not product activation.
+      单一程序化 `dispatchPlan` 循环，消费 board port 准入的候选与 worker port，拥有认领／运行／结果／裁决顺序及记账，并把合法性和会话决策委托给其 owner；仅抽取该循环不等于产品已启用。
+    owner: docs/decisions/implemented/2026-09-19-dispatch-loop-is-shared.md
+    anchor: Decision
+    status: canonical
+references:
+  - evidence

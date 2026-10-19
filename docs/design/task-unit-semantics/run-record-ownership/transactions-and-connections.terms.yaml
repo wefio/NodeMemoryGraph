@@ -1,0 +1,39 @@
+version: 2
+terms:
+  - term: transaction port
+    aliases: [TransactionPort, 事务端口]
+    definition: >-
+      A Store-issued, synchronous-scope capability bound to one connection and transaction generation; it permits typed operations to join that transaction but does not expose the connection or transaction controls.
+      Store 签发、绑定单一连接与事务代次的同步作用域能力；允许类型化操作加入该事务，但不暴露连接或事务控制。
+    owner: docs/design/task-unit-semantics/run-record-ownership/transactions-and-connections.md
+    anchor: Transaction participation and connection lifetime
+    status: canonical
+  - term: rollback-only
+    aliases: [rollback-only transaction, 仅回滚]
+    definition: >-
+      A transaction state set after an inner operation fails; catching the inner error cannot make the outermost scope commit.
+      内层操作失败后设置的事务状态；即使捕获了内层错误，最外层作用域也不能提交。
+    owner: docs/design/task-unit-semantics/run-record-ownership/transactions-and-connections.md
+    anchor: Transaction participation and connection lifetime
+    status: canonical
+  - term: outer-owner/inner-borrower
+    aliases: [borrowed Store lifetime, 外层拥有内层借用]
+    definition: >-
+      A lifecycle rule in which the outer host creates and closes the Store, while the inner run receives only a scoped operation capability and never closes the borrowed Store.
+      外层宿主创建并关闭 Store，内层 run 只接收有作用域的操作能力，不能关闭所借用 Store 的生命周期规则。
+    owner: docs/design/task-unit-semantics/run-record-ownership/transactions-and-connections.md
+    anchor: Transaction participation and connection lifetime
+    status: proposed
+  - term: post-commit hook
+    aliases: [afterCommit, 提交后钩子]
+    definition: >-
+      An observation or notification callback that runs after durable commit; its failure does not establish that the transaction rolled back.
+      在持久化提交后运行的观察或通知回调；回调失败不能证明事务已回滚。
+    owner: docs/design/task-unit-semantics/run-record-ownership/transactions-and-connections.md
+    anchor: Transaction participation and connection lifetime
+    status: canonical
+references:
+  - run record
+  - run namespace
+  - managed board entry
+  - borrowed query port

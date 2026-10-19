@@ -1,0 +1,31 @@
+version: 2
+terms:
+  - term: config-driven benchmark workflow
+    aliases: [配置驱动的基准工作流]
+    definition: >-
+      Running and resuming the official OmniMemEval suites through one checked-in configuration file that owns common arguments, per-suite official options, and environment-file selection, so the command line never reconstructs parameters; a runner-owned flag such as a library, env, version, or replay switch stays out of the config and a one-off canary copies the config instead of adding a CLI flag.
+      通过一份签入仓库的配置文件运行与续跑官方 OmniMemEval 套件：该文件拥有公共参数、各套件官方选项与环境文件选择，命令行因此从不重建参数；库、env、版本或 replay 这类 runner 自有标志不进配置，一次性 canary 复制配置而不是新增 CLI 标志。
+    owner: .pi/skills/omnimemeval-eval/SKILL.md
+    anchor: Configure once
+    status: canonical
+  - term: benchmark resume by result directory
+    aliases: [按结果目录续跑]
+    definition: >-
+      Continuing an interrupted official run by pointing at its exact existing result directory, from which the runner infers suite and version and then rejects membership or configured-parameter drift before delegating; a similar-looking directory name is not a valid target and the official pipeline resumes its own checkpoints.
+      指向既有且确切的结果目录来继续被中断的官方运行；runner 从中推断套件与版本，并在委托前拒绝归属不符或配置参数漂移。相似的目录名不是合法目标，续跑由官方流水线从自己的检查点完成。
+    owner: .pi/skills/omnimemeval-eval/SKILL.md
+    anchor: Resume
+    status: canonical
+  - term: run-manual boundary
+    aliases: [操作手册边界]
+    definition: >-
+      The rule that the skill's boundaries section keeps official parsing, prompts, scoring, checkpoints and reports upstream, keeps NMG evidence audits separate from the official run, forbids a suite-specific NMG wrapper or direct invocation of the five official scripts for normal runs, and places historical scores and incident narratives in the experiments area rather than in this operating manual.
+      该 skill 的边界章节所立的规则：官方解析、提示词、打分、检查点与报告保持在上游；NMG 证据审计与官方运行分离；常规运行禁止套件专属 NMG wrapper、也禁止直接调用五个官方脚本；历史分数与事故叙述放在实验区，不写进这份操作手册。
+    owner: .pi/skills/omnimemeval-eval/SKILL.md
+    anchor: Boundaries
+    status: canonical
+references:
+  - benchmark venv
+  - embedding profile
+  - QPP
+  - evidence

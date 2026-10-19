@@ -1,0 +1,14 @@
+version: 2
+terms:
+  - term: adopter
+    aliases: [adopting caller, 采纳调用方]
+    definition: >-
+      The caller that decides to bind a board entry to a run; this record names the role without claiming that a product implementation exists.
+      决定将黑板条目绑定到 run 的调用方；本记录为该角色命名，但不声称产品实现已经存在。
+    owner: docs/decisions/implemented/2026-09-20-name-the-collaboration-protocol.md
+    anchor: Decision
+    status: canonical
+references:
+  - Task Board
+  - protocol-governed collaboration
+  - Task-Unit Protocol

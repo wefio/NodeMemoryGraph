@@ -1,0 +1,41 @@
+version: 2
+terms:
+  - term: run record
+    aliases: [run history, 运行记录]
+    definition: >-
+      The immutable run manifest and append-only facts that cannot be reconstructed from the task board; the board remains authoritative for current claim, delivery, verdict and resolution state, while ready/blocked/accepted are derived views.
+      不可从任务黑板重建的不可变运行 manifest 与追加事实；claim、交付、verdict、resolve 的当前状态仍由黑板权威持有，ready/blocked/accepted 则是派生视图。
+    owner: docs/design/task-unit-semantics/run-record-ownership.md
+    anchor: Physical ownership of run records and the sole writer
+    status: canonical
+  - term: run namespace
+    aliases: [task-run namespace, 运行命名空间]
+    definition: >-
+      Store-owned run identity, frozen task plan and append-only facts keyed by runId, isolated from other runs; it does not duplicate the board's current lifecycle state.
+      由 Store 持有、以 runId 隔离的运行身份、冻结任务计划与追加事实；它不复制黑板的当前生命周期状态。
+    owner: docs/design/task-unit-semantics/run-record-ownership.md
+    anchor: Shape of the run surface
+    status: canonical
+  - term: managed board entry
+    aliases: [run-managed entry, 受管理 board 条目]
+    definition: >-
+      A board entry bound to a frozen task in a run; later lifecycle writes must pass through the run-coordinated transaction and append its matching run fact atomically.
+      绑定到某个 run 冻结任务的 board 条目；后续生命周期写入必须经运行协调事务，并与对应运行事实原子追加。
+    owner: docs/design/task-unit-semantics/run-record-ownership.md
+    anchor: Shape of the run surface
+    status: canonical
+  - term: borrowed query port
+    aliases: [typed read port, 借用查询端口]
+    definition: >-
+      A narrow typed read capability over an owner's existing connection that exposes neither writes, the raw connection, arbitrary SQL, transaction control nor close; the borrower does not own the connection.
+      借用 owner 现有连接的窄类型化读取能力，不暴露写操作、原始连接、任意 SQL、事务控制或 close；连接所有权不转移给借用者。
+    owner: docs/design/task-unit-semantics/run-record-ownership.md
+    anchor: Shape of the borrowed status view
+    status: proposed
+references:
+  - task unit
+  - Task Board
+  - task view
+  - Task IR
+  - execution fusion
+  - bounded speculation

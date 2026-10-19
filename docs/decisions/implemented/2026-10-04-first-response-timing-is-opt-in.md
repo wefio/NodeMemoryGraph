@@ -1,6 +1,6 @@
 # First-response timing is opt-in
 
-[中文](2026-10-04-first-response-timing-is-opt-in.zh-CN.md)
+[中文](2026-10-04-first-response-timing-is-opt-in.zh-CN.md) · [Terms used](2026-10-04-first-response-timing-is-opt-in.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit
@@ -14,7 +14,7 @@ The symptom is intermittent waiting before the first visible response during ord
 
 The user authorized installing only the observer in the shared checkout, without deploying a recall deadline or interrupting the running Premiere session. `/nmg-latency on|off|status` explicitly controls capture; it defaults off and resets on session replacement, branch navigation or reload. The shared timing primitive owns identities, monotonic elapsed time, first-only phases, exclusions, outcomes and safe sink failure. The Pi binding only observes native lifecycle events and appends metadata-only custom entries outside model context.
 
-The user selected slow input-to-recall retention rather than persisting every observed input. Filtering belongs to the persistence sink, not the first-only clock: a retained trace includes its earlier short boundaries. The normative retention threshold, event, privacy and interpretation contract is in [session hooks](../../design/session-memory-lifecycle-hooks-2026-08-10.md#首次输出计时). The observation wraps the existing preparation handler and preserves its awaited return value or error. It does not add a recall deadline, change model settings or daemon lifecycle, or increase provider request volume. It does not claim that a host event timestamp is client-visible TTFT.
+The user selected slow input-to-recall retention rather than persisting every observed input. Filtering belongs to the persistence sink, not the first-only clock: a retained trace includes its earlier short boundaries and is persisted only when the input-to-recall interval exceeds `SLOW_RECALL_THRESHOLD_MS` (1,000 ms). The shared [timing primitive](../../../src/integration/first-response-timing.ts) defines the versioned metadata event and retention filter; the [Pi binding](../../../.pi/extensions/nmg/first-response-timing.ts) maps host events. The [historical session-hook index](../../design/session-memory-lifecycle-hooks-2026-08-10.md#current-owner-map) points to current owners. The observation wraps the existing preparation handler and preserves its awaited return value or error. It does not add a recall deadline, change model settings or daemon lifecycle, or increase provider request volume. It does not claim that a host event timestamp is client-visible TTFT.
 
 ## Alternatives considered
 

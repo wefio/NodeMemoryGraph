@@ -1,5 +1,14 @@
 # A round's transition and the board write inside it - 2026-09-13
 
+[English](ooo-round-transition-2026-09-13.md) | [简体中文](ooo-round-transition-2026-09-13.zh-CN.md) · [Terms](ooo-round-transition-2026-09-13.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a dated research
+or fixture record. Table names, source positions, status statements, test counts
+and unresolved-work labels belong to its snapshot, not current daemon `taskRun`
+integration. No listed suite or mutation was rerun here, and historical/local
+replay commands are not confirmed available in this checkout. The current
+[task-unit contract](../../design/task-unit-semantics.md) owns product boundaries.
+
 The design's integration contract says the composed write entries reuse one implementation: standalone
 they open the transaction boundary, and inside a transition they join it through the port the store
 issued. This slice does the round's half.
@@ -12,10 +21,11 @@ issued. This slice does the round's half.
   publication made inside a transition is part of that transition instead of a second BEGIN (which the
   store refuses rather than nesting).
 
-No caller publishes inside a transition today — publishing happens after the outer commit, which is
-what the design's static review says and what the green suites before this change confirmed. The point
-of the change is that the rule no longer depends on that ordering: a publication reached inside a
-transition now joins it, and a publication reached without a port is refused by name.
+The slice's static review reported publication after the outer commit. Passing
+suites alone do not establish that ordering for every call path. The interface
+change removes reliance on it: publication inside an existing transition joins
+through the issued port, or is refused there when the port is absent.
+Standalone publication outside a transition may open its own store boundary.
 
 ## Evidence (re-runnable)
 
@@ -43,5 +53,7 @@ refactor never touched.
   store is the single BEGIN owner" is still not literally true.
 - **The lifecycle half is not started**: no operations port carrying no `close()`, no borrowed view for
   `status` (it must not migrate schema, publish handoffs or write), no daemon close order, and the
-  confirmed cancelled-round temporary-directory leak (`src/integration/ooo-cycle.ts:814` returns before
-  the `finally` at line 1037 that removes the default directory).
+  historically reported cancelled-round temporary-directory leak
+  (`src/integration/ooo-cycle.ts:814` returns before the cleanup `finally` at
+  line 1037). These unversioned source positions are retained as historical
+  evidence leads, not a verified current bug location.

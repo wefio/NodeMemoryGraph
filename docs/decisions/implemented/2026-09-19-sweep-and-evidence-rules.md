@@ -1,6 +1,6 @@
 # A running sweep makes the tree unreadable, and evidence has no third state
 
-[中文](2026-09-19-sweep-and-evidence-rules.zh-CN.md)
+[中文](2026-09-19-sweep-and-evidence-rules.zh-CN.md) · [Terms used](2026-09-19-sweep-and-evidence-rules.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

@@ -1,0 +1,35 @@
+version: 2
+terms:
+  - term: run-scoped round storage
+    aliases: [run-namespaced probe tables, 按 run 划分的 round 存储]
+    definition: >-
+      The 2026-09-13 migration state in which the round's tables are keyed by `run_id` with composite primary keys and the board channel is `ooo-probe:<runId>`, so one store may hold several rounds; adoption opens a named run, continues a single-run store, and refuses a multi-run store rather than guessing.
+      2026-09-13 的迁移状态：round 的表以 `run_id` 为 key 并使用复合主键，board 频道为 `ooo-probe:<runId>`，因此一个 store 可容纳多个 round；采用时具名 run 会打开它，单 run 的 store 被继续，多 run 的 store 被拒绝而不是猜测。
+    owner: docs/experiments/execution/ooo-run-namespace-2026-09-13.md
+    anchor: What changed
+    status: canonical
+  - term: unscoped claim tooth
+    aliases: [claim-is-not-scoped-to-its-run, 未加作用域的 claim tooth]
+    definition: >-
+      The historical claim-is-not-scoped-to-its-run mutation. The first test's next()/accepted() checks did not expose contamination of another run's owner field; a raw-row ownership assertion after claiming the same task ID exposed it. That is the observed oracle, not the only possible test.
+      历史 claim-is-not-scoped-to-its-run 突变。首版测试的 next()/accepted() 检查未暴露另一 run 的 owner 字段被污染；在 claim 同一 task ID 后断言原始行归属才暴露它。这是记录采用的检查，不是唯一可能的测试。
+    owner: docs/experiments/execution/ooo-run-namespace-2026-09-13.md
+    anchor: Evidence
+    status: canonical
+  - term: replay-preserved checkId scope
+    aliases: [checkId not run-scoped, checkId 不随 run 划分]
+    definition: >-
+      The finding that scoping `checkId` by run breaks replay, because replay is a different run reproducing the same attempts (`replay asks for exactly the recorded attempts: 2 !== 3`); uniqueness stays on the `(run_id, task_id)` key.
+      按 run 给 `checkId` 加作用域会破坏 replay 的发现，因为 replay 是一个不同的 run 在复现相同的 attempt（`replay asks for exactly the recorded attempts: 2 !== 3`）；唯一性仍落在 `(run_id, task_id)` key 上。
+    owner: docs/experiments/execution/ooo-run-namespace-2026-09-13.md
+    anchor: What this does not do
+    status: canonical
+  - term: unaccepted migrated store
+    aliases: [migration leaves acceptance empty, 迁移后不恢复接受状态]
+    definition: >-
+      The migration rule that a pre-namespace store's own verdict is not restored as acceptance: the artifact is kept and left unaccepted, so the record is visible rather than silently accepted.
+      迁移规则：命名空间化之前 store 自己的 verdict 不会被恢复为 acceptance；artifact 被保留且保持未接受，因此记录是可见的，而不是被静默接受。
+    owner: docs/experiments/execution/ooo-run-namespace-2026-09-13.md
+    anchor: What this does not do
+    status: canonical
+references: []

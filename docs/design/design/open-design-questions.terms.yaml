@@ -1,0 +1,11 @@
+version: 2
+terms: []
+references:
+  - Active Graph
+  - Long-Term Graph
+  - Short-Term Graph
+  - QPP
+  - state space
+  - working state
+  - memory chain
+  - learnable controller

@@ -1,6 +1,6 @@
 # Shared Session Flows in the Integration Layer
 
-[中文](2026-10-16-shared-session-flows.zh-CN.md)
+[中文](2026-10-16-shared-session-flows.zh-CN.md) · [Terms used](2026-10-16-shared-session-flows.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

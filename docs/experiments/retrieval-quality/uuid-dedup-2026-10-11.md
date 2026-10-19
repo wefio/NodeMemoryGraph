@@ -1,5 +1,13 @@
 # UUID repetition and identifier alternatives — 2026-10-11
 
+[English](uuid-dedup-2026-10-11.md) | [简体中文](uuid-dedup-2026-10-11.zh-CN.md) · [Terms](uuid-dedup-2026-10-11.terms.yaml)
+
+**Evidence boundary (2026-10-17):** this is a historical isolated comparison at
+the named baseline. Branch states, host wiring and test/LSP/DAP readings describe
+that checkpoint, not current acceptance of this dirty documentation worktree.
+Cited experiment artifacts, external sources and run receipts were not
+independently revalidated or rerun by this documentation review.
+
 ## Frozen scope
 
 The user selected duplicate-ID removal and requested research into alternatives
@@ -35,15 +43,16 @@ representations; bare value and `memory=<value>` contexts; `cl100k_base` and
 actual encoding tokens, not a character estimate; do not equate either encoding
 with the unverified current answer model or billing. No package install, live
 model, embedding, or benchmark is used. Public vocabulary files may be fetched
-by the existing tokenizer. No format in this research matrix is implemented.
+by the existing tokenizer. No alternate representation is adopted by this research matrix; existing
+canonical UUIDs remain unchanged.
 
 ## Sources and compatibility boundary
 
 1. [RFC 9562 §4](https://www.rfc-editor.org/rfc/rfc9562.html#section-4)
    permits binary/integer representations while describing hex-and-dash text.
 2. [Alternate UUID Encoding Methods §4.12](https://www.ietf.org/archive/id/draft-davis-uuidrev-alt-uuid-encoding-methods-00.html#section-4.12)
-   is an Internet-Draft, not an approved replacement standard. It preserves
-   hex-and-dash as the default UUID parser and discusses explicit alternate
+   is an Internet-Draft, not an approved replacement standard. It retains
+   hex-and-dash text for the default UUID parser and discusses explicit alternate
    encoding parsing. A smaller spelling does not eliminate parsing support.
 3. [Nano ID](https://github.com/ai/nanoid#comparison-with-uuid)
    generates a native 21-character opaque ID, with 126 random bits compared
@@ -54,8 +63,11 @@ by the existing tokenizer. No format in this research matrix is implemented.
    This motivates testing numeric identifiers; the regex alone does not prove
    token cost or suitability for NMG.
 
-Current NMG get parsing trims nonempty string IDs, and store retrieval uses an
-exact `WHERE id = ?` comparison. Merely deleting UUID dashes or displaying
+The literal canonical-ID route inspected for this study trims nonempty strings
+and uses an exact `WHERE id = ?` store comparison. The separate
+[compound-reference path](compound-reference-2026-10-11.md) resolves a displayed
+selector through its explicit graph and original witnesses; it does not make
+arbitrary undashed, Base64 or decimal spellings valid UUID lookups. Merely deleting UUID dashes or displaying
 Base64/decimal will not retrieve an existing canonical UUID record. A native
 compact or numeric ID could avoid lookup-time decoding only if that exact string
 were the stored identifier. Changing generation, legacy coexistence, assumptions
@@ -65,19 +77,23 @@ verification; none is authorized or implemented here.
 ## Results
 
 `tiktoken` 0.13.0 completed the frozen matrix: 100 paired random UUIDv4 values,
-16 aggregate cells and 1,600 ID tokenizations. All representations round-tripped
+16 aggregate cells (4 representations × 2 contexts × 2 encodings) and 1,600 ID
+tokenizations (100 paired UUIDs × 16 cells), not 1,600 independent random IDs. All representations round-tripped
 to their source UUIDs in the research probe. The probe's inputs, source and
 per-sample counts are retained in `.nmg/verification/id-dedup/token-probe.json`;
 the throwaway Python source is removed.
 
 Mean tokens (actual named encodings, not character estimates):
 
-| Representation        | Characters | Bare cl100k / o200k | `memory=` field cl100k / o200k |
-| --------------------- | ---------- | ------------------- | ------------------------------ |
-| UUID                  | 36         | 22.79 / 22.78       | 24.55 / 24.54                  |
-| Undashed hex          | 32         | 18.51 / 18.58       | 20.27 / 20.34                  |
-| Unpadded Base64url    | 22         | 15.87 / 15.08       | 17.39 / 16.68                  |
-| Decimal 128-bit value | 38.66 mean | 13.00 / 13.00       | 15.00 / 15.00                  |
+| Representation | Characters | Bare cl100k / o200k | `memory=` field cl100k / o200k |
+| --- | --- | --- | --- |
+| UUID | 36 | 22.79 / 22.78 | 24.55 / 24.54 |
+| Undashed hex | 32 | 18.51 / 18.58 | 20.27 / 20.34 |
+| Unpadded Base64url | 22 | 15.87 / 15.08 | 17.39 / 16.68 |
+| Decimal 128-bit value | 38.66 mean | 13.00 / 13.00 | 15.00 / 15.00 |
+
+The first three spellings have fixed character lengths; decimal length varies,
+so 38.66 is the sample mean, not a fixed length or a token estimate.
 
 In this sample a longer decimal string costs fewer tokens than a shorter
 Base64url string. This supports evaluating native numeric-string identifiers,

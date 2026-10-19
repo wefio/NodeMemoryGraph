@@ -1,0 +1,35 @@
+version: 2
+terms:
+  - term: tessera
+    aliases: [memory tessera, tesserae, 定位书签]
+    definition: >-
+      An Agent-authored bookmark row with a path, selected content snippet and searchable label, independent of a memory fact. The current SQLite source indexes label/snippet and does not filter by linked memory status; the optional link does not give the bookmark memory authority or lifecycle guarantees.
+      Agent 编写的定位书签行，含路径、选定内容 snippet 与可检索 label，独立于 memory 事实。当前 SQLite 来源索引 label／snippet，不按所链接 memory 的状态过滤；可选链接不赋予书签 memory 权威或生命周期保证。
+    owner: docs/design/memory-tesserae-design.md
+    anchor: "3.2 Tesserae are an independent, searchable source"
+    status: canonical
+  - term: tessera drift fingerprint
+    aliases: [书签漂移指纹]
+    definition: >-
+      The optional file-level 64-bit SimHash used to choose relocation candidates, represented by the service as 16 lowercase hexadecimal characters. It may be computed at write time or backfilled from later file bytes; it is not an identity proof or verified historical snapshot.
+      用于选择重定位候选的可选文件级 64-bit SimHash，service 表示为 16 个小写十六进制字符。它可在写入时计算，也可由之后的文件字节补填；不是身份证明或已验证的历史快照。
+    owner: docs/design/memory-tesserae-design.md
+    anchor: "3.3 Tesserae are content-anchored, not line-anchored"
+    status: canonical
+  - term: tessera resolution miss
+    aliases: [stale tessera, 书签定位失败]
+    definition: >-
+      A stale result from snippet relocation within the supplied root, accessible files and bounded fallback, not proof that the text is absent everywhere or the linked memory is false. Without a root, resolution is not attempted and a missing stale flag supplies no freshness evidence.
+      在所给 root、可访问文件与有界回退范围内的 snippet 定位失效结果，不证明所有位置都不存在文本，也不证明所链接 memory 为假。没有 root 时不尝试定位，缺少 stale 标志不构成新鲜度证据。
+    owner: docs/design/memory-tesserae-design.md
+    anchor: "3.3 Tesserae are content-anchored, not line-anchored"
+    status: canonical
+  - term: tessera reference marker
+    aliases: [tessera_ref, tessera 引用标记]
+    definition: >-
+      A MemoryMarker with kind tessera_ref and a tesseraId attribute pointing to a separate bookmark row. Reusing memory metadata does not eliminate tessera schema migrations or establish cascading deletion, retirement or acceptance of that row.
+      kind 为 tessera_ref、以 tesseraId 属性指向独立书签行的 MemoryMarker。复用 memory 元数据不表示无需 tessera schema 迁移，也不建立该行的级联删除、退役或 acceptance。
+    owner: docs/design/memory-tesserae-design.md
+    anchor: "3.4 Markers are the index pointer between memory and tessera"
+    status: canonical
+references: []

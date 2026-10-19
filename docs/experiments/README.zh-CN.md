@@ -1,6 +1,6 @@
 # 实验
 
-[English](README.md)
+[English](README.md) · [术语](README.terms.yaml)
 
 测量证据。这里的记录报告观测到了什么；只有决策或设计 owner 接纳结果后，它才成为
 规范（见 [doc-maintenance](../../skills/doc-maintenance/SKILL.md)）。

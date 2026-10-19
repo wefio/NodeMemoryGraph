@@ -1,0 +1,52 @@
+version: 2
+terms:
+  - term: predicate key
+    aliases: [predicate_key, 谓词键]
+    definition: >-
+      The canonical `{subject}_{verb_lemma}[_{object_head_lemma}]` string stored on a claim or record so that contradiction detection can be a deterministic join on equal keys with opposite polarity; all fuzzy work happens at canonicalization time, never at query time.
+      存储在 claim 或记录上的规范字符串 `{subject}_{verb_lemma}[_{object_head_lemma}]`，使矛盾检测可以是「键相等且极性相反」的确定性连接；所有模糊工作都发生在规范化时，绝不在查询时。
+    owner: docs/design/predicate-key-canonicalization.md
+    anchor: Design
+    status: canonical
+  - term: aspectual transparency
+    aliases: [xcomp descent, 体貌透明]
+    definition: >-
+      The grammar rule that aspectuals and modals (`try`, `want`, `need`, `start`, `begin`, `manage`, `used`, `going`, `plan`, `hope`) are transparent so the predicate is their infinitival `xcomp` complement, taken recursively: the rule layer descends from ROOT when it is an aspectual with an `xcomp` verb child, and the LLM prompt states the same instruction in words with examples.
+      语法规则：体貌与情态动词（`try`、`want`、`need`、`start`、`begin`、`manage`、`used`、`going`、`plan`、`hope`）是透明的，谓词是它们的不定式 `xcomp` 补语并递归取得：规则层在 ROOT 为体貌动词且带 `xcomp` 动词子节点时下降一层，LLM prompt 用文字配例子给出同一指令。
+    owner: docs/design/predicate-key-canonicalization.md
+    anchor: 1. Unified key grammar (prevention, both layers)
+    status: canonical
+  - term: polarity guard on key merging
+    aliases: [guarded merging, 键合并的极性守卫]
+    definition: >-
+      The eligibility rule that a candidate key pair is merged only if merging it cannot collapse an affirmative key and a negative key that both have support; the guard blocked all 3 wrong cross-polarity merges in the earlier round, and the later record notes that candidate pairs must NOT be polarity-guarded during arbitration because that blocked exactly the gold pair — merging keys never hides a contradiction since rows keep their own polarity.
+      候选键对的可合并规则：只有合并它不会吞掉一个肯定键与一个有支持的否定键时才允许合并；该守卫在上一轮挡住了全部 3 次错误的跨极性合并，而后续结果指出仲裁阶段的候选对**不能**加极性守卫，因为它恰好挡住了金标配对——合并键永远不会掩盖矛盾，因为行保留各自的极性。
+    owner: docs/design/predicate-key-canonicalization.md
+    anchor: 2. LLM-arbitrated key canonicalization (repair, offline pass)
+    status: canonical
+  - term: claim-level polarity metadata
+    aliases: [claims_json, 声明级极性元数据]
+    definition: >-
+      The record-is-the-evidence-unit model in which a record carries a `claims_json` array of atomic claims, each with its own polarity, `predicate_key` and confidence, while record-level columns are kept only as a first-non-neutral rollup cache; it makes contradictions that live inside one long message joinable because the join orders by (record rowid, claim index).
+      「记录即证据单元」的模型：记录携带一个 `claims_json` 原子 claim 数组，每个 claim 有自己的极性、`predicate_key` 与置信度，而记录级列只保留为首个非中性值的汇总缓存；由于连接按（记录 rowid，claim 序号）排序，存在于单条长消息内部的矛盾因此可被连接。
+    owner: docs/design/predicate-key-canonicalization.md
+    anchor: "Claims model (2026-07-27): both official contradictions detected"
+    status: canonical
+  - term: temporal join filter
+    aliases: [rowid ordering, 时间连接过滤]
+    definition: >-
+      The condition that a contradiction is an earlier affirmation against a later negation, applied as `a.rowid < b.rowid`: it removed 7 of 11 candidates including every later how-to that shared the key, and it uses `rowid` rather than `created_at` because millisecond ISO timestamps can tie during fast ingestion, while an earlier `a.id < b.id` draft silently dropped about half the pairs because ids are random UUIDs.
+      「矛盾是较早的肯定对较晚的否定」这一条件，以 `a.rowid < b.rowid` 施加：它消掉了 11 个候选中的 7 个，包括每一条共享该键的后续 how-to；它用 `rowid` 而不是 `created_at`，因为毫秒级 ISO 时间戳在快速摄取时会并列，而更早一份 `a.id < b.id` 草稿因 ID 是随机 UUID 而静默丢掉了约一半配对。
+    owner: docs/design/predicate-key-canonicalization.md
+    anchor: Outcome (2026-07-27, BEAM conv 1)
+    status: canonical
+  - term: contradiction note
+    aliases: [contradictionNotes, 矛盾注记]
+    definition: >-
+      One human-readable note per memory returned by `NmgStore.contradictionNotes(memoryIds)`, computed by the claim-join lookup at query time with no stored flags: both records of a contradictory pair receive it because retrieval may surface only the later one, its text always orders claims earlier-versus-later by record rowid, and hosts such as the OmniMemEval bridge and the Pi plugin append it to each rendered statement so the answer-stage reader sees the metadata-derived annotation.
+      `NmgStore.contradictionNotes(memoryIds)` 为每条记忆返回的一条人类可读注记，由查询期的 claim 连接查找计算、不存标志位：矛盾配对的两条记录都会收到它，因为检索可能只浮出较晚的那一条，注记文本始终按记录 rowid 排出较早对较晚，而 OmniMemEval 桥与 Pi 插件等宿主把它追加到每条渲染陈述之后，使答案阶段 reader 看到这条元数据派生标注。
+    owner: docs/design/predicate-key-canonicalization.md
+    anchor: "Query-time render path (2026-07-27): contradiction notes reach the reader"
+    status: canonical
+references:
+  - claim outcome

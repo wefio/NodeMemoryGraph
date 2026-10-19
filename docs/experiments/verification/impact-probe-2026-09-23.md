@@ -1,5 +1,13 @@
 # Import-impact verification probe — 2026-09-23
 
+[English](impact-probe-2026-09-23.md) | [简体中文](impact-probe-2026-09-23.zh-CN.md) · [Terms](impact-probe-2026-09-23.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): all timings, test counts,
+check outcomes and tool/route descriptions below are historical observations on
+their recorded inputs. They are not fresh checks of this documentation worktree.
+No suite, gate, coverage run or benchmark was executed to produce this translation
+review; missing run identity or snapshot details remain explicit uncertainties.
+
 ## Question and protocol
 
 Can a dependency graph select a smaller product-test set for a change to
@@ -35,10 +43,11 @@ The candidate run and the subsequent full verifier used input digest
 | Full `test:product` within `agent:verify --full` | 1,532 tests passed | 85.1 s |
 | Full `agent:verify --full` | All blocking checks passed; advisory research and chaos checks were skipped by policy | 137.3 s end to end |
 
-The candidate execution was about six times faster than the product-test
-portion of this full verifier run. This is a comparison of elapsed test
-execution, not a reliability or
-whole-verifier speedup claim. The current official gate also performs other
+The reported elapsed values are 14.3 seconds for candidate execution and 85.1
+seconds for the full product-test stage (a ratio of about 5.95). Those are
+different execution scopes, not a controlled estimate of stage-level speedup,
+reliability or whole-verifier benefit. The 137.3/85.1-second pair is also quoted
+in the atomic-check report; separate documents do not establish independent runs. The current official gate also performs other
 checks and was not replaced in this experiment.
 
 ## Coverage gaps and decision

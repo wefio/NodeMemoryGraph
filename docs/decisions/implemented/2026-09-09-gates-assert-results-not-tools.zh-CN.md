@@ -1,6 +1,6 @@
 # 门只断言结果的性质，从不断言工具的身份
 
-[English](2026-09-09-gates-assert-results-not-tools.md)
+[English](2026-09-09-gates-assert-results-not-tools.md) · [术语](2026-09-09-gates-assert-results-not-tools.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit
@@ -18,10 +18,10 @@
 - **这是行业级的。** GitClear 的 2.11 亿行变更研究（2020–2024）显示：重构在变更行中的占比从
   25% 降到不足 10%，而复制粘贴（克隆）从 8.3% 升到 12.3%，**首次超过「移动」的代码**。
 
-这个仓库里是同一个模式。`skills/doc-maintenance/SKILL.md` 第 48 行早就说状态会在散文里腐烂，
-而 40 个设计文档里仍有 19 个带着自由文本状态。`AGENTS.md` 要求把 `npm run agent:context` 作为
-任何改动的第一步；那个审计脚本用法的 session 一次都没跑过它。`nmg-rcp` 没有任何 npm 脚本、
-任何 workflow 调用它，而一个 538 行的工具用手写方式组装了同一个库。
+2026-09-09 的审计也在本仓库发现同样的模式。`skills/doc-maintenance/SKILL.md` 第 48 行早就说状态会在散文里腐烂，
+而当时 40 个设计文档里有 19 个带着自由文本状态。当时版本的 `AGENTS.md` 要求把 `npm run agent:context` 作为
+任何改动的第一步；那个审计脚本用法的 session 一次都没跑过它。当时，`nmg-rcp` 没有任何 npm 脚本或
+workflow 调用它，而一个 538 行的工具用手写方式组装了同一个库。
 
 缓解手段的文献在机制上是一致的：_「你通过上下文窗口喂给 Agent 的一切，说到底都是建议」_，
 以及*「能验证的 Agent 是好的，必须验证的 Agent 更好」*。**提醒不是机制。**

@@ -1,0 +1,20 @@
+version: 2
+terms:
+  - term: multi-channel retrieval analogy
+    aliases: [ensemble-stacking analogy, 多通道检索类比]
+    definition: >-
+      An explanatory comparison of NMG's lexical, vector, and route scores with ensemble stacking and sensor fusion; the comparison is limited because NMG's weights are hard-coded and channel independence has not been tested.
+      对 NMG 词法、向量和路由分数与 ensemble stacking、sensor fusion 所作的解释性比较；由于 NMG 权重是硬编码的，且尚未检验信道独立性，该类比有明确边界。
+    owner: docs/design/structural-analogies/multi-channel-retrieval-and-ensemble-stacking.md
+    anchor: Multi-channel retrieval = Ensemble Stacking
+    status: canonical
+  - term: adaptive channel-weight proposal
+    aliases: [noise-variance weighting proposal, 自适应信道权重提案]
+    definition: >-
+      A design possibility to estimate each retrieval channel's noise variance and use Kalman-like adaptive weights instead of the current hard-coded combination; this document does not claim that the proposal is implemented or validated.
+      估计各检索信道的噪声方差，并用类似 Kalman 的自适应权重替代当前硬编码组合的设计可能性；本文不声称该提案已经实现或验证。
+    owner: docs/design/structural-analogies/multi-channel-retrieval-and-ensemble-stacking.md
+    anchor: Multi-channel retrieval = Ensemble Stacking
+    status: proposed
+references:
+  - structural analogy

@@ -18,6 +18,9 @@ function fixture(): string {
     "docs/decisions/README.zh-CN.md": "# 决策\n\n[English](README.md)\n",
     "docs/postmortem/README.md": "# Post-mortems\n\n[中文](README.zh-CN.md)\n",
     "docs/postmortem/README.zh-CN.md": "# 事故复盘\n\n[English](README.md)\n",
+    "docs/design/documentation-governance.md": "# Governance\n\nContent.\n",
+    "docs/design/ooo-execution-bootstrap.md": "# Execution\n\nContent.\n",
+    "skills/doc-maintenance/references/reader-review.md": "# Review\n\nContent.\n",
   };
   for (const [name, content] of Object.entries(files)) {
     const path = join(root, name);
@@ -26,6 +29,132 @@ function fixture(): string {
   }
   return root;
 }
+
+test("new nested active designs inherit structural hygiene without registration", (t) => {
+  const root = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "docs/design/new-topic"), { recursive: true });
+  writeFileSync(
+    join(root, "docs/design/new-topic/contract.md"),
+    "# Contract\n\n## Missing conditions\n",
+  );
+  assert.ok(
+    verifyDocumentation(root).errors.some((error) =>
+      error.includes("new-topic/contract.md: empty section"),
+    ),
+  );
+});
+
+test("new Skill entries and references inherit structural hygiene", (t) => {
+  const root = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "skills/new-topic/references"), { recursive: true });
+  writeFileSync(
+    join(root, "skills/new-topic/SKILL.md"),
+    "---\nname: new-topic\ndescription: Workflow.\n---\n# Topic\n\n## Empty\n",
+  );
+  writeFileSync(
+    join(root, "skills/new-topic/references/recovery.md"),
+    "# Recovery\n\n## Retry\n\nFirst.\n\n## Retry\n\nSecond.\n",
+  );
+  const errors = verifyDocumentation(root).errors;
+  assert.ok(errors.some((error) => error.includes("skills/new-topic/SKILL.md: empty section")));
+  assert.ok(errors.some((error) => error.includes("references/recovery.md: duplicate sibling")));
+});
+
+test("archived designs and raw experiments keep their separate hygiene roles", (t) => {
+  const root = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "docs/design/archived"), { recursive: true });
+  mkdirSync(join(root, "docs/experiments"), { recursive: true });
+  writeFileSync(
+    join(root, "docs/design/archived/old.md"),
+    "# Old\n\n**Status:** superseded\n**Superseded by:** [Current](../documentation-governance.md)\n\n## Empty\n",
+  );
+  writeFileSync(join(root, "docs/experiments/raw-2026-10-15.md"), "# Evidence\n\n## Empty\n");
+  assert.deepEqual(verifyDocumentation(root).errors, []);
+});
+
+test("active designs accept the exact 15000-byte boundary", () => {
+  const root = fixture();
+  const header = "# Design\n\n";
+  writeFileSync(
+    join(root, "docs/design/boundary.md"),
+    header + "x".repeat(15000 - Buffer.byteLength(header)),
+  );
+  assert.deepEqual(verifyDocumentation(root).errors, []);
+});
+
+test("active designs reject 15001 bytes without a per-file registration", () => {
+  const root = fixture();
+  const header = "# Design\n\n";
+  writeFileSync(
+    join(root, "docs/design/new-subject.md"),
+    header + "x".repeat(15001 - Buffer.byteLength(header)),
+  );
+  assert.ok(
+    verifyDocumentation(root).errors.some((error) =>
+      error.includes("new-subject.md: 15001B exceeds 15000B"),
+    ),
+  );
+});
+
+test("moving oversized design text into a new nested topic cannot escape its budget", () => {
+  const root = fixture();
+  mkdirSync(join(root, "docs/design/new-subject"), { recursive: true });
+  writeFileSync(
+    join(root, "docs/design/new-subject/detail.md"),
+    "# Detail\n\n" + "x".repeat(15000),
+  );
+  assert.ok(
+    verifyDocumentation(root).errors.some(
+      (error) => error.includes("new-subject/detail.md:") && error.includes("exceeds 15000B"),
+    ),
+  );
+});
+
+test("design budgets count UTF-8 bytes rather than Chinese characters", () => {
+  const root = fixture();
+  const text = "# 设计\n\n" + "汉".repeat(5000);
+  assert.ok(text.length < 15000);
+  writeFileSync(join(root, "docs/design/chinese.md"), text);
+  assert.ok(
+    verifyDocumentation(root).errors.some(
+      (error) => error.includes("chinese.md:") && error.includes("exceeds 15000B"),
+    ),
+  );
+});
+
+test("new Skill entries inherit the existing budget without a standing-file whitelist", () => {
+  const root = fixture();
+  mkdirSync(join(root, "skills/new-subject"), { recursive: true });
+  writeFileSync(
+    join(root, "skills/new-subject/SKILL.md"),
+    "---\nname: new-subject\ndescription: A workflow.\n---\n# Subject\n\n" + "x".repeat(15000),
+  );
+  assert.ok(
+    verifyDocumentation(root).errors.some(
+      (error) => error.includes("skills/new-subject/SKILL.md:") && error.includes("exceeds 15000B"),
+    ),
+  );
+});
+
+test("historical designs and experiment source evidence do not acquire the active-design budget", () => {
+  const root = fixture();
+  mkdirSync(join(root, "docs/design/archived"), { recursive: true });
+  mkdirSync(join(root, "docs/experiments"), { recursive: true });
+  writeFileSync(join(root, "docs/design/current.md"), "# Current\n\nContract.\n");
+  writeFileSync(
+    join(root, "docs/design/archived/old.md"),
+    "# Old\n\n**Status:** superseded\n**Superseded by:** [Current](../current.md)\n\n" +
+      "x".repeat(15001),
+  );
+  writeFileSync(
+    join(root, "docs/experiments/source-2026-10-14.md"),
+    "# Source evidence\n\n" + "x".repeat(15001),
+  );
+  assert.deepEqual(verifyDocumentation(root).errors, []);
+});
 
 test("the parts shelf fails when it names a part src/rcp no longer exports", () => {
   const root = fixture();
@@ -231,11 +360,106 @@ test("bilingual decisions warn when they do not link to each other", () => {
   assert.ok(report.warnings.some((warning) => warning.includes("must link to each other")));
 });
 
+test("translated subtree instructions are not uncategorized content", (t) => {
+  const root = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, "docs/AGENTS.md"), "# Instructions\n\nLocal rules.\n");
+  writeFileSync(join(root, "docs/AGENTS.zh-CN.md"), "# 指令\n\n本地规则。\n");
+  assert.ok(
+    !verifyDocumentation(root).warnings.some((warning) =>
+      warning.includes("AGENTS.zh-CN.md: documentation content must live"),
+    ),
+  );
+  writeFileSync(join(root, "docs/unplaced.md"), "# Unplaced\n\nContent.\n");
+  assert.ok(
+    verifyDocumentation(root).warnings.some((warning) =>
+      warning.includes("unplaced.md: documentation content must live"),
+    ),
+  );
+});
+
+test("decision relationships parse every reciprocal link and still reject a missing one", (t) => {
+  const root = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const directory = join(root, "docs/decisions/implemented");
+  mkdirSync(directory, { recursive: true });
+  const body =
+    "## Problem\nP\n\n## Decision\nD\n\n## Alternatives considered\nA\n\n## Consequences\nC\n";
+  const writeDecision = (name: string, relation: string): void => {
+    writeFileSync(
+      join(directory, name),
+      `# Decision\n\n**Status:** implemented\n**Approved:** explicit\n${relation}\n\n${body}`,
+    );
+  };
+  const first = "2026-10-18-first.md";
+  const second = "2026-10-18-second.md";
+  const third = "2026-10-18-third.md";
+  writeDecision(first, `**Superseded by:** [second](${second}), [third](${third})`);
+  writeDecision(second, `**Supersedes:** [first](${first})`);
+  writeDecision(third, `**Supersedes:** [first](${first})`);
+  const relationships = (): string[] =>
+    verifyDocumentation(root).warnings.filter((warning) => warning.includes("not reciprocated"));
+  assert.deepEqual(relationships(), []);
+  writeDecision(third, "");
+  assert.ok(relationships().some((warning) => warning.includes(third)));
+  writeDecision(third, `**Supersedes:** [first](${first}), [second](${second})`);
+  assert.ok(relationships().some((warning) => warning.includes(`by ${second}`)));
+});
+
+test("relationship examples below the header are not decision metadata", (t) => {
+  const root = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const directory = join(root, "docs/decisions/implemented");
+  mkdirSync(directory, { recursive: true });
+  const body =
+    "# Decision\n\n**Status:** implemented\n**Approved:** explicit\n\n" +
+    "## Problem\nP\n\n## Decision\nD\n\n## Alternatives considered\nA\n\n## Consequences\nC\n";
+  writeFileSync(join(directory, "2026-10-18-target.md"), body);
+  writeFileSync(
+    join(directory, "2026-10-18-example.md"),
+    body + "\n```markdown\n**Supersedes:** [example](2026-10-18-target.md)\n```\n",
+  );
+  assert.ok(
+    !verifyDocumentation(root).warnings.some((warning) => warning.includes("not reciprocated")),
+  );
+});
+
 test("undated experiment filenames are advisory", () => {
   const root = fixture();
   const directory = join(root, "docs", "experiments");
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, "evaluation.md"), "# Evaluation\n");
+  const report = verifyDocumentation(root);
+  assert.deepEqual(report.errors, []);
+  assert.ok(report.warnings.some((warning) => warning.includes("should end in -YYYY-MM-DD")));
+});
+
+for (const name of [
+  "trial-2026-10-15.md",
+  "trial-2026-10-15.zh-CN.md",
+  "trial-results.md",
+  "trial-results.zh-CN.md",
+  "trial-notes.md",
+  "trial-notes.zh-CN.md",
+]) {
+  test(`dated and rolling experiment names accept the language suffix: ${name}`, (t) => {
+    const root = fixture();
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const directory = join(root, "docs", "experiments");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, name), "# Evidence\n\nMeasured result.\n");
+    const report = verifyDocumentation(root);
+    assert.deepEqual(report.errors, []);
+    assert.deepEqual(report.warnings, []);
+  });
+}
+
+test("the Chinese suffix does not exempt an undated experiment from advisory naming", (t) => {
+  const root = fixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const directory = join(root, "docs", "experiments");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "evaluation.zh-CN.md"), "# Evidence\n\nMeasured result.\n");
   const report = verifyDocumentation(root);
   assert.deepEqual(report.errors, []);
   assert.ok(report.warnings.some((warning) => warning.includes("should end in -YYYY-MM-DD")));
@@ -378,7 +602,7 @@ test("a current design and an archived superseded design pass", () => {
   mkdirSync(join(root, "docs", "design", "archived"), { recursive: true });
   writeFileSync(
     join(root, "docs", "design", "live-design.md"),
-    "# Live\n\n**Status:** current — calibrated later\n**Related:** [Old](archived/old-design.md)\n\n## Body\n",
+    "# Live\n\n**Status:** current — calibrated later\n**Related:** [Old](archived/old-design.md)\n\n## Body\n\nCurrent behavior.\n",
   );
   writeFileSync(
     join(root, "docs", "design", "archived", "old-design.md"),
@@ -546,4 +770,26 @@ test("the post-mortem index lists every record exactly once", () => {
   writeFileSync(join(directory, "README.md"), postmortemIndex([row]));
   const report = verifyDocumentation(root);
   assert.deepEqual(report.errors, []);
+});
+
+test("docs check rejects both original and newly discovered active-design defects", () => {
+  const root = fixture();
+  const defect = "# Topic\n## Repeated\nOne\n## Repeated\nTwo\n";
+  writeFileSync(join(root, "docs/design/documentation-governance.md"), defect);
+  writeFileSync(join(root, "docs/design/unregistered.md"), defect);
+  const report = verifyDocumentation(root);
+  assert.ok(
+    report.errors.some((error) => error.includes("documentation-governance.md: duplicate sibling")),
+  );
+  assert.ok(report.errors.some((error) => error.includes("unregistered.md: duplicate sibling")));
+});
+
+test("removing a registered hygiene document cannot turn its check into a silent skip", () => {
+  const root = fixture();
+  rmSync(join(root, "docs/design/documentation-governance.md"));
+  assert.ok(
+    verifyDocumentation(root).errors.some((error) =>
+      error.includes("documentation-governance.md: missing hygiene pilot document"),
+    ),
+  );
 });

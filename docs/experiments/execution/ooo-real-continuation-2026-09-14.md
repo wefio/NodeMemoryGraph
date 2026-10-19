@@ -1,15 +1,18 @@
 # G7: one real handoff at a legal boundary, five structurally identical tasks
 
-**Status:** evidence for ledger row G7. The objective (user, 2026-09-14) was to finish G5 and then G7,
+[中文](ooo-real-continuation-2026-09-14.zh-CN.md) · [Terms used](ooo-real-continuation-2026-09-14.terms.yaml)
+
+**Status:** historical research-instrument evidence for ledger row G7; not product-runtime proof. The objective (user, 2026-09-14) was to finish G5 and then G7,
 with G7 designed as **five structurally similar but distinct tasks**, so that both the stability
 across different tasks and the process on similar-shaped tasks are visible. This is that check.
 
-**What G7 asks for** (`docs/design/task-unit-semantics.md`, and the ledger's own G7 row): _one real
-handoff at a legal boundary, with another Agent session continuing the same parent task from the view
-plus retrievable evidence, judged by the fixed parent check._ The design puts this after G1, and it
-requires naming the model, the budget and the repeats; this document names all three.
+**What G7 asks for** (the [task-unit design](../../design/task-unit-semantics.md) and the ledger's [G7 row](../../design/task-unit-semantics-obligations.md)): _one real handoff at a legal
+boundary, with another Agent session continuing the same parent task from the view plus retrievable
+evidence, judged by the fixed parent check._ The historical design placed this after G1 and required
+naming the model, budget and repeats; this document names all three. The experiment used the research
+script and its own store, not daemon `taskRun`, so it does not prove product integration.
 
-**Model, budget, repeats** (the paragraph at the design's `:270` demands exactly this):
+**Model, budget, repeats:**
 
 - provider `deepseek`, model `deepseek-v4-flash`, configured through `PI_PROVIDER` / `PI_MODEL`.
 - One clean pass over all five tasks, plus extra passes on one task to sample it more than once.
@@ -135,8 +138,8 @@ wrong answer:
 
 Two of the three are the same mistake — a query that does not say **which stage it is asking
 about** — and in both cases the correct behaviour was to fail closed rather than pick a plausible
-artifact. That is the same rule the contract states for the product path, arriving here through a
-research script instead.
+artifact. This matches the product design's rule, but the evidence comes from a research script, not a
+product-runtime caller.
 
 ## Honest limits
 

@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: synthetic chain injection
+    aliases: [benchmark chain injection, 合成链注入]
+    definition: >-
+      Explicit construction of temporal or logical chain membership during benchmark-data ingestion; it is not runtime chain inference and does not establish natural-chain quality.
+      在基准数据导入时显式构造 temporal 或 logical 链成员关系；这不是运行时链推断，也不证明自然链的质量。
+    owner: docs/design/beam-chained-benchmark-design-2026-08-16.md
+    anchor: Question and evaluation setup
+    status: canonical
+  - term: sample-bounded BEAM result
+    aliases: [BEAM 2026-08-16 reported result, 样本限定的 BEAM 结果]
+    definition: >-
+      A result reported for the dated 400-question synthetic-chain protocol; without linked raw artifacts or reproduction it is historical evidence, not a current benchmark receipt or general product claim.
+      针对带日期的 400 问合成链 protocol 报告的结果；没有链接原始 artifacts 或复跑时，它是历史证据，不是当前 benchmark receipt 或普遍产品结论。
+    owner: docs/design/beam-chained-benchmark-design-2026-08-16.md
+    anchor: Reported results
+    status: canonical

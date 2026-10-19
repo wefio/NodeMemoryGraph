@@ -5,6 +5,8 @@ description: Maintain a compact temporary working state during multi-step work, 
 
 # Working-state maintenance
 
+[简体中文](SKILL.zh-CN.md) · [Terms used](SKILL.terms.yaml)
+
 Keep the smallest provisional snapshot that lets a capable reader choose the
 next authorized action with the available evidence. A working state is not a
 journal, a second task contract, or proof of completion. This procedure works

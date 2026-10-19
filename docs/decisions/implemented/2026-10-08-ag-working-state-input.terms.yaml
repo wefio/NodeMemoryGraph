@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: per-turn working-state carriage
+    aliases: [working-state user-turn input, 按用户轮次携带 working state]
+    definition: >-
+      A dedicated provisional state body derived from the current daemon snapshot and appended once at a user-turn boundary in the persisted `nmg-context` message; this does not authenticate the body or confirm final provider input.
+      根据 daemon 当前快照生成的专用 provisional 状态正文，在用户轮次边界随持久化的 `nmg-context` 消息追加一次；这既不认证正文，也不确认最终 provider 输入。
+    owner: docs/decisions/implemented/2026-10-08-ag-working-state-input.md
+    anchor: Decision
+    status: canonical
+references:
+  - working state
+  - evidence

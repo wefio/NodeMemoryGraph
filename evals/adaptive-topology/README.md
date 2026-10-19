@@ -1,5 +1,7 @@
 # Adaptive topology ablation
 
+[English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
+
 Run the deterministic held-out relation and routing experiment:
 
 ```powershell
@@ -20,6 +22,8 @@ about natural conversation quality.
 
 The 2026-07-19 local 30-case run produced flat/fixed/adaptive recall of
 0%/0%/100%, heuristic/labelled routing accuracy of 0%/100%, and 100% proposal
-precision. P50 retrieval latency was approximately 0.36/0.78/1.10 ms. The
-extreme separation is intentional: each held-out case requires exactly the
-relation supplied by repeated useful co-retrieval labels.
+precision. P50 retrieval latency was approximately 0.36/0.78/1.10 ms. No run
+artifact path is cited here, so these historical numbers are not independently
+reproducible from this README alone. The extreme separation is intentional:
+each held-out case requires exactly the relation supplied by repeated useful
+co-retrieval labels.

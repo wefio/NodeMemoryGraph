@@ -1,0 +1,16 @@
+version: 2
+terms:
+  - term: task adviser
+    aliases: [adviser source, 任务顾问]
+    definition: >-
+      An optional source given a bounded projection and the shared layer's legal task set; it may rank only tasks already in that set, cannot change legality, and its adopted ranking is revalidated at claim or commit.
+      接收有界投影和共享层合法任务集的可选来源；它只能为集合内已有任务排序，不能改变合法性，采用其排序前还须在 claim 或 commit 时重新校验。
+    owner: docs/design/task-unit-semantics/autodiff-ha-mgr-integration.md
+    anchor: Reusing autodiff, HA and MGR
+    status: canonical
+references:
+  - task unit
+  - Task IR
+  - task view
+  - execution fusion
+  - bounded speculation

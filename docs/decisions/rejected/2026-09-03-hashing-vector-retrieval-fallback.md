@@ -1,6 +1,6 @@
 # Local hashing vectors as a retrieval fallback
 
-[中文](2026-09-03-hashing-vector-retrieval-fallback.zh-CN.md)
+[中文](2026-09-03-hashing-vector-retrieval-fallback.zh-CN.md) · [Terms used](2026-09-03-hashing-vector-retrieval-fallback.terms.yaml)
 
 **Status:** rejected  
 

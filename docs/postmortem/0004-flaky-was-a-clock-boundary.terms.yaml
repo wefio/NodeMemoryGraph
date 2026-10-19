@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: current-value window
+    aliases: [current-value predicate, 当前值窗口]
+    definition: >-
+      The timestamp comparison that determines whether a stored state value is in force; this incident widened its boundary to tolerate disagreement between JavaScript and SQLite clock reads.
+      判断已存储状态值是否生效的时间戳比较；本次事故通过扩展边界，容忍 JavaScript 与 SQLite 时钟读数之间的偏差。
+    owner: docs/postmortem/0004-flaky-was-a-clock-boundary.md
+    anchor: Root cause
+    status: canonical
+references:
+  - post-mortem
+  - guardrail

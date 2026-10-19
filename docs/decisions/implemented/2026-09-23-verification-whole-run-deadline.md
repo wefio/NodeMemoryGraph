@@ -1,6 +1,6 @@
 # Bound agent verification as one run
 
-[中文](2026-09-23-verification-whole-run-deadline.zh-CN.md)
+[中文](2026-09-23-verification-whole-run-deadline.zh-CN.md) · [Terms used](2026-09-23-verification-whole-run-deadline.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

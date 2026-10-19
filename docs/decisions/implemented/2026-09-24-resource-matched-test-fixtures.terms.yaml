@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: resource-matched fixture
+    aliases: [assertion-matched fixture, 与断言匹配的 fixture]
+    definition: >-
+      A test fixture chosen to provide exactly the resource boundary its assertion observes, such as in-process data, a single in-memory connection, a file-backed store, or a real external process.
+      按断言实际观察的资源边界选择的测试 fixture，例如进程内数据、单个内存连接、文件型 store 或真实外部进程。
+    owner: docs/decisions/implemented/2026-09-24-resource-matched-test-fixtures.md
+    anchor: Decision
+    status: canonical
+references:
+  - gate
+  - evidence

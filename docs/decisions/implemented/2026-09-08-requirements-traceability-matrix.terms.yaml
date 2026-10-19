@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: assurance case
+    aliases: [claim-argument-evidence case, 可信论证]
+    definition: >-
+      An auditable structure of claims, arguments, evidence, context, and assumptions used to support a conclusion; this decision borrows that structure without adopting GSN or SACM tooling.
+      由 claims、论证、证据、上下文和假设组成、用于支持结论的可审计结构；本决策借用其结构，不采用 GSN 或 SACM 工具。
+    owner: docs/decisions/implemented/2026-09-08-requirements-traceability-matrix.md
+    anchor: Decision
+    status: canonical
+  - term: requirements traceability matrix
+    aliases: [RTM, requirement-to-check matrix, 需求可追溯矩阵]
+    definition: >-
+      A proposed bidirectional map from structured assertions to named evidence and checks, with coverage reported by stage; the implemented `rtm:check` is a narrower subset and is not the full chain-coverage proposal.
+      将结构化 assertion 双向映射到具名证据与检查、并按 stage 报告覆盖情况的提案；已实现的 `rtm:check` 只是较窄子集，并非完整的全链覆盖提案。
+    owner: docs/decisions/implemented/2026-09-08-requirements-traceability-matrix.md
+    anchor: Decision
+    status: canonical
+references:
+  - assertion
+  - check
+  - stage
+  - evidence
+  - contract
+  - work order
+  - receipt
+  - gate

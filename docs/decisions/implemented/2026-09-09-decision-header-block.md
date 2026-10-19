@@ -1,6 +1,6 @@
 # A fixed header block for decision records
 
-[中文](2026-09-09-decision-header-block.zh-CN.md)
+[中文](2026-09-09-decision-header-block.zh-CN.md) · [Terms used](2026-09-09-decision-header-block.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit
@@ -13,8 +13,8 @@ nothing else. Three probes on 2026-09-09 confirmed the gap: a second conflicting
 `**Status:**` line is ignored, `**Date:** 1900-13-99` is accepted, and a
 `**Status:**` line below the first section passes.
 
-The field vocabulary has already drifted, which is what an unruled header
-produces:
+At the time of the 2026-09-09 review, the field vocabulary had already drifted,
+which is what an unruled header produces:
 
 | Field in use | Count | Problem |
 |---|---|---|
@@ -38,18 +38,21 @@ A decision carries a fixed field block before its first section, enforced by
 [<counterpart>](<slug>.<lang>.md)
 
 **Status:** <proposed|implemented|rejected|archived>
+[**Approved:** <explicit|auto|unrecorded>]
 [**Supersedes:** [..](..)]
 [**Superseded by:** [..](..)]
 [**Relates to:** [..](..)]
 [**Archived:** YYYY-MM-DD]
 ```
 
-The block is closed: `**Status:**`, `**Supersedes:**`, `**Superseded by:**`,
-`**Relates to:**`, and `**Archived:**` are the only fields. Any other
-`**Field:**` line before the first section fails the check, so a prose note moves
-below the block. Each field appears at most once. `**Status:**` is required and
-must equal the lifecycle directory; `**Archived:**` is valid only under
-`archived/`.
+The block is closed: `**Status:**`, `**Approved:**`, `**Supersedes:**`,
+`**Superseded by:**`, `**Relates to:**`, and `**Archived:**` are the only
+fields. Any other `**Field:**` line before the first section fails the check,
+so a prose note moves below the block. Each field appears at most once.
+`**Status:**` is required and must equal the lifecycle directory;
+`**Approved:**` is required under `implemented/` and is `explicit`, `auto`, or
+`unrecorded` (see [approval tiers](2026-09-09-approval-tiers.md));
+`**Archived:**` is valid only under `archived/`.
 
 `**Date:**` is deleted. The filename carries `YYYY-MM-DD`, so the field was a
 second copy of the same fact, and the eight decisions without it were not missing
@@ -72,10 +75,10 @@ separates metadata from prose cleanly and lets a generator read it without parsi
 Markdown. At 21 decisions it adds a second file per decision plus a consistency
 problem between the two.
 
-**Reject bare `Word:` lines in the block as well.** That closes the last gap, but
-one uncommitted decision still carries `Date:` and `Branch:` lines without the
-bold markers, and rejecting them would fail a concurrent agent's in-flight file.
-Recorded under Deferred.
+**Reject bare `Word:` lines in the block as well.** This would close the remaining
+header-shaped-prose gap. The legacy records that motivated the exception have
+since landed; their obsolete `Date:` and `Branch:` header lines have been removed.
+No broader syntax change is made by this decision.
 
 **Keep `**Date:**` and require it.** The rendered document would show the date, at
 the cost of a second home for a fact the filename owns, and of editing eight
@@ -86,9 +89,10 @@ order is not a problem this rule needs to solve.
 
 ## Deferred
 
-Bare `Word:` lines in the header block are still accepted as prose, because one
-uncommitted decision carries `Date:` and `Branch:` without bold markers;
-rejecting them would fail that agent's in-flight file. Revisit once it lands.
+Unbolded `Word:` lines are still treated as prose, so the check recognizes only
+the documented bold field syntax. The original in-flight exception has expired
+and the known legacy `Date:`/`Branch:` lines have been removed. A broader ban on
+header-shaped prose is outside this decision.
 
 ## Verification
 
@@ -101,6 +105,12 @@ Verified as of 2026-09-09:
 - `npm run docs:check` reports zero errors and no new warnings.
 
 ## Consequences
+
+**Relationship interpretation.** Each linked target in a header relationship
+participates in reciprocal checking; a second target cannot make the field
+invisible. Keeping that interpretation inside the header also prevents a body
+example from claiming decision authority. This costs per-target checking rather
+than a different metadata format or weaker warnings.
 
 **Bare `Word:` lines stay accepted.** A field written without bold markers is
 treated as prose, so the gate covers the documented syntax only.

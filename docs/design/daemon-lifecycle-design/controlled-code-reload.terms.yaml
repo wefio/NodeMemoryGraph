@@ -1,0 +1,31 @@
+version: 2
+terms:
+  - term: reload gate
+    aliases: [handover gate, 重载交接门禁]
+    definition: >-
+      The exclusive `<db>.reload.json` coordination file holding the controller PID and a random ticket; it fences daemon-owner admission but is not an endpoint descriptor or state store. Malformed or orphaned gates fail closed for operator recovery.
+      独占的 `<db>.reload.json` 协调文件，保存控制器 PID 与随机 ticket；它 fence daemon owner 准入，但不是端点描述符或状态库。格式错误或孤儿门禁会 fail closed，等待 operator recovery。
+    owner: docs/design/daemon-lifecycle-design/controlled-code-reload.md
+    anchor: Controlled code reload
+    status: canonical
+  - term: reload drain
+    aliases: [reload admission drain, 重载排空]
+    definition: >-
+      The reload phase that stops accepting domain calls and waits up to five seconds for accepted calls to finish; on timeout, the original service reopens and no replacement is started.
+      重载期间停止接受领域调用并最多等待五秒让已接受调用完成；超时后原服务重新开放，且不启动替代进程。
+    owner: docs/design/daemon-lifecycle-design/controlled-code-reload.md
+    anchor: Controlled code reload
+    status: canonical
+  - term: controlled reload handover
+    aliases: [daemon handover, 受控重载交接]
+    definition: >-
+      A fenced daemon replacement in which the authenticated current owner drains accepted calls and exits before its ticketed child may acquire the lease; success requires the replacement's authenticated ready handshake.
+      通过 fence 保护的 daemon 替换流程：经认证的当前 owner 排空已接受调用并退出后，其持票子进程才可获取 lease；成功要求替代进程通过已认证的就绪握手。
+    owner: docs/decisions/implemented/2026-10-13-daemon-controlled-reload.md
+    anchor: Decision
+    status: canonical
+references:
+  - daemon idle timeout
+  - daemon reconnect after owner exit
+  - Active Graph
+  - working state

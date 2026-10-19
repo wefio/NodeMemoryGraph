@@ -1,6 +1,6 @@
 # 分离 NMG 运行环境与 embedding 环境
 
-[English](2026-08-24-external-embedding-container.md)
+[English](2026-08-24-external-embedding-container.md) · [术语](2026-08-24-external-embedding-container.terms.yaml)
 
 **Status:** implemented  
 **Approved:** unrecorded

@@ -1,0 +1,20 @@
+version: 2
+terms:
+  - term: co-retrieval signal
+    aliases: [node-pair retrieval signal, 共检索信号]
+    definition: >-
+      A recorded pairwise signal derived from nodes appearing in the same retrieval trace, with co-retrieval and usefulness counts used when proposing topology changes; it is not a general multi-item association model.
+      从同一 retrieval trace 中共同出现的 node 派生的成对记录信号；拓扑变更提案会使用共检索数和有用数；它不是通用的多项关联模型。
+    owner: docs/design/structural-analogies/co-retrieval-and-hebbian-learning.md
+    anchor: Co-retrieval = association-rule mining / Hebbian learning
+    status: canonical
+  - term: co-retrieval structural analogy
+    aliases: [association-rule / Hebbian analogy, 共检索结构类比]
+    definition: >-
+      An explanatory comparison between pairwise co-retrieval counts, association-rule itemset counts, and Hebbian co-activation; the comparison does not establish that NMG implements Apriori, a learned neural rule, or all properties of those models.
+      对成对共检索计数、关联规则 itemset 计数和 Hebbian 共激活的解释性比较；该比较不证明 NMG 实现了 Apriori、已学习的神经规则或这些模型的全部性质。
+    owner: docs/design/structural-analogies/co-retrieval-and-hebbian-learning.md
+    anchor: Co-retrieval = association-rule mining / Hebbian learning
+    status: canonical
+references:
+  - structural analogy

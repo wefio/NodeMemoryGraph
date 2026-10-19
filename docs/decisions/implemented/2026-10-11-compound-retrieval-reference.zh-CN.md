@@ -1,6 +1,6 @@
 # 图作用域内的组合取回引用
 
-[English](2026-10-11-compound-retrieval-reference.md)
+[English](2026-10-11-compound-retrieval-reference.md) · [术语](2026-10-11-compound-retrieval-reference.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

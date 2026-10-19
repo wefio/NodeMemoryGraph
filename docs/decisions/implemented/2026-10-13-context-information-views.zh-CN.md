@@ -1,6 +1,6 @@
 # 信息项驱动的共享上下文
 
-[English](2026-10-13-context-information-views.md)
+[English](2026-10-13-context-information-views.md) · [术语](2026-10-13-context-information-views.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit
@@ -13,7 +13,7 @@
 
 ## Decision
 
-[状态空间 owner](../../design/state-spaces.md#统一上下文信息项)定义现有及新增 state 内容与
+[状态空间 owner](../../design/state-spaces.zh-CN.md#统一上下文信息项)定义现有及新增 state 内容与
 动态消息共享的 InformationView 协议。类型化条目是基本单位，职责分组不是新来源 owner，
 不建立状态表、视图图谱、Task 抽象或编排语言。
 

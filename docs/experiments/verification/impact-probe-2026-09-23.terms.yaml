@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: import-impact probe
+    aliases: [导入影响探针, 导入图探针]
+    definition: >-
+      The historical research selector following reverse edges from static imports/exports and literal dynamic import()/require() calls, intersecting product-test globs and hashing recorded inputs. It omits unknown and non-import dependencies, remains candidate-only, and does not certify a selected change.
+      历史研究选择器，沿静态 import／export 与字面量动态 import()／require() 的反向边查找，与产品测试 glob 求交并记录输入哈希。它会遗漏未知或非导入依赖，仍仅产生候选，不能为所选改动提供完整认证。
+    owner: docs/experiments/verification/impact-probe-2026-09-23.md
+    anchor: Question and protocol
+    status: canonical
+  - term: candidate-only exit status
+    aliases: [candidate-only 退出状态]
+    definition: >-
+      The probe's exit code 2, reported even when the candidate tests pass, which marks the result as comparison-only evidence; exit code 1 instead means candidate execution or planning failed.
+      该探针的退出码 2，即使候选测试通过也会报告，用于把结果标记为仅作比较的证据；退出码 1 则表示候选执行或规划失败。
+    owner: docs/experiments/verification/impact-probe-2026-09-23.md
+    anchor: Observation
+    status: canonical

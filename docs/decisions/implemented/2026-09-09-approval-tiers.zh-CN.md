@@ -1,6 +1,6 @@
 # 批准分层：绝大多数文档不需要批准
 
-[English](2026-09-09-approval-tiers.md)
+[English](2026-09-09-approval-tiers.md) · [术语](2026-09-09-approval-tiers.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit
@@ -20,7 +20,7 @@
 | 内容 | 谁批 | 例子 |
 | --- | --- | --- |
 | 描述性——写错只是浪费一次编辑 | **没人批** | `docs/experiments/**`、`docs/guides/**`、README、`**Status:** draft` 的设计、笔记 |
-| 有检查盯着——写错会让门禁变红 | **检查批** | 零件货架、`docs/glossary.yaml`、`.rcp/contracts/**`、`.rcp/counterexamples.yaml`、收据 |
+| 有检查盯着——写错会让门禁变红 | **检查批** | 零件货架、`*.terms.yaml` 元数据（非词义正确性）、`.rcp/contracts/**`、`.rcp/counterexamples.yaml`、收据 |
 | 规范性、且没有检查能判定 | **`explicit` 或 `auto`** | `AGENTS.md`、`skills/*/SKILL.md` 里的常设规则、`**Status:** current` 的设计、`docs/decisions/implemented/**` |
 
 ### 缺检查就写检查，而不是继续问人

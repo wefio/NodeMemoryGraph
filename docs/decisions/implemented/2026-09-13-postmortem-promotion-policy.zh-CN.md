@@ -1,6 +1,6 @@
 # 一篇事故复盘什么时候变成一条规则
 
-[English](2026-09-13-postmortem-promotion-policy.md)
+[English](2026-09-13-postmortem-promotion-policy.md) · [术语](2026-09-13-postmortem-promotion-policy.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit

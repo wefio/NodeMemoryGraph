@@ -1,0 +1,30 @@
+version: 2
+terms:
+  - term: MCP stdio memory server
+    aliases: [MCP stdio 记忆服务器]
+    definition: >-
+      The Claude Code plugin's local server that exposes the durable-memory tools plus the task board over MCP stdio, manages the local daemon itself (start on connect, safe stop on exit, reuse when already running) and requires Node.js 22.19 or newer with the project installed.
+      该 Claude Code 插件的本地服务器：通过 MCP stdio 暴露持久记忆工具与任务板，自行管理本地 daemon（连接时启动、退出时安全停止、已在运行时复用），并要求 Node.js 22.19 或更新版本且项目已安装。
+    owner: claude-plugins/nmg-memory/CLAUDE.md
+    anchor: NMG Memory MCP server
+    status: canonical
+  - term: MCP board identity
+    aliases: [MCP 看板身份]
+    definition: >-
+      The identity the stdio server registers when it connects: the agent and session environment variables win, otherwise the server's own process id in the form `mcp:<pid>` is used, which is stable only per host session; the identity is refreshed as a heartbeat on board use, capability hints are an optional comma-separated discovery string, and reading open entries writes delivery receipts so a wake loop never re-pushes what this session already saw.
+      stdio server 连接时注册的身份：agent 与 session 环境变量优先，否则使用 server 自身进程 id（形式为 `mcp:<pid>`），它只在同一宿主会话内稳定；使用看板时该身份作为心跳被刷新，能力提示是可选的逗号分隔发现字符串，读取 open 条目会写投递回执，使唤醒循环不重复推送本会话已看过的内容。
+    owner: claude-plugins/nmg-memory/CLAUDE.md
+    anchor: NMG Memory MCP server
+    status: canonical
+  - term: per-process perf feedback switch
+    aliases: [进程级性能反馈开关]
+    definition: >-
+      The `NMG_AGENT_PERF=1` switch that makes search append a compact per-phase timing line to its own result so an agent can self-diagnose, for example that a slow direct scan on a large store suggests pruning or merging low-tier nodes; the switch is scoped to one MCP server process, so shared daemons keep their own timing behavior.
+      `NMG_AGENT_PERF=1` 开关：让 search 在自己的结果后追加一行紧凑的分阶段计时，供 agent 自我诊断——例如大型库上 direct 扫描很慢说明该裁剪或合并低层级节点。该开关的作用域是单个 MCP server 进程，共享 daemon 保持它们自己的计时行为。
+    owner: claude-plugins/nmg-memory/CLAUDE.md
+    anchor: Performance feedback (off by default)
+    status: canonical
+references:
+  - Task Board
+  - disclosure
+  - harness adapter

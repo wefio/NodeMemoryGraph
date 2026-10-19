@@ -1,0 +1,61 @@
+version: 2
+terms:
+  - term: fuzzy set atom
+    aliases: [soft set, τ sharpness, 模糊集合原子]
+    definition: >-
+      The MGR atom implemented entirely inside the autodiff DAG (`LogicExpr`, `logicSearch`, `trainLogic`) that maps every node to a membership `σ(τ·cos(v, q))`, whose combinators are t-norm operators — AND = product (intersection), OR = probabilistic sum (union), NOT = complement — and whose only trained parameter is a global sharpness `τ`.
+      完全在 autodiff DAG（`LogicExpr`、`logicSearch`、`trainLogic`）内实现的 MGR 原子：把每个节点映射到隶属度 `σ(τ·cos(v, q))`，其组合子是 t-norm 算子——AND＝乘积（交）、OR＝概率和（并）、NOT＝补集——且唯一被训练的参量是全局锐度 `τ`。
+    owner: docs/design/design/memory-graph-reasoner/differentiable-set-logic.md
+    anchor: Differentiable set logic
+    status: canonical
+  - term: operator caveats
+    aliases: [NOT with broad atoms, AND over-constrains coverage, 算子适用边界]
+    definition: >-
+      The observed failure modes of the fuzzy operators on real LoCoMo multi-hop failures with BGE record embeddings: conjunctive questions are the sweet spot, NOT is dangerous with broad atoms because near neighbours of the negated concept get suppressed along with the target and NOT atoms must be narrow or the operator needs a learned damping exponent, and AND over-constrains coverage questions whose evidence turns each match only one atom; constraint questions want AND while coverage questions want OR or plain ranking with diversity.
+      在真实 LoCoMo 多跳失败上用 BGE 记录 embedding 观察到的模糊算子失效模式：合取问题是理想场景；NOT 在宽原子下危险，因为被否定概念的近邻会随目标一起被抑制，所以 NOT 原子必须狭窄，或该算子需要一个可学习的阻尼指数；AND 会过度约束其证据轮次各自只匹配一个原子的覆盖型问题——约束型问题适合 AND，覆盖型问题适合 OR 或带多样性的普通排序。
+    owner: docs/design/design/memory-graph-reasoner/differentiable-set-logic.md
+    anchor: Differentiable set logic
+    status: canonical
+  - term: derivation operators
+    aliases: [nand, xor, 派生算子]
+    definition: >-
+      The two derived operators completing the set: `nand(...)` = NOT(AND), functionally complete but an anti-selector on its own (irrelevant nodes rank highest, so it is only a building block or a differentiable conflict penalty such as training superseded states not to co-activate), and `xor(a, b)` = OR·NAND, which ranks evidence belonging to exactly one side above ambiguous both-sides statements.
+      补全套逻辑的两个派生算子：`nand(...)` = NOT(AND)，功能完备但单独使用时是反选择器（无关节点排最高，因此它只能是构建块或可微冲突惩罚，例如训练已被取代的状态不要共同激活）；以及 `xor(a, b)` = OR·NAND，它把恰好属于一侧的证据排在模糊的双方陈述之上。
+    owner: docs/design/design/memory-graph-reasoner/differentiable-set-logic.md
+    anchor: Differentiable set logic
+    status: canonical
+  - term: negation blindness
+    aliases: [polarity axis failure, 否定盲区]
+    definition: >-
+      The results of two bounded probes: in a ten-pair minimal-pair test, each tested embedding model selected the affirmative twin as top-1 (bge-small-en-v1.5 9/10, Qwen3-Embedding-0.6B 10/10, gemini-embedding-001 10/10); in a separate BEAM sample, an estimated polarity axis failed to transfer (gold contradictory messages at ranks 167/188 and 127/188, cosine 0.042 to the gold pair's own difference vector). These results show that the tested vectors did not reliably separate polarity in these examples, not that embeddings universally lack polarity information; for retrieval that must distinguish polarity, they support explicit write-time metadata rather than relying on vector similarity alone.
+      两项有界探针的结果：在十对句子的最小对测试中，每个受测 embedding 模型都把肯定孪生句排在 top-1（bge-small-en-v1.5 为 9/10、Qwen3-Embedding-0.6B 与 gemini-embedding-001 均为 10/10）；在另一项 BEAM 样本中，估计出的极性轴无法迁移（金标矛盾消息位于 167/188 与 127/188 名，与金标对自身差向量的余弦为 0.042）。这些结果表明受测向量在这些示例中未能可靠地区分极性，并不证明所有 embedding 都普遍缺少极性信息；对于必须区分极性的检索，这些结果支持使用显式写入期元数据，而不是只依赖向量相似度。
+    owner: docs/design/design/memory-graph-reasoner/differentiable-set-logic.md
+    anchor: Differentiable set logic
+    status: canonical
+  - term: record-level polarity metadata
+    aliases: [record polarity metadata, 记录级极性元数据]
+    definition: >-
+      The research prototype's nullable record-level write-time columns (`confidence`, `polarity` of `affirmative`/`negative`/`neutral`, canonical snake_case `predicate_key`, and `extract_method` recording which layer filled the row) that turn contradiction detection into a deterministic join `WHERE a.predicate_key = b.predicate_key AND a.polarity <> b.polarity` with zero embedding math at query time; key canonicalisation requires the merge pass or vocabulary-constrained extraction, key clustering must never merge across polarities, and moving extraction to claims makes contradictions that live inside one long message detectable.
+      研究原型的记录级可空写入期列（`confidence`、取值为 `affirmative`／`negative`／`neutral` 的 `polarity`、规范 snake_case 的 `predicate_key`，以及记录由哪一层填充该行的 `extract_method`），把矛盾检测变成查询期零 embedding 运算的确定性连接 `WHERE a.predicate_key = b.predicate_key AND a.polarity <> b.polarity`；键规范化需要该合并轮次或词汇受限抽取，键聚类绝不能跨极性合并，而把抽取移到 claim 层能让存在于单条长消息内部的矛盾可被检出。
+    owner: docs/design/design/memory-graph-reasoner/differentiable-set-logic.md
+    anchor: Differentiable set logic
+    status: canonical
+  - term: advisory weak-model verification
+    aliases: [prompt-unstable verdicts, 咨询性弱模型验证]
+    definition: >-
+      The result that deepseek-chat's per-pair contradiction verdicts are prompt-unstable (the same gold pair judged true and false under trivial rephrasings), so weak-model verification is advisory only and precision must come from upstream keying rather than a downstream veto.
+      发现：deepseek-chat 的逐对矛盾裁决对 prompt 不稳定（同一金标对在轻微改写下被判为真又被判为假），因此弱模型验证只是咨询性的，精确性必须来自上游的键化而不是下游的否决。
+    owner: docs/design/design/memory-graph-reasoner/differentiable-set-logic.md
+    anchor: Differentiable set logic
+    status: canonical
+  - term: membership sharpness calibration
+    aliases: [τ saturates, 隶属度锐度校准]
+    definition: >-
+      The requirement that default `τ = 8` saturates real embedding distributions (on-topic memberships collapse to ≈1.0 and OR/AND rankings degenerate into tie noise, while `τ ≈ 1` restores ordering), so membership sharpness must be calibrated per embedding space or learned via `trainLogic` before set logic composes meaningfully on real vectors.
+      要求：默认 `τ = 8` 会使真实 embedding 分布饱和（同话题隶属度塌缩到约 1.0，OR/AND 排序退化为并列噪声，而 `τ ≈ 1` 恢复排序），因此隶属度锐度必须按 embedding 空间校准或经 `trainLogic` 学习，集合逻辑才能在真实向量上有意义地组合。
+    owner: docs/design/design/memory-graph-reasoner/differentiable-set-logic.md
+    anchor: Differentiable set logic
+    status: canonical
+references:
+  - claim outcome
+  - Lab

@@ -1,0 +1,52 @@
+version: 2
+terms:
+  - term: ReasoningWorkspace
+    aliases: [reasoning workspace, session reasoning workspace, 推理工作区, 会话推理工作区]
+    definition: >-
+      A session-local, auditable scratchpad of concise typed items and explicit relations, projected through the Active Graph boundary and owned by the daemon as an atomic per-session file; it is neither another persistent memory graph nor raw hidden chain-of-thought. Session scoping is not an OS-level access-control boundary.
+      由简洁带类型条目与显式关系构成的会话本地可审计草稿板，经 Active Graph 边界投影，由 daemon 以逐会话原子文件持有；它既不是又一个持久记忆图，也不是原始的隐藏思维链。Session scope 不是 OS 级访问控制边界。
+    owner: docs/design/design/session-reasoning-workspace-and-compaction-checkpoint.md
+    anchor: Session reasoning workspace and compaction checkpoint
+    status: canonical
+  - term: ReasoningCheckpoint
+    aliases: [reasoning checkpoint, 推理检查点]
+    definition: >-
+      The bounded snapshot of the workspace consumed by the next `before_agent_start` after a one-shot `session_before_compact` marker, carrying at most a fixed node and character budget; NMG does not replace Pi's compactor, and the checkpoint is not a durable semantic record.
+      在一次性 `session_before_compact` 标记之后由下一次 `before_agent_start` 消费的工作区有界快照，至多携带固定的节点数与字符预算；NMG 不取代 Pi 的压缩器，该检查点也不是持久语义记录。
+    owner: docs/design/design/session-reasoning-workspace-and-compaction-checkpoint.md
+    anchor: Session reasoning workspace and compaction checkpoint
+    status: canonical
+  - term: structural support state
+    aliases: [referenced/linked/unsupported, 结构性支持状态]
+    definition: >-
+      The per-checkpoint-line state `referenced`, `linked` or `unsupported` that keeps a hypothesis' status visible; an unsupported hypothesis stays explicitly marked instead of being presented as an established fact, and `add` and `update` accept `supported` only with a non-empty reference string or a transitively reference-anchored incoming path, never from a cycle. The prototype does not resolve or validate whether a reference string points to a stable external source, and state restoration does not re-run this check.
+      检查点行上的 `referenced`、`linked` 或 `unsupported` 状态，使假设的状态保持可见；不受支持的假设保持显式标记，而不被呈现为已确立事实，`add` 与 `update` 仅在存在非空引用字符串或经传递锚定到引用的入向路径时接受 `supported` 状态，绝不能来自环。该原型不解析或验证引用字符串是否指向稳定外部来源，恢复状态也不会重新运行此检查。
+    owner: docs/design/design/session-reasoning-workspace-and-compaction-checkpoint.md
+    anchor: Session reasoning workspace and compaction checkpoint
+    status: canonical
+  - term: retry-idempotent add
+    aliases: [exact normalized kind + content, 重试幂等 add]
+    definition: >-
+      The workspace rule that `add` on an exact normalized `kind + content` pair reuses the existing node without merging new status, importance or evidence, so tool retries cannot inflate the graph; semantic evolution and additional evidence must use explicit `update`.
+      工作区规则：对精确规范化 `kind + content` 组合调用 `add` 会复用既有节点，不合并新的状态、重要性或证据，因此工具重试无法把图撑大；语义演进与新增证据必须使用显式 `update`。
+    owner: docs/design/design/session-reasoning-workspace-and-compaction-checkpoint.md
+    anchor: Session reasoning workspace and compaction checkpoint
+    status: canonical
+  - term: session capability lease
+    aliases: [Lab lease, 会话能力租约]
+    definition: >-
+      The bounded session lease through which an Agent may invoke only the operations `lab list` reports for `reasoning_workspace`, `memory_graph_reasoner` or `controller_shadow`, disabling it when finished; leases expire automatically, and `controller_controlled` or `controller_active` accept no Agent self-authorization because the existing candidate, evaluation, receipt, rollback and product gates remain mandatory.
+      Agent 只能调用 `lab list` 为 `reasoning_workspace`、`memory_graph_reasoner` 或 `controller_shadow` 报告的操作、并在结束时禁用的有界会话租约；租约自动过期，而 `controller_controlled` 或 `controller_active` 不接受任何 Agent 自我授权，因为既有的候选、评测、回执、回滚与产品门禁仍然强制。
+    owner: docs/design/design/session-reasoning-workspace-and-compaction-checkpoint.md
+    anchor: Session reasoning workspace and compaction checkpoint
+    status: canonical
+  - term: rejected automatic capture variant
+    aliases: [automatic checkpoint injection, 被否决的自动捕获变体]
+    definition: >-
+      The historical July 2026 implementation record for automatic input capture and workspace injection, described as rejected on measured evidence: in a matched DeepSeek V4 Flash development run (three tasks, three repeats) both arms scored 100% at 7.0 s versus 9.8 s mean latency, and after normal Pi compaction the baseline kept 100% while automatic injection scored 77.8% and rose from 11.9 s to 15.7 s, with local tool execution accounting for only about 0.1--0.2 s.
+      历史记录记载，2026 年 7 月自动捕获输入并注入工作区的实现变体，依据实测证据被否决：在匹配的 DeepSeek V4 Flash 开发运行中（三个任务、三次重复）两臂都得分 100%，平均延迟 7.0 s 对 9.8 s；普通 Pi 压缩之后基线保持 100%，自动注入得分 77.8% 且从 11.9 s 升到 15.7 s，而本地工具执行只占约 0.1--0.2 s。
+    owner: docs/design/design/session-reasoning-workspace-and-compaction-checkpoint.md
+    anchor: Session reasoning workspace and compaction checkpoint
+    status: canonical
+references:
+  - Active Graph

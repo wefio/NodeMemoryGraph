@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: cascade-versus-AND equivalence
+    aliases: [级联与 AND 等价]
+    definition: >-
+      For fixed item predicates over the same frozen pool, sequential filtering equals set intersection. Pure functions alone do not ensure this when predicates depend on the surviving set, top-K, normalization or shared budgets; full-pool membership preservation does not preserve a budgeted prefix's recall.
+      同一冻结池上的固定逐项谓词按序过滤等于集合交集；谓词依赖剩余集合、top-K、归一化或共享预算时，仅纯函数不足以保证。完整池成员不变不保留预算前缀的召回。
+    owner: docs/experiments/retrieval-quality/gate-cascade-literature-2026-09-09.md
+    anchor: "Premise (a): cascade vs AND"
+    status: canonical
+  - term: post-retrieval query performance prediction
+    aliases: [检索后查询性能预测, QPP 预测]
+    definition: >-
+      The selected scan's quality-prediction family over score/list features: classical unsupervised baselines need no relevance labels at inference, learned predictors need supervision. cv and NQC are related, not guaranteed identical; no extra model API call does not mean zero CPU cost.
+      所选扫描中用分数／列表特征预测质量的族：经典无监督基线推理时不需相关性标签，学习型预测器需监督。cv 与 NQC 相关不保证相同；无额外模型 API 不等于零 CPU 成本。
+    owner: docs/experiments/retrieval-quality/gate-cascade-literature-2026-09-09.md
+    anchor: "Premise (b): \"is this recall mostly noise?\" — QPP and set-level gates"
+    status: canonical
+  - term: joint risk calibration
+    aliases: [联合风险校准, 联合标定]
+    definition: >-
+      Assessing a threshold family jointly against a specified loss and alpha/delta, conditional on valid sampling/family assumptions. A selected-paper account is not an exhaustive theorem or deployment authority; FPR, expected FDR and aggregate kept-noise risk are not interchangeable.
+      在有效抽样／候选族假设下，对指定损失及 alpha／delta 联合评估阈值族。所选论文记述不是穷尽定理或部署权限，FPR、期望 FDR、聚合保留噪声风险不能互换。
+    owner: docs/experiments/retrieval-quality/gate-cascade-literature-2026-09-09.md
+    anchor: "Premise (c): is there a \"switch it on and it is good\" formulation?"
+    status: canonical

@@ -1,0 +1,14 @@
+version: 2
+terms:
+  - term: verification target
+    aliases: [verified tree, 验证对象]
+    definition: >-
+      The exact working-tree or commit-tree state against which a command ran; a result about one target does not establish the state of another.
+      命令实际运行所针对的工作树或提交树状态；针对一个对象的结果不能证明另一个对象的状态。
+    owner: docs/postmortem/0002-wrong-tree-verification.md
+    anchor: Root cause
+    status: canonical
+references:
+  - post-mortem
+  - evidence
+  - gate

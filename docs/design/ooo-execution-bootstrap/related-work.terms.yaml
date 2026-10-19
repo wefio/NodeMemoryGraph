@@ -1,0 +1,33 @@
+version: 2
+terms:
+  - term: assisted self-improvement maturity (L2)
+    aliases: [L2, assisted self-improvement, 辅助式自我改进成熟度]
+    definition: >-
+      In the cited five-level scale, the system may propose candidates and diagnostic evidence, but humans verify/apply changes and maintain the improvement mechanism; the L2 label here describes the historical project snapshot, not a current product certification.
+      在所引五级尺度中，系统可提出 candidate 与诊断证据，但由人验证/应用变更并维护改进机制；本文的 L2 标签描述历史项目快照，不是当前产品认证。
+    owner: docs/design/ooo-execution-bootstrap/related-work.md
+    anchor: Maturity and published-system comparison
+    status: canonical
+  - term: out-of-order execution with in-order commit
+    aliases: [OoO plus in-order commit, 乱序执行与顺序提交]
+    definition: >-
+      A processor analogy in which work executes out of order but a reorder buffer exposes effects in program order; here, the plan/tickets and coordinator are only an explanatory mapping, not a claim of processor-equivalent semantics.
+      处理器类比：工作可乱序执行，但 reorder buffer 按程序顺序提交效果；在本文中 plan/tickets 与 coordinator 只是解释性映射，不声称语义等同于处理器。
+    owner: docs/design/ooo-execution-bootstrap/related-work.md
+    anchor: "Out-of-order execution: the true analogue is “out-of-order execution + in-order commit”"
+    status: canonical
+  - term: advisor-only LLM judge
+    aliases: [judge as advisor, LLM 评判者仅作建议]
+    definition: >-
+      A model-based rejection may serve as a prefilter or advisory input, but cannot establish acceptance or replace a deterministic host check; only the host may accept.
+      基于模型的拒绝可以用于预过滤或作为建议，但不能确立接受，也不能替代确定性的 host 检查；只有 host 可以作出接受决定。
+    owner: docs/design/ooo-execution-bootstrap/related-work.md
+    anchor: State machines, LLM guesses, and LLM rejection
+    status: canonical
+references:
+  - constrained OoO bootstrap
+  - independently accepted development change
+  - real external wait
+  - historical round-instrument record
+  - product-loop activation boundary
+  - research-instrument evidence

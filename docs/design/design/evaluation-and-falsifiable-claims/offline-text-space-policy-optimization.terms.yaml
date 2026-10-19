@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: offline controller candidate
+    aliases: [离线控制器候选制品]
+    definition: >-
+      An artifact produced by an offline optimizer (SkillOpt) over a controller-only decision policy; a validation win creates a candidate only, and adoption additionally requires the matched answer/evidence/pollution/token/tool-call/latency gates plus a dedicated controller invocation boundary, landing as a reviewed edit to the YAML source of truth — the runtime never auto-loads it.
+      离线优化器（SkillOpt）针对仅控制器决策策略产出的制品；验证胜出只产生候选，采用还需匹配的答案/证据/污染/token/工具调用/延迟闸门与专用的控制器调用边界，并以回写到 YAML 事实来源的经评审编辑落地——运行时从不自动加载它。
+    owner: docs/design/design/evaluation-and-falsifiable-claims/offline-text-space-policy-optimization.md
+    anchor: Offline text-space policy optimization
+    status: canonical
+  - term: maintenance defect attribution
+    aliases: [维护缺陷归因]
+    definition: >-
+      The three-way separation of a content defect (wrong, obsolete or ambiguous statement), a scope defect (valid statement attached too broadly or narrowly) and a retrieval defect (valid content, wrong selection or timing); only the first two may propose content/scope maintenance, while retrieval defects remain selection-policy evidence, and accepting a proposal never edits memory by itself.
+      内容缺陷（statement 错误、过时或含糊）、作用域缺陷（有效 statement 挂得过宽或过窄）与检索缺陷（内容有效但选择或时机有误）的三分；只有前两类可以提出内容/作用域维护，检索缺陷仍属选择策略证据，且接受提案本身永不编辑记忆。
+    owner: docs/design/design/evaluation-and-falsifiable-claims/offline-text-space-policy-optimization.md
+    anchor: Offline text-space policy optimization
+    status: canonical
+references:
+  - collection origin
+  - promotion gate
+  - Lab
+  - learnable controller
+  - disclosure
+  - Short-Term Graph
+  - Long-Term Graph
