@@ -1,0 +1,1586 @@
+{
+  "measuredAt": "2026-10-09T14:09:25.937Z",
+  "baselineCommit": "7c18f6f61b375a129fc04ad6ba5ee62ebb0522ab",
+  "node": "v24.19.0",
+  "sqlite": "3.53.3",
+  "platform": "win32",
+  "architecture": "x64",
+  "cpu": "12th Gen Intel(R) Core(TM) i7-12700H",
+  "input": "private in-memory native SQLite BLOB rows fetched before timing",
+  "config": {
+    "records": 300,
+    "dimensions": 1024,
+    "queries": 32,
+    "rounds": 6,
+    "warmup": 2
+  },
+  "scope": "scoring kernel only: decode/view selection + complete cosine scans; no SQL, NMG filtering/ranking, hierarchy, second pass, chains, RPC, embeddings or cloud inside timing",
+  "recipe": "Math.sin((recordIndex + 1) * (dimensionIndex + 1)) * 0.03; queries use the same recipe with queryIndex",
+  "sampleOrder": "paired, alternating first implementation by round+query parity; 2 warmup rounds excluded",
+  "checksums": {
+    "decoded": 249.34857042008198,
+    "view": 249.34857042008198
+  },
+  "payloadFingerprintUnchanged": true,
+  "percentile": "nearest rank ceil(n*0.95)-1",
+  "metrics": {
+    "decoded": {
+      "samples": 192,
+      "medianMs": 3.3904999999999745,
+      "p95Ms": 3.730099999999993,
+      "meanCpuMs": 3.5104166666666665
+    },
+    "view": {
+      "samples": 192,
+      "medianMs": 0.3856999999999289,
+      "p95Ms": 0.4738999999999578,
+      "meanCpuMs": 0.234375
+    }
+  },
+  "exactScoreParityChecks": 9600,
+  "blobSha256": "66fea4328026b961de6ffafd7255c6f3b05cf90f697643b9e9f8ca619583de3e",
+  "rowsBorrowable": 300,
+  "limits": "synthetic vectors, not Qwen or LoCoMo; not end-to-end retrieval, Sites, SQLite WASM/VFS, deployment or a speed guarantee",
+  "rawSamples": {
+    "decoded": [
+      {
+        "elapsedMs": 3.420000000000016,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.436300000000017,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.254000000000019,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.5173000000000343,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 4.415999999999997,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.6164999999999736,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.245299999999986,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 3.7536999999999807,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.487099999999998,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.308599999999956,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4552999999999656,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.361599999999953,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.6019000000000005,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.372500000000059,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.402500000000032,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.3343999999999596,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.589599999999905,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.6021999999999252,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3758000000000266,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 3.06899999999996,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.443300000000022,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.321900000000028,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.1480000000000246,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.1546999999999343,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.1217000000000326,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4213999999999487,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.297399999999925,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 3.3654999999999973,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4476999999999407,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.5312000000000126,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.413599999999974,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 3.282199999999989,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.2280999999999267,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.0914000000000215,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.6537000000000717,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.218699999999899,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4687000000000126,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4909000000000106,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 5.559499999999957,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 5.138400000000047,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.691599999999994,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4805999999999813,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.179300000000012,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3706999999999425,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.2870000000000346,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.325399999999945,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.2970000000000255,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.322200000000066,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.192099999999982,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.120900000000006,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.2730999999999995,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.1169000000001006,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.1906999999999925,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.1498000000000275,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.227700000000027,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 3.3455000000000155,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.51380000000006,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.5026999999998907,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3898999999998978,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.81919999999991,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3700000000000045,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4156000000000404,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3757000000000517,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.383199999999988,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.5386000000000877,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.316099999999892,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.2835000000000036,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 3.5774000000000115,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.620700000000056,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3396999999999935,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4857000000000653,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.7332000000000107,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.647399999999948,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3716000000000577,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3251999999999953,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.330000000000041,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4868000000000166,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3213000000000648,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.2006000000000085,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.186399999999935,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.435999999999922,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.413599999999974,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.1394000000000233,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.236099999999965,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.5027999999999793,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.6383999999999332,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4692999999999756,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.526100000000042,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.503300000000081,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4734999999999445,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.425100000000043,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.296000000000049,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 3.2732999999999493,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4424999999999955,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.447400000000016,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.351199999999949,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.4203999999999724,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.719100000000026,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.598600000000033,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.6800000000000637,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 3.463700000000017,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.29219999999998,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.452199999999948,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4168999999999414,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.3209999999999127,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.1685999999999694,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.419499999999971,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.286200000000008,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.5786000000000513,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.294399999999996,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.1598999999999933,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4560000000000173,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 3.392900000000054,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4343000000000075,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.356899999999996,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.251600000000053,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.4867000000000417,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3588999999999487,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.33420000000001,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3564999999999827,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.369199999999978,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3162999999999556,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4378000000000384,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3378000000000156,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.6245999999999867,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4056000000000495,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.2935999999999694,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.27819999999997,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3974000000000615,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.430499999999938,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.2755999999999403,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.216099999999983,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.5994000000000597,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 3.7994999999999663,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3769999999999527,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3327000000000453,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.509800000000041,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4975999999999203,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.379299999999944,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.2082000000000335,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.432800000000043,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.502599999999916,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4579999999998563,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.379000000000133,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.328499999999849,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 3.748100000000022,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.6027999999998883,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3687999999999647,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.543999999999869,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.3759000000000015,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.5997999999999593,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4329999999999927,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4284999999999854,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 3.3115999999999985,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3904999999999745,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.498800000000074,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.6902999999999793,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.5726999999999407,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4431999999999334,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.394600000000082,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.380300000000034,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.335499999999911,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.351599999999962,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4248999999999796,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.340599999999995,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.441000000000031,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4365000000000236,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.9125000000001364,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3986999999999625,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 3.3397999999999683,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.257899999999836,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3408999999999196,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.352300000000014,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.40079999999989,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.348900000000185,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3261999999999716,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.600099999999884,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.411100000000033,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.2883999999999105,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3037000000001626,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.458099999999831,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.730099999999993,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.2998000000000047,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3097999999999956,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.287499999999909,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 3.508399999999938,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.4375,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3197000000000116,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.2519999999999527,
+        "cpuMs": 16
+      },
+      {
+        "elapsedMs": 3.529499999999871,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3455999999998767,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 3.3704999999999927,
+        "cpuMs": 0
+      }
+    ],
+    "view": [
+      {
+        "elapsedMs": 0.3756999999999948,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38040000000000873,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3883000000000152,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.369199999999978,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.6632999999999925,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.6750999999999863,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3826000000000249,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.36369999999999436,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4048999999999978,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.35820000000001073,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.40790000000004056,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.37590000000000146,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3856999999999289,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3731000000000222,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4078999999999269,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3854000000000042,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38619999999991705,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3690000000000282,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3834999999999127,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4738999999999578,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.40010000000006585,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3875999999999067,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.35140000000001237,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3451999999999771,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3865000000000691,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.37829999999996744,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3828000000000884,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3869999999999436,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4352999999999838,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3835000000000264,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.39409999999998035,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3751999999999498,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.384900000000016,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3707999999999174,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3589999999999236,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3893000000000484,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.36770000000001346,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.39459999999996853,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.36800000000005184,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.7144000000000688,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.6601000000000568,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.37439999999992324,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3747000000000753,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3946000000000822,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3830000000000382,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38829999999995835,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3928000000000793,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 0.386600000000044,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38030000000003383,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3645999999999958,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.37350000000003547,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.47709999999995034,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.36549999999999727,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3668999999999869,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3707000000000562,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38450000000000273,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.36019999999996344,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4008000000000038,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3976000000000113,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4433999999999969,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.504099999999994,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4290000000000873,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3744000000000369,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.36379999999996926,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.39440000000001874,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3789000000000442,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.35000000000002274,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3552999999999429,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.43889999999998963,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3915999999999258,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.40589999999997417,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38440000000002783,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4113000000000966,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3729000000000724,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38400000000001455,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.379099999999994,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.37829999999996744,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3571000000000595,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.34730000000001837,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.36410000000000764,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 0.42629999999996926,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.39570000000003347,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3654000000000224,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.344600000000014,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4057000000000244,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.421799999999962,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3854999999999791,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3949999999999818,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3967999999999847,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3893000000000484,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.42009999999993397,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3730999999999085,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38400000000001455,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38040000000000873,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.39409999999998035,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.37150000000008276,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.40840000000002874,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3990000000000009,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38409999999998945,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4097000000000435,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3949999999999818,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.39019999999993615,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38420000000007803,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.42250000000001364,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3547000000000935,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.35370000000000346,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.35390000000006694,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3832999999999629,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3567999999999074,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3827999999999747,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.37019999999995434,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.37779999999997926,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.35599999999999454,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3684000000000651,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.35410000000001673,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.42470000000002983,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3833000000000766,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.5036999999999807,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38209999999992306,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.39020000000004984,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.37609999999995125,
+        "cpuMs": 15
+      },
+      {
+        "elapsedMs": 0.3870999999999185,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.5298000000000229,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38419999999996435,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3885999999999967,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.39580000000000837,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.379099999999994,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3889000000000351,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.5245000000001028,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.39580000000000837,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38190000000008695,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.36599999999998545,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4051000000000613,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.39229999999997744,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.39400000000000546,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3806000000000722,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.37630000000001473,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.36580000000003565,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3812000000000353,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3813999999999851,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3867999999999938,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3848000000000411,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38820000000009713,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3831000000000131,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3890000000001237,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3853999999998905,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4076000000000022,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3847000000000662,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4067999999999756,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.37419999999997344,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3888999999999214,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3631000000000313,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3894000000000233,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3795000000000073,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38609999999994216,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.37189999999986867,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.42049999999994725,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.412900000000036,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.39650000000006,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4454000000000633,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3914999999999509,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3906000000001768,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3873000000000957,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4175999999999931,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.40160000000014406,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.39970000000016626,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38599999999996726,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4071999999998752,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3864000000000942,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38769999999999527,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38009999999985666,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4294999999999618,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.4035000000001219,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38829999999984466,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38550000000009277,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3867000000000189,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.37180000000012114,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3873000000000957,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.37989999999990687,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3773999999998523,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3968999999999596,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.404700000000048,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38199999999983447,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.375,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3871999999998934,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3835999999998876,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3891000000000986,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38400000000001455,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.38000000000010914,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3926000000001295,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.3951999999999316,
+        "cpuMs": 0
+      },
+      {
+        "elapsedMs": 0.39259999999990214,
+        "cpuMs": 0
+      }
+    ]
+  }
+}

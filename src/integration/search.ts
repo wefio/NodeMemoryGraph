@@ -1,6 +1,7 @@
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
 import type { NmgStore } from "../core/store.ts";
 import type { MemoryContext } from "../core/types.ts";
+import type { RecallBudget } from "./recall-budget.ts";
 
 export type QueryEmbeddingClient = Pick<EmbeddingClient, "embedQueries" | "indexId">;
 
@@ -12,6 +13,7 @@ export async function searchMemoryContext(
   query: string,
   options: SearchOptions,
   degradedReason?: string,
+  recallBudget?: RecallBudget,
 ): Promise<MemoryContext> {
   // degradedReason is set by the caller when the embedding provider is known
   // to be unavailable (cooldown after a failure). The search still runs, but
@@ -36,9 +38,14 @@ export async function searchMemoryContext(
     return lexicalFallback(store, query, options, "embedding_index_missing_targets");
   }
 
-  const queryVector = await embedQuery(embeddingClient, query);
+  const queryVector = await embedQuery(embeddingClient, query, recallBudget);
   if (!queryVector) {
-    return lexicalFallback(store, query, options, "embedding_unavailable");
+    return lexicalFallback(
+      store,
+      query,
+      options,
+      recallBudget?.expired ? "automatic_recall_embedding_deadline" : "embedding_unavailable",
+    );
   }
   return {
     ...store.searchContext(
@@ -53,9 +60,12 @@ export async function searchMemoryContext(
 async function embedQuery(
   client: QueryEmbeddingClient,
   query: string,
+  recallBudget?: RecallBudget,
 ): Promise<number[] | undefined> {
   try {
-    const vectors = await client.embedQueries([query]);
+    const vectors = recallBudget
+      ? await recallBudget.run("embedding", () => client.embedQueries([query]))
+      : await client.embedQueries([query]);
     return vectors[0]?.length ? vectors[0] : undefined;
   } catch {
     return undefined;

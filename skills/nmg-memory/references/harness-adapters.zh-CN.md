@@ -4,6 +4,8 @@
 
 NMG 为各类 Harness 提供轻量适配器（Pi、Claude Code MCP、DeepSeek Harness，以及可安装的 WorkBuddy hook）。本文说明如何编写适配器；在将 NMG 接入新的工具型 Harness，或排查现有适配器行为时阅读。
 
+仓库同时提供 `opencode-plugin/` 中的 OpenCode v2 薄适配器。跨宿主的具体能力覆盖见[适配器能力矩阵](../../../docs/design/harness-capability-matrix.zh-CN.md)，不能从存在插件推断所有能力都已端到端接入。
+
 ## 稳定合同
 
 适配器应保持**轻量**：不得导入 NMG 核心存储（`src/core`、`src/cli/service.ts`）。它通过 HTTP JSON-RPC 与运行中的 daemon 通信：读取 `<data-dir>/nmg.sqlite.server.json`，再携带 `Authorization: Bearer <token>` 发送 `{ jsonrpc: '2.0', method, params, id }`。仅对宿主合同明确支持的操作，才可在 daemon 不可用时回退到一次性 CLI（`node bin/nmg.mjs`）。适配器不自行接管 daemon 生命周期；daemon 运行时，应避免每次调用都启动进程（Node 启动约需 180 ms）。
@@ -53,6 +55,8 @@ AG 替换或清除必须携带该租约所捕获的 binding，且该元数据不
 ## 自动召回（可选）
 
 只有工具接口并不能保证模型会搜索记忆。在宿主提供合适生命周期接入点时，适配器可以在每个新用户回合执行有界搜索，并通过宿主支持的上下文机制暴露 **Active-Graph header projection**（精简标题及 `activeGraphId`）。精确陈述和证据仍应由 `get(activeGraphId)` 获取；它会在 AG trace 上记录实际使用。仅显示注入的标题不算使用。限制搜索预算，按照共享披露合同折叠重复 ID；召回失败时也应让用户回合继续。
+
+自动上下文准备共用五秒绝对等待预算，不为每次 RPC 重开额度。后续阶段到期仍保留及时完成的候选，支持取消的调用传递取消信号；超时不意味着能抢占同步 SQLite 工作或停止远端工作。模型显式请求的搜索不受自动期限约束。检查点、剩余预算准入与 daemon 上限见[等待预算契约](../../../docs/design/session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.zh-CN.md)。
 
 具体注入机制因宿主而异。本仓库的 DSH 包在用户消息进入 inbox 时启动召回，通过 DSH 的 `systemPrompt.context` 提供结果；Pi 使用其自身持久化的 `nmg-context` 消息路径。宿主有受支持的上下文 API 时，不要自行伪造用户消息。只有 hook 与模型侧工具共享同一宿主 session identity 时，projection handle 才有效。独立的 WorkBuddy hook 使用命名空间身份 `workbuddy-hook:<sessionId>`，发出的 projection handle 属于独立 AG；不要把该 handle 传给工具侧 `nmg_get`。当前 hook 路径没有发送 `release` RPC，因此不能声称 AG 会立即清理。Agent 必须先调用工具侧 `nmg_search` 再调用 `nmg_get`；不得为了复用 hook 创建的句柄而削弱 session 所有权边界。
 

@@ -2,6 +2,10 @@
 
 [English](lexical-budget-2026-10-10.md) | [简体中文](lexical-budget-2026-10-10.zh-CN.md) · [术语](lexical-budget-2026-10-10.terms.yaml)
 
+## 历史预算前机制
+
+这是已冻结源分支的预算前排序实验记录，不是当前主线排序契约，也不声明本次文档 PR 交付该运行时改动。当前仅 FTS5 规则在 AG 选定证据后处理并列，见[主线检索契约](../../design/design/progressive-retrieval.zh-CN.md)。下文保留原实验的问题、数据与证据边界。
+
 ## 冻结协议
 
 基线为 `94ca7e8f8000fb275e73961b25ba0c517e2f63df`。本轮仅研究 FTS5 同分排序的位置；不改变候选生成、分数、gate、默认条数、QPP 参数或输出格式。用户已确认公开测试边界为 `NmgStore.search` / `searchContext`；共享入口 `searchMemoryContext` 验证无 embedding 及本地模拟降级，不调用网络模型。

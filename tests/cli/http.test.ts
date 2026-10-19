@@ -6,6 +6,8 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { httpCall } from "../../src/cli/http-client.ts";
+import { invokeDaemon } from "../../src/cli/daemon-client.ts";
+import type { NmgHelloResult, NmgLabResult } from "../../src/cli/protocol.ts";
 import { httpHandler } from "../../src/cli/http-server.ts";
 import type { ServerState } from "../../src/cli/lifecycle.ts";
 import { NMG_PROTOCOL_VERSION, NMG_RPC_CATALOG_FINGERPRINT } from "../../src/cli/protocol.ts";
@@ -44,7 +46,9 @@ function startServer(
 function withServer(fn: (state: EphemeralServer["state"]) => Promise<void>): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "nmg-http-"));
   const token = "test-token";
-  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite") });
+  const service = new NmgService({
+    databasePath: join(directory, "nmg.sqlite"),
+  });
   return startServer(service, token).then(async ({ server, state }) => {
     try {
       await fn(state);
@@ -83,6 +87,47 @@ test("JSON-RPC over HTTP round-trips hello, remember, search, and get", async ()
       memoryIds: [remembered.memory.id, "missing"],
     })) as { results: unknown[]; missingMemoryIds: string[] };
     assert.equal(got.missingMemoryIds.length, 1);
+  });
+});
+
+test("ordinary daemon client captures working-state metadata across the JSON-RPC wire", async () => {
+  await withServer(async (state) => {
+    const hello = (await httpCall(state, "hello")) as NmgHelloResult;
+    const connection = {
+      state,
+      startedByCaller: false,
+      databasePath: "unused-working-state-client.sqlite",
+      capabilities: new Set(hello.capabilities),
+      methods: new Set(hello.methods),
+    };
+    const enable = {
+      action: "enable",
+      capability: "working_state",
+      sessionId: "owner",
+      requester: "agent:wire",
+      reason: "current state",
+    };
+    const lease = (await invokeDaemon(connection, "lab", enable)) as NmgLabResult;
+    assert.equal(lease.action, "enable");
+    const invocation = {
+      action: "invoke",
+      capability: "working_state",
+      sessionId: "owner",
+      operation: "replace",
+      input: { text: "Wire state." },
+    };
+    const result = (await invokeDaemon(connection, "lab", invocation)) as NmgLabResult;
+    assert.equal(result.action === "invoke" && result.output, "updated");
+    const old = lease.action === "enable" ? lease.activation?.workingStateBinding : undefined;
+    assert.ok(old);
+    await invokeDaemon(connection, "lab", enable);
+    await assert.rejects(
+      invokeDaemon(connection, "lab", {
+        ...invocation,
+        workingStateBinding: old,
+      }),
+      /binding/u,
+    );
   });
 });
 
@@ -156,6 +201,48 @@ test("JSON-RPC over HTTP surfaces protocol validation errors", async () => {
     );
   });
 });
+
+test(
+  "an operation deadline aborts HTTP response-body consumption after headers arrive",
+  { timeout: 10_000 },
+  async (t) => {
+    let bodyStarted!: () => void;
+    const atBody = new Promise<void>((resolve) => {
+      bodyStarted = resolve;
+    });
+    const realFetch = globalThis.fetch;
+    t.mock.method(globalThis, "fetch", async (...args: Parameters<typeof fetch>) => {
+      const response = await realFetch(...args);
+      bodyStarted();
+      return response;
+    });
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.write('{"jsonrpc":"2.0","id":1,"result":');
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const state: ServerState = {
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      transport: "http",
+      host: "127.0.0.1",
+      port: (server.address() as { port: number }).port,
+      token: "test-token",
+    };
+    const controller = new AbortController();
+    const pending = httpCall(state, "hello", {}, { signal: controller.signal });
+    try {
+      await atBody;
+      const rejected = assert.rejects(pending, /whole-operation deadline/u);
+      controller.abort(new Error("whole-operation deadline"));
+      await rejected;
+    } finally {
+      controller.abort();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);
 
 test("JSON-RPC over HTTP rejects oversized request bodies", async () => {
   await withServer(async (state) => {

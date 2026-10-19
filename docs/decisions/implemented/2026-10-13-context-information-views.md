@@ -24,6 +24,11 @@ Ordinary flat output remains compatible. Automatic preparation does not mark omi
 disclosed or infer provider exposure. AG and board owners retain lifecycle and permissions;
 explicit history reads remain available without automatically becoming working context.
 
+The Pi integration retains the shared automatic-recall time budget and cancellation path,
+including typed AG reads and optional checkpoint/telemetry work. A deadline renders completed
+typed items through the same admission protocol; it does not restore a raw-header fallback or
+write disclosure history. Attribution uses only memory IDs admitted in that final output.
+
 ## Alternatives considered
 
 - Keeping five large strings: does not allow item-level omission or preserve independent purposes.

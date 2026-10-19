@@ -12,6 +12,8 @@ Session reasoning workspace 是可选的 Lab scratch surface，与 LTG memory �
 
 ## 当前 owner 索引
 
+- 自动召回总期限、取消与诊断：[当前等待预算契约](session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.zh-CN.md)。
+
 - Capture、recall 与 session working-state 边界：[Memory loop 设计](memory-loop-design.md)和[session active-graph runtime](session-active-graph-runtime-design.md)。
 - Agent 可见的信息视图：[context-information 决策](../decisions/implemented/2026-10-13-context-information-views.md)。
 - Working-state admission 与日常使用：[working-state 决策](../decisions/implemented/2026-10-08-ag-working-state.md)和[日常使用决策](../decisions/implemented/2026-10-12-working-state-daily-use.md)。
@@ -24,3 +26,11 @@ Session reasoning workspace 是可选的 Lab scratch surface，与 LTG memory �
 原始记录包含 33 个 Pi lifecycle event 的清单和详细实现观察。Extension event 名称与 payload 可能变化；依赖 event 级主张前，应核对当前安装的 Pi API 与当前 extension 源码。旧稿中的“已实现”或“测试通过”只描述当时报告的状态。本索引不声称本次文档审计重新测试了所有列出的行为。
 
 通过[实现沿革](implementation-lineage.md)查找当前源码 owner。保留这份历史设计，是为了说明 temporary session context、显式持久记忆、可选 reasoning scratch 和测量 instrumentation 为什么属于不同关注点。
+
+## 自动召回等待预算
+
+读[当前等待预算契约](session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.zh-CN.md)；本页保留历史索引职责。
+
+## 首次输出计时
+
+读[可选观测决策](../decisions/implemented/2026-10-04-first-response-timing-is-opt-in.zh-CN.md)及其实现 owner。

@@ -17,6 +17,8 @@ The WorkBuddy integration surface for NMG (Node Memory Graph), a Claude Code-com
 
 The hook is passive: it calls the daemon only when a live HTTP lease exists (`<dataDir>/nmg.sqlite.server.json` with a live PID), never starts the daemon, accepts only `127.0.0.1`, sends `hello` first and checks the compatibility epoch, silently handles failures, and always exits 0. Automatic recall uses a separate namespaced hook session. The current hook path does not send a `release` RPC, so do not claim that the in-memory AG is released immediately after rendering. Candidate rendering uses the shared surface in `src/integration/agent-surface.ts`; it does not hand-build strings. See the integration recipe in `skills/nmg-memory/references/harness-adapters.md`.
 
+Recall hello, search and disclosure share one absolute five-second waiting budget; later-phase expiry preserves timely candidates. Identity registration and wake polling are outside that function's budget, and explicit MCP search is not bounded by the automatic deadline. The [waiting-budget contract](../docs/design/session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.md) owns cancellation and synchronous-work limits.
+
 ## Registration
 
 ```json

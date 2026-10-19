@@ -1,15 +1,16 @@
 /**
  * Encoding and decoding of embedding vectors stored in SQLite.
  *
- * Vectors are persisted twice during the ongoing migration to binary storage:
- * `vector_blob` (little-endian float32, compact and fast) and legacy
- * `vector_json`. Readers prefer the blob and fall back to JSON, so rows written
- * before the binary column existed stay readable.
+ * Writers persist `vector_blob` (little-endian float32) and keep `vector_json`
+ * as an empty compatibility placeholder. Readers project the preferred storage
+ * form into one `vector` column, retaining JSON fallback for legacy rows.
  *
  * Shared by the schema migration and the store itself, so it lives outside both.
  */
 
 type Row = Record<string, string | number | Uint8Array | null>;
+
+const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
 
 export function encodeVector(vector: readonly number[]): Buffer {
   const buffer = Buffer.allocUnsafe(vector.length * Float32Array.BYTES_PER_ELEMENT);
@@ -17,12 +18,33 @@ export function encodeVector(vector: readonly number[]): Buffer {
   return buffer;
 }
 
-/** Read a vector from a row, preferring the binary column over legacy JSON. */
+/** Decode a preferred-vector projection, or a legacy row with separate columns. */
 export function storedVector(row: Row, prefix = ""): number[] {
+  const projected = row[`${prefix}vector`];
+  if (projected !== undefined) return parseVector(projected);
   const blob = row[`${prefix}vector_blob`];
   return blob instanceof Uint8Array
     ? parseVector(blob)
     : parseVector(row[`${prefix}vector_json`] as string | undefined);
+}
+
+/** Borrow an aligned projected Float32 payload for immediate, read-only scoring.
+ * Never cache/return this view across async work or WASM memory growth. Public
+ * readers still use storedVector's independent ordinary-array snapshots. */
+export function scoringVector(row: Row, prefix = ""): ArrayLike<number> {
+  const value = row[`${prefix}vector`];
+  if (LITTLE_ENDIAN && value instanceof Uint8Array) {
+    const buffer = value.buffer;
+    if (
+      buffer instanceof ArrayBuffer &&
+      !("resizable" in buffer && buffer.resizable) &&
+      value.byteOffset % 4 === 0 &&
+      value.byteLength % 4 === 0
+    ) {
+      return new Float32Array(buffer, value.byteOffset, value.byteLength / 4);
+    }
+  }
+  return storedVector(row, prefix);
 }
 
 /**

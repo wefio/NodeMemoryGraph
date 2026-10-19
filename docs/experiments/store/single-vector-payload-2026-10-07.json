@@ -1,0 +1,46 @@
+{
+  "measuredAt": "2026-10-07T11:59:06.590Z",
+  "input": ":memory: synthetic NMG graph; no cloud DB or provider",
+  "rows": 300,
+  "dimensions": {
+    "localHashing": 256,
+    "syntheticDense": 1024
+  },
+  "runtime": "v24.19.0",
+  "sqlite": "3.53.3",
+  "baseline": {
+    "vectorRows": 600,
+    "jsonBytes": 6863550,
+    "blobBytes": 1536000,
+    "pageSize": 4096,
+    "pageCount": 2845,
+    "freePages": 0,
+    "allocatedBytes": 11653120
+  },
+  "migrated": {
+    "vectorRows": 600,
+    "jsonBytes": 1200,
+    "blobBytes": 1536000,
+    "pageSize": 4096,
+    "pageCount": 2846,
+    "freePages": 1501,
+    "allocatedBytes": 11657216
+  },
+  "compacted": {
+    "vectorRows": 600,
+    "jsonBytes": 1200,
+    "blobBytes": 1536000,
+    "pageSize": 4096,
+    "pageCount": 1033,
+    "freePages": 0,
+    "allocatedBytes": 4231168
+  },
+  "vectorIdentitySha256": "74e69f1f164a1009dc28fc781d121ec98f1282c9c0fa1e991e7bd583e50acfc0",
+  "checks": {
+    "vectorBytesAndMetadataUnchanged": true,
+    "retrievedIdsAndVectorScoresUnchanged": true,
+    "memoryAndHistoryRowCountsPreserved": true,
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0
+  }
+}

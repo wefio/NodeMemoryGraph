@@ -12,20 +12,13 @@ import nmgExtension, {
   formatMemoryContext,
   formatSearchRecommendation,
   formatSearchHeaders,
-  isMemorableToolResult,
-  isSuccessfulCommit,
-  maybeBroadcastToWorld,
-  isBoardWakeCandidate,
   MEMORY_POLICY,
   PI_BRANCH_SHAPE_VERSION,
   projectPiBranch,
   piUserTurnKey,
   resolvePiEvidenceSource,
   selectPiEvidenceSource,
-  SessionRecallFlow,
-  SessionTaskWindow,
   SKILLOPT_POLICY_CHANNELS,
-  summarizeToolResult,
 } from "../../../.pi/extensions/nmg/index.ts";
 import { loadPrompts } from "../../../src/prompts/load.ts";
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
@@ -44,6 +37,14 @@ import { stripProviderEnv } from "../../helpers/test-env.ts";
 // deterministic. Tests that want a provider must configure it explicitly.
 stripProviderEnv();
 
+/** The content the host would persist for this turn, or the empty string when the
+ * handler returned no message at all. Keeping the optional lookup in one place
+ * keeps the turn test's own branching unchanged.
+ */
+function carriedStateMessage(result: { message?: { content: string } }): string {
+  return result.message ? result.message.content : "";
+}
+
 function extensionHarness() {
   const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
   const tools = new Map<
@@ -58,7 +59,11 @@ function extensionHarness() {
   const commands = new Map<string, unknown>();
   nmgExtension({
     on(event: string, handler: (...args: unknown[]) => Promise<unknown>) {
-      handlers.set(event, handler);
+      const previous = handlers.get(event);
+      handlers.set(event, async (...args) => {
+        const first = await previous?.(...args);
+        return (await handler(...args)) ?? first;
+      });
     },
     registerTool(tool: {
       name: string;
@@ -86,12 +91,12 @@ test("Pi adapter exposes stable memory tools plus the unified Lab capability ent
   try {
     assert.deepEqual(
       [...extensionHarness().tools.keys()],
-      ["nmg_lab", "nmg_remember", "nmg_get", "nmg_search", "nmg_board"],
+      ["nmg_lab", "nmg_remember", "nmg_get", "nmg_search", "nmg_state"],
     );
     process.env.NMG_ENABLE_COORDINATION = "off";
     assert.deepEqual(
       [...extensionHarness().tools.keys()],
-      ["nmg_lab", "nmg_remember", "nmg_get", "nmg_search"],
+      ["nmg_lab", "nmg_remember", "nmg_get", "nmg_search", "nmg_state"],
     );
   } finally {
     if (previous === undefined) delete process.env.NMG_ENABLE_LAB_TOOLS;
@@ -113,7 +118,7 @@ test("Lab reasoning tool persists scratch state and injects it only after compac
     const { handlers, tools } = extensionHarness();
     assert.deepEqual(
       [...tools.keys()],
-      ["nmg_reason", "nmg_lab", "nmg_remember", "nmg_get", "nmg_search", "nmg_board"],
+      ["nmg_reason", "nmg_lab", "nmg_remember", "nmg_get", "nmg_search", "nmg_state"],
     );
     const sessionManager = {
       getSessionId: () => "reasoning-session",
@@ -130,7 +135,10 @@ test("Lab reasoning tool persists scratch state and injects it only after compac
       undefined,
       undefined,
       { sessionManager },
-    )) as { details: { invoked: { output: { id: string } } }; content: Array<{ text: string }> };
+    )) as {
+      details: { invoked: { output: { id: string } } };
+      content: Array<{ text: string }>;
+    };
     assert.match(added.details.invoked.output.id, /^reason_/u);
     assert.match(added.content[0]!.text, /not verified fact/u);
     assert.equal(existsSync(join(directory, "nmg.sqlite")), false);
@@ -307,7 +315,10 @@ test("remember cannot attribute an unbound Assistant inference to the user", asy
       {
         type: "message",
         id: "user-question",
-        message: { role: "user", content: "Why does this design use an append-only history?" },
+        message: {
+          role: "user",
+          content: "Why does this design use an append-only history?",
+        },
       },
     ],
   };
@@ -340,7 +351,10 @@ test("controller shadow bridge logs answer attribution without learning from it"
     assert.equal(shadowEnabled(undefined), false);
     assert.equal(shadowEnabled("true"), true);
     const disabled = new ControllerShadowBridge(directory, false);
-    const saved = store.remember({ statement: "Atlas uses SQLite", nodeName: "Atlas" });
+    const saved = store.remember({
+      statement: "Atlas uses SQLite",
+      nodeName: "Atlas",
+    });
     const context = store.searchContext("Atlas database", {
       sessionId: "session-a",
       persistTrace: false,
@@ -475,7 +489,11 @@ test("controller shadow bridge logs answer attribution without learning from it"
     assert.equal(retrieval.type, "retrieval");
     assert.equal(retrieval.costs.injectedCharacters, "injected header".length);
     assert.equal(retrieval.costs.injectedEstimatedTokens, 4);
-    const flow = JSON.parse(events[1]!) as { type: string; action: string; query: string };
+    const flow = JSON.parse(events[1]!) as {
+      type: string;
+      action: string;
+      query: string;
+    };
     assert.equal(flow.type, "tool_flow");
     assert.equal(flow.action, "search_suppressed");
     assert.equal(flow.query, "same query again");
@@ -531,8 +549,14 @@ test("trained controller actuation is explicit, bounded, and auditable", async (
   try {
     const memories = [
       store.remember({ statement: "Atlas uses SQLite", nodeName: "Atlas" }),
-      store.remember({ statement: "Borealis uses PostgreSQL", nodeName: "Borealis" }),
-      store.remember({ statement: "Cygnus uses object storage", nodeName: "Cygnus" }),
+      store.remember({
+        statement: "Borealis uses PostgreSQL",
+        nodeName: "Borealis",
+      }),
+      store.remember({
+        statement: "Cygnus uses object storage",
+        nodeName: "Cygnus",
+      }),
     ];
     const context = store.searchContext("project storage database", {
       sessionId: "candidate-session",
@@ -594,7 +618,10 @@ test("shadow feedback review selects a disclosed graph instead of a newer header
   const store = new NmgStore(join(directory, "nmg.sqlite"));
   try {
     const bridge = new ControllerShadowBridge(directory, true);
-    const saved = store.remember({ statement: "Atlas uses SQLite", nodeName: "Atlas" });
+    const saved = store.remember({
+      statement: "Atlas uses SQLite",
+      nodeName: "Atlas",
+    });
     const used = store.searchContext("Atlas database", {
       sessionId: "session-a",
       persistTrace: false,
@@ -711,7 +738,10 @@ test("Pi injects the advisory claim-outcome review only on the next user turn", 
         { sessionManager },
       )) as {
       content: Array<{ text: string }>;
-      details: { activeGraph?: { id: string }; results: Array<{ memory: { id: string } }> };
+      details: {
+        activeGraph?: { id: string };
+        results: Array<{ memory: { id: string } }>;
+      };
     };
     assert.match(searched.content[0]?.text ?? "", /Atlas stores durable metadata in SQLite/u);
     const disclosedMemoryId = searched.details.results[0]!.memory.id;
@@ -727,7 +757,10 @@ test("Pi injects the advisory claim-outcome review only on the next user turn", 
             role: "user",
             content: [{ type: "text", text: "What database stores Atlas metadata?" }],
           },
-          { role: "assistant", content: [{ type: "text", text: "Atlas uses SQLite." }] },
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "Atlas uses SQLite." }],
+          },
         ],
       },
       { sessionManager },
@@ -756,7 +789,12 @@ test("Pi injects the advisory claim-outcome review only on the next user turn", 
     process.env.NMG_PROJECT_DIR = previousProject;
     process.env.NMG_CONTROLLER_SHADOW = previousShadow;
     try {
-      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      rmSync(directory, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
     } catch {
       // Windows can briefly retain daemon handles after shutdown.
     }
@@ -770,14 +808,22 @@ test("Pi evidence projection retains only an exact bounded source excerpt", () =
       {
         type: "message",
         id: "assistant-1",
-        message: { role: "assistant", content: "A routine assistant explanation." },
+        message: {
+          role: "assistant",
+          content: "A routine assistant explanation.",
+        },
       },
       {
         type: "message",
         id: "user-1",
         message: {
           role: "user",
-          content: [{ type: "text", text: "Please remember that Atlas uses SQLite offline." }],
+          content: [
+            {
+              type: "text",
+              text: "Please remember that Atlas uses SQLite offline.",
+            },
+          ],
         },
       },
       {
@@ -874,7 +920,7 @@ test("tool descriptions come from the prompt source of truth", () => {
     assert.equal(tools.get("nmg_search")?.description, prompts.search_description);
     assert.equal(tools.get("nmg_get")?.description, prompts.get_description);
     assert.equal(tools.get("nmg_remember")?.description, prompts.remember_description);
-    assert.equal(tools.get("nmg_board")?.description, prompts.board_description);
+    assert.equal(tools.get("nmg_state")?.description, prompts.state_description);
   } finally {
     if (previous === undefined) delete process.env.NMG_ENABLE_COORDINATION;
     else process.env.NMG_ENABLE_COORDINATION = previous;
@@ -917,7 +963,7 @@ test("tool parameter descriptions come from the prompt source of truth", () => {
       prompts.remember_memory_id_parameter_description,
     );
     assert.equal(
-      tools.get("nmg_board")?.parameters?.properties?.taskId?.description,
+      tools.get("nmg_state")?.parameters?.properties?.taskId?.description,
       prompts.board_task_id_parameter_description,
     );
   } finally {
@@ -941,14 +987,16 @@ test("NMG prompt keeps a stable policy prefix; dynamic recall goes to the traili
   assert.match(MEMORY_POLICY, /Semantic or topical relevance does not prove/);
   assert.match(MEMORY_POLICY, /unconfirmed assistant proposals/);
 
-  const dynamic = composeNmgContextMessage("first candidate");
-  assert.match(dynamic, /<nmg_automatic_recall>\nfirst candidate\n<\/nmg_automatic_recall>$/);
+  const dynamic = composeNmgContextMessage([{ purpose: "material", body: "first candidate" }]);
+  assert.match(dynamic, /<nmg_material>\nfirst candidate\n<\/nmg_material>$/);
   assert.equal(composeNmgContextMessage(), "");
-  // Ordering: recall (head) then runtime AG then nudge, stable prefix untouched.
-  const full = composeNmgContextMessage("recall", "", "nudge", "runtime");
-  assert.match(full, /<nmg_automatic_recall>\nrecall\n<\/nmg_automatic_recall>/);
-  assert.match(full, /<nmg_runtime_ag>\nruntime\n<\/nmg_runtime_ag>/);
-  assert.match(full, /<nmg_nudge>\nnudge\n<\/nmg_nudge>/);
+  const full = composeNmgContextMessage([
+    { purpose: "material", body: "recall" },
+    { purpose: "guidance", body: "nudge" },
+    { purpose: "material", body: "runtime" },
+  ]);
+  assert.match(full, /<nmg_material>\nrecall\nruntime\n<\/nmg_material>/);
+  assert.match(full, /<nmg_guidance>\nnudge\n<\/nmg_guidance>/);
 });
 
 test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", async () => {
@@ -960,6 +1008,11 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
   process.env.NMG_DATA_DIR = directory;
   process.env.NMG_PROJECT_DIR = directory;
   process.env.NMG_ENABLE_COORDINATION = "1";
+  const continuationEntries: Array<{
+    type: string;
+    id: string;
+    message: { role: string; content: string };
+  }> = [];
   const sessionManager = {
     getSessionId: () => "http-test-session",
     getSessionFile: () => "session.jsonl",
@@ -972,10 +1025,11 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
           content: "Please remember: Atlas must use SQLite for offline operation.",
         },
       },
+      ...continuationEntries,
     ],
   };
   try {
-    const { handlers, tools } = extensionHarness();
+    const { handlers, tools, commands } = extensionHarness();
     const remember = (await tools.get("nmg_remember")!.execute(
       "remember",
       {
@@ -1000,6 +1054,165 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     assert.equal(remember.details.history.sourceMessageId, "user-atlas-storage");
     assert.equal(remember.details.history.content, "Atlas must use SQLite for offline operation.");
     assert.equal(remember.details.memory.writeSource, "agent");
+
+    // Real HTTP daemon + loaded Pi factory: write scope stays outside model
+    // arguments, and the view plus per-user-turn carriage read the native state.
+    const state = tools.get("nmg_state")!;
+    const stateWidgets: Array<string[] | undefined> = [];
+    const stateNotices: string[] = [];
+    const hostContext = {
+      sessionManager,
+      mode: "tui",
+      hasUI: true,
+      ui: {
+        setWidget(_key: string, lines: string[] | undefined) {
+          stateWidgets.push(lines);
+        },
+        notify(text: string) {
+          stateNotices.push(text);
+        },
+      },
+    };
+    await state.execute(
+      "enable-state",
+      {
+        action: "write",
+        space: "ag",
+        operation: "enable",
+        reason: "Verify Pi working-state input wiring",
+      },
+      undefined,
+      undefined,
+      hostContext,
+    );
+    const writeArguments = {
+      action: "write",
+      space: "ag",
+      operation: "replace",
+      text: "Current HTTP working plan; exact constraint=123",
+    };
+    const written = (await state.execute(
+      "write-state",
+      writeArguments,
+      undefined,
+      undefined,
+      hostContext,
+    )) as {
+      content: Array<{ type: string; text: string }>;
+      details: { output: string; workingStateBinding: { sessionId: string } };
+    };
+    assert.equal(written.content[0].text, "updated");
+    assert.equal(written.details.workingStateBinding.sessionId, "http-test-session");
+    assert.equal("workingStateBinding" in writeArguments, false);
+    await handlers.get("tool_result")!(
+      {
+        toolName: "nmg_state",
+        toolCallId: "write-state",
+        input: writeArguments,
+        isError: false,
+        content: written.content,
+      },
+      hostContext,
+    );
+    assert.match(
+      stateWidgets.at(-1)!.join("\n"),
+      /Current HTTP working plan; exact constraint=123/u,
+      "a state write refreshes the user view",
+    );
+    const stateCommand = commands.get("nmg") as {
+      handler: (args: string, ctx: typeof hostContext) => Promise<unknown>;
+    };
+    const readState = () => stateCommand.handler("state", hostContext);
+    await readState();
+    assert.equal(
+      stateNotices.at(-1),
+      "[temporary] Current HTTP working plan; exact constraint=123",
+    );
+    await stateCommand.handler("state off", hostContext);
+    assert.equal(stateWidgets.at(-1), undefined, "the preview switch hides the user view");
+    assert.match(String(stateNotices.at(-1)), /隐藏/u);
+    await readState();
+    assert.equal(
+      stateNotices.at(-1),
+      "[temporary] Current HTTP working plan; exact constraint=123",
+      "hiding the preview keeps the body readable",
+    );
+    await stateCommand.handler("state on", hostContext);
+    assert.match(
+      stateWidgets.at(-1)!.join("\n"),
+      /Current HTTP working plan; exact constraint=123/u,
+      "re-enabling the preview reads the current body again",
+    );
+    await state.execute(
+      "disable-writer",
+      { action: "write", space: "ag", operation: "disable" },
+      undefined,
+      undefined,
+      { sessionManager },
+    );
+    await readState();
+    assert.equal(
+      stateNotices.at(-1),
+      "[temporary] Current HTTP working plan; exact constraint=123",
+      "writer disablement leaves completed status readable",
+    );
+    await state.execute(
+      "enable-writer",
+      {
+        action: "write",
+        space: "ag",
+        operation: "enable",
+        reason: "Continue the writer after verifying read-only completed status",
+        ttlSeconds: 300,
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    );
+    const restored = (await handlers.get("before_agent_start")!(
+      { prompt: "继续验证状态注入位置", systemPrompt: "base" },
+      hostContext,
+    )) as { message?: { content: string } };
+    assert.match(
+      carriedStateMessage(restored),
+      /<nmg_working_state>\n\[temporary\] Current HTTP working plan; exact constraint=123\n<\/nmg_working_state>/u,
+      "one user turn carries the current state once",
+    );
+    await state.execute(
+      "clear-state",
+      { action: "write", space: "ag", operation: "clear" },
+      undefined,
+      undefined,
+      hostContext,
+    );
+    await handlers.get("tool_result")!(
+      {
+        toolName: "nmg_state",
+        toolCallId: "clear-state",
+        input: { action: "write", space: "ag", operation: "clear" },
+        isError: false,
+        content: [{ type: "text", text: "cleared" }],
+      },
+      hostContext,
+    );
+    assert.equal(stateWidgets.at(-1), undefined, "real owner clear removes the user state view");
+    const cleared = (await handlers.get("before_agent_start")!(
+      { prompt: "状态清空后的继续", systemPrompt: "base" },
+      hostContext,
+    )) as { message?: { content: string } };
+    assert.doesNotMatch(
+      carriedStateMessage(cleared),
+      /<nmg_working_state>/u,
+      "a cleared state is carried as absent, not as a stale body",
+    );
+    await state.execute(
+      "disable-state",
+      { action: "write", space: "ag", operation: "disable" },
+      undefined,
+      undefined,
+      hostContext,
+    );
+
     const claimOutcome = (await tools.get("nmg_remember")!.execute(
       "claim-user-evidence",
       {
@@ -1029,7 +1242,12 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       { sessionManager },
     )) as {
       details: {
-        memory: { markers: Array<{ kind: string; attributes?: Record<string, unknown> }> };
+        memory: {
+          markers: Array<{
+            kind: string;
+            attributes?: Record<string, unknown>;
+          }>;
+        };
       };
     };
     const degradedMarker = degraded.details.memory.markers.find(
@@ -1062,7 +1280,10 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       undefined,
       undefined,
       { sessionManager },
-    )) as { content: Array<{ text: string }>; details: { memory: { id: string } } };
+    )) as {
+      content: Array<{ text: string }>;
+      details: { memory: { id: string } };
+    };
     assert.match(newDatabase.content[0].text, /possible older values/i);
     assert.match(newDatabase.content[0].text, /action=supersede/i);
     const resolvedDatabase = (await tools.get("nmg_remember")!.execute(
@@ -1127,10 +1348,12 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     // the session id (stable within a session) rather than the volatile pid.
     const fallbackAgent = process.env.NMG_AGENT_ID;
     delete process.env.NMG_AGENT_ID;
-    const boardPutSession = (await tools.get("nmg_board")!.execute(
+    const boardPutSession = (await tools.get("nmg_state")!.execute(
       "board-put-session",
       {
-        action: "put",
+        action: "write",
+        space: "board",
+        operation: "put",
         kind: "note",
         content: "Written with the session-id fallback identity.",
       },
@@ -1146,10 +1369,12 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     else process.env.NMG_AGENT_ID = fallbackAgent;
 
     process.env.NMG_AGENT_ID = "agent-a";
-    const boardPut = (await tools.get("nmg_board")!.execute(
+    const boardPut = (await tools.get("nmg_state")!.execute(
       "board-put",
       {
-        action: "put",
+        action: "write",
+        space: "board",
+        operation: "put",
         taskId: "atlas-review",
         kind: "handoff",
         content: "Agent B should verify the parser tests.",
@@ -1166,10 +1391,19 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       getSessionId: () => "http-test-session-b",
     };
     const boardRead = (await tools
-      .get("nmg_board")!
-      .execute("board-read", { action: "read", taskId: "atlas-review" }, undefined, undefined, {
-        sessionManager: secondSessionManager,
-      })) as { content: Array<{ text: string }>; details: { entries: Array<{ id: string }> } };
+      .get("nmg_state")!
+      .execute(
+        "board-read",
+        { action: "read", space: "board", taskId: "atlas-review" },
+        undefined,
+        undefined,
+        {
+          sessionManager: secondSessionManager,
+        },
+      )) as {
+      content: Array<{ text: string }>;
+      details: { entries: Array<{ id: string }> };
+    };
     assert.deepEqual(
       boardRead.details.entries.map((entry) => entry.id),
       [boardPut.details.entry.id],
@@ -1195,23 +1429,31 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     // Reading the world channel (no taskId) surfaces the lobby directory of
     // active named channels.
     const worldRead = (await tools
-      .get("nmg_board")!
-      .execute("board-world-read", { action: "read" }, undefined, undefined, {
+      .get("nmg_state")!
+      .execute("board-world-read", { action: "read", space: "board" }, undefined, undefined, {
         sessionManager: secondSessionManager,
       })) as { content: Array<{ text: string }> };
     assert.match(worldRead.content[0].text, /Active named channels/u);
     assert.match(worldRead.content[0].text, /atlas-review/u);
     // Lease-based claiming: agent-b claims the open handoff, a third agent is
     // refused (diagnosed as already claimed), then agent-b releases it back.
-    const boardClaim = (await tools
-      .get("nmg_board")!
-      .execute(
-        "board-claim",
-        { action: "claim", taskId: "atlas-review", entryId: boardPut.details.entry.id },
-        undefined,
-        undefined,
-        { sessionManager: secondSessionManager },
-      )) as { details: { entry: { claimedBy: string | null; claimExpiresAt: string | null } } };
+    const boardClaim = (await tools.get("nmg_state")!.execute(
+      "board-claim",
+      {
+        action: "write",
+        space: "board",
+        operation: "claim",
+        taskId: "atlas-review",
+        entryId: boardPut.details.entry.id,
+      },
+      undefined,
+      undefined,
+      { sessionManager: secondSessionManager },
+    )) as {
+      details: {
+        entry: { claimedBy: string | null; claimExpiresAt: string | null };
+      };
+    };
     assert.equal(boardClaim.details.entry.claimedBy, "agent-b");
     assert.ok(boardClaim.details.entry.claimExpiresAt);
     // A third agent is refused (diagnosed as already claimed). Override the
@@ -1219,87 +1461,163 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     const wakeAgent = process.env.NMG_AGENT_ID;
     process.env.NMG_AGENT_ID = "agent-c";
     await assert.rejects(
-      tools
-        .get("nmg_board")!
-        .execute(
-          "board-claim-conflict",
-          { action: "claim", taskId: "atlas-review", entryId: boardPut.details.entry.id },
-          undefined,
-          undefined,
-          {
-            sessionManager: { ...secondSessionManager, getSessionId: () => "http-test-session-c" },
+      tools.get("nmg_state")!.execute(
+        "board-claim-conflict",
+        {
+          action: "write",
+          space: "board",
+          operation: "claim",
+          taskId: "atlas-review",
+          entryId: boardPut.details.entry.id,
+        },
+        undefined,
+        undefined,
+        {
+          sessionManager: {
+            ...secondSessionManager,
+            getSessionId: () => "http-test-session-c",
           },
-        ),
+        },
+      ),
       /already claimed/u,
     );
     if (wakeAgent === undefined) delete process.env.NMG_AGENT_ID;
     else process.env.NMG_AGENT_ID = wakeAgent;
-    const boardRelease = (await tools
-      .get("nmg_board")!
-      .execute(
-        "board-release",
-        { action: "release", taskId: "atlas-review", entryId: boardPut.details.entry.id },
-        undefined,
-        undefined,
-        { sessionManager: secondSessionManager },
-      )) as { details: { entry: { claimedBy: string | null } } };
+    const boardRelease = (await tools.get("nmg_state")!.execute(
+      "board-release",
+      {
+        action: "write",
+        space: "board",
+        operation: "release",
+        taskId: "atlas-review",
+        entryId: boardPut.details.entry.id,
+      },
+      undefined,
+      undefined,
+      { sessionManager: secondSessionManager },
+    )) as { details: { entry: { claimedBy: string | null } } };
     assert.equal(boardRelease.details.entry.claimedBy, null);
     // Session-scoped unsubscribe: agent-b opts out of wake notices for the
     // channel (suppression registry, do-not-send).
-    const boardUnsubscribe = (await tools
-      .get("nmg_board")!
-      .execute(
-        "board-unsubscribe",
-        { action: "unsubscribe", taskId: "atlas-review" },
-        undefined,
-        undefined,
-        { sessionManager: secondSessionManager },
-      )) as { content: Array<{ text: string }> };
+    const boardUnsubscribe = (await tools.get("nmg_state")!.execute(
+      "board-unsubscribe",
+      {
+        action: "write",
+        space: "board",
+        operation: "unsubscribe",
+        taskId: "atlas-review",
+      },
+      undefined,
+      undefined,
+      { sessionManager: secondSessionManager },
+    )) as { content: Array<{ text: string }> };
     assert.match(boardUnsubscribe.content[0].text, /已退出频道 atlas-review/u);
-    const boardSubscribe = (await tools
-      .get("nmg_board")!
-      .execute(
-        "board-subscribe",
-        { action: "subscribe", taskId: "atlas-review" },
-        undefined,
-        undefined,
-        { sessionManager: secondSessionManager },
-      )) as { content: Array<{ text: string }> };
+    const boardSubscribe = (await tools.get("nmg_state")!.execute(
+      "board-subscribe",
+      {
+        action: "write",
+        space: "board",
+        operation: "subscribe",
+        taskId: "atlas-review",
+      },
+      undefined,
+      undefined,
+      { sessionManager: secondSessionManager },
+    )) as { content: Array<{ text: string }> };
     assert.match(boardSubscribe.content[0].text, /已加入频道 atlas-review/u);
     const boardProjection = (await handlers.get("before_agent_start")!(
       { prompt: "Continue the assigned review.", systemPrompt: "base" },
       { sessionManager: secondSessionManager },
     )) as { message?: { content: string } };
-    assert.match(boardProjection.message?.content ?? "", /<nmg_runtime_ag>/u);
+    assert.match(boardProjection.message?.content ?? "", /<nmg_material>/u);
     assert.match(boardProjection.message?.content ?? "", /Agent B should verify the parser tests/u);
 
+    const historySessionManager = {
+      ...secondSessionManager,
+      getSessionId: () => "http-history-session",
+    };
+    const historyRead = (await tools.get("nmg_state")!.execute(
+      "board-history",
+      {
+        action: "read",
+        space: "board",
+        taskId: "atlas-review",
+        includeResolved: true,
+      },
+      undefined,
+      undefined,
+      { sessionManager: historySessionManager },
+    )) as { content: Array<{ text: string }> };
+    assert.match(historyRead.content[0]!.text, /Agent B should verify the parser tests/u);
+    const historyState = (await tools
+      .get("nmg_state")!
+      .execute("history-ag", { action: "read", space: "ag" }, undefined, undefined, {
+        sessionManager: historySessionManager,
+      })) as { details: { result: { snapshot: unknown } } };
+    assert.equal(historyState.details.result.snapshot, null);
+
     const recalled = (await handlers.get("before_agent_start")!(
-      { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
+      {
+        prompt: "What storage did we decide last time for Atlas?",
+        systemPrompt: "base",
+      },
       { sessionManager },
-    )) as { systemPrompt: string; message?: { content: string } };
+    )) as {
+      systemPrompt: string;
+      message?: { content: string; details: { count: number } };
+    };
     // Stable prefix: dynamic recall must NOT leak into the system prompt.
     assert.match(recalled.systemPrompt, /^base\n\n<nmg_policy>/);
     assert.doesNotMatch(recalled.systemPrompt, /Atlas must use SQLite/);
     assert.doesNotMatch(recalled.systemPrompt, /NMG SEARCH HEADERS/);
     const recallContent = recalled.message?.content ?? "";
     assert.match(recallContent, /Atlas must use SQLite/);
-    assert.match(recallContent, /NMG MEMORY CANDIDATES/);
-    assert.match(recallContent, /fields: memory=id/);
-    assert.match(recallContent, /fields separated by "; "/);
+    assert.match(recallContent, /candidate preview; not exact evidence/);
+    assert.doesNotMatch(recallContent, /^format:|^fields:/m);
+    assert.match(recallContent, /memory=[^\n;]+; node=[^\n;]+; type=[^\n;]+; preview=/);
     assert.doesNotMatch(recallContent, /tier=L\d/);
     assert.doesNotMatch(recallContent, /matches=/);
     assert.doesNotMatch(recallContent, /deepestTier/);
     assert.doesNotMatch(recallContent, /SOURCE=/);
+    const feedbackBlock = /<nmg_guidance>\n([\s\S]*?)\n<\/nmg_guidance>/u.exec(recallContent);
+    assert.ok(feedbackBlock);
+    assert.equal([...feedbackBlock[1].matchAll(/activeGraphId=/gu)].length, 1);
+    assert.equal(
+      [...recallContent.matchAll(/activeGraphId=/gu)].length,
+      recalled.message!.details.count + 1,
+    );
+    assert.match(feedbackBlock[1], /never invent labels/u);
+    const preparedState = (await tools
+      .get("nmg_state")!
+      .execute("prepared-ag", { action: "read", space: "ag" }, undefined, undefined, {
+        sessionManager,
+      })) as {
+      details: {
+        result: { snapshot: { disclosures: Array<{ memoryId: string }> } };
+      };
+    };
+    assert.equal(
+      preparedState.details.result.snapshot.disclosures.some(
+        (entry) => entry.memoryId === remember.details.memory.id,
+      ),
+      false,
+    );
     const recalledAgain = (await handlers.get("before_agent_start")!(
-      { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
+      {
+        prompt: "What storage did we decide last time for Atlas?",
+        systemPrompt: "base",
+      },
       { sessionManager },
     )) as { systemPrompt: string; message?: { content: string } };
     assert.doesNotMatch(recalledAgain.systemPrompt, /Atlas must use SQLite/);
-    assert.match(recalledAgain.message?.content ?? "", /already_in_context=true/);
-    assert.doesNotMatch(recalledAgain.message?.content ?? "", /Atlas must use SQLite/);
+    assert.doesNotMatch(recalledAgain.message?.content ?? "", /already_in_context=true/);
+    assert.match(recalledAgain.message?.content ?? "", /Atlas must use SQLite/);
     await handlers.get("session_before_compact")!({}, { sessionManager });
     const recalledAfterCompaction = (await handlers.get("before_agent_start")!(
-      { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
+      {
+        prompt: "What storage did we decide last time for Atlas?",
+        systemPrompt: "base",
+      },
       { sessionManager },
     )) as { systemPrompt: string; message?: { content: string } };
     assert.match(recalledAfterCompaction.message?.content ?? "", /Atlas must use SQLite/);
@@ -1319,8 +1637,8 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       { prompt: "continue", systemPrompt: "base" },
       { sessionManager },
     )) as { systemPrompt: string; message?: { content: string } };
-    assert.doesNotMatch(nudged.systemPrompt, /<nmg_nudge>/);
-    assert.match(nudged.message?.content ?? "", /<nmg_nudge>/);
+    assert.doesNotMatch(nudged.systemPrompt, /<nmg_guidance>/);
+    assert.match(nudged.message?.content ?? "", /<nmg_guidance>/);
     const noOp = await handlers.get("tool_result")!(
       {
         toolName: "bash",
@@ -1344,9 +1662,60 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       { prompt: "continue", systemPrompt: "base" },
       { sessionManager },
     )) as { systemPrompt: string; message?: { content: string } };
-    assert.doesNotMatch(withRuntimeAg.systemPrompt, /<nmg_runtime_ag>/);
-    assert.match(withRuntimeAg.message?.content ?? "", /<nmg_runtime_ag>/);
+    assert.doesNotMatch(withRuntimeAg.systemPrompt, /<nmg_material>/);
+    assert.match(withRuntimeAg.message?.content ?? "", /<nmg_material>/);
     assert.match(withRuntimeAg.message?.content ?? "", /Edited src\/storage\.ts/);
+    await handlers.get("tool_result")!(
+      {
+        toolName: "test-tool",
+        isError: true,
+        content: [{ type: "text", text: "one-time transient failure" }],
+        input: {},
+      },
+      { sessionManager },
+    );
+    const errorState = (await tools
+      .get("nmg_state")!
+      .execute("error-ag", { action: "read", space: "ag" }, undefined, undefined, {
+        sessionManager,
+      })) as {
+      details: {
+        result: {
+          snapshot: {
+            items: Array<{ statement: string; sourceKind?: string }>;
+          };
+        };
+      };
+    };
+    const errorItem = errorState.details.result.snapshot.items.find((item) =>
+      item.statement.includes("one-time transient failure"),
+    );
+    assert.ok(errorItem);
+    assert.equal(errorItem.sourceKind, "tool_error");
+    continuationEntries.push({
+      type: "message",
+      id: "continuation-1",
+      message: { role: "user", content: "Continue after this observation." },
+    });
+    const nextTurn = (await handlers.get("before_agent_start")!(
+      { prompt: "Continue after this observation.", systemPrompt: "base" },
+      { sessionManager },
+    )) as { message?: { content: string } };
+    assert.match(carriedStateMessage(nextTurn), /<nmg_diagnostics>/u);
+    assert.match(carriedStateMessage(nextTurn), /one-time transient failure/u);
+    continuationEntries.push({
+      type: "message",
+      id: "continuation-2",
+      message: { role: "user", content: "Move to the next review step." },
+    });
+    const laterTurn = (await handlers.get("before_agent_start")!(
+      { prompt: "Move to the next review step.", systemPrompt: "base" },
+      { sessionManager },
+    )) as { message?: { content: string } };
+    assert.doesNotMatch(
+      carriedStateMessage(laterTurn),
+      /one-time transient failure|Edited src\/storage\.ts/u,
+    );
 
     const searched = (await tools
       .get("nmg_search")!
@@ -1356,7 +1725,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       content: Array<{ text: string }>;
       details: { activeGraph: { id: string; traceIds: string[] } };
     };
-    assert.match(searched.content[0].text, /already_in_context=true/);
+    assert.match(searched.content[0].text, /Atlas must use SQLite/);
     const activeGraphId = searched.details.activeGraph.id;
     assert.match(searched.content[0].text, new RegExp(activeGraphId));
     await tools
@@ -1484,7 +1853,10 @@ test("remember from a board source attaches a board_origin marker", async () => 
         statement: "Atlas pins SQLite for offline operation (board decision).",
         nodeName: "Atlas storage",
         memoryType: "constraint",
-        boardSource: { taskId: "board-origin-test-2026-08-12", entryId: "entry-42" },
+        boardSource: {
+          taskId: "board-origin-test-2026-08-12",
+          entryId: "entry-42",
+        },
       },
       undefined,
       undefined,
@@ -1554,7 +1926,10 @@ test("agent_end derives and persists answer-overlap attribution on the trace", a
       {
         messages: [
           { role: "user", content: "Which storage does Atlas use offline?" },
-          { role: "assistant", content: "Atlas pins SQLite for offline operation." },
+          {
+            role: "assistant",
+            content: "Atlas pins SQLite for offline operation.",
+          },
         ],
       },
       { sessionManager },
@@ -1647,7 +2022,11 @@ test("Chinese automatic recall reaches diagnostic answer attribution and the sha
       { sessionManager },
     )) as {
       details: {
-        events: Array<{ memoryId: string; outcome: string; sourceLineage: string }>;
+        events: Array<{
+          memoryId: string;
+          outcome: string;
+          sourceLineage: string;
+        }>;
         posteriors: Array<{ memoryId: string; independentVoteCount: number }>;
       };
     };
@@ -1712,7 +2091,12 @@ test("Chinese automatic recall reaches diagnostic answer attribution and the sha
           },
           {
             role: "assistant",
-            content: [{ type: "text", text: "我会使用中文解释，并保留精确的技术细节。" }],
+            content: [
+              {
+                type: "text",
+                text: "我会使用中文解释，并保留精确的技术细节。",
+              },
+            ],
           },
         ],
       },
@@ -1779,7 +2163,12 @@ test("Chinese automatic recall reaches diagnostic answer attribution and the sha
     process.env.NMG_PROJECT_DIR = previousProject;
     process.env.NMG_CONTROLLER_SHADOW = previousShadow;
     try {
-      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      rmSync(directory, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
     } catch {
       // Windows can briefly retain daemon handles after shutdown.
     }
@@ -1799,7 +2188,9 @@ test("formatters keep search headers compact and exact evidence separate", () =>
           scope: { project: "atlas" },
         },
         node: { canonicalName: "Atlas storage" },
-        evidence: { content: "The Atlas project must use SQLite because it works offline." },
+        evidence: {
+          content: "The Atlas project must use SQLite because it works offline.",
+        },
       },
     ],
     progressiveDisclosure: {
@@ -1812,7 +2203,7 @@ test("formatters keep search headers compact and exact evidence separate", () =>
   const headers = formatSearchHeaders(context);
   assert.doesNotMatch(headers, /works offline/);
   assert.match(headers, /NMG MEMORY CANDIDATES/);
-  assert.match(headers, /NMG search metadata: count=1/);
+  assert.match(headers, /\ncount=1\n/);
   assert.match(headers, /order is not a guarantee of relevance/);
   assert.match(headers, /More ranked records are folded/);
   assert.match(headers, /memory-2/);
@@ -1835,7 +2226,14 @@ test("exact evidence projects logical chains without repeating statements", () =
     },
     node: { canonicalName: `Atlas ${id}` },
     evidence: { content: statement },
-    chainMemberships: [{ chainId, position, chainType: "logical", topic: "Atlas merge evidence" }],
+    chainMemberships: [
+      {
+        chainId,
+        position,
+        chainType: "logical",
+        topic: "Atlas merge evidence",
+      },
+    ],
   });
   const context = {
     results: [
@@ -1845,8 +2243,18 @@ test("exact evidence projects logical chains without repeating statements", () =
     ],
     relations: [],
     chainEdges: [
-      { chainId, sourceMemoryId: "memory-a", targetMemoryId: "memory-b", edgeType: "order" },
-      { chainId, sourceMemoryId: "memory-c", targetMemoryId: "memory-b", edgeType: "order" },
+      {
+        chainId,
+        sourceMemoryId: "memory-a",
+        targetMemoryId: "memory-b",
+        edgeType: "order",
+      },
+      {
+        chainId,
+        sourceMemoryId: "memory-c",
+        targetMemoryId: "memory-b",
+        edgeType: "order",
+      },
     ],
   } as never;
 
@@ -1866,7 +2274,9 @@ test("exact evidence projects logical chains without repeating statements", () =
   ]) {
     assert.equal(rendered.split(statement).length - 1, 1, `${statement} is emitted once`);
   }
-  const evidenceOnly = formatMemoryContext(context, { logicalChainMaxChars: 0 });
+  const evidenceOnly = formatMemoryContext(context, {
+    logicalChainMaxChars: 0,
+  });
   assert.doesNotMatch(evidenceOnly, /<nmg_logical_chains>/);
   assert.match(evidenceOnly, /Atlas combines both inputs\./);
 });
@@ -1890,7 +2300,8 @@ test("search headers close with the nmg_get hint when nothing is deferred", () =
     progressiveDisclosure: undefined,
   } as never;
   const headers = formatSearchHeaders(context);
-  assert.match(headers, /Use nmg_get with selected memory IDs and the activeGraphId/);
+  assert.match(headers, /Use nmg_get with selected IDs and activeGraphId/);
+  assert.match(headers, /exact records and source evidence/);
 });
 
 test("formatters visibly mark external provenance and trust", () => {
@@ -1907,7 +2318,10 @@ test("formatters visibly mark external provenance and trust", () => {
           markers: [
             {
               kind: "external_source",
-              attributes: { source: "web:https://example.com", retrievedAt: "2026-08-01" },
+              attributes: {
+                source: "web:https://example.com",
+                retrievedAt: "2026-08-01",
+              },
             },
           ],
         },
@@ -1969,7 +2383,7 @@ test("revoked records show metadata but withhold the statement", () => {
   assert.match(headers, /type=preference/);
   assert.match(headers, /\(content withdrawn\)/);
   assert.doesNotMatch(headers, /modern electronic music festivals/);
-  assert.match(headers, /revocation boundary/);
+  assert.match(headers, /\[forget\] means withdrawn content; do not rely on it/);
   // Exact lookup preserves the revocation boundary instead of re-disclosing
   // content that the user asked the Agent to forget.
   const evidence = formatMemoryContext(context);
@@ -1977,271 +2391,29 @@ test("revoked records show metadata but withhold the statement", () => {
   assert.doesNotMatch(evidence, /modern electronic music festivals/);
 });
 
-test("session recall flow requires evidence progression after two searches", () => {
-  const flow = new SessionRecallFlow();
-  assert.equal(flow.beginTurn("session-a", "first request"), true);
-  assert.equal(flow.allowSearch("session-a"), true);
-  flow.recordSearch("session-a", ["memory-1"]);
-  assert.equal(flow.allowSearch("session-a"), true);
-  flow.recordSearch("session-a", ["memory-2"]);
-  assert.equal(flow.allowSearch("session-a"), false);
-  assert.equal(flow.searchBlockReason("session-a"), "evidence_progression_required");
-
-  // Pi emits before_agent_start again after each tool result. The same user
-  // prompt must not reset the guard during those internal agent loops.
-  assert.equal(flow.beginTurn("session-a", "first request"), false);
-  assert.equal(flow.allowSearch("session-a"), false);
-
-  assert.equal(flow.allowGet("session-a"), true);
-  flow.recordGet("session-a", ["memory-1"]);
-  assert.equal(flow.allowSearch("session-a"), true);
-  assert.equal(flow.beginTurn("session-a", "second request"), true);
-  assert.equal(flow.allowSearch("session-a"), true);
-});
-
-test("session recall flow isolates and clears session state", () => {
-  const flow = new SessionRecallFlow(1);
-  flow.beginTurn("session-a", "request");
-  flow.beginTurn("session-b", "request");
-  assert.equal(flow.allowSearch("session-a"), true);
-  assert.equal(flow.allowSearch("session-a"), false);
-  assert.equal(flow.allowSearch("session-b"), true);
-
-  flow.clear("session-a");
-  assert.equal(flow.allowSearch("session-a"), true);
-});
-
-test("session recall flow stops repeated candidates and enforces a hard tool budget", () => {
-  const noGain = new SessionRecallFlow(2, 5, 6, 2);
-  noGain.beginTurn("session-a", "request");
-  assert.equal(noGain.allowSearch("session-a"), true);
-  noGain.recordSearch("session-a", ["memory-1"]);
-  assert.equal(noGain.allowGet("session-a"), true);
-  noGain.recordGet("session-a", ["memory-1"]);
-  assert.equal(noGain.allowSearch("session-a"), true);
-  noGain.recordSearch("session-a", ["memory-1"]);
-  assert.equal(noGain.allowSearch("session-a"), true);
-  noGain.recordSearch("session-a", ["memory-1"]);
-  assert.equal(noGain.allowSearch("session-a"), false);
-  assert.equal(noGain.searchBlockReason("session-a"), "no_new_evidence");
-
-  const hardCap = new SessionRecallFlow(3, 4, 4, 4);
-  hardCap.beginTurn("session-b", "request");
-  assert.equal(hardCap.allowGet("session-b"), true);
-  hardCap.recordGet("session-b", ["memory-1"]);
-  assert.equal(hardCap.allowGet("session-b"), true);
-  hardCap.recordGet("session-b", ["memory-2"]);
-  assert.equal(hardCap.allowSearch("session-b"), true);
-  hardCap.recordSearch("session-b", ["memory-3"]);
-  assert.equal(hardCap.allowGet("session-b"), true);
-  hardCap.recordGet("session-b", ["memory-3"]);
-  assert.equal(hardCap.allowGet("session-b"), false);
-  assert.equal(hardCap.searchBlockReason("session-b"), "recall_tool_budget_exhausted");
-});
-
-test("session task window carries bounded task context into terse continuations", () => {
-  const window = new SessionTaskWindow();
-  const first = window.prepare(
-    "session-a",
-    "Configure the pi-lsp extension to use the vendored language server implementation.",
-  );
-  assert.equal(first, null, "ordinary implementation work does not preload long-term memory");
-
-  const continuation = window.prepare("session-a", "我 reload 了，你试试");
-  assert.match(continuation!.query, /reload/u);
-  assert.match(continuation!.query, /Recent task context:/u);
-  assert.match(continuation!.query, /vendored language server/u);
-  assert.equal(continuation!.reason, "task_continuation");
-
-  const switched = window.prepare(
-    "session-a",
-    "Implement and test the unrelated billing export pipeline.",
-  );
-  assert.equal(switched, null);
-
-  assert.equal(window.prepare("session-b", "好的"), null);
-});
-
-test("session task window keeps explicit recall and clears session context", () => {
-  const window = new SessionTaskWindow();
-  window.prepare("session-a", "Implement and test the Atlas SQLite storage adapter.");
-  assert.match(
-    window.prepare("session-a", "What did we decide last time?")!.query,
-    /Atlas SQLite/u,
-  );
-  window.clear("session-a");
-  assert.doesNotMatch(
-    window.prepare("session-a", "What did we decide last time?")!.query,
-    /Atlas/u,
-  );
-});
-
-test("session task window applies the memory gate to ordinary, cue, and recall prompts", () => {
-  const window = new SessionTaskWindow();
-  assert.equal(window.prepare("session-a", "Explain how acquireFileLock works."), null);
-
-  const cue = window.prepare("session-a", "How should we plan the next release?");
-  assert.equal(cue?.mode, "cue");
-  assert.equal(cue?.limit, 5);
-  assert.equal(cue?.graphHops, 0);
-
-  const recall = window.prepare("session-a", "What did we decide last time?");
-  assert.equal(recall?.mode, "retrieve");
-  assert.equal(recall?.limit, 12);
-  assert.equal(recall?.graphHops, 1);
-});
-
 test("composeNmgContextMessage: injects a completion nudge block when provided", async () => {
   const { composeNmgContextMessage, composeNmgSystemPrompt } =
     await import("../../../.pi/extensions/nmg/index.ts");
-  const out = composeNmgContextMessage("", "", "nudge text");
-  assert.match(out, /<nmg_nudge>/);
+  const out = composeNmgContextMessage([{ purpose: "guidance", body: "nudge text" }]);
+  assert.match(out, /<nmg_guidance>/);
   assert.match(out, /nudge text/);
-  // no nudge -> no block
-  const plain = composeNmgContextMessage("");
-  assert.doesNotMatch(plain, /<nmg_nudge>/);
+  const plain = composeNmgContextMessage();
+  assert.doesNotMatch(plain, /<nmg_guidance>/);
   // the stable system prompt never carries the nudge
   const sys = composeNmgSystemPrompt("base");
   assert.match(sys, /<nmg_policy>/);
-  assert.doesNotMatch(sys, /<nmg_nudge>/);
+  assert.doesNotMatch(sys, /<nmg_guidance>/);
 });
 
-test("git commit nudge is success-aware on tool_result", () => {
-  assert.equal(
-    isSuccessfulCommit({
-      toolName: "bash",
-      isError: false,
-      content: [{ type: "text", text: "[main a1b2c3d] feat: wire SQLite" }],
-      input: { command: "git commit -m 'feat' && git push" },
-    }),
-    true,
-  );
-  // Exit 0 but nothing actually committed: no nudge.
-  assert.equal(
-    isSuccessfulCommit({
-      toolName: "bash",
-      isError: false,
-      content: [{ type: "text", text: "nothing to commit, working tree clean" }],
-      input: { command: "git commit -am x" },
-    }),
-    false,
-  );
-  // A failed commit is not a milestone.
-  assert.equal(
-    isSuccessfulCommit({
-      toolName: "bash",
-      isError: true,
-      content: [],
-      input: { command: "git commit -m x" },
-    }),
-    false,
-  );
-  // Non-commit commands never nudge.
-  assert.equal(
-    isSuccessfulCommit({
-      toolName: "bash",
-      isError: false,
-      content: [],
-      input: { command: "npm test" },
-    }),
-    false,
-  );
-});
-
-test("tool result filter keeps only memorable outcomes", () => {
-  assert.equal(
-    isMemorableToolResult({
-      toolName: "bash",
-      isError: false,
-      content: [{ type: "text", text: "error: cannot find module" }],
-      input: { command: "npm run build" },
-    }),
-    true,
-  );
-  assert.equal(
-    isMemorableToolResult({
-      toolName: "bash",
-      isError: false,
-      content: [{ type: "text", text: "ok" }],
-      input: { command: "ls" },
-    }),
-    false,
-  );
-  assert.equal(
-    isMemorableToolResult({
-      toolName: "bash",
-      isError: false,
-      content: [{ type: "text", text: "1 passed, 0 failed" }],
-      input: { command: "npm test" },
-    }),
-    true,
-  );
-  assert.equal(
-    isMemorableToolResult({
-      toolName: "read",
-      isError: false,
-      content: [{ type: "text", text: "lots of file content" }],
-      input: { path: "src/a.ts" },
-    }),
-    false,
-  );
-  assert.equal(
-    isMemorableToolResult({
-      toolName: "edit",
-      isError: false,
-      content: [{ type: "text", text: "ok" }],
-      input: { path: "src/a.ts" },
-    }),
-    true,
-  );
-  assert.equal(
-    isMemorableToolResult({
-      toolName: "grep",
-      isError: false,
-      content: [{ type: "text", text: "src/a.ts:1: match" }],
-      input: { query: "x" },
-    }),
-    true,
-  );
-  assert.equal(
-    isMemorableToolResult({
-      toolName: "grep",
-      isError: false,
-      content: [{ type: "text", text: "" }],
-      input: { query: "x" },
-    }),
-    false,
-  );
-});
-
-test("tool trace statement carries the path and tool node", () => {
-  const edit = summarizeToolResult({
-    toolName: "edit",
-    isError: false,
-    content: [],
-    input: { path: "src/a.ts" },
-  });
-  assert.equal(edit.nodeName, "src/a.ts");
-  assert.match(edit.statement, /Edited src\/a\.ts/);
-  const bash = summarizeToolResult({
-    toolName: "bash",
-    isError: true,
-    content: [{ type: "text", text: "fatal: boom" }],
-    input: { command: "git commit" },
-  });
-  assert.equal(bash.nodeName, "tool:bash");
-  assert.match(bash.statement, /\[error\]/);
-});
-
-test("runtime AG is presented as temporary state after durable recall", () => {
-  const output = composeNmgContextMessage(
-    "durable recall",
-    "",
-    "",
-    "Session working state (temporary; not durable memory):\n- tests passed",
-  );
-  assert.match(output, /<nmg_automatic_recall>\ndurable recall/);
-  assert.match(output, /<nmg_runtime_ag>/);
+test("runtime observations and recall share material purpose without merging their sources", () => {
+  const output = composeNmgContextMessage([
+    { purpose: "material", body: "durable recall", preview: true },
+    {
+      purpose: "material",
+      body: "Session working state (temporary; not durable memory):\n- tests passed",
+    },
+  ]);
+  assert.match(output, /<nmg_material>\ndurable recall/);
   assert.match(output, /temporary; not durable memory/);
   assert.ok(output.indexOf("durable recall") < output.indexOf("Session working state"));
 });
@@ -2283,6 +2455,52 @@ test("/nmg with no arguments opens the interactive select menu", async () => {
     notified.some((message) => /召回/.test(message)),
     "recall toggle should notify",
   );
+});
+
+test("/nmg lists the state entries and the preview switch only hides the view", async () => {
+  const { commands } = extensionHarness();
+  const nmgCommand = commands.get("nmg") as {
+    handler: (
+      args: string,
+      ctx: {
+        hasUI: boolean;
+        ui: {
+          select: (title: string, options: string[]) => Promise<string | undefined>;
+          input: (...args: unknown[]) => Promise<unknown>;
+          notify: (message: string) => void;
+        };
+      },
+    ) => Promise<void>;
+  };
+  const optionLists: string[][] = [];
+  const selectedTitles: string[] = [];
+  const notified: string[] = [];
+  const ctx = {
+    hasUI: true,
+    ui: {
+      select: async (title: string, options: string[]) => {
+        optionLists.push(options);
+        selectedTitles.push(title);
+        return selectedTitles.length === 1 ? "当前状态：显示/隐藏预览（当前 显示）" : "隐藏";
+      },
+      input: async () => "5",
+      notify: (message: string) => {
+        notified.push(message);
+      },
+    },
+  };
+  await nmgCommand.handler("", ctx);
+  const entries = optionLists[0]!;
+  assert.ok(
+    entries.some((entry) => entry.startsWith("当前状态：查看完整正文")),
+    "the complete body stays readable from the menu",
+  );
+  assert.ok(
+    entries.some((entry) => entry.startsWith("当前状态：显示/隐藏预览")),
+    "the preview switch is a menu entry, not a new top-level command",
+  );
+  assert.deepEqual(selectedTitles, ["NMG 控制台", "NMG 当前工作状态预览"]);
+  assert.equal(notified.at(-1), "状态预览已隐藏（状态本身不变）");
 });
 
 test("/nmg wake parameter flow writes the config file via the menu", async () => {
@@ -2329,89 +2547,6 @@ test("/nmg wake parameter flow writes the config file via the menu", async () =>
   }
 });
 
-test("world-channel pull broadcast posts once and dedups per entry", async () => {
-  const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
-  let delivered = false;
-  const mockInvoke = async (method: string, params: Record<string, unknown>) => {
-    calls.push({ method, params });
-    if (params.action === "deliveryCheck") {
-      return {
-        action: "deliveryCheck",
-        delivered: delivered ? ["entry-1"] : [],
-        suppressed: false,
-      };
-    }
-    if (params.action === "put") {
-      return { action: "put", entry: { id: "broadcast-1" } };
-    }
-    if (params.action === "recordDelivery") {
-      delivered = true;
-      return { action: "recordDelivery", recorded: true };
-    }
-    throw new Error(`unexpected invoke ${method} ${JSON.stringify(params)}`);
-  };
-  const entry = {
-    id: "entry-1",
-    sequence: 3,
-    agentId: "other-agent",
-    kind: "question",
-    status: "open",
-    content: "谁能帮忙？",
-    createdAt: "2026-01-01T00:00:00.000Z",
-    taskId: "task-x",
-  };
-  const posted = await maybeBroadcastToWorld({
-    invoke: mockInvoke as (method: string, params: unknown) => Promise<unknown>,
-    entry,
-    agentId: "me",
-    sessionId: "sess-1",
-  });
-  assert.equal(posted, true);
-  const put = calls.find((call) => call.params.action === "put")!;
-  assert.equal(put.params.kind, "handoff");
-  assert.match(String(put.params.content), /协作广播/u);
-  assert.equal(put.params.sourceSessionId, "sess-1");
-  assert.equal(put.params.ttlSeconds, 86_400, "broadcast is transient (RAII TTL)");
-  const recorded = calls.find((call) => call.params.action === "recordDelivery")!;
-  assert.equal(recorded.params.sessionId, "world-broadcast");
-  assert.equal(recorded.params.entryId, "entry-1");
-  // Already broadcast (deliveryCheck reports the sentinel receipt) → no second post.
-  const again = await maybeBroadcastToWorld({
-    invoke: mockInvoke as (method: string, params: unknown) => Promise<unknown>,
-    entry,
-    agentId: "me",
-    sessionId: "sess-1",
-  });
-  assert.equal(again, false);
-  assert.equal(calls.filter((call) => call.params.action === "put").length, 1);
-});
-
-test("a broadcast entry is never re-broadcast (no broadcast storm)", async () => {
-  let invoked = 0;
-  const mockInvoke = async () => {
-    invoked += 1;
-    return { delivered: [] };
-  };
-  const broadcastEntry = {
-    id: "broadcast-1",
-    sequence: 12,
-    agentId: "other-agent",
-    kind: "handoff",
-    status: "open",
-    content: "[NMG board 协作广播] 频道 task-x 有 #1 未认领的交接（open）：…",
-    createdAt: "2026-01-01T00:00:00.000Z",
-    taskId: "default",
-  };
-  const posted = await maybeBroadcastToWorld({
-    invoke: mockInvoke as (method: string, params: unknown) => Promise<unknown>,
-    entry: broadcastEntry,
-    agentId: "me",
-    sessionId: "sess-1",
-  });
-  assert.equal(posted, false);
-  assert.equal(invoked, 0, "no daemon calls for a broadcast entry");
-});
-
 test("/nmg wake world toggle is reachable from the interactive menu", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "nmg-wake-world-"));
   const previous = process.env.NMG_DATA_DIR;
@@ -2453,70 +2588,4 @@ test("/nmg wake world toggle is reachable from the interactive menu", async () =
     else process.env.NMG_DATA_DIR = previous;
     rmSync(dataDir, { recursive: true, force: true });
   }
-});
-
-test("isBoardWakeCandidate: live claim suppresses nudges, lapsed claim returns to pool (no starvation)", () => {
-  const now = new Date("2026-08-13T12:00:00.000Z");
-  const base = {
-    id: "entry-1",
-    sequence: 1,
-    agentId: "other",
-    sourceSessionId: "other-sess",
-    kind: "handoff",
-    status: "open",
-    content: "Any taker?",
-  };
-  const wake = (overrides: Record<string, unknown>) =>
-    isBoardWakeCandidate({ ...base, ...overrides } as Parameters<typeof isBoardWakeCandidate>[0], {
-      sessionId: "me-sess",
-      agentId: "me",
-      now,
-    });
-  // Unclaimed open entry from another session: wake.
-  assert.equal(wake({}), true);
-  // Notify-only kinds are silent: a note/result/decision/goal records a fact
-  // and owes no reply — waking on it is the acknowledgement storm (four
-  // agents confirming one fact each emit a note, and every note wakes every
-  // subscriber). Read on demand, never pushed.
-  for (const kind of ["note", "result", "decision", "goal"]) {
-    assert.equal(wake({ kind }), false, `${kind} must be silent`);
-  }
-  // Actionable kinds wake: question/blocker/handoff ask for a response.
-  for (const kind of ["question", "blocker", "handoff"]) {
-    assert.equal(wake({ kind }), true, `${kind} must wake`);
-  }
-  // Own echo: never wake yourself.
-  assert.equal(wake({ sourceSessionId: "me-sess" }), false);
-  // Resolved: no wake.
-  assert.equal(wake({ status: "resolved" }), false);
-  // Broadcast pull announcement: meta, no wake (subscription-leak fix).
-  assert.equal(
-    wake({ content: "[NMG board 协作广播] 频道 x 有 #1 未认领的交接（open）：…" }),
-    false,
-  );
-  // Live claim by someone else: they are working it — no nudge for anyone.
-  assert.equal(wake({ claimedBy: "other", claimExpiresAt: "2026-08-13T13:00:00.000Z" }), false);
-  // Live claim by THIS agent: holder knows, no self-nudge.
-  assert.equal(wake({ claimedBy: "me", claimExpiresAt: "2026-08-13T13:00:00.000Z" }), false);
-  // Lapsed claim by someone else: lease expired, entry returns to the pool — wake.
-  assert.equal(wake({ claimedBy: "other", claimExpiresAt: "2026-08-13T11:00:00.000Z" }), true);
-  // Lapsed claim by THIS agent (the starvation case from the audit): the holder
-  // crashed/stopped and the lease lapsed; without liveness the entry would be
-  // permanently hidden from its former holder until TTL. Must wake.
-  assert.equal(wake({ claimedBy: "me", claimExpiresAt: "2026-08-13T11:00:00.000Z" }), true);
-  // Legacy row with no claim expiry (claim fields absent): treat as unclaimed.
-  assert.equal(wake({ claimedBy: "me", claimExpiresAt: null }), true);
-  // Directed delivery (find→direct): addressed to another stable agent_name —
-  // never wake me; I read-but-stay-silent.
-  assert.equal(wake({ to: "other" }), false);
-  // Directed to me: I am the addressee — wake.
-  assert.equal(wake({ to: "me" }), true);
-  // Reply-gated serial handoff: a pending actionable is queued behind the
-  // outstanding one ("回复=接手" — it promotes on claim/resolve) — no wake.
-  assert.equal(wake({ serialState: "pending" }), false);
-  // The outstanding actionable is the serial slot being worked — wake.
-  assert.equal(wake({ serialState: "outstanding" }), true);
-  // Directed entries are exempt from serial queuing (serialState null) — wake
-  // as ordinary actionable (point-to-point, parallel-safe).
-  assert.equal(wake({ to: "me", serialState: null }), true);
 });

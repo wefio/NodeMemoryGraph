@@ -10,10 +10,10 @@ capabilities:
 
   - id: harness-adapters
     aliases: [agent-integration]
-    summary: Connect the shared Agent Surface to Pi, Claude MCP, WorkBuddy, or DSH without moving product policy into an adapter.
-    paths: [extensions, claude-plugins, workbuddy-plugin, dsh]
+    summary: Connect the shared Agent Surface to Pi, Claude MCP, WorkBuddy, DSH, or OpenCode without moving product policy into an adapter.
+    paths: [extensions, claude-plugins, workbuddy-plugin, dsh, opencode-plugin]
     entrypoints: [npm install node-memory-graph]
-    supports: [pi, claude-mcp, workbuddy, dsh]
+    supports: [pi, claude-mcp, workbuddy, dsh, opencode]
 
   - id: retrieval-evaluation
     aliases: [evidence-recall, retrieval-benchmark]
@@ -107,6 +107,16 @@ routes:
     tests: [tests/integration/workbuddy-hook.test.ts]
     verify:
       blocking: [check, test:product, build, package:check]
+      advisory: []
+
+  - id: opencode-adapter
+    paths: [opencode-plugin/**, src/integration/lease-transport.ts]
+    owners:
+      - opencode-plugin/README.md
+      - skills/nmg-memory/references/harness-adapters.md
+    tests: [tests/integration/lease-transport.test.ts, tests/integration/tool-contract.test.ts]
+    verify:
+      blocking: [check, test:product, build]
       advisory: []
 
   - id: documentation
@@ -205,8 +215,15 @@ routes:
       - src/integration/config.ts
       - src/integration/controller-channel.ts
       - src/integration/evidence.ts
+      - src/integration/first-response-timing.ts
+      - src/integration/information-output.ts
+      - src/integration/context-information.ts
+      - src/integration/working-state-input.ts
       - src/integration/lab-capabilities.ts
+      - src/integration/state.ts
+      - src/integration/memory-reference.ts
       - src/integration/reasoning-workspaces.ts
+      - src/integration/recall-budget.ts
       - src/integration/search-projection.ts
       - src/integration/search.ts
       - src/integration/tool-contract.ts
@@ -219,8 +236,40 @@ routes:
         tests/integration/config.test.ts,
         tests/integration/controller-channel.test.ts,
         tests/integration/evidence.test.ts,
+        tests/integration/first-response-timing.test.ts,
+        tests/integration/information-output.test.ts,
+        tests/integration/context-information.test.ts,
         tests/integration/lab-capabilities.test.ts,
+        tests/integration/recall-budget.test.ts,
+        tests/integration/state-client.test.ts,
+        tests/integration/memory-reference.test.ts,
+        tests/integration/memory-reference-snapshot.test.ts,
+        tests/integration/working-state-client.test.ts,
+        tests/integration/working-state-input.test.ts,
         tests/integration/tool-contract.test.ts,
+      ]
+    verify:
+      blocking: [check, test:product, build]
+      advisory: []
+
+  # Session flows are host-neutral loop state: the recall guard, the bounded task
+  # window, tool-result observation, answer attribution, agent identity, and the
+  # board wake loop. They were extracted from the pi adapter so every harness
+  # adapter forwards the same rules instead of forking them.
+  - id: session-flows
+    paths:
+      - src/integration/agent-attribution.ts
+      - src/integration/agent-identity.ts
+      - src/integration/board-wake.ts
+      - src/integration/session-recall-flow.ts
+      - src/integration/session-task-window.ts
+      - src/integration/tool-observation.ts
+    owners:
+      - docs/design/session-memory-lifecycle-hooks-2026-08-10.md
+    tests:
+      [
+        tests/integration/session-flows.test.ts,
+        tests/extensions/nmg/index.test.ts,
       ]
     verify:
       blocking: [check, test:product, build]
@@ -230,6 +279,7 @@ routes:
     paths:
       - src/integration/ooo-board.ts
       - src/integration/ooo-candidate.ts
+      - src/integration/ooo-declaration-store.ts
       - src/integration/ooo-dispatch.ts
       - src/integration/ooo-execution.ts
       - src/integration/ooo-fusion-plan.ts
@@ -243,6 +293,7 @@ routes:
       - src/integration/ooo-patch-session.ts
       - src/integration/task-advisers.ts
       - src/integration/task-coordinator.ts
+      - src/integration/task-unit-declaration-store.ts
       - src/integration/task-semantics-interleavings.ts
       - src/integration/task-semantics-model.ts
       - src/integration/task-semantics.ts
@@ -251,7 +302,12 @@ routes:
       - docs/design/ooo-execution-bootstrap.md
       - docs/design/task-unit-semantics.md
       - docs/design/ooo-fusion-planning.md
-    tests: [tests/integration/ooo-*.test.ts, tests/integration/task-semantics*.test.ts, tests/integration/task-refinement*.test.ts]
+    tests:
+      [
+        tests/integration/ooo-*.test.ts,
+        tests/integration/task-semantics*.test.ts,
+        tests/integration/task-refinement*.test.ts,
+      ]
     verify:
       blocking: [check, test:product, build]
       advisory: []

@@ -22,10 +22,16 @@ Agent 验证器的 `ci-and-tests` route 列出 `verify:static` package contract 
 结果及 route 归因。测试约束该 route 与静态 package contract 保持一致。CI 继续以
 `verify:static` 作为可复现的命名入口。
 
-非 RCP 的 Agent full 计划在构建与打包屏障之后，以最多三个并发执行相互独立的静态检查；
-这些检查不改写根源码或 `dist`，子包构建和复杂度探针使用独立路径。
-`test:product` 在这些检查完成后运行。结果仍按声明顺序排列，保留逐项失败归因，且共用
-同一整轮预算。RCP 与 narrow 验证保持原有串行执行。
+非 RCP 的 Agent full 计划对相邻且独立的静态检查以最多三个并发执行，遵守构建、打包和
+产品测试的串行屏障。批次包含测试源码类型检查、anchor 解析与 policy-word 检查；
+它们均不改写根源码或 `dist`，子包构建和复杂度探针使用独立路径。
+结果仍按声明顺序排列，保留逐项失败归因，并共用同一整轮预算。
+RCP 与 narrow 验证保持原有串行执行。
+
+`test:product` 最多使用八个 Node 测试文件 worker。文件 glob、测试正文、失败判定和
+清理契约不变；coverage 仍使用两个 worker，文件清单不变。
+沿用 Node 自身调度器，不采用固定分区、依赖图测试子集，也不与生成文件写入者重叠。
+[余量观察](../../experiments/verification/full-gate-margin-2026-10-09.md)记录具体负载及重复计时。
 
 ## 考虑过的替代方案
 
@@ -43,5 +49,6 @@ Agent 验证器的 `ci-and-tests` route 列出 `verify:static` package contract 
   npm 的后代进程均已退出。重新运行前仍须检查活动的 mutation lock。
 - Agent 计划保留更多逐项归因的结果，但不重复执行其他 route 共享的静态检查。
   CI contract 不变。
-- 有界并发在实测工作树上缩短静态阶段，但 CPU 密集检查会因资源争用而各自变慢。
-  未能按时完成时，150 秒整轮预算仍失败关闭。
+- 有界并发缩短实测关键路径，但 CPU 密集检查可能因资源争用而变慢。
+  计时证据只覆盖实测负载与机器，并非通用最坏耗时保证。
+  未能按时完成时，不变的 150 秒整轮预算仍失败关闭。

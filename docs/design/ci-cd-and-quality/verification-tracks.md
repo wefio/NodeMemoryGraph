@@ -69,9 +69,13 @@ behavior in evaluation fixtures; the same decision owns this boundary.
 
 `npm run check:tests` runs
 `tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters` and belongs to
-the blocking `verify:static` and `ci-and-tests` sets. It checks `tests/`, explicitly
-included source and their imported dependencies—not all `evals/`, `scripts/`
-or `tools/`.
+the blocking `verify:static` and `ci-and-tests` sets. It checks `tests/`, standalone
+`evals/ooo-execution/*.test.ts` harnesses, explicitly included source and imported
+dependencies. Frozen `evals/ooo-execution/fixtures/` and archived evidence are not
+independent compiler entries. Type-check inclusion does not imply default product
+execution. `tests/tools/test-groups.test.ts` compares real compiler entries with
+the on-demand selection list. This is not coverage of every `evals/`, `scripts/`
+or `tools/` file; see the [recovery-test decision](../../decisions/implemented/2026-10-13-recovery-tests-use-frozen-declarations.md).
 
 `check:policy-words` runs once in the blocking `verify:static` and `ci-and-tests`
 sets. [Mechanism, not policy](../../decisions/implemented/2026-09-21-mechanism-not-policy.md#decision)

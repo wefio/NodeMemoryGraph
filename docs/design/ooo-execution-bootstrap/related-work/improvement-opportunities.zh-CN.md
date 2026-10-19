@@ -2,7 +2,8 @@
 
 [English](improvement-opportunities.md) · [术语](improvement-opportunities.terms.yaml)
 
-**Status:** draft; 以下实现细节为带日期的历史研究记录，不构成产品运行时集成证据。  
+**Status:** draft; 以下实现细节为带日期的历史研究记录，不构成产品运行时集成证据。
+
 **Authority:** [父级范围](../related-work.zh-CN.md).
 
 ## 改进机会与记录状态
@@ -15,7 +16,6 @@
 6. **产物通道只有一套标准**：补丁尝试的文本作答过去被原样记录，宿主只能在账付完之后以 `invalid patch structure` 拒收。现在文本作答必须通过工具同一套信封校验，不合格就是记下原因的一次失败尝试；系统提示词也不再描述文本通道，补丁尝试被明确要求走产物工具。
 7. S4 的对照必须回答“本设计会不会更慢”：变异复检与候选目录都是本轮新增的宿主开销，不能只报收益。
 
-S2 的退出条件“故障注入后无重复完成、错误解锁或无限等待；重启可恢复或明确终止”现由
-`evals/ooo-execution/recovery.test.ts` 的 8 个确定性测试覆盖：崩溃后继者不偷活认领、重复提交为
-`duplicate` 且不二次释放依赖、被撤认领的产物为 `stale`、租约失效是新一代而非静默成功、永不回报的检查以
-`undecidable` 显式终止、伪造票据不能终止等待、取消围栏迟到产物且跨重启保留、存储按列增量迁移且保留既有状态。另加两条真实进程的取消实测（`cancellation.test.ts`：杀进程树、无幽灵完成、依赖不解锁、原因跨重启保留）与“重放要么复现要么指名拒收”。5. 统一术语：协调器=retire/commit 阶段，接受=commit，拒绝=squash，attempt digest=fencing token。
+在主线接入快照中，`evals/ooo-execution/recovery.test.ts` 声明 9 个具名本地 SQLite 场景：后继协调器不偷活认领；重复提交为 `duplicate` 且不二次释放依赖；被撤认领产物为 `stale`；租约失效开启新一代而非静默成功；永不回报的检查以 `undecidable` 结束；伪造票据不能终止等待；首次取消原因不被重写；取消围栏迟到产物且跨重启保留；重开同库保留认领与票据身份。补丁绑定 `BoardTicket.declaration.digest`，宿主拒收错误摘要后仍可接受同一活认领的正确产物。关闭并重开协调器是这些场景的恢复模型；数据库重开不构造旧版 schema，不证明任意旧库升级，也不模拟进程强杀。冻结声明的取舍见[决策](../../../decisions/implemented/2026-10-13-recovery-tests-use-frozen-declarations.zh-CN.md)。这是声明覆盖范围，不是本次文档编辑重新执行了该套件。另有两条独立真实进程取消记录（进程树结束、无幽灵完成、不解锁依赖、原因跨重启保留）以及具名拒绝的重放边界；它们不扩大 SQLite 场景的证据。
+
+原记录的术语提示：协调器＝retire／commit 阶段，接受＝commit，拒绝＝squash，attempt digest＝fencing token。这是解释性类比，不证明产品每条写入路径实现同样契约。

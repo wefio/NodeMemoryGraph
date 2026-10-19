@@ -2,7 +2,8 @@
 
 [English](distributed-coordination.md) · [术语](distributed-coordination.terms.yaml)
 
-**Status:** draft; 以下是设计类比，不是当前产品运行时集成证据。  
+**Status:** draft; 以下是设计类比，不是当前产品运行时集成证据。
+
 **Authority:** [父级范围](../related-work.zh-CN.md).
 
 ## 机制对应关系

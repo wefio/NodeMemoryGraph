@@ -1,3 +1,5 @@
+import type { MemoryTier } from "../core/types.ts";
+
 export type QppActuationMode = "off" | "shadow" | "active";
 export type SearchRecommendationMode = "off" | "advisory" | "guardrail";
 
@@ -201,6 +203,33 @@ export function configuredSearchRecommendationMode(
   return (
     parseMode(environment.NMG_SEARCH_RECOMMENDATION, ["off", "advisory", "guardrail"]) ?? "off"
   );
+}
+
+export function configuredAutoRecallTier(environment: NodeJS.ProcessEnv = process.env): MemoryTier {
+  const value = Number(environment.NMG_AUTO_RECALL_TIER ?? 1);
+  return Math.max(0, Math.min(3, Number.isFinite(value) ? Math.floor(value) : 1)) as MemoryTier;
+}
+
+export function configuredAutoRecallLimit(environment: NodeJS.ProcessEnv = process.env): number {
+  const value = Number(environment.NMG_AUTO_RECALL_LIMIT ?? 13);
+  return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 13));
+}
+
+export function configuredInitialTarget(environment: NodeJS.ProcessEnv = process.env): number {
+  const value = Number(environment.NMG_AUTO_RECALL_INITIAL_TARGET ?? 13);
+  return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 13));
+}
+
+export function configuredStrongHitTopGap(environment: NodeJS.ProcessEnv = process.env): number {
+  const value = Number(environment.NMG_AUTO_RECALL_STRONG_HIT_TOP_GAP ?? 0.05);
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0.05));
+}
+
+export function configuredStrongHitInitialTarget(
+  environment: NodeJS.ProcessEnv = process.env,
+): number {
+  const value = Number(environment.NMG_AUTO_RECALL_STRONG_HIT_INITIAL_TARGET ?? 3);
+  return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 3));
 }
 
 function parseMode<const T extends string>(

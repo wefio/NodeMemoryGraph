@@ -81,39 +81,14 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 - `node-compat`：最低支持版本 Node 22.19 的 build/package；
 - `chaos`：Windows 上的资源与 daemon 故障注入，仅在推送到 `main` 时运行（该决策的历史样本为 145 次 CI 运行、1 次失败且在 `main` 上；见[决策](../decisions/implemented/2026-09-09-chaos-tests-on-main-pushes.md)）；
 - `all-checks-passed`：只聚合阻塞轨道。
-- `static` 内的 `ci:uncovered-tests`：从各 job 实际调用的 glob 推导出**没有任何 job 覆盖的测试文件**，`evals/` 下（研究 harness，按需运行）可留为 acknowledged，其余一律失败关闭并指名文件。
-- `.github/workflows/on-demand-suites.yml`（仅 `workflow_dispatch`）：在 Linux 与 Windows 上以 `--test-concurrency=1` 跑上述未覆盖套件，并把 TAP 逐字记录作为 artifact 上传；不是必需检查。
+- `static` 内的 `ci:uncovered-tests`：从 job 调用的 glob 推导未覆盖的 tracked 测试；全部未覆盖文件仍在 inventory 中可见，未认领的文件失败关闭。认领根注明能否直接运行：`evals/` 的独立 harness 可运行；更具体的 `evals/ooo-execution/fixtures/` 是填入候选后执行的冻结检查，`docs/experiments/execution/archive/` 是历史证据，均不可直接运行。具体根优先，不按泛化的 `fixtures` 名称过滤其他测试。
+- `.github/workflows/on-demand-suites.yml`（仅 `workflow_dispatch`）：工具的 `--list` 只输出可直接运行的未覆盖文件；Linux／Windows 以 `--test-concurrency=1` 跑清单，保留每个路径参数与 Node 失败退出码，并上传 TAP。空清单写 `1..0 # SKIP`，不启动无文件参数的 Node 自动发现；该轨仍不是必需检查。
 
 CI 或打包规则变更除本地目标测试外，应在 clean checkout（或等价干净 worktree）运行其完整命令，防止未跟踪文件让本地验证产生假阳性。
 
 ## 可组合测试运行时
 
-Cordis 本身只出现在 `tests/support/cordis-adapter.ts`。该文件只导出
-`createTestRuntime()`，返回可组合 effect 与幂等 `dispose()` 的最小生命周期对象；它不导入 NMG
-Core、CLI 或 daemon。需要文件系统、SQLite 和 daemon 的集成测试再由
-`tests/support/test-runtime.ts` 组合 NMG 专用资源：
-
-```text
-TestRuntime
-├── testWorkspace
-├── testDatabase
-└── testDaemon
-```
-
-测试通过 `withTestRuntime(...)` 或显式 `dispose()` 获取 RAII 式回收。插件依赖必须显式：database 要求 workspace，daemon 要求 database；缺少依赖时失败，不偷偷创建隐含全局状态。daemon 在进程内使用真实 HTTP JSON-RPC handler，因此能验证协议，同时不会遗留后台进程。
-
-测试资源按断言需观察的边界分为四类，按需取得最轻且隔离的资源（[决策](../decisions/implemented/2026-09-24-resource-matched-test-fixtures.md)）：
-
-| 断言边界 | 测试资源 | 可省的准备工作 |
-| --- | --- | --- |
-| 纯数据或决策 | 进程内输入 | 工作区、数据库和外部进程 |
-| 单个 SQLite 连接的读写 | 每项独立的 `:memory:` store | 临时数据库文件及其清理 |
-| 重开、旧库迁移、WAL、独立连接或路径 | 每项唯一的文件数据库或工作区 | 与断言无关的额外文件和服务 |
-| CLI、Git、HTTP、daemon lease 或跨进程共享 | 断言这些边界时使用实际进程、端口及所需工作区 | 不参与断言的重复启动和检查 |
-
-观察文件或跨进程语义的测试保留真实边界；只断言控制平面策略、receipt 或 harness 编排时，可以注入固定的 `RepositoryProvider` 观察值，另由真实 Git 集成测试覆盖发现、dirty 范围、提交和 forge 绑定。集成 `testDatabase()` 使用真实文件路径供 daemon 共享。真实 Git fixture 保留 `init/add/commit`，提交身份只传给 `commit`，避免每项再启动两次 `git config`。资源类别只决定 fixture 和可安全减少的准备工作，不改变 Safety/Contract/Guardrail 分类、阻塞地位或 narrow/full 验证范围；后两者由既有 route 与验证契约决定。
-
-该层精确锁定 `@deepseek-ai/cordis@4.0.1` 作为 **devDependency**，只借用插件 effect/fiber 生命周期。NMG Core、daemon、Pi adapter 和发布包均不依赖 Cordis；不引入其 loader、HMR 或配置系统。Cordis adapter 与 NMG fixture composition 分离，未来若替换框架只需修改生命周期 adapter。
+[资源生命周期与行为片段](ci-cd-and-quality/composable-test-runtime.zh-CN.md)拥有 fixture 依赖、资源边界选择、GC 报告与行为 helper 契约。
 
 ## Agent 原生仓库上下文
 
@@ -136,9 +111,11 @@ npm run agent:verify
 `ci-and-tests` 把 `verify:static` 展开为 CI contract 的同一组原子检查；跨 route 共享检查只执行
 一次，保留各自状态与 route 归因。CI 仍调用命名的 `verify:static` contract。
 
-非 RCP full 计划越过 build/package 写入屏障后，有界并发执行独立静态检查，再运行产品测试；
-结果按计划顺序展示，RCP 和 narrow 仍串行。命令失败、启动异常或信号终止都归因到该命令，
-不阻止继续收集后续证据，最终整轮失败。
+非 RCP full 计划对相邻独立静态检查使用最多三个并发，包括测试源码类型检查、anchor 解析
+与 policy-word 检查；build、package 和产品测试保持串行屏障。产品测试最多八个 Node 文件
+worker，coverage 为两个；完整 glob、断言、失败判定及清理契约不变。结果按计划顺序展示，
+RCP 和 narrow 仍串行。失败退出、启动异常或信号终止归因到该命令，不阻止后续证据收集，
+最终整轮失败。
 
 官方入口整轮默认预算为 150 秒，可用 `--timeout-ms` 调整；外层看门进程超时后返回失败与
 `incomplete` 证据。普通执行和 RCP full/narrow 共用从执行器入口计算的剩余预算，每个子命令

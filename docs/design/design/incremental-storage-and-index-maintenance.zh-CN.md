@@ -27,13 +27,17 @@ new MemoryRecord
 
 常驻服务把累积范围实现为一个摊销队列。写入会递增持久的逐节点 `memory_index_delta` 行，精确记忆使用会递增 `pending_access_count`；一个进程内小计数器避免每次调用之后都做数据库到期检查。在 daemon 启动后的第一个信号处、以及此后仅在越过阈值时，事件循环的一个维护切片会检视至多有界数量的节点。它为到期的访问变化重新平衡层级、压缩到期的 leaf block、确认其 Delta 行，并记录 `maintenance.batch` 延迟与被触及行数。默认值集中在 `src/integration/config.ts`，可用 `NMG_MAINTENANCE_WRITE_THRESHOLD`、`NMG_MAINTENANCE_ACCESS_THRESHOLD` 与 `NMG_MAINTENANCE_NODE_LIMIT` 覆盖。一个单独设界的语义阶段在第一次 daemon 积压检查时运行，之后每经过配置数量的产出式本地批次运行一次（`NMG_MAINTENANCE_SEMANTIC_EVERY`）。它使有限数量的 STG 记录过期、调和有限数量的独立观察关系对，并生成——但从不自动接受——有限数量的拓扑提议。失败的切片保持持久计数器不变以便稍后重试，且绝不把一次成功的 `remember` 变成失败的写入。
 
-访问压力只统计已索引的、活动的或有争议的记录，与层级再平衡所消费的待处理访问计数器所对应的记录一致。逐节点与全局访问总量都使用这一资格规则。不合格的记录保留其计数器与历史，既不触发也不延长维护循环；被重新激活的已索引记录可以再次贡献压力。空的本地检查返回其结果并更新性能聚合，但不追加 `maintenance_runs` 行。产出式本地运行与语义运行保留彼此的日志：一次 `rowsTouched` 为零的语义结果仍可排空 trace 信号。检索 trace、反馈、归因与历史日志行不变。
-
-到期检查有意采用双触发。单个热节点在它自身的写入或合格访问计数器达到相应阈值时立即被选中。若许多稀疏节点使每个本地计数器都低于阈值，但它们的全局待处理总量达到阈值，同一有界切片会选出积压量最大、其次最旧的节点。当消费了一个完整的 `nodeLimit` 批次时，常驻服务会再调度一个有界切片，使压力降到全局阈值之下而不需要无界的同步遍历。低于阈值的尾部保持延后；它是有界的，而不是永久增长。这保留了局部的 Huffman 式再平衡，同时防止小节点图饿死 Base 压缩。
+到期检查有意采用双触发。单个热节点在它自身的写入或访问计数器达到相应阈值时立即被选中。若许多稀疏节点使每个本地计数器都低于阈值，但它们的全局待处理总量达到阈值，同一有界切片会选出积压量最大、其次最旧的节点。当消费了一个完整的 `nodeLimit` 批次时，常驻服务会再调度一个有界切片，使压力降到全局阈值之下而不需要无界的同步遍历。低于阈值的尾部保持延后；它是有界的，而不是永久增长。这保留了局部的 Huffman 式再平衡，同时防止小节点图饿死 Base 压缩。
 
 拓扑提议的接受仍是一次显式语义审阅。边稳定性可以支持可逆的关系合并或降级，但它无法确立节点身份，因此不能授权节点合并。
 
 SQLite 是权威的，应当拥有事务、内容哈希、版本标记、脏队列、FTS 与崩溃恢复。NMG 决定语义分组、summary 失效与拓扑变更。一个进程内连续 `Float32` 矩阵可以缓存活动记录、节点或 leaf 的 embedding；它是可丢弃的，并且可以依据存储中的带版本二进制向量重建。
+
+每个模型的 record、node 与 leaf embedding 在 `vector_blob` 保存一份 little-endian Float32 payload；`vector_json` 是空 `[]` 兼容占位，不是另一种导出格式。旧 JSON-only 行仍可读。首次可写迁移补齐缺失二进制值，且只在二进制字节长度匹配声明的正 dimensions 时移除重复 JSON。三个表与完成标记原子提交；已完成迁移不在每次打开时重扫。preferred-vector 查询只返回一种存储形式；纯 FTS 检索不连接或解码 embedding。binary-aware 读者兼容；JSON-only 集成必须用 stored-embedding API 或解码 BLOB。迁移不改 page size、持久性，也不运行 `VACUUM`。
+
+即时 record-vector 评分仅在 little-endian 宿主、四字节对齐的完整 payload、私有且不可 resize 的 ArrayBuffer 上借用 Float32 view。cosine similarity 同步消费它；不得流入公共结果、缓存、异步工作或跨 WASM memory growth 存活。其他 payload 保留 decoder 优先级与兜底，公共 stored-vector 读取仍返回独立普通数组。存储字节、精度、候选选择与排名权重不变。
+
+词法 `memory_fts` 使用 contentless-delete FTS5：保留 postings、positions 与 BM25 文档长度，不再保存一份全文。history content 与记忆 statement 即使字节相同仍是独立权威字段；Han bigram、recall trigger 与无内容 surface trigram 的文本变换不变。`memory_fts_registry.lexical_rowid` 将词法行映射到稳定记忆 ID，registry 自身 rowid 仍映射 surface 行。迁移保留两种 rowid 顺序，从权威字段一次重建，并在一个 savepoint 提交索引、registry schema 和格式标记；刷新原子更新双索引与映射。已删除记忆重开后不重建索引，dormant／恢复记录遵循存储状态。当前只读查询兼容旧全文表而不迁移，并能在 writer 升级后解析小 registry。按 `memory_fts.memory_id` 读写或删除的旧可执行文件与 SQL 不兼容，须一起升级读写方或采用 registry-aware 查询；仅支持二进制向量还不够。FTS 迁移不自动压缩或调整 page size。
 
 同一权威边界适用于写入时候选加速。一个可选的进程内按作用域索引可以保留原始与规范化陈述、预分词词项、当前状态与稳定记忆 ID。它存在的唯一目的是避免重复的精确、近似重复与取代候选扫描；SQLite 仍是真值来源。该索引惰性构建、在成功写入后更新，并在回滚、删除、保留、过期或节点变换使增量更新不确定时失效。
 

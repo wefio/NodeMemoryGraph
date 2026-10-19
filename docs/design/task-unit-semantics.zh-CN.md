@@ -49,6 +49,10 @@ CPU 类比还暴露出两个研究缺口：自然语言任务没有现成 ISA �
 - [Dask 图优化](https://docs.dask.org/en/latest/optimize.html)通过融合减少任务间通信。这里把融合视为成本优化，保留每个 Agent 任务的验收边界。
 - [乐观并发检查](https://learn.microsoft.com/en-us/dotnet/framework/data/adonet/optimistic-concurrency)在更新时核对原始状态。这里借鉴提交点验证；版本匹配只证明输入未漂移，不证明模型结论正确。
 
+## 声明存储与恢复
+
+[默认声明、冻结输入回执与恢复拒绝](task-unit-semantics/declaration-storage-and-recovery.zh-CN.md)拥有完整契约；连接与事务仍由运行记录 owner 拥有。
+
 ## 长任务的连续性与任务视图
 
 Read the complete responsibility: [长任务的连续性与任务视图](task-unit-semantics/task-continuity.zh-CN.md).

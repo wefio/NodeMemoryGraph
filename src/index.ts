@@ -19,24 +19,61 @@ export {
 } from "./integration/config.ts";
 export type { QppActuationMode, SearchRecommendationMode } from "./integration/config.ts";
 export {
+  prepareSessionActiveGraphSurface,
+  prepareTaskBoardSurface,
   renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
   renderSessionActiveGraphSurface,
+  searchInformationViews,
   renderTaskBoardSurface,
   TASK_BOARD_CONVENTIONS,
 } from "./integration/agent-surface.ts";
 export type {
   EvidenceSurfaceOptions,
   SearchSurfaceOptions,
+  SessionActiveGraphSurfaceOptions,
   TaskBoardDirectoryEntry,
   TaskBoardSurfaceEntry,
   TaskBoardSurfaceOptions,
   TaskBoardSurfaceResult,
 } from "./integration/agent-surface.ts";
+export {
+  prepareInformationOutput,
+  confirmInformationOutput,
+} from "./integration/information-output.ts";
+export type { InformationOutputOptions } from "./integration/information-output.ts";
+export { DEFAULT_CONTEXT_OUTPUT_CHARACTERS } from "./core/information-view.ts";
+export {
+  contextStateViews,
+  contextNotice,
+  checkpointInformationViews,
+  contextBoardEntries,
+} from "./integration/context-information.ts";
+export type {
+  InformationPurpose,
+  InformationSource,
+  InformationView,
+  InformationOutputEntry,
+  InformationOutputReceipt,
+  PreparedInformationOutput,
+} from "./core/information-view.ts";
+export {
+  prepareWorkingStateInput,
+  PI_WORKING_STATE_INPUT_CAPABILITY,
+} from "./integration/working-state-input.ts";
+export type { WorkingStateInput } from "./integration/working-state-input.ts";
 export { retainEvidence } from "./integration/evidence.ts";
 export type { AgentHistoryMessage, AgentHistorySnapshot } from "./integration/evidence.ts";
 export { searchMemoryContext } from "./integration/search.ts";
+export {
+  captureMemoryReferenceTargets,
+  createMemoryReferences,
+  isMemoryReference,
+  MemoryReferenceError,
+  resolveMemoryReferences,
+} from "./integration/memory-reference.ts";
+export type { MemoryReferenceTarget } from "./integration/memory-reference.ts";
 export type { QueryEmbeddingClient } from "./integration/search.ts";
 export {
   createLeafSummaryProviderFromEnv,
@@ -53,7 +90,20 @@ export type {
   SessionActiveGraphItemKind,
   SessionActiveGraphProjection,
   SessionActiveGraphSnapshot,
+  WorkingStateBinding,
 } from "./core/session-active-graph.ts";
+export { captureWorkingStateInvocation, renderLabOutput } from "./integration/lab-capabilities.ts";
+export {
+  captureStateInvocation,
+  renderStateOutput,
+  stateOperation,
+  STATE_AG_READ_OPERATIONS,
+  STATE_AG_WRITE_OPERATIONS,
+  STATE_BOARD_READ_OPERATIONS,
+  STATE_BOARD_WRITE_OPERATIONS,
+  STATE_OPERATIONS,
+} from "./integration/state.ts";
+export type { NmgStateResult } from "./cli/protocol.ts";
 export { normalizeClaims } from "./core/claims.ts";
 export type {
   ActivationSignal,

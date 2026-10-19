@@ -1,4 +1,7 @@
+import type { WorkingStateBinding } from "../core/session-active-graph.ts";
+
 export const LAB_CAPABILITIES = [
+  "working_state",
   "reasoning_workspace",
   "memory_graph_reasoner",
   "controller_shadow",
@@ -26,6 +29,8 @@ export interface LabActivation {
   enabled: boolean;
   enabledAt: string;
   expiresAt: string;
+  /** Owner-captured fence; never selected through the model's operation input. */
+  workingStateBinding?: WorkingStateBinding;
 }
 
 export interface LabActivationAuthorityOptions {
@@ -33,6 +38,14 @@ export interface LabActivationAuthorityOptions {
 }
 
 const DESCRIPTORS: readonly LabCapabilityDescriptor[] = [
+  {
+    id: "working_state",
+    summary:
+      "Replace or clear one provisional AG state in the session working frame; no durable or collaboration writes.",
+    agentMayEnable: true,
+    supportedScopes: ["session"],
+    operations: ["replace", "clear"],
+  },
   {
     id: "reasoning_workspace",
     summary:
@@ -81,6 +94,65 @@ const DESCRIPTORS: readonly LabCapabilityDescriptor[] = [
   },
 ] as const;
 
+/** Capture immediately before ordinary RPC transport. Supplied fences are never
+ * refreshed on retry: an old operation must not borrow a new context. */
+export async function captureWorkingStateInvocation(
+  params: Record<string, unknown>,
+  readStatus: (sessionId: string) => Promise<unknown>,
+): Promise<Record<string, unknown>> {
+  if (
+    params.action !== "invoke" ||
+    params.capability !== "working_state" ||
+    params.workingStateBinding !== undefined
+  )
+    return params;
+  if (typeof params.sessionId !== "string")
+    throw new Error("working_state requires a host session binding");
+  const status = (await readStatus(params.sessionId)) as {
+    activation?: LabActivation | null;
+  };
+  const binding = status?.activation?.workingStateBinding;
+  if (!binding || binding.sessionId !== params.sessionId)
+    throw new Error("working_state requires an enabled host binding");
+  return {
+    ...params,
+    workingStateBinding: Object.freeze({
+      sessionId: binding.sessionId,
+      agId: binding.agId,
+      taskFrameId: binding.taskFrameId,
+      bindingId: binding.bindingId,
+    }),
+  };
+}
+
+/** Ordinary text is short; the native structured RPC envelope remains intact. */
+export function renderLabOutput(result: unknown): string {
+  const value = result as {
+    action?: string;
+    capability?: string;
+    output?: unknown;
+  } | null;
+  if (
+    value?.action === "invoke" &&
+    value.capability === "working_state" &&
+    typeof value.output === "string" &&
+    ["updated", "unchanged", "cleared"].includes(value.output)
+  )
+    return value.output;
+  if (value?.action === "list") {
+    const catalog = result as { capabilities?: LabCapabilityDescriptor[] };
+    return JSON.stringify(
+      {
+        ...catalog,
+        capabilities: catalog.capabilities?.filter((item) => item.id !== "working_state"),
+      },
+      null,
+      2,
+    );
+  }
+  return JSON.stringify(result, null, 2) ?? "";
+}
+
 export class LabActivationAuthority {
   readonly #now: () => number;
   readonly #leases = new Map<string, LabActivation>();
@@ -101,6 +173,7 @@ export class LabActivationAuthority {
     reason: string;
     ttlSeconds?: number;
     authorizedByHarness?: boolean;
+    workingStateBinding?: WorkingStateBinding;
   }): LabActivation {
     const descriptor = this.#descriptor(input.capability);
     if (input.scope !== "session" || !input.sessionId?.trim()) {
@@ -108,6 +181,12 @@ export class LabActivationAuthority {
     }
     if (!descriptor.agentMayEnable && !input.authorizedByHarness) {
       throw new Error(`${input.capability} requires operator or harness authorization`);
+    }
+    if (
+      input.capability === "working_state" &&
+      input.workingStateBinding?.sessionId !== input.sessionId.trim()
+    ) {
+      throw new Error("working_state activation requires an owner-captured binding");
     }
     const requester = input.requester.trim();
     const reason = input.reason.trim();
@@ -124,6 +203,8 @@ export class LabActivationAuthority {
       enabledAt: new Date(now).toISOString(),
       expiresAt: new Date(now + ttlSeconds * 1_000).toISOString(),
     };
+    if (input.capability === "working_state")
+      activation.workingStateBinding = input.workingStateBinding;
     this.#leases.set(this.#key(input.capability, activation.sessionId), activation);
     return { ...activation };
   }

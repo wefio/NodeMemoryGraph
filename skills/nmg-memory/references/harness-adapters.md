@@ -3,8 +3,11 @@
 [中文](harness-adapters.zh-CN.md) · [Terms used](harness-adapters.terms.yaml)
 
 NMG ships a thin adapter per harness (Pi, Claude Code MCP, DeepSeek Harness,
-plus the installable WorkBuddy hook in `workbuddy-plugin/`).
-This reference is the recipe for writing one. Read it when you need to expose NMG
+plus the installable WorkBuddy hook in `workbuddy-plugin/` and the OpenCode v2
+plugin in `opencode-plugin/`). This reference is the recipe for writing one.
+Per-adapter coverage of the capability surface is compared in the
+[harness capability matrix](../../../docs/design/harness-capability-matrix.md).
+Read it when you need to expose NMG
 to a new tool-capable harness, or when an existing adapter misbehaves.
 
 ## The stable contract
@@ -122,6 +125,8 @@ statements and evidence behind `get(activeGraphId)`, which records actual use on
 the AG trace; merely showing an injected header is not use. Bound the search,
 fold repeated IDs according to the shared disclosure contract, and let the user
 turn proceed when recall fails.
+
+Automatic context preparation uses one absolute five-second waiting budget, not a fresh allowance per RPC. Keep timely completed candidates if a later phase expires, propagate cancellation where supported, and do not imply that a timeout preempts synchronous SQLite work or stops remote work. Explicit model-requested search is outside this automatic deadline. Use the [waiting-budget contract](../../../docs/design/session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.md) for checkpoints, remaining-budget admission and daemon limits.
 
 The right insertion mechanism is host-specific. The DSH package in this
 repository starts recall when the user message enters the inbox and supplies the

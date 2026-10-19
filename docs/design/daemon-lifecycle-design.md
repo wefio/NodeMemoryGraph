@@ -7,6 +7,8 @@
 **Updated:** 2026-10-13
 **Related:** [STG isolated store](stg-isolated-store.md), [memory graphs](memory-graphs.md), [external-source design](external-source-design.md), [design overview](design.md)
 
+Controlled reload and handover-specific client descriptions are retained source-branch designs, conditional on explicit support in the installed implementation. They do not advertise that command or its tests in this checkout. Ordinary storage, ownership and compatibility rules remain separate; the CLI and authenticated discovery own actual operation availability.
+
 ## Background: the 2026-08-02 memory incident
 
 During `run.ts locomo matched 99999`, Node exhausted memory: 98.2% of 63.7 GB physical memory, with working set above 100 GB. The incident report attributed it to:

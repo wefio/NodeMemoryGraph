@@ -310,7 +310,10 @@ test("store open migrates a legacy raw Chinese FTS row exactly once", () => {
     store = null;
 
     const db = new DatabaseSync(path);
-    db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(saved.memory.id);
+    db.exec(`DROP TABLE memory_fts;
+      CREATE VIRTUAL TABLE memory_fts USING fts5(
+        memory_id UNINDEXED, statement, node_name, evidence, tokenize = 'unicode61'
+      );`);
     db.prepare(
       "INSERT INTO memory_fts(memory_id, statement, node_name, evidence) VALUES (?, ?, ?, ?)",
     ).run(saved.memory.id, statement, "用户讲解偏好", statement);

@@ -53,7 +53,7 @@ config 中每个以目录锚定的 `files:` 块均落在扫描面内，且仍能
 
 ### 区分类型检查与机制词检查
 
-`npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`）进入 `verify:static` 与 `ci-and-tests` 的阻塞集合。它检查 `tests/`、配置显式包含的源文件以及它们导入的依赖；不声明覆盖全部 `evals/`、`scripts/`、`tools/`。
+`npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`）进入 `verify:static` 与 `ci-and-tests` 的阻塞集合。它检查 `tests/`、独立 `evals/ooo-execution/*.test.ts` harness、配置显式包含的源文件及其导入依赖；冻结的 `evals/ooo-execution/fixtures/` 与归档证据不作为独立编译入口。纳入类型检查不等于默认产品执行；`tests/tools/test-groups.test.ts` 对照真实编译器入口和按需选择清单。它不声明覆盖全部 `evals/`、`scripts/`、`tools/`；见[恢复测试决策](../../decisions/implemented/2026-10-13-recovery-tests-use-frozen-declarations.zh-CN.md)。
 
 `check:policy-words` 在 `verify:static` 与 `ci-and-tests` 的阻塞集合中执行一次；维护词表、分类记录和扫描面由[机制，不是策略](../../decisions/implemented/2026-09-21-mechanism-not-policy.zh-CN.md#决策)拥有。它阻止未登记的命中与记录漂移，不证明机制层已无策略。
 

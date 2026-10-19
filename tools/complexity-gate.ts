@@ -183,7 +183,12 @@ function probeBatches(probes: readonly string[]): string[][] {
 
 interface EslintReport {
   filePath: string;
-  messages: Array<{ line: number; ruleId: string; message: string; fatal?: boolean }>;
+  messages: Array<{
+    line: number;
+    ruleId: string;
+    message: string;
+    fatal?: boolean;
+  }>;
 }
 
 /** A spawn that produced nothing measured nothing: an unparseable stdout is the same
@@ -277,21 +282,19 @@ export async function complexitiesFor(
 function extractComplexityFindings(
   filePath: string,
   source: string,
-  reports: Array<{ messages: Array<{ line: number; ruleId: string; message: string }> }>,
+  reports: Array<{
+    messages: Array<{ line: number; ruleId: string; message: string }>;
+  }>,
 ): ComplexityFinding[] {
   const findings: ComplexityFinding[] = [];
   for (const report of reports) {
     for (const message of report.messages) {
       if (message.ruleId !== "complexity") continue;
       const count = Number(/complexity of (\d+)/u.exec(message.message)?.[1] ?? 0);
-      const nameMatch =
-        /(?:Function|Method|Async arrow function|Async function|Async method|Arrow function|Private method)\s+'([^']+)'/u.exec(
-          message.message,
-        );
       findings.push({
         file: filePath,
         line: message.line,
-        name: nameMatch?.[1] ?? functionIdentityAtLine(filePath, source, message.line),
+        name: functionIdentityAtLine(filePath, source, message.line),
         complexity: count,
       });
     }
@@ -329,17 +332,48 @@ function containsLine(sourceFile: ts.SourceFile, node: ts.Node, line: number): b
 }
 
 function functionIdentity(node: ts.FunctionLikeDeclaration, sourceFile: ts.SourceFile): string {
-  if (node.name) return node.name.getText(sourceFile);
+  if (node.name) return ownedFunctionName(node.parent, node.name.getText(sourceFile), sourceFile);
   const parent = node.parent;
   if (ts.isVariableDeclaration(parent)) return parent.name.getText(sourceFile);
-  if (ts.isPropertyAssignment(parent)) return parent.name.getText(sourceFile);
+  if (ts.isPropertyAssignment(parent))
+    return ownedFunctionName(parent.parent, parent.name.getText(sourceFile), sourceFile);
   if (ts.isCallExpression(parent)) {
     const label = parent.arguments[0];
     const suffix = label && ts.isStringLiteralLike(label) ? `:${label.text}` : "";
     const argumentIndex = parent.arguments.findIndex((argument) => argument === node);
     return `${parent.expression.getText(sourceFile)}${suffix}#${argumentIndex}`;
   }
-  return `<anonymous:${node.kind}>`;
+  return ownedFunctionName(parent, `<anonymous:${node.kind}>`, sourceFile);
+}
+
+function namedObjectArgument(node: ts.Node, sourceFile: ts.SourceFile): string | undefined {
+  if (!ts.isObjectLiteralExpression(node) || !ts.isCallExpression(node.parent)) return;
+  const label = node.properties.find(
+    (property) => ts.isPropertyAssignment(property) && property.name.getText(sourceFile) === "name",
+  );
+  if (!label || !ts.isPropertyAssignment(label) || !ts.isStringLiteralLike(label.initializer))
+    return;
+  return `${node.parent.expression.getText(sourceFile)}:${label.initializer.text}`;
+}
+
+/** Object/class owners distinguish equal method names without depending on line
+ * numbers or on which methods currently exceed the reporting threshold. */
+function ownedFunctionName(parent: ts.Node, name: string, sourceFile: ts.SourceFile): string {
+  const owners: string[] = [];
+  for (let owner = parent; owner && !ts.isFunctionLike(owner); owner = owner.parent) {
+    const argumentOwner = namedObjectArgument(owner, sourceFile);
+    if (argumentOwner) owners.unshift(argumentOwner);
+    if (
+      (ts.isVariableDeclaration(owner) ||
+        ts.isClassDeclaration(owner) ||
+        ts.isClassExpression(owner) ||
+        ts.isPropertyAssignment(owner)) &&
+      owner.name
+    ) {
+      owners.unshift(owner.name.getText(sourceFile));
+    }
+  }
+  return [...owners, name].join(".");
 }
 
 /** Complexity per (file, method-name) for a whole tree, keyed for diffing, plus the

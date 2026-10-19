@@ -67,7 +67,87 @@ export interface CliCommandSpec {
 export const COMMON_OPTIONS = ["data-dir", "db"] as const;
 export const COMMON_FLAGS = ["json"] as const;
 
+const STATE_BOARD_OPTIONS = {
+  "task-id": "taskId",
+  agent: "agentId",
+  "agent-name": "agentName",
+  content: "content",
+  kind: "kind",
+  "entry-id": "entryId",
+  resolution: "resolution",
+  reason: "reason",
+  digest: "digest",
+  ref: "ref",
+  summary: "summary",
+  verdict: "verdict",
+  "after-cursor": "afterCursor",
+  to: "to",
+  need: "need",
+  capabilities: "capabilities",
+  "session-id": "sessionId",
+} as const;
+
+function stateOperation(values: OptionValues, action: "read" | "write"): string {
+  if (values.positionals.length > 1)
+    throw new Error("state accepts one operation; use named arguments");
+  return values.positionals[0] ?? (action === "read" ? "read" : "");
+}
+
+function stateAgCommand(action: "read" | "write"): CliCommandSpec {
+  return {
+    method: "state",
+    words: ["state", action, "ag"],
+    requiresResident: true,
+    usageLine: `nmg state ${action} ag [OPERATION] --session-id ID [options] [--json]`,
+    options: ["session-id", "text", "reason", "requester", "ttl-seconds"],
+    flags: [],
+    buildParams: (values) =>
+      compactObject({
+        action,
+        space: "ag",
+        operation: stateOperation(values, action),
+        sessionId: requiredOption(values, "session-id"),
+        text: firstOption(values, "text"),
+        reason: firstOption(values, "reason"),
+        ttlSeconds: numericOption(values, "ttl-seconds"),
+        requester:
+          action === "write" ? (firstOption(values, "requester") ?? "agent:cli") : undefined,
+      }),
+  };
+}
+
+function stateBoardCommand(action: "read" | "write"): CliCommandSpec {
+  return {
+    method: "state",
+    words: ["state", action, "board"],
+    usageLine: `nmg state ${action} board [OPERATION] --agent ID [options] [--json]`,
+    options: [...Object.keys(STATE_BOARD_OPTIONS), "limit", "ttl-seconds", "lease-seconds"],
+    flags: ["include-resolved"],
+    buildParams: (values) =>
+      compactObject({
+        action,
+        space: "board",
+        operation: stateOperation(values, action),
+        ...Object.fromEntries(
+          Object.entries(STATE_BOARD_OPTIONS).map(([key, name]) => [
+            name,
+            firstOption(values, key),
+          ]),
+        ),
+        agentId: requiredOption(values, "agent"),
+        limit: numericOption(values, "limit"),
+        ttlSeconds: numericOption(values, "ttl-seconds"),
+        leaseSeconds: numericOption(values, "lease-seconds"),
+        includeResolved: values.flags.has("include-resolved") || undefined,
+      }),
+  };
+}
+
 export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
+  stateAgCommand("read"),
+  stateAgCommand("write"),
+  stateBoardCommand("read"),
+  stateBoardCommand("write"),
   {
     method: "sessionActiveGraph",
     words: ["session", "observe"],
@@ -1147,7 +1227,10 @@ function parseTesseraOptions(
     const path = parts[0]!.trim();
     const snippet = parts[1]!.trim();
     const label = parts.length > 2 ? parts.slice(2).join("::").trim() : undefined;
-    const tessera: { path: string; snippet: string; label?: string } = { path, snippet };
+    const tessera: { path: string; snippet: string; label?: string } = {
+      path,
+      snippet,
+    };
     if (label) tessera.label = label;
     tesserae.push(tessera);
   }

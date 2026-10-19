@@ -1,7 +1,7 @@
 # NMG active TODO list
 
 **Authority:** working queue, not design specification or implementation history.
-**Updated:** 2026-09-03
+**Updated:** 2026-10-10
 
 Durable behavior belongs in the owning design or operating document; current
 implementation evidence belongs in

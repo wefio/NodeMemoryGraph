@@ -2,7 +2,8 @@
 
 [English](historical-round-tooling.md) · [术语](historical-round-tooling.terms.yaml)
 
-**权威归属：**[受限 OoO 的自举开发](../ooo-execution-bootstrap.zh-CN.md)。  
+**权威归属：**[受限 OoO 的自举开发](../ooo-execution-bootstrap.zh-CN.md)。
+
 历史实现记录；不表示当前已接入产品运行时。
 
 ## S3：可用入口（历史记录，2026-09-12 完成）

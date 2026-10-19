@@ -33,7 +33,7 @@
 | 会话推理草稿本 | 私有、原子、有界、可重启恢复的显式检查点工具；永不静默提升 | daemon Lab 权威/工作区加 CLI、Pi、MCP 与 DSH 适配器 | **可选 Lab** | 自动捕获已被否决；跨会话转移/提升等待被展示的需求。 |
 | Memory-Graph Reasoner | 在 HA 选中的会话-AG 子图上运行的可选有界遍历/what-if 引擎；输出保持假设性并与持久真值分离 | daemon Lab RPC 要求会话投影、拒绝投影外节点、继承 AG 节点/边/步数预算，并把输出标为非持久/假设性 | **可选 Lab** | TTL 产物物化、类型化推理边与 HA 重打分回路未接线。效用证明与接线正确性是两件事。 |
 | 临时协调 | Task Board 基于 TTL/游标/归因，且不进入 LTG/FTS | 看板 store、daemon、CLI/Pi/MCP 适配器 | **已验证核心** | ACL 与多设备传输**显式推迟**。 |
-| Daemon 与并发 | 单一应用权威/单一 LTG 写者；同步 SQLite 阶段串行；没有事务跨 await；一个冻结的声明式 RPC 目录驱动方法发现与可选能力闸门 | CLI daemon/service/client、确定性目录指纹、经校验的 hello 发现、重连刷新、注册表/处理器漂移、并发与受控重载的单元/HTTP/真实进程测试 | **已验证核心** | 共享生产重载未被演练；多进程分布式写者、可信运行时注册、进程内模块热加载与自动孤儿闸门恢复均被推迟。 |
+| Daemon 与并发 | 单一应用权威/单一 LTG 写者；同步 SQLite 阶段串行；没有事务跨 await；一个冻结的声明式 RPC 目录驱动方法发现与可选能力闸门 | CLI daemon/service/client、确定性目录指纹、validated hello 发现、重连刷新、registry／handler drift 与并发测试 | **已验证核心** | 多进程分布式写者不在当前范围；trusted runtime registration 与 hot reload 明确延后。 |
 | 可观测性 | 轨迹路由、分数、预算、披露、结果、维护与回滚，且不把诊断当作真值 | 轨迹表、影子 JSONL、报告/审计 | **已验证核心** | 自然标签必须通过使用积累。 |
 | Benchmark | 官方格式适配器、匹配臂、可缓存 embedding、一个 OmniMemEval 执行入口与失败即关闭打分 | 配置驱动的 NMG runner 把全部五个用户记忆套件委托给其钉住的官方脚本；rank 感知评测器使用与 Pi 类消费者相同的 `searchMemoryContext` 与精确证据 Agent Surface；数据集适配与打分仍归 benchmark 所有；provider 预检防止部分预热的缓存掩盖不可用的服务；官方答案/裁判提示词与信封仍是上游协议 | **已验证核心** | 稳定与仅套件选项在一个配置中声明；resume 绑定其确切结果目录并拒绝配置漂移。研究探针与 oracle/raw 臂必须保持标为自定义面，不能定义产品行为。启动后的 provider 失败仍依赖检查点与恢复，因为钉住的套件拥有阶段调度。 |
 | Agent 开发与质量 | 动态仓库上下文、可发现的稳定仓库能力、有主文档、产品/研究/混沌测试轨道、临时护栏生命周期与可组合资源清理 | 根 bootstrap、repo-development Skill、路由/能力上下文工具、CI 工作流、Cordis 支撑的测试包装器 | **已验证核心** | 能力清单是静态导航元数据，不是服务目录或实现状态数据库。研究刻画保持非阻塞，且不能重定义产品契约。 |

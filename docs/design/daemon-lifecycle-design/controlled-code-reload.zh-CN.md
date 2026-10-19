@@ -6,6 +6,9 @@
 
 ## Controlled code reload
 
+本节保留已审阅源分支的实现协议，不证明当前 checkout 提供该 CLI、能力或测试文件；本次文档 PR 不加入其运行时代码。以下步骤只适用于已安装 CLI 与认证发现均明确支持 `controlled-reload` 的实现，不能作为当前版本的直接操作指南。
+
+
 `nmg daemon reload [--db FILE | --data-dir DIR] [--json]` 是显式管理操作，不是
 代码监听器、进程内模块热加载或旧 restart 的别名。它加载当前已构建的 CLI 入口，
 不自动 build。用户接受清空 AG、writer 租约与其他进程内状态；持久记忆和黑板保留。

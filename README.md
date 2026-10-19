@@ -23,7 +23,7 @@ other way:
 - **Own the memory layer.** Agents come and go — Pi today, another harness
   tomorrow. NMG exists independently of all of them; adapters are replaceable,
   the store is not tied to any product. This is also why the multi-agent task
-  board passes memory *IDs*, not content: memory outlives any single agent.
+  board passes memory _IDs_, not content: memory outlives any single agent.
 - **Local and private.** All durable memory lives in one SQLite file you can
   back up by copying. Retrieval works with zero configuration (SQLite FTS5);
   the optional semantic layer can use a bundled local model, a separately hosted
@@ -32,18 +32,19 @@ other way:
 - **Free.** No billing surface at all: FTS5 retrieval is built in, the local
   embedding path costs nothing, and there is no account to upgrade.
 - **Real, not conceptual.** A CLI, a JSON-RPC daemon, an MCP server, working
-  adapters for three harnesses — and NMG is used daily across sessions as its
+  adapters for four harnesses — and NMG is used daily across sessions as its
   own development memory, not demonstrated once in a demo.
 
 **Honest boundary:** NMG is not plug-and-play yet. Native integrations need
 setup, and generic agents use the CLI + Skill path. But it is deliberately
-*agent-friendly to integrate*: if your agent can use a CLI, it can probably use
+_agent-friendly to integrate_: if your agent can use a CLI, it can probably use
 NMG; if it can write plugins, it can integrate NMG itself from the stable
 JSON-RPC boundary.
 
 | Your setup | Path |
 |---|---|
 | [Pi](https://github.com/earendil-works/pi) | Native extension ([Try it](#try-it)) |
+| OpenCode v2 | Thin transport plugin ([opencode-plugin README](opencode-plugin/README.md)) |
 | Claude Code | Local MCP plugin ([Claude Code plugin](#claude-code-plugin)) |
 | DeepSeek Harness | Cordis plugin ([dsh/](dsh/README.md)) |
 | Any other agent | CLI + [Skill](skills/nmg-memory/SKILL.md) ([Agent-independent CLI](#agent-independent-cli), [Agent Skill](#agent-skill)) |
@@ -52,6 +53,7 @@ JSON-RPC boundary.
 NMG stores mutable semantic memory over immutable evidence and retrieves a
 small, progressively deeper subset instead of flattening all history into one
 global prompt.
+
 - Ordinary prompts load no dynamic long-term memory. Automatic retrieval
   overfetches and type-reranks candidates before applying the final record budget.
 - Stable `stateKey` values identify one replaceable property—not a topic or
@@ -140,11 +142,11 @@ claude-plugins/nmg-memory/
 The root `.mcp.json` registers `nmg` as a local MCP server. Claude Code
 auto-discovers it at session start and exposes three tools:
 
-| Tool | Purpose |
-|------|---------|
-| `nmg_search` | Return compact memory headers (mid/node/type/tier/preview) |
-| `nmg_get` | Load exact memory statements and source evidence |
-| `nmg_remember` | Save durable facts/preferences/states/constraints/events |
+| Tool           | Purpose                                                    |
+| -------------- | ---------------------------------------------------------- |
+| `nmg_search`   | Return compact memory headers (mid/node/type/tier/preview) |
+| `nmg_get`      | Load exact memory statements and source evidence           |
+| `nmg_remember` | Save durable facts/preferences/states/constraints/events   |
 
 Daemon lifecycle is automatic: the MCP server starts the NMG daemon when it
 launches and safely stops it on exit. If a daemon was already running (e.g.,
@@ -202,6 +204,10 @@ redaction, and logical-chain projection. Adapters retain only native tool
 schemas, lifecycle hooks, transport fallback, genuinely host-only actions, and
 official benchmark envelopes or audit fields.
 An already-running shared daemon is left untouched.
+Automatic recall stops waiting after five seconds total and preserves candidates returned before
+later phases time out. Use `/nmg recall timing` in Pi to inspect the latest phase durations.
+Explicit `nmg_search` is unchanged; [deadline details and limitations](docs/design/session-memory-lifecycle-hooks-2026-08-10.md#自动召回等待预算)
+are in the hook contract.
 The daemon is the single application-level writer for its SQLite database.
 Concurrent Agent turns may wait on embeddings or summaries in parallel, while
 their short synchronous SQLite phases are serialized by the daemon event loop;
@@ -367,11 +373,7 @@ requires an explicit command. `memory delete` retains immutable source history.
 
 The service rejects a second daemon for the same database, opens SQLite lazily,
 and removes stale process leases. Use the same `--data-dir` or `--db` for daemon
-and client commands. At a coordinated code-update boundary, `nmg daemon reload`
-drains accepted work and replaces a capable owner without clients racing to
-start a second one. Persistent memory/board data survives; volatile AG and writer
-leases are cleared. An older daemon without this capability is refused, not
-silently restarted. See [controlled reload](docs/design/daemon-lifecycle-design/controlled-code-reload.md#controlled-code-reload-1).
+and client commands.
 
 Node identity maintenance starts automatically on write: exact canonical names
 and case/spacing/punctuation-only variants of the same node kind reuse the

@@ -45,6 +45,8 @@
 | `task_run_manifest`、`task_run_tasks`（`input`、`dependencies`、`effect`、`wait_event`、`operation`、`kind`、`patch_files`、`patch_editable`）                                                                  | 冻结任务声明，已经是 typed 表，由 `run_id` 与 `task_id` 抵达；每次尝试的事实追加进 `task_run_facts`，而后者自己的 `payload` 列正是本文形状的先例                 |
 | ——                                                                                                                                                                                                              | 拟议的 `payload` **不承载任务单元协议需要的任何东西**。它是平级协议声明用的槽位，对任务单元条目保持 NULL                                                         |
 
+[已批准的存储归属切片](../implemented/2026-10-02-declarations-have-one-owner.zh-CN.md)保留这些类型表，用原有事实日志记录不可变 attempt 输入，不新增本文拟议的黑板列或独立任务正文。外框其余部分保持 proposed。
+
 ### 2. 数据格式是三个分开的问题
 
 - **线上字节**：JSON，走 daemon 现有的 RPC。不变；既然只有一条线而没有第二个绑定，就不值得为代码生成付费，所以 A2A 的"proto 作规范源"暂不采用。

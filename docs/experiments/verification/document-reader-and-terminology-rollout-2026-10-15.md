@@ -1368,3 +1368,21 @@ predecessor-inventory facts remain explicit boundaries, not grounds to call
 this scope unfinished. This report does not establish out-of-scope coverage,
 whole-repository writing-quality or reading-efficiency measurements, remote CI
 or full-product verification, nor impose them as additional completion gates.
+
+## Mainline integration for PR 93 (2026-10-19)
+
+The isolated documentation branch integrates main `1534e98acbdd93f037d128b5ee0ce8720abf3234` for [PR 93](https://github.com/wefio/NodeMemoryGraph/pull/93). All 48 documentation conflicts have explicit working resolutions. Relative to that main revision, runtime implementation and lockfiles are unchanged: the non-document changes are the eight documentation checker/test files and the package-owned documentation command.
+
+Upstream storage, SQL filtering/binding, selected-evidence lexical ordering, declaration recovery, test-resource and automatic waiting-budget facts are retained at their split bilingual owners. Historical pre-budget ranking and retained source-only feature/incident records remain explicitly scoped rather than advertised as current mainline implementation. The recovery account distinguishes nine declared SQLite scenarios from migration or real-process proof.
+
+The continuous group check exposed 24 missing companions imported from main. Eighteen term companions and six Chinese reports complete those groups. The long Chinese behavioral-composition report now has a complete English primary, retaining measured tables, commands, historical failures, proof limits and existing inbound anchors. Definitions remain in the registered design-sidecar scope. Protocol table padding was removed without changing its cells; eleven trailing-space lines were repaired while retaining separate rendered fields.
+
+| Integrated-branch check | Observed result |
+| --- | --- |
+| `npm run docs:check` | 711 files; 0 errors, 0 warnings; 355 groups, 0 errors, 1 declared disposable scratch |
+| `npm run glossary:check` | 433 definitions; 0 errors |
+| Four focused documentation/glossary suites | 108 passed; 0 failed, cancelled or skipped |
+| Eight owned TypeScript files | 0 LSP diagnostics; scoped formatting and ESLint completed |
+| PR diff whitespace and conflict markers | No trailing-whitespace diagnostics or working conflict markers |
+
+These observations belong to this integration worktree, not the earlier source workspace. They do not reuse its full-verifier receipt. Full local verification, remote checks and publication status are reported separately on PR 93; an unexecuted step is not a pass. Dependency installation, deployment and live provider/benchmark workloads were not performed for this section. The previously accepted queue remains complete within its authorized scope.

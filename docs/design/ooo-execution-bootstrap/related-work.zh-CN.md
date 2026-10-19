@@ -2,7 +2,8 @@
 
 [English](related-work.md) · [术语](related-work.terms.yaml)
 
-**Status:** draft; external metrics below reproduce cited reports and were not rerun here.  
+**Status:** draft; external metrics below reproduce cited reports and were not rerun here.
+
 **Authority:** [父级范围](../ooo-execution-bootstrap.zh-CN.md)。
 
 ## 成熟度与已发表系统对照

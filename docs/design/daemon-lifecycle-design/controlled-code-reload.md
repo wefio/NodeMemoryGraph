@@ -6,6 +6,9 @@
 
 ## Controlled code reload
 
+This is a retained implementation protocol from the reviewed source branch, not evidence that this checkout supplies its CLI, capability or test files. This documentation PR adds no runtime implementation. The steps below apply only to an installed implementation whose CLI and authenticated discovery both explicitly support `controlled-reload`; they are not an unconditional operating procedure for the current version.
+
+
 `nmg daemon reload [--db FILE | --data-dir DIR] [--json]` is an explicit administrative operation. It is not a file watcher, in-process module hot load, or alias for the legacy restart command. It loads the currently built CLI entrypoint and does not build source. The operator accepts clearing Active Graph state, writer leases and other process-local state; durable memories and task-board data remain.
 
 1. The controller exclusively acquires the `<db>.reload.json` handover gate. The existing `<db>.server.json` remains the daemon endpoint identity; the gate is neither a second daemon descriptor nor a state store.

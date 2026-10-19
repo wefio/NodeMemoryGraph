@@ -29,7 +29,7 @@ agent 平台——还有一些停留在论文阶段。NMG 走相反的方向：
   进程，记忆库本身永远不会。
 - **免费。** 没有任何计费面：FTS5 检索内置，本地嵌入路径零成本，也没有
   可以升级的账号。
-- **真实可用，不是概念。** CLI、JSON-RPC daemon、MCP server、三个 harness
+- **真实可用，不是概念。** CLI、JSON-RPC daemon、MCP server、四个 harness
   的可用 adapter——而且 NMG 正作为自己的开发记忆被跨会话日常使用，不是
   demo 里跑一次就完。
 
@@ -41,6 +41,7 @@ JSON-RPC 边界自己完成集成。
 | 你的环境 | 接入路径 |
 |---|---|
 | [Pi](https://github.com/earendil-works/pi) | 原生扩展（[试试](#试试)） |
+| OpenCode v2 | 薄传输插件（[opencode-plugin README](opencode-plugin/README.md)） |
 | Claude Code | 本地 MCP 插件（[Claude Code 插件](#claude-code-插件)） |
 | DeepSeek Harness | Cordis 插件（[dsh/](dsh/README.md)） |
 | 其他任意 agent | CLI + [Skill](skills/nmg-memory/SKILL.md)（[Agent 无关 CLI](#agent-无关-cli)、[Agent Skill](#agent-skill)） |
@@ -179,6 +180,10 @@ Pi、Claude MCP、DSH 和 benchmark 桥共用同一个 Agent Surface，用于紧
 工具 schema、生命周期钩子、传输回退、真正的宿主专属动作，以及官方 benchmark
 信封或审计字段。
 已在运行的共享 daemon 不会被碰。
+
+自动召回总等待五秒，后续阶段超时仍保留及时返回的候选。Pi 用
+`/nmg recall timing` 查看最近一轮各阶段耗时；显式 `nmg_search` 不变。
+[期限与限制](docs/design/session-memory-lifecycle-hooks-2026-08-10.zh-CN.md#自动召回等待预算)由钩子契约说明。
 daemon 是对应 SQLite 数据库唯一的应用层写入者。并发 Agent 轮次可以并行等待
 embedding 或摘要；短小的同步 SQLite 阶段由 daemon 事件循环串行执行。客户端
 不应再对同一文件打开独立可写 store。
@@ -319,10 +324,7 @@ CLI/管理能力，不是额外的模型侧 Pi 工具。保留候选筛选是 dr
 L4/L5 或删除其语义解释需要显式命令。`memory delete` 保留不可变来源历史。
 
 服务拒绝同库的第二个 daemon，惰性打开 SQLite，并清理过期的进程租约。daemon
-和客户端命令要用同一个 `--data-dir` 或 `--db`。在协调的代码升级窗口，
-`nmg daemon reload` 排空已接受的工作并替换有能力的 owner，无需客户端争抢启动
-第二个 daemon；持久记忆/黑板保留，临时 AG 与 writer 租约清空。缺少能力的旧
-daemon 明确拒绝，不会被偷偷重启。见[受控 reload](docs/design/daemon-lifecycle-design/controlled-code-reload.md#controlled-code-reload-1)。
+和客户端命令要用同一个 `--data-dir` 或 `--db`。
 
 节点身份维护在写入时自动启动：同一节点种类的精确规范名和仅大小写/空格/标点
 差异的变体复用现有节点。更大范围的语义合并不靠嵌入相似度单独触发；它们需要

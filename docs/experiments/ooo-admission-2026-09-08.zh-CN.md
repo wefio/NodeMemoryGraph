@@ -26,8 +26,10 @@ node --experimental-strip-types --test evals/ooo-execution/admission.test.ts eva
 
 ## 多进程探测
 
-实现：[board-admission.ts](../../src/integration/ooo-board.ts)。  
-进程启动：[process-fixture.ts](../../evals/ooo-execution/process-fixture.ts)。  
+实现：[board-admission.ts](../../src/integration/ooo-board.ts)。
+
+进程启动：[process-fixture.ts](../../evals/ooo-execution/process-fixture.ts)。
+
 场景：[multiprocess.test.ts](../../evals/ooo-execution/multiprocess.test.ts)。
 
 驱动器会启动一个独立 daemon 进程和两个不同的 worker 进程。daemon 使用真实的 `NmgService`、`httpHandler` 和 Task Board SQLite store。worker 通过未改变的 board JSON-RPC endpoint 发现 handoff 并发布结果条目。IPC 只控制 fixture 的操作与时序；任务和 candidate 结果通过 HTTP 与 board 传递。worker 从不打开 SQLite。

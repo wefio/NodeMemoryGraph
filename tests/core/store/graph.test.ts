@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { NmgStore } from "../../../src/core/store.ts";
+import { linkNodePath } from "../../support/node-graph-behavior.ts";
 
 function withStore(run: (store: NmgStore) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-graph-"));
@@ -128,8 +129,7 @@ test("getRelations with maxHops=2 traverses two-hop neighbourhood", () => {
       nodeName: "C",
       memoryType: "fact",
     });
-    store.linkNodes({ sourceNodeId: a.node.id, targetNodeId: b.node.id, type: "related_to" });
-    store.linkNodes({ sourceNodeId: b.node.id, targetNodeId: c.node.id, type: "related_to" });
+    linkNodePath(store, [a.node.id, b.node.id, c.node.id], "related_to");
     const rels = store.getRelations([a.node.id], 2);
     assert.equal(rels.length, 2);
     const ids = new Set(rels.flatMap((r) => [r.sourceNodeId, r.targetNodeId]));

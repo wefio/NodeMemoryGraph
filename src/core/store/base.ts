@@ -44,19 +44,24 @@ import { Router } from "../router.ts";
 import { cosineSimilarity, HashingVectorEmbedder } from "../vector.ts";
 import { Float32VectorCache } from "../vector-cache.ts";
 import { migrate } from "./schema.ts";
+import {
+  freezeTaskUnitDeclaration,
+  readTaskUnitDeclarations,
+  type TaskUnitDeclaration,
+  type TaskUnitDeclarationInput,
+} from "../../integration/task-unit-declaration-store.ts";
 import { parseNumberArray } from "./row-parse.ts";
 import { encodeVector, storedVector } from "./vector-codec.ts";
+import { deleteMemoryFts, indexMemoryFts, memoryFtsLink } from "./fts-index.ts";
 import { updateRelationStrength } from "../edge-activation.ts";
 import { serializeScope } from "../scope.ts";
 import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import { ScopeWriteIndex, type ScopeWriteIndexRow, writeTokens } from "./scope-write-index.ts";
 import {
   ftsExpression,
-  ftsIndexedText,
   memoryEmbeddingText,
   normalizeStatement,
   surfaceAnchorExpression,
-  surfaceIndexedText,
   type StoreRow as Row,
 } from "./search-ranking.ts";
 
@@ -94,7 +99,10 @@ export class NmgStoreBase {
   protected scopeWriteIndexes = new Map<string, ScopeWriteIndex>();
   protected scopeWriteIndexEnabled: boolean;
   /** The open write transaction, if any. A port is the only way to join it. */
-  private openTransaction: { port: TransactionPort; rollbackOnly: boolean } | null = null;
+  private openTransaction: {
+    port: TransactionPort;
+    rollbackOnly: boolean;
+  } | null = null;
   /** The run whose coordinated write scope is open, if any: the store's own state, set only by
    *  `coordinateRunWrite` while its callback runs. */
   private coordinatedRun: string | null = null;
@@ -592,6 +600,10 @@ export class NmgStoreBase {
       ackCount: entry.ackedBy.length,
       createdAt: entry.createdAt,
       resolvedAt: entry.resolvedAt,
+      deliveredBy: entry.deliveredBy,
+      deliverableDigest: entry.deliverableDigest,
+      verdict: entry.verdict,
+      judgedBy: entry.judgedBy,
       preview: boardEntryView(entry.content),
     }));
     return { previews, nextCursor };
@@ -1795,80 +1807,11 @@ export class NmgStoreBase {
   /** Freeze one task of a run's plan. Frozen means frozen: the same task id with a different
    *  input, position or operation is refused rather than replaced, since the plan is the thing
    *  every later decision is read against. */
-  freezeTaskRunTask(
-    input: {
-      runId: string;
-      taskId: string;
-      position: number;
-      revision: string;
-      input: string;
-      dependencies: readonly string[];
-      effect: string;
-      waitEvent?: string | null;
-      operation?: string;
-      kind?: string;
-      patchFiles?: readonly string[] | null;
-      patchEditable?: readonly string[] | null;
-    },
-    port?: TransactionPort,
-  ): void {
-    return port
-      ? this.withPort(port, () => this.insertTaskRunTask(input))
-      : this.writeTransaction(() => this.insertTaskRunTask(input));
-  }
-
-  private insertTaskRunTask(input: {
-    runId: string;
-    taskId: string;
-    position: number;
-    revision: string;
-    input: string;
-    dependencies: readonly string[];
-    effect: string;
-    waitEvent?: string | null;
-    operation?: string;
-    kind?: string;
-    patchFiles?: readonly string[] | null;
-    patchEditable?: readonly string[] | null;
-  }): void {
-    if (!this.taskRunManifestExists(input.runId))
-      throw new Error(`run ${input.runId} is not registered; a task cannot be frozen into it`);
-    const dependencies = JSON.stringify(input.dependencies);
-    const existing = this.db
-      .prepare(
-        "SELECT input, dependencies, position, operation FROM task_run_tasks WHERE run_id = ? AND task_id = ?",
-      )
-      .get(input.runId, input.taskId) as Row | undefined;
-    if (existing) {
-      const same =
-        String(existing.input) === input.input &&
-        String(existing.dependencies) === dependencies &&
-        Number(existing.position) === input.position &&
-        String(existing.operation) === (input.operation ?? "");
-      if (!same)
-        throw new Error(
-          `run ${input.runId} already froze task ${input.taskId} with a different definition`,
-        );
-      return;
-    }
-    this.db
-      .prepare(
-        "INSERT INTO task_run_tasks (run_id, task_id, position, revision, input, dependencies, effect, wait_event, operation, kind, patch_files, patch_editable) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      )
-      .run(
-        input.runId,
-        input.taskId,
-        input.position,
-        input.revision,
-        input.input,
-        dependencies,
-        input.effect,
-        input.waitEvent ?? null,
-        input.operation ?? "",
-        input.kind ?? "snapshot",
-        input.patchFiles ? JSON.stringify(input.patchFiles) : null,
-        input.patchEditable ? JSON.stringify(input.patchEditable) : null,
-      );
+  freezeTaskRunTask(input: TaskUnitDeclarationInput, port?: TransactionPort): void {
+    // Compatibility entrypoint for the default protocol. The store supplies the
+    // connection and transaction; its adapter owns declaration encoding and equality.
+    const write = () => freezeTaskUnitDeclaration(this.db, input);
+    return port ? this.withPort(port, write) : this.writeTransaction(write);
   }
 
   /** Append one run fact, if it is not already there. The fact's own identity (run, kind, task,
@@ -1953,37 +1896,8 @@ export class NmgStoreBase {
   }
 
   /** The tasks the run froze, in plan order. */
-  taskRunTasks(runId: string): {
-    taskId: string;
-    position: number;
-    revision: string;
-    input: string;
-    dependencies: string[];
-    effect: string;
-    waitEvent: string | null;
-    operation: string;
-    kind: string;
-    patchFiles: string[] | null;
-    patchEditable: string[] | null;
-  }[] {
-    const rows = this.db
-      .prepare("SELECT * FROM task_run_tasks WHERE run_id = ? ORDER BY position, task_id")
-      .all(runId) as Row[];
-    return rows.map((row) => ({
-      taskId: String(row.task_id),
-      position: Number(row.position),
-      revision: String(row.revision),
-      input: String(row.input),
-      dependencies: JSON.parse(String(row.dependencies)) as string[],
-      effect: String(row.effect),
-      waitEvent: row.wait_event === null ? null : String(row.wait_event),
-      operation: String(row.operation),
-      kind: String(row.kind),
-      patchFiles:
-        row.patch_files === null ? null : (JSON.parse(String(row.patch_files)) as string[]),
-      patchEditable:
-        row.patch_editable === null ? null : (JSON.parse(String(row.patch_editable)) as string[]),
-    }));
+  taskRunTasks(runId: string): TaskUnitDeclaration[] {
+    return readTaskUnitDeclarations(this.db, runId);
   }
 
   /** The run's appended facts in sequence order. `through` is how a caller asks for the facts as of
@@ -2058,12 +1972,7 @@ export class NmgStoreBase {
         .prepare("SELECT 1 FROM memory_derivations WHERE derived_memory_id = ?")
         .get(derivedId);
       if (!remaining) {
-        this.db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(derivedId);
-        this.db
-          .prepare(
-            "DELETE FROM memory_surface_fts WHERE rowid IN (SELECT rowid FROM memory_fts_registry WHERE memory_id = ?)",
-          )
-          .run(derivedId);
+        deleteMemoryFts(this.db, derivedId);
         this.db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(derivedId);
         this.db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(derivedId);
         this.db.prepare("DELETE FROM memory_index_delta WHERE memory_id = ?").run(derivedId);
@@ -2188,14 +2097,7 @@ export class NmgStoreBase {
     // transaction did not commit cannot warm the cache either.
     this.writeTransaction(() => {
       for (const item of embeddings) {
-        upsert.run(
-          item.nodeId,
-          model,
-          dimensions,
-          JSON.stringify(item.vector),
-          encodeVector(item.vector),
-          now,
-        );
+        upsert.run(item.nodeId, model, dimensions, "[]", encodeVector(item.vector), now);
       }
     });
     for (const item of embeddings) {
@@ -2206,7 +2108,9 @@ export class NmgStoreBase {
   storedNodeEmbeddings(model: string, afterNodeId = "", limit = 256): ExternalNodeEmbedding[] {
     const rows = this.db
       .prepare(
-        `SELECT node_id, vector_blob, vector_json FROM node_embeddings
+        `SELECT node_id,
+          CASE WHEN typeof(vector_blob) = 'blob' THEN vector_blob ELSE vector_json END AS vector
+       FROM node_embeddings
        WHERE model = ? AND node_id > ? ORDER BY node_id LIMIT ?`,
       )
       .all(model, afterNodeId, Math.max(1, Math.min(limit, 2_048))) as Row[];
@@ -2264,14 +2168,7 @@ export class NmgStoreBase {
     // As above: the boundary is the store's, and the cache is warmed only after it commits.
     this.writeTransaction(() => {
       for (const item of embeddings) {
-        upsert.run(
-          item.blockId,
-          model,
-          dimensions,
-          JSON.stringify(item.vector),
-          encodeVector(item.vector),
-          now,
-        );
+        upsert.run(item.blockId, model, dimensions, "[]", encodeVector(item.vector), now);
       }
     });
     for (const item of embeddings) {
@@ -2282,7 +2179,9 @@ export class NmgStoreBase {
   storedLeafEmbeddings(model: string, afterBlockId = "", limit = 256): ExternalLeafEmbedding[] {
     const rows = this.db
       .prepare(
-        `SELECT block_id, vector_blob, vector_json FROM leaf_embeddings
+        `SELECT block_id,
+          CASE WHEN typeof(vector_blob) = 'blob' THEN vector_blob ELSE vector_json END AS vector
+       FROM leaf_embeddings
        WHERE model = ? AND block_id > ? ORDER BY block_id LIMIT ?`,
       )
       .all(model, afterBlockId, Math.max(1, Math.min(limit, 2_048))) as Row[];
@@ -2337,14 +2236,7 @@ export class NmgStoreBase {
     const now = new Date().toISOString();
     this.writeTransaction(() => {
       for (const item of embeddings) {
-        upsert.run(
-          item.memoryId,
-          model,
-          dimensions,
-          JSON.stringify(item.vector),
-          encodeVector(item.vector),
-          now,
-        );
+        upsert.run(item.memoryId, model, dimensions, "[]", encodeVector(item.vector), now);
       }
     });
     return embeddings.length;
@@ -2352,7 +2244,9 @@ export class NmgStoreBase {
   storedEmbeddings(model: string, afterMemoryId = "", limit = 256): ExternalEmbedding[] {
     const rows = this.db
       .prepare(
-        `SELECT memory_id, vector_blob, vector_json FROM memory_embeddings
+        `SELECT memory_id,
+          CASE WHEN typeof(vector_blob) = 'blob' THEN vector_blob ELSE vector_json END AS vector
+       FROM memory_embeddings
        WHERE model = ? AND memory_id > ? ORDER BY memory_id LIMIT ?`,
       )
       .all(model, afterMemoryId, Math.max(1, Math.min(limit, 2_048))) as Row[];
@@ -2574,37 +2468,22 @@ export class NmgStoreBase {
       .prepare("SELECT markers_json FROM memory_records WHERE id = ?")
       .get(memoryId) as Row | undefined;
     const triggers = recallTriggersFromStoredMarkers(row?.markers_json).join(" ");
-    this.db
-      .prepare("INSERT OR IGNORE INTO memory_fts_registry(memory_id) VALUES (?)")
-      .run(memoryId);
-    const registry = this.db
-      .prepare("SELECT rowid FROM memory_fts_registry WHERE memory_id = ?")
-      .get(memoryId) as Row;
-    this.db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
-    this.db.prepare("DELETE FROM memory_surface_fts WHERE rowid = ?").run(Number(registry.rowid));
-    this.db
-      .prepare(
-        "INSERT INTO memory_fts(memory_id, statement, node_name, evidence) VALUES (?, ?, ?, ?)",
-      )
-      .run(
-        memoryId,
-        ftsIndexedText(statement),
-        ftsIndexedText(node.canonicalName),
-        ftsIndexedText(`${evidence.content} ${triggers}`.trim()),
-      );
-    this.db
-      .prepare("INSERT INTO memory_surface_fts(rowid, content) VALUES (?, ?)")
-      .run(
-        Number(registry.rowid),
-        surfaceIndexedText(`${statement} ${node.canonicalName} ${evidence.content} ${triggers}`),
-      );
+    indexMemoryFts(this.db, {
+      memoryId,
+      statement,
+      nodeName: node.canonicalName,
+      evidence: evidence.content,
+      triggers,
+    });
   }
   ftsCandidates(query: string, limit: number): string[] {
     const expression = ftsExpression(query);
     if (!expression) return [];
+    const link = memoryFtsLink(this.db);
     const rows = this.db
       .prepare(
-        "SELECT memory_id FROM memory_fts WHERE memory_fts MATCH ? ORDER BY bm25(memory_fts) LIMIT ?",
+        `SELECT ${link.id} AS memory_id FROM memory_fts f ${link.join}
+         WHERE memory_fts MATCH ? ORDER BY bm25(memory_fts), f.rowid LIMIT ?`,
       )
       .all(expression, limit) as Row[];
     return rows.map((row) => String(row.memory_id));
@@ -2624,12 +2503,13 @@ export class NmgStoreBase {
   ftsCandidatesInNodes(query: string, nodeIds: string[], limit: number): string[] {
     const expression = ftsExpression(query);
     if (!expression || nodeIds.length === 0) return [];
+    const link = memoryFtsLink(this.db);
     const rows = this.db
       .prepare(
-        `SELECT f.memory_id FROM memory_fts f
-       JOIN memory_records m ON m.id = f.memory_id
+        `SELECT ${link.id} AS memory_id FROM memory_fts f ${link.join}
+       JOIN memory_records m ON m.id = ${link.id}
        WHERE memory_fts MATCH ? AND m.node_id IN (${nodeIds.map(() => "?").join(",")})
-       ORDER BY bm25(memory_fts) LIMIT ?`,
+       ORDER BY bm25(memory_fts), f.rowid LIMIT ?`,
       )
       .all(expression, ...nodeIds, limit) as Row[];
     return rows.map((row) => String(row.memory_id));
@@ -2777,7 +2657,7 @@ export class NmgStoreBase {
         memoryId,
         this.embedder.model,
         this.embedder.dimensions,
-        JSON.stringify(vector),
+        "[]",
         encodeVector(vector),
         new Date().toISOString(),
       );
@@ -2887,7 +2767,8 @@ export class NmgStoreBase {
     const idColumn = kind === "node" ? "node_id" : "block_id";
     const rows = this.db
       .prepare(
-        `SELECT ${idColumn} AS id, dimensions, vector_blob, vector_json
+        `SELECT ${idColumn} AS id, dimensions,
+          CASE WHEN typeof(vector_blob) = 'blob' THEN vector_blob ELSE vector_json END AS vector
        FROM ${table} WHERE model = ? ORDER BY ${idColumn}`,
       )
       .all(model) as Row[];

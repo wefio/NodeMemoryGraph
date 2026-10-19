@@ -3,10 +3,11 @@ name: On-demand suites
 # Runs the test suites that no CI job reaches, on both platforms, only when asked for.
 #
 # Two reasons this is a separate workflow rather than another job in ci.yml:
-#   - The set is derived, not chosen: `npm run ci:uncovered-tests --list` prints the suites that
-#     no job globs reach, so a future suite is picked up here automatically instead of being
-#     forgotten. The static job's `--check` mode fails when such a suite appears outside an
-#     acknowledged root, so it cannot land silently either.
+#   - The set is derived, not chosen: `npm run ci:uncovered-tests --list` prints runnable suites
+#     no job globs reach, excluding frozen fixture inputs and archived candidate evidence.
+#     A future independent suite is picked up automatically instead of being forgotten.
+#     The static job's `--check` mode fails outside an acknowledged root,
+#     so a new suite cannot land silently either.
 #   - These suites drive real git worktrees, real child processes and real multi-process
 #     boards, and the two flakes observed so far were load-sensitive. They run at bounded
 #     concurrency, and they are not required checks while that is still true.
@@ -48,7 +49,7 @@ jobs:
       - name: Which suites does CI not reach
         shell: bash
         run: |
-          echo "### Unreached suites" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Runnable on-demand suites" >> "$GITHUB_STEP_SUMMARY"
           npm run ci:uncovered-tests
           node --experimental-strip-types tools/ci-uncovered-tests.ts --list > unreached.txt
           echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
@@ -67,8 +68,14 @@ jobs:
           NMG_OOO_ARTIFACT_DIR: ${{ github.workspace }}/ooo-artifacts
         run: |
           set -o pipefail
+          mapfile -t suites < unreached.txt
+          if (( ${#suites[@]} == 0 )); then
+            printf 'TAP version 13\n1..0 # SKIP no on-demand suites selected\n' \
+              | tee "unreached-${{ matrix.os }}.tap"
+            exit 0
+          fi
           node --experimental-strip-types --test --test-concurrency=1 \
-            --test-reporter=tap $(tr '\n' ' ' < unreached.txt) \
+            --test-reporter=tap "${suites[@]}" \
             | tee "unreached-${{ matrix.os }}.tap"
       - name: Upload the transcript
         if: always()

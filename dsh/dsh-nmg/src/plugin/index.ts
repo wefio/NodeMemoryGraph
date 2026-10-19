@@ -9,7 +9,7 @@
 // forward the same RPC. Duplicating logic adapter-side drifts and goes stale.
 //
 // Host half: registers model tools (nmg_search / nmg_get / nmg_remember /
-// nmg_board / nmg_lab / nmg_daemon) into the host `tools` registry and implements
+// nmg_state / nmg_lab / nmg_daemon) into the host `tools` registry and implements
 // AUTOMATIC RECALL on `agent/pre-step`. Inside this package the half runs in the
 // real node process (full fetch / fs / process), so it talks to the running NMG
 // daemon over HTTP JSON-RPC first (single-digit-ms fast path) and falls back to
@@ -27,17 +27,18 @@ import { randomUUID } from 'node:crypto'
 import { connect } from 'node:net'
 import type { Context } from '@deepseek-ai/cordis'
 import { coordinationEnabled as configuredCoordinationEnabled } from '../../../../src/integration/config.ts'
-import { COMMON_BOARD_ACTIONS, COMMON_REMEMBER_ACTIONS } from '../../../../src/integration/tool-contract.ts'
+import { COMMON_REMEMBER_ACTIONS } from '../../../../src/integration/tool-contract.ts'
 import { compactDisclosureEntries, compactSearchContext, memoryDisclosureEntries } from '../../../../src/integration/search-projection.ts'
 import {
   renderCompactSearchSurface,
   renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
-  renderTaskBoardSurface,
 } from '../../../../src/integration/agent-surface.ts'
 import { loadPrompts, renderDisclosure } from '../../../../src/prompts/load.ts'
 import { contextOnlineLearningEnabled } from '../../../../src/lab/context-router-online.ts'
+import { STATE_OPERATIONS, stateOperation, captureStateInvocation, renderStateOutput } from '../../../../src/integration/state.ts'
+import { renderLabOutput } from '../../../../src/integration/lab-capabilities.ts'
 
 const nmgPrompts = loadPrompts()
 
@@ -130,7 +131,7 @@ export function apply(ctx: Context): () => void {
     return daemon
   }
 
-  async function daemonCall(method, params, signal?) {
+  async function daemonCall(method, params, signal?, propagateFailure = false) {
     const endpoint = resolveDaemon()
     if (!endpoint) return null
     try {
@@ -146,7 +147,7 @@ export function apply(ctx: Context): () => void {
       if (parsed.error) throw new Error(parsed.error.message || 'nmg ' + method + ' error')
       return parsed.result
     } catch (error) {
-      if (error && error.name === 'AbortError') throw error
+      if (propagateFailure || (error && error.name === 'AbortError')) throw error
       daemon = null
       return null
     }
@@ -578,7 +579,7 @@ export function apply(ctx: Context): () => void {
   // client's job — this package is that client.
   //
   // Claim ≠ notify: the waker only NOTIFIES ("通知决定谁知道"). Taking over
-  // work ("claim 决定谁工作") is the model's call via `nmg_board claim`, so we
+  // work ("claim 决定谁工作") is the model's call via `nmg_state action=write space=board operation=claim`, so we
   // never auto-claim — we surface entries and let the model decide.
 
   const hostSessionId = (process.env.DSH_SESSION_ID || '').trim() || 'dsh'
@@ -688,7 +689,7 @@ export function apply(ctx: Context): () => void {
     const broadcast =
       '[NMG board 协作广播] 频道 ' + (entry.taskId || '?') + ' 有 #' + (entry.id || '?') +
       ' 未认领的' + label + '（open）：' + excerpt +
-      '。有空的 agent 可用 nmg_board read taskId=' + (entry.taskId || '?') + ' 查看详情、claim 认领处理。'
+      '。有空的 agent 可用 nmg_state space=board action=read taskId=' + (entry.taskId || '?') + ' 查看详情、action=write operation=claim 认领处理。'
     await daemonCall('taskBoard', {
       action: 'put',
       taskId: WAKE_WORLD_TASK,
@@ -978,7 +979,7 @@ export function apply(ctx: Context): () => void {
   // 自动再取"的语义（dsh-agent-loop wakeDriver + kick() finally 的
   // wakeRequested/hasPending 再唤醒）。这里直接 send 即可，由 native 队列
   // 承担"没东西就发出去，有东西就等待"。内容直接携带黑板待办详情（纯展示，
-  // 不带强制工具指令），模型看完自主决定是否用 nmg_board 处理。
+  // 不带强制工具指令），模型看完自主决定是否用 nmg_state space=board 处理。
   function wakeAgent(agent, entry) {
     if (!agent || typeof agent.send !== 'function') return false
     try {
@@ -1004,7 +1005,7 @@ export function apply(ctx: Context): () => void {
       const batch = wakeBatch.get(String(agent.id))
       if (!Array.isArray(batch) || batch.length === 0) return ''
       const lines = batch.map(wakeEntryLine)
-      lines.push('Claim with nmg_board claim (claim=接手), resolve with nmg_board resolve.')
+      lines.push('Use nmg_state action=write space=board operation=claim (claim=接手), operation=resolve to close.')
       return 'NMG board wake (' + batch.length + ' pending):\n' + lines.join('\n')
     } catch {
       return ''
@@ -1314,13 +1315,19 @@ export function apply(ctx: Context): () => void {
     },
   }
 
-  const boardTool = {
-    name: 'nmg_board',
-    description: 'Temporary, task-scoped cross-agent coordination (not durable memory). Entries expire. Use a stable taskId; default agent identity is "dsh". Promote durable conclusions only through a separate nmg_remember.',
+  const stateTool = {
+    name: 'nmg_state',
+    description: nmgPrompts.state_description,
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: [...COMMON_BOARD_ACTIONS], description: 'Board action.' },
+        action: { type: 'string', enum: ['read', 'write'] },
+        space: { type: 'string', enum: ['ag', 'board'] },
+        operation: { type: 'string', enum: STATE_OPERATIONS },
+        text: { type: 'string' },
+        digest: { type: 'string' }, ref: { type: 'string' }, summary: { type: 'string' },
+        verdict: { type: 'string', enum: ['accepted', 'rejected', 'undecidable'] },
+        agentName: { type: 'string' },
         taskId: { type: 'string', description: 'Task channel; omit for the shared world channel.' },
         content: { type: 'string', description: 'Entry text (put).' },
         kind: { type: 'string', enum: ['goal', 'note', 'question', 'result', 'handoff', 'decision', 'blocker'], description: 'Entry kind (put).' },
@@ -1336,86 +1343,52 @@ export function apply(ctx: Context): () => void {
         leaseSeconds: { type: 'integer', description: 'Claim lease 60..86400 (claim).' },
         capabilities: { type: 'string', description: 'Capability substring filter (discover).' },
       },
-      required: ['action'],
+      required: ['action', 'space'],
     },
     output: textOutput,
     async execute(args, exec) {
-      const agent = args.agentId || WAKE_AGENT_ID
-       const sourceSessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-      const taskId = args.taskId || WAKE_WORLD_TASK
-      if (['resolve', 'acknowledge', 'claim', 'release'].includes(args.action) && (!args.taskId || !args.entryId)) {
-        return 'nmg_board ' + args.action + ' requires taskId and entryId.'
-      }
-      if (!COMMON_BOARD_ACTIONS.includes(args.action)) {
-        return 'Unsupported board action: ' + args.action
-      }
-      const params: Record<string, any> = { action: args.action, agentId: agent }
-      const argv = ['board', args.action]
-      if (args.action === 'subscribe' || args.action === 'unsubscribe') {
-        const result = await invokeRpcOnly('taskBoard', {
-          action: args.action,
-          taskId,
-          sessionId: sourceSessionId,
-          agentId: agent,
-          reason: args.reason,
-        }, exec.signal)
-        return result.ok ? JSON.stringify(result.data) : result.error
-      } else if (args.action === 'acknowledge') {
-        const result = await invokeRpcOnly('taskBoard', {
-          action: args.action,
-          taskId,
-          entryId: args.entryId,
-          agentId: agent,
-          sourceSessionId,
-          reason: args.reason,
-        }, exec.signal)
-        return result.ok ? JSON.stringify(result.data) : result.error
-      } else if (args.action === 'discover') {
-        params.taskId = 'default'
-        if (args.capabilities) params.capabilities = args.capabilities
-        argv.push('--agent', agent)
-        if (args.capabilities) argv.push('--capabilities', args.capabilities)
-      } else if (args.action === 'put') {
-        params.taskId = taskId
-        params.content = args.content || ''
-        if (args.kind) params.kind = args.kind
-        if (args.to) params.to = args.to
-        if (args.ttlSeconds != null) params.ttlSeconds = args.ttlSeconds
-        params.sourceSessionId = sourceSessionId
-        argv.push(taskId, args.content || '')
-        argv.push('--agent', agent)
-        argv.push('--session-id', sourceSessionId)
-        if (args.kind) argv.push('--kind', args.kind)
-        if (args.to) argv.push('--to', args.to)
-        if (args.ttlSeconds != null) argv.push('--ttl-seconds', String(args.ttlSeconds))
-      } else if (args.action === 'read') {
-        params.taskId = taskId
-        if (args.afterCursor != null) params.afterCursor = args.afterCursor
-        if (args.limit != null) params.limit = args.limit
-        if (args.includeResolved) params.includeResolved = true
-        argv.push(taskId, '--agent', agent)
-        if (args.afterCursor != null) argv.push('--after-cursor', String(args.afterCursor))
-        if (args.limit != null) argv.push('--limit', String(args.limit))
-        if (args.includeResolved) argv.push('--include-resolved')
-      } else {
-        params.taskId = taskId
-        params.entryId = args.entryId
-        if (args.action === 'resolve' && args.resolution) params.resolution = args.resolution
-        if (args.action === 'claim' && args.leaseSeconds != null) params.leaseSeconds = args.leaseSeconds
-        argv.push(taskId, args.entryId, '--agent', agent)
-        if (args.action === 'resolve' && args.resolution) argv.push('--resolution', args.resolution)
-        if (args.action === 'claim' && args.leaseSeconds != null) argv.push('--lease-seconds', String(args.leaseSeconds))
-      }
-      argv.push('--json')
-      const r = await invoke('taskBoard', params, argv, exec.signal, null)
-      if (!r.ok) return r.error
-      // When the model claims or resolves a woken entry, drop it from the
-      // pending wake batch — the work has been picked up.
-      if (args.entryId && (args.action === 'claim' || args.action === 'resolve')) {
-        removeWakeEntry(args.entryId)
-      }
-      return renderTaskBoardSurface(r.data, { taskId })
+      const operation = stateOperation(args)
+      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
+      const result = args.space === 'ag'
+        ? await executeAgState(args, operation, sessionId, exec.signal)
+        : await executeBoardState(args, operation, sessionId, exec.signal)
+      return result.ok ? renderStateOutput(result.data) : result.error
     },
+  }
+
+  // State calls need a resident owner: no CLI fallback, lifecycle takeover or
+  // automatic replay of a refused domain mutation.
+  async function invokeState(params, signal) {
+    try {
+      const data = await daemonCall('state', params, signal, true)
+      return data == null
+        ? { ok: false, error: 'NMG daemon is unavailable for state' }
+        : { ok: true, data }
+    } catch (error) {
+      return { ok: false, error: 'NMG state request failed: ' + String(error.message || error) }
+    }
+  }
+
+  async function executeAgState(args, operation, sessionId, signal) {
+    const params = await captureStateInvocation({
+      action: args.action, space: 'ag', operation, text: args.text,
+      sessionId, requester: 'agent:dsh', reason: args.reason, ttlSeconds: args.ttlSeconds,
+    }, async sessionId => {
+      const status = await invokeState({ action: 'read', space: 'ag', operation: 'status', sessionId }, signal)
+      if (!status.ok) throw new Error(status.error)
+      return status.data
+    })
+    return invokeState(params, signal)
+  }
+
+  async function executeBoardState(args, operation, sessionId, signal) {
+    if (!coordinationEnabled) throw new Error('Board coordination is disabled')
+    const agentId = args.agentId || WAKE_AGENT_ID
+    return invokeState({
+      ...args, operation, taskId: args.taskId || WAKE_WORLD_TASK,
+      sessionId, sourceSessionId: sessionId, agentId, id: agentId,
+      agentName: args.agentName || agentId,
+    }, signal)
   }
 
   const daemonTool = {
@@ -1442,9 +1415,46 @@ export function apply(ctx: Context): () => void {
     },
   }
 
+  function labParameterError(args) {
+    if (args.action !== 'list' && !args.capability) return args.action + ' requires capability.'
+    if (args.action === 'enable' && !args.reason) return 'enable requires reason.'
+    if (args.action === 'invoke' && !args.operation) return 'invoke requires operation.'
+    return null
+  }
+
+  function labCliArgs(args, sessionId) {
+    const argv = ['lab', args.action]
+    if (args.capability) argv.push(args.capability)
+    if (args.action !== 'list') argv.push('--session-id', sessionId)
+    if (args.action === 'enable') {
+      argv.push('--requester', 'agent:dsh', '--reason', args.reason)
+      if (args.ttlSeconds != null) argv.push('--ttl-seconds', String(args.ttlSeconds))
+    }
+    if (args.action === 'invoke') {
+      argv.push('--operation', args.operation)
+      if (args.input != null) argv.push('--input-json', JSON.stringify(args.input))
+    }
+    argv.push('--json')
+    return argv
+  }
+
+  async function executeLab(args, exec) {
+    if (args.capability === 'working_state') throw new Error('Working state uses nmg_state')
+    const error = labParameterError(args)
+    if (error) return error
+    const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
+    const params = {
+      action: args.action, capability: args.capability, sessionId,
+      requester: args.action === 'enable' ? 'agent:dsh' : undefined,
+      reason: args.reason, ttlSeconds: args.ttlSeconds, operation: args.operation, input: args.input,
+    }
+    const result = await invoke('lab', params, labCliArgs(args, sessionId), exec.signal, null)
+    return result.ok ? renderLabOutput(result.data) : result.error
+  }
+
   const labTool = {
     name: 'nmg_lab',
-    description: 'Discover and temporarily enable optional NMG capabilities for this session. Reasoning workspace, graph reasoner, and controller shadow are self-service; controlled/active controller modes remain gated.',
+    description: nmgPrompts.lab_description,
     parameters: {
       type: 'object',
       properties: {
@@ -1459,35 +1469,7 @@ export function apply(ctx: Context): () => void {
     },
     output: textOutput,
     async execute(args, exec) {
-      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-      if (args.action !== 'list' && !args.capability) return args.action + ' requires capability.'
-      if (args.action === 'enable' && !args.reason) return 'enable requires reason.'
-      if (args.action === 'invoke' && !args.operation) return 'invoke requires operation.'
-      const params: Record<string, any> = {
-        action: args.action,
-        capability: args.capability,
-        sessionId,
-        requester: args.action === 'enable' ? 'agent:dsh' : undefined,
-        reason: args.reason,
-        ttlSeconds: args.ttlSeconds,
-        operation: args.operation,
-        input: args.input,
-      }
-      const argv = ['lab', args.action]
-      if (args.capability) argv.push(args.capability)
-      if (args.action !== 'list') argv.push('--session-id', sessionId)
-      if (args.action === 'enable') {
-        argv.push('--requester', 'agent:dsh', '--reason', args.reason)
-        if (args.ttlSeconds != null) argv.push('--ttl-seconds', String(args.ttlSeconds))
-      }
-      if (args.action === 'invoke') {
-        argv.push('--operation', args.operation)
-        if (args.input != null) argv.push('--input-json', JSON.stringify(args.input))
-      }
-      argv.push('--json')
-      const r = await invoke('lab', params, argv, exec.signal, null)
-      if (!r.ok) return r.error
-      return JSON.stringify(r.data, null, 2)
+      return executeLab(args, exec)
     },
   }
 
@@ -1606,6 +1588,7 @@ export function apply(ctx: Context): () => void {
     tools.register(getTool),
     tools.register(rememberTool),
     tools.register(labTool),
+    tools.register(stateTool),
     tools.register(daemonTool),
     contextDisposer,
     ctx.on('agent/inbox/inserted', onInboxInserted),
@@ -1613,7 +1596,6 @@ export function apply(ctx: Context): () => void {
   ]
   if (coordinationEnabled) {
     disposers.push(
-      tools.register(boardTool),
       boardWakeContextDisposer,
       wakeServiceDisposer,
       wakeTimerDisposer,

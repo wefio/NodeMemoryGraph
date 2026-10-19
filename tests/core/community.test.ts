@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NmgStore } from "../../src/core/store.ts";
+import { linkNodePath } from "../support/node-graph-behavior.ts";
 
 function withStore(run: (store: NmgStore) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "comm-"));
@@ -33,8 +34,7 @@ test("detectCommunities finds weakly-connected components and drops isolates", (
     const b = node(store, "乙");
     const c = node(store, "丙");
     const d = node(store, "丁");
-    store.linkNodes({ sourceNodeId: a.node.id, targetNodeId: b.node.id, type: "causes" });
-    store.linkNodes({ sourceNodeId: b.node.id, targetNodeId: c.node.id, type: "causes" });
+    linkNodePath(store, [a.node.id, b.node.id, c.node.id], "causes");
     store.linkNodes({ sourceNodeId: d.node.id, targetNodeId: a.node.id, type: "causes" });
     node(store, "孤立"); // no relations → excluded
     const communities = store.detectCommunities();
@@ -70,13 +70,11 @@ test("analyzeCommunities profiles patterns and emits natural-supervision suggest
     });
     const tech = node(store, "技术选型");
     const ops = node(store, "运维");
-    store.linkNodes({ sourceNodeId: b2.node.id, targetNodeId: tech.node.id, type: "depends_on" });
-    store.linkNodes({ sourceNodeId: tech.node.id, targetNodeId: ops.node.id, type: "depends_on" });
+    linkNodePath(store, [b2.node.id, tech.node.id, ops.node.id], "depends_on");
     // Community 2: contradiction pair.
     const va = node(store, "观点甲");
     const vb = node(store, "观点乙");
-    store.linkNodes({ sourceNodeId: va.node.id, targetNodeId: vb.node.id, type: "contradicts" });
-    store.linkNodes({ sourceNodeId: vb.node.id, targetNodeId: va.node.id, type: "contradicts" });
+    linkNodePath(store, [va.node.id, vb.node.id, va.node.id], "contradicts");
 
     const analysis = store.analyzeCommunities();
     assert.equal(analysis.length, 2, "two communities");
@@ -103,8 +101,7 @@ test("analyzeCommunities flags a feedback loop for manual review", () => {
   withStore((store) => {
     const x = node(store, "子系统X");
     const y = node(store, "子系统Y");
-    store.linkNodes({ sourceNodeId: x.node.id, targetNodeId: y.node.id, type: "causes" });
-    store.linkNodes({ sourceNodeId: y.node.id, targetNodeId: x.node.id, type: "causes" });
+    linkNodePath(store, [x.node.id, y.node.id, x.node.id], "causes");
     const analysis = store.analyzeCommunities();
     assert.equal(analysis.length, 1);
     assert.equal(analysis[0]!.patternCounts.FEEDBACK, 1);

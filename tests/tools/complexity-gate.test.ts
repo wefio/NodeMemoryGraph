@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { evaluateComplexityDiff, functionIdentityAtLine } from "../../tools/complexity-gate.ts";
+import {
+  complexitiesForMany,
+  evaluateComplexityDiff,
+  functionIdentityAtLine,
+} from "../../tools/complexity-gate.ts";
 
 interface Finding {
   file: string;
@@ -108,7 +112,40 @@ test("anonymous callback identities survive unrelated line shifts", () => {
 test("variable arrows and private methods have stable identities", () => {
   const source = `const menu = async () => true;\nclass Service {\n  #get() { return true; }\n}\n`;
   assert.equal(functionIdentityAtLine("adapter.ts", source, 1), "menu");
-  assert.equal(functionIdentityAtLine("adapter.ts", source, 3), "#get");
+  assert.equal(functionIdentityAtLine("adapter.ts", source, 3), "Service.#get");
+});
+
+test("same-named object methods retain separate baselines when one drops below the threshold", async () => {
+  const method = (branches: number) =>
+    `execute(value) { ${"if (value) value++;".repeat(branches)} return value; }`;
+  const baselineSource = `const board = { ${method(20)} };\nconst lab = { ${method(16)} };\n`;
+  const currentSource = `const unrelated = true;\nconst board = { ${method(20)} };\nconst lab = { ${method(0)} };\n`;
+  const [before, after] = await complexitiesForMany([
+    { file: "adapter.ts", source: baselineSource },
+    { file: "adapter.ts", source: currentSource },
+  ]);
+  assert.equal(before?.measured, true);
+  assert.equal(after?.measured, true);
+  const baseline = new Map(before?.findings.map((finding) => [key(finding), finding]));
+  const current = new Map(after?.findings.map((finding) => [key(finding), finding]));
+  assert.equal(baseline.size, 2, "different tool owners cannot overwrite each other's method");
+  assert.deepEqual(evaluateComplexityDiff(baseline, current, 15).violations, []);
+});
+
+test("same-named method growth is not hidden by another owner's larger debt", async () => {
+  const method = (branches: number) =>
+    `execute(value) { ${"if (value) value++;".repeat(branches)} return value; }`;
+  const sources = [20, 22].map(
+    (branches) => `const first = { ${method(branches)} };\nconst second = { ${method(40)} };\n`,
+  );
+  const [before, after] = await complexitiesForMany(
+    sources.map((source) => ({ file: "adapter.ts", source })),
+  );
+  const baseline = new Map(before?.findings.map((finding) => [key(finding), finding]));
+  const current = new Map(after?.findings.map((finding) => [key(finding), finding]));
+  const violations = evaluateComplexityDiff(baseline, current, 15).violations;
+  assert.equal(violations.length, 1);
+  assert.match(violations[0]!, /first.execute.*21 -> 23/u);
 });
 
 test("multiple callbacks in one call receive distinct identities", () => {

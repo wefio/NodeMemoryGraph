@@ -1,0 +1,5 @@
+version: 2
+terms: []
+references:
+  - hybrid SQL bind order
+  - borrowed Float32 scoring view

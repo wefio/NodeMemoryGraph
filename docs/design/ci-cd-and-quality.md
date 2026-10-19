@@ -117,12 +117,17 @@ of copying command lists into every job. Local and CI execution share owners:
   The [decision](../decisions/implemented/2026-09-09-chaos-tests-on-main-pushes.md)
   records the historical one failure in 145 CI runs, on `main`.
 - `all-checks-passed`: aggregates blocking tracks only.
-- `ci:uncovered-tests` within `static`: derives test files uncovered by any job
-  from actual called globs. `evals/` research harnesses may be acknowledged as
-  on-demand; other uncovered tests fail closed and are named.
-- `.github/workflows/on-demand-suites.yml`: `workflow_dispatch` only. Runs those
-  uncovered suites on Linux/Windows with `--test-concurrency=1`, uploading verbatim
-  TAP artifacts; it is not a required check.
+- `ci:uncovered-tests` within `static`: derives uncovered tracked tests from called
+  globs. All uncovered files remain in inventory; unacknowledged files fail closed.
+  Acknowledged roots state whether they are directly runnable: standalone `evals/`
+  harnesses are; the more-specific `evals/ooo-execution/fixtures/` frozen candidate
+  checks and `docs/experiments/execution/archive/` historical evidence are not.
+  Specific roots win; a generic `fixtures` name does not filter other tests.
+- `.github/workflows/on-demand-suites.yml`: `workflow_dispatch` only. The tool's
+  `--list` emits only runnable uncovered files. Linux/Windows use concurrency one,
+  preserve each path argument and Node's failure exit, and upload TAP. An empty
+  list writes `1..0 # SKIP`, not an argument-free Node discovery run. This remains
+  a non-required track.
 
 For CI/packaging rule changes, run the full affected commands in a clean checkout
 or equivalent worktree as well as targeted tests. Untracked local files must not
@@ -130,47 +135,8 @@ manufacture success.
 
 ## Composable test runtime
 
-Only `tests/support/cordis-adapter.ts` uses Cordis. It exports
-`createTestRuntime()`, minimal composable effects and idempotent `dispose()`,
-without NMG Core, CLI or daemon imports. `tests/support/test-runtime.ts` composes
-NMG resources for integration tests:
-
-```text
-TestRuntime
-├── testWorkspace
-├── testDatabase
-└── testDaemon
-```
-
-`withTestRuntime(...)` or explicit `dispose()` supplies RAII-style cleanup.
-Dependencies are explicit: database requires workspace, daemon requires database;
-missing dependencies fail rather than create hidden global state. The in-process
-daemon uses the real HTTP JSON-RPC handler, testing the protocol without leaving
-a background process.
-
-Choose the lightest isolated resources that expose the assertion boundary;
-[the decision](../decisions/implemented/2026-09-24-resource-matched-test-fixtures.md)
-owns this distinction:
-
-| Assertion boundary | Resource | Preparation that can be omitted |
-| --- | --- | --- |
-| Pure data/decision | In-process input | Workspace, database, external processes. |
-| One SQLite connection | Independent `:memory:` store | Database files and cleanup. |
-| Reopen, migration, WAL, separate connection or path | Unique file database/workspace per case | Unrelated files/services. |
-| CLI, Git, HTTP, daemon lease, cross-process sharing | Actual required processes, ports and workspace | Starts/checks that do not participate in the assertion. |
-
-File/cross-process assertions retain real boundaries. Policy/receipt/harness-only
-assertions may inject `RepositoryProvider` observations, with separate real Git
-tests for discovery, dirty scope, commit and forge bindings. `testDatabase()` uses
-real paths shared with the daemon. Git fixtures retain `init/add/commit`, passing
-identity to `commit` instead of spawning two `git config` calls per case. Resource
-choice neither changes Safety/Contract/Guardrail classification nor blocking or
-narrow/full scope, which remain owned by routes and verification contracts.
-
-`@deepseek-ai/cordis@4.0.1` is pinned as a devDependency for effect/fiber lifecycle
-only. NMG Core, daemon, Pi adapter and released packages do not depend on it; no
-loader, HMR or configuration system is adopted. Separating the adapter from NMG
-fixture composition confines a framework replacement to the lifecycle adapter.
+[Resource lifecycle and behavior fragments](ci-cd-and-quality/composable-test-runtime.md)
+owns fixture dependencies, boundary selection, GC reporting and behavior-helper contracts.
 
 ## Agent-native repository context
 
@@ -198,10 +164,13 @@ For `ci-and-tests`, `verify:static` expands into the same atomic checks as the C
 contract. Cross-route shared checks run once, retaining individual status and
 route attribution; CI still invokes the named contract.
 
-Non-RCP full plans use bounded parallel independent static checks after
-build/package write barriers, then product tests. Results retain plan order;
-RCP and narrow plans remain serial. A failed exit, launch error or signal belongs
-to that command, does not prevent later evidence collection, and fails the run.
+Non-RCP full plans run adjacent independent static checks with at most three
+workers, including test-source checking, anchor resolution and policy-word checks.
+Build, package and product-test commands remain serial barriers. Product tests
+use at most eight Node file workers; coverage uses two. Globs, assertions, failure
+judgments and cleanup contracts do not change. Results retain plan order; RCP and
+narrow plans remain serial. A failed exit, launch error or signal belongs to that
+command, does not prevent later evidence collection, and fails the run.
 
 The official wrapper defaults to a 150-second whole-run budget, adjustable with
 `--timeout-ms`. The watchdog returns failure and `incomplete` evidence on timeout.

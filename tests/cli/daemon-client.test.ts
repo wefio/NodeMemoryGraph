@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { acquireServerLease } from "../../src/cli/lifecycle.ts";
 
 import {
   assertDaemonCapability,
@@ -14,6 +15,7 @@ import {
   NmgDaemonHandshakeError,
   NmgDaemonMethodError,
   parseDaemonHello,
+  invokeDaemon,
 } from "../../src/cli/daemon-client.ts";
 import {
   NMG_CAPABILITIES,
@@ -175,6 +177,49 @@ test("hello parser validates discovery shape while preserving unknown capabiliti
       }),
     NmgDaemonHandshakeError,
   );
+});
+
+test("an aborted automatic call never reconnects a dead daemon", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cancelled-rpc-"));
+  const databasePath = join(directory, "nmg.sqlite");
+  const lease = acquireServerLease(databasePath);
+  lease.update({ transport: "http", host: "127.0.0.1", port: 12345, token: "test-token" });
+  const controller = new AbortController();
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    calls += 1;
+    if (calls > 1)
+      return new Response(JSON.stringify({ result: { protocol: "incompatible-test-daemon" } }));
+    controller.abort(new TypeError("automatic call deadline"));
+    throw new TypeError("transport failed after cancellation");
+  });
+  try {
+    await assert.rejects(
+      invokeDaemon(
+        {
+          state: {
+            pid: -1,
+            startedAt: new Date().toISOString(),
+            transport: "http",
+            host: "127.0.0.1",
+            port: 12345,
+            token: "test-token",
+          },
+          databasePath,
+          startedByCaller: false,
+          capabilities: new Set(NMG_CAPABILITIES),
+        },
+        "search",
+        {},
+        { signal: controller.signal },
+      ),
+      /automatic call deadline/u,
+    );
+    assert.equal(calls, 1);
+  } finally {
+    lease.release();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("advertised method discovery gates calls independently of capability metadata", () => {

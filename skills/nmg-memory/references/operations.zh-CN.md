@@ -27,9 +27,7 @@ Pi 适配器会自动跟踪本次启动的所有权。
 
 ## 受控代码重载
 
-只有在明确协调的升级边界上才使用 `nmg daemon reload --db <DATABASE> --json`。它要求当前运行的 owner 声明 `controlled-reload` 能力；旧 daemon 会被拒绝，而不会静默重启。先构建选定 checkout。重载会排空已接受的调用，为替代进程启动设置 fence，并确认新的已认证 owner。持久记忆和 board 数据保留；私有 AG 与 writer 租约会清除，必须根据仓库／任务证据重建。
-
-格式错误或孤立的 `<DATABASE>.reload.json` 不代表可以删除它或另启 owner。检查 controller 和两个候选 daemon 进程后，协调恢复。见[生命周期 owner](../../../docs/design/daemon-lifecycle-design/controlled-code-reload.zh-CN.md#controlled-code-reload-1)。
+此处只路由到[保留的源分支协议](../../../docs/design/daemon-lifecycle-design/controlled-code-reload.zh-CN.md)，不声明当前 checkout 提供该命令。本次文档变更不加入重载实现。仅在已安装 CLI 与已验证握手都明确支持该能力时，才按该协议及 operator 授权操作；否则沿用上面的 ownership-safe 生命周期，不通过删除交接文件或强启第二 owner 绕过限制。
 
 ## 存储选择
 

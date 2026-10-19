@@ -11,6 +11,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { NmgStore } from "../../src/core/store.ts";
+import { claimAndDeliver } from "../support/task-board-behavior.ts";
 
 const PAST = "2000-01-01T00:00:00.000Z";
 const NOW = "2026-01-01T00:00:00.000Z";
@@ -37,19 +38,11 @@ function expiredEntry(store: NmgStore, content = "an entry that is past its TTL"
     content,
     expiresAt: PAST,
   });
-  store.claimTaskBoardEntry({
-    taskId: "retention-channel",
-    entryId: entry.id,
-    agentId: "scout-a",
-    leaseSeconds: 600,
-    now: WHEN_LIVE,
-  });
-  store.deliverTaskBoardEntry({
-    taskId: "retention-channel",
-    entryId: entry.id,
+  claimAndDeliver(store, entry, {
     agentId: "scout-a",
     digest: "d".repeat(64),
     now: WHEN_LIVE,
+    leaseSeconds: 600,
   });
   store.acknowledgeTaskBoardEntry({
     entryId: entry.id,

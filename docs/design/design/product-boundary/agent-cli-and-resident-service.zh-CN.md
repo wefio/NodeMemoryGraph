@@ -4,6 +4,8 @@
 
 **Authority:** [上层范围](../product-boundary.md)。
 
+跨宿主具体能力覆盖由[适配器能力矩阵](../../harness-capability-matrix.zh-CN.md)比较；存在适配器入口不等于全部能力都已接入。
+
 ## 与 agent 无关的 CLI 与常驻服务
 
 目标集成边界是一个与 agent 无关的 `nmg` CLI，而不是由 harness 直接访问 NMG 内部。Pi 仍需要一个小的 TypeScript 扩展，但该扩展应把 Pi 生命周期事件与工具翻译为一个稳定的、语言中立的协议。它不得让核心存储或处理实现变成 TypeScript 专属。
@@ -47,7 +49,7 @@ nmg daemon stop
 
 该模型允许并发的 Agent 轮次，而不把所有工作挡在一次慢模型调用之后，同时为持久状态保留单一权威写者。请求到达顺序决定其他方面并发的写入阶段的顺序。它不承诺分布式事务、跨独立 OS 进程的线性化顺序，也不承诺同步 SQLite 工作的并行执行。只有当测量显示事件循环写者超出其延迟预算时，读副本或 worker 线程数据库队列才作为性能选项保留。
 
-协议兼容 epoch `nmg.v9` 通过 JSON-RPC 2.0 暴露 `protocol.ts` 中声明的类型化 lifecycle、memory、retrieval、maintenance、STG-sync、memory-chain、Task Board、run-record、Lab 与 session-Active-Graph 方法。HTTP 是唯一的常驻协议；NMG 不维护并行的 NDJSON 或平台专属 socket API。租约记录兼容 epoch。增量 RPC、可选字段与可选行为不推进该 epoch。daemon 在 `hello.capabilities` 中通告它们；客户端保留未知能力名以保持前向兼容，在本地对可选调用加闸门，且只在调用方调用缺失能力时报告 feature-unavailable 错误。只有当活着的 daemon 使用不同的兼容 epoch 时客户端才失败即关闭，随后在一个安全的协调点要求显式 `nmg daemon restart`；它们绝不自动替换共享 daemon。显式 `nmg daemon reload` 通过[受控生命周期交接](../../daemon-lifecycle-design/controlled-code-reload.zh-CN.md#controlled-code-reload-1)替换有能力的拥有者：准入关闭、被接受的调用排空、只有持票的替代者才能取得租约、客户端刷新发现。持久记忆与看板数据存活；易失的 AG 与写者租约被清除。缺失能力被拒绝而不是隐式升级。不确定的变更结果在拥有者变更后不被重放；只读调用保留有界重连重试。
+协议兼容 epoch `nmg.v9` 通过 JSON-RPC 2.0 暴露 `protocol.ts` 中声明的类型化 lifecycle、memory、retrieval、maintenance、STG-sync、memory-chain、Task Board、run-record、Lab 与 session-Active-Graph 方法。HTTP 是唯一的常驻协议；NMG 不维护并行的 NDJSON 或平台专属 socket API。租约记录兼容 epoch。增量 RPC、可选字段与可选行为不推进该 epoch。daemon 在 `hello.capabilities` 中通告它们；客户端保留未知能力名以保持前向兼容，在本地对可选调用加闸门，且只在调用方调用缺失能力时报告 feature-unavailable 错误。只有当活着的 daemon 使用不同的兼容 epoch 时客户端才失败即关闭，随后在一个安全的协调点要求显式 `nmg daemon restart`；它们绝不自动替换共享 daemon。
 `NMG_RPC_DESCRIPTORS` 是方法存在性与同 epoch 可选能力闸门的运行时声明来源。它派生出服务端白名单、TypeScript 方法联合、客户端闸门表与可选的 `hello.methods` 发现列表；双向契约测试拒绝没有服务处理器的描述符，或没有描述符的处理器。描述符目录在 daemon 生存期内冻结，并有一个确定性的 `sha256` 指纹发布为 `hello.catalogFingerprint`。客户端校验完整 hello 形状，保留通告的方法集与目录指纹，并在重连后刷新两者。该指纹只是发现/缓存身份：同一兼容 epoch 内不同的指纹不是不兼容判决。可选调用只有在通告的方法集（当存在时）与描述符的能力闸门都允许时才被准入。运行时方法注册与目录热重载未实现；加入它们首先需要一套有界的可信注册、处理器归属与在途请求策略。
 这种自动化有意止步于传输声明。解析器、跨字段不变量、事务、副作用、CLI 语法、宿主暴露与 epoch 升级决定仍保持显式，因为结构化生成无法确立它们的语义或安全性。
 `nmg.v5` 有意与 v4 不兼容，因为含糊的 `recordActiveGraphUse` RPC 被只用于诊断的 `recordActiveGraphAttribution` 取代；静默连接到 v4 会在 Agent 完成时丢失归因，并保留旧的、不安全的训练语义。

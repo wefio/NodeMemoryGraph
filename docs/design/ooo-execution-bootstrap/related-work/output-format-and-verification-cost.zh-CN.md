@@ -2,7 +2,8 @@
 
 [English](output-format-and-verification-cost.md) · [术语](output-format-and-verification-cost.terms.yaml)
 
-**Status:** draft; 外部研究结果按引用来源报告，未在此复现；以下历史 research instrument 细节不证明产品运行时集成。  
+**Status:** draft; 外部研究结果按引用来源报告，未在此复现；以下历史 research instrument 细节不证明产品运行时集成。
+
 **Authority:** [父级范围](../related-work.zh-CN.md).
 
 ## 格式服从与验证成本

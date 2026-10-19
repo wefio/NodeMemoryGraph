@@ -8,7 +8,7 @@
 
 | 功能 | Gate／开关 | 默认值 | 含义摘要 | 状态／owner |
 |---|---|---|---|---|
-| Controlled daemon code reload | `nmg daemon reload`；`controlled-reload`；`daemon run --reload-ticket` | OFF（仅 operator 显式操作） | 独占交接、排空已接受调用、ticket 替换；保留持久数据，清理易失 AG／leases；能力缺失或孤儿 gate 时 fail closed | 隔离契约测试；不自动执行生产替换；[daemon lifecycle](../daemon-lifecycle-design/controlled-code-reload.zh-CN.md) |
+| Automatic recall deadline and timing | 无 env gate；Pi `/nmg recall timing` 查看诊断 | ON | [五秒绝对等待预算](../session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.zh-CN.md)；显式搜索不受自动期限约束；实现位于 `src/integration/recall-budget.ts` 与 Pi／WorkBuddy adapters | 默认开启；共享 integration owner |
 | Maintained AG working state | `nmg_state space=ag action=write operation=enable`／`nmg state write ag enable` | writer OFF | 有界 session lease；`replace(text)`／`clear()`；拒绝过期、secret、超预算写入；disable／过期撤销 writer 但保留文本；Pi 每个用户回合通过共享 InformationView 原子携带状态 | opt-in writer；仅确定性机制；[state spaces](../state-spaces.zh-CN.md) |
 | Grouped context information | `prepareInformationOutput` 的 `format`；Pi 选择 `context` | library/tool `flat`（8,000）；Pi `context`（16,000 UTF-16 units） | 按用途分组 source-bound entries；wrapper 纳入预算；state／recovery 优先于可选材料；仅完整 item 入选；不代表披露、provider receipt 或第二个状态 owner | source／contract 已分别验证；[state spaces](../state-spaces.zh-CN.md) |
 | Retrieval relevance gate | program half 无 gate（始终开）；model half 使用 `<dataDir>/relevance-model.json` | program ON；model OFF 且未 armed | program half 确定性且只删除候选；model half opt-in，可重排披露预算；离线训练／认证与 runtime admission 分开；评测集不能作训练数据 | program 默认开启（2026-09-09）；model opt-in／unarmed；shape head、coverage knob、provenance guard 仍在推进；[relevance training](../relevance-training.zh-CN.md) |

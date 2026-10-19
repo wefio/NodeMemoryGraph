@@ -2,7 +2,8 @@
 
 [English](speculation-integration.md) · [术语](speculation-integration.terms.yaml)
 
-**Status:** draft; historical planning snapshot, later reports are separate sample-bounded evidence.  
+**Status:** draft; historical planning snapshot, later reports are separate sample-bounded evidence.
+
 **Authority:** [父级范围](../related-work.zh-CN.md).
 
 ## 候选位置与成本类别

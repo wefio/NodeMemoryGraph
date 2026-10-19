@@ -6,6 +6,9 @@
 
 ## Executive summary
 
+Source scope: this record and its `resolved` status describe the investigation, fix and regression evidence in the reviewed source revision. This documentation change does not deliver that fix to the target checkout. Test and behavior conclusions below belong to the recorded source revision, not an assertion that the current implementation includes it.
+
+
 The resident daemon repeatedly selected nodes using access counters on superseded records, while tier rebalancing consumed counters only on indexed active or disputed records. Full batches therefore scheduled more full batches without draining their trigger. Tests covered productive active backlogs, not eligibility changes. The correction aligns pressure with the work that can consume it and tests the stopping condition through the store and service interfaces.
 
 ## Summary

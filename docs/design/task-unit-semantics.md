@@ -49,6 +49,12 @@ Three mechanisms inform the design but are not evidence of Agent gains:
 - [Dask graph optimization](https://docs.dask.org/en/latest/optimize.html) fuses tasks to reduce communication. Here fusion is a cost optimization and each Agent task keeps its acceptance boundary.
 - [Optimistic concurrency](https://learn.microsoft.com/en-us/dotnet/framework/data/adonet/optimistic-concurrency) checks the original state at update time. Here validation at commit is analogous: a matching version proves only that input did not drift, not that a model conclusion is correct.
 
+<a id="声明存储与恢复"></a>
+
+## Declaration storage and recovery
+
+[Default declarations, frozen inputs and recovery refusals](task-unit-semantics/declaration-storage-and-recovery.md) owns the complete contract; run-record ownership still governs connections and transactions.
+
 ## Long-task continuity and task view
 
 Read the complete responsibility: [Long-task continuity and task view](task-unit-semantics/task-continuity.md).

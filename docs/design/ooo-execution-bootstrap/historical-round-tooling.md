@@ -2,7 +2,8 @@
 
 [中文](historical-round-tooling.zh-CN.md) · [Terms used](historical-round-tooling.terms.yaml)
 
-**Authority:** [Bootstrapping constrained OoO development](../ooo-execution-bootstrap.md).  
+**Authority:** [Bootstrapping constrained OoO development](../ooo-execution-bootstrap.md).
+
 historical implementation record; it does not assert current product-runtime integration.
 
 ## S3: usable entry point (historical record, completed 2026-09-12)

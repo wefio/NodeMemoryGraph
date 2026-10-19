@@ -10,16 +10,19 @@ import {
 import { resolveNmgDataDir } from "../../../src/cli/data-path.ts";
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import { coordinationEnabled } from "../../../src/integration/config.ts";
-import { memoryDisclosureEntries } from "../../../src/integration/search-projection.ts";
+import { renderLabOutput } from "../../../src/integration/lab-capabilities.ts";
 import {
-  COMMON_BOARD_ACTIONS,
-  COMMON_REMEMBER_ACTIONS,
-} from "../../../src/integration/tool-contract.ts";
+  STATE_OPERATIONS,
+  stateOperation,
+  renderStateOutput,
+} from "../../../src/integration/state.ts";
+import type { NmgStateResult } from "../../../src/cli/protocol.ts";
+import { memoryDisclosureEntries } from "../../../src/integration/search-projection.ts";
+import { COMMON_REMEMBER_ACTIONS } from "../../../src/integration/tool-contract.ts";
 import {
   renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
-  renderTaskBoardSurface,
 } from "../../../src/integration/agent-surface.ts";
 import { WORLD_BOARD_ID, type MemoryContext } from "../../../src/core/types.ts";
 
@@ -75,7 +78,12 @@ server.registerTool(
     })) as MemoryContext;
     const disclosed = await discloseContext(r, "header");
     return {
-      content: [{ type: "text", text: searchH(disclosed.context, disclosed.foldedMemoryIds) }],
+      content: [
+        {
+          type: "text",
+          text: searchH(disclosed.context, disclosed.foldedMemoryIds),
+        },
+      ],
     };
   },
 );
@@ -104,7 +112,12 @@ server.registerTool(
     };
     const disclosed = await discloseContext(r, "evidence", params.activeGraphId);
     return {
-      content: [{ type: "text", text: memText(disclosed.context, disclosed.foldedMemoryIds) }],
+      content: [
+        {
+          type: "text",
+          text: memText(disclosed.context, disclosed.foldedMemoryIds),
+        },
+      ],
     };
   },
 );
@@ -315,7 +328,10 @@ server.registerTool(
             markers: [
               {
                 kind: "board_origin",
-                attributes: { taskId: boardSource.taskId, entryId: boardSource.entryId },
+                attributes: {
+                  taskId: boardSource.taskId,
+                  entryId: boardSource.entryId,
+                },
               },
             ],
           }
@@ -360,36 +376,11 @@ server.registerTool(
       scope: params.action === "enable" ? "session" : undefined,
       requester: params.action === "enable" ? `agent:mcp:${BOARD_AGENT_ID}` : undefined,
     });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return { content: [{ type: "text", text: renderLabOutput(result) }] };
   },
 );
 
-// ── nmg_board ──
-
-interface BoardEntry {
-  id: string;
-  kind: string;
-  status: string;
-  agentId: string;
-  content: string;
-  sourceSessionId?: string | null;
-  claimedBy?: string | null;
-  ackedBy?: string[];
-}
-
-interface BoardToolResult {
-  action: string;
-  entry?: BoardEntry;
-  entries?: BoardEntry[];
-  nextCursor?: string | null;
-  taskId?: string;
-  agents?: Array<{
-    agentName: string;
-    description: string | null;
-    capabilities: string | null;
-    lastSeenAt: string;
-  }>;
-}
+// ── Unified state and board identity ──
 
 // Identity chain mirrors the Pi extension: NMG_AGENT_ID / NMG_SESSION_ID win,
 // then a per-server pid (one stdio server per host session, so pid ≈ session).
@@ -418,133 +409,98 @@ async function heartbeatBoardAgent(): Promise<void> {
   lastBoardHeartbeatAt = Date.now();
 }
 
-if (coordinationEnabled())
-  server.registerTool(
-    "nmg_board",
-    {
-      description: nmgPrompts.board_description,
-      inputSchema: {
-        action: z
-          .enum(COMMON_BOARD_ACTIONS)
-          .describe(nmgPrompts.board_action_parameter_description),
-        taskId: z.string().optional().describe(nmgPrompts.board_task_id_parameter_description),
-        content: z.string().optional().describe(nmgPrompts.board_content_parameter_description),
-        kind: z
-          .enum(["blocker", "decision", "goal", "handoff", "note", "question", "result"])
-          .optional(),
-        entryId: z.string().optional(),
-        resolution: z.string().optional(),
-        reason: z.string().optional(),
-        digest: z
-          .string()
-          .optional()
-          .describe("deliver only: the sha256 identity of the artifact being handed in"),
-        ref: z.string().optional().describe("deliver only: where the artifact can be read"),
-        summary: z
-          .string()
-          .optional()
-          .describe("deliver only: what the artifact contains, in one line"),
-        verdict: z
-          .enum(["accepted", "rejected", "undecidable"])
-          .optional()
-          .describe("judge only: your ruling on someone else's deliverable"),
-        leaseSeconds: z.number().int().min(60).max(86_400).optional(),
-        afterCursor: z.number().int().min(0).optional(),
-        limit: z.number().int().min(1).max(200).optional(),
-        includeResolved: z.boolean().optional(),
-        ttlSeconds: z.number().int().min(60).max(2_592_000).optional(),
-        to: z
-          .string()
-          .optional()
-          .describe("Stable agent name returned by discover for directed put"),
-        capabilities: z.string().optional().describe("Capability substring used by discover"),
-      },
+server.registerTool(
+  "nmg_state",
+  {
+    description: nmgPrompts.state_description,
+    inputSchema: {
+      action: z.enum(["read", "write"]),
+      space: z.enum(["ag", "board"]),
+      operation: z.enum(STATE_OPERATIONS).optional(),
+      text: z.string().optional(),
+      agentName: z.string().optional(),
+      taskId: z.string().optional().describe(nmgPrompts.board_task_id_parameter_description),
+      content: z.string().optional().describe(nmgPrompts.board_content_parameter_description),
+      kind: z
+        .enum(["blocker", "decision", "goal", "handoff", "note", "question", "result"])
+        .optional(),
+      entryId: z.string().optional(),
+      resolution: z.string().optional(),
+      reason: z.string().optional(),
+      digest: z
+        .string()
+        .optional()
+        .describe("deliver only: the sha256 identity of the artifact being handed in"),
+      ref: z.string().optional().describe("deliver only: where the artifact can be read"),
+      summary: z
+        .string()
+        .optional()
+        .describe("deliver only: what the artifact contains, in one line"),
+      verdict: z
+        .enum(["accepted", "rejected", "undecidable"])
+        .optional()
+        .describe("judge only: your ruling on someone else's deliverable"),
+      leaseSeconds: z.number().int().min(60).max(86_400).optional(),
+      afterCursor: z.string().optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+      includeResolved: z.boolean().optional(),
+      ttlSeconds: z.number().int().min(60).max(2_592_000).optional(),
+      to: z.string().optional().describe("Stable agent name returned by discover for directed put"),
+      capabilities: z.string().optional().describe("Capability substring used by discover"),
     },
-    async (params) => {
-      await heartbeatBoardAgent();
-      // taskId is optional: without one, entries land on the shared world
-      // channel (the lobby), which every agent reads by default.
-      const taskId = params.taskId?.trim() || WORLD_BOARD_ID;
-      if (params.action === "discover") {
-        const result = (await invokeDaemon(connection, "taskBoard", {
-          action: "discover",
-          taskId,
-          agentId: BOARD_AGENT_ID,
-          capabilities: params.capabilities,
-        })) as BoardToolResult;
-        return {
-          content: [
-            {
-              type: "text",
-              text: renderTaskBoardSurface(
-                {
-                  ...result,
-                  agents: (result.agents ?? []).map((agent) => ({
-                    ...agent,
-                    id: agent.agentName,
-                  })),
-                },
-                { taskId },
-              ),
-            },
-          ],
-        };
-      }
-      if (params.action === "subscribe" || params.action === "unsubscribe") {
-        const result = (await invokeDaemon(connection, "taskBoard", {
-          action: params.action,
-          taskId,
-          sessionId: BOARD_SESSION_ID,
-          agentId: BOARD_AGENT_ID,
-        })) as { taskId: string };
-        const text =
-          params.action === "unsubscribe"
-            ? `已退出频道 ${result.taskId}：不再接收该频道新条目的唤醒通知（用 nmg_board subscribe 重新加入）。`
-            : `已加入频道 ${result.taskId}：接收该频道新条目的唤醒通知（未订阅的频道不会打扰你）。`;
-        return { content: [{ type: "text", text }] };
-      }
-      const result = (await invokeDaemon(connection, "taskBoard", {
-        ...params,
-        taskId,
+  },
+  async (params) => {
+    const operation = stateOperation(params);
+    if (params.space === "ag") {
+      const result = (await invokeDaemon(connection, "state", {
+        action: params.action,
+        space: "ag",
+        operation,
+        text: params.text,
+        reason: params.reason,
+        ttlSeconds: params.ttlSeconds,
+        sessionId: BOARD_SESSION_ID,
+        requester: `agent:mcp:${BOARD_AGENT_ID}`,
+      })) as NmgStateResult;
+      return { content: [{ type: "text", text: renderStateOutput(result) }] };
+    }
+    if (!coordinationEnabled()) throw new Error("Board coordination is disabled");
+    await heartbeatBoardAgent();
+    const result = (await invokeDaemon(connection, "state", {
+      ...params,
+      operation,
+      taskId: params.taskId?.trim() || WORLD_BOARD_ID,
+      agentId: BOARD_AGENT_ID,
+      id: BOARD_AGENT_ID,
+      agentName: params.agentName ?? BOARD_AGENT_ID,
+      sourceSessionId: BOARD_SESSION_ID,
+      sessionId: BOARD_SESSION_ID,
+    })) as NmgStateResult;
+    await receiptBoardRead(result.result);
+    return { content: [{ type: "text", text: renderStateOutput(result) }] };
+  },
+);
+
+async function receiptBoardRead(result: NmgStateResult["result"]): Promise<void> {
+  if (result.action !== "read") return;
+  const receipts = result.entries
+    .filter(
+      (entry) =>
+        entry.status === "open" &&
+        entry.sourceSessionId !== BOARD_SESSION_ID &&
+        !(entry.sourceSessionId == null && entry.agentId === BOARD_AGENT_ID),
+    )
+    .map((entry) =>
+      invokeDaemon(connection, "taskBoard", {
+        action: "recordDelivery",
+        entryId: entry.id,
+        sessionId: BOARD_SESSION_ID,
         agentId: BOARD_AGENT_ID,
-        sourceSessionId: BOARD_SESSION_ID,
-      })) as BoardToolResult;
-      const entries = result.entries ?? (result.entry ? [result.entry] : []);
-      if (result.action === "read") {
-        // Reading is a delivery: receipt every open, non-own-echo entry so the
-        // wake path never re-pushes what this session already saw.
-        const receipts = entries
-          .filter((entry) => {
-            if (entry.status !== "open") return false;
-            return !(
-              entry.sourceSessionId === BOARD_SESSION_ID ||
-              (entry.sourceSessionId == null && entry.agentId === BOARD_AGENT_ID)
-            );
-          })
-          .map((entry) =>
-            invokeDaemon(connection, "taskBoard", {
-              action: "recordDelivery",
-              entryId: entry.id,
-              sessionId: BOARD_SESSION_ID,
-              agentId: BOARD_AGENT_ID,
-              source: "read",
-            }),
-          );
-        await Promise.allSettled(receipts);
-      }
-      // The world channel read surfaces the lobby: the directory of active
-      // named channels, so an agent that knows no channel name can find one.
-      let directory: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> = [];
-      if (result.action === "read" && taskId === WORLD_BOARD_ID) {
-        const lobby = (await invokeDaemon(connection, "taskBoard", {
-          action: "list",
-          agentId: BOARD_AGENT_ID,
-        })) as { boards?: typeof directory };
-        directory = lobby.boards ?? [];
-      }
-      return { content: [{ type: "text", text: formatBoard(result, taskId, directory) }] };
-    },
-  );
+        source: "read",
+      }),
+    );
+  await Promise.allSettled(receipts);
+}
 
 // ── Lifecycle ──
 
@@ -649,12 +605,4 @@ function memText(
   ]
     .filter(Boolean)
     .join("\n");
-}
-
-function formatBoard(
-  result: BoardToolResult,
-  taskId: string,
-  directory: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }>,
-): string {
-  return renderTaskBoardSurface(result, { taskId, directory });
 }

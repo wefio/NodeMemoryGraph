@@ -19,7 +19,9 @@
   },
   "files": [
     ".pi/extensions/nmg/controller-shadow.ts",
+    ".pi/extensions/nmg/first-response-timing.ts",
     ".pi/extensions/nmg/index.ts",
+    ".pi/extensions/nmg/working-state-view.ts",
     "bin/nmg-rcp.mjs",
     "bin/nmg.mjs",
     "dist/",
@@ -44,7 +46,8 @@
     "src/lab/skillopt-policy.ts",
     "src/prompts/",
     "src/rcp/",
-    "workbuddy-plugin/"
+    "workbuddy-plugin/",
+    "opencode-plugin/"
   ],
   "scripts": {
     "prompts:generate": "node --experimental-strip-types scripts/generate-prompts.ts",
@@ -55,10 +58,10 @@
     "cli": "node --experimental-strip-types src/cli/main.ts",
     "rcp": "node --experimental-strip-types src/rcp/cli/main.ts",
     "tutorial:first-recall": "node --experimental-strip-types scripts/tutorial-first-recall.ts",
-    "lint": "eslint src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ tests/ evals/ scripts/ tools/",
-    "lint:fix": "eslint --fix src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ tests/ evals/ scripts/ tools/",
-    "format": "prettier --write \"src/**/*.ts\" \".pi/**/*.ts\" \"workbuddy-plugin/**/*.ts\" \"tests/**/*.ts\" \"evals/**/*.ts\" \"scripts/**/*.ts\" \"tools/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \".pi/**/*.ts\" \"workbuddy-plugin/**/*.ts\" \"tests/**/*.ts\" \"evals/**/*.ts\" \"scripts/**/*.ts\" \"tools/**/*.ts\"",
+    "lint": "eslint src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ opencode-plugin/ tests/ evals/ scripts/ tools/",
+    "lint:fix": "eslint --fix src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ opencode-plugin/ tests/ evals/ scripts/ tools/",
+    "format": "prettier --write \"src/**/*.ts\" \".pi/**/*.ts\" \"workbuddy-plugin/**/*.ts\" \"opencode-plugin/**/*.ts\" \"tests/**/*.ts\" \"evals/**/*.ts\" \"scripts/**/*.ts\" \"tools/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \".pi/**/*.ts\" \"workbuddy-plugin/**/*.ts\" \"opencode-plugin/**/*.ts\" \"tests/**/*.ts\" \"evals/**/*.ts\" \"scripts/**/*.ts\" \"tools/**/*.ts\"",
     "test:coverage": "c8 --check-coverage --lines 0.01 node --experimental-strip-types --test --test-concurrency=2 \"tests/cli/**/*.test.ts\" \"tests/core/**/*.test.ts\" \"tests/docker/**/*.test.ts\" \"tests/docs/**/*.test.ts\" \"tests/extensions/**/*.test.ts\" \"tests/guardrails/**/*.test.ts\" \"tests/integration/**/*.test.ts\" \"tests/lab/**/*.test.ts\" \"tests/prompts/**/*.test.ts\" \"tests/rcp/**/*.test.ts\" \"tests/scripts/**/*.test.ts\" \"tests/skills/**/*.test.ts\" \"tests/support/**/*.test.ts\" \"tests/tools/**/*.test.ts\"",
     "eval:agents": "node --experimental-strip-types evals/run.ts",
     "hotspot:modules": "node --experimental-strip-types scripts/hotspot-files.ts",
@@ -136,7 +139,7 @@
     "verify:chaos": "npm run test:chaos",
     "bench:autodiff": "node --experimental-strip-types tools/autodiff-benchmark.ts",
     "test": "node --experimental-strip-types --test --test-concurrency=4 \"tests/**/*.test.ts\"",
-    "test:product": "node --experimental-strip-types --test --test-concurrency=4 \"tests/cli/**/*.test.ts\" \"tests/core/**/*.test.ts\" \"tests/docker/**/*.test.ts\" \"tests/docs/**/*.test.ts\" \"tests/extensions/**/*.test.ts\" \"tests/guardrails/**/*.test.ts\" \"tests/integration/**/*.test.ts\" \"tests/lab/**/*.test.ts\" \"tests/prompts/**/*.test.ts\" \"tests/rcp/**/*.test.ts\" \"tests/scripts/**/*.test.ts\" \"tests/skills/**/*.test.ts\" \"tests/support/**/*.test.ts\" \"tests/tools/**/*.test.ts\"",
+    "test:product": "node --experimental-strip-types --test --test-concurrency=8 \"tests/cli/**/*.test.ts\" \"tests/core/**/*.test.ts\" \"tests/docker/**/*.test.ts\" \"tests/docs/**/*.test.ts\" \"tests/extensions/**/*.test.ts\" \"tests/guardrails/**/*.test.ts\" \"tests/integration/**/*.test.ts\" \"tests/lab/**/*.test.ts\" \"tests/prompts/**/*.test.ts\" \"tests/rcp/**/*.test.ts\" \"tests/scripts/**/*.test.ts\" \"tests/skills/**/*.test.ts\" \"tests/support/**/*.test.ts\" \"tests/tools/**/*.test.ts\"",
     "test:research": "node --experimental-strip-types --test --test-concurrency=4 \"tests/benchmarks/**/*.test.ts\" \"tests/evals/**/*.test.ts\" \"tests/official/**/*.test.ts\"",
     "test:chaos": "npm run build && node --experimental-strip-types --test \"tests/chaos/*.test.ts\"",
     "test:cg": "node --experimental-strip-types --test tests/core/autodiff.test.ts tests/core/differentiable-controller.test.ts tests/core/hierarchical-activation.test.ts tests/core/memory-graph-reasoner.test.ts tests/core/fork-merge.test.ts tests/core/robustness.test.ts",

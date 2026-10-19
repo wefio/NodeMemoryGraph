@@ -56,6 +56,27 @@ terms:
     owner: docs/design/design/incremental-storage-and-index-maintenance.md
     anchor: Incremental storage and index maintenance
     status: canonical
+  - term: single vector payload
+    aliases: ["single-vector-payload storage","单一向量载荷"]
+    definition: >-
+      A stored embedding has one authoritative little-endian Float32 BLOB; a legacy JSON column can retain an empty placeholder without duplicating the payload. 每个 embedding 仅保留一份权威 little-endian Float32 BLOB，旧 JSON 列可留空占位而不重复载荷。
+    owner: docs/design/design/incremental-storage-and-index-maintenance.md
+    anchor: Incremental storage and index maintenance
+    status: canonical
+  - term: borrowed Float32 scoring view
+    aliases: ["借用Float32评分视图"]
+    definition: >-
+      A validated private native BLOB view used only during synchronous scoring; alignment, complete payload, ownership and lifetime checks gate borrowing, while exports and unsafe cases retain decoder copies. 仅在同步评分期间借用经验证的私有 native BLOB；对齐、完整载荷、所有权与生命周期条件限制借用，导出及不安全情况仍解码复制。
+    owner: docs/design/design/incremental-storage-and-index-maintenance.md
+    anchor: Incremental storage and index maintenance
+    status: canonical
+  - term: contentless lexical FTS
+    aliases: ["无内容词法FTS"]
+    definition: >-
+      FTS5 lexical indexing without a second authoritative full-text copy; registry-mapped rowids and index statistics remain, while memory/history retain source content. 不另存第二份权威全文的 FTS5 词法索引；保留 registry 映射 rowid 与索引统计，由 memory/history 保留源内容。
+    owner: docs/design/design/incremental-storage-and-index-maintenance.md
+    anchor: Incremental storage and index maintenance
+    status: canonical
 references:
   - Long-Term Graph
   - Short-Term Graph

@@ -48,18 +48,8 @@ and generates—but never automatically accepts—a limited number of topology
 proposals. Failed slices leave durable counters intact for a later retry and
 never turn a successful `remember` into a failed write.
 
-Access pressure counts only indexed, active or disputed records, matching the
-records whose pending access counters tier rebalancing consumes. Both per-node
-and global access totals use this eligibility rule. Ineligible records retain
-their counters and history without triggering or prolonging a maintenance loop;
-reactivated indexed records can contribute pressure again. Empty local checks
-return their result and update performance aggregates without appending a
-`maintenance_runs` row. Productive local runs and semantic runs retain separate
-journals: a semantic result with zero `rowsTouched` can still drain trace signals.
-Retrieval traces, feedback, attribution and historical journal rows are unchanged.
-
 The due check is deliberately a dual trigger. A single hot node is selected as
-soon as its own write or eligible access counter reaches the corresponding threshold. If
+soon as its own write or access counter reaches the corresponding threshold. If
 many sparse nodes keep every local counter below the threshold but their global
 pending total reaches it, the same bounded slice selects the largest then oldest
 non-empty node backlogs. The resident service schedules another bounded slice
@@ -78,6 +68,41 @@ markers, dirty queues, FTS, and crash recovery. NMG decides semantic grouping,
 summary invalidation, and topology changes. A process-local contiguous
 `Float32` matrix may cache active record, node, or leaf embeddings; it is
 disposable and rebuildable from versioned binary vectors in storage.
+
+Per-model record, node and leaf embeddings persist one little-endian Float32
+payload in `vector_blob`; `vector_json` is an empty `[]` compatibility placeholder,
+not another export format. Legacy JSON-only rows remain readable. The first
+writable migration backfills missing binary values and removes duplicate JSON
+only when binary byte length matches declared positive dimensions. All three
+tables and the completion marker commit atomically; a completed migration does
+not rescan them at every open. Preferred-vector queries return one storage form;
+pure FTS retrieval neither joins nor decodes embedding payloads. Binary-aware
+readers remain compatible; JSON-only integrations must use stored-embedding APIs
+or decode the BLOB. No page-size/durability change or `VACUUM` accompanies migration.
+
+Immediate record-vector scoring may borrow a Float32 view only on little-endian
+hosts, for a four-byte-aligned complete payload backed by a private, non-resizable
+ArrayBuffer. Cosine similarity consumes it synchronously: it must not escape to
+public results, caches or async work, or survive WASM memory growth. Other payloads
+retain decoder precedence and fallback. Public stored-vector readers still return
+independent ordinary arrays. Stored bytes, precision, candidate selection and
+ranking weights do not change.
+
+Lexical `memory_fts` is contentless-delete FTS5. Postings, positions and BM25
+document sizes remain without another full-text copy. History content and memory
+statements remain independent authorities even when bytes match. Han bigrams,
+recall triggers and contentless surface trigrams retain their transformations.
+`memory_fts_registry.lexical_rowid` maps lexical rows to stable memory IDs; the
+registry rowid still maps surface rows. Migration preserves both rowid orders,
+rebuilds once from authority and commits indexes, registry schema and format
+markers in one savepoint. Refresh updates both indexes and mappings atomically.
+Deleted memories are not reindexed on reopen; dormant/restored records follow
+storage state. Current read-only queries support legacy full-content tables
+without migration and resolve the small registry after writer upgrade. Older
+executables/SQL using `memory_fts.memory_id` for reads or deletes are incompatible:
+upgrade readers/writers together or adopt registry-aware queries. Binary-vector
+support alone is insufficient. FTS migration changes no page size and performs
+no automatic compaction.
 
 The same authority boundary applies to write-time candidate acceleration. An
 optional process-local per-scope index may retain raw and normalised statements,

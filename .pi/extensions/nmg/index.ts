@@ -8,9 +8,19 @@
 // another is a defect: add it to src/ + the daemon, then have every adapter
 // forward the same RPC. Duplicating logic adapter-side drifts and goes stale.
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { observeRecallPreparation, registerFirstResponseTiming } from "./first-response-timing.ts";
+import { registerWorkingStateView } from "./working-state-view.ts";
+
 import { join } from "node:path";
 
+import { defineTool } from "@earendil-works/pi-coding-agent";
+import {
+  captureStateInvocation,
+  stateOperation,
+  renderStateOutput,
+  STATE_BOARD_READ_OPERATIONS,
+} from "../../../src/integration/state.ts";
+import type { NmgStateResult } from "../../../src/cli/protocol.ts";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
@@ -18,7 +28,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Box, Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 
 import {
   connectDaemon,
@@ -27,6 +37,8 @@ import {
   type DaemonConnection,
 } from "../../../src/cli/daemon-client.ts";
 import { resolveNmgDataDir } from "../../../src/cli/data-path.ts";
+import type { HttpCallOptions } from "../../../src/cli/http-client.ts";
+import { RecallBudget, RecallDeadlineExceeded } from "../../../src/integration/recall-budget.ts";
 import {
   archiveOrStage,
   archiveNodeName,
@@ -37,30 +49,59 @@ import {
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import { memoryDisclosureEntries } from "../../../src/integration/search-projection.ts";
 import { PI_BOARD_ACTIONS, PI_REMEMBER_ACTIONS } from "../../../src/integration/tool-contract.ts";
+import type { TaskBoardToolResult } from "../../../src/integration/tool-contract.ts";
+import {
+  type BoardWakeConfig,
+  type BoardWakeState,
+  collectWakeCandidates,
+  deliverBoardWake,
+  filterUndelivered,
+  loadWakeState as loadWakeStateShared,
+  readWakeConfig as readWakeConfigShared,
+  wakeBudgetGate,
+  writeWakeConfig as writeWakeConfigShared,
+} from "../../../src/integration/board-wake.ts";
+import {
+  loadOrCreateAgentIdentity,
+  renameAgentIdentity,
+} from "../../../src/integration/agent-identity.ts";
+import {
+  AgentAttributionFlow,
+  extractAnswerText,
+  extractPromptText,
+} from "../../../src/integration/agent-attribution.ts";
+import { SessionRecallFlow } from "../../../src/integration/session-recall-flow.ts";
+import { SessionTaskWindow } from "../../../src/integration/session-task-window.ts";
+import {
+  isMemorableToolResult,
+  isSuccessfulCommit,
+  messageText,
+  summarizeToolResult,
+} from "../../../src/integration/tool-observation.ts";
+import { renderLabOutput } from "../../../src/integration/lab-capabilities.ts";
 import { TASK_BOARD_VERDICTS } from "../../../src/core/types.ts";
-import { boardEntryView } from "../../../src/core/board-entry-view.ts";
 import { resolveSkillOptPolicyChannels } from "../../../src/lab/skillopt-policy.ts";
-import type {
-  ActiveGraphBudget,
-  MemoryContext,
-  MemorySearchResult,
-  MemoryTier,
-} from "../../../src/core/types.ts";
+import type { ActiveGraphBudget, MemoryContext, MemoryTier } from "../../../src/core/types.ts";
 import { WORLD_BOARD_ID } from "../../../src/core/types.ts";
 import {
-  coordinationEnabled,
+  configuredAutoRecallLimit,
+  configuredAutoRecallTier,
   configuredControllerRerankMode,
+  configuredInitialTarget,
   configuredQpp1Mode,
   configuredQpp2Mode,
   configuredQpp2RetainedMass,
   configuredSearchRecommendationMode,
+  configuredStrongHitInitialTarget,
+  configuredStrongHitTopGap,
+  coordinationEnabled,
   type SearchRecommendationMode,
 } from "../../../src/integration/config.ts";
 import {
   renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
-  renderSessionActiveGraphSurface,
+  searchInformationViews,
   renderTaskBoardSurface,
 } from "../../../src/integration/agent-surface.ts";
 import {
@@ -68,12 +109,23 @@ import {
   type AgentHistoryMessage,
   type SelectedEvidence,
 } from "../../../src/integration/evidence.ts";
+import type {
+  InformationView,
+  PreparedInformationOutput,
+} from "../../../src/core/information-view.ts";
+import { prepareInformationOutput } from "../../../src/integration/information-output.ts";
+import {
+  checkpointInformationViews,
+  contextBoardEntries,
+  contextNotice,
+  contextStateViews,
+} from "../../../src/integration/context-information.ts";
 import { deriveAnswerOverlapMemoryIds } from "../../../src/core/feedback.ts";
-import { decideMemoryLoad } from "../../../src/core/gate.ts";
 import {
   REASONING_EDGE_KINDS,
   REASONING_NODE_KINDS,
   REASONING_STATUSES,
+  type ReasoningCheckpoint,
 } from "../../../src/lab/reasoning-workspace.ts";
 import {
   ControllerShadowBridge,
@@ -123,7 +175,9 @@ function assertBoardVerbCall(params: {
 }
 
 export default function nmgExtension(pi: ExtensionAPI): void {
+  const firstResponseTiming = registerFirstResponseTiming(pi);
   let connectionPromise: Promise<DaemonConnection> | undefined;
+  let latestRecallTiming: ReturnType<RecallBudget["timing"]> | undefined;
   const taskWindow = new SessionTaskWindow();
   const recallFlow = new SessionRecallFlow();
   const agentAttributionFlow = new AgentAttributionFlow(32);
@@ -143,6 +197,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   // forwards feedback — no learner logic or ask-scheduling lives here.
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
   const coordinationToolsEnabled = coordinationEnabled();
+  // Wake config/state persistence lives in src/integration/board-wake.ts; the
+  // adapter only binds the data directory once so the /nmg UI below keeps its
+  // one-argument surface without duplicating any load/save/gating logic.
+  const wakeDataDir = resolveNmgDataDir();
+  const readWakeConfig = (): BoardWakeConfig => readWakeConfigShared(wakeDataDir);
+  const writeWakeConfig = (config: BoardWakeConfig): void =>
+    writeWakeConfigShared(config, wakeDataDir);
+  const loadWakeState = (): BoardWakeState => loadWakeStateShared(wakeDataDir);
   // The online-learning gate is inlined here because the pi package cannot
   // import the learner module — it pulls node:fs + the learner dep tree across
   // the thin-extension pack boundary. The daemon owns the real gate; this only
@@ -155,7 +217,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   // missed recalls that never armed it and silently suppressed the ask.
   const recallFeedbackAffordance = (graphId: string | null | undefined): string => {
     if (!graphId || !onlineLearningActive()) return "";
-    return renderDisclosure(nmgPrompts.recall_feedback_affordance, { graph_id: graphId });
+    return renderDisclosure(nmgPrompts.recall_feedback_affordance, {
+      graph_id: graphId,
+    });
   };
   // Most recent event context, used by the board wake loop to test isIdle and
   // to resolve the current session id outside an event handler.
@@ -183,28 +247,46 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       | "search"
       | "sessionActiveGraph"
       | "taskBoard"
+      | "state"
       | "recordActiveGraphAttribution"
       | "recordClaimOutcomes"
       | "recordFeedback",
     params: Record<string, unknown>,
-  ) => invokeDaemon(await connection(), method, params);
+    options: HttpCallOptions = {},
+  ) => invokeDaemon(await connection(), method, params, options);
+
+  const workingStateView = registerWorkingStateView(pi, async (sessionId) => {
+    const result = (await invoke("sessionActiveGraph", {
+      action: "snapshot",
+      sessionId,
+    })) as {
+      snapshot:
+        import("../../../src/core/session-active-graph.ts").SessionActiveGraphSnapshot | null;
+    };
+    return result.snapshot;
+  });
 
   const formatDisclosedContext = async (
     sessionId: string,
     context: MemoryContext,
     disclosure: DisclosureLevel,
+    options: HttpCallOptions = {},
   ): Promise<string> => {
     if (context.results.length === 0) {
       return disclosure === "header" ? "No matching NMG memory found." : "";
     }
     try {
-      const decision = (await invoke("sessionActiveGraph", {
-        action: "disclose",
-        sessionId,
-        projectionId: context.activeGraph?.id,
-        disclosure,
-        entries: memoryDisclosureEntries(context, disclosure),
-      })) as { freshMemoryIds: string[]; foldedMemoryIds: string[] };
+      const decision = (await invoke(
+        "sessionActiveGraph",
+        {
+          action: "disclose",
+          sessionId,
+          projectionId: context.activeGraph?.id,
+          disclosure,
+          entries: memoryDisclosureEntries(context, disclosure),
+        },
+        options,
+      )) as { freshMemoryIds: string[]; foldedMemoryIds: string[] };
       const freshIds = new Set(decision.freshMemoryIds);
       const foldedIds = new Set(decision.foldedMemoryIds);
       const fresh = context.results.filter((result) => freshIds.has(result.memory.id));
@@ -232,12 +314,20 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       return disclosure === "header" ? formatSearchHeaders(context) : formatMemoryContext(context);
     }
   };
-  const beginDisclosureTurn = async (sessionId: string, enabled: boolean): Promise<void> => {
+  const beginDisclosureTurn = async (
+    sessionId: string,
+    enabled: boolean,
+    options: HttpCallOptions = {},
+  ): Promise<void> => {
     if (!enabled) return;
-    await invoke("sessionActiveGraph", {
-      action: "beginDisclosureTurn",
-      sessionId,
-    }).catch(() => undefined);
+    await invoke(
+      "sessionActiveGraph",
+      {
+        action: "beginDisclosureTurn",
+        sessionId,
+      },
+      options,
+    ).catch(() => undefined);
   };
 
   // git commit via the bash tool is the strongest "milestone" signal available
@@ -256,6 +346,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         action: "observe",
         sessionId,
         sourceId: event.toolName,
+        sourceKind: event.isError ? "tool_error" : "tool_result",
         nodeId: observation.nodeName,
         statement: observation.statement,
       });
@@ -264,19 +355,19 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("before_agent_start", async (event, ctx) => {
-    const sessionId = ctx.sessionManager.getSessionId();
-    const isNewUserTurn = recallFlow.beginTurn(
-      sessionId,
-      piUserTurnKey(ctx.sessionManager, event.prompt),
-    );
-    await beginDisclosureTurn(sessionId, isNewUserTurn);
-    const completionNudge = popCompletionNudge(event.prompt);
-    // Pi re-enters before_agent_start after tool results. A completed graph may
-    // already exist at that point, but it must be reviewed on the next user
-    // turn, not consumed by an internal tool loop from the same prompt.
+  const recallNudges = async (
+    budget: RecallBudget,
+    sessionId: string,
+    isNewUserTurn: boolean,
+    prompt: string,
+  ) => {
+    const completionNudge = popCompletionNudge(prompt);
+    // Tool-loop re-entry must not consume a review intended for the next user turn.
     const pendingFeedback = isNewUserTurn ? controllerShadow.pendingFeedback(sessionId) : null;
-    if (pendingFeedback) await controllerShadow.feedbackNudgeShown(sessionId, pendingFeedback);
+    if (pendingFeedback)
+      await budget.run("feedback.nudge", () =>
+        controllerShadow.feedbackNudgeShown(sessionId, pendingFeedback),
+      );
     const feedbackNudge = pendingFeedback
       ? renderDisclosure(nmgPrompts.shadow_feedback_nudge, {
           active_graph_id: pendingFeedback.activeGraphId,
@@ -287,7 +378,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       ? controllerShadow.pendingClaimOutcome(sessionId)
       : null;
     if (pendingClaimOutcome) {
-      await controllerShadow.claimOutcomeNudgeShown(sessionId, pendingClaimOutcome);
+      await budget.run("claim.nudge", () =>
+        controllerShadow.claimOutcomeNudgeShown(sessionId, pendingClaimOutcome),
+      );
     }
     const claimOutcomeNudge = pendingClaimOutcome
       ? renderDisclosure(nmgPrompts.shadow_claim_outcome_nudge, {
@@ -296,63 +389,132 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           memory_ids: pendingClaimOutcome.memoryIds.join(","),
         })
       : "";
-    const nudge = [completionNudge, feedbackNudge, claimOutcomeNudge].filter(Boolean).join("\n");
-    let reasoningCheckpoint = "";
+    return [completionNudge, feedbackNudge, claimOutcomeNudge].flatMap((body) =>
+      contextNotice(body),
+    );
+  };
+  const reasoningCheckpointFor = async (
+    budget: RecallBudget,
+    sessionId: string,
+  ): Promise<InformationView[]> => {
     if (labToolsEnabled) {
       try {
-        const status = (await invokeDaemon(await connection(), "lab", {
-          action: "status",
-          capability: "reasoning_workspace",
-          sessionId,
-        })) as { activation?: unknown };
+        const status = (await budget.run("reasoning.status", async (signal) =>
+          invokeDaemon(
+            await connection(),
+            "lab",
+            {
+              action: "status",
+              capability: "reasoning_workspace",
+              sessionId,
+            },
+            { signal },
+          ),
+        )) as { activation?: unknown };
         if (status.activation) {
-          const consumed = (await invokeDaemon(await connection(), "lab", {
-            action: "invoke",
-            capability: "reasoning_workspace",
-            sessionId,
-            operation: "consume_checkpoint",
-            input: { maxNodes: 24, maxChars: 6_000 },
-          })) as { output?: { text?: string } | null };
-          reasoningCheckpoint = consumed.output?.text ?? "";
+          const consumed = (await budget.run("reasoning.checkpoint", async (signal) =>
+            invokeDaemon(
+              await connection(),
+              "lab",
+              {
+                action: "invoke",
+                capability: "reasoning_workspace",
+                sessionId,
+                operation: "consume_checkpoint",
+                input: { maxNodes: 24, maxChars: 6_000 },
+              },
+              { signal },
+            ),
+          )) as { output?: ReasoningCheckpoint | null };
+          return checkpointInformationViews(consumed.output ?? null, sessionId);
         }
       } catch (error) {
-        reasoningCheckpoint = `Reasoning workspace unavailable: ${message(error)}`;
+        return contextNotice(`Reasoning workspace unavailable: ${message(error)}`, "diagnostic");
       }
     }
-    let runtimeAgContext = "";
+    return [];
+  };
+
+  // One typed state read per turn; no model-tool round trip or rendered-text parser.
+  const readTurnAgContext = async (
+    budget: RecallBudget,
+    sessionId: string,
+  ): Promise<readonly InformationView[]> => {
     try {
-      const result = (await invoke("sessionActiveGraph", {
-        action: "snapshot",
+      const result = (await budget.run("state.read", (signal) =>
+        invoke("state", { action: "read", space: "ag", sessionId }, { signal }),
+      )) as NmgStateResult;
+      if (result.space !== "ag" || result.result.action !== "snapshot")
+        throw new Error("Invalid AG state result");
+      return contextStateViews(result.result.snapshot, sessionId);
+    } catch (error) {
+      return contextNotice(`AG context unavailable: ${message(error)}`, "diagnostic");
+    }
+  };
+
+  observeRecallPreparation(pi, firstResponseTiming, async (event, ctx) => {
+    const budget = new RecallBudget(undefined, ctx.signal);
+    const sessionId = ctx.sessionManager.getSessionId();
+    const partial = {
+      base: [] as InformationView[],
+      candidates: [] as InformationView[],
+      hints: [] as InformationView[],
+      context: undefined as MemoryContext | undefined,
+    };
+    const automaticInvoke = (
+      method: Parameters<typeof invoke>[0],
+      params: Record<string, unknown>,
+    ) =>
+      budget.run(
+        `${method}${typeof params.action === "string" ? `.${params.action}` : ""}`,
+        (signal) => invoke(method, params, { signal }),
+      );
+    const currentOutput = (diagnostic = "") =>
+      prepareInformationOutput(
+        [
+          ...partial.base,
+          ...partial.candidates,
+          ...partial.hints,
+          ...contextNotice(diagnostic, "diagnostic"),
+        ],
+        { format: "context" },
+      );
+    const includedMemoryIds = (output: PreparedInformationOutput) =>
+      output.included.flatMap((entry) =>
+        entry.source.kind === "memory" ? [entry.source.memoryId] : [],
+      );
+    const surfaceResult = (output: PreparedInformationOutput) => {
+      const context = partial.context;
+      if (context) {
+        const ids = new Set(includedMemoryIds(output));
+        agentAttributionFlow.note(sessionId, {
+          ...context,
+          results: context.results.filter((result) => ids.has(result.memory.id)),
+        });
+      }
+      return persistedContextResult(output, event.systemPrompt);
+    };
+    const prepare = async () => {
+      const isNewUserTurn = recallFlow.beginTurn(
         sessionId,
-      })) as {
-        snapshot?:
-          import("../../../src/core/session-active-graph.ts").SessionActiveGraphSnapshot | null;
-      };
-      runtimeAgContext = renderSessionActiveGraphSurface(result.snapshot ?? null);
-    } catch {
-      // Search and ordinary Pi operation continue without optional working state.
-    }
-    const runtimeContext = [runtimeAgContext, reasoningCheckpoint].filter(Boolean).join("\n");
-    const recallRequest = taskWindow.prepare(sessionId, event.prompt);
-    const dynamicContext = composeNmgContextMessage("", "", nudge, runtimeContext);
-    if (!recallRequest) {
-      return {
-        systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
-        ...(dynamicContext
-          ? {
-              message: {
-                customType: "nmg-context",
-                content: dynamicContext,
-                display: true,
-                details: { count: 0 },
-              },
-            }
-          : {}),
-      };
-    }
-    try {
-      let context = (await invoke("search", {
+        piUserTurnKey(ctx.sessionManager, event.prompt),
+      );
+      await budget.run("connection", () => connection());
+      await budget.run("disclosure.begin", (signal) =>
+        beginDisclosureTurn(sessionId, isNewUserTurn, { signal }),
+      );
+      partial.base.push(...(await recallNudges(budget, sessionId, isNewUserTurn, event.prompt)));
+      // Each completed typed stage survives later optional work or a deadline.
+      partial.base.unshift(...(await reasoningCheckpointFor(budget, sessionId)));
+      partial.base.push(...(await readTurnAgContext(budget, sessionId)));
+    };
+    const automatic = async () => {
+      await prepare();
+      const recallRequest = taskWindow.prepare(sessionId, event.prompt);
+      if (!recallRequest) return surfaceResult(currentOutput());
+      let context = (await automaticInvoke("search", {
         query: recallRequest.query,
+        autoRecallBudgetMs: Math.max(1, Math.floor(Math.min(4_500, budget.remainingMs - 100))),
         projectDir: projectDirectory(),
         sessionId,
         maxTier: Math.min(configuredAutoRecallTier(), recallRequest.maxTier) as MemoryTier,
@@ -363,70 +525,79 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         secondPass: qpp2Mode === "active",
         graphHops: Math.min(1, recallRequest.graphHops),
         tieredDisclosure: true,
-        // Tell the daemon this is an automatic recall decision: it stages the
-        // injected graph for online learning (explicit nmg_search stays unstaged).
         autoRecall: true,
       })) as MemoryContext;
+      partial.context = context;
+      partial.candidates = searchInformationViews(context);
       if (controllerRerankMode === "active") {
-        context = await controllerShadow.rerank(context);
+        context = await budget.run("controller.rerank", () => controllerShadow.rerank(context));
+        partial.context = context;
+        partial.candidates = searchInformationViews(context);
       }
       const fullContext = context;
       if (qpp2Mode === "active") {
-        context = await applyLearnedFold(context, controllerShadow, qpp2RetainedMass, false);
+        context = await budget.run("controller.fold", () =>
+          applyLearnedFold(context, controllerShadow, qpp2RetainedMass, false),
+        );
+        partial.candidates = searchInformationViews(context);
       }
-      const recalled = await formatDisclosedContext(sessionId, context, "header");
-      await controllerShadow.retrieval(fullContext, sessionId, "automatic", recalled);
-      // Automatic recall is still a retrieval trace. Keep it in the per-turn
-      // attribution window so agent_end can distinguish surfaced evidence from
-      // candidates that were merely injected.
-      agentAttributionFlow.note(sessionId, fullContext);
-      const recordCount = (recalled.match(/memory=/g) ?? []).length;
-      const searchNudge = formatSearchRecommendation(context, recommendationMode);
-      const recallContext = composeNmgContextMessage(
-        recalled,
-        "",
-        [
-          nudge,
-          searchNudge,
-          recordCount > 0 ? recallFeedbackAffordance(fullContext.activeGraph?.id) : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        runtimeContext,
+      partial.hints = [
+        formatSearchRecommendation(context, recommendationMode),
+        formatProgressiveDisclosure(context),
+        context.results.length > 0 ? recallFeedbackAffordance(fullContext.activeGraph?.id) : "",
+      ].flatMap((body) => contextNotice(body));
+      const output = currentOutput();
+      await budget.run("controller.telemetry", () =>
+        controllerShadow.retrieval(
+          fullContext,
+          sessionId,
+          "automatic",
+          includedMemoryIds(output)
+            .map((id) => `memory=${id}`)
+            .join("\n"),
+        ),
       );
+      return surfaceResult(output);
+    };
+    try {
+      const result = await budget.run("automatic.context", automatic);
       return {
-        systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
-        ...(recallContext
+        ...result,
+        ...(result.message
           ? {
               message: {
-                customType: "nmg-context",
-                content: recallContext,
-                display: true,
-                details: { count: recordCount },
+                ...result.message,
+                details: {
+                  ...result.message.details,
+                  recallTiming: budget.timing(),
+                },
               },
             }
           : {}),
       };
     } catch (error) {
-      const errorContext = composeNmgContextMessage(
-        "",
-        `NMG unavailable: ${message(error)}`,
-        nudge,
-        runtimeContext,
-      );
+      const diagnostic =
+        error instanceof RecallDeadlineExceeded
+          ? "NMG automatic recall reached its 5-second budget; late work was ignored."
+          : `NMG unavailable: ${message(error)}`;
+      const result = surfaceResult(currentOutput(diagnostic));
       return {
-        systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
-        ...(errorContext
+        ...result,
+        ...(result.message
           ? {
               message: {
-                customType: "nmg-context",
-                content: errorContext,
-                display: true,
-                details: { count: 0 },
+                ...result.message,
+                details: {
+                  ...result.message.details,
+                  recallTiming: budget.timing(),
+                },
               },
             }
           : {}),
       };
+    } finally {
+      latestRecallTiming = budget.timing();
+      budget.close();
     }
   });
 
@@ -449,19 +620,31 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   // NMG 总二级/三级菜单。早期只有独立的 /nmg-recall 命令；现在统一收编到
   // /nmg 下，保留 /nmg-recall 作为别名。状态只影响后续渲染与重开会话后的
   // 历史恢复；已渲染的历史消息不重绘（pi 无公开 force-rerender）。
+  const recallCommand = (args: readonly string[], ctx: ExtensionCommandContext): void => {
+    if (args[0] === "timing") {
+      ctx.ui.notify(
+        latestRecallTiming
+          ? JSON.stringify(latestRecallTiming, null, 2)
+          : "本会话尚无自动召回耗时记录",
+        "info",
+      );
+      return;
+    }
+    recallCollapsed = !recallCollapsed;
+    ctx.ui.notify(
+      recallCollapsed
+        ? "nmg-context 已折叠（只显示 [nmg-context] chip）"
+        : "nmg-context 已展开（显示召回全文）",
+      "info",
+    );
+  };
   const nmgMenuHandler = async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
     const parts = args.trim().split(/\s+/).filter(Boolean);
     const [sub, ...rest] = parts;
     const restText = rest.join(" ");
     switch (sub) {
       case "recall": {
-        recallCollapsed = !recallCollapsed;
-        ctx.ui.notify(
-          recallCollapsed
-            ? "nmg-context 已折叠（只显示 [nmg-context] chip）"
-            : "nmg-context 已展开（显示召回全文）",
-          "info",
-        );
+        recallCommand(rest, ctx);
         return;
       }
       case "wake": {
@@ -560,10 +743,74 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   };
   // 交互式选择菜单：/nmg（无参数）弹出可上下键选的列表，避免手敲。带参数的
   // 形式（/nmg recall、/nmg wake on 等）仍保留，供脚本/快捷路径直接调用。
+  // 挡位选择（select 预设值，避免随意输入溢出/无效）；自由数字只走命令形式
+  // （/nmg wake budget N 等，已有 clamp）。
+  const nmgWakeParamMenu = async (ctx: ExtensionCommandContext): Promise<void> => {
+    const param = await ctx.ui.select("唤醒参数", ["每日上限", "冷却", "轮询"]);
+    if (!param) return;
+    const current = readWakeConfig();
+    if (param === "每日上限") await nmgWakeBudgetMenu(current, ctx);
+    else if (param === "冷却") await nmgWakeCooldownMenu(current, ctx);
+    else if (param === "轮询") await nmgWakeIntervalMenu(current, ctx);
+  };
+  const nmgWakeBudgetMenu = async (
+    current: ReturnType<typeof readWakeConfig>,
+    ctx: ExtensionCommandContext,
+  ): Promise<void> => {
+    const option = await ctx.ui.select("每日唤醒上限", ["不限制", "3/天", "8/天", "15/天"]);
+    if (!option) return;
+    const budget = option === "不限制" ? 0 : Number(option.split("/")[0]);
+    writeWakeConfig({ ...current, budget });
+    ctx.ui.notify(`黑板唤醒预算已设为 ${budget === 0 ? "不限制" : `${budget}/天`}`, "info");
+  };
+  const nmgWakeCooldownMenu = async (
+    current: ReturnType<typeof readWakeConfig>,
+    ctx: ExtensionCommandContext,
+  ): Promise<void> => {
+    const option = await ctx.ui.select("冷却", ["无", "10 分钟", "30 分钟", "1 小时"]);
+    if (!option) return;
+    const cooldownMs =
+      option === "无"
+        ? 0
+        : option === "10 分钟"
+          ? 600_000
+          : option === "30 分钟"
+            ? 1_800_000
+            : 3_600_000;
+    writeWakeConfig({ ...current, cooldownMs });
+    ctx.ui.notify(
+      `黑板唤醒冷却已设为 ${cooldownMs === 0 ? "无" : `${Math.round(cooldownMs / 60_000)} 分钟`}`,
+      "info",
+    );
+  };
+  const nmgWakeIntervalMenu = async (
+    current: ReturnType<typeof readWakeConfig>,
+    ctx: ExtensionCommandContext,
+  ): Promise<void> => {
+    const option = await ctx.ui.select("轮询", ["5 秒", "30 秒", "60 秒", "5 分钟"]);
+    if (!option) return;
+    const intervalMs =
+      option === "5 秒"
+        ? 5_000
+        : option === "30 秒"
+          ? 30_000
+          : option === "60 秒"
+            ? 60_000
+            : 300_000;
+    writeWakeConfig({ ...current, intervalMs });
+    ctx.ui.notify(`黑板唤醒轮询已设为 ${Math.round(intervalMs / 1_000)} 秒`, "info");
+  };
+  // 状态预览的菜单入口：只切显示，不改状态、不改携带。
+  const nmgStatePreviewMenu = async (ctx: ExtensionCommandContext): Promise<void> => {
+    const onOff = await ctx.ui.select("NMG 当前工作状态预览", ["显示", "隐藏"]);
+    if (!onOff) return;
+    await workingStateView.setPreview(onOff === "显示", ctx);
+    ctx.ui.notify(onOff === "显示" ? "状态预览已显示" : "状态预览已隐藏（状态本身不变）", "info");
+  };
   const nmgInteractiveMenu = async (ctx: ExtensionCommandContext): Promise<void> => {
     if (!ctx.hasUI || typeof ctx.ui.select !== "function") {
       ctx.ui.notify(
-        "当前模式不支持交互菜单，可用：/nmg recall、/nmg wake on|off|status|budget N|cooldown M|interval S",
+        "当前模式不支持交互菜单，可用：/nmg recall、/nmg state on|off、/nmg wake on|off|status|budget N|cooldown M|interval S",
         "warning",
       );
       return;
@@ -599,47 +846,15 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       return;
     }
     if (choice.startsWith("唤醒：参数设置")) {
-      // 挡位选择（select 预设值，避免随意输入溢出/无效）；自由数字只走命令形式
-      // （/nmg wake budget N 等，已有 clamp）。
-      const param = await ctx.ui.select("唤醒参数", ["每日上限", "冷却", "轮询"]);
-      if (!param) return;
-      const current = readWakeConfig();
-      if (param === "每日上限") {
-        const option = await ctx.ui.select("每日唤醒上限", ["不限制", "3/天", "8/天", "15/天"]);
-        if (!option) return;
-        const budget = option === "不限制" ? 0 : Number(option.split("/")[0]);
-        writeWakeConfig({ ...current, budget });
-        ctx.ui.notify(`黑板唤醒预算已设为 ${budget === 0 ? "不限制" : `${budget}/天`}`, "info");
-      } else if (param === "冷却") {
-        const option = await ctx.ui.select("冷却", ["无", "10 分钟", "30 分钟", "1 小时"]);
-        if (!option) return;
-        const cooldownMs =
-          option === "无"
-            ? 0
-            : option === "10 分钟"
-              ? 600_000
-              : option === "30 分钟"
-                ? 1_800_000
-                : 3_600_000;
-        writeWakeConfig({ ...current, cooldownMs });
-        ctx.ui.notify(
-          `黑板唤醒冷却已设为 ${cooldownMs === 0 ? "无" : `${Math.round(cooldownMs / 60_000)} 分钟`}`,
-          "info",
-        );
-      } else if (param === "轮询") {
-        const option = await ctx.ui.select("轮询", ["5 秒", "30 秒", "60 秒", "5 分钟"]);
-        if (!option) return;
-        const intervalMs =
-          option === "5 秒"
-            ? 5_000
-            : option === "30 秒"
-              ? 30_000
-              : option === "60 秒"
-                ? 60_000
-                : 300_000;
-        writeWakeConfig({ ...current, intervalMs });
-        ctx.ui.notify(`黑板唤醒轮询已设为 ${Math.round(intervalMs / 1_000)} 秒`, "info");
-      }
+      await nmgWakeParamMenu(ctx);
+      return;
+    }
+    if (choice.startsWith("当前状态：查看完整正文")) {
+      await workingStateView.readForUser(ctx);
+      return;
+    }
+    if (choice.startsWith("当前状态：显示/隐藏预览")) {
+      await nmgStatePreviewMenu(ctx);
       return;
     }
     {
@@ -652,6 +867,27 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         "info",
       );
     }
+  };
+  // `/nmg state [on|off]` is the read-only state view and its preview switch.
+  // It dispatches before the menu handler so that handler keeps its own shape.
+  const nmgStateCommand = async (rest: string[], ctx: ExtensionCommandContext): Promise<void> => {
+    const [action] = rest;
+    if (action === "on" || action === "off") {
+      await workingStateView.setPreview(action === "on", ctx);
+      ctx.ui.notify(
+        action === "on"
+          ? "NMG 当前工作状态预览已显示"
+          : "NMG 当前工作状态预览已隐藏（状态本身不变，/nmg state 仍可查看）",
+        "info",
+      );
+      return;
+    }
+    await workingStateView.readForUser(ctx);
+  };
+  const nmgCommand = async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
+    const [sub, ...rest] = args.trim().split(/\s+/).filter(Boolean);
+    if (sub === "state") return nmgStateCommand(rest, ctx);
+    return nmgMenuHandler(args, ctx);
   };
   // 菜单项带当前状态，进子菜单前就看得见：召回折叠/展开、唤醒开/关、参数当前值。
   // 预算/冷却支持 0（不限制/无），轮询保持最小 5 秒（0 无意义）。
@@ -667,22 +903,58 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       `唤醒：开启/关闭（当前 ${wake.enabled ? "开" : "关"}）`,
       `唤醒：世界广播（当前 ${wake.worldBroadcast ? "开" : "关"}）`,
       `唤醒：参数设置（预算 ${budgetText} · 冷却 ${cooldownText} · 轮询 ${Math.round(wake.intervalMs / 1_000)} 秒）`,
+      ...nmgStateMenuLabels(),
       "查看状态",
     ];
   };
+  const nmgStateMenuLabels = (): string[] => [
+    "当前状态：查看完整正文",
+    `当前状态：显示/隐藏预览（当前 ${workingStateView.previewEnabled() ? "显示" : "隐藏"}）`,
+  ];
   pi.registerCommand("nmg", {
     description:
-      "NMG 菜单：/nmg recall · wake on/off/status/world · wake budget N · wake cooldown M · wake interval S",
+      "NMG 菜单：/nmg recall · state [on|off] · wake on/off/status/world · wake budget N · wake cooldown M · wake interval S",
     getArgumentCompletions: (prefix) => {
       const items: AutocompleteItem[] = [
-        { value: "recall", label: "recall", description: "切换 nmg-context 召回折叠/展开" },
+        {
+          value: "recall",
+          label: "recall",
+          description: "切换 nmg-context 召回折叠/展开",
+        },
+        {
+          value: "state",
+          label: "state",
+          description: "查看完整当前工作状态（只读）",
+        },
+        { value: "state on", label: "state on", description: "显示状态预览" },
+        {
+          value: "state off",
+          label: "state off",
+          description: "隐藏状态预览（不改状态）",
+        },
         { value: "wake", label: "wake", description: "黑板唤醒开关/配置" },
         { value: "wake on", label: "wake on", description: "开启黑板唤醒" },
         { value: "wake off", label: "wake off", description: "关闭黑板唤醒" },
-        { value: "wake status", label: "wake status", description: "显示唤醒配置" },
-        { value: "wake budget ", label: "wake budget N", description: "每日唤醒上限（0=不限制）" },
-        { value: "wake cooldown ", label: "wake cooldown M", description: "冷却分钟（0=无）" },
-        { value: "wake interval ", label: "wake interval S", description: "轮询秒（最小 5）" },
+        {
+          value: "wake status",
+          label: "wake status",
+          description: "显示唤醒配置",
+        },
+        {
+          value: "wake budget ",
+          label: "wake budget N",
+          description: "每日唤醒上限（0=不限制）",
+        },
+        {
+          value: "wake cooldown ",
+          label: "wake cooldown M",
+          description: "冷却分钟（0=无）",
+        },
+        {
+          value: "wake interval ",
+          label: "wake interval S",
+          description: "轮询秒（最小 5）",
+        },
         {
           value: "wake world",
           label: "wake world",
@@ -692,7 +964,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const normalized = prefix.trim();
       return items.filter((item) => item.value.startsWith(normalized));
     },
-    handler: nmgMenuHandler,
+    handler: nmgCommand,
   });
 
   pi.on("session_start", async (_event, ctx) => {
@@ -713,7 +985,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           truthStatus: "asserted",
           tier: 2,
           importance: 0.2,
-          markers: [{ kind: "session_archive", attributes: { sessionId: entry.sessionId } }],
+          markers: [
+            {
+              kind: "session_archive",
+              attributes: { sessionId: entry.sessionId },
+            },
+          ],
           scope: { project: projectDirectory() },
           writeReason: "session_archive_flush",
           projectDir: projectDirectory(),
@@ -737,7 +1014,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     // heartbeats it each tick). Never wakes an LLM. Capabilities come from
     // NMG_AGENT_CAPABILITIES (comma-separated) when set.
     try {
-      const identity = loadOrCreateAgentIdentity(sessionId);
+      const identity = loadOrCreateAgentIdentity(sessionId, "pi");
       await invoke("taskBoard", {
         action: "registerAgent",
         id: identity.id,
@@ -813,7 +1090,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       return;
     }
     try {
-      await invokeDaemon(active, "sessionActiveGraph", { action: "release", sessionId });
+      await invokeDaemon(active, "sessionActiveGraph", {
+        action: "release",
+        sessionId,
+      });
     } catch {
       // Process teardown below is the final cleanup fallback.
     }
@@ -854,9 +1134,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
 
   pi.on("session_before_compact", async (_event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
-    await invoke("sessionActiveGraph", { action: "clearDisclosures", sessionId }).catch(
-      () => undefined,
-    );
+    await invoke("sessionActiveGraph", {
+      action: "clearDisclosures",
+      sessionId,
+    }).catch(() => undefined);
     try {
       await invoke("sessionActiveGraph", { action: "activate", sessionId });
     } catch {
@@ -903,7 +1184,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           { description: nmgPrompts.reason_action_parameter_description },
         ),
         nodeId: Type.Optional(
-          Type.String({ description: nmgPrompts.reason_node_id_parameter_description }),
+          Type.String({
+            description: nmgPrompts.reason_node_id_parameter_description,
+          }),
         ),
         kind: Type.Optional(
           Type.Union(
@@ -912,7 +1195,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           ),
         ),
         content: Type.Optional(
-          Type.String({ description: nmgPrompts.reason_content_parameter_description }),
+          Type.String({
+            description: nmgPrompts.reason_content_parameter_description,
+          }),
         ),
         status: Type.Optional(
           Type.Union(
@@ -933,10 +1218,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           }),
         ),
         sourceId: Type.Optional(
-          Type.String({ description: nmgPrompts.reason_source_id_parameter_description }),
+          Type.String({
+            description: nmgPrompts.reason_source_id_parameter_description,
+          }),
         ),
         targetId: Type.Optional(
-          Type.String({ description: nmgPrompts.reason_target_id_parameter_description }),
+          Type.String({
+            description: nmgPrompts.reason_target_id_parameter_description,
+          }),
         ),
         relation: Type.Optional(
           Type.Union(
@@ -964,7 +1253,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         }
         const input =
           params.action === "link"
-            ? { sourceId: params.sourceId, targetId: params.targetId, type: params.relation }
+            ? {
+                sourceId: params.sourceId,
+                targetId: params.targetId,
+                type: params.relation,
+              }
             : params.action === "update"
               ? {
                   nodeId: params.nodeId,
@@ -1032,13 +1325,16 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const sessionId = ctx.sessionManager.getSessionId();
+      if (String(params.capability) === "working_state")
+        throw new Error("Working state uses nmg_state");
       if (params.action !== "list" && !params.capability) {
         throw new Error(`${params.action} requires capability`);
       }
       if (params.action === "enable" && !params.reason) throw new Error("enable requires reason");
       if (params.action === "invoke" && !params.operation)
         throw new Error("invoke requires operation");
-      const result = await invokeDaemon(await connection(), "lab", {
+      const active = await connection();
+      const result = await invokeDaemon(active, "lab", {
         action: params.action,
         capability: params.capability,
         sessionId,
@@ -1049,7 +1345,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         operation: params.operation,
         input: params.input,
       });
-      return toolResult(result, JSON.stringify(result, null, 2));
+      return toolResult(result, renderLabOutput(result));
     },
   });
 
@@ -1065,37 +1361,59 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         ),
       ),
       memoryId: Type.Optional(
-        Type.String({ description: nmgPrompts.remember_memory_id_parameter_description }),
+        Type.String({
+          description: nmgPrompts.remember_memory_id_parameter_description,
+        }),
       ),
       activeGraphId: Type.Optional(
-        Type.String({ description: nmgPrompts.active_graph_id_parameter_description }),
+        Type.String({
+          description: nmgPrompts.active_graph_id_parameter_description,
+        }),
       ),
       taskSuccess: Type.Optional(
-        Type.Boolean({ description: nmgPrompts.feedback_label_parameter_description }),
+        Type.Boolean({
+          description: nmgPrompts.feedback_label_parameter_description,
+        }),
       ),
       userCorrection: Type.Optional(
-        Type.Boolean({ description: nmgPrompts.feedback_label_parameter_description }),
+        Type.Boolean({
+          description: nmgPrompts.feedback_label_parameter_description,
+        }),
       ),
       evidenceSufficient: Type.Optional(
-        Type.Boolean({ description: nmgPrompts.feedback_label_parameter_description }),
+        Type.Boolean({
+          description: nmgPrompts.feedback_label_parameter_description,
+        }),
       ),
       expansionUseful: Type.Optional(
-        Type.Boolean({ description: nmgPrompts.feedback_label_parameter_description }),
+        Type.Boolean({
+          description: nmgPrompts.feedback_label_parameter_description,
+        }),
       ),
       excessiveNoise: Type.Optional(
-        Type.Boolean({ description: nmgPrompts.feedback_label_parameter_description }),
+        Type.Boolean({
+          description: nmgPrompts.feedback_label_parameter_description,
+        }),
       ),
       noMemoryNeeded: Type.Optional(
-        Type.Boolean({ description: nmgPrompts.feedback_label_parameter_description }),
+        Type.Boolean({
+          description: nmgPrompts.feedback_label_parameter_description,
+        }),
       ),
       memoryMisleading: Type.Optional(
-        Type.Boolean({ description: nmgPrompts.feedback_misleading_parameter_description }),
+        Type.Boolean({
+          description: nmgPrompts.feedback_misleading_parameter_description,
+        }),
       ),
       feedbackNote: Type.Optional(
-        Type.String({ description: nmgPrompts.feedback_note_parameter_description }),
+        Type.String({
+          description: nmgPrompts.feedback_note_parameter_description,
+        }),
       ),
       semanticTaskId: Type.Optional(
-        Type.String({ description: nmgPrompts.semantic_task_id_parameter_description }),
+        Type.String({
+          description: nmgPrompts.semantic_task_id_parameter_description,
+        }),
       ),
       claimOutcome: Type.Optional(
         Type.Union([Type.Literal("supported"), Type.Literal("contradicted")], {
@@ -1108,7 +1426,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         }),
       ),
       claimSourceLineage: Type.Optional(
-        Type.String({ description: nmgPrompts.claim_source_lineage_parameter_description }),
+        Type.String({
+          description: nmgPrompts.claim_source_lineage_parameter_description,
+        }),
       ),
       claimIndexes: Type.Optional(
         Type.Array(Type.Number({ minimum: 0 }), {
@@ -1118,7 +1438,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       claimWeight: Type.Optional(Type.Number({ minimum: 0.000001, maximum: 1 })),
       statement: Type.Optional(Type.String()),
       nodeName: Type.Optional(
-        Type.String({ description: nmgPrompts.node_name_parameter_description }),
+        Type.String({
+          description: nmgPrompts.node_name_parameter_description,
+        }),
       ),
       recallTriggers: Type.Optional(
         Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
@@ -1127,7 +1449,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         }),
       ),
       newMemoryId: Type.Optional(
-        Type.String({ description: nmgPrompts.remember_new_memory_id_parameter_description }),
+        Type.String({
+          description: nmgPrompts.remember_new_memory_id_parameter_description,
+        }),
       ),
       supersededMemoryId: Type.Optional(
         Type.String({
@@ -1135,7 +1459,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         }),
       ),
       relatedMemoryId: Type.Optional(
-        Type.String({ description: nmgPrompts.remember_related_memory_id_parameter_description }),
+        Type.String({
+          description: nmgPrompts.remember_related_memory_id_parameter_description,
+        }),
       ),
       relationJudgement: Type.Optional(
         Type.Union(
@@ -1146,7 +1472,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             Type.Literal("related"),
             Type.Literal("same_entity"),
           ],
-          { description: nmgPrompts.remember_relation_judgement_parameter_description },
+          {
+            description: nmgPrompts.remember_relation_judgement_parameter_description,
+          },
         ),
       ),
       relationConfidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
@@ -1223,10 +1551,16 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       boardSource: Type.Optional(
         Type.Object(
           {
-            taskId: Type.String({ description: "Task board channel the content came from" }),
-            entryId: Type.String({ description: "Task board entry the content came from" }),
+            taskId: Type.String({
+              description: "Task board channel the content came from",
+            }),
+            entryId: Type.String({
+              description: "Task board entry the content came from",
+            }),
           },
-          { description: nmgPrompts.remember_board_source_parameter_description },
+          {
+            description: nmgPrompts.remember_board_source_parameter_description,
+          },
         ),
       ),
     }),
@@ -1360,7 +1694,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             note: params.feedbackNote,
           });
           const result = raw as
-            | { trained?: boolean; reward?: number; loss?: number; activeGraphId?: string | null }
+            | {
+                trained?: boolean;
+                reward?: number;
+                loss?: number;
+                activeGraphId?: string | null;
+              }
             | null
             | undefined;
           daemonGraphId = result?.activeGraphId ?? null;
@@ -1376,7 +1715,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         // Any real feedback addressed the recall it names; nothing to clear here
         // (the affordance rides with recall output, it is not scheduled).
         return toolResult(
-          { recorded, activeGraphId: params.activeGraphId ?? shadowGraphId ?? daemonGraphId },
+          {
+            recorded,
+            activeGraphId: params.activeGraphId ?? shadowGraphId ?? daemonGraphId,
+          },
           `Retrieval feedback processed.${online}${recorded ? "" : " Shadow log not recorded (set NMG_CONTROLLER_SHADOW=1 to also record natural shadow events)."}`,
         );
       }
@@ -1502,7 +1844,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           ? [
               {
                 kind: "board_origin",
-                attributes: { taskId: boardSource.taskId, entryId: boardSource.entryId },
+                attributes: {
+                  taskId: boardSource.taskId,
+                  entryId: boardSource.entryId,
+                },
               } as const,
             ]
           : []),
@@ -1678,215 +2023,309 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     },
   });
 
-  if (coordinationToolsEnabled)
-    pi.registerTool({
-      name: "nmg_board",
-      label: "NMG Task Board",
-      description: nmgPrompts.board_description,
-      parameters: Type.Object({
-        action: Type.Union(
-          PI_BOARD_ACTIONS.map((action) => Type.Literal(action)),
-          { description: nmgPrompts.board_action_parameter_description },
-        ),
-        taskId: Type.Optional(
-          Type.String({ description: nmgPrompts.board_task_id_parameter_description }),
-        ),
-        content: Type.Optional(
-          Type.String({ description: nmgPrompts.board_content_parameter_description }),
-        ),
-        kind: Type.Optional(
-          Type.Union([
-            Type.Literal("blocker"),
-            Type.Literal("decision"),
-            Type.Literal("goal"),
-            Type.Literal("handoff"),
-            Type.Literal("note"),
-            Type.Literal("question"),
-            Type.Literal("result"),
-          ]),
-        ),
-        entryId: Type.Optional(Type.String()),
-        resolution: Type.Optional(Type.String()),
-        reason: Type.Optional(Type.String()),
-        leaseSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 86_400 })),
-        digest: Type.Optional(
-          Type.String({
-            description:
-              "deliver only: the sha256 identity of the artifact you are handing in; the judge recomputes it",
-          }),
-        ),
-        ref: Type.Optional(
-          Type.String({
-            description:
-              "deliver only: where the artifact can be read (a path or URL the judge can open)",
-          }),
-        ),
-        summary: Type.Optional(
-          Type.String({ description: "deliver only: what the artifact contains, in one line" }),
-        ),
-        verdict: Type.Optional(
-          Type.Union(
-            TASK_BOARD_VERDICTS.map((value) => Type.Literal(value)),
-            {
-              description:
-                "judge only: your ruling on someone else's deliverable. The deliverer can never judge it",
-            },
-          ),
-        ),
-        afterCursor: Type.Optional(
-          Type.String({ description: "不透明游标：上一条已读 entry 的 id（增量读续点）" }),
-        ),
-        limit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
-        includeResolved: Type.Optional(Type.Boolean()),
-        ttlSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 2_592_000 })),
-        // A2A find→direct: put with to=<stable agent_name> wakes only that
-        // agent's LLM (others read-but-stay-silent). discover lists online
-        // agents so the caller can pick a to= target.
-        to: Type.Optional(
-          Type.String({
-            description:
-              "定向投递：stable agent_name 只唤醒该 agent；其他订阅者 read 可见但静默（需先 discover 选人）",
-          }),
-        ),
-        need: Type.Optional(Type.String({ description: "discover 的找人需求描述（可选）" })),
-        capabilities: Type.Optional(
-          Type.String({ description: "discover 按能力过滤（可选，如 'stg,audit'）" }),
-        ),
-        agentName: Type.Optional(
-          Type.String({ description: "rename 的新显示名（id 不变，reload 后保持）" }),
-        ),
-      }),
-      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-        const sessionId = ctx.sessionManager.getSessionId();
-        // Identity chain: explicit NMG_AGENT_ID wins, then the session id (stable
-        // across a session), then the pid as a last resort. A pid alone would
-        // change every launch and fragment cross-session attribution.
-        const identity = loadOrCreateAgentIdentity(sessionId);
-        const agentId = identity.id;
-        const agentName = identity.agentName;
-        assertBoardVerbCall(params);
-        // taskId is optional: without one, entries land on the shared world
-        // channel (the lobby), which every Agent reads by default — no channel
-        // name needs to be agreed on in advance. Explicit taskIds open named
-        // channels that are surfaced in the world channel's lobby.
-        const taskId = params.taskId?.trim() || WORLD_BOARD_ID;
-        // Runtime rename: change this agent's display name (id unchanged — it is
-        // the stable routing key). Persisted in the per-agent identity file so
-        // it survives reload; mirrored to the registry so discover shows it.
-        if (params.action === "rename") {
-          const newName = String(params.agentName ?? "").trim();
-          if (!newName) {
-            return toolResult(
-              { action: "rename", agentName, id: agentId },
-              `当前 agent 名：${agentName}（id=${agentId}）。用法：nmg_board rename <新名>`,
-            );
-          }
-          const anchor = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
-          const identityFile = join(resolveNmgDataDir(), "agents", anchor, "identity.json");
-          const renamedIdentity = { id: agentId, agentName: newName };
-          cachedIdentities.set(anchor, renamedIdentity);
-          try {
-            mkdirSync(join(resolveNmgDataDir(), "agents", anchor), { recursive: true });
-            writeFileSync(identityFile, JSON.stringify(renamedIdentity, null, 2), "utf8");
-          } catch {
-            // read-only dir — rename is in-memory only for this process
-          }
-          const result = (await invoke("taskBoard", {
-            action: "rename",
-            id: agentId,
-            agentName: newName,
-          })) as { action: "rename"; agentName: string; id: string };
-          return toolResult(
-            result,
-            `已改名：${result.agentName}（id=${result.id}）——reload 后保持；定向 to= 可用新名或 id。`,
-          );
-        }
-        // Unsubscribe/subscribe are session-scoped (whether THIS session keeps
-        // getting wake notices for a channel), handled apart from entry reads.
-        // Topic-based membership: subscribe joins a channel (named channels only
-        // notify their members), unsubscribe leaves it. The world channel is the
-        // default member channel; unsubscribe there mutes the world channel.
-        if (params.action === "unsubscribe" || params.action === "subscribe") {
-          const result = (await invoke("taskBoard", {
-            action: params.action,
-            taskId,
-            sessionId,
-            agentId,
-          })) as { action: "unsubscribe" | "subscribe"; taskId: string };
-          return toolResult(
-            result,
-            params.action === "unsubscribe"
-              ? `已退出频道 ${result.taskId}：不再接收该频道新条目的唤醒通知（用 nmg_board subscribe 重新加入）。`
-              : `已加入频道 ${result.taskId}：接收该频道新条目的唤醒通知（未订阅的频道不会打扰你）。`,
-          );
-        }
-        const result = (await invoke("taskBoard", {
-          ...params,
-          taskId,
-          agentId,
-          sourceSessionId: sessionId,
-        })) as TaskBoardToolResult;
-        const entries = result.entries ?? (result.entry ? [result.entry] : []);
-        if (result.action === "read") {
-          await Promise.allSettled(
-            entries.map((entry) =>
-              invoke("sessionActiveGraph", {
-                action: "observe",
-                sessionId,
-                kind: "board_projection",
-                sourceId: `board:${taskId}:${entry.id}`,
-                nodeId: `board:${taskId}`,
-                statement: `[task-board ${taskId} #${entry.id} ${entry.kind} by ${entry.agentId}] ${entry.content}`,
-              }),
-            ),
-          );
-          if (entries.length > 0) {
-            await invoke("sessionActiveGraph", { action: "activate", sessionId }).catch(
-              () => undefined,
-            );
-          }
-          // Reading is a delivery: write a receipt for every open, non-own-echo
-          // entry returned, so the wake loop does not re-push entries this
-          // session has already seen (flow constraint — 'already read' never
-          // re-wakes, per cross-agent feedback on world #9). Same echo boundary
-          // as the loop: the poster's own entries are never pushed anyway.
-          // await allSettled so receipts are durable before the read returns;
-          // a transient failure just risks one extra push (at-least-once).
-          const receipts = entries
-            .filter((entry) => {
-              if (entry.status !== "open") return false;
-              return !(
-                entry.sourceSessionId === sessionId ||
-                (entry.sourceSessionId == null && entry.agentId === agentId)
-              );
-            })
-            .map((entry) =>
-              invoke("taskBoard", {
-                action: "recordDelivery",
-                entryId: entry.id,
-                sessionId,
-                agentId,
-                source: "read",
-              }),
-            );
-          await Promise.allSettled(receipts);
-        }
-        // Reading the world channel surfaces the lobby: the directory of active
-        // named channels, so an Agent that knows no channel name can discover
-        // and join one.
-        let directory: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> = [];
-        if (result.action === "read" && taskId === WORLD_BOARD_ID) {
-          const lobby = (await invoke("taskBoard", { action: "list", agentId })) as {
-            action: "list";
-            boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }>;
-          };
-          directory = lobby.boards ?? [];
-        }
-        return toolResult(result, formatTaskBoardResult(result, taskId, directory));
-      },
-    });
+  const invokeStateBoard = async (params: Record<string, unknown>) => {
+    const operation = String(params.action);
+    const action = (STATE_BOARD_READ_OPERATIONS as readonly string[]).includes(operation)
+      ? "read"
+      : "write";
+    const result = (await invoke("state", {
+      ...params,
+      action,
+      space: "board",
+      operation,
+    })) as NmgStateResult;
+    return result.result;
+  };
 
-  // ---- Board wake loop (config file + /nmg-wake command) ------------
+  async function renameBoardAgent(
+    sessionId: string,
+    agentId: string,
+    agentName: string,
+    requestedName?: string,
+  ) {
+    const newName = String(requestedName ?? "").trim();
+    if (!newName) {
+      return toolResult(
+        { action: "rename", agentName, id: agentId },
+        `当前 agent 名：${agentName}（id=${agentId}）。用法：nmg_state action=write space=board operation=rename agentName=<新名>`,
+      );
+    }
+    const anchor = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
+    renameAgentIdentity({ anchor, id: agentId, agentName: newName });
+    const result = (await invokeStateBoard({
+      action: "rename",
+      id: agentId,
+      agentName: newName,
+    })) as { action: "rename"; agentName: string; id: string };
+    return toolResult(
+      result,
+      `已改名：${result.agentName}（id=${result.id}）——reload 后保持；定向 to= 可用新名或 id。`,
+    );
+  }
+
+  const boardParameters = Type.Object({
+    action: Type.Union(
+      PI_BOARD_ACTIONS.map((action) => Type.Literal(action)),
+      { description: nmgPrompts.board_action_parameter_description },
+    ),
+    taskId: Type.Optional(
+      Type.String({
+        description: nmgPrompts.board_task_id_parameter_description,
+      }),
+    ),
+    content: Type.Optional(
+      Type.String({
+        description: nmgPrompts.board_content_parameter_description,
+      }),
+    ),
+    kind: Type.Optional(
+      Type.Union([
+        Type.Literal("blocker"),
+        Type.Literal("decision"),
+        Type.Literal("goal"),
+        Type.Literal("handoff"),
+        Type.Literal("note"),
+        Type.Literal("question"),
+        Type.Literal("result"),
+      ]),
+    ),
+    entryId: Type.Optional(Type.String()),
+    resolution: Type.Optional(Type.String()),
+    reason: Type.Optional(Type.String()),
+    leaseSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 86_400 })),
+    digest: Type.Optional(
+      Type.String({
+        description:
+          "deliver only: the sha256 identity of the artifact you are handing in; the judge recomputes it",
+      }),
+    ),
+    ref: Type.Optional(
+      Type.String({
+        description:
+          "deliver only: where the artifact can be read (a path or URL the judge can open)",
+      }),
+    ),
+    summary: Type.Optional(
+      Type.String({
+        description: "deliver only: what the artifact contains, in one line",
+      }),
+    ),
+    verdict: Type.Optional(
+      Type.Union(
+        TASK_BOARD_VERDICTS.map((value) => Type.Literal(value)),
+        {
+          description:
+            "judge only: your ruling on someone else's deliverable. The deliverer can never judge it",
+        },
+      ),
+    ),
+    afterCursor: Type.Optional(
+      Type.String({
+        description: "不透明游标：上一条已读 entry 的 id（增量读续点）",
+      }),
+    ),
+    limit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
+    includeResolved: Type.Optional(Type.Boolean()),
+    ttlSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 2_592_000 })),
+    // A2A find→direct: put with to=<stable agent_name> wakes only that
+    // agent's LLM (others read-but-stay-silent). discover lists online
+    // agents so the caller can pick a to= target.
+    to: Type.Optional(
+      Type.String({
+        description:
+          "定向投递：stable agent_name 只唤醒该 agent；其他订阅者 read 可见但静默（需先 discover 选人）",
+      }),
+    ),
+    need: Type.Optional(Type.String({ description: "discover 的找人需求描述（可选）" })),
+    capabilities: Type.Optional(
+      Type.String({
+        description: "discover 按能力过滤（可选，如 'stg,audit'）",
+      }),
+    ),
+    agentName: Type.Optional(
+      Type.String({
+        description: "rename 的新显示名（id 不变，reload 后保持）",
+      }),
+    ),
+  });
+  const boardTool = defineTool({
+    name: "nmg_board",
+    label: "NMG Task Board",
+    description: nmgPrompts.board_description,
+    parameters: boardParameters,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const sessionId = ctx.sessionManager.getSessionId();
+      // Identity chain: explicit NMG_AGENT_ID wins, then the session id (stable
+      // across a session), then the pid as a last resort. A pid alone would
+      // change every launch and fragment cross-session attribution.
+      const identity = loadOrCreateAgentIdentity(sessionId, "pi");
+      const agentId = identity.id;
+      const agentName = identity.agentName;
+      assertBoardVerbCall(params);
+      // taskId is optional: without one, entries land on the shared world
+      // channel (the lobby), which every Agent reads by default — no channel
+      // name needs to be agreed on in advance. Explicit taskIds open named
+      // channels that are surfaced in the world channel's lobby.
+      const taskId = params.taskId?.trim() || WORLD_BOARD_ID;
+      // Runtime rename: change this agent's display name (id unchanged — it is
+      // the stable routing key). Persisted in the per-agent identity file so
+      // it survives reload; mirrored to the registry so discover shows it.
+      if (params.action === "rename") {
+        return renameBoardAgent(sessionId, agentId, agentName, params.agentName);
+      }
+      // Unsubscribe/subscribe are session-scoped (whether THIS session keeps
+      // getting wake notices for a channel), handled apart from entry reads.
+      // Topic-based membership: subscribe joins a channel (named channels only
+      // notify their members), unsubscribe leaves it. The world channel is the
+      // default member channel; unsubscribe there mutes the world channel.
+      if (params.action === "unsubscribe" || params.action === "subscribe") {
+        const result = (await invokeStateBoard({
+          action: params.action,
+          taskId,
+          sessionId,
+          agentId,
+        })) as { action: "unsubscribe" | "subscribe"; taskId: string };
+        return toolResult(
+          result,
+          params.action === "unsubscribe"
+            ? `已退出频道 ${result.taskId}：不再接收该频道新条目的唤醒通知（用 nmg_state action=write space=board operation=subscribe 重新加入）。`
+            : `已加入频道 ${result.taskId}：接收该频道新条目的唤醒通知（未订阅的频道不会打扰你）。`,
+        );
+      }
+      const result = (await invokeStateBoard({
+        ...params,
+        taskId,
+        agentId,
+        sourceSessionId: sessionId,
+      })) as TaskBoardToolResult;
+      const entries = result.entries ?? (result.entry ? [result.entry] : []);
+      if (result.action === "read") {
+        const projectedEntries = contextBoardEntries(entries, params.includeResolved === true);
+        await Promise.allSettled(
+          projectedEntries.map((entry) =>
+            invoke("sessionActiveGraph", {
+              action: "observe",
+              sessionId,
+              kind: "board_projection",
+              sourceId: `board:${taskId}:${entry.id}`,
+              nodeId: `board:${taskId}`,
+              statement: `[task-board ${taskId} #${entry.id} ${entry.kind} by ${entry.agentId}] ${entry.content}`,
+            }),
+          ),
+        );
+        if (projectedEntries.length > 0) {
+          await invoke("sessionActiveGraph", {
+            action: "activate",
+            sessionId,
+          }).catch(() => undefined);
+        }
+        // Reading is a delivery: write a receipt for every open, non-own-echo
+        // entry returned, so the wake loop does not re-push entries this
+        // session has already seen (flow constraint — 'already read' never
+        // re-wakes, per cross-agent feedback on world #9). Same echo boundary
+        // as the loop: the poster's own entries are never pushed anyway.
+        // await allSettled so receipts are durable before the read returns;
+        // a transient failure just risks one extra push (at-least-once).
+        const receipts = entries
+          .filter((entry) => {
+            if (entry.status !== "open") return false;
+            return !(
+              entry.sourceSessionId === sessionId ||
+              (entry.sourceSessionId == null && entry.agentId === agentId)
+            );
+          })
+          .map((entry) =>
+            invoke("taskBoard", {
+              action: "recordDelivery",
+              entryId: entry.id,
+              sessionId,
+              agentId,
+              source: "read",
+            }),
+          );
+        await Promise.allSettled(receipts);
+      }
+      // Reading the world channel surfaces the lobby: the directory of active
+      // named channels, so an Agent that knows no channel name can discover
+      // and join one.
+      let directory: Array<{
+        taskId: string;
+        entryCount: number;
+        lastUpdatedAt: string;
+      }> = [];
+      if (result.action === "read" && taskId === WORLD_BOARD_ID) {
+        const lobby = (await invokeStateBoard({ action: "list", agentId })) as {
+          action: "list";
+          boards: Array<{
+            taskId: string;
+            entryCount: number;
+            lastUpdatedAt: string;
+          }>;
+        };
+        directory = lobby.boards ?? [];
+      }
+      return toolResult(result, formatTaskBoardResult(result, taskId, directory));
+    },
+  });
+
+  pi.registerTool({
+    name: "nmg_state",
+    label: "NMG state",
+    description: nmgPrompts.state_description,
+    parameters: Type.Object({
+      ...boardParameters.properties,
+      action: Type.Union([Type.Literal("read"), Type.Literal("write")]),
+      space: Type.Union([Type.Literal("ag"), Type.Literal("board")]),
+      operation: Type.Optional(Type.String()),
+      text: Type.Optional(Type.String()),
+    }),
+    async execute(id, args, signal, onUpdate, ctx) {
+      const operation = stateOperation(args);
+      if (args.space === "ag") {
+        const sessionId = ctx.sessionManager.getSessionId();
+        const active = await connection();
+        const captured = await captureStateInvocation(
+          {
+            action: args.action,
+            space: "ag",
+            operation,
+            text: args.text,
+            reason: args.reason,
+            ttlSeconds: args.ttlSeconds,
+            sessionId,
+            requester: "agent:pi",
+          },
+          (sessionId) =>
+            invokeDaemon(active, "state", {
+              action: "read",
+              space: "ag",
+              operation: "status",
+              sessionId,
+            }),
+        );
+        const result = (await invokeDaemon(active, "state", captured)) as NmgStateResult;
+        const details = {
+          ...result,
+          ...(result.result.action === "invoke" ? { output: result.result.output } : {}),
+          workingStateBinding: captured.workingStateBinding,
+        };
+        return toolResult(details, renderStateOutput(result));
+      }
+      if (!coordinationToolsEnabled) throw new Error("Board coordination is disabled");
+      return boardTool.execute(
+        id,
+        {
+          ...args,
+          action: operation as Static<typeof boardParameters>["action"],
+        },
+        signal,
+        onUpdate,
+        ctx,
+      );
+    },
+  });
+
+  // ---- Board wake loop ----------------------------------------------
   // Notification for an idle Agent: poll the subscribed spaces (the world
   // channel plus active named channels), and when a new open entry appears
   // that has not already been surfaced, wake the Agent with a broadcast-style
@@ -1894,80 +2333,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   // addressing a specific recipient. This is the notification half of the
   // claim+notify design: claims decide who works, notifications decide who
   // knows. Enabled and tuned via ~/.nmg/board-wake.json (edited by hand or
-  // toggled with /nmg-wake, which persists to the same file); dedup state is
+  // toggled with /nmg, which persists to the same file); dedup state is
   // kept in board-wake-state.json. Coordination is available by default and
   // this second-layer switch can explicitly silence automatic wake delivery.
-  const wakeConfigPath = join(resolveNmgDataDir(), "board-wake.json");
-  const wakeStatePath = join(resolveNmgDataDir(), "board-wake-state.json");
-  interface BoardWakeConfig {
-    enabled: boolean;
-    budget: number;
-    cooldownMs: number;
-    intervalMs: number;
-    /** When on, a collaboration-kind entry that wakes this session is also
-     * announced on the world channel so other agents can pull it in. */
-    worldBroadcast: boolean;
-  }
-  interface BoardWakeState {
-    budgetDate: string;
-    budgetUsed: number;
-    lastWakeAt: number;
-  }
-  const readWakeConfig = (): BoardWakeConfig => {
-    try {
-      const raw = JSON.parse(readFileSync(wakeConfigPath, "utf8")) as Partial<BoardWakeConfig>;
-      return {
-        enabled: raw.enabled !== false,
-        // 0 = unlimited: budget 0 disables the daily cap, cooldownMs 0 removes the cooldown.
-        budget: raw.budget === 0 ? 0 : Math.max(1, Number(raw.budget) || 8),
-        cooldownMs: raw.cooldownMs === 0 ? 0 : Math.max(30_000, Number(raw.cooldownMs) || 600_000),
-        intervalMs: Math.max(5_000, Number(raw.intervalMs) || 60_000),
-        worldBroadcast: raw.worldBroadcast === true,
-      };
-    } catch {
-      return {
-        enabled: true,
-        budget: 8,
-        cooldownMs: 600_000,
-        intervalMs: 60_000,
-        worldBroadcast: false,
-      };
-    }
-  };
-  const writeWakeConfig = (config: BoardWakeConfig): void => {
-    try {
-      writeFileSync(wakeConfigPath, JSON.stringify(config, null, 2), "utf8");
-    } catch {
-      // best-effort; a read-only directory just means the toggle cannot persist
-    }
-  };
-  const loadWakeState = (): BoardWakeState => {
-    try {
-      return JSON.parse(readFileSync(wakeStatePath, "utf8")) as BoardWakeState;
-    } catch {
-      return { budgetDate: "", budgetUsed: 0, lastWakeAt: 0 };
-    }
-  };
-  const saveWakeState = (state: BoardWakeState): void => {
-    try {
-      writeFileSync(wakeStatePath, JSON.stringify(state), "utf8");
-    } catch {
-      // best-effort; losing dedup state only means an entry could re-notify
-    }
-  };
-  // Wake budget gate: returns false when the tick should stop (disabled,
-  // cooling, budget exhausted) and mutates `state` for the daily budget reset.
-  const wakeBudgetGate = (config: BoardWakeConfig, state: BoardWakeState, now: number): boolean => {
-    if (!config.enabled) return false;
-    if (config.cooldownMs > 0 && now - state.lastWakeAt < config.cooldownMs) return false;
-    const today = new Date(now).toISOString().slice(0, 10);
-    if (state.budgetDate !== today) {
-      state.budgetDate = today;
-      state.budgetUsed = 0;
-    }
-    if (config.budget > 0 && state.budgetUsed >= config.budget) return false;
-    return true;
-  };
+  // Config/state persistence, the budget gate, candidate collection, delivery
+  // filtering, and world broadcasts live in src/integration/board-wake.ts —
+  // the adapter only binds its transport and emission primitives.
+  const wakeInvoke = invoke as (method: string, params: unknown) => Promise<unknown>;
 
   // Live session gate: a captured ctx goes stale after session replacement/
   // reload; isIdle and getSessionId on a stale ctx throw, which must never
@@ -1981,147 +2353,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }
   };
 
-  // Collect wake candidates from the world channel, the directed inbox, and
-  // subscribed named channels. Point-to-point delivery is an inbox, not topic
-  // membership: a target must receive a directed handoff even before it has
-  // discovered or joined the sender's named channel.
-  const collectWakeCandidates = async (
-    agentId: string,
-    agentName: string,
-    sessionId: string,
-  ): Promise<Array<TaskBoardToolEntry & { taskId: string }>> => {
-    const candidates: Array<TaskBoardToolEntry & { taskId: string }> = [];
-    const candidateIds = new Set<string>();
-    const collect = (taskId: string, entries: TaskBoardToolEntry[] | undefined) => {
-      for (const entry of entries ?? []) {
-        if (
-          !candidateIds.has(entry.id) &&
-          isBoardWakeCandidate(entry, { sessionId, agentId, agentName })
-        ) {
-          candidateIds.add(entry.id);
-          candidates.push({ ...entry, taskId });
-        }
-      }
-    };
-    const world = (await invoke("taskBoard", {
-      action: "read",
-      taskId: WORLD_BOARD_ID,
-      agentId,
-    })) as TaskBoardToolResult;
-    collect(WORLD_BOARD_ID, world.entries);
-    const directed = (await invoke("taskBoard", {
-      action: "readDirected",
-      agentId,
-      agentName,
-    })) as { action: "readDirected"; entries: TaskBoardToolEntry[] };
-    for (const entry of directed.entries ?? []) {
-      const taskId = entry.taskId?.trim();
-      if (taskId) collect(taskId, [entry]);
-    }
-    // Named channels: only channels this session explicitly subscribed to are
-    // scanned. Topic-based membership — a non-member never receives wake
-    // notices for a named channel, no matter how active it is. Discovery of
-    // new channels happens by reading the world channel lobby, then joining
-    // with subscribe.
-    const subs = (await invoke("taskBoard", {
-      action: "listSubscriptions",
-      agentId,
-      sessionId,
-    })) as { action: "listSubscriptions"; subscriptions: Array<{ taskId: string }> };
-    for (const board of subs.subscriptions ?? []) {
-      const read = (await invoke("taskBoard", {
-        action: "read",
-        taskId: board.taskId,
-        agentId,
-      })) as TaskBoardToolResult;
-      collect(board.taskId, read.entries);
-    }
-    return candidates;
-  };
-
-  // Delivery protocol: ask the daemon which candidates are already delivered to
-  // this session and which channels are suppressed (do-not-send), then keep
-  // only undelivered, non-suppressed ones.
-  const filterUndelivered = async (
-    candidates: Array<TaskBoardToolEntry & { taskId: string }>,
-    agentId: string,
-    sessionId: string,
-  ): Promise<Array<TaskBoardToolEntry & { taskId: string }>> => {
-    const fresh: Array<TaskBoardToolEntry & { taskId: string }> = [];
-    for (const taskId of new Set(candidates.map((candidate) => candidate.taskId))) {
-      const check = (await invoke("taskBoard", {
-        action: "deliveryCheck",
-        taskId,
-        agentId,
-        sessionId,
-        entryIds: candidates
-          .filter((candidate) => candidate.taskId === taskId)
-          .map((candidate) => candidate.id),
-      })) as { delivered: string[]; acked: string[]; suppressed: boolean };
-      if (check.suppressed) continue; // unsubscribed channel — skip entirely
-      const delivered = new Set(check.delivered);
-      const acked = new Set(check.acked ?? []);
-      for (const candidate of candidates) {
-        if (
-          candidate.taskId === taskId &&
-          !delivered.has(candidate.id) &&
-          !acked.has(candidate.id)
-        ) {
-          fresh.push(candidate);
-        }
-      }
-    }
-    return fresh;
-  };
-
-  // Wake the agent for the top-priority fresh entry, record the delivery
-  // receipt, optionally broadcast to the world channel, and consume the budget.
-  const deliverWake = async (
-    pick: TaskBoardToolEntry & { taskId: string },
-    config: BoardWakeConfig,
-    state: BoardWakeState,
-    now: number,
-    agentId: string,
-    sessionId: string,
-  ): Promise<void> => {
-    const excerpt = pick.content.length > 140 ? `${pick.content.slice(0, 140)}…` : pick.content;
-    const label = kindLabel(pick.kind);
-    pi.sendUserMessage(
-      `[NMG board] 你订阅的频道 ${pick.taskId} 有新${label}：#${pick.id} — ${excerpt}（open，可认领）。需要的话用 nmg_board read 查看详情、claim 认领处理。`,
-    );
-    // Delivery receipt: this session has been reached for this entry, so the
-    // wake loop will not re-notify it (idempotent in the store).
-    await invoke("taskBoard", {
-      action: "recordDelivery",
-      entryId: pick.id,
-      sessionId,
-      agentId,
-      source: "wake",
-    });
-    // Optional world-channel pull broadcast: when enabled and the entry is a
-    // collaboration kind, announce it on the world channel so OTHER agents
-    // notice and can pull it in. Broadcast is broadcast-style (a pull
-    // announcement, never addressed), deduped once per entry via the
-    // deliveries table under the sentinel session so an unanswered entry does
-    // not re-broadcast every tick. The loop's own echo filter (sourceSessionId
-    // === this session) stops the broadcaster from waking on its own post.
-    if (
-      config.worldBroadcast &&
-      BROADCAST_KINDS.has(pick.kind) &&
-      !pick.content.startsWith(BROADCAST_PREFIX)
-    ) {
-      await maybeBroadcastToWorld({
-        invoke: invoke as (method: string, params: unknown) => Promise<unknown>,
-        entry: pick,
-        agentId,
-        sessionId,
-      });
-    }
-    state.budgetUsed += 1;
-    state.lastWakeAt = now;
-    saveWakeState(state);
-  };
-
   const scanBoardWake = async (): Promise<void> => {
     const config = readWakeConfig();
     const state = loadWakeState();
@@ -2129,7 +2360,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     if (!wakeBudgetGate(config, state, now)) return;
     const sessionId = liveSessionId();
     if (!sessionId) return;
-    const identity = loadOrCreateAgentIdentity(sessionId);
+    const identity = loadOrCreateAgentIdentity(sessionId, "pi");
     const agentId = identity.id;
     const agentName = identity.agentName;
     // System-layer identity heartbeat (A2A AgentCard local edition): refresh
@@ -2148,9 +2379,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // best-effort: a daemon without the registerAgent method just skips it.
     }
     try {
-      const candidates = await collectWakeCandidates(agentId, agentName, sessionId);
+      const candidates = await collectWakeCandidates(wakeInvoke, {
+        agentId,
+        agentName,
+        sessionId,
+      });
       if (candidates.length === 0) return;
-      const fresh = await filterUndelivered(candidates, agentId, sessionId);
+      const fresh = await filterUndelivered(wakeInvoke, candidates, { agentId, sessionId });
       if (fresh.length === 0) return;
       const rank: Record<string, number> = {
         question: 0,
@@ -2166,7 +2401,17 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           (rank[left.kind] ?? 9) - (rank[right.kind] ?? 9) ||
           String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? "")),
       );
-      await deliverWake(fresh[0]!, config, state, now, agentId, sessionId);
+      await deliverBoardWake({
+        invoke: wakeInvoke,
+        sendWake: (message: string) => pi.sendUserMessage(message),
+        config,
+        state,
+        dataDir: wakeDataDir,
+        now,
+        agentId,
+        sessionId,
+        entry: fresh[0]!,
+      });
     } catch {
       // daemon unavailable or transient failure — retry next tick
     }
@@ -2212,7 +2457,11 @@ export function projectPiBranch(value: unknown): {
   const messages: AgentHistoryMessage[] = [];
   for (const entry of value.slice(-EVIDENCE_SOURCE_WINDOW)) {
     if (!entry || typeof entry !== "object") continue;
-    const candidate = entry as { type?: unknown; id?: unknown; message?: unknown };
+    const candidate = entry as {
+      type?: unknown;
+      id?: unknown;
+      message?: unknown;
+    };
     if (candidate.type !== "message") continue;
     if (
       typeof candidate.id !== "string" ||
@@ -2220,7 +2469,11 @@ export function projectPiBranch(value: unknown): {
       typeof candidate.message !== "object" ||
       typeof (candidate.message as { role?: unknown }).role !== "string"
     ) {
-      return { version: PI_BRANCH_SHAPE_VERSION, supported: false, messages: [] };
+      return {
+        version: PI_BRANCH_SHAPE_VERSION,
+        supported: false,
+        messages: [],
+      };
     }
     const projected = piHistoryMessage(entry);
     if (projected) messages.push(projected);
@@ -2272,7 +2525,10 @@ export function resolvePiEvidenceSource(
 ): PiEvidenceResolution {
   if (!evidence?.trim()) return { version: PI_BRANCH_SHAPE_VERSION };
   if (typeof sessionManager.getBranch !== "function") {
-    return { version: PI_BRANCH_SHAPE_VERSION, reason: "branch_api_unavailable" };
+    return {
+      version: PI_BRANCH_SHAPE_VERSION,
+      reason: "branch_api_unavailable",
+    };
   }
   const branch = projectPiBranch(sessionManager.getBranch());
   if (!branch.supported) {
@@ -2312,285 +2568,7 @@ function piHistoryMessage(value: unknown): AgentHistoryMessage | undefined {
   return content ? { id: entry.id, actor, content } : undefined;
 }
 
-function messageText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((part) =>
-      part && typeof part === "object" && (part as { type?: unknown }).type === "text"
-        ? String((part as { text?: unknown }).text ?? "")
-        : "",
-    )
-    .filter(Boolean)
-    .join("\n");
-}
-
 type DisclosureLevel = "header" | "exact" | "evidence";
-
-interface SessionTaskState {
-  anchors: string[];
-}
-
-export interface SessionRecallRequest {
-  query: string;
-  mode: "retrieve" | "cue";
-  reason: string;
-  maxTier: MemoryTier;
-  limit: number;
-  graphHops: number;
-}
-
-/**
- * Bounded query-side task context for automatic recall. It does not inject
- * transcript text into the model and does not attempt semantic summarisation;
- * it only carries two recent substantive user task anchors across terse
- * continuation turns such as "reload 了，你试试".
- */
-export class SessionTaskWindow {
-  readonly #sessions = new Map<string, SessionTaskState>();
-  readonly maxAnchors: number;
-  readonly maxAnchorCharacters: number;
-
-  constructor(maxAnchors = 2, maxAnchorCharacters = 480) {
-    this.maxAnchors = Math.max(1, maxAnchors);
-    this.maxAnchorCharacters = Math.max(80, maxAnchorCharacters);
-  }
-
-  prepare(sessionId: string, prompt: string): SessionRecallRequest | null {
-    const normalized = normalizeTaskPrompt(prompt);
-    if (!normalized) return null;
-    const state = this.#state(sessionId);
-    const gate = decideMemoryLoad(normalized);
-    const substantive = isSubstantiveTaskPrompt(normalized);
-    const continuation = isTaskContinuation(normalized);
-    const prior = state.anchors.join("\n");
-    const continuePriorTask = continuation && prior.length > 0;
-    const usePriorContext = prior.length > 0 && (gate.mode === "retrieve" || continuePriorTask);
-
-    if (substantive) {
-      const anchor = excerpt(normalized, this.maxAnchorCharacters);
-      if (state.anchors.at(-1) !== anchor) state.anchors.push(anchor);
-      while (state.anchors.length > this.maxAnchors) state.anchors.shift();
-    }
-    if (gate.mode === "none" && !continuePriorTask) return null;
-    return {
-      query: [normalized, usePriorContext ? `Recent task context:\n${prior}` : ""]
-        .filter(Boolean)
-        .join("\n"),
-      mode: gate.mode === "none" ? "cue" : gate.mode,
-      reason: gate.mode === "none" ? "task_continuation" : gate.reason,
-      maxTier: (gate.mode === "none" ? 1 : gate.maxTier) as MemoryTier,
-      limit: gate.mode === "none" ? 5 : gate.limit,
-      graphHops: gate.mode === "none" ? 0 : gate.graphHops,
-    };
-  }
-
-  clear(sessionId: string): void {
-    this.#sessions.delete(sessionId);
-  }
-
-  #state(sessionId: string): SessionTaskState {
-    let state = this.#sessions.get(sessionId);
-    if (!state) {
-      state = { anchors: [] };
-      this.#sessions.set(sessionId, state);
-    }
-    return state;
-  }
-}
-
-/**
- * Per-turn tool-flow guard. It does not cap retrieval depth or result count;
- * it prevents repeated paraphrased searches when the model has not consumed
- * any returned evidence. A successful get opens the search phase again.
- */
-/**
- * Agent-end diagnostic-attribution cache. Independent of the SkillOpt shadow
- * bridge, it records which active graphs a session retrieved so agent_end can
- * derive answer overlap and persist attributed_memory_ids. The signal is useful
- * for coverage and feedback targeting but cannot train QPP or the controller.
- * Normal close() already checkpoints, so there is no per-turn cost beyond the
- * bounded in-memory list.
- */
-export class AgentAttributionFlow {
-  readonly #traces = new Map<string, Array<{ traceId: string; results: MemorySearchResult[] }>>();
-  readonly maxPerSession: number;
-
-  constructor(maxPerSession = 8) {
-    this.maxPerSession = Math.max(1, maxPerSession);
-  }
-
-  note(sessionId: string, context: MemoryContext): void {
-    if (!context.activeGraph) return;
-    let list = this.#traces.get(sessionId);
-    if (!list) {
-      list = [];
-      this.#traces.set(sessionId, list);
-    }
-    const existing = list.find((entry) => entry.traceId === context.activeGraph!.id);
-    if (existing) {
-      existing.results = context.results;
-      return;
-    }
-    list.push({ traceId: context.activeGraph.id, results: context.results });
-    if (list.length > this.maxPerSession) list.shift();
-  }
-
-  latestActiveGraphIdForMemories(sessionId: string, memoryIds: readonly string[]): string | null {
-    if (memoryIds.length === 0) return null;
-    const requested = new Set(memoryIds);
-    const traces = this.#traces.get(sessionId) ?? [];
-    for (let index = traces.length - 1; index >= 0; index -= 1) {
-      const trace = traces[index]!;
-      const available = new Set(trace.results.map((result) => result.memory.id));
-      if ([...requested].every((memoryId) => available.has(memoryId))) return trace.traceId;
-    }
-    return null;
-  }
-
-  /** All retrieved graphs for this session, cleared afterwards (one-shot). */
-  consume(sessionId: string): Array<{ traceId: string; results: MemorySearchResult[] }> {
-    const pending = this.#traces.get(sessionId) ?? [];
-    this.#traces.delete(sessionId);
-    return pending;
-  }
-
-  clear(sessionId: string): void {
-    this.#traces.delete(sessionId);
-  }
-}
-
-/** Concatenate assistant message content from an agent_end message list. */
-function extractAnswerText(messages: readonly unknown[]): string {
-  const parts: string[] = [];
-  for (const value of messages) {
-    if (!value || typeof value !== "object") continue;
-    const message = value as { role?: unknown; content?: unknown };
-    if (message.role !== "assistant") continue;
-    const text = messageText(message.content).trim();
-    if (text) parts.push(text);
-  }
-  return parts.join("\n").trim();
-}
-
-function extractPromptText(messages: readonly unknown[]): string {
-  const parts: string[] = [];
-  for (const value of messages) {
-    if (!value || typeof value !== "object") continue;
-    const message = value as { role?: unknown; content?: unknown };
-    if (message.role !== "user") continue;
-    const text = messageText(message.content).trim();
-    if (text) parts.push(text);
-  }
-  return parts.join("\n").trim();
-}
-
-export class SessionRecallFlow {
-  readonly #states = new Map<
-    string,
-    {
-      turnKey: string;
-      searchesSinceGet: number;
-      searchCalls: number;
-      recallCalls: number;
-      consecutiveNoGain: number;
-      candidateIds: Set<string>;
-      loadedIds: Set<string>;
-    }
-  >();
-  readonly maxSearchesBeforeGet: number;
-  readonly maxSearchCalls: number;
-  readonly maxRecallCalls: number;
-  readonly maxConsecutiveNoGain: number;
-
-  constructor(
-    maxSearchesBeforeGet = 2,
-    maxSearchCalls = 3,
-    maxRecallCalls = 5,
-    maxConsecutiveNoGain = 2,
-  ) {
-    this.maxSearchesBeforeGet = Math.max(1, maxSearchesBeforeGet);
-    this.maxSearchCalls = Math.max(this.maxSearchesBeforeGet, maxSearchCalls);
-    this.maxRecallCalls = Math.max(this.maxSearchCalls, maxRecallCalls);
-    this.maxConsecutiveNoGain = Math.max(1, maxConsecutiveNoGain);
-  }
-
-  beginTurn(sessionId: string, turnKey: string): boolean {
-    const current = this.#states.get(sessionId);
-    if (current?.turnKey === turnKey) return false;
-    this.#states.set(sessionId, this.#newState(turnKey));
-    return true;
-  }
-
-  allowSearch(sessionId: string): boolean {
-    const current = this.#state(sessionId);
-    if (this.searchBlockReason(sessionId) !== null) return false;
-    current.searchesSinceGet += 1;
-    current.searchCalls += 1;
-    current.recallCalls += 1;
-    return true;
-  }
-
-  searchBlockReason(sessionId: string): string | null {
-    const current = this.#state(sessionId);
-    if (current.recallCalls >= this.maxRecallCalls) return "recall_tool_budget_exhausted";
-    if (current.searchCalls >= this.maxSearchCalls) return "search_budget_exhausted";
-    if (current.consecutiveNoGain >= this.maxConsecutiveNoGain) return "no_new_evidence";
-    if (current.searchesSinceGet >= this.maxSearchesBeforeGet) {
-      return "evidence_progression_required";
-    }
-    return null;
-  }
-
-  recordSearch(sessionId: string, memoryIds: readonly string[]): void {
-    const current = this.#state(sessionId);
-    const newIds = memoryIds.filter((memoryId) => !current.candidateIds.has(memoryId));
-    for (const memoryId of memoryIds) current.candidateIds.add(memoryId);
-    current.consecutiveNoGain = newIds.length > 0 ? 0 : current.consecutiveNoGain + 1;
-  }
-
-  allowGet(sessionId: string): boolean {
-    const current = this.#state(sessionId);
-    if (current.recallCalls >= this.maxRecallCalls) return false;
-    current.recallCalls += 1;
-    return true;
-  }
-
-  recordGet(sessionId: string, memoryIds: readonly string[]): void {
-    const current = this.#state(sessionId);
-    const newIds = memoryIds.filter((memoryId) => !current.loadedIds.has(memoryId));
-    for (const memoryId of memoryIds) current.loadedIds.add(memoryId);
-    if (newIds.length > 0) {
-      current.searchesSinceGet = 0;
-      current.consecutiveNoGain = 0;
-    }
-  }
-
-  clear(sessionId: string): void {
-    this.#states.delete(sessionId);
-  }
-
-  #state(sessionId: string) {
-    let current = this.#states.get(sessionId);
-    if (!current) {
-      current = this.#newState("");
-      this.#states.set(sessionId, current);
-    }
-    return current;
-  }
-
-  #newState(turnKey: string) {
-    return {
-      turnKey,
-      searchesSinceGet: 0,
-      searchCalls: 0,
-      recallCalls: 0,
-      consecutiveNoGain: 0,
-      candidateIds: new Set<string>(),
-      loadedIds: new Set<string>(),
-    };
-  }
-}
 
 const nmgPrompts = loadPrompts();
 export const SKILLOPT_POLICY_CHANNELS = resolveSkillOptPolicyChannels(nmgPrompts.memory_policy);
@@ -2612,48 +2590,28 @@ export function composeNmgSystemPrompt(baseSystemPrompt: string): string {
 
 /**
  * Per-turn dynamic context, injected as a custom message AFTER the current user
- * prompt. The message is persistent in the session, so on later turns it becomes
- * part of the stable prefix and only the newest dynamic block is billed.
+ * prompt. History is append-only here; preparation does not prove provider
+ * transmission, cache retention or billing.
  */
-export function composeNmgContextMessage(
-  automaticRecall = "",
-  status = "",
-  nudge = "",
-  runtimeAg = "",
-): string {
-  return [
-    automaticRecall ? `<nmg_automatic_recall>\n${automaticRecall}\n</nmg_automatic_recall>` : "",
-    runtimeAg ? `<nmg_runtime_ag>\n${runtimeAg}\n</nmg_runtime_ag>` : "",
-    nudge ? `<nmg_nudge>\n${nudge}\n</nmg_nudge>` : "",
-    status ? `<nmg_status>${status}</nmg_status>` : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+export function composeNmgContextMessage(views: readonly InformationView[] = []): string {
+  return prepareInformationOutput(views, { format: "context" }).text;
 }
 
-function configuredAutoRecallTier(): MemoryTier {
-  const value = Number(process.env.NMG_AUTO_RECALL_TIER ?? 1);
-  return Math.max(0, Math.min(3, Number.isFinite(value) ? Math.floor(value) : 1)) as MemoryTier;
-}
-
-function configuredAutoRecallLimit(): number {
-  const value = Number(process.env.NMG_AUTO_RECALL_LIMIT ?? 13);
-  return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 13));
-}
-
-function configuredInitialTarget(): number {
-  const value = Number(process.env.NMG_AUTO_RECALL_INITIAL_TARGET ?? 13);
-  return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 13));
-}
-
-function configuredStrongHitTopGap(): number {
-  const value = Number(process.env.NMG_AUTO_RECALL_STRONG_HIT_TOP_GAP ?? 0.05);
-  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0.05));
-}
-
-function configuredStrongHitInitialTarget(): number {
-  const value = Number(process.env.NMG_AUTO_RECALL_STRONG_HIT_INITIAL_TARGET ?? 3);
-  return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 3));
+function persistedContextResult(output: PreparedInformationOutput, systemPrompt: string) {
+  const count = output.included.filter((entry) => entry.source.kind === "memory").length;
+  return {
+    systemPrompt: composeNmgSystemPrompt(systemPrompt),
+    ...(output.text
+      ? {
+          message: {
+            customType: "nmg-context",
+            content: output.text,
+            display: true,
+            details: { count, omitted: output.omitted.length },
+          },
+        }
+      : {}),
+  };
 }
 
 export function controllerBudgetEnvelopes(context: MemoryContext): {
@@ -2734,24 +2692,6 @@ export function formatSearchRecommendation(
   return nmgPrompts.search_recommendation;
 }
 
-function normalizeTaskPrompt(prompt: string): string {
-  return prompt.replace(/\s+/gu, " ").trim();
-}
-
-function isSubstantiveTaskPrompt(prompt: string): boolean {
-  if (prompt.length >= 40) return true;
-  return /(?:[A-Za-z][\w.-]{2,}[-_/][\w./-]+|\b(?:fix|implement|debug|test|build|refactor|install|configure)\b|(?:修复|实现|测试|构建|重构|安装|配置|设计))/iu.test(
-    prompt,
-  );
-}
-
-function isTaskContinuation(prompt: string): boolean {
-  if (prompt.length > 100) return false;
-  return /(?:\b(?:continue|again|retry|reload|try|proceed|go on|fix it|test it)\b|(?:继续|再试|重试|试试|开始吧|接着|改吧|修一下|好了|可以了|然后呢))/iu.test(
-    prompt,
-  );
-}
-
 export function formatSearchHeaders(context: MemoryContext): string {
   const nextStep = formatProgressiveDisclosure(context) || nmgPrompts.get_hint;
   return renderSearchSurface(context, {
@@ -2805,228 +2745,14 @@ function toolResult(details: unknown, text: string) {
   return { content: [{ type: "text" as const, text }], details };
 }
 
-interface AgentIdentity {
-  /** Stable unique routing key — never changes (industry practice: A2A
-   * AgentCard id, Microsoft resolve-by-id). Equal to the anchor on first
-   * creation. */
-  id: string;
-  /** Mutable display label — runtime-renamable via nmg_board rename. */
-  agentName: string;
-}
-
-const cachedIdentities = new Map<string, AgentIdentity>();
-
-/** Stable agent identity: a persistent per-agent file under
- * ~/.nmg/agents/<anchor>/identity.json, where anchor = NMG_AGENT_ID (the
- * agent's own stable id, set by the agent itself) or the session id. The id
- * (routing key) never changes; agentName is a mutable display label that a
- * runtime `rename` updates. Multiple agents on one machine never collide
- * because each has its own anchor directory. Survives reload (session-boundary
- * fix): the identity file is re-read, so id and name persist across a pi
- * restart. */
-function loadOrCreateAgentIdentity(sessionId: string): AgentIdentity {
-  const anchor = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
-  const cachedIdentity = cachedIdentities.get(anchor);
-  if (cachedIdentity) return cachedIdentity;
-  const dir = join(resolveNmgDataDir(), "agents", anchor);
-  const file = join(dir, "identity.json");
-  try {
-    const raw = JSON.parse(readFileSync(file, "utf8")) as AgentIdentity;
-    if (raw.id && raw.agentName) {
-      const identity = { id: raw.id, agentName: raw.agentName };
-      cachedIdentities.set(anchor, identity);
-      return identity;
-    }
-  } catch {
-    // no identity file yet — create below
-  }
-  const identity: AgentIdentity = { id: anchor, agentName: anchor };
-  try {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(file, JSON.stringify(identity, null, 2), "utf8");
-  } catch {
-    // read-only directory — fall back to the in-memory identity
-  }
-  cachedIdentities.set(anchor, identity);
-  return identity;
-}
-
-interface TaskBoardToolEntry {
-  id: string;
-  taskId?: string;
-  sequence: number;
-  agentId: string;
-  sourceSessionId?: string | null;
-  kind: string;
-  status: string;
-  content: string;
-  claimedBy?: string | null;
-  claimExpiresAt?: string | null;
-  /** Directed delivery (A2A find→direct): stable agent_name to wake. Others
-   * read-but-stay-silent. Null = ordinary broadcast to subscribers. */
-  to?: string | null;
-  /** Reply-gated serial handoff: 'pending' entries are queued and must not
-   * wake until the outstanding one is claimed/resolved. */
-  serialState?: "outstanding" | "pending" | "stale" | null;
-  ackedBy?: string[];
-  createdAt?: string;
-}
-
-function kindLabel(kind: string): string {
-  switch (kind) {
-    case "question":
-      return "问题";
-    case "blocker":
-      return "阻塞";
-    case "handoff":
-      return "交接";
-    case "goal":
-      return "目标";
-    case "note":
-      return "记录";
-    case "decision":
-      return "决定";
-    case "result":
-      return "结果";
-    default:
-      return "条目";
-  }
-}
-
-interface TaskBoardToolResult {
-  action: "put" | "read" | "resolve" | "claim" | "release" | "acknowledge" | "discover";
-  entry?: TaskBoardToolEntry;
-  entries?: TaskBoardToolEntry[];
-  nextCursor?: string | null;
-  delivered?: string[];
-  acked?: string[];
-  /** discover: online agent roster (A2A discovery localised). */
-  agents?: Array<{
-    id: string;
-    agentName: string;
-    description: string | null;
-    capabilities: string | null;
-    lastSeenAt: string;
-  }>;
-  suppressed?: boolean;
-}
-
-/** Sentinel deliveries-table session used to dedup world-channel broadcasts:
- * each entry is broadcast at most once, keyed on (entry, this sentinel). */
-export const WORLD_BROADCAST_SESSION = "world-broadcast";
-/** Content prefix marking a world-channel pull broadcast (meta: it announces
- * another entry). Entries carrying it are never re-broadcast — otherwise a
- * broadcast wakes a session, which broadcasts the broadcast, recursively
- * flooding the world channel (observed live: #12→#13→#16…). */
-export const BROADCAST_PREFIX = "[NMG board 协作广播]";
-
-/** Pure wake-candidate predicate for the board wake loop (exported for unit
- * testing). An entry wakes a session when it is open, is not an echo of the
- * receiving session, has NO live claim, is not a broadcast pull announcement,
- * AND its kind asks for a response/action — the same set as BROADCAST_KINDS
- * (question/blocker/handoff). Notify-only kinds (note/result/decision/goal)
- * are SILENT: they record a fact and owe no reply, so waking on them is the
- * acknowledgement storm — N agents confirming one fact each emit a note, and
- * every note wakes every subscriber (observed live: #36/#37/#38/#39 were four
- * confirmations of the same fact). Notify-only entries are read on demand,
- * never pushed. Claim liveness matters: a lapsed claim (lease expired; holder
- * crashed or stopped, no sweeper clears the column) returns the entry to the
- * pool, so it must wake again rather than be permanently hidden from its
- * former holder (audit finding 2026-08-13). */
-export function isBoardWakeCandidate(
-  entry: TaskBoardToolEntry,
-  input: { sessionId: string; agentId: string; agentName?: string; now?: Date },
-): boolean {
-  const now = input.now ?? new Date();
-  const ownEcho =
-    entry.sourceSessionId === input.sessionId ||
-    (entry.sourceSessionId == null && entry.agentId === input.agentId);
-  const liveClaim =
-    entry.claimExpiresAt != null && new Date(entry.claimExpiresAt).getTime() > now.getTime();
-  // Directed delivery (find→direct): an entry addressed to another agent
-  // never wakes me — only the addressee's LLM is woken. Matched against the
-  // stable id OR the mutable display name (both are the same agent). Everyone
-  // else sees it on read but stays silent.
-  const addressedToOther =
-    entry.to != null && entry.to !== input.agentId && entry.to !== input.agentName;
-  // Reply-gated serial handoff: only the outstanding actionable wakes; pending
-  // entries sit in the queue (read-visible) until the outstanding one is
-  // claimed ("回复=接手") or resolved, which promotes them. Directed entries are
-  // exempt (serialState is null for them — parallel-safe).
-  const serialQueued = entry.serialState === "pending";
-  return (
-    entry.status === "open" &&
-    BROADCAST_KINDS.has(entry.kind) &&
-    !ownEcho &&
-    !liveClaim &&
-    !addressedToOther &&
-    !serialQueued &&
-    !entry.content.startsWith(BROADCAST_PREFIX)
-  );
-}
-/** Broadcasts are transient pull notices: they announce another entry and must
- * not outlive it. RAII: give them a short TTL so an unanswered broadcast is
- * recycled (with its receipts) instead of accumulating as permanent open dead
- * state on the world channel. */
-export const BROADCAST_TTL_SECONDS = 86_400;
-/** Collaboration kinds worth pulling other agents in on; note/result/decision
- * updates are not broadcast, to keep the world channel quiet. */
-export const BROADCAST_KINDS = new Set(["question", "blocker", "handoff"]);
-
-/** Post a collaboration-pull broadcast on the world channel for an open entry
- * that woke this session, so other agents notice and can pull it in.
- * Broadcast is broadcast-style (a pull announcement, never addressed); the
- * delivery receipt under WORLD_BROADCAST_SESSION dedups it (once per entry),
- * and the wake loop's echo filter (sourceSessionId === this session) stops the
- * broadcaster from waking on its own post. Returns true when a broadcast was
- * actually posted. Injected `invoke` keeps the function unit-testable. */
-export async function maybeBroadcastToWorld(input: {
-  invoke: (method: string, params: unknown) => Promise<unknown>;
-  entry: TaskBoardToolEntry & { taskId: string };
-  agentId: string;
-  sessionId: string;
-}): Promise<boolean> {
-  const { invoke, entry, agentId, sessionId } = input;
-  // A broadcast entry is meta — it announces another entry. Re-broadcasting it
-  // is how broadcast storms start (broadcast → wake → broadcast → …). The
-  // original entry gets one pull broadcast; the broadcast itself never does.
-  if (entry.content.startsWith(BROADCAST_PREFIX)) return false;
-  const worldCheck = (await invoke("taskBoard", {
-    action: "deliveryCheck",
-    taskId: WORLD_BOARD_ID,
-    agentId,
-    sessionId: WORLD_BROADCAST_SESSION,
-    entryIds: [entry.id],
-  })) as { delivered: string[]; suppressed: boolean };
-  if (worldCheck.delivered.includes(entry.id)) return false;
-  const excerpt = boardEntryView(entry.content, 140);
-  const label = kindLabel(entry.kind);
-  const broadcast = `[NMG board 协作广播] 频道 ${entry.taskId} 有 #${entry.id} 未认领的${label}（open）：${excerpt}。有空的 agent 可用 nmg_board read taskId=${entry.taskId} 查看详情、claim 认领处理。`;
-  await invoke("taskBoard", {
-    action: "put",
-    taskId: WORLD_BOARD_ID,
-    agentId,
-    sourceSessionId: sessionId,
-    kind: "handoff",
-    content: broadcast,
-    // RAII: a broadcast is a transient pull notice — recycle it (with its
-    // receipts) after a day rather than leaving permanent open dead state.
-    ttlSeconds: BROADCAST_TTL_SECONDS,
-  });
-  await invoke("taskBoard", {
-    action: "recordDelivery",
-    entryId: entry.id,
-    sessionId: WORLD_BROADCAST_SESSION,
-    agentId,
-    source: "wake-broadcast",
-  });
-  return true;
-}
-
 function formatTaskBoardResult(
   result: TaskBoardToolResult,
   taskId: string,
-  directory: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> = [],
+  directory: Array<{
+    taskId: string;
+    entryCount: number;
+    lastUpdatedAt: string;
+  }> = [],
 ): string {
   return renderTaskBoardSurface(result, { taskId, directory });
 }
@@ -3035,88 +2761,6 @@ function formatRememberResult(value: unknown): string {
   return renderRememberSurface(value as Parameters<typeof renderRememberSurface>[0]);
 }
 
-function excerpt(value: string, maxLength: number): string {
-  const normalized = value.replace(/\s+/gu, " ").trim();
-  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}…`;
-}
-
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-
-/**
- * PostToolUse runtime-state capture (the tool result is the one event that
- * carries input + content + isError + per-tool details).
- */
-
-/** True only when a git commit actually landed, so a failed or no-op commit
- *  never raises the completion nudge. */
-export function isSuccessfulCommit(event: {
-  toolName: string;
-  isError: boolean;
-  content: unknown;
-  input?: unknown;
-}): boolean {
-  if (event.toolName !== "bash" || event.isError) return false;
-  const command = String((event.input as { command?: unknown })?.command ?? "");
-  if (!/\bgit\s+commit\b/.test(command)) return false;
-  const output = messageText(event.content);
-  return !/(?:nothing to commit|no changes added to commit|nothing added to commit)/iu.test(output);
-}
-
-/** Only tool results with lasting information value are captured as traces. */
-export function isMemorableToolResult(event: {
-  toolName: string;
-  isError: boolean;
-  content: unknown;
-  input?: unknown;
-}): boolean {
-  if (event.isError) return true;
-  const text = messageText(event.content);
-  switch (event.toolName) {
-    case "bash": {
-      const command = String((event.input as { command?: unknown })?.command ?? "");
-      const testRun =
-        /\b(?:npm|pnpm|yarn|bun|npx|node|deno)\s+(?:run\s+)?test\b|(?:vitest|jest|pytest|go\s+test|cargo\s+test)/iu.test(
-          command,
-        );
-      return testRun || /(?:error|fail(?:ed|ure)?|fatal|warning|exception|✗|FAILED)/iu.test(text);
-    }
-    case "edit":
-    case "write":
-      // File mutations are structural changes; capture the path.
-      return true;
-    case "grep":
-      return text.trim().length > 0;
-    default:
-      return false;
-  }
-}
-
-export function summarizeToolResult(event: {
-  toolName: string;
-  isError: boolean;
-  content: unknown;
-  input?: unknown;
-}): { statement: string; nodeName: string } {
-  const input = event.input as Record<string, unknown> | undefined;
-  if (event.toolName === "edit" || event.toolName === "write") {
-    const path = String(input?.path ?? input?.filePath ?? "?");
-    const verb = event.toolName === "write" ? "Wrote" : "Edited";
-    return {
-      statement: `${verb} ${path}${event.isError ? " (tool returned an error)" : ""}.`,
-      nodeName: path,
-    };
-  }
-  const text = excerpt(messageText(event.content), 400);
-  const status = event.isError ? " [error]" : "";
-  return {
-    statement: `Tool ${event.toolName}${status}: ${text || "(no text output)"}`,
-    nodeName: `tool:${event.toolName}`,
-  };
-}
-
-/**
- * Session-local projection of recent tool state. It deliberately has no daemon
- * or SQLite path: explicit nmg_remember remains the durable-memory gate.
- */

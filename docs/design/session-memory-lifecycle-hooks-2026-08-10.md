@@ -12,6 +12,8 @@ A session reasoning workspace is an optional Lab scratch surface, separate from 
 
 ## Current owner map
 
+- Automatic recall deadlines, cancellation and diagnostics: [current waiting-budget contract](session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.md).
+
 - Capture, recall, and the session working-state boundary: [Memory loop design](memory-loop-design.md) and [session active-graph runtime](session-active-graph-runtime-design.md).
 - Agent-visible information views: [context-information decision](../decisions/implemented/2026-10-13-context-information-views.md).
 - Working-state admission and daily use: [working-state decision](../decisions/implemented/2026-10-08-ag-working-state.md) and [daily-use decision](../decisions/implemented/2026-10-12-working-state-daily-use.md).
@@ -24,3 +26,15 @@ A session reasoning workspace is an optional Lab scratch surface, separate from 
 The original note included a 33-event Pi lifecycle inventory and detailed implementation observations. Extension event names and payloads can change; consult the currently installed Pi API and current extension source before relying on an event-level claim. Historical “implemented” or “tests passed” labels describe the dated report only. This index makes no new claim that every listed behavior was re-tested in this documentation pass.
 
 Use [implementation lineage](implementation-lineage.md) to locate current source ownership. The historical design is retained to explain why temporary session context, explicit durable memory, optional reasoning scratch, and measurement instrumentation are separate concerns.
+
+<a id="自动召回等待预算"></a>
+
+## Automatic recall waiting budget
+
+Read the [current waiting-budget contract](session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.md); this page remains a historical index.
+
+<a id="首次输出计时"></a>
+
+## First-output timing
+
+Read the [opt-in observation decision](../decisions/implemented/2026-10-04-first-response-timing-is-opt-in.md) and its implementation owner.

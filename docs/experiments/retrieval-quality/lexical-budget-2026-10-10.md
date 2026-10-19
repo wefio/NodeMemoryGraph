@@ -2,6 +2,10 @@
 
 [English](lexical-budget-2026-10-10.md) | [简体中文](lexical-budget-2026-10-10.zh-CN.md) · [Terms](lexical-budget-2026-10-10.terms.yaml)
 
+## Historical pre-budget mechanism
+
+This is a frozen source-branch experiment on ordering before evidence budgets, not the current mainline ranking contract or a claim that this documentation PR delivers the runtime change. The current FTS5-only rule resolves ties after AG evidence selection; see the [mainline retrieval contract](../../design/design/progressive-retrieval.md). The original experimental question, measurements and proof limits remain below.
+
 ## Frozen protocol
 
 Baseline: `94ca7e8f8000fb275e73961b25ba0c517e2f63df`. This slice studies only the position of FTS5 tie-breaking; it does not change candidate generation, scores, gates, default result count, QPP parameters, or output format. The user confirmed the public test boundary as `NmgStore.search` / `searchContext`; the shared `searchMemoryContext` entry verifies no-embedding and locally simulated degradation paths without calling a network model.

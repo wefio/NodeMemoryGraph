@@ -2,8 +2,10 @@
 
 [English](ooo-execution-bootstrap.md) · [术语](ooo-execution-bootstrap.terms.yaml)
 
-**状态：**草案  
-**更新：**2026-09-18  
+**状态：**草案
+
+**更新：**2026-09-18
+
 **相关：**[选择理由](../decisions/implemented/2026-09-09-ooo-bootstrap.zh-CN.md)、[准入实验](../experiments/ooo-admission-2026-09-08.md)
 
 > **2026-09-18 更新：**轮次仪器（`round-cli.ts`、`round-runner.ts`、`round-spec.ts`、`round-compare.ts`、`ooo-round-log.ts`、`src/integration/ooo-cycle.ts`）已退役，研究侧入口改为实验臂驱动器 `evals/ooo-execution/plan-driver.ts`（[决策](../decisions/implemented/2026-09-18-retire-the-round-instrument.zh-CN.md)）。下面 S3/S4 行与 S2 说明保留为当时的记录。

@@ -65,12 +65,20 @@ terms:
     anchor: QPP actuation and progressive disclosure
     status: canonical
   - term: pre-budget lexical tie-break
-    aliases: [lexical tie resolution, 预算前词法并列裁决]
+    aliases: [pre-budget lexical resolution, 预算前词法并列裁决]
     definition: >-
-      Ranking of adjacent FTS5 records with exactly equal combined scores before result caps and Active Graph selection, using IDF-weighted query-word coverage while preserving scores and non-tied order.
-      在结果上限和 Active Graph 选择之前，对 combined score 完全相同且相邻的 FTS5 记录进行排序；使用 IDF 加权查询词覆盖度，并保留原分数与非并列顺序。
-    owner: docs/decisions/implemented/2026-09-30-lexical-tie-ranking.md
-    anchor: Decision
+      The retained source-branch mechanism ordering equal-score adjacent FTS5 records before caps and AG selection using IDF-weighted query-word coverage; it is historical experimental evidence, not current mainline behavior.
+      保留的源分支机制，在 cap 与 AG 选择前按 IDF 加权查询词覆盖度排列相邻等分 FTS5 记录；它是历史实验证据，不是当前主线行为。
+    owner: docs/experiments/retrieval-quality/lexical-budget-2026-10-10.md
+    anchor: Historical pre-budget mechanism
+    status: canonical
+  - term: lexical tie-break
+    aliases: [lexical tie resolution, 词法并列排序]
+    definition: >-
+      Mainline FTS5-only reordering of adjacent exactly equal-score evidence after AG budget selection, using IDF-weighted query-word coverage in statements and bounded evidence; selected membership, non-tied order, QPP and hybrid retrieval do not change.
+      主线仅 FTS5 路径在 AG 预算选择后，按 statement 与有界证据中的 IDF 加权查询词覆盖度重排相邻完全等分证据；成员、非并列顺序、QPP 与 hybrid 检索不变。
+    owner: docs/design/design/progressive-retrieval.md
+    anchor: Progressive retrieval
     status: canonical
   - term: explicit recall intent
     aliases: [explicit-recall synonym, 显式召回意图]
@@ -79,6 +87,13 @@ terms:
       用于触发显式召回路径的已识别查询信号；比较 extension 或检索行为时必须保持同义词选择一致。
     owner: docs/decisions/implemented/2026-10-10-recall-intent-and-diagnostics.md
     anchor: Decision
+    status: canonical
+  - term: hybrid SQL bind order
+    aliases: ["混合检索SQL绑定顺序"]
+    definition: >-
+      The positional SQL contract that all WHERE parameters precede repeated ORDER BY ID bindings, preserving conjunctive scope and inclusive event-time filtering. 全部 WHERE 参数先于重复 ORDER BY ID 绑定的位置契约，保留 scope 合取与含端点事件时间过滤。
+    owner: docs/design/design/progressive-retrieval.md
+    anchor: Progressive retrieval
     status: canonical
 references:
   - Active Graph

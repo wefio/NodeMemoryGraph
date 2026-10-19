@@ -1,9 +1,28 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { ActiveGraph, ActiveGraphEdge } from "./types.ts";
+import {
+  DEFAULT_INFORMATION_OUTPUT_CHARACTERS,
+  TEMPORARY_INFORMATION_LABEL,
+} from "./information-view.ts";
+import { containsSecret } from "./write-policy.ts";
 
 export type SessionActiveGraphItemKind =
-  "semantic_memory" | "tool_observation" | "board_projection" | "reasoning_artifact";
+  | "semantic_memory"
+  | "tool_observation"
+  | "board_projection"
+  | "reasoning_artifact"
+  | "working_state";
+
+/** Trusted caller metadata used for fencing, not authentication or a model input. */
+export interface WorkingStateBinding {
+  readonly sessionId: string;
+  readonly agId: string;
+  readonly taskFrameId: string;
+  readonly bindingId: string;
+}
+
+const WORKING_STATE_ITEM_ID = "ag-item:working-state";
 
 export type SessionDisclosureLevel = "header" | "exact" | "evidence";
 
@@ -25,6 +44,8 @@ export interface SessionActiveGraphItem {
   lastActivatedAt: string;
   activation: number;
   temporary: boolean;
+  /** Owner-stamped creation/refresh turn for short-lived automatic continuity. */
+  observedTurn?: number;
   /** Optional TTL in ms from `createdAt`. When set and expired, the item is
    * excluded from snapshots and evicted from the live graph. Used by
    * `reasoning_artifact` (hypothetical MGR output) so hypotheses expire
@@ -34,6 +55,8 @@ export interface SessionActiveGraphItem {
    * reasoning artifact, "bash" for a tool observation). Never implies durable
    * truth. */
   sourceKind?: string;
+  /** Current-state content identity; replacing text keeps the item ID stable. */
+  contentHash?: string;
 }
 
 export interface ActiveGraphProjectionPart<TPart> {
@@ -77,6 +100,8 @@ export interface SessionActiveGraphRuntimeOptions {
   maxSessions?: number;
   maxItemsPerSession?: number;
   maxCharactersPerSession?: number;
+  /** Inside the existing resident/text ceilings; writers cannot raise it. */
+  maxWorkingStateCharacters?: number;
   maxProjectionsPerSession?: number;
   /** Bounded cooling set: how many task frames (active + cooled) a session may
    * keep at once. The oldest cooled frame is evicted beyond this cap. */
@@ -92,6 +117,7 @@ export interface SessionActiveGraphRuntimeOptions {
  * evicted LRU when the frame cap is exceeded. */
 interface FrameState {
   taskFrameId: string;
+  workingStateBindingId: string | null;
   items: Map<string, SessionActiveGraphItem>;
   edges: Map<string, ActiveGraphEdge>;
   latestProjectionId: string | null;
@@ -129,6 +155,7 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
   readonly maxSessions: number;
   readonly maxItemsPerSession: number;
   readonly maxCharactersPerSession: number;
+  readonly maxWorkingStateCharacters: number;
   readonly maxProjectionsPerSession: number;
   readonly maxTaskFramesPerSession: number;
   readonly maxDisclosureTurns: number;
@@ -143,6 +170,23 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
       256,
       10_000_000,
       32_000,
+    );
+    if (
+      options.maxWorkingStateCharacters !== undefined &&
+      (!Number.isSafeInteger(options.maxWorkingStateCharacters) ||
+        options.maxWorkingStateCharacters < 1)
+    ) {
+      throw new RangeError("working state character budget must be a positive safe integer");
+    }
+    const stateCeiling = Math.min(
+      this.maxCharactersPerSession,
+      DEFAULT_INFORMATION_OUTPUT_CHARACTERS - TEMPORARY_INFORMATION_LABEL.length - 1,
+    );
+    this.maxWorkingStateCharacters = bounded(
+      options.maxWorkingStateCharacters,
+      1,
+      stateCeiling,
+      stateCeiling,
     );
     this.maxProjectionsPerSession = bounded(options.maxProjectionsPerSession, 1, 10_000, 128);
     this.maxTaskFramesPerSession = bounded(options.maxTaskFramesPerSession, 1, 1_024, 8);
@@ -308,13 +352,15 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     sourceId?: string | null;
     nodeId?: string | null;
     taskFrameId?: string;
-    kind?: Exclude<SessionActiveGraphItemKind, "semantic_memory">;
+    kind?: Exclude<SessionActiveGraphItemKind, "semantic_memory" | "working_state">;
     activation?: number;
     /** TTL in ms from creation; the item stops being surfaced once expired. */
     ttlMs?: number;
     /** Provenance tag (e.g. "mgr" for a reasoning artifact). */
     sourceKind?: string;
   }): { added: boolean; item: SessionActiveGraphItem } {
+    if (String(input.kind) === "working_state")
+      throw new Error("working state requires its dedicated writer");
     const sessionId = normalizedSessionId(input.sessionId);
     const state = this.#state(sessionId, input.taskFrameId);
     const taskFrameId = input.taskFrameId?.trim() || state.activeTaskFrameId;
@@ -328,6 +374,8 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     const existing = frame.items.get(id);
     if (existing) {
       existing.lastActivatedAt = now;
+      existing.observedTurn = state.disclosureTurn;
+      existing.sourceKind = input.sourceKind ?? existing.sourceKind;
       existing.activation = Math.max(existing.activation, clamp01(input.activation ?? 0.7));
       this.#touch(state);
       return { added: false, item: { ...existing } };
@@ -343,6 +391,7 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
       lastActivatedAt: now,
       activation: clamp01(input.activation ?? 0.7),
       temporary: true,
+      observedTurn: state.disclosureTurn,
       ttlMs: input.ttlMs,
       sourceKind: input.sourceKind,
     };
@@ -350,6 +399,103 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     this.#trimItems(state);
     this.#touch(state);
     return { added: true, item: { ...item } };
+  }
+
+  /** Host-only capture. Rebinding fences queued writes from an older activation. */
+  bindWorkingState(sessionId: string, taskFrameId = "session"): WorkingStateBinding {
+    if (!sessionId.trim() || !taskFrameId.trim())
+      throw new Error("working state binding requires session and frame");
+    const state = this.#state(sessionId.trim(), taskFrameId.trim());
+    const frame = this.#activateFrame(state, taskFrameId.trim());
+    frame.workingStateBindingId = randomUUID();
+    return Object.freeze({
+      sessionId: state.sessionId,
+      agId: state.agId,
+      taskFrameId: frame.taskFrameId,
+      bindingId: frame.workingStateBindingId,
+    });
+  }
+
+  unbindWorkingState(binding: WorkingStateBinding): boolean {
+    const state = this.#sessions.get(binding.sessionId);
+    const frame = state?.frames.get(binding.taskFrameId);
+    if (state?.agId !== binding.agId || !frame || frame.workingStateBindingId !== binding.bindingId)
+      return false;
+    frame.workingStateBindingId = null;
+    return true;
+  }
+
+  replaceWorkingState(binding: WorkingStateBinding, text: string): "updated" | "unchanged" {
+    const { state, frame } = this.#workingStateFrame(binding);
+    if (!text.trim())
+      throw new Error("working state text is required; use clear for an empty state");
+    if (containsSecret(text)) throw new Error("working state cannot contain secrets");
+    if (text.length > this.maxWorkingStateCharacters)
+      throw new Error("working state exceeds its character budget");
+    const previous = frame.items.get(WORKING_STATE_ITEM_ID);
+    if (previous?.statement === text) {
+      this.#touch(state);
+      return "unchanged";
+    }
+    this.#requireWorkingStateCapacity(state, frame, text);
+    const now = new Date(this.#now()).toISOString();
+    frame.items.set(WORKING_STATE_ITEM_ID, {
+      id: WORKING_STATE_ITEM_ID,
+      kind: "working_state",
+      statement: text,
+      sourceId: binding.bindingId,
+      sourceKind: "working_state",
+      nodeId: null,
+      taskFrameId: frame.taskFrameId,
+      createdAt: previous?.createdAt ?? now,
+      lastActivatedAt: now,
+      activation: 1,
+      temporary: true,
+      contentHash: hash(text),
+    });
+    this.#touch(state);
+    return "updated";
+  }
+
+  clearWorkingState(binding: WorkingStateBinding): "cleared" {
+    const { state, frame } = this.#workingStateFrame(binding);
+    frame.items.delete(WORKING_STATE_ITEM_ID);
+    this.#touch(state);
+    return "cleared";
+  }
+
+  #workingStateFrame(binding: WorkingStateBinding): {
+    state: SessionState<TPart>;
+    frame: FrameState;
+  } {
+    const state = this.#sessions.get(binding.sessionId);
+    const frame = state?.frames.get(binding.taskFrameId);
+    if (
+      !state ||
+      state.agId !== binding.agId ||
+      state.activeTaskFrameId !== binding.taskFrameId ||
+      !frame ||
+      !frame.workingStateBindingId ||
+      frame.workingStateBindingId !== binding.bindingId
+    ) {
+      throw new Error("working state binding is stale or belongs to another context");
+    }
+    return { state, frame };
+  }
+
+  #requireWorkingStateCapacity(state: SessionState<TPart>, target: FrameState, text: string): void {
+    let count = 1;
+    let characters = text.length;
+    for (const frame of state.frames.values()) {
+      for (const item of frame.items.values()) {
+        if (frame === target && item.id === WORKING_STATE_ITEM_ID) continue;
+        count += 1;
+        characters += item.statement.length;
+      }
+    }
+    if (count > this.maxItemsPerSession || characters > this.maxCharactersPerSession) {
+      throw new Error("working state exceeds the resident AG budget");
+    }
   }
 
   activateTemporaryProjection(sessionId: string): SessionActiveGraphSnapshot {
@@ -368,7 +514,12 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     const items = frame
       ? [...frame.items.values()]
           .filter((item) => this.#liveItem(item, nowMs))
-          .filter((item) => item.kind === "semantic_memory" || state.temporaryProjectionActive)
+          .filter(
+            (item) =>
+              item.kind === "semantic_memory" ||
+              item.kind === "working_state" ||
+              state.temporaryProjectionActive,
+          )
           .sort((left, right) => right.activation - left.activation)
           .map((item) => ({ ...item }))
       : [];
@@ -383,7 +534,9 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
       edges: frame ? [...frame.edges.values()].map((edge) => ({ ...edge })) : [],
       disclosedProjectionIds: [...state.disclosedProjectionIds],
       disclosureTurn: state.disclosureTurn,
-      disclosures: [...state.disclosures.values()].map((entry) => ({ ...entry })),
+      disclosures: [...state.disclosures.values()].map((entry) => ({
+        ...entry,
+      })),
     };
   }
 
@@ -397,7 +550,12 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     const nowMs = this.#now();
     const items = [...frame.items.values()]
       .filter((item) => this.#liveItem(item, nowMs))
-      .filter((item) => item.kind === "semantic_memory" || state.temporaryProjectionActive)
+      .filter(
+        (item) =>
+          item.kind === "semantic_memory" ||
+          item.kind === "working_state" ||
+          state.temporaryProjectionActive,
+      )
       .sort((left, right) => right.activation - left.activation)
       .map((item) => ({ ...item }));
     return {
@@ -411,7 +569,9 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
       edges: [...frame.edges.values()].map((edge) => ({ ...edge })),
       disclosedProjectionIds: [...state.disclosedProjectionIds],
       disclosureTurn: state.disclosureTurn,
-      disclosures: [...state.disclosures.values()].map((entry) => ({ ...entry })),
+      disclosures: [...state.disclosures.values()].map((entry) => ({
+        ...entry,
+      })),
     };
   }
 
@@ -456,10 +616,15 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
    * one) and apply the bounded cooling-set eviction. Returns the frame. */
   #activateFrame(state: SessionState<TPart>, taskFrameId: string): FrameState {
     const key = taskFrameId.trim() || "session";
+    if (state.activeTaskFrameId !== key) {
+      const previous = state.frames.get(state.activeTaskFrameId);
+      if (previous) previous.workingStateBindingId = null;
+    }
     let frame = state.frames.get(key);
     if (!frame) {
       frame = {
         taskFrameId: key,
+        workingStateBindingId: null,
         items: new Map(),
         edges: new Map(),
         latestProjectionId: null,
@@ -513,18 +678,23 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
 
   /** Unified budget: the session's total items/characters across ALL frames
    * (active + cooled) must stay under the per-session caps. Evicts the
-   * lowest-activation item anywhere, so tool observations, board projections,
-   * and reasoning artifacts share one pool with retrieved semantic memories. */
+   * lowest-activation ordinary item anywhere. Maintained state participates in
+   * the same cap but is replaced/cleared explicitly or removed with its frame;
+   * admission must prove capacity before a state write. */
   #trimItems(state: SessionState<TPart>): void {
     const all = [...state.frames.values()].flatMap((frame) =>
       [...frame.items.values()].map((item) => ({ frame, item })),
     );
-    const ordered = all.sort((a, b) => compareEvictionPriority(a.item, b.item));
-    let characters = ordered.reduce((sum, entry) => sum + entry.item.statement.length, 0);
-    while (ordered.length > this.maxItemsPerSession || characters > this.maxCharactersPerSession) {
+    const ordered = all
+      .filter(({ item }) => item.kind !== "working_state")
+      .sort((a, b) => compareEvictionPriority(a.item, b.item));
+    let count = all.length;
+    let characters = all.reduce((sum, entry) => sum + entry.item.statement.length, 0);
+    while (count > this.maxItemsPerSession || characters > this.maxCharactersPerSession) {
       const removed = ordered.shift();
       if (!removed) break;
       removed.frame.items.delete(removed.item.id);
+      count -= 1;
       characters -= removed.item.statement.length;
     }
   }

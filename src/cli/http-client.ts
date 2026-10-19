@@ -20,6 +20,8 @@ export interface HttpCallOptions {
    * instead of the transport's.
    */
   timeoutMs?: number;
+  /** A caller's whole-operation deadline, including response-body consumption. */
+  signal?: AbortSignal;
 }
 
 export async function httpCall(
@@ -31,38 +33,49 @@ export async function httpCall(
   if (state.transport !== "http" || !state.host || !state.port || !state.token) {
     throw new Error("NMG daemon state does not contain an HTTP endpoint");
   }
-  let response: Response;
+  const signal = callSignal(options);
   try {
-    response = await fetch(`http://${state.host}:${state.port}/`, {
+    signal?.throwIfAborted();
+    const response = await fetch(`http://${state.host}:${state.port}/`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${state.token}`,
       },
       body: JSON.stringify({ jsonrpc: "2.0", method, params, id: 1 }),
-      ...(options.timeoutMs === undefined
-        ? {}
-        : { signal: AbortSignal.timeout(options.timeoutMs) }),
+      ...(signal ? { signal } : {}),
     });
+    return await responseResult(response, method, signal);
   } catch (error) {
-    // A bound that fired is a fact about this call, not a transport quirk to report as one: name it
-    // here so the caller's message can say what the wait was for.
+    if (options.signal?.aborted) throw options.signal.reason;
     if (options.timeoutMs !== undefined && isTimeout(error)) {
       throw new TimeoutError(`nmg ${method} did not answer within ${options.timeoutMs}ms`);
     }
     throw error;
   }
+}
+
+function callSignal(options: HttpCallOptions): AbortSignal | undefined {
+  const timeout =
+    options.timeoutMs === undefined ? undefined : AbortSignal.timeout(options.timeoutMs);
+  return options.signal && timeout
+    ? AbortSignal.any([options.signal, timeout])
+    : (options.signal ?? timeout);
+}
+
+async function responseResult(
+  response: Response,
+  method: NmgMethod,
+  signal?: AbortSignal,
+): Promise<unknown> {
   const text = await response.text();
-  if (!response.ok) {
-    throw new Error(text || `nmg ${method} failed (${response.status})`);
-  }
+  signal?.throwIfAborted();
+  if (!response.ok) throw new Error(text || `nmg ${method} failed (${response.status})`);
   const parsed = JSON.parse(text) as {
     result?: unknown;
     error?: { code?: number; message?: string };
   };
-  if (parsed.error) {
-    throw new Error(parsed.error.message ?? `nmg ${method} error`);
-  }
+  if (parsed.error) throw new Error(parsed.error.message ?? `nmg ${method} error`);
   return parsed.result;
 }
 

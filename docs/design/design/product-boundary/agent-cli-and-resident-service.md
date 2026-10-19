@@ -2,6 +2,8 @@
 
 **Authority:** [Parent scope](../product-boundary.md).
 
+Per-adapter capability coverage is compared in the [harness capability matrix](../../harness-capability-matrix.md); an adapter entry point alone does not establish full coverage.
+
 ## Agent-independent CLI and resident service
 
 The target integration boundary is an agent-independent `nmg` CLI rather than
@@ -113,13 +115,7 @@ compatibility, gate optional calls locally, and report a feature-unavailable
 error only when the caller invokes a missing capability. Clients fail closed
 only when a live daemon uses a different compatibility epoch and then require an
 explicit `nmg daemon restart` at a safe coordination point; they never replace a
-shared daemon automatically. An explicit `nmg daemon reload` replaces a capable
-owner through the [controlled lifecycle handover](../../daemon-lifecycle-design/controlled-code-reload.md#controlled-code-reload-1):
-admission closes, accepted calls drain, only a ticketed replacement can acquire
-the lease, and clients refresh discovery. Durable memory and board data survive;
-volatile AG and writer leases are cleared. Missing capability is refused rather
-than upgraded implicitly. Uncertain mutation outcomes are not replayed after
-owner changes; read-only calls retain the bounded reconnect retry.
+shared daemon automatically.
 `NMG_RPC_DESCRIPTORS` is the runtime declaration source for method existence and
 same-epoch optional capability gates. It derives the server whitelist, the
 TypeScript method union, the client gate table, and the optional `hello.methods`

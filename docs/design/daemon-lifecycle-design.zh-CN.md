@@ -6,6 +6,8 @@
 **Updated:** 2026-10-13
 **Related:** [stg-isolated-store.md](stg-isolated-store.md), [memory-graphs.md](memory-graphs.md), [external-source-design.md](external-source-design.md), [design.md](design.md)
 
+受控 reload 及其交接专用客户端描述是保留的源分支设计，条件是已安装实现明确支持该能力；不声明本 checkout 提供该命令或相关测试。普通存储、ownership 与兼容性规则不因此改变，实际可用操作以 CLI 和认证发现为准。
+
 ## 背景：2026-08-02 内存耗尽事故
 
 评测 `run.ts locomo matched 99999` 期间，节点内存被 node 进程打爆（63.7GB 物理内存占用 98.2%，工作集超 100GB）。已定位根因（详见事故分析，归档于 NMG 记忆 `NodeMemoryGraph-eval-daemon-leak`）：

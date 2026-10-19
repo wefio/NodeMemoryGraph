@@ -18,14 +18,14 @@ not evidence that a policy improves real Agent work.
 
 ## Status vocabulary
 
-| State | Meaning |
-| --- | --- |
-| **Verified core** | Contract is designed, wired into the stable boundary, and covered by deterministic tests. |
-| **Opt-in Lab** | Implemented and explicitly activatable, but omitted from the Lite default tool/prompt path. |
-| **Designed target** | Normative target and ownership are accepted, but the current implementation still follows a superseded runtime shape. |
-| **Calibration gate** | Mechanism exists; thresholds or default activation require independent natural evidence. |
-| **Explicitly deferred** | Boundary is designed, but implementation waits for a stated prerequisite. |
-| **Out of scope** | Another component owns it; NMG must only define an integration boundary. |
+| State                   | Meaning                                                                                                               |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| **Verified core**       | Contract is designed, wired into the stable boundary, and covered by deterministic tests.                             |
+| **Opt-in Lab**          | Implemented and explicitly activatable, but omitted from the Lite default tool/prompt path.                           |
+| **Designed target**     | Normative target and ownership are accepted, but the current implementation still follows a superseded runtime shape. |
+| **Calibration gate**    | Mechanism exists; thresholds or default activation require independent natural evidence.                              |
+| **Explicitly deferred** | Boundary is designed, but implementation waits for a stated prerequisite.                                             |
+| **Out of scope**        | Another component owns it; NMG must only define an integration boundary.                                              |
 
 Lab is not a one-way holding area. The daemon publishes a capability directory and
 session-scoped expiring leases through the existing client RPC. An Agent may

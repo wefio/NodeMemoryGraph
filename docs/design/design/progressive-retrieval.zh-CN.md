@@ -39,8 +39,9 @@ Inbox/Delta + surface anchors + fine-grained record semantics
 - 词级 FTS5 作为零配置或降级兜底，而不是语义检索的替代，也不是英文 benchmark 策略；
 - 正则表达式仅作为在有界候选集合或原始会话子集之上的高级／调试兜底。
 
-在仅 FTS5 路径上，`combinedScore` 完全相等的相邻候选，在直接结果上限与 Active Graph 预算选择证据之前，按其陈述与前 500 个证据字符中查询词项的 IDF 加权覆盖率排序。非并列顺序与分数不变；所选前缀与 QPP 观察可能改变，因为预算看到的是已解决顺序。Open 附件保留其预留位置。语义检索与强制的 surface-anchor 补充不使用该规则。其范围、评测与被否决的神经排序臂记录在
-[词法并列排序](../../decisions/implemented/2026-09-30-lexical-tie-ranking.md)。
+结构化 scope 的合取与含端点的 event-time 边界，在评分及 limit 之前约束 SQL 候选池；缺少 event time 的记录不满足已提供的时间边界。hybrid lexical priority 也不豁免这些过滤；重复 `ORDER BY` 记忆 ID 按 SQL 占位符顺序绑定在全部 `WHERE` 值之后、`LIMIT` 之前。强制候选与无 FTS 命中的向量兜底使用同一过滤契约。
+
+仅 FTS5 路径在 Active Graph 预算选出证据之后，对 `combinedScore` 完全相同的相邻候选，按 statement 与有界证据摘录中的查询词 IDF 加权覆盖率排序；不改变候选成员、QPP 扩展或 hybrid 检索。评测与被否决的神经排序臂见[词法并列排序](../../decisions/implemented/2026-09-30-lexical-tie-ranking.zh-CN.md)。
 
 任意模型生成的正则不是相关性排序器，默认不得扫描整个 store。Surface anchor 在共享 AG 预算与投影之前、与语义候选一起被准入。纯散文不会仅因词重叠而产生 surface anchor，从而防止一个英文 benchmark 重新定义产品排序。任意字面扫描仍被禁止，因为 trigram 索引提供了有界精确路径，且没有正则转义或灾难性回溯风险。
 
