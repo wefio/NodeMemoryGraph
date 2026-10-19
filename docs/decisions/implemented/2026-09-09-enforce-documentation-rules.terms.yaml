@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: mechanical documentation enforcement boundary
+    aliases: [checkable documentation rule, 文档机械检查边界]
+    definition: >-
+      The distinction between document properties a validator can check without false positives, such as lifecycle headings and duplicate inventories, and prose judgments that remain human review rather than grep rules.
+      验证器可在避免误报的前提下机械检查的文档属性（如生命周期标题和重复清单），与仍需人工审阅、不能靠 grep 规则裁决的散文判断之间的边界。
+    owner: docs/decisions/implemented/2026-09-09-enforce-documentation-rules.md
+    anchor: Decision
+    status: canonical
+references:
+  - evidence

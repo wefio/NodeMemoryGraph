@@ -1,0 +1,21 @@
+version: 2
+terms:
+  - term: external embedding target
+    aliases: [external runtime target, 外部 embedding 构建目标]
+    definition: >-
+      The Docker build target containing NMG's Node runtime without Python, PyTorch, CUDA or model weights; semantic retrieval requires a separately configured external provider.
+      只包含 NMG Node 运行时、不包含 Python、PyTorch、CUDA 或模型权重的 Docker 构建目标；语义检索还需要单独配置外部 provider。
+    owner: docs/decisions/implemented/2026-08-24-external-embedding-container.md
+    anchor: Decision
+    status: canonical
+  - term: BGE target
+    aliases: [本地 BGE 目标]
+    definition: >-
+      The Docker target extending the shared NMG runtime with the pinned local BGE service; it remains the default target for backward-compatible `docker build .` behavior.
+      在共享 NMG 运行时上增加固定版本本地 BGE 服务的 Docker 目标；为保持兼容，它仍是 `docker build .` 的默认目标。
+    owner: docs/decisions/implemented/2026-08-24-external-embedding-container.md
+    anchor: Decision
+    status: canonical
+references:
+  - embedding provider
+  - semantic retrieval

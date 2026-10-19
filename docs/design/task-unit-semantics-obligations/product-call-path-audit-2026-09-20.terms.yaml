@@ -1,0 +1,24 @@
+version: 2
+terms:
+  - term: dependency admission
+    aliases: [dependency acceptance, 依赖准入]
+    definition: >-
+      The rule that makes a task eligible only when its declared dependencies are accepted; a board claim or serial handoff promotion does not itself satisfy this rule.
+      只有在声明的依赖均已接受时才允许任务进入可执行集合的规则；board claim 或串行 handoff 晋升本身不满足该规则。
+    owner: docs/design/task-unit-semantics-obligations/product-call-path-audit-2026-09-20.md
+    anchor: Product call-path audit (2026-09-20)
+    status: canonical
+  - term: serial promotion
+    aliases: [promoteNextSerialPending, 串行晋升]
+    definition: >-
+      Making the next serially pending board handoff available after a claim or closure; it changes handoff availability, not dependency acceptance.
+      在 claim 或 closure 后使下一个串行待处理的 board handoff 可用；它改变 handoff 可用性，不改变依赖接受状态。
+    owner: docs/design/task-unit-semantics-obligations/product-call-path-audit-2026-09-20.md
+    anchor: Product call-path audit (2026-09-20)
+    status: canonical
+references:
+  - proven obligation
+  - task unit
+  - run record
+  - Task Board
+  - product-runtime evidence

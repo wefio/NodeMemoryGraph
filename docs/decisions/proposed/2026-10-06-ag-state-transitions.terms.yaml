@@ -1,0 +1,14 @@
+version: 2
+terms:
+  - term: actual output confirmation
+    aliases: [host exposure confirmation, 实际输出确认]
+    definition: >-
+      A proposed adapter-bound step that associates the final model-input content with its source projection before the session owner commits disclosure; prepared output or a successful operation alone is not confirmation that a provider received it.
+      拟议的宿主适配器步骤：在会话 owner 提交披露记录前，将最终模型输入内容与其来源投影关联；仅有已准备输出或操作成功，并不能确认 provider 已收到该内容。
+    owner: docs/decisions/proposed/2026-10-06-ag-state-transitions.md
+    anchor: 2.2 Host-neutral typed information views and explicit output
+    status: proposed
+references:
+  - working state
+  - prepared information output
+  - Task Board

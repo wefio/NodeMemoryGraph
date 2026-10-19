@@ -1,0 +1,39 @@
+version: 2
+terms:
+  - term: host-side token-free speculation (class A)
+    aliases: [class A, 无 token 的 host 侧推测]
+    definition: >-
+      Perform preparatory host work that will be needed regardless of the event outcome, with no model-token cost and no irreversible side effects; the historical decision allowed this class without guessing an outcome.
+      预先执行无论事件结果如何都必需的 host 工作，不花模型 token，也不产生不可逆副作用；历史决策允许此类操作而不猜测事件结果。
+    owner: docs/design/ooo-execution-bootstrap/related-work/speculation-integration.md
+    anchor: Candidate locations and cost classes
+    status: canonical
+  - term: event-outcome speculation (class B)
+    aliases: [class B, 事件结果推测]
+    definition: >-
+      Spend a worker call by guessing a declared external event outcome to start dependent work early; the cited decision did not adopt this without measured break-even evidence.
+      通过 worker 调用猜测已声明的外部事件结果，以提前启动依赖工作；所引决策未在缺少实测盈亏平衡证据时采纳此做法。
+    owner: docs/design/ooo-execution-bootstrap/related-work/speculation-integration.md
+    anchor: Candidate locations and cost classes
+    status: canonical
+  - term: dependency relaxation
+    aliases: [dependency reordering, 依赖放宽与重排]
+    definition: >-
+      Split or reorder work that is required either way but is blocked only by an unnecessarily coarse dependency; this is not speculation and requires no guessed outcome.
+      拆分或重排无论如何都必须执行、只是被过粗依赖关系阻塞的工作；这不是推测，也不需要猜测结果。
+    owner: docs/design/ooo-execution-bootstrap/related-work/speculation-integration.md
+    anchor: Candidate locations and cost classes
+    status: canonical
+  - term: speculation break-even evidence
+    aliases: [measured break-even, 推测盈亏平衡证据]
+    definition: >-
+      Per-round token cost, step wall time, covered wait, and wasted-work cost sufficient to compare the value of hiding a wait with the cost of wrong guesses and host verification.
+      每轮 token 成本、分步墙钟时间、被覆盖等待与白跑成本，用于比较隐藏等待的收益与猜错及 host 验证的成本。
+    owner: docs/design/ooo-execution-bootstrap/related-work/speculation-integration.md
+    anchor: Candidate locations and cost classes
+    status: canonical
+references:
+  - constrained OoO bootstrap
+  - real external wait
+  - bounded speculation
+  - research-instrument evidence

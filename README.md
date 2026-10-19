@@ -1,8 +1,8 @@
 # Node Memory Graph (NMG)
 
-English | [简体中文](README.zh-CN.md)
+English | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
 
-> **Your agent may change. Your memory doesn't have to.****
+> **Your agent may change. Your memory doesn't have to.**
 
 NMG is a local-first, long-term memory layer for AI agents. Durable memory lives
 in one SQLite file on your machine — not in someone's cloud.
@@ -180,6 +180,18 @@ By default, the extension stores shared LTG and Task Board data in
 `~/.nmg/nmg.sqlite`. Set `NMG_DATA_DIR` to use another directory. Project-local
 `.nmg/` data is reserved for isolated STG sessions and controlled/headless runs.
 
+Pi provides [opt-in first-output timing](docs/decisions/implemented/2026-10-04-first-response-timing-is-opt-in.md)
+through `/nmg-latency on|off|status`; it records metadata only and does not change
+recall waiting policy. The hook contract defines slow-recall retention and
+host-event interpretation.
+
+For ongoing work, the maintained-state widget shows a labelled current-status
+preview; `/nmg state` reads the complete session state without searching history, and
+`/nmg state on|off` toggles only that preview.
+See the [daily work-status workflow](skills/nmg-memory/references/optional-capabilities.md#daily-work-status)
+for updates, evidence and restart boundaries. The state is provisional, not a
+completion certificate or a durable task store.
+
 The Pi adapter is deliberately thin. It lazily starts the local daemon over
 JSON-RPC/HTTP, reuses one connection for automatic recall and the default tool
 surface, and stops the daemon at session shutdown only when that adapter
@@ -222,12 +234,13 @@ entry point, the shared Task Board, and a typed write/use policy:
   the existing daemon connection. Reasoning workspace, read-only graph reasoning,
   and controller shadow are Agent-selectable; controlled/active actuation remains
   receipt- and gate-protected.
-- `nmg_board`: publish, discover, claim, acknowledge, and resolve temporary
-  cross-Agent work. It is available by default so a newly attached Agent can
-  immediately discover peers and shared tasks.
+- `nmg_state`: read/write private AG working state or shared board coordination
+  through one space-specific entry. AG writers explicitly enable a bounded lease;
+  board operations retain their TTL, claim and independent-judgement lifecycle.
+  See [state spaces](docs/design/state-spaces.md).
 
-Set `NMG_ENABLE_COORDINATION=0` (also `false`, `off`, or `no`) to hide the
-model-facing `nmg_board` tool and disable adapter wake polling. The daemon RPC
+Set `NMG_ENABLE_COORDINATION=0` (also `false`, `off`, or `no`) to reject
+model-facing board operations and disable adapter wake polling; AG remains available. The daemon RPC
 and `nmg board ...` CLI remain available for administration. Board entries are
 temporary, attributed, task-scoped coordination data; they never enter LTG or
 semantic retrieval.
@@ -354,7 +367,11 @@ requires an explicit command. `memory delete` retains immutable source history.
 
 The service rejects a second daemon for the same database, opens SQLite lazily,
 and removes stale process leases. Use the same `--data-dir` or `--db` for daemon
-and client commands.
+and client commands. At a coordinated code-update boundary, `nmg daemon reload`
+drains accepted work and replaces a capable owner without clients racing to
+start a second one. Persistent memory/board data survives; volatile AG and writer
+leases are cleared. An older daemon without this capability is refused, not
+silently restarted. See [controlled reload](docs/design/daemon-lifecycle-design/controlled-code-reload.md#controlled-code-reload-1).
 
 Node identity maintenance starts automatically on write: exact canonical names
 and case/spacing/punctuation-only variants of the same node kind reuse the
@@ -378,17 +395,19 @@ recall, and operations guidance is read only after an Agent forgets an operation
 or encounters a special case. The normal path remains
 `status → start if needed → search → selected get → ownership-safe stop`.
 
-Install or refresh the complete Skill (quick card plus references) and verify
-that the installed copy has not drifted:
+For first-time setup from a persistent local checkout, prefer a directory
+symbolic link from `~/.agents/skills/nmg-memory` (or the Agent's configured skills
+location) to `<CHECKOUT>/skills/nmg-memory`; on Windows, use a directory junction.
+Link the whole directory so the quick card and references follow source changes
+without a sync script. Keep the source available and confirm migration before
+replacing an existing installation or local modifications. See the
+[Skill installation rule](skills/nmg-memory/SKILL.md#installation).
 
-```bash
-npm run skill:nmg:sync
-npm run skill:nmg:check
-```
+File changes follow the link immediately; instructions already loaded into a
+session are not retroactively replaced. In Pi, reload at an idle boundary or start
+a new session when refreshed discovery is needed.
 
-The default cross-platform target is `~/.agents/skills/nmg-memory`; pass
-`-- --target <.../nmg-memory>` to either command for another Agent home. The
-natural-evidence reference describes passive real-use collection, fail-closed
+The natural-evidence reference describes passive real-use collection, fail-closed
 readiness audits, candidate calibration, matched validation, and rollbackable
 Agent-applied updates.
 

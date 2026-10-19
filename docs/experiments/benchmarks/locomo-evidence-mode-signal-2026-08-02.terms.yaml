@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: evidence-mode signal audit
+    aliases: [evidence cardinality audit, evidence-mode 信号审计]
+    definition: >-
+      The historical offline five-fold audit of evidence cardinality and fusion completeness; labels were excluded from retrieval and feature construction, not from the audit's evaluation. No LLM was called in that audit.
+      历史离线五折审计，用来评估 evidence 数量与融合完备性；检索和特征构造不使用标签，但不表示审计评估也不使用标签。该次审计未调用 LLM。
+    owner: docs/experiments/benchmarks/locomo-evidence-mode-signal-2026-08-02.md
+    anchor: Protocol
+    status: canonical
+  - term: asserted evidence-cardinality signal
+    aliases: [single/multi prompt signal, 已断言的 evidence 数量信号]
+    definition: >-
+      Exposing `single` versus `multi` to the prompt as a claim about how many evidence records a question needs; this audit rejected it because the score distribution does not identify evidence cardinality and route agreement is almost uninformative.
+      把 `single` 与 `multi` 作为「问题需要几条 evidence 记录」的断言暴露给 prompt；本次审计否决了它，因为分数分布无法识别 evidence cardinality，route 一致性也几乎没有信息量。
+    owner: docs/experiments/benchmarks/locomo-evidence-mode-signal-2026-08-02.md
+    anchor: Decision
+    status: canonical
+  - term: shadow evidence-completeness signal
+    aliases: [completeness shadow signal, 完备性 shadow 信号]
+    definition: >-
+      A completeness estimate recorded for inspection without stopping retrieval or authorizing an answer; it must be calibrated on held-out data with measured selective risk before the Pi adapter uses it.
+      只记录供检查、不用于停止检索或授权回答的完备性估计；在 Pi adapter 使用它之前，必须在 held-out 数据上校准并测量 selective risk。
+    owner: docs/experiments/benchmarks/locomo-evidence-mode-signal-2026-08-02.md
+    anchor: Decision
+    status: canonical
+references: [evidence completeness, QPP]

@@ -1,7 +1,16 @@
 # Retention, and the verdict the round no longer copies
 
+[English](ooo-retention-2026-09-13.md) | [简体中文](ooo-retention-2026-09-13.zh-CN.md) · [Terms](ooo-retention-2026-09-13.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a dated research
+or fixture record. Table names, source positions, status statements, test counts
+and unresolved-work labels belong to its snapshot, not current daemon `taskRun`
+integration. No listed suite or mutation was rerun here, and historical/local
+replay commands are not confirmed available in this checkout. The current
+[task-unit contract](../../design/task-unit-semantics.md) owns product boundaries.
+
 **Related:** [task-unit semantics design](../../design/task-unit-semantics.md) ·
-[proposed decision record](../../decisions/implemented/2026-09-13-task-unit-semantics.md) ·
+[implemented decision record](../../decisions/implemented/2026-09-13-task-unit-semantics.md) ·
 [the single acceptance predicate](ooo-acceptance-predicate-2026-09-13.md) ·
 [board deliverable/verdict decision](../../decisions/implemented/2026-09-06-board-governance-addressing.md)
 
@@ -9,7 +18,9 @@ Measured 2026-09-13. Zero model tokens.
 
 ## Question
 
-The design lists two preconditions the round has to meet before runners can be wired to it:
+The record quotes two preconditions from its historical design context, before
+runner integration. The original source revision of this quotation is not pinned
+here; do not treat it as a quotation of today's edited design:
 _"被保留 run 引用的 board entry 必须能 survive 普通 TTL prune"_, and derived facts must have no
 authoritative storage. Both were false, and they are the same problem seen twice: the round kept
 a private column (`accepted_entry_id`) pointing at the entry that accepted an artifact, precisely
@@ -27,8 +38,9 @@ for not being able to retain the evidence.
 | `acceptedArtifacts()`                                                            | the verdict is looked up on the board by the digest of _this attempt's_ artifact; no pointer column                                                                                  |
 | `commitArtifact()`                                                               | stops writing `accepted_entry_id`                                                                                                                                                    |
 
-So acceptance is now derived from the entry, and the retention is what makes that derivation
-true. A consumer that needs a durable reference no longer has to copy the fact into its own
+Acceptance is looked up from the board's digest-bound verdict; retention keeps
+the evidence available for that derivation. A pin does not itself accept an
+artifact or replace the independent verdict. A consumer that needs a durable reference no longer has to copy the fact into its own
 table — which is exactly the property the design's "derived facts have no authoritative storage"
 asks for.
 
@@ -68,12 +80,21 @@ that changed nothing:
   (`artifact`) and derivable state (`entry_id`, `attempt`, and now the retired
   `accepted_entry_id`) in one table. This change removes one derived column's _use_; splitting the
   table is the design's later slice, together with the shared transaction store and multi-round
-  namespacing.
+  namespacing. This paragraph predates the
+  [task-table recomputation audit](ooo-task-tables-2026-09-13.md); its broad
+  derived-state label is not a completed proof that every listed field can be
+  reconstructed from the board.
 - A pin with no `retainedUntil` is released explicitly, so a round that dies without fencing
   leaves a visible pin behind. That is deliberate — the evidence must not vanish — and
   `listTaskBoardRetentions` is how an operator finds it. Nobody should read this as automatic.
 
 ## Reproduction
+
+This block is a historical replay recipe, not a current executable receipt.
+`<shared-checkout>` and the local one-off script are not supplied by this record;
+this review does not establish their availability. The named mutation checks
+must be resolved against the intended source revision before any replay, and
+no such replay was run for this documentation pass.
 
 ```bash
 cd <worktree on this branch>

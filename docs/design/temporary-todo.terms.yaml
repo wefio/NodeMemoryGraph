@@ -1,0 +1,49 @@
+version: 2
+terms:
+  - term: active TODO list
+    aliases: [working queue, 活动 TODO 清单]
+    definition: >-
+      A working queue rather than a design specification or implementation history: durable behavior belongs in the owning design or operating document, current implementation evidence in the completion audit, and completed history in Git. An item is removed as soon as it is implemented or deliberately closed, and the file is deleted once every active item is completed or explicitly closed.
+      工作队列，而不是设计规格或实现历史：持久行为属于拥有它的设计或操作文档，当前实现证据属于完成审计，已完成历史属于 Git。一项一旦实现或被有意关闭就立即删除；当上面每个活动项都完成或被明确关闭时，删除本文件。
+    owner: docs/design/temporary-todo.md
+    anchor: NMG active TODO list
+    status: canonical
+  - term: TODO entry triple
+    aliases: [available mechanism / current blocker / done when, 条目三段式]
+    definition: >-
+      The three closing blocks each workstream carries: available mechanism (reusable implementation pieces that already exist), current blocker (why the item is not yet done, stating honestly what a controlled fixture does and does not prove), and done when (the observable completion condition). The checkbox list above them carries explicit unchecked items that must not be dropped.
+      每个工作方向末尾的三个块：可用机制（已经存在的可复用实现零件）、当前阻塞（为什么还没做完，并如实说明受控 fixture 能证明与不能证明什么）、完成条件（可观察的完成判据）。它们之上的复选框清单带有不得丢弃的未勾选项。
+    owner: docs/design/temporary-todo.md
+    anchor: Implement the session Active Graph runtime
+    status: canonical
+  - term: unchecked item retention
+    aliases: [open checkbox state, 未勾选项保留]
+    definition: >-
+      The maintenance obligation that `- [ ]` items stay unchecked and present even when surrounding prose is reworded, because this index records unresolved work; a translation that silently drops or ticks an item would misreport the queue.
+      维护义务：即使改写周边散文，`- [ ]` 条目也保持未勾选并留在原处，因为该索引记录的是未解决的工作；一份悄悄丢掉或勾掉条目的译文会错误报告队列状态。
+    owner: docs/design/temporary-todo.md
+    anchor: NMG active TODO list
+    status: canonical
+  - term: explicitly deferred option
+    aliases: [deferred with prerequisite, 明确推迟的选项]
+    definition: >-
+      An option recorded as deliberately absent from current work together with the prerequisite whose observation brings it back to the active checklist (for example multi-device operation entering scope, a measured TypeScript bottleneck, or trustworthy natural labels); being deferred is not the same as being missing.
+      被记录为刻意不在当前工作内的选项，连同「观察到它就会回到活动清单」的那条前提（例如多设备操作进入范围、测量到 TypeScript 瓶颈，或可信的自然标签）；推迟不等于缺失。
+    owner: docs/design/temporary-todo.md
+    anchor: Explicitly deferred — not missing current work
+    status: canonical
+  - term: completion rule
+    aliases: [delete when done, 完成规则]
+    definition: >-
+      The rule that this file is deleted when every active item above is completed or explicitly closed; it is what keeps the index from becoming a changelog or a completed-work archive.
+      规则：当上面每个活动项都完成或被明确关闭时，删除本文件；正是它防止该索引变成变更日志或已完成工作档案。
+    owner: docs/design/temporary-todo.md
+    anchor: Completion rule
+    status: canonical
+references:
+  - Active Graph
+  - Long-Term Graph
+  - Short-Term Graph
+  - claim outcome
+  - consolidation
+  - QPP

@@ -1,17 +1,43 @@
 # Pre-registration: real-model context-intervention comparison
 
-**Status:** pre-registered (protocol only, **not yet run**).
+[English](live-comparison-preregistration-2026-09-07.md) | [简体中文](live-comparison-preregistration-2026-09-07.zh-CN.md) · [Terms](live-comparison-preregistration-2026-09-07.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this dated record is
+historical research material, not a current runtime contract or authorization
+to run provider experiments. No cited experiment or original run artifact was
+rerun or independently revalidated in this review.
+
+**Status:** historical protocol proposal; freeze prerequisites remain unresolved;
+no completed freeze or execution is established by this record.
 **Date:** 2026-09-07
 **Owner context:** `docs/design/agent-convergence-feedback-design.md` §9.4–9.6.
 **Predecessor:** `docs/experiments/context/live-canary-2026-09-07.md` (proved the
 decision → real-model exposure → official-grading → usage path is wired; n=3,
 no value claim).
 
-This document fixes, *before seeing outcomes*, the objective, arms, cost
-participation, metric, non-inferiority and cost/quality gates, independent-unit
-criterion, analysis plan and stop rules of the first powered comparison. Writing
-implementation or inspecting test outcomes before these are locked is not
-allowed (design-first decision).
+This record describes an intended prospective comparison, not a verified
+completed pre-registration. Its hypotheses and gate text are retained below,
+including unresolved inconsistencies. The proposed design-first constraint is
+to lock the protocol before implementation or outcome inspection; this review
+does not select missing settings, authorize spend, or claim that the lock occurred.
+
+## Unresolved freeze conditions
+
+- No final suite or hash-pinned owner-to-row map is supplied. Select and record
+  them from the eligibility criteria before inspecting any outcome.
+- The numeric values in the lambda grid, hard call/cost budgets, and exact
+  model-call token-accounting convention are not supplied.
+- H1 asks for cost superiority (or a cap), while §6 permits equality
+  (`C_R ≤ C_F0`). A non-constant action policy alone does not establish added
+  value. Reconcile these claims prospectively rather than silently weakening one.
+- §5 compares `accuracy − λ·cost` across different λ values without defining
+  one common cross-grid validation target. That selection rule needs clarification;
+  the later retrieved-vs-nothing report is also undefined for the four actions.
+- The assumed owner-level variance, minimum effect, power calculation and exact
+  non-inferiority/uncertainty procedure are not recorded. A target of 0.8 power
+  is not a demonstrated power calculation.
+
+These are unresolved parts of the recorded proposal, not newly chosen parameters.
 
 ## 1. The question
 
@@ -23,7 +49,7 @@ measured cost here), to justify the experimental router relative to the
 (previous actions and independently verified outcomes), rather than explainable
 by a static retrieve-always policy under a loose budget?
 
-Two pre-registered hypotheses:
+Two proposed hypotheses (not a verified completed freeze):
 
 - **H1 (gate/utility):** the validation-tuned router is non-inferior in graded
   task accuracy to the fixed fallback within margin `δ`, and superior in
@@ -61,8 +87,8 @@ falsify cue/resurface/history hypotheses and is not an efficacy result.
   rows. Candidates currently: LoCoMo (10 owners → **rejected**, too few),
   LongMemEval (500 rows, per-row haystack → owner grouping must be confirmed),
   PersonaMem v2 (200 personas, multi-turn chat → strongest for sequential
-  history). Final suite and the owner↔row mapping are fixed here, **before** any
-  outcome is read; the map is recorded and hash-pinned.
+  history). The final suite and owner↔row mapping must be recorded and
+  hash-pinned before any outcome is read; this record does not supply them.
 - **Sequential history availability:** rows must be orderable within an owner
   (chronological) so previous action/reward can be defined. If the chosen suite
   cannot provide clean within-owner ordering, H2 is reported as not testable with
@@ -82,9 +108,10 @@ Policies compared on the **same held-out questions** (matched: the same
 `(owner, question)` receives each policy's context in independent real-model
 calls — the canary pattern):
 
-- **F0 Fixed fallback:** the current default injection (retrieve/recall all,
-  i.e. today's NMG behaviour). Baseline.
-- **F1 Fixed `none`:** empty context (upper cost bound reference, floor quality).
+- **F0 Fixed fallback:** the proposed experiment's fixed retrieve-always
+  baseline, not a claim that all current NMG callers inject all memories.
+- **F1 Fixed `none`:** empty-context reference. It guarantees neither a model-call
+  cost bound nor a quality floor; answer length and quality can still vary.
 - **R0 History-free router:** 132-parameter head (32→4) trained offline on the
   executed-action regression, selection = cost-adjusted epsilon-greedy.
 - **R1 History router:** same head + measured history features (§9.4).
@@ -105,7 +132,7 @@ Q(action) = E[ graded utility ] − λ · cost(action)
 where `cost` is the **model-call token cost** measured from real `create()` usage
 (retrieval/search cost is deferred to §9 and excluded from this measured cost;
 nothing is fabricated). λ is **not** a free post-hoc knob: a predeclared grid
-`Λ = {0, λ1, …, λk}` is fixed here; for each λ ∈ Λ the router is trained on train
+`Λ = {0, λ1, …, λk}` is only a template here, without numeric λi values; for each λ ∈ Λ the router is trained on train
 and the resulting (accuracy, cost) is read on **validation**; the single (λ,
 policy) that maximizes `accuracy − λ·cost` on validation (ties → lower cost) is
 selected; that choice is fixed before the test fold is read. Reporting must
@@ -153,8 +180,8 @@ null, not as support.
   budget is hit the experiment stops and is reported as incomplete rather than
   extrapolated.
 - A finding that R0/R1 **do not beat or match** F0 under the gates, or reduce to
-a retrieve-constant replica of F0 at the selected λ (no added value), is a
-valid result and blocks extra architecture by default (§9.4, §9.5). No default
+  a retrieve-constant replica of F0 at the selected λ (no added value), is a
+  valid result and blocks extra architecture by default (§9.4, §9.5). No default
   activation from any offline/held-out score alone; promotion additionally needs
   the §9.5 predeclared task metric, uncertainty estimates, no safety violations,
   and no quality/cost regression.
@@ -179,6 +206,9 @@ reported as a wiring extension, not as an efficacy result.
 
 ---
 
-*Boundary note: this is a protocol. Nothing in it has been executed; selecting
-the dataset and reading any test/validation outcome before this file is frozen
-would invalidate the pre-registration.*
+*Boundary note: this record reports no execution and does not demonstrate a
+completed prospective freeze. Selecting the suite from the stated criteria is
+a prerequisite to that freeze, not a reason to invalidate it. Outcome inspection
+before the suite, map and other settings are locked, or retrospective
+outcome-dependent amendments presented as pre-registered, would invalidate the
+prospective claim.*

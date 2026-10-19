@@ -1,0 +1,46 @@
+version: 2
+terms:
+  - term: pure-data compiler
+    aliases: [shared semantics compiler, 纯数据编译器]
+    definition: >-
+      The recorded slice-1 prototype derives TaskUnit[] from ProbePlan, PatchTaskSpec and cycle Requirements, leaves freezing to preparePatchWork and owns its isAccepted predicate. The no-runtime-caller statement belongs to that checkpoint; it does not claim a full Task IR migration or present integration status.
+      记录中的 slice-1 原型由 ProbePlan、PatchTaskSpec 与 cycle Requirements 派生 TaskUnit[]，冻结仍归 preparePatchWork，并持有其 isAccepted 谓词。无运行时调用者只属于该检查点，不声称完整 Task IR 迁移或当前集成状态。
+    owner: docs/experiments/execution/task-semantics-slice1-2026-09-13.md
+    anchor: What was built
+    status: canonical
+  - term: finite offline model
+    aliases: [semantics model, 有限离线模型]
+    definition: >-
+      The historical model enumerates legal settlement orders for ordered/out-of-order/fused over at most four units and counts event waits, rollbacks and retries. It executes no model calls; its recorded excluded categories include wall clock, real verification and external waits. It is not runtime timing or quality evidence.
+      历史模型在至多四个单元上枚举 ordered／out-of-order／fused 合法结算顺序，计数等待事件、回滚、重试。不执行模型调用；记录的排除类别含墙钟、真实验证与外部等待，不是运行时时间或质量证据。
+    owner: docs/experiments/execution/task-semantics-slice1-2026-09-13.md
+    anchor: What was built
+    status: canonical
+  - term: test-undistinguished budget mutant
+    aliases: [historical budget mutant, 旧输入未区分的预算变体]
+    definition: >-
+      The historical budget mutant was indistinguishable only under the old selected inputs, which a neighboring SPEC_FIELDS guard rejected before the changed loop. New cases could and did distinguish it; the observation does not establish semantic equivalence over every possible input.
+      历史 budget mutant 仅在旧选定输入下未被区分：相邻 SPEC_FIELDS 守卫在到达被改循环前已拒绝输入。新用例能够且确实区分它，不建立所有可能输入上的语义等价。
+    owner: docs/experiments/execution/task-semantics-slice1-2026-09-13.md
+    anchor: The budget mutant under the original test inputs
+    status: canonical
+  - term: unclaimed mutant
+    aliases: [not applicable target, 未认领 mutant]
+    definition: >-
+      The reported historical applicability outcome when an anchor/target was absent in the selected checkout. It is neither an executed kill nor a caught mutant; this label does not define how every current gate must treat missing coverage.
+      选定 checkout 缺 anchor／target 时，所报的历史适用性结局。不是已执行 kill，也不是已抓到 mutant；该标签不定义所有当前 gate 如何处理缺覆盖。
+    owner: docs/experiments/execution/task-semantics-slice1-2026-09-13.md
+    anchor: Evidence
+    status: canonical
+  - term: fused-mode spread
+    aliases: [floor of zero rollbacks, 融合模式区间]
+    definition: >-
+      A range across legal orders in the finite model with predefined outcomes: fused may wait, leaving a zero-rollback floor, or start D before P settles and incur a rollback/retry when P rejects. It is not a confidence interval, independent-run distribution, elapsed-time gain or demonstrated real-session fusion.
+      结局预定义的有限模型中合法顺序范围：fused 可等待而保持零回滚下限，也可在 P 结算前启动 D、P 拒绝时付回滚／重试。不是置信区间、独立运行分布、耗时收益或真实会话融合证明。
+    owner: docs/experiments/execution/task-semantics-slice1-2026-09-13.md
+    anchor: What the model shows (two units, `D` depends on `P`)
+    status: canonical
+references:
+  - task unit
+  - Task IR
+  - execution fusion

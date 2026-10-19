@@ -1,6 +1,6 @@
 # The fusion mechanism: one session per run
 
-[中文](2026-09-19-fusion-session-mechanism.zh-CN.md)
+[中文](2026-09-19-fusion-session-mechanism.zh-CN.md) · [Terms used](2026-09-19-fusion-session-mechanism.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

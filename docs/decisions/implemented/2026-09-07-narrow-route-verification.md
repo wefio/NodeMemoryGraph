@@ -2,12 +2,10 @@
 
 **Status:** implemented  
 **Approved:** unrecorded
-Date: 2026-09-07
-Branch: pr/rcp-narrow-verify
-
+**Relates to:** [RCP lightweight verification by default](2026-09-07-rcp-lightweight-verification-default.md)
 Governing meta-rule: [self-governance meta-rule](../implemented/2026-09-07-self-governance-meta-rule.md) — this changes a standing verification convention (RCP/agent-verify route semantics), so it is recorded as a governed decision.
 
-中文版: [2026-09-07-narrow-route-verification.zh-CN.md](2026-09-07-narrow-route-verification.zh-CN.md)
+中文版: [2026-09-07-narrow-route-verification.zh-CN.md](2026-09-07-narrow-route-verification.zh-CN.md) · [Terms used](2026-09-07-narrow-route-verification.terms.yaml)
 
 ## Problem
 
@@ -60,17 +58,13 @@ in doubt, run full" is the entire safety rule.
 
 ## Consequences
 
-- Route declarations stay the single source of per-domain verification: the
-  owning route's own `tests` are the narrow set. Narrowing is exposed as the
-  opt-in `agent:verify --narrow` fast path; the default authoritative gate is
-  unchanged until the coverage rule is trusted. Aligning the adapter-leaf
-  routes' default blocking (which today over-run `test:product` while their
-  peer `dsh-adapter` runs only `check`) is the follow-up once narrow is adopted.
-- A dev/agent fast path (`agent:verify --narrow`/by-paths) composes the always-run
-  shared checks with each touched route's own tests; the result is exactly the
-  set the authoritative gate would run for a fully-owned change. This makes
-  "lightweight composed = full RCP" true for localizable changes, and leaves the
-  full gate authoritative when any file is shared.
+**Current implementation.** The related [RCP lightweight verification by
+default](2026-09-07-rcp-lightweight-verification-default.md) changed selection
+from the opt-in fast path described here to default narrow for eligible changes,
+and runs it through RCP reconciliation with a receipt. That decision replaces
+this record's earlier default-full detail; this record remains the origin of the
+two-level composition rationale. Current selection and evidence semantics live
+in [Narrow and full verification gates](../../design/ci-cd-and-quality/repository-control-plane/lightweight-verification.md).
 - No new executor and no primitive registry: the underlying tools (`node --test`,
   `eslint`, `prettier`, `tsc`) already accept the narrow arguments. We add route
   granularity and a coverage rule, not machinery.

@@ -1,0 +1,57 @@
+version: 2
+terms:
+  - term: improvement area entry
+    aliases: [symptom/concern/approaches, 改进领域条目]
+    definition: >-
+      The fixed shape of every entry in this gap analysis: the observed symptom, the underlying concern, and one or more concrete approaches, grouped by impact rather than by priority; the document is historical gap analysis, not current design, so a resolved area records how it was resolved and what would reopen it.
+      本文每个条目固定包含：观察到的症状、底层关切、一条或多条具体做法，并按影响而非优先级分组；本文是历史缺口分析而非当前设计，因此已解决的领域记录它如何被解决、以及什么情况会重新开启它。
+    owner: docs/design/improvement-areas.md
+    anchor: NMG improvement areas
+    status: canonical
+  - term: coarse cache invalidation
+    aliases: [invalidateVectorCaches, 粗粒度缓存失效]
+    definition: >-
+      The behaviour in which `#invalidateVectorCaches(kind)` drops an entire leaf or node cache regardless of which IDs changed, so one merge or split discards every node embedding and each is rebuilt lazily on the next query; per-ID invalidation or a generation counter are the candidate fixes, and the summary marks the area resolved with reopening tied to measured rebuild cost.
+      `#invalidateVectorCaches(kind)` 不区分实际变动的 ID 就丢掉整个 leaf 或 node 缓存的行为，因此一次合并或拆分丢弃全部节点 embedding，并在下一次查询时逐个惰性重建；按 ID 失效或代际计数器是候选修法，汇总表将该领域标为已解决，并将重新开启与实测重建成本挂钩。
+    owner: docs/design/improvement-areas.md
+    anchor: Vector cache invalidation is too coarse
+    status: canonical
+  - term: ANN recall quality
+    aliases: [hybrid exact+ANN, ANN 召回质量]
+    definition: >-
+      The open concern that 87.5% leaf ANN accuracy against 100% exact scan on a 10K near-duplicate workload is too low for default use because false negatives cascade — the query never reaches the correct leaf's records; candidates are USearch parameter tuning, hybrid exact re-ranking of an ANN candidate set, per-node indices, or deferral until measured exact-scan latency violates the budget.
+      未决关切：在 10K 近似重复负载上 leaf ANN 准确率 87.5% 对精确扫描 100% 对默认使用太低，因为假阴性会级联——查询永远到不了正确 leaf 的记录；候选是调 USearch 参数、对 ANN 候选集做精确重排、逐节点索引，或推迟到已测量的精确扫描延迟违反预算为止。
+    owner: docs/design/improvement-areas.md
+    anchor: ANN recall is not yet production-quality
+    status: canonical
+  - term: physical privacy erasure
+    aliases: [hard delete, 物理隐私擦除]
+    definition: >-
+      The deferred product work of removing a memory together with every dependent artifact — record row, evidence links, derivations, FTS entries, embeddings, leaf membership, index deltas, references inside retrieval-trace arrays and topology proposals, stale signal counts, and affected vector caches — where partial deletion leaves orphaned derivations, dangling relations and misleading retrieval; soft delete is the safe starting point and is not by itself the erasure.
+      推迟的产品工作：删除一条记忆以及全部依赖工件——记录行、证据链接、派生、FTS 条目、embedding、leaf 成员关系、索引增量、检索 trace 数组与拓扑提议中的引用、变陈旧的信号计数，以及受影响的向量缓存；部分删除会留下孤立派生、悬空关系与误导性检索。软删除是安全的起点，但本身不是擦除。
+    owner: docs/design/improvement-areas.md
+    anchor: No explicit privacy deletion
+    status: canonical
+  - term: provenance degradation marker
+    aliases: [provenance_degraded, 来源降级标记]
+    definition: >-
+      The `provenance_degraded` marker attached to Assistant-authored fallback evidence, carrying the expected history-reference version and an explicit reason (`branch_api_unavailable`, `incompatible_branch_shape`, or `exact_excerpt_not_found`), so such evidence is never silently presented as a harness-verified excerpt; user and tool attribution still fail closed unless an exact source is bound.
+      附在 Assistant 撰写兜底证据上的 `provenance_degraded` 标记，携带期望的历史引用版本与显式原因（`branch_api_unavailable`、`incompatible_branch_shape` 或 `exact_excerpt_not_found`），使这类证据绝不被静默呈现为经宿主验证的摘录；用户与工具归因仍 fail closed，除非绑定精确来源。
+    owner: docs/design/improvement-areas.md
+    anchor: Pi evidence-source resolution is versioned and fails visibly
+    status: canonical
+  - term: topology auto-acceptance
+    aliases: [NMG_TOPOLOGY_AUTO_MERGE, 拓扑自动接受]
+    definition: >-
+      An implemented-but-not-promoted actuator behind an explicit, default-off policy: semantic maintenance may accept only a strongly gated `same_as` identity proposal when `NMG_TOPOLOGY_AUTO_MERGE=1`, requiring repeated high-confidence observations, balanced active user/tool evidence with a shared source-actor class, one exact scope identity, no conflicting proposal and no pre-existing canonical target; each actuation records its transform in the reversible merge journal, one proposal per maintenance pass is the default and four is the hard cap, and pending non-identity links and splits still require explicit review.
+      已实现但未晋升的执行器，位于显式、默认关闭的策略之后：只有当 `NMG_TOPOLOGY_AUTO_MERGE=1` 时，语义维护才可接受一个经强门禁的 `same_as` 身份提议，要求重复的高置信观察、平衡的活动用户／工具证据且共享来源 actor 类别、一个完全相同的作用域身份、无冲突提议、且不存在既有规范目标；每次执行都记录其变换到可逆合并日志，默认每次维护遍历一个提议、硬上限四个，而待处理的非身份链接与拆分仍需显式审阅。
+    owner: docs/design/improvement-areas.md
+    anchor: Topology auto-acceptance is implemented but not promoted
+    status: canonical
+references:
+  - Long-Term Graph
+  - Short-Term Graph
+  - claim outcome
+  - consolidation
+  - counterexample
+  - gate

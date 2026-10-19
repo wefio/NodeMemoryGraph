@@ -1,0 +1,21 @@
+version: 2
+terms:
+  - term: state supersession
+    aliases: [state supersession chain, 状态取代]
+    definition: >-
+      Recording a newer value for the same stateKey and scope makes the previous value superseded while retaining a link to its predecessor; this does not mean the old record is physically deleted.
+      为相同 stateKey 和 scope 记录新值时，会将旧值标记为 superseded 并保留指向前序值的链接；这不表示旧记录被物理删除。
+    owner: docs/design/structural-analogies/state-supersession-and-mvcc.md
+    anchor: State supersession = MVCC / temporal databases
+    status: canonical
+  - term: bitemporal state model
+    aliases: [valid-time and transaction-time model, 双时态状态模型]
+    definition: >-
+      A design possibility that records valid time and transaction time separately to distinguish when a fact held from when the system recorded it; this document does not claim that NMG currently implements it.
+      将有效时间和事务时间分开记录、以区分事实成立时间与系统记录时间的设计可能性；本文不声称 NMG 已实现该模型。
+    owner: docs/design/structural-analogies/state-supersession-and-mvcc.md
+    anchor: State supersession = MVCC / temporal databases
+    status: proposed
+references:
+  - structural analogy
+  - memory residence

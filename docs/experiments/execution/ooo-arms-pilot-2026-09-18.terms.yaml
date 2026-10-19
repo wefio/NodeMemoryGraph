@@ -1,0 +1,39 @@
+version: 2
+terms:
+  - term: frozen run envelope
+    aliases: [frozen envelope, 冻结运行包络]
+    definition: >-
+      The arm-shared baseline files, composed parent check, per-unit checks and execution limits held constant so the declared arm variable is the relevant difference.
+      各 arm 共同使用且保持不变的 baseline 文件、组合 parent check、unit checks 与执行限制，使声明的 arm 变量成为相关差异。
+    owner: docs/experiments/execution/ooo-arms-pilot-2026-09-18.md
+    anchor: What was fixed, and what was left to the arms
+    status: canonical
+  - term: patch artifact
+    aliases: [patch-shaped artifact, 补丁型 artifact]
+    definition: >-
+      An artifact envelope with a digest and files, read as a patch candidate by the pilot harness; it is distinct from a conclusion artifact.
+      包含 digest 与 files、由 pilot harness 按 patch candidate 读取的 artifact envelope；它与 conclusion artifact 不同。
+    owner: docs/experiments/execution/ooo-arms-pilot-2026-09-18.md
+    anchor: The first-run diagnosis, corrected by the second run
+    status: canonical
+  - term: conclusion artifact
+    aliases: [conclusion-shaped artifact, 结论型 artifact]
+    definition: >-
+      A valid artifact envelope with a digest, kind, conclusion, summary, evidence and citations, but no patch files; its admissibility does not mean it can pass a unit check that requires a patch.
+      含 digest、kind、conclusion、summary、evidence 与 citations，但没有 patch files 的合法 artifact envelope；格式合法不代表它能通过要求 patch 的 unit check。
+    owner: docs/experiments/execution/ooo-arms-pilot-2026-09-18.md
+    anchor: The first-run diagnosis, corrected by the second run
+    status: canonical
+references:
+  - dependency density
+  - host check queue
+  - held-out task family
+  - declared slot budget
+  - execution fusion
+  - bounded speculation
+  - directional-only result
+  - task unit
+  - Task IR
+  - run record
+  - product-runtime evidence
+  - research-instrument evidence

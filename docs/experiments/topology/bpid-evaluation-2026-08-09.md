@@ -1,5 +1,12 @@
 # BPID identity-candidate evaluation — 2026-08-09
 
+[English](bpid-evaluation-2026-08-09.md) | [简体中文](bpid-evaluation-2026-08-09.zh-CN.md) · [Terms](bpid-evaluation-2026-08-09.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a historical
+record. Its configurations, measured results and implementation-status statements
+are not current test receipts or default-policy authorization. This review did
+not rerun the experiment or independently revalidate the original run artifacts.
+
 ## Question
 
 Can a cheap, model-free candidate generator narrow the node-pair search space
@@ -24,7 +31,8 @@ embedding model.
 
 For a bounded recovery probe, three labelled matches and three labelled
 non-matches scoring at least `0.98` are materialized as separate NMG entity
-nodes. Each receives five independent proposal observations, passes through the
+nodes. Each candidate pair receives five constructed proposal observations,
+not five independently sourced identity confirmations, passes through the
 real automatic-merge assessment, is physically merged, and is immediately
 rolled back using its journal. This deliberately measures recoverability, not
 whether knowingly merging a negative pair is acceptable.
@@ -50,7 +58,9 @@ three were deliberately selected false positives and were also restored.
 The cheap score is useful only as a **blocking/candidate-generation signal**.
 It can preserve nearly all matches only while rejecting very little of the
 pair space. Tightening it enough to reduce the pool by about 98% destroys
-recall and still leaves a 7.88% false-merge rate among selected pairs. Several
+recall and still leaves a 7.88% selected-pair non-match fraction (19/241).
+That is not a measured unattended false-merge rate; most selected pairs were
+not physically merged by this probe. Several
 hard negatives share apparently decisive identifiers—email, phone, name, or
 date of birth—while another field conflicts. Therefore:
 

@@ -1,0 +1,19 @@
+version: 2
+terms:
+  - term: experiment record
+    aliases: [实验记录]
+    definition: >-
+      A bounded report of measured observations and their provenance; it becomes normative only after the owning design or decision accepts the result.
+      对测量观察及其来源信息进行有界记录的报告；只有所属设计或决策接纳结果后，它才成为规范。
+    owner: docs/experiments/README.md
+    anchor: Experiments
+    status: canonical
+  - term: experiment topic directory
+    aliases: [实验主题目录]
+    definition: >-
+      The directory that groups experiment records by the line of inquiry they answer, rather than by execution date alone.
+      按实验记录所回答的探究主题分组的目录，而不只是按执行日期归档。
+    owner: docs/experiments/README.md
+    anchor: Topics
+    status: canonical
+references: []

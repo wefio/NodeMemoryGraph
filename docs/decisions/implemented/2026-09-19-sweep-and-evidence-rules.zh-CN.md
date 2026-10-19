@@ -1,6 +1,6 @@
 # 扫描运行中的树不可读，且证据没有第三态
 
-[English](2026-09-19-sweep-and-evidence-rules.md)
+[English](2026-09-19-sweep-and-evidence-rules.md) · [术语](2026-09-19-sweep-and-evidence-rules.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

@@ -1,6 +1,6 @@
 # The dispatch loop is shared; the arms keep their declarations and their measurement
 
-[中文](2026-09-19-dispatch-loop-is-shared.zh-CN.md)
+[中文](2026-09-19-dispatch-loop-is-shared.zh-CN.md) · [Terms used](2026-09-19-dispatch-loop-is-shared.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit
@@ -72,7 +72,7 @@ loop would create the second implementation the same decision warned against, an
 - **Extraction is not product activation.** The fast dispatch tests exercise a fake board, with a real
   Store for session-fact recording. They do not demonstrate the existing `nmg_board` host path invoking
   this loop. Product integration reuses the existing blackboard and host flow; it does not introduce a
-  tool, command or separate OoO entry. The [integration audit](../../design/task-unit-semantics-obligations.md#product-call-path-audit-2026-09-20)
+  tool, command or separate OoO entry. The [integration audit](../../design/task-unit-semantics-obligations/product-call-path-audit-2026-09-20.md#product-call-path-audit-2026-09-20-1)
   separates existing rules, existing lifecycle operations and the observed call-site boundary.
 - **The arms' identity survives.** Their driver keeps the spec format, the live/stub worker choice, the
   report, and the archive; a reviewer can still read "what the arms ran" without reading the product.

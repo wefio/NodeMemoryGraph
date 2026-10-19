@@ -1,6 +1,6 @@
 # 0002 - The tree I verified was not the tree I pushed
 
-[中文](0002-wrong-tree-verification.zh-CN.md)
+[中文](0002-wrong-tree-verification.zh-CN.md) · [Terms used](0002-wrong-tree-verification.terms.yaml)
 
 **Status:** open
 
@@ -51,8 +51,8 @@ matters is narrower and does not depend on that answer: a reviewer who trusted m
 
 Two mechanisms, and only their combination produces this.
 
-First, the object I verified and the object I published were different: `npm test` runs against a directory,
-a push publishes a commit tree. Nothing in the workflow compares the two, and the difference is precisely the
+First, the verification target (the working tree) and the published target (the commit tree) differed:
+`npm test` runs against a directory, while a push publishes a commit tree. Nothing in the workflow compares the two, and the difference is precisely the
 unstaged work. This is the general form - a verification result is only as good as the identity of the tree
 it was measured on, and that identity was in my head rather than in the command.
 

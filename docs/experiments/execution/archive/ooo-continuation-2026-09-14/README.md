@@ -1,5 +1,9 @@
 # Archive: the OoO continuation samples (2026-09-14)
 
+[中文](README.zh-CN.md) · [Terms used](README.terms.yaml)
+
+**Scope:** archived research-instrument evidence for ledger row G7, not proof of product-runtime integration.
+
 **Why this is here.** The runs behind ledger row G7 were driven from a git worktree under `%TEMP%`
 (`C:/Users/LEGION/AppData/Local/Temp/nmg-board-verbs`). Committed content survives a temp cleanup -
 the branch is pushed and the objects live in the repository - but the _measurements_ would not: the
@@ -13,18 +17,18 @@ from the adapter's own accounting, not from a clock outside it.
 
 ## Run logs (`run-logs/`)
 
-| file                   | lines | what it is                                                            |
-| ---------------------- | ----- | --------------------------------------------------------------------- |
-| `g7-run.jsonl`         | 25    | 干净的一遍：五个任务，每个 part1 → 边界 → part2，同一 store           |
-| `m-rep6.jsonl`         | 43    | 早期那批因认领被前任占住而连续失败的重复（保留为缺陷证据）            |
-| `m6.jsonl`             | 198   | 配对的重复测量：merge 的 part1/part2 各多次；本文档引用的主要数据集   |
-| `merge-repeats6.jsonl` | 44    | 第一次尝试的重复测量（当时失败记录还不完整）                          |
-| `merge-retry.jsonl`    | 12    | merge 在独立 store 里的重试（含释放死认领后的一次成功）               |
-| `run-1.jsonl`          | 8     | chunk 的首次全链路（含一条 part2 判为 unchanged 的旧记录）            |
-| `run-2.jsonl`          | 7     | chunk 的 part2 崩在 patchCandidate（invalid patch structure）的那一轮 |
-| `run-3.jsonl`          | 7     | chunk 在失败记录缺失期的样本                                          |
-| `run-4.jsonl`          | 8     | chunk 改为记录失败后的样本                                            |
-| `run-5.jsonl`          | 9     | chunk 第一个完整成功的五任务循环样本                                  |
+| file                   | lines | what it is                                                                    |
+| ---------------------- | ----- | ----------------------------------------------------------------------------- |
+| `g7-run.jsonl`         | 25    | Clean run: five tasks, each part1 → boundary → part2, in one store            |
+| `m-rep6.jsonl`         | 43    | Early repeats repeatedly failed because a predecessor held the claim; retained as defect evidence |
+| `m6.jsonl`             | 198   | Paired repeats: multiple merge part1/part2 runs; the main dataset cited here  |
+| `merge-repeats6.jsonl` | 44    | Repeats from the first attempt, when failure records were still incomplete    |
+| `merge-retry.jsonl`    | 12    | Merge retry in an independent store; includes one success after releasing a dead claim |
+| `run-1.jsonl`          | 8     | First full chunk chain, including an older part2 recorded as unchanged        |
+| `run-2.jsonl`          | 7     | Chunk part2 failed in `patchCandidate` with `invalid patch structure`         |
+| `run-3.jsonl`          | 7     | Chunk sample from the period when failure records were missing               |
+| `run-4.jsonl`          | 8     | Chunk sample after failure recording was added                               |
+| `run-5.jsonl`          | 9     | Chunk's first complete successful five-task cycle                             |
 
 Each line is one role's record: `role`, `task`, `stage`, `conclusion`, `turns`, `reads`,
 `tokens`, `wallMs`, `passed`/`cases`, `failed`, `digest`, `continuedFrom`. A `part2` record's
@@ -33,12 +37,12 @@ to start from the delivered bytes rather than from the stub.
 
 ## Rejected artifacts (`rejected-artifacts/`)
 
-| file                      | bytes | the model submitted                               | why it was not accepted                                  |
-| ------------------------- | ----- | ------------------------------------------------- | -------------------------------------------------------- |
-| `m6--merge-part2-r14.txt` | 1598  | `kind=conclusion`, `conclusion=no-change-needed`  | 合法结论被误判为畸形补丁（当时运行器只认提升文件的补丁） |
-| `m6--merge-part2-r19.txt` | 1981  | `kind=conclusion`, `conclusion=no-change-needed`  | 同上（修复前留存）                                       |
-| `m6--merge-part2-r22.txt` | 1663  | `kind=conclusion`, `conclusion=cannot-complete`   | 合法结论，但为 cannot-complete：模型宣告未完成           |
-| `m6--merge-part2.txt`     | 1482  | `kind=conclusion`, `conclusion=promote-candidate` | 早期一条被拒产物                                         |
+| file                      | bytes | the model submitted                               | why it was not accepted                                                       |
+| ------------------------- | ----- | ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `m6--merge-part2-r14.txt` | 1598  | `kind=conclusion`, `conclusion=no-change-needed`  | Valid conclusion misclassified as a malformed patch (the runner then recognized only promoted-file patches) |
+| `m6--merge-part2-r19.txt` | 1981  | `kind=conclusion`, `conclusion=no-change-needed`  | Same misclassification; retained from before the fix                          |
+| `m6--merge-part2-r22.txt` | 1663  | `kind=conclusion`, `conclusion=cannot-complete`   | Valid conclusion, but `cannot-complete`: the model declared the task incomplete |
+| `m6--merge-part2.txt`     | 1482  | `kind=conclusion`, `conclusion=promote-candidate` | An earlier rejected artifact                                                  |
 
 These are the bytes behind a failure claim. They are kept because "invalid patch structure" is a
 statement about bytes, and reading them is what showed the string-matching misclassification: a

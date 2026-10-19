@@ -1,0 +1,11 @@
+version: 2
+terms:
+  - term: single-connection store test
+    aliases: [in-memory store test, 单连接 store 测试]
+    definition: >-
+      A test whose assertions use one database connection and therefore can use a fresh in-memory SQLite store; tests of restart persistence, migration or independent readers still require file-backed stores.
+      断言只使用一个数据库连接、因此可以采用全新内存 SQLite store 的测试；验证重启持久性、迁移或独立读取者的测试仍须使用文件型 store。
+    owner: docs/decisions/implemented/2026-09-23-single-connection-store-tests-in-memory.md
+    anchor: Decision
+    status: canonical
+references: []

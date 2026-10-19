@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: relevance label
+    aliases: [candidate judgment, 相关性标签]
+    definition: >-
+      An evidence-grounded judgment that a candidate memory is relevant or not relevant; absent judgments remain unknown and are not negative labels.
+      基于证据判断候选记忆相关或不相关；缺失判断保持未知，不能视为负标签。
+    owner: docs/design/relevance-training.md
+    anchor: Boundary
+    status: canonical
+  - term: source-unit partition
+    aliases: [sourceUnitId split, source-unit 分区]
+    definition: >-
+      Assignment of whole independent source units to train, calibration, or test roles before fitting, preventing variants of one source from crossing roles.
+      拟合前将完整、独立的 source unit 分配给训练、校准或测试角色，防止同一来源的变体跨角色泄漏。
+    owner: docs/design/relevance-training.md
+    anchor: Prepare and partition
+    status: canonical

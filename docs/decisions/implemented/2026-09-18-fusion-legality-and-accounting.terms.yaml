@@ -1,0 +1,20 @@
+version: 2
+terms:
+  - term: fusion legality pair predicate
+    aliases: [shared-session legality, 融合合法性成对谓词]
+    definition: >-
+      A predicate over a before/after unit pair and its plan that checks the design's session-sharing conditions and composes them with the board's candidate/acceptance authority; it decides legality, not ranking or chain bound.
+      针对前后单元及其计划的谓词，用于检查设计规定的共享会话条件，并与黑板的候选／接受权威复合；它决定合法性，不决定排序或链长上界。
+    owner: docs/decisions/implemented/2026-09-18-fusion-legality-and-accounting.md
+    anchor: Decision
+    status: canonical
+  - term: two-line fusion accounting
+    aliases: [boundary-saved and shared-startup accounting, 融合双项记账]
+    definition: >-
+      A report that keeps saved session-boundary cost (`boundarySavedMs`) separate from once-per-session shared startup cost (`sharedStartupMs`), and remains `unmeasured` until startup has measured evidence.
+      将节省的会话边界成本（`boundarySavedMs`）与每会话只记一次的共享启动成本（`sharedStartupMs`）分开报告；启动项没有实测证据前保持 `unmeasured`。
+    owner: docs/decisions/implemented/2026-09-18-fusion-legality-and-accounting.md
+    anchor: Decision
+    status: canonical
+references:
+  - evidence

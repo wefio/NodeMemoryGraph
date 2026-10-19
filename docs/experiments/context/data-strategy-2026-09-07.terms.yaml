@@ -1,0 +1,21 @@
+version: 2
+terms:
+  - term: executed action-reward sample
+    aliases: [state-action-reward sample, 已执行的动作奖励样本]
+    definition: >-
+      A sample produced by running a decision action and evaluating its outcome; benchmark gold answers and corpora alone do not provide intervention outcomes for alternative actions.
+      通过执行决策动作并评估结果生成的样本；benchmark gold answers 与 corpus 本身不提供其他动作的干预结果。
+    owner: docs/experiments/context/data-strategy-2026-09-07.md
+    anchor: Q2. How do we get the data (the real bottleneck)?
+    status: canonical
+  - term: owner-level isolation
+    aliases: [owner-independent split, 按 owner 隔离]
+    definition: >-
+      Keeping all records for an owner within one evaluation fold so that the same owner's data cannot leak across training, validation, and test.
+      将同一 owner 的所有记录限制在同一个评估分折中，避免同一 owner 的数据泄漏到训练、验证和测试集合。
+    owner: docs/experiments/context/data-strategy-2026-09-07.md
+    anchor: Q4. How do we show the data is good?
+    status: canonical
+references:
+  - decision policy
+  - outcome reward

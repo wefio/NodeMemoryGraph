@@ -1,0 +1,14 @@
+version: 2
+terms:
+  - term: working-state preview
+    aliases: [read-only state preview, 工作状态只读预览]
+    definition: >-
+      A host UI presentation of the admitted working-state snapshot; showing it does not change state, acquire a writer lease, create model history or prove final provider visibility.
+      宿主 UI 对已准入工作状态快照的呈现；显示预览不会更改状态、获取 writer lease、创建模型历史或证明 provider 最终可见。
+    owner: docs/decisions/implemented/2026-10-12-working-state-daily-use.md
+    anchor: Decision
+    status: canonical
+references:
+  - working state
+  - state space
+  - Active Graph

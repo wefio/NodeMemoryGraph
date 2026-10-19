@@ -1,6 +1,6 @@
 # One benchmark venv, and a venv path that can move
 
-[中文](2026-09-11-benchmark-venv-consolidation.zh-CN.md)
+[中文](2026-09-11-benchmark-venv-consolidation.zh-CN.md) · [Terms used](2026-09-11-benchmark-venv-consolidation.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit

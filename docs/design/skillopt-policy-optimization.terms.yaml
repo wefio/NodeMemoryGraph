@@ -1,0 +1,62 @@
+version: 2
+terms:
+  - term: SkillOpt
+    aliases: [Microsoft SkillOpt, 离线 Lab 策略优化器]
+    definition: >-
+      The Microsoft offline Lab policy optimizer NMG integrates for text-space policy search; it is neither a memory editor nor part of ordinary Pi inference, and NMG does not load its `best_skill.md` in production.
+      NMG 集成的微软离线 Lab 策略优化器，用于文本空间的策略搜索；它既不是记忆编辑器，也不属于普通 Pi 推理，而且 NMG 在生产中不加载它的 `best_skill.md`。
+    owner: docs/design/skillopt-policy-optimization.md
+    anchor: SkillOpt policy optimization boundary
+    status: canonical
+  - term: controller-only decision policy
+    aliases: [recall_action/fold_noise, 仅控制器决策策略]
+    definition: >-
+      The artifact the implemented adapter trains: a policy initialized from `src/prompts/nmg-prompts.yaml:memory_policy` whose evaluator asks for a strict machine-readable `recall_action`/`fold_noise` decision; it is not interchangeable with the global natural-language policy seen by the answering Agent, and the first matched promotion run caught controller JSON leaking into user answers.
+      已实现适配器所训练的工件：从 `src/prompts/nmg-prompts.yaml:memory_policy` 初始化的策略，其评估器要求严格的机器可读 `recall_action`/`fold_noise` 决策；它与作答 Agent 所见的全局自然语言策略不可互换，而第一次匹配晋升运行抓到了控制器 JSON 泄漏进用户答案。
+    owner: docs/design/skillopt-policy-optimization.md
+    anchor: Trainable and immutable state
+    status: canonical
+  - term: two-stage gate
+    aliases: [held-out then matched, 两阶段门禁]
+    definition: >-
+      The promotion protocol in which passing SkillOpt's held-out gate produces only a candidate, and promotion additionally requires a matched Pi + NMG run holding model, histories, questions, retrieval configuration and scorer fixed while changing only the policy, reporting answer quality and task success, exact and conflict evidence recall, wrong or obsolete memory use and pollution, unnecessary search and expansion, and injected tokens, tool calls and end-to-end latency.
+      晋升协议：通过 SkillOpt 的留出门禁只产出一个候选，晋升还要求一次匹配的 Pi + NMG 运行——模型、历史、问题、检索配置与评分器固定，只换策略——并报告答案质量与任务成功、精确与冲突证据召回、错误或过时记忆的使用与污染、不必要的检索与展开，以及注入 token、工具调用与端到端延迟。
+    owner: docs/design/skillopt-policy-optimization.md
+    anchor: Two-stage gate
+    status: canonical
+  - term: policy channel separation
+    aliases: [controller channel, 策略通道分离]
+    definition: >-
+      The boundary under which the answering Agent always receives the reviewed YAML while a Lab candidate can populate only the controller channel and cannot alter the system prompt; a reviewed YAML edit remains the only production adoption path for the Agent policy, and a text candidate is not a runtime actuator until its decision is projected through a typed controller boundary and passes the matched gate.
+      这条边界：作答 Agent 始终收到经审阅的 YAML，而 Lab 候选只能填充控制器通道，不能改动系统提示；经审阅的 YAML 编辑仍是 Agent 策略唯一的生产采纳路径，而文本候选在其决策经带类型控制器边界投影并通过匹配门禁之前，不是运行时执行器。
+    owner: docs/design/skillopt-policy-optimization.md
+    anchor: Two-stage gate
+    status: canonical
+  - term: readiness floor
+    aliases: [24 independent semantic tasks, 就绪度下限]
+    definition: >-
+      The conservative engineering minimum — 24 independent semantic tasks total, 12 train, 6 held-out validation, 6 untouched test, plus at least two observed recall actions and both noise-label values — below which formal export fails closed; it is not a statistical power guarantee, and `--allow-insufficient` only checks the adapter and file layout and cannot authorize training or promotion.
+      保守的工程下限——共 24 个独立语义任务、12 训练、6 留出验证、6 未触碰测试，外加至少两个观察到的召回动作与两种噪声标签取值——低于此正式导出 fail closed；它不是统计功效保证，而 `--allow-insufficient` 只检查适配器与文件布局，不能授权训练或晋升。
+    owner: docs/design/skillopt-policy-optimization.md
+    anchor: Data readiness
+    status: canonical
+  - term: excluded label conversion
+    aliases: [no natural-use conversion, 排除的标签转换]
+    definition: >-
+      The prohibition that silence, normal completion, absence of correction, candidate exposure and benchmark gold answers are never converted into natural-use labels, and that whole semantic tasks are split chronologically into train, validation and untouched test sets so retries cannot cross a split.
+      禁止项：沉默、正常完成、缺少纠正、候选暴露与 benchmark 金标答案绝不转换为自然使用标签；整个语义任务按时间顺序划分为训练、验证与未触碰测试集合，使重试无法跨越划分。
+    owner: docs/design/skillopt-policy-optimization.md
+    anchor: Two-stage gate
+    status: canonical
+  - term: answer-path isolation regression
+    aliases: [NMG_SKILLOPT_POLICY_PATH, 答案路径隔离回归]
+    definition: >-
+      The `npm run eval:agents` regression run with `NMG_SKILLOPT_POLICY_PATH` set: the runner encodes the candidate into an explicitly Lab-only controller channel, records only its SHA-256 in the report, and states that the candidate was not applied to the answering Agent, so the run proves absence of prompt leakage without measuring candidate controller quality.
+      在设置 `NMG_SKILLOPT_POLICY_PATH` 时运行的 `npm run eval:agents` 回归：runner 把候选编码进一个显式标记为 Lab-only 的控制器通道，报告里只记录其 SHA-256，并说明候选未被应用到作答 Agent，因此这次运行证明没有 prompt 泄漏，但不测量候选控制器质量。
+    owner: docs/design/skillopt-policy-optimization.md
+    anchor: Commands
+    status: canonical
+references:
+  - Lab
+  - collection origin
+  - gate

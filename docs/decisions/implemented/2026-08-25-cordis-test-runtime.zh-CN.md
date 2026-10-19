@@ -1,6 +1,6 @@
 # 将 Cordis 限制在测试运行时包装层
 
-[English](2026-08-25-cordis-test-runtime.md)
+[English](2026-08-25-cordis-test-runtime.md) · [术语](2026-08-25-cordis-test-runtime.terms.yaml)
 
 **Status:** implemented  
 **Approved:** unrecorded

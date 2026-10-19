@@ -1,0 +1,21 @@
+version: 2
+terms:
+  - term: official option extraction
+    aliases: [官方选项抽取]
+    definition: >-
+      PersonaMem's official single-option extraction rule applied by the separate scorer without an LLM judge, while the reader prompt keeps the upstream `<final_answer>` instruction; `matched` runs no-memory, deterministic NMG and shadow-controller NMG from isolated copies of the same seeded corpus.
+      由独立打分器应用、且不调用 LLM 判定器的 PersonaMem 官方单选抽取规则；reader 提示词保留上游 `<final_answer>` 指令；`matched` 从同一份种子语料的隔离副本运行 no-memory、确定性 NMG 与 shadow-controller NMG。
+    owner: evals/personamem/README.md
+    anchor: PersonaMem adapter
+    status: canonical
+  - term: shared-context cutoff
+    aliases: [共享上下文截断]
+    definition: >-
+      The adapter behaviour that joins each question to `shared_context_id`, applies the official `end_index_in_shared_context` cutoff, preserves multiple-choice options, and reports results by PersonaMem question type; other official variants are selected through `NMG_PERSONAMEM_SIZE` or by overriding the question and context paths.
+      适配器行为：把每个问题连接到 `shared_context_id`，应用官方 `end_index_in_shared_context` 截断，保留多选题选项，并按 PersonaMem 问题类型报告结果；其他官方变体通过 `NMG_PERSONAMEM_SIZE` 或覆盖问题与上下文路径来选择。
+    owner: evals/personamem/README.md
+    anchor: PersonaMem adapter
+    status: canonical
+references:
+  - evidence
+  - gate

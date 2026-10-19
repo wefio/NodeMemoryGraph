@@ -1,6 +1,6 @@
 # 机制，不是策略
 
-[English](2026-09-21-mechanism-not-policy.md)
+[English](2026-09-21-mechanism-not-policy.md) · [术语](2026-09-21-mechanism-not-policy.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

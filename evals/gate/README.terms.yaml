@@ -1,0 +1,11 @@
+version: 2
+terms:
+  - term: automatic-recall gate probe
+    aliases: [eval:gate, 自动召回门禁探针]
+    definition: >-
+      The deterministic, no-LLM probe run by `npm run eval:gate` that measures false positives and false negatives for explicit recall intent across English, Chinese, German, French, Japanese and Spanish; it is deliberately small and curated, so it exposes language coverage gaps and prevents regressions rather than claiming production prevalence or tuning additional regexes as if they were learned policy.
+      由 `npm run eval:gate` 运行的确定性、无 LLM 探针，测量英文、中文、德文、法文、日文与西班牙文中显式召回意图的假正例与假负例；它有意小规模且有策展，因此用于暴露语言覆盖缺口并防止回退，而不是声称生产流行度，也不是把额外正则当作学习策略去调参。
+    owner: evals/gate/README.md
+    anchor: Automatic-recall gate probe
+    status: canonical
+references: []

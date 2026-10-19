@@ -1,6 +1,6 @@
 # 何时允许进入链式路径
 
-[English](2026-09-19-when-the-chain-path-may-be-entered.md)
+[English](2026-09-19-when-the-chain-path-may-be-entered.md) · [术语](2026-09-19-when-the-chain-path-may-be-entered.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

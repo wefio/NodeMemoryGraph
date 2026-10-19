@@ -1,0 +1,35 @@
+version: 2
+terms:
+  - term: board retention pin
+    aliases: [task_board_retentions, board 保留 pin]
+    definition: >-
+      A per-`(entry_id, owner)` pin with a reason and an optional `retained_until` that exempts a board entry, its deliveries and its acks from expired-entry pruning on both the channel-scoped and the global path; an expired bound stops pinning, and a pin without a bound is released only explicitly, so a round that dies without fencing leaves it visible.
+      按 `(entry_id, owner)` 记录的 pin，带原因与可选的 `retained_until`，使该 board entry 及其 delivery 与 ack 在 channel 作用域与全局两条 prune 路径上都被豁免；界限过期即停止 pin，而没有界限的 pin 只能显式释放，因此未 fence 就死掉的 round 会把它留在可见处。
+    owner: docs/experiments/execution/ooo-retention-2026-09-13.md
+    anchor: What changed
+    status: canonical
+  - term: derived verdict by artifact digest
+    aliases: [acceptedArtifacts() by digest, 按 artifact digest 派生的 verdict]
+    definition: >-
+      Looking up the board's verdict for this attempt's artifact digest rather than trusting a private acceptance column. Retention preserves the evidence needed for that lookup; a pin alone supplies neither independent judgment nor acceptance.
+      按本次尝试的 artifact digest 查找 board verdict，而不是信任私有接受列。Retention 保持查找所需证据可用；pin 本身既不提供独立判断，也不产生 acceptance。
+    owner: docs/experiments/execution/ooo-retention-2026-09-13.md
+    anchor: What changed
+    status: canonical
+  - term: single-path test gap
+    aliases: [only-global-prune gap, 单路径测试缺口]
+    definition: >-
+      A test that exercises only one of two code paths, so a mutant in the un-exercised path survives; here the retention case called only the global prune and never reached the channel-scoped pruner with its own DELETE.
+      只走到两条代码路径中一条的测试，使得未被走到的路径上的 mutant 存活；此处 retention 用例只调用全局 prune，从未走到带自己 DELETE 的 channel 作用域 pruner。
+    owner: docs/experiments/execution/ooo-retention-2026-09-13.md
+    anchor: Two teeth survived, and both were my test's fault
+    status: canonical
+  - term: orphan pin from single-key release
+    aliases: [dual release by row, 单键释放造成的孤儿 pin]
+    definition: >-
+      The record's cancellation defect: digest-only release could miss a published but unused handoff whose entry_id had been cleared. The reported fix released through one helper using entry identity and artifact digest; it is a historical finding, not a new current-run confirmation.
+      本记录中的取消缺陷：仅按 digest 释放可能漏掉已发布但未使用、且 entry_id 已清空的 handoff。报告的修复由一个 helper 按 entry 身份与 artifact digest 处理释放；这是历史发现，不是新的当前运行确认。
+    owner: docs/experiments/execution/ooo-retention-2026-09-13.md
+    anchor: Two teeth survived, and both were my test's fault
+    status: canonical
+references: [accepted fact predicate, delivered versus accepted]

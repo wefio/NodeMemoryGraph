@@ -1,6 +1,6 @@
 # Keep Cordis behind a test-runtime wrapper
 
-[中文](2026-08-25-cordis-test-runtime.zh-CN.md)
+[中文](2026-08-25-cordis-test-runtime.zh-CN.md) · [Terms used](2026-08-25-cordis-test-runtime.terms.yaml)
 
 **Status:** implemented  
 **Approved:** unrecorded

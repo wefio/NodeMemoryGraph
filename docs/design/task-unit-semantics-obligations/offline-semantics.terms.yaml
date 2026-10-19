@@ -1,0 +1,32 @@
+version: 2
+terms:
+  - term: event interleaving
+    aliases: [legal interleaving, 事件交错顺序]
+    definition: >-
+      An order-preserving merge of per-task-unit event scripts that enumerates every legal cross-unit ordering within the model's declared bounds.
+      保持每个任务单元内部顺序的事件脚本合并；在模型声明的边界内枚举跨单元的全部合法排序。
+    owner: docs/design/task-unit-semantics-obligations/offline-semantics.md
+    anchor: A. Offline semantics
+    status: canonical
+  - term: stable topological order
+    aliases: [declared plan order, 稳定拓扑顺序]
+    definition: >-
+      The deterministic topological order fixed by the frozen plan; the ordered model mode uses this order rather than choosing any legal topological ordering.
+      由冻结计划固定的确定性拓扑顺序；ordered 模型模式采用该顺序，而不从所有合法拓扑排序中任意选择。
+    owner: docs/design/task-unit-semantics-obligations/offline-semantics.md
+    anchor: A. Offline semantics
+    status: canonical
+  - term: finite-model evidence boundary
+    aliases: [finite-model proof, 有限模型证据边界]
+    definition: >-
+      A passing bounded enumeration establishes only the listed invariants for the modeled units and events; it does not prove correctness for arbitrary Agent programs.
+      有界枚举通过只证明模型中所列单元与事件满足指定不变量；它不证明任意 Agent 程序正确。
+    owner: docs/design/task-unit-semantics-obligations/offline-semantics.md
+    anchor: A. Offline semantics
+    status: canonical
+references:
+  - proven obligation
+  - task unit
+  - Task IR
+  - run record
+  - execution fusion

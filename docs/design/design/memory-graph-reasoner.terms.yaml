@@ -1,0 +1,38 @@
+version: 2
+terms:
+  - term: node operator
+    aliases: [micro-operator, 节点算子]
+    definition: >-
+      The three named degrees of freedom a Memory-Graph Reasoner node applies to query state — absorption `g` with a per-node `b_log`, decay `A` with a global `a_log`, and retention `β` with a per-node `β_log` — producing the blended state `q'` that is scored locally against the node value.
+      Memory-Graph Reasoner 节点作用于查询状态的三个命名自由度——吸收 `g`（逐节点 `b_log`）、衰减 `A`（全局 `a_log`）与保留 `β`（逐节点 `β_log`）——产出与节点值做局部打分的混合状态 `q'`。
+    owner: docs/design/design/memory-graph-reasoner.md
+    anchor: Node operator
+    status: canonical
+  - term: edge-constrained traversal
+    aliases: [declared outgoing neighbours, 边约束遍历]
+    definition: >-
+      The traversal mode used when any input node declares `outgoing`: the first step is a global query seed and every later step is restricted to the preceding node's outgoing neighbours, with training rejecting paths that violate those edges. It proves edge adherence, not factual correctness or automatic logical inference.
+      当任何输入节点声明 `outgoing` 时采用的遍历模式：第一步是全局查询种子，之后每一步都受限于前一节点的 outgoing 邻居，训练拒绝违反这些边的路径。它证明的是边依从性，不是事实正确性，也不是自动逻辑推理。
+    owner: docs/design/design/memory-graph-reasoner.md
+    anchor: Memory-Graph Reasoner — retained numerical Lab prototype
+    status: canonical
+  - term: fact gate
+    aliases: [soft-AND precondition, 事实门]
+    definition: >-
+      A numerical soft-AND multiplier on absorption during `traverse`: each required fact contributes sigmoid of its vector's dot product with the current state; a missing fact contributes 0.5 via a zero-vector fallback. It neither verifies truth nor filters candidates, even at zero absorption, and `trainPath` does not apply it.
+      `traverse` 中作用于吸收的数值 soft-AND 乘子：每个所需事实贡献其向量与当前状态点积的 sigmoid；缺少事实时零向量回退贡献 0.5。它既不验证真值，也不在吸收为零时过滤候选，且 `trainPath` 不应用它。
+    owner: docs/design/design/memory-graph-reasoner.md
+    anchor: Node operator
+    status: canonical
+  - term: what-if impact summary
+    aliases: [impactSummary, what-if 影响摘要]
+    definition: >-
+      The compact LLM-ready text produced by re-running a traversal after inserting or replacing one hypothetical node in a local graph copy and comparing the two traversals, reporting entries, exits and the path score delta; it is a Lab diagnostic artifact, not evidence of inference correctness or utility.
+      在本地图副本中插入或替换一个假设节点，重跑遍历并比较两次遍历所得的紧凑、可直接交给 LLM 的文本，报告进入、退出与路径分数差；它是 Lab 诊断产物，不是推理正确性或效用的证据。
+    owner: docs/design/design/memory-graph-reasoner.md
+    anchor: API
+    status: canonical
+references:
+  - Active Graph
+  - Memory-Graph Reasoner
+  - Lab

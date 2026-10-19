@@ -1,6 +1,6 @@
 # 0002 - 我验证的树，不是我推送的树
 
-[English](0002-wrong-tree-verification.md)
+[English](0002-wrong-tree-verification.md) · [术语](0002-wrong-tree-verification.terms.yaml)
 
 **Status:** open
 
@@ -44,7 +44,7 @@ B2 把 round 的任务行拆成三张表并删掉了 `ooo_probe_tasks`。一个�
 
 两个机制，且只有它们的组合才产生这个结果。
 
-第一，我验证的对象与我发布的对象不同：`npm test` 跑的是一个目录，推送发布的是一个 commit 树。工作流里没有
+第一，验证对象（工作树）与发布对象（commit 树）不同：`npm test` 跑的是一个目录，推送发布的是一个 commit 树。工作流里没有
 任何东西比较这两者，而两者之差恰好就是未暂存的工作。这是一般形式——**验证结果的成色取决于"它是在哪棵树上量的"
 这个身份**，而这个身份此前在我脑子里，不在命令里。
 

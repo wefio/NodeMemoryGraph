@@ -1,0 +1,43 @@
+version: 2
+terms:
+  - term: MAST mode verdict
+    aliases: [blocked/partial/not applicable, MAST 模式判定]
+    definition: >-
+      A historical manual label over the cited research-probe mechanisms: 7 blocked, 5 partial, 2 not applicable. These 14 bins are neither failure frequencies nor independent trials; blocked is not complete behavioral conformance or a natural prevention measurement.
+      对所引研究探针机制的历史人工标签：7 blocked、5 partial、2 not applicable。这 14 个分类不是失败频率或独立试验；blocked 不是完整行为合规或自然防止率测量。
+    owner: docs/experiments/execution/mast-coverage-2026-09-12.md
+    anchor: Annotation
+    status: canonical
+  - term: mechanism claim without sample
+    aliases: [no recorded violation, 无样本的机制主张]
+    definition: >-
+      A guard/test-based claim without a corresponding live violation in the cited record, notably modes 1.2, 2.3 and 2.6. It does not establish natural incident prevention or prove that no such violation has ever occurred elsewhere.
+      所引记录中没有相应 live 违规、仅由守卫／测试支持的主张，尤其模式 1.2、2.3、2.6。不建立自然事件防止率，也不证明别处从未发生此类违规。
+    owner: docs/experiments/execution/mast-coverage-2026-09-12.md
+    anchor: Not established
+    status: canonical
+  - term: promotion boundary
+    aliases: [unprotected promotion, promotion 边界]
+    definition: >-
+      The historical research candidate-to-shared-tree promotion window, plus between-round work outside an admitted plan. Within-plan collision exclusion relies on disjoint editable sets, one authority and candidate worktrees; it is not OS isolation or a current universal product guarantee.
+      历史研究候选进入共享树的 promotion 窗口，以及已准入计划外的轮间工作。计划内的碰撞排除依赖互斥可编辑集、唯一权威与候选 worktree；不是 OS 隔离或当前普适产品保证。
+    owner: docs/experiments/execution/mast-coverage-2026-09-12.md
+    anchor: Outside the taxonomy, and the attribution correction
+    status: canonical
+  - term: historical collision-rate evidence limit
+    aliases: [collision-rate history limitation, 历史碰撞率证据限制]
+    definition: >-
+      The original review could not infer concurrent-agent collision frequency from its inspected commit/rebase history and reported missing instrumentation at that checkpoint. This is a scoped evidence limit, not proof of present instrumentation absence or impossibility of measuring collisions.
+      原审阅无法从所查提交／rebase 历史推导并发 agent 碰撞频率，并报告该检查点缺插桩。这是有范围的证据限制，不证明当前仍缺插桩或碰撞不可测。
+    owner: docs/experiments/execution/mast-coverage-2026-09-12.md
+    anchor: Outside the taxonomy, and the attribution correction
+    status: canonical
+  - term: scripted actor
+    aliases: [scripted multi-process test, 脚本化 actor]
+    definition: >-
+      A participant driven by fixture instructions rather than independent model-driven behavior. The cited probe launched such workers in distinct OS processes; process separation does not make their decisions independent or establish natural multi-session failure incidence.
+      由 fixture 指令驱动、而非独立模型行为的参与者。所引探针在不同 OS 进程中启动此类 worker；进程分离不使其决策独立，也不建立自然多会话失败发生率。
+    owner: docs/experiments/execution/mast-coverage-2026-09-12.md
+    anchor: Not established
+    status: canonical
+references: []

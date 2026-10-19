@@ -1,6 +1,6 @@
 # 静态门禁声明自己的扫描面，并把活性发现交给人类判断
 
-[English](2026-09-16-ci-static-coverage.md)
+[English](2026-09-16-ci-static-coverage.md) · [术语](2026-09-16-ci-static-coverage.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

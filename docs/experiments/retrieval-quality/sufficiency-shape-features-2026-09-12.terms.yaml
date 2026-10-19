@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: retrieval sufficiency prediction
+    aliases: [检索充分性预测, 充分性预测]
+    definition: >-
+      A proposed whole-list open/abstain decision for at least one sufficient item (Hit@k), distinct from item relevance, causal use or complete multi-hop/task sufficiency. With positive-only qrels, no known positive is unknown, not a verified insufficient list.
+      针对至少一个充分项（Hit@k）的拟议整列表打开／弃权决定，不同于条目相关性、因果使用或完整多跳／任务充分性。仅正例 qrels 下无已知正项是未知，不是核验的不充分列表。
+    owner: docs/experiments/retrieval-quality/sufficiency-shape-features-2026-09-12.md
+    anchor: "1. The problem, restated"
+    status: canonical
+  - term: normalized shape feature family
+    aliases: [归一化形状特征族, 形状特征族]
+    definition: >-
+      The planned list-shape feature group, not an entirely scale-free vector: differences/std retain units and ratios need defined zero-denominator, sign and short-list handling. Cross-configuration transfer requires evidence rather than following from the family name.
+      计划中的列表形状特征组，不是全向量尺度无关：差／标准差带单位，比值需定义零分母、符号及短列表处理。跨配置迁移需证据，不由族名直接成立。
+    owner: docs/experiments/retrieval-quality/sufficiency-shape-features-2026-09-12.md
+    anchor: 4. Proposed feature-family comparison
+    status: canonical
+  - term: assumed negative label
+    aliases: [假定负标签]
+    definition: >-
+      A historical zero assigned to an unjudged candidate absent from positive qrels, not an explicit negative judgment. All affected proxy tables, including early AUCs, cannot establish verified live-noise or model-quality gains; unknowns remain unknown under the current protocol.
+      对不在正例 qrels 中的未判候选历史赋零，不是显式负判定。受影响的代理表（包括早期 AUC）不建立核验的实时降噪或模型质量收益；当前协议保留未知。
+    owner: docs/experiments/retrieval-quality/sufficiency-shape-features-2026-09-12.md
+    anchor: 8. Results so far (S4, S5)
+    status: canonical

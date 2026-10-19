@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: free host-side speculation
+    aliases: [zero-token-cost speculation, 无 token 成本的宿主侧 speculation]
+    definition: >-
+      Reversible precomputation whose wrong guess costs no tokens and whose outputs are discardable and uncommitted; event-outcome guesses that spend tokens to hide ordinary waits remain forbidden.
+      可逆的预计算，错误猜测不消耗 token，产物可丢弃且不提交；为隐藏普通等待而消耗 token 猜测事件结果仍被禁止。
+    owner: docs/decisions/implemented/2026-09-11-ooo-speculation.md
+    anchor: Decision
+    status: canonical
+references:
+  - work order
+  - evidence

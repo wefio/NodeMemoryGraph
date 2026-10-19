@@ -1,13 +1,13 @@
 # 每个入口登记一句话
 
-[English](2026-09-09-register-every-entry-point.md)
+[English](2026-09-09-register-every-entry-point.md) · [术语](2026-09-09-register-every-entry-point.terms.yaml)
 
 **Status:** rejected  
 **Relates to:** 2026-09-09-gates-assert-results-not-tools
 
 ## Problem
 
-`package.json` 声明了 93 个脚本，没有任何地方说明它们各自是做什么的。存在四处**部分**登记：根
+在 2026-09-09 普查时，`package.json` 声明了 93 个脚本，没有任何地方说明它们各自是做什么的。存在四处**部分**登记：根
 `README.md` 列了 12 个、`evals/README.md` 30 个、`docs/design/ci-cd-and-quality.md` 22 个、
 `AGENTS.md` 6 个，合计覆盖 59 个；加上各目录 README 覆盖 28 个 eval 目录中的 16 个。有九个脚本
 在任何地方都找不到：`index:qwen3`、`hotspot:modules`、`perf:hotspots`、`eval:recall-compression`、
@@ -20,8 +20,7 @@
 `evals/retrieval/profile-*.ts`。RCP 自己是干净的：十个子命令都有文档（1 到 47 次提及）。
 
 代价不是整洁问题。2026-09-09 一个 Agent 问「哪些脚本没有消费者」，写了个一次性脚本去答，然后又
-写了两个——第二个漏掉了 `verify:static` 里组合进去的脚本，第三个漏掉了根 `README.md`。它一次都
-没跑过 `npm run agent:context`，而 `AGENTS.md` 要求那必须是任何仓库改动的第一步。
+写了两个——第二个漏掉了 `verify:static` 里组合进去的脚本，第三个漏掉了根 `README.md`。它没有运行 `npm run agent:context`；当时版本的 `AGENTS.md` 要求这必须是任何仓库改动的第一步。
 
 ## Proposal
 
@@ -65,11 +64,11 @@
 
 ## Why rejected
 
-- **登记表已经存在，只是高一层。** `agent-context.yaml` 带 `capabilities:`（id、aliases、summary、
-  entrypoints、supports）和 `routes:`（paths、owners、tests、verify）；`agent:context:check` 在检查
-  它，`npm run agent:context` 在读它，而 `AGENTS.md` 已经把它定为仓库改动的第一步。
-  `docs/scripts.yaml` 会是**第二个**目录，用不同粒度回答同一个问题——五个能力对九十三个脚本。
-  一个事实两个家，多了一个。
+- **更高层的路由登记已存在。** `agent-context.yaml` 带 `capabilities:`（id、aliases、summary、
+  entrypoints、supports）和 `routes:`（paths、owners、tests、verify）；`agent:context:check` 会校验，
+  `npm run agent:context` 会读取它。当前根 `AGENTS.md` 拥有稳定的仓库发现流程；`repo-development`
+  Skill 在 owner 或检查不清楚时才使用 `agent:context`。这一路由面不是逐脚本手册，但再建一个详尽目录
+  会重复更高层的 owner 路径，仍不能解释某个脚本具体用途。
 - **可检查的形态和有用的形态尺寸不同。** 要在「缺一条」时失败，文件必须枚举**每一个**脚本；要有用，
   它只该列「别处没解释的」。九十三行散文，换九行价值。
 - **用来否掉最便宜方案的那个前提是错的。** 「文件头注释里的用途没有读者」预设了注释已经存在。2026-09-09

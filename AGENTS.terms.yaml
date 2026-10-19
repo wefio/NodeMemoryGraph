@@ -1,0 +1,29 @@
+version: 2
+terms:
+  - term: bootstrap entry scope
+    aliases: [引导入口的作用范围]
+    definition: >-
+      The scope this repository-root entry claims for itself: it owns the stable discovery protocol only, and module inventories, commands, implementation status and environment-specific setup stay with their current owners rather than being restated here.
+      这个仓库根入口为自己声明的范围：它只拥有稳定的发现协议；模块清单、命令、实现状态与环境专属配置留在它们当前的归属文件里，不在本入口重述。
+    owner: AGENTS.md
+    anchor: Maintain shared knowledge
+    status: canonical
+  - term: context expansion stop condition
+    aliases: [上下文扩展停止条件]
+    definition: >-
+      The bootstrap rule that discovery ends once the next action, its constraints and its verification are clear, and reopens when evidence conflicts or the task crosses a boundary; a reference is followed only when it supplies a missing definition, an affected dependency or an applicable obligation, so a background link alone never forces another file to be read.
+      引导规则：当下一步行动、它的约束与验证方式都已清楚时，发现过程即结束；当证据冲突或任务跨越边界时重新开始。只有在引用提供缺失定义、受影响的依赖或适用义务时才跟随它，因此仅作为背景的链接绝不构成必须读另一个文件的强制要求。
+    owner: AGENTS.md
+    anchor: Find the context for the next action
+    status: canonical
+  - term: shared-knowledge owner update
+    aliases: [共享知识归属更新]
+    definition: >-
+      The maintenance rule that facts come from current code and owning documents while experiments and past decisions supply evidence and rationale, and that a behavior change updates the existing owner instead of adding another summary, preserving unrelated working-tree edits and keeping required knowledge recoverable from the shared repository or an explicit shared task reference rather than from local memory or prior sessions alone.
+      维护规则：事实来自当前代码与归属文档，实验与既往决策提供证据和理由；行为变化更新既有归属文件，而不是再写一份摘要；保留无关的工作区改动；必需知识必须能从共享仓库或显式共享任务引用恢复，而不能只依赖本地记忆或既往会话。
+    owner: AGENTS.md
+    anchor: Maintain shared knowledge
+    status: canonical
+references:
+  - stable discovery protocol
+  - evidence

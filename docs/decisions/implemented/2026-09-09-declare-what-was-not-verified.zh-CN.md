@@ -1,6 +1,6 @@
 # 显式声明「没验证什么」
 
-[English](2026-09-09-declare-what-was-not-verified.md)
+[English](2026-09-09-declare-what-was-not-verified.md) · [术语](2026-09-09-declare-what-was-not-verified.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit

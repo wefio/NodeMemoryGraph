@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: project-local STG store
+    aliases: [STG shared store, 项目本地 STG store]
+    definition: >-
+      One SQLite file per project at <project>/.nmg/stg.sqlite; session isolation is enforced by row-level session_id filtering, not by separate per-session files.
+      每个项目一个 SQLite 文件，路径为 <project>/.nmg/stg.sqlite；session 隔离通过行级 session_id 过滤实现，而不是按 session 建独立文件。
+    owner: docs/design/stg-isolated-store.md
+    anchor: "2. The three-storage model"
+    status: canonical
+  - term: cached LTG hint
+    aliases: [cached_from_ltg, LTG 缓存提示]
+    definition: >-
+      A project-local copy marked cached_from_ltg that can assist retrieval but is not authoritative, is not promoted back to LTG, and retains a sourceMemoryId link to the authoritative LTG record.
+      带有 cached_from_ltg 标记的项目本地副本，可辅助检索但不具权威性，不得再 promotion 回 LTG，并以 sourceMemoryId 指向 LTG 权威记录。
+    owner: docs/design/stg-isolated-store.md
+    anchor: "3. Cached LTG subset: cache, not replica"
+    status: canonical

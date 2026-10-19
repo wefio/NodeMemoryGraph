@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: bounded chain disclosure
+    aliases: [bounded chain expansion, 有界链披露]
+    definition: >-
+      Caller-selected expansion of chain context under explicit hop, chain, edge, member and character budgets; it supplements rather than globally reranks primary retrieval results.
+      调用方选择的链上下文扩展，受跳数、链数、edge、成员和字符预算约束；它补充主检索结果，而不是全局重排结果。
+    owner: docs/design/temporal-logical-chains-design-2026-08-13/converged-design.md
+    anchor: Current source contract
+    status: canonical
+references:
+  - memory chain
+  - design analogy

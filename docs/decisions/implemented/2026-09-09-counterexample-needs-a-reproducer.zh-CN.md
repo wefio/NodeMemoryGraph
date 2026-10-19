@@ -1,6 +1,6 @@
 # 反例必须带可复现输入
 
-[English](2026-09-09-counterexample-needs-a-reproducer.md)
+[English](2026-09-09-counterexample-needs-a-reproducer.md) · [术语](2026-09-09-counterexample-needs-a-reproducer.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit  

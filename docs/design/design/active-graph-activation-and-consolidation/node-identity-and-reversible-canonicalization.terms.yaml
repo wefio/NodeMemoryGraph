@@ -1,0 +1,51 @@
+version: 2
+terms:
+  - term: identity decision classes
+    aliases: [SAME_ENTITY/EXACT_MATCH/CLOSE_MATCH, 身份判定类别]
+    definition: >-
+      The seven classes — `SAME_ENTITY`, `EXACT_MATCH`, `CLOSE_MATCH`, `BROADER`, `NARROWER`, `RELATED`, `DIFFERENT` — that separate strict identity from weaker match and hierarchy relations; node similarity is only a blocking signal that proposes pairs, and `CLOSE_MATCH` is non-transitive and must not create an equivalence closure.
+      七个类别——`SAME_ENTITY`、`EXACT_MATCH`、`CLOSE_MATCH`、`BROADER`、`NARROWER`、`RELATED`、`DIFFERENT`——把严格身份与较弱的匹配及层级关系分开；节点相似性只是提出待比较节点对的阻塞信号，且 `CLOSE_MATCH` 不传递、不得产生等价闭包。
+    owner: docs/design/design/active-graph-activation-and-consolidation/node-identity-and-reversible-canonicalization.md
+    anchor: Node identity and reversible canonicalization
+    status: canonical
+  - term: hard veto
+    aliases: [asymmetric-loss threshold, 硬否决]
+    definition: >-
+      A comparison outcome that refuses identity regardless of similarity — node-kind incompatibility, different stable IDs, disjoint scope, event-time differences, incompatible validity intervals, or explicit non-identity — applied under a high asymmetric-loss threshold because false merges are more destructive than missed merges, so the default action for uncertain pairs is a typed link rather than a merge.
+      无论相似度如何都拒绝身份的比对结果——节点类别不兼容、稳定 ID 不同、作用域不相交、事件时间不同、有效期区间不兼容或显式非同一性——在高不对称损失阈值下适用，因为错误合并比漏掉合并更具破坏性，所以对不确定节点对的默认动作是带类型的链接而非合并。
+    owner: docs/design/design/active-graph-activation-and-consolidation/node-identity-and-reversible-canonicalization.md
+    anchor: Node identity and reversible canonicalization
+    status: canonical
+  - term: MDL merge gain
+    aliases: [delta_MDL, MDL 合并增益]
+    definition: >-
+      The model-selection gain that is positive only when one shared description plus exceptions is shorter than two separate descriptions; a merged description that needs many scope qualifiers, conflicts or exceptions makes NMG keep the nodes separate or create a common broader parent.
+      只有当一份共享描述加例外比两份分开的描述更短时才为正的模型选择增益；若合并后的描述需要大量作用域限定、冲突或例外，NMG 保持节点分离或创建一个共同的更宽父级。
+    owner: docs/design/design/active-graph-activation-and-consolidation/node-identity-and-reversible-canonicalization.md
+    anchor: Node identity and reversible canonicalization
+    status: canonical
+  - term: rollback journal
+    aliases: [node rollback, 回滚日志]
+    definition: >-
+      The exact record written by every new merge — source/target node snapshots, original memory assignments and complete pre/post relation sets — which `node rollback` restores in one immediate transaction only if every moved memory, involved node status and relation still matches the recorded post-merge state; it refuses to overwrite later edits, keeps a newly created target as an inactive tombstone, and cannot roll back merges created before journaling existed.
+      每次新合并写入的精确记录——来源／目标节点快照、原始记忆指派与完整的前／后关系集合——`node rollback` 仅在每条被迁移记忆、涉及节点状态与关系仍与记录的后合并状态一致时于一个即时事务中恢复；它拒绝覆盖之后的编辑，把新建目标保留为不活动墓碑，且无法回滚日志机制存在之前产生的合并。
+    owner: docs/design/design/active-graph-activation-and-consolidation/node-identity-and-reversible-canonicalization.md
+    anchor: Node identity and reversible canonicalization
+    status: canonical
+  - term: pending topology proposal
+    aliases: [same_as proposal, 待处理拓扑提议]
+    definition: >-
+      The provenance-bearing proposal that `remember` stores when an Agent classifies one bounded candidate as `same_entity`, `related`, `refines`, `conflict` or `distinct`; it creates a regulatory `same_as` proposal but does not call `mergeNodes`, redirect an ID or change either node's status, because review and physical identity merge remain separate maintenance operations.
+      Agent 把一个有界候选归类为 `same_entity`、`related`、`refines`、`conflict` 或 `distinct` 时由 `remember` 存储的携带 provenance 的提议；它创建规制性 `same_as` 提议，但不调用 `mergeNodes`、不重定向 ID、也不改变任一节点状态，因为审阅与物理身份合并仍是彼此独立的维护操作。
+    owner: docs/design/design/active-graph-activation-and-consolidation/node-identity-and-reversible-canonicalization.md
+    anchor: Node identity and reversible canonicalization
+    status: canonical
+  - term: candidate generation versus identity acceptance
+    aliases: [blocking is not merge confidence, 候选生成与身份验收分离]
+    definition: >-
+      The separation of the stage that proposes candidate pairs from the stage that accepts identity: a cheap blocker may bound semantic review, but its score is not accepted as calibrated merge confidence, as the BPID audit shows where a `0.98` multi-field blocking score selected 19 false matches among 241 candidates while recalling only 222 of 4,333 true matches.
+      提出候选对的阶段与接受身份的阶段的分离：廉价阻塞器可以界定语义审阅范围，但其次分不被当作经过校准的合并置信度，正如 BPID 审计所示——`0.98` 的多字段阻塞分数在 241 个候选中选出 19 个错配，而只召回 4,333 个真匹配中的 222 个。
+    owner: docs/design/design/active-graph-activation-and-consolidation/node-identity-and-reversible-canonicalization.md
+    anchor: Node identity and reversible canonicalization
+    status: canonical
+references: []

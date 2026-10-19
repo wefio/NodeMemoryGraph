@@ -1,5 +1,7 @@
 # Literature scan: can two gates be cascaded, and is a gate ever "safe to switch on"?
 
+[English](gate-cascade-literature-2026-09-09.md) | [简体中文](gate-cascade-literature-2026-09-09.zh-CN.md) · [Terms](gate-cascade-literature-2026-09-09.terms.yaml)
+
 **Date:** 2026-09-09
 **Status:** external-literature synthesis (web search); not a formal survey.
 **Purpose:** test three premises that came up while implementing the retrieval
@@ -13,21 +15,22 @@ risk control, adaptive retrieval gating. English academic focus.
 
 ## Headline
 
-1. **Cascading two _filters_ is provably the same decision as ANDing them.** The
-   literature never treats the cascade as extra filtering power; it is a **cost**
-   device (early exit, cheap → expensive) and a **joint-calibration** problem.
-   "Cascade instead of AND" buys nothing by itself.
-2. **A per-query "this list is mostly noise" signal has a name and a literature**:
-   post-retrieval **query performance prediction (QPP)**. Our `cv` is essentially
-   the classical **NQC** (normalized query commitment = dispersion of the top
-   scores), and the standard uses of QPP are exactly the decisions we discussed —
-   an adaptive cutoff, and "retrieve again / reformulate".
-3. **No formulation makes enabling a filter "always positive".** What exists is
-   **finite-sample risk control** (conformal / selective prediction) and, most
-   directly, **joint calibration of a two-threshold cascade against a target risk**
-   (BalanceRAG). That turns "should the learned gate ship?" into a _certification_
-   question with explicit α and δ — falsifiable, and the right shape for our
-   acceptance bar.
+This selected scan and its 2026-09-12 follow-up are historical, not an exhaustive
+survey or new source verification. External statements below are the recorded
+accounts of selected authors, not universal literature results. The
+[current training protocol](../../design/relevance-training.md) owns admissible
+labels and deployment boundaries; this report enables nothing.
+
+1. Fixed item predicates over the same frozen pool satisfy B(A(S)) = A(S) ∩ B(S).
+   "Pure filter" alone is insufficient: set-relative normalization, top-K,
+   adaptive thresholds and shared budgets can make order change membership.
+   Staging can affect cost without changing membership under those assumptions.
+2. QPP is a relevant signal family. cv and NQC are related dispersion measures,
+   not automatically identical formulas/normalizations. Learned QPP needs labels;
+   inference need not see gold. Classical baselines are not zero-CPU-cost.
+3. Conditional risk control is not "always positive" enablement. BalanceRAG is
+   one selected motivation for joint calibration, not the only possible method,
+   an unconditional guarantee or authority to ship.
 
 ## Premise (a): cascade vs AND
 
@@ -41,30 +44,29 @@ risk control, adaptive retrieval gating. English academic focus.
   al.; _Learning Cascade Ranking as One Network_, ICML 2025, uses recall-aware
   surrogate losses). Feature costs belong inside the cascade (Chen et al., SIGIR
   2017).
-- Consequence for us: `applyRelevanceGates` (program gate → learned gate) is
-  **already** a cascade, and because **both stages are pure filters it is
-  identical to the AND** — staging and order do not change the resulting set. A
-  cascade only becomes a different object if a stage **adds** (candidate
-  expansion, query rewriting, larger k) or **changes the other stage's
-  parameters** (threshold chaining).
-- The one property the literature does assign to ordering: **an earlier stage's
+- The historical `applyRelevanceGates` description is program → learned.
+  AND equivalence needs fixed predicates, not merely pure functions. Expansion,
+  rewriting, larger k, threshold chaining or set-dependent filters can change it;
+  arbitrary implementations are not proved order-independent.
+- One property of remove-only stage ordering: **an earlier stage's
   errors are unrecoverable** — a later stage never sees what an earlier one
-  dropped. This matches our own measurement (the model recovered only 2 of 51
-  program-gate false drops), and it is why the delete permission should sit in a
+  dropped. The 2 of 51 program false drops is a model-alone counterfactual comparison,
+  not actual recovery of candidates removed earlier, and it is why the delete permission should sit in a
   single, last stage.
 - Also standard: **every top-K cut creates a recall ceiling** (candidate-generation
   guidance), and reranking practice notes are explicit that
-  _reorder-without-filtering_ is what "helps recall without hurting it" — a filter
-  is a different animal from a reranker.
-- Empirical ceilings in the literature match ours: realistic retrieval covers only
+  reorder-only preserves full-pool membership, not necessarily R@K or a
+  budget-selected prefix. Reranking can change recall at the consumer cutoff.
+- These cited coverage values have different k, domains and units; they are not
+  quantitative corroboration of each other: realistic retrieval covers only
   **2–19% of relevant items at K=100** across three domains in an LLM-reranking
   study; our product-path lexical any@20 is 34.3% (hybrid 40.5%).
 
 ## Premise (b): "is this recall mostly noise?" — QPP and set-level gates
 
-- **Post-retrieval QPP** predicts retrieval quality from the retrieved list's
+- **Classical unsupervised post-retrieval QPP** estimates retrieval quality from the retrieved list's
   score distribution, with no relevance labels. The classical predictors include
-  **NQC** (dispersion of the top scores — our `cv`), score-gap, and
+  **NQC** (top-score dispersion related to, not necessarily identical to, `cv`), score-gap, and
   top-score/clarity-style statistics. Foundations: ECIR 2024 QPP tutorial, QPP++
   2025 workshop.
 - The standard downstream uses are the two we identified: **adaptive cutoff** (how
@@ -79,8 +81,8 @@ risk control, adaptive retrieval gating. English academic focus.
   actually lives.
 - ⇒ For our set-level question the right shape is **a QPP-style predictor driving
   the cutoff**, not a second candidate filter. Critically, any learned version must
-  be compared against the classical predictors (NQC/`cv`, score-gap), which are
-  strong and free.
+  be compared against the classical predictors (NQC/`cv`, score-gap), which do not require an extra model API call, but are not free computation
+  or guaranteed winners.
 
 ## Premise (c): is there a "switch it on and it is good" formulation?
 
@@ -88,12 +90,14 @@ risk control, adaptive retrieval gating. English academic focus.
   Sontag 2023; Narasimhan et al. 2022) the guarantee is **on risk at a chosen
   α**, not "always better"; and under a fixed budget any set-changing decision can
   drop a gold. The practice literature draws the same line we did: a **reranker**
-  (reorders) preserves recall, a **filter** risks it.
+  (reorders) preserves full-pool membership, not necessarily recall after a top-K
+  or budget cap; a **filter** can remove members before that cap.
 - What the literature does offer, and we should copy:
   - **Risk control with finite-sample guarantees** on selected outputs
     (Angelopoulos et al.; conformal prediction). The variant matching our objective
     is **conformal sets with limited false positives** (Fisch et al., ICML 2022) —
-    control the false-positive rate _in the kept set_.
+    control a specified false-positive loss; its exact denominator must be checked
+    before equating it with FPR, FDR or aggregate kept noise.
   - **Conformal post-hoc filtering**: CiteGuard controls false-discovery rate on
     citation faithfulness. That is precisely "filter, but with a promised noise
     level".
@@ -103,7 +107,7 @@ risk control, adaptive retrieval gating. English academic focus.
     with **two thresholds**, calibrated **jointly rather than stage by stage**:
     each threshold pair is an operating point on a 2-D lattice, each is tested
     against the null "system risk > α", certified pairs get **FWER control at
-    level δ** (so _any_ later choice from the certified set is valid), and the
+    level δ** (so later selection is valid within that tested family and the paper's assumptions), and the
     shipped pair is the **highest-acceptance certified one**. It extends to
     **multi-risk** (bound retrieval usage together with selection-conditioned
     error). Its explicit finding: **stage-wise calibration is valid but
@@ -112,37 +116,25 @@ risk control, adaptive retrieval gating. English academic focus.
   - Cheap-then-expensive **routing** with a Hoeffding upper-confidence shipping
     rule (UR-RAG, snippet-level source) — same family.
 
-## What this implies for NMG (design-level; no results claimed)
+## What this implies for NMG (historical proposals, no default change)
 
-1. **Do not expect power from "cascading".** Keep the gates ANDed (equivalently
-   staged). Real gains can only come from (i) a stage that _adds_, (ii) **joint
-   calibration**, or (iii) a better first stage.
-2. **Make the deletion point singular and last.** Stage 1 (candidate generation:
-   lexical + vector + chains + second pass) should only add; the deterministic gate
-   is the only remover; the model gets **no delete permission** (reorder, re-score,
-   or predict a threshold only). This is the recall-oriented-then-precision-oriented
-   split, and it makes "who dropped the gold" attributable.
-3. **Reframe "should we enable the learned gate" as a certification problem.** On a
-   held-out set, treat (program threshold, model threshold) as a lattice, compute
-   acceptance and accepted-error at each point, control FWER at δ (Bonferroni is a
-   sufficient conservative version; BalanceRAG's sequential graphical testing is
-   the tighter one), and ship the max-acceptance certified point for a stated risk
-   α. **If no point certifies, the honest answer is that the gate cannot ship** —
-   and we would know it without arguing about it.
-4. **State a risk target, not just a metric.** We currently report "kept precision
-   5.9% → 13.1% at 81% hit recall" with no target. The risk-control literature uses
-   `risk / carefulness / coverage / alignment` (RC-RAG) or a controlled FPR/FDR.
-   Pick α (e.g. noise in the kept set ≤ 25%) so a threshold is a _claim_.
-5. **Close the remaining scale hole.** The fixed absolute score floor (`0.05`) is
-   the only still-scale-coupled part of our gate. The literature's two scale-free
-   alternatives are (i) **rank/proportion cutoffs** (the cascade mechanism) and
-   (ii) **per-query score normalization / score-distribution modelling**
-   (z-score/NQC; normal–exponential mixtures, Arampatzis et al. 2011, Manmatha et
-   al.). Our move to raw-scale dispersion is a partial NQC; the absolute floor
-   should probably be dropped or replaced by a rank-proportion cut.
-6. **Expect the retriever to remain the dominant lever.** The literature's own
-   recall-ceiling numbers match ours; no gate fixes a first stage that never
-   surfaces the evidence.
+1. Fixed-predicate staging adds no filtering power by itself. Expansion, joint
+   calibration and better signals were proposed levers, not an exhaustive list.
+2. The singular last removal point concerns heuristic candidate suppression,
+   not persistent-memory deletion. Permission/privacy/currentness filters remain
+   mandatory and cannot be replaced by score fusion or learned features.
+3. Compare a valid candidate family against stated alpha/delta with valid sampling
+   assumptions. A certified maximum-acceptance point still needs deployment
+   approval; no passing point is reason to withhold that proposal, not a theorem
+   that no gate can work. FPR, expected FDR and aggregate kept-noise share are
+   distinct losses/denominators, not interchangeable guarantees.
+4. The motivating numbers remain 5.9% → 13.1% kept precision at 81% hit recall;
+   kept noise ≤25% was a proposed target, not a validated runtime guarantee.
+5. The absolute 0.05 floor was suspected scale coupling. Rank/proportion cuts,
+   z-score/NQC and score-distribution models were alternatives, not proved safe
+   replacements; raw dispersion itself is not automatically scale-invariant.
+6. A fixed-pool remover cannot recover absent evidence. The 2–19% at K=100 and
+   local lexical/hybrid any@20 34.3%/40.5% are different measurements.
 
 ## Open questions this scan does not settle
 
@@ -198,6 +190,12 @@ risk control, adaptive retrieval gating. English academic focus.
 
 ## Follow-up scan (2026-09-12): three measured findings, checked against the literature
 
+This switches from LoCoMo to NFCorpus, not another arm of one dataset. A later
+label audit found unjudged candidates had been assumed negative. These are
+historical proxy outputs, not verified noise labels or currently admitted
+training. AUC 0.89 → 0.72 spans changed datasets/labels/settings, not an isolated
+causal effect of correcting labels. Literature analogies do not isolate causes.
+
 Measured on the first qrels-labelled training set (NFCorpus, 3633 docs / 323 judged
 queries -> 298 groups): the learned head covers **0.68** of gold questions where the
 deterministic lexical gate covers **0.36**; the **AND of the two is 0.12** — worse than
@@ -221,10 +219,10 @@ labels with real per-document relevance judgments moved test AUC from **0.89 to 
   lower recall or higher latency from oversearching"_, and metadata filtering is
   described as _"the recall win nobody measures"_.
 - **Why our case is worse than theirs.** Their filter is an exact metadata predicate
-  (tenant, date, permission) that is _true or false_ and independent of relevance.
+  (tenant, date, permission) that is _true or false_ and mandatory regardless of relevance; statistical independence is not assumed.
   Ours is a **noisy score threshold**, so it removes true positives _and_ is only
-  weakly correlated with the thing we want. That is the worst shape to put in
-  series with a ranker, and our `AND = 0.12` is the size of the damage.
+  weakly correlated with the thing we want. The `AND = 0.12` is a recorded proxy operating point in that cohort, not a
+  universal worst shape or a measured production-harm rate.
 
 ### 2. A learned predictor beating an unsupervised score-distribution rule has a documented reason
 
@@ -235,11 +233,10 @@ labels with real per-document relevance judgments moved test AUC from **0.89 to 
   Supervised/adaptive QPP (e.g. ADG-QPP for dense retrievers) beats those baselines on
   Kendall τ and Spearman ρ.
 - Consequence for us: "the learned half covers 0.68 where the cv rule covers 0.36" is
-  the expected direction once labels are real, and the _reason_ is the same one we
-  measured locally. Note also that QPP is evaluated by **correlation** (Kendall τ /
+  the expected direction once labels are real, and a common causal explanation has not been isolated by these comparisons. Note also that QPP is evaluated by **correlation** (Kendall τ /
   Spearman ρ), not by AUC — a metric change we have not made yet.
 
-### 3. With n = 60 the word "certified" is not defensible, and the standard for saying so is written down
+### 3. Sample adequacy depends on the claimed bound
 
 - eDiscovery / TAR validation is the field that operationalises exactly this
   measurement, and its stated standard is blunt: a recall estimate is only as
@@ -248,19 +245,18 @@ labels with real per-document relevance judgments moved test AUC from **0.89 to 
   defensible result"_. There is explicitly **no one-size-fits-all sample size**: the
   sample must be justified for the interval being claimed.
 - Applying that to our own output: the qrels run's split is **cal 60 / test 60
-  questions**, so the "HOLDS at α = 0.70" line from that run is a **noise-level
-  observation, not a certification**. The earlier bge run (307/307) is the smallest
-  split we can currently defend, and even that flags the tight points at n ≈ 8.
+  questions**. "HOLDS at α = 0.70" is a reported tool outcome, insufficient here
+  for a population claim. n=60 alone does not preclude every valid certificate,
+  nor does 307/307 establish a universal minimum; the bge run also has operating
+  points near n ≈ 8. Sampling, labels and the actual bound need joint assessment.
 
-### What this implies (unchanged design, changed composition)
+### What this implies (composition hypotheses, not default authority)
 
-1. **Keep the split, change the composition.** The evidence now points at _fusing_
-   (learned convex combination of the program gate's score and the model's score,
-   with the single weight fitted on a small held-out set) rather than intersecting
-   two thresholds. It is also the cheaper thing to certify, because it has one
-   parameter.
-2. **Keep the program gate's purpose, not its position in series.** Its value was
-   never "filter precision" — it was a deterministic, always-on floor. In a fusion it
-   becomes a _feature_, which is compatible with never losing to the learned head.
-3. **Do not quote the qrels run's certification line.** Report it as n = 60 and
-   rebuild the sample before any claim; the TAR standard above is the bar to meet.
+1. Convex fusion is a candidate comparison, not proof of lower risk or cheaper
+   certification merely because it has one weight. Freeze the choice before
+   independent testing; tuning data is not untouched test data.
+2. Turning a heuristic score into a feature does not guarantee never losing to
+   the learned head. Hard authorization/validity constraints remain hard.
+3. Report n = 60 and label/uncertainty limits, not a new certification. The earlier
+   no-point-below-alpha-0.60 answer refers to the question run; item calibration
+   passes have different semantics and failed rechecks. See the certification note.

@@ -1,219 +1,201 @@
-# NMG Daemon 生命周期加固设计（Idle 超时 / 自动重拉 / 数量上限）
+# NMG Daemon Lifecycle Hardening Design (Idle Timeout / Automatic Relaunch / Count Warning)
 
-**Status:** current — 2026-08-02 实机验证通过，见 §8
-**Updated:** 2026-08-25
-**Related:** [stg-isolated-store.md](stg-isolated-store.md), [memory-graphs.md](memory-graphs.md), [external-source-design.md](external-source-design.md), [design.md](design.md)
+[简体中文](daemon-lifecycle-design.zh-CN.md) · [Terms used](daemon-lifecycle-design.terms.yaml)
 
-## 0. 背景：2026-08-02 内存耗尽事故
+**Status:** current
 
-评测 `run.ts locomo matched 99999` 期间，节点内存被 node 进程打爆（63.7GB 物理内存占用 98.2%，工作集超 100GB）。已定位根因（详见事故分析，归档于 NMG 记忆 `NodeMemoryGraph-eval-daemon-leak`）：
+**Updated:** 2026-10-13
+**Related:** [STG isolated store](stg-isolated-store.md), [memory graphs](memory-graphs.md), [external-source design](external-source-design.md), [design overview](design.md)
 
-- 每个评测 arm 通过 `src/cli/daemon-client.ts` 以 **`detached: true` + `child.unref()`** 拉起独立 nmg daemon（每个 arm 的 sqlite 路径唯一 → `readyState()` 永远复用不了 → 只增不减）；
-- daemon **没有 idle 超时**，只在收到 HTTP `shutdown` 或 SIGTERM 时退出；唯一清理路径是扩展的 `pi.on("session_shutdown")`，而评测用 `RpcClient.stop()` 强杀子进程（Windows 下 SIGTERM=TerminateProcess），清理处理器不执行；
-- 现场证据：837 个 arm × 2 个 nmg 模式 = **1670 份 `nmg.sqlite.server.json`**，单 daemon 50–200MB，合计 ≈ 100GB 工作集。
+## Background: the 2026-08-02 memory incident
 
-**本次设计目标：在 daemon 侧建立自愈机制（防御纵深），不依赖评测侧是否优雅清理。**
+During `run.ts locomo matched 99999`, Node exhausted memory: 98.2% of 63.7 GB physical memory, with working set above 100 GB. The incident report attributed it to:
 
-## 1. 需求
+- Each evaluation arm launched a detached daemon (`detached: true`, `child.unref()`) with its own SQLite path, so `readyState()` could not reuse another arm's process.
+- There was no idle timeout; cleanup depended on HTTP `shutdown` or SIGTERM. The extension's `session_shutdown` hook was bypassed when `RpcClient.stop()` force-stopped children; Windows maps SIGTERM to `TerminateProcess`.
+- The incident record lists 837 arms, two NMG modes and 1,670 `nmg.sqlite.server.json` descriptors. At an estimated 50–200 MB each, working set was about 100 GB.
 
-| 编号 | 需求 | 验收口径 |
+**Design goal:** add daemon-side recovery as defense in depth, independent of whether the evaluation caller exits gracefully.
+
+## Requirements
+
+| ID | Requirement | Acceptance criterion |
 | --- | --- | --- |
-| R1 | daemon 空闲超时自动退出 | 无请求超过 `N` 秒后自行优雅退出并释放 lease |
-| R2 | 超时退出后能**原样重新拉起** | 客户端再次连接同一 db 时自动重拉新 daemon，sqlite 数据不丢；会话中途 daemon 死亡也能自愈 |
-| R3 | daemon 数量上限检测 | 拉起前统计存活 daemon 数，超过上限（默认 32）向 stderr 警告 |
+| R1 | Exit automatically after daemon idle time | After `N` seconds without requests, exit gracefully and release the lease. |
+| R2 | Relaunch after idle exit | A client reconnecting to the same database can start a daemon with SQLite data intact; a daemon death mid-session can recover. |
+| R3 | Detect excessive daemon count | Before spawning, count eligible daemons and warn on stderr above the default limit of 32. |
 
-## 2. 决策总览
+## Decision summary
 
-| 需求 | 方案 | 配置项 | 默认值 |
+| Requirement | Design | Setting | Default |
 | --- | --- | --- | --- |
-| R1 | daemon 内建 idle 计时器，每次请求刷新；超时走与 `shutdown` 相同的关闭路径 | `NMG_DAEMON_IDLE_TIMEOUT_MS` | `300000`（5 分钟；`<=0` 禁用） |
-| R2 | 复用现有 `readyState` 探活 + `acquireServerLease` 残留清理；新增客户端**连接失败自动重连一次** | 无（固定行为） | — |
-| R3 | spawn 前扫描 `*.server.json` 统计存活 pid，超限警告 | `NMG_DAEMON_LIMIT` | `32`（`<=0` 禁用） |
+| R1 | In-daemon idle timer, refreshed on each request; timeout uses the server close path | `NMG_DAEMON_IDLE_TIMEOUT_MS` | `300000` (5 minutes; `<=0` disables) |
+| R2 | Reuse `readyState()` and stale-lease cleanup; add one connection-level reconnect | None; fixed behavior | — |
+| R3 | Before spawn, scan the resolved NMG data root and warn above the limit; do not block spawn | `NMG_DAEMON_LIMIT` | `32` (`<=0` disables) |
 
-## 3. R1：daemon idle 超时自动退出
+## R1: Daemon idle timeout
 
-### 3.1 行为定义
+### Behavior
 
-- daemon 启动时即启动计时器（**即使一个请求都没收到**也会退出，覆盖"spawn 后客户端先死"的孤儿场景）；
-- **每次收到请求（含 `hello`）重置计时器**；
-- 超时后执行与 `shutdown` 方法完全相同的关闭路径：`server.close()` + `closeIdleConnections()` → `closed` promise 决议 → `lease.release()`（删除 `*.server.json`）→ `serveHttp` 返回 → `daemon run` 命令以 0 退出；
-- `shutdown` 方法与 idle 超时互斥：`closing` 标志防重入，超时回调与显式 shutdown 不互相覆盖；
-- 关闭过程不打断**正在执行**的请求（HTTP server close 只停止接受新连接）。
+- Start the timer at daemon startup, even before the first request, so a client that dies immediately after spawn does not leave an immortal daemon.
+- Refresh the timer before handling each arriving HTTP request, including `hello`; response completion does not refresh it.
+- Timeout uses the shutdown close helper: `server.close()` stops new connections, then `closeAllConnections()` closes HTTP connections. After `closed` resolves, `lease.release()` removes `*.server.json`; `serveHttp` returns and `daemon run` exits 0.
+- A `closing` flag prevents duplicate close paths from racing.
+- **In-flight request boundary:** the design intends not to interrupt accepted work, but the current helper calls `closeAllConnections()`. A long request may be interrupted; current idle tests do not cover this case.
 
-### 3.2 实现位置
+### Implementation location
 
-`src/cli/http-server.ts` 的 `serveHttp`：
-
-```ts
-export async function serveHttp(
-  service: NmgService,
-  lease: ServerLease,
-  options: { idleTimeoutMs?: number } = {},
-): Promise<void> {
-  const idleTimeoutMs = options.idleTimeoutMs ?? daemonIdleTimeoutMs(); // env
-  let idleTimer: NodeJS.Timeout | undefined;
-  let closing = false;
-  const close = () => { /* server.close + closeIdleConnections + 清计时器 */ };
-  const touch = () => {
-    if (closing) return;
-    clearTimeout(idleTimer);
-    idleTimer = idleTimeoutMs > 0 ? setTimeout(close, idleTimeoutMs) : undefined;
-  };
-  // 启动即 touch()；每个请求 handler 先 touch()
-}
-```
-
-`daemonIdleTimeoutMs()` 读取 `NMG_DAEMON_IDLE_TIMEOUT_MS`，非法值回退默认。`options.idleTimeoutMs` 仅测试注入。
-
-### 3.3 为什么默认 5 分钟
-
-| 场景 | 要求 |
-| --- | --- |
-| 交互式 `nmg daemon start` | 用户可能长时间思考后回来，5 分钟起步合理 |
-| 评测 arm（单次 prompt） | arm 完成后 daemon 即失联，5 分钟内自退；可调低至 60s 加速回收 |
-| 慢模型思考间隙（两次 nmg 调用间隔） | 工具调用间隙通常 < 5 分钟；即使超时被杀，R2 的重连兜底可自愈 |
-
-### 3.4 备选方案（不选）
-
-| 方案 | 否决理由 |
-| --- | --- |
-| 父进程存活探活（PPID 轮询） | daemon 由 `detached` 拉起，PPID 语义在 Windows 上不可靠；`spawn` 父进程（cli.js 子进程）本就短命，父死即退会让"评测 arm 内多次连接"失效 |
-| 固定 TTL（启动后 N 秒必退） | 长会话（长文档问答）会被误杀，且无请求语义区分活跃/闲置 |
-
-## 4. R2：超时退出后能原样重新拉起 —— 结论：能
-
-### 4.1 现有机制已支持（逐环验证）
-
-1. **连接侧探活**：`daemon-client.ts` 的 `readyState()` 要求 `isProcessAlive(pid)` 为真才复用；daemon 超时退出后 pid 死亡 → 视为"无 daemon" → 走 spawn 分支；
-2. **残留 lease 清理**：`lifecycle.ts` 的 `acquireServerLease` 用 `wx` 独占创建 `*.server.json`，遇 EEXIST 时读 pid：存活则报错（防双 daemon），**已死则 `rmSync` 后重试** → 强杀/崩溃残留的 stale 文件不阻塞重拉；
-3. **daemon 无进程态**：sqlite 是唯一事实源，新 daemon 用同一 `--db` 重新打开即恢复全部数据；token/port 每次新生成，客户端始终通过 `server.json` 重新发现，无需旧 token。
-
-### 4.2 新增：客户端连接失败自动重连（防"会话中途被杀"）
-
-R1 引入了新失效模式：agent 思考间隙超过 idle 超时时，daemon 可能**在会话中途**退出，下一次 nmg 调用将 ECONNREFUSED。为让失败自愈，`invokeDaemon` 增加**一次**重连重试：
+`src/cli/http-server.ts`, `serveHttp`:
 
 ```ts
-export interface DaemonConnection {
-  state: ServerState;
-  startedByCaller: boolean;
-  databasePath: string;          // 新增：重连时需要重新 spawn 的 db 路径
-}
-
-export async function invokeDaemon(connection, method, params = {}) {
-  try {
-    return await httpCall(connection.state, method, params);
-  } catch (error) {
-    if (!(error instanceof TypeError)) throw error;   // 仅连接级错误（fetch 网络层）
-    const reconnected = await connectDaemon(connection.databasePath); // 已死则重拉
-    connection.state = reconnected.state;              // 就地更新，扩展缓存的对象随之生效
-    connection.startedByCaller = reconnected.startedByCaller;
-    return await httpCall(connection.state, method, params);
-  }
-}
+const idleTimeoutMs = options.idleTimeoutMs ?? daemonIdleTimeoutMs();
+let idleTimer: NodeJS.Timeout | undefined;
+let closing = false;
+const close = () => {
+  if (closing) return;
+  closing = true;
+  clearTimeout(idleTimer);
+  server.close(resolveClosed);
+  server.closeAllConnections?.();
+};
+const touch = () => {
+  if (closing) return;
+  clearTimeout(idleTimer);
+  idleTimer = idleTimeoutMs > 0 ? setTimeout(close, idleTimeoutMs) : undefined;
+};
+// touch at startup and before handling each request
 ```
 
-判别依据：连接级失败是 fetch 网络层抛出的 `TypeError`（ECONNREFUSED 等）；HTTP 层 4xx/5xx 与协议错误是我们的普通 `Error`，**不重试**（避免掩盖真错误）。
+`daemonIdleTimeoutMs()` reads `NMG_DAEMON_IDLE_TIMEOUT_MS`; invalid input falls back to the default. `options.idleTimeoutMs` is a test-only injection point.
 
-### 4.3 重连的所有权语义
+### Why the default is five minutes
 
-- 重连 spawn 的新 daemon `startedByCaller=true` → 扩展 `session_shutdown` 时 `shutdownOwnedDaemon` 会正确关停它，与"评测场景下每个 cli.js 子进程独占一个 arm daemon"的事实一致；
-- 原 daemon 若由**本进程**启动且已死，重连后新 daemon 归本进程所有，无归属冲突。
-
-## 5. R3：daemon 数量上限检测（默认 32，超限警告）
-
-### 5.1 触发点与行为
-
-- 在 `connectDaemon` **spawn 新 daemon 之前**统计（复用路径不统计，因为不新增）；
-- 存活数 > `NMG_DAEMON_LIMIT`（默认 32）时向 **stderr** 输出警告，**不阻断** spawn（按需求：警告而非拦截）；
-- **每进程只警告一次**：评测 ~6000 次连接调用，逐次警告会刷屏；首次越限时附带当前计数与处置提示。
-
-```
-NMG: warning: 1670 NMG daemons running (limit 32); raise NMG_DAEMON_LIMIT or stop stale daemons (nmg daemon stop --data-dir <dir>)
-```
-
-stderr 会被 `RpcClient` 子进程捕获并透传到评测主进程，可观测。
-
-### 5.2 统计实现 `countRunningDaemons`
-
-- **扫描根**：`[NMG_DATA_DIR || ~/.nmg, process.cwd()]`（去重）。评测场景：每个 cli.js 子进程的 `NMG_DATA_DIR` 是 arm 目录、cwd 是仓库根 → 全量 arms 的 `*.server.json` 都能扫到；
-- **匹配**：`*.server.json` 后缀，逐个读 pid + `isProcessAlive` 判定；
-- **排除目录**：`node_modules`、`.git`、`dist`、`coverage`、`.nmg`、`build`（与 tests/cli/http-boundary.test.ts 的 SKIP_DIRS 一致）；
-- **成本控制**：模块级 memo，**1 秒 TTL**——评测 16 并发进程各自 spawn 时，扫描频率摊销到 ≤1 次/秒/进程，每次全树同步遍历（排除后 ~数千目录、10–30k 文件）约 50–200ms，可接受；
-- 扫描是**只读、无协调**的：不引入跨进程注册表，避免陈旧条目/锁竞争。
-
-### 5.3 为什么默认 32
-
-评测并发上限 16（`NMG_BENCH_CONCURRENCY` 硬上限）× matched 模式每用例 2 个 nmg arm（nmg-deterministic + nmg-candidate）= **恰好 32 个合法在途 daemon**。因此：
-
-- `32` = "一整套满并发评测的合法规模"，默认值下正常评测不误报；
-- 超过 32 即提示有泄漏/重复运行（上轮事故 1670 ≫ 32）；
-- `NMG_DAEMON_LIMIT=0` 或负数可完全禁用检测。
-
-### 5.4 备选方案（不选）
-
-| 方案 | 否决理由 |
+| Scenario | Rationale |
 | --- | --- |
-| 注册表文件登记 pid | 跨进程无原子保证、强杀后残留脏条目、与 `*.server.json` 现有事实源重复 |
-| 超限即拦截（硬上限） | 需求明确"警告"；拦截会引入评测误伤（合法多进程同时拉起）风险，留待后续按需加 `NMG_DAEMON_LIMIT_BLOCK` |
-| 只扫 `NMG_DATA_DIR` | 评测 arm 的 db 在项目树内，扫不到主泄漏源 |
+| Interactive `nmg daemon start` | A user may think for a while before returning; five minutes is a reasonable starting point. |
+| One-prompt evaluation arm | The daemon becomes unused after the arm; lower the timeout (for example, to 60 seconds) for faster reclamation. |
+| Long model-thinking gap between NMG calls | Gaps are usually under five minutes; if the daemon does exit, R2 provides a reconnect path. |
 
-## 6. 文件改动清单
+### Alternatives not selected
 
-| 文件 | 改动 |
+| Alternative | Reason |
 | --- | --- |
-| `src/cli/http-server.ts` | `serveHttp` 增加 idle 计时器（touch/close/closing 标志）；`daemonIdleTimeoutMs()` 读 env；`httpHandler` 保持签名不变（onShutdown 改为内部 close） |
-| `src/cli/daemon-client.ts` | `DaemonConnection.databasePath`；`connectDaemon` spawn 前调 `countRunningDaemons` + 越限警告（每进程一次）；`invokeDaemon` 连接级失败重连一次；新增 `countRunningDaemons`、memo、环境变量解析 |
-| `tests/cli/process.test.ts` | 新增 idle 超时退出、超时后重拉、数量检测/警告的进程级测试 |
-| `tests/cli/http-boundary.test.ts` | 不破坏：`daemon-client.ts` 仍只 import `./http-client.ts`、`./lifecycle.ts`（新增 import 需复核不引入 `../core/*`） |
-| 本设计文档 + `evals/README.md` | 记录 `NMG_DAEMON_IDLE_TIMEOUT_MS`、`NMG_DAEMON_LIMIT` |
+| Poll the parent process ID | The daemon is detached; PPID semantics are unreliable on Windows, and the spawning CLI child is short-lived. Exiting with that parent would break multiple connections within one evaluation arm. |
+| Fixed lifetime from startup | A long session could be killed even while active; it does not distinguish activity from idleness. |
 
-| `src/cli/main.ts` | `waitForState` 增加 `isProcessAlive(pid)` 探活（修复 stale lease 时误把死进程端点当活 daemon 去连接） |
+## R2: Relaunch after timeout — conclusion: yes
 
-## 7. 测试计划
+### Existing mechanisms
 
-| 用例 | 方法 | 断言 |
+1. **Liveness:** `readyState()` reuses only a descriptor whose PID passes `isProcessAlive`; a dead owner follows the spawn path.
+2. **Stale lease:** `acquireServerLease()` creates `*.server.json` with `wx`. On `EEXIST`, a live PID blocks a second daemon; a dead PID allows removal and retry.
+3. **Data recovery:** the replacement uses the same `--db`, preserving SQLite memory and board data, but not Active Graph state, writer leases or other process-local state. It gets a new token and port, rediscovered through `server.json`.
+
+### Added: connection-level reconnect
+
+A client may outlive its daemon while the agent is thinking. It rediscovers the endpoint and `hello` capabilities for the same `databasePath`, then updates its connection object. It may spawn a replacement only after the previous owner has exited; a transient endpoint fault while the owner is alive must not create a second writer.
+
+`invokeDaemon` waits for handover and refreshes a changed owner before checking capabilities. If no request was sent, it can use the new owner. If a request was sent but its response was lost, only the [client's read allowlist](../../src/cli/daemon-client.ts) is retried once. An uncertain mutation returns an explicit error and is not replayed. HTTP, protocol and domain rejections are not retried; a missing capability does not trigger an implicit upgrade.
+
+### Reconnect ownership semantics
+
+- A replacement spawned by reconnect has `startedByCaller=true`; the extension's `session_shutdown` can therefore close it through `shutdownOwnedDaemon`. This matches the evaluation case where each `cli.js` child owns its arm daemon.
+- If this process started the original daemon and it has exited, the replacement belongs to the same process; ownership is not ambiguous.
+
+## R3: Daemon-count warning (default 32; warning only)
+
+### Trigger and behavior
+
+- Count before spawning a new daemon; a reuse path does not add a process and is not counted.
+- If the count is greater than `NMG_DAEMON_LIMIT` (default 32), write a warning to **stderr** but do not block spawn. Warn once per process to avoid flooding output during thousands of connection calls.
+
+```text
+NMG: warning: 1670 NMG daemons running (limit 32); raise NMG_DAEMON_LIMIT or stop stale daemons (`nmg daemon stop --data-dir <dir>`)
+```
+
+`RpcClient` captures the child stderr and forwards it to the evaluation process.
+
+### Counting implementation and current coverage boundary
+
+- **Scan root:** `daemonScanRoots()` returns only `resolveNmgDataDir()` (default `~/.nmg`, overridable by `NMG_DATA_DIR`), not `process.cwd()`. Counts cover that root only. A nearby comment still mentions `cwd`; the function does not, so this is not a global count.
+- Recursively find `*.server.json`, skip `node_modules`, `.git`, `dist`, `coverage`, `.nmg` and `build`, and select HTTP descriptors with a valid host, port, token and live PID. The implementation then checks each candidate with authenticated `hello` (250 ms timeout) and deduplicates by endpoint.
+- A module-level memo has a **1-second TTL**. Current counting includes synchronous tree traversal and parallel authenticated `hello` checks; the earlier 50–200 ms estimate is not a current end-to-end measurement.
+- The scan is read-only and has no cross-process registry or coordination, avoiding stale registry entries and lock contention.
+
+### Why the default is 32
+
+The recorded rationale was 16-way evaluation concurrency × two NMG arms = 32 daemons. The warning should stay quiet at that planned capacity; higher counts may indicate leakage or duplicate runs. `NMG_DAEMON_LIMIT<=0` disables it. This is not a hard cap.
+
+### Alternatives and the current scope gap
+
+| Alternative | Rationale / current status |
+| --- | --- |
+| PID registry file | No cross-process atomicity; force-kills leave stale entries; duplicates the existing `*.server.json` evidence. |
+| Block spawn above the limit | Rejected by the requirement, which calls for warning only; legal simultaneous launches could be blocked. `NMG_DAEMON_LIMIT_BLOCK` remains a possible later option. |
+| Scan only the resolved `NMG_DATA_DIR` | The earlier design rejected this because evaluation-arm databases may live under a project tree. The current `daemonScanRoots()` nevertheless returns only the resolved data root, so the warning can miss daemons outside it; project-root coverage remains an implementation gap. |
+
+## File change inventory
+
+| File | Change |
+| --- | --- |
+| `src/cli/http-server.ts` | Idle timer, `touch`/`close`/`closing`, environment parsing; `httpHandler` keeps its signature. |
+| `src/cli/daemon-client.ts` | `DaemonConnection.databasePath`; pre-spawn count/warning; connection-level reconnect; `countRunningDaemons`, memo and environment parsing. |
+| `tests/cli/process.test.ts` | Process tests for idle exit, relaunch, count warning and reconnect. |
+| `tests/cli/http-boundary.test.ts` | Preserve the daemon-client boundary: imports remain limited to `./http-client.ts` and `./lifecycle.ts` rather than `../core/*`. |
+| `src/cli/main.ts` | `waitForState` checks `isProcessAlive(pid)` so a stale descriptor is not mistaken for a live daemon. |
+| Design document and `evals/README.md` | Record `NMG_DAEMON_IDLE_TIMEOUT_MS` and `NMG_DAEMON_LIMIT`. |
+
+## Test plan
+
+| Case | Method | Assertion |
 | --- | --- | --- |
-| idle 超时退出 | `NMG_DAEMON_IDLE_TIMEOUT_MS=1000` 起 daemon，等 ~1.5s | `daemon status --json` → `running:false`；`*.server.json` 已删除 |
-| 请求刷新计时器 | idle=2s，第 1s 发 `hello`/`status`，第 3s 再发一次 | 第 3s 调用仍成功（计时器被刷新） |
-| 超时后原样重拉 | 上例后再次 `connectDaemon`（或 `daemon start`） | 新 daemon 可用、pid 变化、`remember`/`search` 数据完整 |
-| stale lease 重拉 | 手动写 `*.server.json`（pid=已死进程）后 `daemon start` | 自动清理残留并拉起成功 |
-| 数量检测 | 在临时根目录伪造 N 个 `*.server.json`（pid=当前测试进程 → 存活）；`NMG_DAEMON_LIMIT=2`、N=5 起 daemon | stderr 含 warning，且只出现一次；`NMG_DAEMON_LIMIT=0` 时无警告 |
-| 连接失败重连 | 起 daemon → `stopServer` 杀掉 → 立即 `invokeDaemon` | 自动重拉新 daemon 并成功返回 |
-| 边界守护 | 跑 `tests/cli/http-boundary.test.ts` | 不回归（daemon-client 未引入 core 依赖） |
+| Idle exit | Start with `NMG_DAEMON_IDLE_TIMEOUT_MS=1000`; wait about 1.5 seconds. | `daemon status --json` reports `running:false`; `*.server.json` is removed. |
+| Request refreshes timer | With idle timeout 2 seconds, send `hello`/`status` at 1 second and another request at 3 seconds. | The later call succeeds because the timer was refreshed. |
+| Relaunch after idle exit | After the preceding daemon exits, reconnect or run `daemon start`. | New PID; `remember`/`search` still return the stored data. |
+| Stale lease | Write a `*.server.json` descriptor for a dead PID, then run `daemon start`. | The stale file is removed and the daemon starts. |
+| Count warning | Start real daemons under a temporary `NMG_DATA_DIR`, then trigger a new spawn with `NMG_DAEMON_LIMIT=1`; also use a high limit and `0`. | Authenticated daemons above the threshold warn; a high limit or `0` is quiet. A live PID alone is not enough to count. |
+| Connection reconnect | Start a daemon, stop it, then invoke a client operation. | A new daemon is started and the read returns successfully. |
+| Boundary guard | Run `tests/cli/http-boundary.test.ts`. | No regression; daemon client does not gain a core dependency. |
 
-## 8. 验收标准（针对事故场景复现）
+## Incident-reproduction acceptance observation
 
-**实测（2026-08-02 17:37 本地实机）**：`NMG_BENCH_CONCURRENCY=4 NMG_DAEMON_IDLE_TIMEOUT_MS=60000 NMG_DAEMON_LIMIT=4` 跑 `npm run eval:locomo -- matched 1`（5 用例 × 3 模式 = 15 个 arm），deepseek-v4-flash，约 90 秒完成：
+**Recorded local run (2026-08-02 17:37):** with `NMG_BENCH_CONCURRENCY=4 NMG_DAEMON_IDLE_TIMEOUT_MS=60000 NMG_DAEMON_LIMIT=4`, `npm run eval:locomo -- matched 1` ran 5 cases × 3 modes (15 arms), using `deepseek-v4-flash`, and completed in about 90 seconds.
 
-| 指标 | 结果 |
+| Metric | Recorded observation |
 | --- | --- |
-| RPC 子进程峰值 | 4（= 并发上限，不再失控） |
-| nmg daemon 峰值 | ~9（= 并发 × 2 + idle 窗口内未退出的旧 daemon） |
-| 评测结束后 daemon | 60s 内逐批自退，2 小时观察恒为 1（用户日常 ~/.nmg 基线），**零残留** |
-| 数量警告 | `NMG: warning: 5/6 NMG daemons running (limit 4)` 真实触发（全局计数含用户基线 daemon） |
-| 评测正确性 | 15/15 行有答案，0 answerError |
-| 内存 | 评测期间占用 ~19GB，结束后回落，可用 44.5/63.7 GB |
+| Peak RPC children | 4, equal to the configured concurrency. |
+| Peak NMG daemons | About 9: roughly concurrency × 2 plus older daemons still inside the idle window. |
+| After evaluation | Daemons exited in batches within 60 seconds; a two-hour observation showed one user-level `~/.nmg` baseline daemon and no arm leftovers. |
+| Count warning | With limit 4, warnings were observed at counts 5 and 6; the then-counted scope included the baseline daemon. |
+| Evaluation answers | 15/15 rows had an answer; 0 `answerError`. |
+| Memory | About 19 GB during evaluation, falling after it ended; 44.5/63.7 GB available. |
 
-对比事故（837 arm 残留 1670 daemon、工作集 100GB 打爆 63.7GB），机制生效。
+This single local observation is not a general memory/performance guarantee and does not verify scanner coverage for other data roots or current scan latency. It supports the targeted mitigation in that run, not a universal count claim.
 
-1. 模拟并发：`NMG_BENCH_CONCURRENCY=16 nm npm run eval:locomo -- matched 5`；
-2. 运行中 `tasklist /FI "IMAGENAME eq node.exe"` 观察：daemon 峰值 ≈ 并发 × 2（≤32），arm 完成后逐个自退；
-3. 进程数不再单调累积；内存峰值与 daemon 峰值同步，不随时间膨胀；
-4. 人为把某 daemon 杀掉（`stopServer`）后，下一次 nmg 调用自动拉起新 daemon，评测不失败；
-5. stderr 出现越限警告（人为调低 `NMG_DAEMON_LIMIT` 验证），正常配置下无警告。
+Follow-up reproduction plan:
 
-## 9. 不做的事（范围外 / 后续）
+1. Run `NMG_BENCH_CONCURRENCY=16 nm npm run eval:locomo -- matched 5`.
+2. Observe `node.exe` while running; daemon peak should be near concurrency × 2 (at most 32 for that setup), then fall as arms complete.
+3. Confirm the process count does not grow monotonically and memory does not keep expanding with elapsed time.
+4. Kill a daemon with `stopServer`; the next NMG call should relaunch it without failing the evaluation.
+5. Lower `NMG_DAEMON_LIMIT` to observe a warning; normal settings should stay quiet for the intended workload.
 
-- **评测侧显式清理**（`evaluate()` finally 里 `shutdownOwnedDaemon`、启动前全量扫 stale daemon）：本设计是 daemon 侧兜底，评测侧修复仍推荐单独做（互不替代）；
-- **daemon 复用**（matched 3 arms 共享同一 seed db/daemon）：减少 spawn 次数的结构性优化，独立改动；
-- **硬阻断上限**：留 `NMG_DAEMON_LIMIT_BLOCK` 作为可选后续项。
+## Out of scope / later work
 
-## 10. Implementation lineage
+- **Explicit evaluation-side cleanup** (`shutdownOwnedDaemon` in `evaluate()` `finally`, or scanning stale daemons before launch): daemon-side recovery is defense in depth; caller cleanup remains a separate, complementary change.
+- **Daemon reuse** across the three matched arms using a shared seed database/daemon: a structural reduction in spawn count, separate from this work.
+- **Hard blocking limit:** may be added later as `NMG_DAEMON_LIMIT_BLOCK` if required.
 
-- **Introduced — `39516537`**：建立 resident CLI daemon 生命周期。
-- **Superseded — `9444a3c1` → `692fe85c`**：gRPC transport 被跨平台 HTTP JSON-RPC 取代；协议语义继续由 `src/cli/protocol.ts` 管理。
-- **Hardened — `80167da9`、`a5787cd6`、`30e273e8`**：owned shutdown、idle 退出和重连路径收敛。
-- **Hardened — `11e2101f`**：stale protocol fail-closed，避免旧 daemon 静默接受新客户端。
-- **Hardened — `9a911d00`、`ac2d1114`**：对齐 SQLite 单写者/STG 并发契约，并按最长前缀稳定路由嵌套 CLI 命令。
+## Controlled code reload
 
-完整历史分类见 [implementation lineage](implementation-lineage.md)。
+Read the complete responsibility: [Controlled code reload](daemon-lifecycle-design/controlled-code-reload.md).
+
+## Implementation lineage
+
+- **Introduced — `39516537`:** resident CLI daemon lifecycle.
+- **Superseded — `9444a3c1` → `692fe85c`:** gRPC transport was replaced by cross-platform HTTP JSON-RPC; protocol semantics remain in `src/cli/protocol.ts`.
+- **Hardened — `80167da9`, `a5787cd6`, `30e273e8`:** owned shutdown, idle exit and reconnect converged.
+- **Hardened — `11e2101f`:** stale protocol fails closed instead of silently accepting a new client.
+- **Hardened — `9a911d00`, `ac2d1114`:** aligned SQLite single-writer/STG concurrency and stable longest-prefix routing for nested CLI commands.
+
+Full historical classification is in [implementation lineage](implementation-lineage.md).

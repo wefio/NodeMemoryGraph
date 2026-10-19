@@ -1,0 +1,21 @@
+version: 2
+terms:
+  - term: long-task continuity
+    aliases: [task continuity, 长任务连续性]
+    definition: >-
+      The ability of another suitably capable and authorized Agent to continue the same parent task at an explicit handoff boundary from its contract, current facts and accessible evidence, without undeclared conversation or internal reasoning from the prior Agent.
+      在明确交接边界上，另一名具备所需能力与权限的 Agent 能依据任务契约、当前事实和可访问证据继续同一父任务，而不依赖前一 Agent 未交付的对话或内部推理。
+    owner: docs/design/task-unit-semantics/task-continuity.md
+    anchor: Long-task continuity and task view
+    status: proposed
+  - term: task view
+    aliases: [task-view projection, 任务视图]
+    definition: >-
+      An on-demand projection of the existing contract, execution facts, evidence and observations for the model's next step; it is neither editable task truth nor Task IR's dependency-analysis view.
+      为模型下一步按需投影现有契约、执行事实、证据和观察；它既不是可编辑的任务真相，也不是 Task IR 的依赖分析视图。
+    owner: docs/design/task-unit-semantics/task-continuity.md
+    anchor: Long-task continuity and task view
+    status: canonical
+references:
+  - task unit
+  - Task IR

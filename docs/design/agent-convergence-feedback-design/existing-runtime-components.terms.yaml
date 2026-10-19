@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: ingestible AG content
+    aliases: [AG 可摄入内容, 可摄入条目类型]
+    definition: >-
+      The non-durable item kinds admitted through `SessionActiveGraphRuntime.observe()` are `tool_observation`, `board_projection`, and explicitly supplied `reasoning_artifact`; `semantic_memory` and maintained `working_state` enter by separate paths. This does not make a bookmark (external snippet plus path) an AG content item, and automatic MGR admission remains deferred.
+      经 `SessionActiveGraphRuntime.observe()` 准入的非持久条目类型为 `tool_observation`、`board_projection` 和显式提供的 `reasoning_artifact`；`semantic_memory` 与受维护的 `working_state` 通过各自路径进入。这并不意味着定位书签（外部 snippet 加路径）是 AG 内容条目，自动 MGR 准入仍被推迟。
+    owner: docs/design/agent-convergence-feedback-design/existing-runtime-components.md
+    anchor: AG (session Active Graph runtime)
+    status: canonical
+  - term: cross-session goal continuity
+    aliases: [跨会话目标连续性]
+    definition: >-
+      The difference between re-deriving intent from the next prompt and continuing a direction, carried by memory that outlives one session; board entries are temporary coordination with TTL and expiry, not a persistent quest store, so externally approved long-lived quests are not first-class memory citizens today.
+      在"从下一条提示重新推导意图"与"继续某个方向"之间的差别，由活过单次会话的 memory 承载；看板条目是带 TTL 与过期的临时协调，不是持久任务存储，因此经外部批准的长期任务今天不是一等记忆公民。
+    owner: docs/design/agent-convergence-feedback-design/existing-runtime-components.md
+    anchor: NMG memory (STG/LTG, Task Board)
+    status: canonical
+references:
+  - Active Graph
+  - Long-Term Graph
+  - Short-Term Graph
+  - Task Board
+  - task frame
+  - projection revision
+  - tessera
+  - tessera drift fingerprint

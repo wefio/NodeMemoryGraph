@@ -1,9 +1,8 @@
 # G7 follow-up: the stable baseline, compared against the other samples
 
-**Status:** analysis of the runs behind ledger row G7, prompted by the observation that the first
-stage looked "boringly stable" and that a stable sample is an asset worth comparing against. It is
-not a new experiment: it re-reads every stage record the continuation check has produced, classifies
-each failure by **who caused it**, and compares cost and process across conditions.
+[中文](ooo-real-continuation-comparison-2026-09-14.zh-CN.md) · [Terms used](ooo-real-continuation-comparison-2026-09-14.terms.yaml)
+
+**Status:** historical analysis of research-instrument logs for ledger row G7; not product-runtime proof. It was prompted by the observation that the first stage looked "boringly stable" and that a stable sample is worth comparing against. It is not a new experiment: it re-reads every stage record the continuation check produced, classifies each failure by **who caused it**, and compares cost and process across conditions.
 
 **Where the data comes from.** Four run directories hold `run.jsonl` logs, written by
 `evals/ooo-execution/live-continuation.ts`, from the passes described in
@@ -41,25 +40,20 @@ model returned a `mergeSorted` that dropped the tail (`expected [1,2,3,4], obser
 was rejected at the boundary, and no continuation was opened, which is the boundary behaving
 correctly.
 
-The continuation's naive failure rate looks like 50%. It is not. Reading each failure's cause:
+The continuation's naive non-pass rate looks like 50%; it is not a model-failure rate. Across both conditions there were 20 initially counted non-pass events: 19 continuation non-passes and the one genuine part-1 baseline failure described above. Classifying them by cause gives:
 
-| cause                                                                                       | count | whose fault                       |
-| ------------------------------------------------------------------------------------------- | ----- | --------------------------------- |
-| artifact path reused across repetitions, so the recorded digest no longer matched the bytes | 10    | the harness                       |
-| a failed stage kept its claim, so the retry was refused by its own predecessor              | 2     | the harness                       |
-| the upstream part 1 never passed, so no continuation existed to claim                       | 1     | the harness (upstream)            |
-| `no-change-needed`, read from the kept artifacts (r14, r19), misread as a malformed patch   | 2     | the harness (misclassification)   |
-| `cannot-complete`, read from the kept artifact (r22), a legal conclusion kind               | 1     | the model                         |
-| `promote-candidate` but not parseable (the earliest kept artifact)                          | 1     | the model                         |
-| `invalid patch structure`, artifact not preserved                                           | 2     | unknown — the bytes were not kept |
+| cause | count | interpretation |
+| --- | ---: | --- |
+| Artifact path reused across repetitions, so the recorded digest no longer matched the bytes | 10 | Harness execution defect |
+| A failed stage kept its claim, so the retry was refused by its predecessor | 2 | Harness execution defect |
+| The upstream part 1 never passed, so no continuation existed to claim | 1 | Harness control-flow defect |
+| `no-change-needed`, read from kept artifacts (r14, r19), misread as malformed patches | 2 | Valid outcomes misclassified as failures |
+| `cannot-complete`, read from the kept artifact (r22), a legal conclusion kind | 1 | Model conclusion; not a malformed patch |
+| `promote-candidate` but not parseable (the earliest kept artifact) | 1 | Model-submitted artifact failure |
+| `invalid patch structure`, artifact not preserved | 2 | Unknown; bytes were not kept |
+| Part 1 returned a `mergeSorted` that dropped the tail (`expected [1,2,3,4], observed [1,2,3]`) | 1 | Genuine model failure |
 
-So **13 of 20 failures were the harness's own defects**, and reading the kept artifacts split the
-rest: two were legal `no-change-needed` conclusions the harness misread as malformed patches, one was
-`cannot-complete`, and one was submitted as `promote-candidate` but could not be parsed. Two failures
-still have no preserved bytes, so their cause is not claimed. The apparent instability of the continuation was mostly an
-artefact of the instrument. That is the single most useful thing this comparison produced, and it is
-exactly the failure mode the check exists to catch: an instrument that reports its own faults as
-task variance.
+Thus 13 of the 20 counted events were harness execution/control-flow defects. Two other continuation outcomes were valid `no-change-needed` conclusions that the harness misclassified; the remaining model/unknown outcomes are listed separately. Two failures still have no preserved bytes, so their cause is not claimed. The continuation's apparent instability was largely an instrument artifact. That is the most useful result of this comparison: the check must catch an instrument that reports its own faults as task variance.
 
 The `invalid patch structure` cases deserve a note. Of the four, two were preserved and both
 declare the same thing - `merge`, repetitions r14 and r19:

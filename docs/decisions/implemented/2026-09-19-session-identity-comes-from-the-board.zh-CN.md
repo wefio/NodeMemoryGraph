@@ -1,6 +1,6 @@
 # 单元的会话来自黑板
 
-[English](2026-09-19-session-identity-comes-from-the-board.md)
+[English](2026-09-19-session-identity-comes-from-the-board.md) · [术语](2026-09-19-session-identity-comes-from-the-board.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

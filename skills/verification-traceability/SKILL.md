@@ -5,6 +5,8 @@ description: Make a declared design assertion checkable and traceable. Use when 
 
 # Verification traceability
 
+[简体中文](SKILL.zh-CN.md) · [Terms used](SKILL.terms.yaml)
+
 The rules — every assertion resolves to a check, no orphan checks, the coverage
 table in the receipt, the frozen rule — are owned by
 [the requirements-traceability decision](../../docs/decisions/implemented/2026-09-08-requirements-traceability-matrix.md)

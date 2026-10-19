@@ -1,0 +1,34 @@
+version: 2
+terms:
+  - term: bounded cooling set
+    aliases: [有界冷却集]
+    definition: >-
+      The bounded set of cooled task frames kept after a switch so a return resumes that frame's own parent chain instead of rebuilding from the transcript; `maxTaskFramesPerSession` caps all retained frames, including the active frame, and the least recently activated cooled frame is evicted when a new frame would exceed that total cap.
+      切换后保留的有界冷却任务帧集合，使返回时恢复该帧自己的父链而不是从对话记录重建；`maxTaskFramesPerSession` 限制所有保留帧（包括活动帧）的总数，新增帧将超出上限时驱逐最后激活时间最早的已冷却帧。
+    owner: docs/design/session-active-graph-runtime-design/remaining-work.md
+    anchor: Task-frame lifecycle
+    status: canonical
+  - term: shared resident account
+    aliases: [共享常驻账户]
+    definition: >-
+      The single item/character pool that tool observations, reasoning-artifact admission and dedicated current-state admission all consume, so `budgetLedger` reports one shared account instead of per-call snapshots; it is distinct from the full multidimensional budget and the model-input budget, and maintained state can reduce available retrieval capacity.
+      工具观察、推理产物准入与专用当前状态准入共同消耗的单一条目/字符池，使 `budgetLedger` 报告一个共享账户而不是逐调用快照；它与完整多维预算及模型输入预算相区分，且受维护的状态可以减少可用的检索容量。
+    owner: docs/design/session-active-graph-runtime-design/remaining-work.md
+    anchor: Unified semantic + tool + reasoning budget
+    status: canonical
+  - term: host-neutral disclosure ledger
+    aliases: [宿主中立的披露账本]
+    definition: >-
+      The AG-side record of disclosed projection IDs plus bounded content entries (stable memory ID, hash of the representation visible at that depth, greatest disclosure depth, model-turn number) that every adapter consults, so no adapter owns a second disclosure cache; limits default to 12 turns and 128 records but are configurable, and an RPC failure degrades toward showing requested evidence.
+      AG 侧记录：已披露的投影 ID 加有界内容条目（稳定 memory ID、该深度可见表示的哈希、最大披露深度、模型轮次数），供每个适配器查询，因此没有适配器拥有第二个披露缓存；限制默认是 12 轮与 128 条记录，但可以配置，RPC 失败时退化为展示被请求的证据。
+    owner: docs/design/session-active-graph-runtime-design/remaining-work.md
+    anchor: Host-neutral disclosure ledger
+    status: canonical
+references:
+  - Active Graph
+  - task frame
+  - projection revision
+  - Short-Term Graph
+  - Long-Term Graph
+  - hierarchical activation mode
+  - Lab

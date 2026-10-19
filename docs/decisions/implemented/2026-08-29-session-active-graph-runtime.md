@@ -1,6 +1,6 @@
 # Session-owned Active Graph runtime
 
-[中文](2026-08-29-session-active-graph-runtime.zh-CN.md)
+[中文](2026-08-29-session-active-graph-runtime.zh-CN.md) · [Terms used](2026-08-29-session-active-graph-runtime.terms.yaml)
 
 **Status:** implemented
 **Approved:** unrecorded
@@ -45,10 +45,12 @@ AG_(t+1) = Update_B(AG_t, candidates_t, observations_t, TaskBelief_t)
 Projection_t = Freeze(VisibleSubset(AG_(t+1)))
 ```
 
-`B` is a hard total budget over nodes, edges, evidence, tokens, graph depth, temporary observations,
-reasoning steps, task frames, and latency. HA scores activation, cooling, reactivation, and budget
-allocation. MGR may traverse the selected AG subgraph and emit bounded hypothetical nodes or
-reasoning edges. HA can then rescore those artifacts before a projection is frozen.
+In the target design, `B` is a hard total budget over nodes, edges, evidence, tokens, graph depth,
+temporary observations, reasoning steps, task frames, and latency. The implemented runtime currently
+enforces a shared item/character budget across frames; the full multidimensional account remains
+deferred. HA scores activation, cooling, reactivation, and budget allocation. MGR may traverse the
+selected AG subgraph and emit bounded hypothetical nodes or reasoning edges. HA can then rescore those
+artifacts before a projection is frozen.
 
 AG has three typed edge layers which must not silently reinforce each other:
 
@@ -65,14 +67,15 @@ The query-scoped `ActiveGraph` became a projection revision, the Pi adapter's fl
 was removed, and the injection window moved into the AG disclosure ledger. The APIs of the day were
 implementation evidence, not compatibility requirements for the target design.
 
-The criteria this decision set, each one a requirement on the runtime and its host wiring:
+The target criteria this decision set, each a requirement on the runtime and its host wiring:
 
 - the normative design distinguishes AG, task frame, projection revision, and Task Board channel
   identities;
 - AG is memory-resident and session-owned; no AG content is persisted as authoritative semantic
   memory;
-- a projection revision freezes exact model exposure and supports later exact get, attribution,
-  verified outcomes, and replay after AG mutation;
+- a projection revision freezes the exact selection/disclosure content recorded at the host boundary
+  and supports later exact get, attribution, verified outcomes, and replay after AG mutation; it does
+  not prove the provider's final input;
 - tool observations and retrieved semantic references share one total AG budget without becoming
   durable writes;
 - HA fast state is isolated by session/branch; its activation cannot increase semantic confidence or

@@ -1,0 +1,69 @@
+version: 2
+terms:
+  - term: verification claim
+    aliases: [claim over a domain, 验证声称]
+    definition: >-
+      A triple of property, domain and assumptions written as `∀ x ∈ D, A(x) ⇒ P(x)`, carried as `statement` (P), `domain` (D) and `assumes` (A) on a contract assertion, with evidence bound through `check` and qualified through `strength`; the ledger describes the shape of these claims, while the rules it motivates live in decisions and the workflow lives in the verification-traceability Skill.
+      以 `∀ x ∈ D, A(x) ⇒ P(x)` 写成的性质、定义域与假设三元组，在契约断言上分别由 `statement`（P）、`domain`（D）与 `assumes`（A）承载，证据经 `check` 绑定、经 `strength` 界定强度；账本描述这些声称的形态，而它引出的规则住在决策记录里、工作流住在 verification-traceability Skill 里。
+    owner: docs/design/verification-claims.md
+    anchor: "Verification claims: domain, assumptions, strength"
+    status: canonical
+  - term: evidence strength
+    aliases: [decision, witness, 证据强度]
+    definition: >-
+      The axis that records what a piece of evidence buys: `decision` means a deterministic procedure decides P for every x in D (for example `testOutputPassed(output)` or `validateReceipt(receipt)`), and `witness` means a sample passed while D is claimed rather than covered; `documented-only` is a third state on a different axis — no evidence at all — and lives in `documentedOnly`, not in `strength`, because two fields saying the same thing is one too many.
+      记录一件证据买到多少的轴：`decision` 表示对 D 内每个 x 都有确定性过程判定 P（例如 `testOutputPassed(output)` 或 `validateReceipt(receipt)`），`witness` 表示样本通过而 D 只是被声称、未被覆盖；`documented-only` 是另一轴上的第三种状态——完全没有证据——住在 `documentedOnly` 里而不在 `strength` 里，因为两个字段说同一件事就多了一个。
+    owner: docs/design/verification-claims.md
+    anchor: strength
+    status: canonical
+  - term: visible gap
+    aliases: [0 proven, 可见缺口]
+    definition: >-
+      The state in which a passing test is a witness rather than a proof, so the ledger reports `0 proven` against 12 `witness` because neither of the two `decision` procedures is bound to a contract assertion; the gap is reported instead of implied away, and a witness assertion is still the cheapest falsification instrument available rather than worthless.
+      一种状态：通过的测试是见证而不是证明，因此账本在 12 条 `witness` 上报 `0 proven`，因为两个 `decision` 过程都没有绑定到契约断言；这个缺口被报出来而不是被默认掉，而 witness 断言仍是我们手里最便宜的证伪工具，不是无用之物。
+    owner: docs/design/verification-claims.md
+    anchor: What green means today
+    status: canonical
+  - term: five artifacts
+    aliases: [ledger/register/counterexamples/receipts/uncovered, 五个工件]
+    definition: >-
+      The five artifacts with one home each — claim ledger in `.rcp/contracts/*.yaml`, assumption register in `docs/design/assumptions.yaml`, counterexample ledger in `.rcp/counterexamples.yaml`, receipts in `.rcp/receipts/*.json`, and uncovered scope in the PR's `## 未验证项`; the claim ledger, receipts and the uncovered-scope section exist today, while the assumption register and the counterexample ledger are proposals.
+      五个各有唯一归属的工件——声称账本在 `.rcp/contracts/*.yaml`、假设册在 `docs/design/assumptions.yaml`、反例账本在 `.rcp/counterexamples.yaml`、收据在 `.rcp/receipts/*.json`、未覆盖范围在 PR 的 `## 未验证项`；今天已存在的是声称账本、收据与未覆盖范围，而假设册与反例账本仍是提案。
+    owner: docs/design/verification-claims.md
+    anchor: Five artifacts, one home each
+    status: canonical
+  - term: domain refinement
+    aliases: [CEGAR move, 定义域精化]
+    definition: >-
+      The first branch of the mutation loop: a surviving mutant is a counterexample inside the model, and if it is semantically impossible (outside D) the fix is to rewrite the `domain` declaration rather than the test, which is CEGAR's move because here the model is the three-line claim; if the mutant is inside D, the evidence is fixed or P is conceded.
+      变异回路的第一支：存活的 mutant 是模型内部的反例，若它语义上不可能（不在 D 内），要改的是 `domain` 那条声明而不是测试，这正是 CEGAR 的动作，因为这里的模型就是那三行声称；若 mutant 在 D 内，则修证据，或承认 P 不成立。
+    owner: docs/design/verification-claims.md
+    anchor: Where the loop closes
+    status: canonical
+  - term: stop condition
+    aliases: [closed(change), 停止条件]
+    definition: >-
+      The three-conjunct rule `closed(change)`: every assertion in scope is bound or is documented-only and listed in the PR's 未验证项, no counterexample in scope is open, and every assumption the change touches is registered.
+      三合取规则 `closed(change)`：scope 内每条断言都被绑定，或显式 documented-only 且列入 PR 的 未验证项；scope 内没有 open 反例；改动触及的每条假设都在册。
+    owner: docs/design/verification-claims.md
+    anchor: Stop condition
+    status: canonical
+  - term: enforced versus unenforced checks
+    aliases: [what the checks cannot enforce, 强制与不强制的检查]
+    definition: >-
+      The enforced set, each asserting a property of a result and never the identity of a tool — every non-`documented-only` assertion states a `domain`, every `assumes` entry resolves to the assumption register, every `open` counterexample carries a reproducer, and `rtm:check` reports `bound` and `proven` separately with the strength breakdown — against the explicitly unclaimed: that D is complete, that A is reasonable, and that P is what we want.
+      能强制的集合，每条都只断言结果的性质、绝不看工具身份——非 `documented-only` 的断言都有 `domain`、每个 `assumes` 条目都能解析到假设册、每个 `open` 反例都带 reproducer、`rtm:check` 分别报告 `bound` 与 `proven` 并给出 strength 分布——对比明确不声称的三件事：D 是完整的、A 是合理的、P 是我们真正想要的。
+    owner: docs/design/verification-claims.md
+    anchor: What the checks enforce, and what they cannot
+    status: canonical
+  - term: counterexample
+    aliases: [challenge reproducer, 反例]
+    definition: >-
+      A reproducible input or case that demonstrates a claim is false, distinct from an opinion that the claim looks wrong; an open counterexample entry must include a reproducer another person can run.
+      可复现地证明某项主张为假的输入或案例，不同于“这项主张看起来不对”的意见；open 的反例记录必须包含他人可运行的 reproducer。
+    owner: docs/decisions/implemented/2026-09-09-counterexample-needs-a-reproducer.md
+    anchor: Decision
+    status: canonical
+references:
+  - receipt
+  - gate

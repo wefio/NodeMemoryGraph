@@ -1,6 +1,6 @@
 # CI 覆盖率检查认领归档运行目录
 
-[English](2026-09-19-acknowledge-archived-run-directories.md)
+[English](2026-09-19-acknowledge-archived-run-directories.md) · [术语](2026-09-19-acknowledge-archived-run-directories.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

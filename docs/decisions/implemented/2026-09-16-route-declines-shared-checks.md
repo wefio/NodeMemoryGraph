@@ -2,17 +2,14 @@
 
 **Status:** implemented  
 **Approved:** explicit
-Date: 2026-09-16
-Branch: feat/ooo-run-namespace
-
 Governing meta-rule: [self-governance meta-rule](2026-09-07-self-governance-meta-rule.md) — this rule
 change is itself recorded as a governed decision (decision + owner + alternatives) under it.
 
-中文版: [2026-09-16-route-declines-shared-checks.zh-CN.md](2026-09-16-route-declines-shared-checks.zh-CN.md)
+中文版: [2026-09-16-route-declines-shared-checks.zh-CN.md](2026-09-16-route-declines-shared-checks.zh-CN.md) · [Terms used](2026-09-16-route-declines-shared-checks.terms.yaml)
 
 ## Problem
 
-The narrow gate (`agent:verify`, [CI/RCP §7.14](../../design/ci-cd-and-quality.md#714-轻量验证默认narrow-gate))
+The narrow gate (`agent:verify`, [CI/RCP narrow and full verification](../../design/ci-cd-and-quality/repository-control-plane/lightweight-verification.md#narrow-and-full-verification-gates-1))
 runs the always-run shared checks (`NARROW_SHARED_CHECKS`: `check`, `docs:check`, `format:check`,
 `glossary:check`, `lint`, `package:check`, `rtm:check`) for **every** narrow change, whatever the
 changed surface is. For a change that is cleanly owned by one route and touches no code - a

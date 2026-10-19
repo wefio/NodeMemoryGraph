@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: derived edge activation
+    aliases: [派生边激活]
+    definition: >-
+      A query-local value computed from node activations, persisted edge strength, and relation type; it is exposed for audit but is not stored as the next query's edge state.
+      根据节点激活、持久化边强度与 relation 类型计算的 query-local 值；可供审计，但不会存为下一次查询的边状态。
+    owner: docs/design/edge-activation-design.md
+    anchor: "1. Principle"
+    status: canonical
+  - term: edge strength
+    aliases: [edge retrievability, 边强度]
+    definition: >-
+      The learned edge parameter that controls activation tendency; it changes through explicit evidence-attributed updates and is distinct from the slower persistence axis represented by stability.
+      控制边激活倾向的学习参数；通过显式 evidence-attributed 更新变化，区别于由 stability 表示的较慢持久性轴。
+    owner: docs/design/edge-activation-design.md
+    anchor: "3. Learning rules"
+    status: canonical
+  - term: fan-out dilution
+    aliases: [fan budget allocation, 出边稀释]
+    definition: >-
+      A competitive allocation rule under which a node's fixed activation budget is shared among outgoing edges, reducing the signal available to each edge as fan-out grows.
+      节点固定激活预算在出边之间竞争性分配的规则；fan-out 增大时，每条边可获得的信号减少。
+    owner: docs/design/edge-activation-design.md
+    anchor: "2.2 Fan-out dilution (verified: ACT-R `S − ln(fan)`, GAT softmax)"
+    status: canonical

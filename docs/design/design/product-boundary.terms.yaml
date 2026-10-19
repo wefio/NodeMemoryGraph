@@ -1,0 +1,72 @@
+version: 2
+terms:
+  - term: model-facing surface
+    aliases: [five entry points, 面向模型的表面]
+    definition: >-
+      The default Pi package's whole model-visible interface — `nmg_search`, `nmg_get`, `nmg_remember`, `nmg_state` and `nmg_lab` — while graph editing, rebalancing, consolidation, QPP and experimental reasoning remain background, CLI, benchmark or administrative concerns; explicit retrieval feedback is an action on the existing remember boundary rather than another tool, `nmg_remember action=forget` performs logical withdrawal only rather than physical privacy erasure, and neither action is inferred from user silence.
+      默认 Pi 包对模型可见的完整接口——`nmg_search`、`nmg_get`、`nmg_remember`、`nmg_state` 与 `nmg_lab`——而图编辑、再平衡、合并、QPP 与实验性推理仍是后台、CLI、benchmark 或管理关注点；显式检索反馈是既有 remember 边界上的一个动作而非另一个工具，`nmg_remember action=forget` 仅执行逻辑撤回而非物理隐私擦除，且两者都不会从用户沉默中自动推断。
+    owner: docs/design/design/product-boundary.md
+    anchor: "Product boundary: NMG Lite"
+    status: canonical
+  - term: Agent Surface
+    aliases: [integration-layer result semantics, 面向 Agent 的表面]
+    definition: >-
+      The single integration-layer owner that projects and renders compact search headers, exact evidence, bounded remember follow-up candidates, Task Board entries and logical-chain structure, owning stable field names, withdrawal redaction, evidence/structure budgets, chain labels and default next-step placement; an adapter may wrap that text in a native content block or add a host lifecycle notice but must not recreate the candidate DTO, evidence layout, board conventions or semantic follow-up rules, and storage tiers, ranking scores, QPP internals, timings and token estimates never enter the Agent-facing candidate DTO.
+      单一集成层所有者：投影并渲染紧凑 search header、精确证据、有界 remember 后续候选、Task Board 条目与逻辑链结构，拥有稳定字段名、撤回脱敏、证据／结构预算、链标签与默认下一步放置；适配器可以把该文本包进原生内容块或添加宿主生命周期提示，但不得重建候选 DTO、证据布局、board 约定或语义后续规则，而存储层级、排序分数、QPP 内部、计时与 token 估计永不进入面向 Agent 的候选 DTO。
+    owner: docs/design/design/product-boundary.md
+    anchor: Modular harness adapters
+    status: canonical
+  - term: adapter responsibility boundary
+    aliases: [what an adapter must not do, 适配器职责边界]
+    definition: >-
+      The contract that an adapter must provide stable session and message IDs, normalized actors and text, an optional source reference and lifecycle hooks for pre-turn recall, post-turn feedback and shutdown, and must not parse SQLite rows, update graph topology, implement QPP or construct embedding indexes; Pi is the first adapter, not part of the NMG data model, scope canonicalization and embedding-index lifecycle remain single Core rules, and host-specific delivery and process lifecycle hooks stay thin local adapters because Pi, MCP, Kimi and DSH expose different event loops.
+      契约：适配器必须提供稳定的会话与消息 ID、规范化 actor 与文本、可选来源引用，以及 turn 前召回、turn 后反馈与关闭的生命周期钩子，且不得解析 SQLite 行、更新图拓扑、实现 QPP 或构建 embedding 索引；Pi 是第一个适配器，不属于 NMG 数据模型，作用域规范化与 embedding 索引生命周期仍是单条 Core 规则，而宿主特定投递与进程生命周期钩子保持为薄的本地适配器，因为 Pi、MCP、Kimi 与 DSH 暴露不同的事件循环。
+    owner: docs/design/design/product-boundary.md
+    anchor: Modular harness adapters
+    status: canonical
+  - term: degraded search cause code
+    aliases: [embedding_http_<status>, unknown, 降级检索原因码]
+    definition: >-
+      The bounded diagnostic accompanying a degraded search that keeps its mode and cause in both candidate and empty-result output: known embedding HTTP failures expose `embedding_http_<status>`, admitted embedding/index codes remain unchanged, unrecognized diagnostics expose `unknown`, and provider response bodies stay in the original structured result and daemon diagnostics rather than in compact candidate DTOs or their rendering.
+      伴随降级检索的有界诊断，在候选与空结果输出中都保留其模式与原因：已知 embedding HTTP 失败暴露 `embedding_http_<status>`，已准入的 embedding／索引码不变，未识别的诊断暴露 `unknown`，而 provider 响应正文留在原始结构化结果与 daemon 诊断中，而不是紧凑候选 DTO 或其渲染中。
+    owner: docs/design/design/product-boundary.md
+    anchor: Modular harness adapters
+    status: canonical
+  - term: getReferenceUsage counters
+    aliases: [fullIds, compoundRefs, 引用用量计数]
+    definition: >-
+      The existing status RPC counters (visible through `nmg status --json`) that count each validated get input array entry once before resolution, with non-`ref:` IDs including legacy IDs and `ref:` attempts counted separately, duplicates, missing IDs and rejected selectors counting, invalid RPC parameters and internal reads not counting; counters start at zero per service instance, reset on restart, status returns a copy without opening storage, and they measure input usage rather than successful reads or reference quality.
+      既有 status RPC 计数器（可通过 `nmg status --json` 查看）：每个通过验证的 get 输入数组条目在解析之前计一次，非 `ref:` ID（含旧 ID）与 `ref:` 尝试分别统计，重复项、缺失 ID 与被拒绝选择器计入，非法 RPC 参数与内部读取不计入；计数器按服务实例从零开始、重启后重置，status 返回一份不打开存储的副本，且它们测量输入用量而非成功读取或引用质量。
+    owner: docs/design/design/product-boundary.md
+    anchor: Modular harness adapters
+    status: canonical
+  - term: coordination discovery default
+    aliases: [NMG_ENABLE_COORDINATION, 协调发现默认值]
+    definition: >-
+      The rule that the cross-Agent coordination discovery surface is enabled by default — adapters expose board operations through `nmg_state` and wake polling unless `NMG_ENABLE_COORDINATION` is explicitly set to `0`, `false`, `off` or `no` — so a newly attached Agent can discover and join shared work without every peer first performing a manual enable step, while daemon RPC and CLI board operations remain available when the model-facing surface is disabled.
+      规则：跨 Agent 协调的发现表面默认启用——除非把 `NMG_ENABLE_COORDINATION` 显式设为 `0`、`false`、`off` 或 `no`，适配器通过 `nmg_state` 暴露 board 操作并启用 wake 轮询——因此新接入的 Agent 能发现并加入共享工作而不必每个对端先手动启用一步，而当该面向模型的表面被禁用时，daemon RPC 与 CLI board 操作仍可用。
+    owner: docs/design/design/product-boundary.md
+    anchor: "Product boundary: NMG Lite"
+    status: canonical
+  - term: package dependency boundary
+    aliases: [optional peer, pi-tui runtime, 包依赖边界]
+    definition: >-
+      NMG Core, the daemon and non-interactive CLI paths do not import Pi; the Pi adapter type-checks against `@earendil-works/pi-coding-agent` as a development dependency and declares it as an optional peer supplied by the harness so CLI-only installation does not pull the Pi harness into the runtime graph, `@earendil-works/pi-tui` stays a runtime dependency only because the adapter UI and the standalone lazy-loaded `nmg inspect` command execute it, and its version line must stay aligned with the Pi harness to avoid duplicate or incompatible TUI component instances.
+      NMG Core、daemon 与非交互 CLI 路径不导入 Pi；Pi 适配器以 `@earendil-works/pi-coding-agent` 作为开发依赖进行类型检查，并把它声明为由宿主提供的可选 peer，因此仅安装 CLI 不会把 Pi 宿主拉进运行时依赖图；`@earendil-works/pi-tui` 之所以仍是运行时依赖，仅因为适配器 UI 与独立惰性加载的 `nmg inspect` 命令都要执行它，其版本线必须与 Pi 宿主保持一致，以避免重复或不兼容的 TUI 组件实例。
+    owner: docs/design/design/product-boundary.md
+    anchor: Modular harness adapters
+    status: canonical
+  - term: Lab
+    aliases: [实验室能力]
+    definition: >-
+      An explicitly leased interface for optional experimental NMG capabilities; it does not make them defaults or turn its output into durable truth.
+      通过显式租约使用 NMG 可选实验能力的接口；它不会使这些能力成为默认项，也不会把输出变成持久事实。
+    owner: skills/nmg-memory/references/optional-capabilities.md
+    anchor: Optional Session Lab capabilities
+    status: canonical
+references:
+  - NMG Lite
+  - compound retrieval reference
+  - shared disclosure copy
+  - Task Board
+  - QPP

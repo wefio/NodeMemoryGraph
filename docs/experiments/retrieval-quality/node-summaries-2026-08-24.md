@@ -1,5 +1,13 @@
 # Retrieval-quality node-summary tier — 2026-08-24
 
+[English](node-summaries-2026-08-24.md) | [简体中文](node-summaries-2026-08-24.zh-CN.md) · [Terms](node-summaries-2026-08-24.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a historical
+experiment record. The configurations, measurements, implementation descriptions
+and follow-up proposals below are scoped to that experiment. This review did not
+rerun the experiment or independently revalidate its original artifacts; these
+are not current test receipts, default-policy decisions or general guarantees.
+
 Follow-up to
 [retrieval-quality-summaries-2026-08-18.md](summaries-2026-08-18.md):
 adds the **node-summary tier** to the summaries arm. Node summaries are one
@@ -48,7 +56,9 @@ a duplicate-of-block node summary would only add index noise.
 ## Reading
 
 - The node tier earns its keep where nodes are genuinely multi-block (BEAM):
-  near-free (one call per node, hysteresis-bounded) and a small recall gain.
+  one short generation call per node, hysteresis-bounded, and a small reported
+  recall gain. The table does not price provider calls or establish negligible
+  monetary cost.
 - It does nothing for degenerate clusterings (LoCoMo) — correctly, by the
   minBlocks gate. If LoCoMo-style workloads matter, the lever is better
   clustering (fewer single-block nodes), not lowering the gate.

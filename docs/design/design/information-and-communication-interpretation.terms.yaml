@@ -1,0 +1,23 @@
+version: 2
+terms:
+  - term: information-theoretic design interpretation
+    aliases: [communication-channel analogy, 信息论设计解释]
+    definition: >-
+      A vocabulary and evaluation framework that maps NMG's storage, retrieval and projection concepts to communication-system roles; it does not claim that the implementation is a literal codec or that semantic errors are independent bit flips.
+      将 NMG 存储、检索和投影概念映射到通信系统角色的术语与评估框架；它不声称实现是字面意义上的 codec，也不声称语义错误是独立 bit flip。
+    owner: docs/design/design/information-and-communication-interpretation.md
+    anchor: Information and communication interpretation
+    status: canonical
+  - term: semantic distortion objective
+    aliases: [rate-distortion objective, 语义失真目标]
+    definition: >-
+      An evaluation objective that balances structure, semantic distortion, retrieval cost, and maintenance cost; semantic distortion is judged through observable retrieval errors, not bit error rate.
+      平衡结构成本、语义失真、检索成本和维护成本的评估目标；语义失真依据可观察的检索错误判断，而不是 bit error rate。
+    owner: docs/design/design/information-and-communication-interpretation.md
+    anchor: Information and communication interpretation
+    status: canonical
+references:
+  - Active Graph
+  - Long-Term Graph
+  - Short-Term Graph
+  - memory residence

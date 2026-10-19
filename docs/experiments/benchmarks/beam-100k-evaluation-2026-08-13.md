@@ -1,5 +1,13 @@
 # BEAM 100K full evaluation (2026-08-13)
 
+[English](beam-100k-evaluation-2026-08-13.md) | [简体中文](beam-100k-evaluation-2026-08-13.zh-CN.md) · [Terms](beam-100k-evaluation-2026-08-13.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a historical
+experiment record. The configurations, measurements, implementation descriptions
+and follow-up proposals below are scoped to that experiment. This review did not
+rerun the experiment or independently revalidate its original artifacts; these
+are not current test receipts, default-policy decisions or general guarantees.
+
 ## Status
 
 The first full OmniMemEval BEAM 100K NMG run and a matched empty-memory control
@@ -29,7 +37,10 @@ The ignored local artifact is:
 `results/beam/nmg-nmg_beam100k_bge_records_20260726/exp_report.md`
 
 under the local OmniMemEval checkout. Its replay config and environment snapshot
-contain the complete reproducibility metadata without live credentials.
+contain the recorded reproducibility metadata without live credentials. The
+`20260726` path suffix is preserved as recorded; it does not by itself establish
+the execution date. Resolve run dating from the original manifest rather than
+inferring it from this filename.
 
 ## NMG result
 

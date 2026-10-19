@@ -1,6 +1,6 @@
 # 0003 - 我读到的检查，读的是 mutant
 
-[English](0003-checks-read-a-live-mutant.md)
+[English](0003-checks-read-a-live-mutant.md) · [术语](0003-checks-read-a-live-mutant.terms.yaml)
 
 **Status:** resolved
 

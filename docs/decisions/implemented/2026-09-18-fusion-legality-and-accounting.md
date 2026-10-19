@@ -1,6 +1,6 @@
 # Fusion legality is a pair predicate, and fusion's cost is two lines
 
-[中文](2026-09-18-fusion-legality-and-accounting.zh-CN.md)
+[中文](2026-09-18-fusion-legality-and-accounting.zh-CN.md) · [Terms used](2026-09-18-fusion-legality-and-accounting.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit
@@ -8,7 +8,8 @@
 [its obligations ledger](../../design/task-unit-semantics-obligations.md) (row F4),
 [the fusion and speculation pilot proposal](../implemented/2026-09-18-fusion-and-speculation-pilot.md),
 [the cost model record](../../experiments/execution/ooo-cost-model-2026-09-17.md),
-[the arms pilot](../../experiments/execution/ooo-arms-pilot-2026-09-18.md)
+[the arms pilot](../../experiments/execution/ooo-arms-pilot-2026-09-18.md),
+[the session mechanism](2026-09-19-fusion-session-mechanism.md)
 
 ## Problem
 
@@ -50,9 +51,11 @@ session refuses by name.** `PlanDriverSpec.fusion` declares the bound and the pe
 worker, a successor that is not legal at the boundary or the declared bound, and records one entry per
 session in `PlanRun.sessions`. Fusion's evidence is `WorkerMetrics.sessionId` - the session the worker
 says it used - so a worker that quietly starts its own session is reported as boundaries, not as fusion.
-`piWorker` **refuses** a continuation it cannot honour, naming the session, because `executePiPatch`
-creates a session per call; a fused live run's mechanism is therefore not landed, and a run says so
-instead of reporting a fresh session as reuse.
+The per-call `piWorker` **refuses** continuations by name because its `executePiPatch` path creates a
+fresh session. Fused live runs use the later `piSessionWorker` mechanism backed by
+`createPiSessionRunner`, which holds one session per run; see [the session-mechanism decision](2026-09-19-fusion-session-mechanism.md).
+The refusal remains the honest behavior of the single-call worker, not evidence that session reuse is
+still unimplemented.
 
 ## Alternatives considered
 
@@ -76,15 +79,16 @@ instead of reporting a fresh session as reuse.
 
 ## Consequences
 
-- The offline half of F4 is proven: 12 product cases with 8 named mutants for legality, 12 cost-model
-  cases with 4 named mutants for the accounting, and 15 driver cases with 12 named mutants for the
-  policy - each mutant caught by the case that names the rule it breaks.
-- **The paid F6 arm's D half cannot run as specified in this harness yet.** A reusable session needs the
-  Pi extension to hold one session across calls; until then the only expressible form is the design's
-  named fallback (a new session seeded with the accepted prefix), which is sequential handoff, not
-  fusion. This is a measured fact about the harness, and it is the reason the pilot's D arm is not run.
+- At the time of this decision, the offline half of F4 had 12 product cases with 8 named mutants for
+  legality, 12 cost-model cases with 4 named mutants for accounting, and 15 driver cases with 12 named
+  mutants for policy. These are the recorded results for that snapshot, not a current test run.
+- **The paid F6 arm's D half was blocked at this decision's snapshot.** The follow-up
+  [session-mechanism decision](2026-09-19-fusion-session-mechanism.md) added a reusable Pi session runner,
+  after which the paid arms were run as recorded there. The earlier blocker is historical, not a claim
+  about the current harness.
 - `src/integration/ooo-execution.ts` gains a rule with no product caller today: the arms are its
   consumers, and the design assigns legal fusion candidates to the shared layer. If the D arm is never
   promoted to the product, this rule retires with it - the same disposition the round instrument got.
-- The refusal text in `piWorker` is the place a future extension change must delete: when the extension
-  can hold a session, that branch becomes the continuation it describes.
+- `piWorker` remains the per-call path and still refuses a continuation. Fused live work selects
+  `piSessionWorker`; the two paths are intentionally distinct, so the original refusal should not be
+  removed merely because the session mechanism exists.

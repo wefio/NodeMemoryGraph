@@ -1,0 +1,29 @@
+version: 2
+terms:
+  - term: cumulative Fibonacci evidence tier
+    aliases: [Fibonacci recall tier, 累计 Fibonacci 证据档位]
+    definition: >-
+      A progressive-recall target expressed as a cumulative evidence count in the Fibonacci sequence, with duplicate 1 omitted; the caller's `initialEvidenceTarget`, `limit`, and expanded budget determine which tiers can be visited.
+      用 Fibonacci 数列表示的渐进召回累计 evidence 数量目标，执行时省略重复的 1；调用方的 `initialEvidenceTarget`、`limit` 与扩展预算共同决定可访问的档位。
+    owner: docs/design/fibonacci-progressive-recall.md
+    anchor: Definition
+    status: canonical
+  - term: same-pool progressive re-selection
+    aliases: [Fibonacci re-selection, 同候选池渐进重选]
+    definition: >-
+      Selecting progressively larger evidence prefixes from one over-sampled candidate pool without repeating embedding, ANN or FTS candidate generation.
+      在同一过采样候选池中逐步选择更大的 evidence 前缀，不重复计算 embedding 或重新生成 ANN、FTS 候选。
+    owner: docs/design/fibonacci-progressive-recall.md
+    anchor: Definition
+    status: canonical
+  - term: QPP expansion trace
+    aliases: [progressive-recall stage trace, QPP 扩展轨迹]
+    definition: >-
+      The `QppTriggerDecision.expansion` record of visited targets, selected counts, estimated tokens, QPP decisions and the stop reason; it does not record per-stage memory IDs.
+      `QppTriggerDecision.expansion` 中记录已访问目标、选择数量、估算 token、QPP 判定与停止原因的轨迹；它不记录每阶段的 memory ID。
+    owner: docs/design/fibonacci-progressive-recall.md
+    anchor: Per-tier decision
+    status: canonical
+references:
+  - QPP
+  - Active Graph

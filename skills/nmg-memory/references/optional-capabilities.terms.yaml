@@ -1,0 +1,19 @@
+version: 2
+terms:
+  - term: optional capability
+    aliases: [可选能力]
+    definition: >-
+      An implemented mechanism outside the default Lite path that requires an explicit interface or configuration choice; availability alone is not authorization or evidence of production benefit.
+      默认 Lite 路径之外的已实现机制，需要通过明确接口或配置选择启用；可用性本身不构成授权，也不是生产收益的证据。
+    owner: skills/nmg-memory/references/optional-capabilities.md
+    anchor: Optional Session Lab capabilities
+    status: canonical
+references:
+  - Active Graph
+  - working state
+  - state carriage
+  - Long-Term Graph
+  - Short-Term Graph
+  - Task Board
+  - state space
+  - projection revision

@@ -1,0 +1,23 @@
+version: 2
+terms:
+  - term: shared task semantics
+    aliases: [shared semantics layer, 共享任务语义]
+    definition: >-
+      The shared owner that normalizes task contracts, derives dependencies and effects, checks decomposition obligations and identifies legal execution/fusion actions; harnesses do not reimplement these rules.
+      统一规范化任务契约、派生依赖与效果、检查拆分义务并识别合法执行/融合动作的共享 owner；harness 不自行重实现这些规则。
+    owner: docs/design/task-unit-semantics/shared-layer-and-task-board.md
+    anchor: Shared layer and board
+    status: proposed
+  - term: thin harness adapter
+    aliases: [harness adapter, harness 薄适配]
+    definition: >-
+      A harness-specific boundary that encodes native tool schemas, manages model-session lifecycle and reports capabilities/usage while leaving shared task semantics and correctness rules in the shared layer.
+      负责编码原生工具 schema、管理模型会话生命周期并报告能力/用量的 harness 专属边界；共享任务语义与正确性规则仍由共享层拥有。
+    owner: docs/design/task-unit-semantics/shared-layer-and-task-board.md
+    anchor: Shared layer and board
+    status: proposed
+references:
+  - task unit
+  - execution fusion
+  - Task Board
+  - Task-Unit Protocol

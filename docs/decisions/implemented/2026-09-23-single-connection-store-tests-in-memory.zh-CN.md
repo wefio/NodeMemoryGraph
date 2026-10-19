@@ -1,6 +1,6 @@
 # 单连接 Store 测试使用内存 SQLite
 
-[English](2026-09-23-single-connection-store-tests-in-memory.md)
+[English](2026-09-23-single-connection-store-tests-in-memory.md) · [术语](2026-09-23-single-connection-store-tests-in-memory.terms.yaml)
 
 **Status:** implemented
 **Approved:** auto

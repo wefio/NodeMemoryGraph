@@ -1,0 +1,9 @@
+version: 2
+terms: []
+references:
+  - post-mortem
+  - failure class
+  - guardrail
+  - gate
+  - evidence
+  - decision record

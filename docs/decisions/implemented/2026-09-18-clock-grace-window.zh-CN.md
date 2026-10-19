@@ -1,6 +1,6 @@
 # 用有名字的时钟宽限放宽 current-value 窗口
 
-[English](2026-09-18-clock-grace-window.md)
+[English](2026-09-18-clock-grace-window.md) · [术语](2026-09-18-clock-grace-window.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

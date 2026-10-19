@@ -1,68 +1,76 @@
-## 变更描述
+## Change summary
 
-<!-- 用一两段说明这个 PR 改了什么、为什么改。遵循 ci-cd-and-quality.md 的
-     Proof before trust：PR 文本不是修改成立的证据，检查清单与 CI 才是。 -->
+<!-- Explain in one or two paragraphs what this PR changes and why. Follow the
+     proof-before-trust rule in ci-cd-and-quality.md: PR prose is not evidence
+     that a change works; the checklist and CI are. -->
 
-**What**（改了什么）：
+**What** (what changed):
 
-**Why**（为什么改 / 解决什么问题）：
+**Why** (why it changed / what problem it addresses):
 
-**Changes**（关键改动点，按文件或模块列出）：
-
----
-
-## 未验证项
-
-<!-- 声明本 PR 没有验证到的范围：没跑的路由、没构建或没启动的平台与环境、没覆盖的
-     构建模式、没有复现步骤的行为。确实没有遗留项时写 None.。
-     这是范围声明，不是证据：它不能替代任何检查，门禁全绿也不会让它变得多余。 -->
-
-**Not verified**（没验证什么）：
+**Changes** (key changes, by file or module):
 
 ---
 
-## 完成检查项
+## Not verified
 
-<!-- 合并前逐项核对。GitHub 拥有 PR/CI 状态；本清单只是让提交者自己先过一遍。 -->
+<!-- State the scope this PR did not verify: routes not run, platforms or
+     environments not built or started, build modes not covered, and behaviors
+     without reproduction steps. Write None. only when nothing remains
+     unverified. This is a scope declaration, not evidence: it cannot replace
+     any check, and an all-green gate does not make it unnecessary. -->
 
-### 本地质量检查
+**Not verified** (what was not verified):
 
-- [ ] `npm run verify:static` 通过（build / package:check / check / check:lock / lint / format:check / docs:check / agent:context:check / complexity:gate / verify:packages）
-- [ ] `npm run test:product` 通过（或按改动路由跑 `npm run agent:verify -- <路径>`）
-- [ ] 改了依赖或 lockfile 时：`npm run check:lock` 通过、根 `package-lock.json` 已同步、`npm audit --omit=dev --audit-level=high` 无漏洞
-- [ ] 改了子包（`dsh/dsh-nmg` 等）时：`npm run verify:packages` 通过（frozen-lockfile install + build），`pnpm-lock.yaml`/lockfile 随 package.json 同步
-- [ ] 文档改动跑过 `npm run docs:check`；决策/设计改动遵循 doc-maintenance 规范
-- [ ] `## 未验证项` 已填写（无遗留项时写 `None.`）；非平凡改动已携带决策记录
-- [ ] 新代码方法圈复杂度不超阈值（CodeFactor / `npm run complexity:gate`）
-- [ ] 未提交可再生产物：`dist/`、`dsh/dsh-nmg/lib/`、`src/prompts/nmg-prompts.generated.ts`、`.nmg-search-scope` 不入库（见 `docs/decisions/rejected/2026-09-02-track-build-artifacts-in-git.md`）
+---
 
-### RCP（Repository Control Plane）
+## Completion checklist
 
-<!-- 逐项给出可执行命令：模板是操作层检查表，照命令跑完即完成该项自证。
-     命令细节见 skills/repo-development/SKILL.md 的
-     "Repository Control Plane beyond agent:verify" 节。 -->
+<!-- Review each item before merging. GitHub owns PR/CI status; this checklist
+     is only a submitter-side preflight. -->
 
-- [ ] 首个实质写入前已在 `repo-development` 黑板登记 in-flight goal：
-      `nmg board put repo-development "goal=…; approach=…; scope=…" --agent <id> --kind goal`（已 resolve）
-- [ ] 改动路由的 reconcile 已通过并写入证据：
-      `npm run agent:verify -- <改动路径>`（或 `nmg-rcp reconcile <contract> --apply --workspace-ready`）
-      → `.nmg/verification/latest.json` 覆盖改动路由
-- [ ] CI 全绿是用 RCP 观察确认的，不是人肉轮询：
-      `nmg-rcp forge-status --pr <PR号>` 的 checks 全为 SUCCESS
-- [ ] 只提交本 PR 拥有的文件；未吞并行 Agent 的暂存/工作树改动
-      （`git status --short` 核对无他人文件）
+### Local quality checks
 
-### CI 完成确认
+- [ ] `npm run verify:static` passes (build / package:check / check / check:lock / lint / format:check / docs:check / agent:context:check / complexity:gate / verify:packages)
+- [ ] `npm run test:product` passes (or run `npm run agent:verify -- <path>` for the changed route)
+- [ ] If dependencies or a lockfile changed: `npm run check:lock` passes, the root `package-lock.json` is synchronized, and `npm audit --omit=dev --audit-level=high` reports no vulnerabilities
+- [ ] If a subpackage changed (such as `dsh/dsh-nmg`): `npm run verify:packages` passes (frozen-lockfile install + build), and `pnpm-lock.yaml`/the lockfile matches `package.json`
+- [ ] For documentation changes, `npm run docs:check` was run; decision/design changes follow the doc-maintenance rules
+- [ ] `## Not verified` is filled in (write `None.` if nothing remains); non-trivial changes include a decision record
+- [ ] New code methods stay within the cyclomatic-complexity threshold (CodeFactor / `npm run complexity:gate`)
+- [ ] No reproducible build artifacts are committed: do not check in `dist/`, `dsh/dsh-nmg/lib/`, `src/prompts/nmg-prompts.generated.ts`, or `.nmg-search-scope` (see `docs/decisions/rejected/2026-09-02-track-build-artifacts-in-git.md`)
 
-<!-- 用 RCP/forge 观察确认，不逐个 job 轮询。RCP 节的
-     `nmg-rcp forge-status --pr <PR号>` 是权威读法；下面两项是其补充。
-     CI 从 push 到全部检查完成通常约一分半，可稍等后 `nmg-rcp forge-status --pr <PR号>` 复查，
-     不要按固定时长人工反复轮询或把“看起来在跑”当作“已通过”。 -->
+### RCP (Repository Control Plane)
 
-- [ ] `nmg-rcp forge-status --pr <PR号>` 的 `All checks passed` 为 SUCCESS
-      （或 CI Status Snapshot `.nmg-ci/status.json`：`conclusion: "success"` 且 `failures: []`）
-- [ ] CodeFactor 通过
-- [ ] Static job 通过（含 `verify:static` 全部子检查 + Dependency audit；audit 因上游新 advisory 失败时，先 `npm audit fix` 再更新 `package-lock.json` 提交，不要改 audit 门槛）
+<!-- Each item gives an executable command: this is an operational checklist;
+     running the command completes the submitter's self-check for that item.
+     See the "Repository Control Plane beyond agent:verify" section in
+     skills/repo-development/SKILL.md for command details. -->
 
-> CI Status Snapshot 是 GitHub 状态的只读观察（`authority: observation-only`），
-> 不是授权或合并决定；合并仍需显式操作。
+- [ ] Before the first substantive write, register an in-flight goal on the `repo-development` board:
+      `nmg board put repo-development "goal=…; approach=…; scope=…" --agent <id> --kind goal` (then resolve it)
+- [ ] Reconcile the changed route successfully and record evidence:
+      `npm run agent:verify -- <path>` (or `nmg-rcp reconcile <contract> --apply --workspace-ready`)
+      → `.nmg/verification/latest.json` covers the changed route
+- [ ] Confirm all-green CI through RCP observation, not manual polling:
+      checks from `nmg-rcp forge-status --pr <PR number>` are all SUCCESS
+- [ ] Commit only files owned by this PR; do not absorb another Agent's staged or working-tree changes
+      (check with `git status --short`)
+
+### CI completion confirmation
+
+<!-- Use RCP/forge observation to confirm completion; do not poll individual
+     jobs. `nmg-rcp forge-status --pr <PR number>` in the RCP section is the
+     authoritative view; the items below are supplementary. CI usually takes
+     about 90 seconds from push to completion. Wait briefly, then recheck with
+     `nmg-rcp forge-status --pr <PR number>`; do not repeatedly poll by a fixed
+     timer or treat "looks like it is running" as "passed." -->
+
+- [ ] `All checks passed` from `nmg-rcp forge-status --pr <PR number>` is SUCCESS
+      (or CI Status Snapshot `.nmg-ci/status.json` has `conclusion: "success"` and `failures: []`)
+- [ ] CodeFactor passes
+- [ ] The Static job passes (all `verify:static` subchecks + Dependency audit; if the audit fails due to a new upstream advisory, run `npm audit fix`, update and commit `package-lock.json`; do not change the audit threshold)
+
+> CI Status Snapshot is a read-only observation of GitHub status
+> (`authority: observation-only`), not authorization or a merge decision;
+> merging still requires an explicit action.

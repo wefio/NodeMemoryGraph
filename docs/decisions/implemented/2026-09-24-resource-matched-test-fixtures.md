@@ -1,6 +1,6 @@
 # Match test fixtures to the resource an assertion observes
 
-[中文](2026-09-24-resource-matched-test-fixtures.zh-CN.md)
+[中文](2026-09-24-resource-matched-test-fixtures.zh-CN.md) · [Terms used](2026-09-24-resource-matched-test-fixtures.terms.yaml)
 
 **Status:** implemented
 **Approved:** auto

@@ -1,5 +1,7 @@
 # Predicting whether a recall is worth opening: the normalized-shape feature family
 
+[English](sufficiency-shape-features-2026-09-12.md) | [简体中文](sufficiency-shape-features-2026-09-12.zh-CN.md) · [Terms](sufficiency-shape-features-2026-09-12.terms.yaml)
+
 **Status:** plan + first measurement. Steps S1–S6 below are the implementation order.
 This document is the home for the shape-feature line; the gate/composition records stay
 in `docs/decisions/implemented/2026-09-09-retrieval-relevance-gate.md` and
@@ -7,19 +9,30 @@ in `docs/decisions/implemented/2026-09-09-retrieval-relevance-gate.md` and
 
 ## 1. The problem, restated
 
+This is the dated S1–S6 plan and historical measurements including the later
+2026-09-15 label audit, not current deployment or permission to run. The
+[training protocol](../../design/relevance-training.md) owns data admission;
+its current trainer fits candidate relevance, not an automatically deployed
+whole-list head. External accounts/raw artifacts were not reverified. All the
+qrels-derived results, including early AUC tables, use historical assumed
+negatives and do not establish verified live-noise reduction. The reported
+15.6% lexical / 52.8% embedding pool figures are cache/slice-specific, not a new
+matched causal comparison. Open-one-positive is not complete multi-hop sufficiency.
+
 The product symptom is "most injected memories are irrelevant". Deleting candidates is a
 bounded remedy: a gate can only remove what a retriever already put in front of it, so its
 ceiling is the retriever's pool. Measured on LoCoMo caches: only **15.6%** of questions have
 any gold in the lexical pool (**52.8%** with embeddings), and the shipped deterministic
 program gate lifts candidate precision from **5.9% to 13.1%** while keeping 81% of
-gold-carrying questions. That is a real 2.2x improvement and it is still not enough.
+gold-carrying questions. That is a reported 2.2x proxy ratio, not verified live-quality improvement.
 
 The unbounded question is a different one, and it is a **per-recall decision**: _is this
-recall's list worth opening at all?_ Two independent signals point the same way:
+recall's list worth opening at all?_ Two motivations, not statistically independent evidence sources, were recorded:
 
-- In the certification lattice, the only family that ever certified was the **query-level**
-  one (the controller), never an item-level head; the split-rotation sweep then showed the
-  item-level compositions rotate with the draw.
+- The rotation record motivated query-level selection, but the certification note
+  also reports item-level calibration passes. "Only the query family ever
+  certified" is not correct across those runs: calibration passes, held-out
+  bound rechecks and empirical-risk changes are different outcomes.
 - The capture's own labels are **display-level** (`noise` / `partial` / `on_target`), not
   per-candidate, which is the granularity of an open/abstain decision.
 
@@ -38,8 +51,8 @@ branch of query performance prediction (QPP).
 Two readings that drive the plan:
 
 1. **`top1` (an absolute score) is the strongest single feature on NFCorpus (0.622), while
-   the same kind of feature was inverted in-domain (0.42).** Absolute scores are comparable
-   _within_ one retriever configuration and not across configurations. Train per
+   the same kind of feature was inverted in-domain (0.42).** Absolute-score use is restricted to a retriever configuration; this alone
+   does not calibrate scores across queries or establish cross-configuration transfer. Train per
    configuration; let the shape features carry transfer.
 2. **Split variance dominates at these sizes.** Every future number is reported as a mean
    over ≥5 splits with the spread, never as one split. The earlier composition sweeps failed
@@ -80,7 +93,12 @@ model (0.856) and ~3000x slower. Do not build an LLM judge for this.
 **Limitations the authors state:** single retriever, single judge, not validated on live
 queries, and cross-domain transfer is weak (leave-one-domain-out AUROC drops to ~0.71).
 
-## 4. The correction: our feature family is wrong
+## 4. Proposed feature-family comparison
+
+Not all listed features are normalized: score differences and standard deviation
+retain score units. Ratios need defined zero-denominator, short-list and
+negative-score handling; this prose chooses no fallback. Shape transfer is an
+empirical question, not automatic invariance.
 
 The controller today reads 12 features, of which the informative core is _raw_ dispersion
 (`cv_raw`, `max_bounded`, `mean_bounded`, `mean_raw_log`) plus the product's QPP components
@@ -97,8 +115,7 @@ Concretely, adopt:
   operating rule for "how often do we open a recall".
 - **Query surface (new):** word count, char length, average word length, has-numbers,
   punctuation count. These need the **query text**, which our caches currently do not keep.
-- **Keep:** the product's QPP components and the text-overlap maxima (they are non-lexical
-  enough and cheap), the raw dispersion features only as _per-configuration_ features.
+- **Keep:** the product's QPP components and the text-overlap maxima (text overlap is lexical and cost/transfer need measurement), the raw dispersion features only as _per-configuration_ features.
 - **Drop as portability traps:** any absolute score used across configurations
   (`nn above 0.8`, `nn above 0.7` are scale-bound in the same way).
 
@@ -106,9 +123,10 @@ Concretely, adopt:
 
 - **Label definition:** a recall is _sufficient_ when at least one judged-sufficent item is in
   the disclosed list. For qrels corpora this is derivable — `label = any(relevant in list)` —
-  so an existing dataset supplies the target with **no annotation and no memory benchmark**.
-- **Negative kinds are recorded** (in-corpus-unanswerable vs topic-absent), because the
-  decision to abstain is the adversarial case and the two behave differently.
+  so known positives provide positive targets without new annotation. With
+  positive-only qrels, missing matches remain unknown, not negative supervision.
+- **Negative kinds require evidence** (in-corpus-unanswerable versus topic-absent).
+  Missing qrels or failed retrieval alone cannot establish either class.
 - **Sources:** NFCorpus (323 judged queries) and SciFact (339) are local; both are IR
   corpora, not memory benchmarks. Scale target ~1,000 queries per configuration, which is
   what the literature uses and what makes a split's spread small enough to read.
@@ -130,7 +148,8 @@ distribution than it will see live.
 
 **S3 — build the sufficiency sets.** Store the query text in the qrels group cache and derive
 `label = any(relevant in list)`; add SciFact. Assert on the positive rate (~50%) and on the
-number of queries; a set whose rate is far off means the retrieval or the label join is wrong.
+number of queries; deviation from the proposed ~50% is a diagnostic prompt, not proof of a join
+bug or permission to force class balance or convert unknowns to negatives.
 
 **S4 — train small and compare honestly.** Logistic regression first (standardized features),
 then a small MLP only if the linear model is beaten. Report the **mean over ≥5 splits with
@@ -147,15 +166,20 @@ requires a decision record and, if a new gate flag appears, a hidden-features re
 
 ## 7. Standing rules for this line
 
+These are recorded plan constraints, not a second current policy owner. The
+≥5-split/spread requirement remains, but historical tables omit some spreads
+and do not thereby demonstrate compliance. Folds share data, not independent
+natural tasks. Current label/training policy remains at the linked design.
+
 1. No memory-benchmark dataset (LoCoMo, LongMemEval, BEAM, PersonaMem, HaluMem) is used for
    training. They are evaluation surfaces at most.
 2. Every number is a mean over ≥5 splits with its spread; single splits are not results.
 3. Labels come from existing judgements (qrels) or from in-domain judging — never from
-   gold-answer-string containment, which is what made the earlier AUC of 0.894 meaningless
-   next to 0.722 on real judgements.
+   gold-answer-string containment, the 0.894 and 0.722 AUCs use different label/corpus settings and do not isolate
+   the causal effect of a labeling method. Unjudged qrels remain unknown.
 4. The bar for a learned head is a linear model on the same features, and it must beat the
    deterministic rule at matched coverage.
-5. Absolute scores are per-configuration; shape features carry the transfer.
+5. Absolute scores are per-configuration; shape-feature transfer must be demonstrated.
 
 ## 8. Results so far (S4, S5)
 
@@ -171,11 +195,12 @@ model-quality claim. The protocol's fixture tests exercise data isolation and
 reporting, not these benchmark scores.
 
 Head trained out of sample (5 folds, logistic on the 11 shape features); "coverage" is the
-fraction of queries left open after the threshold. Item precision is the share of injected
-items that are actually relevant, sufficient-recall the share of answerable queries whose
-list stays open. Baselines are the cheapest deterministic rules on the same scores.
+fraction of queries left open after the threshold. The displayed precision/recall pairs use the historical proxy judgment rule,
+not verified noise or complete answerability. Sufficient-recall counts known
+positive-bearing queries whose lists stay open. Baselines are the cheapest deterministic rules on the same scores.
 
-**SciFact** (300 queries, 41.7% sufficient, 126 relevant items, 597 noise items):
+**SciFact historical proxy labels** (300 queries, 41.7% recorded sufficient,
+126 judged positives, 597 assumed-negative/unjudged items):
 
 | coverage | head              | cv rule       | single feature `top1` |
 | -------- | ----------------- | ------------- | --------------------- |
@@ -183,7 +208,8 @@ list stays open. Baselines are the cheapest deterministic rules on the same scor
 | 70%      | 21.9% / 89.6%     | 19.5% / 85.6% | 21.8% / 86.4%         |
 | 90%      | 18.6% / 96.8%     | 17.7% / 94.4% | 18.6% / 96.0%         |
 
-**NFCorpus** (298 queries, 46.0% sufficient, 195 relevant items, 525 noise items):
+**NFCorpus historical proxy labels** (298 queries, 46.0% recorded sufficient,
+195 judged positives, 525 assumed-negative/unjudged items):
 
 | coverage | head              | cv rule       | single feature `top1` |
 | -------- | ----------------- | ------------- | --------------------- |
@@ -193,24 +219,23 @@ list stays open. Baselines are the cheapest deterministic rules on the same scor
 
 Reading:
 
-1. **The gain is concentrated at a tight abstain budget**, and it is real: at 50% coverage the
-   head beats the product's own dispersion rule on both axes on both corpora (+5.6pt precision
-   and +11.2pt recall on SciFact; +13pt/+13pt on NFCorpus). At 90% coverage it is level with, or
-   slightly behind, the deterministic rules — abstaining on a tenth of the queries changes little.
-2. **A single raw feature gets most of it at loose coverage.** At 70% and 90% the 10-feature head
-   is within noise of `top1`. The head earns its place only when the budget is tight, so the
-   decision this table informs is a product parameter, not a modelling choice: _how often may a
-   recall come back empty?_
-3. **Magnitude**: SciFact precision 17.4% (all queries open) to 26.5% (50% open) is 1.5x, the
-   same order as the shipped program gate's 2.2x, and it is a different layer, so the two stack.
-4. **Domain caveat**: these are IR document corpora, and the head's quality is
-   configuration-dependent (0.562 on NFCorpus against 0.803 on SciFact with identical code), so
-   the numbers are a feasibility and magnitude signal for the mechanism, not a product promise.
-   A product number needs in-domain labels.
+1. At 50% coverage the proxy head exceeds cv on both axes: SciFact +5.6pt
+   precision/+11.2pt recall, NFCorpus about +13pt/+13pt. These are numeric proxy
+   gaps, not verified live gains or significance tests.
+2. At 70%/90%, "within noise" of top1 is not established without uncertainty.
+   The intro says 11 shape features while the old reading calls it a 10-feature
+   head; the artifact binding remains unresolved.
+3. SciFact 17.4% → 26.5% (50% open) is about 1.5x versus a separate 2.2x
+   program-gate claim. Different labels/corpora/operating points cannot be
+   multiplied or declared stackable without a joint comparison.
+4. Reported configuration-dependent 0.562 on NFCorpus and 0.803 on SciFact
+   do not reconcile themselves with earlier AUC tables or demonstrate transfer.
+   These limited feasibility proxies are not a product promise.
 
-**S5 — the knob.** `coverageThreshold(scores, targetCoverage)` returns the threshold that opens
-approximately the requested share of queries. It needs **no labels**: opening a fraction of
-queries is a property of the score distribution, so the knob is usable in production from live
-logits alone. Labels are needed only to decide which coverage to run at — which is the table
-above. Ties open together, so the realised coverage can exceed the target by the size of a tied
-run.
+**S5 — the knob.** `coverageThreshold(scores, targetCoverage)` describes an
+empirical score quantile, not a risk guarantee. Computing it needs no labels;
+choosing useful coverage and claiming quality do. Ties open together, so that
+sample's coverage can exceed target by the tied run; future traffic can differ
+under drift. This interpretation presumes finite valid scores and a compatible
+population; implementation edge handling belongs to its owner. Helper existence
+is not production readiness or permission to load/activate a head.

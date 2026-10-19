@@ -1,0 +1,33 @@
+version: 2
+terms:
+  - term: single-rep fusion field trial
+    aliases: [one-run-per-arm comparison, 单次融合现场试验]
+    definition: >-
+      A live research comparison with one board run per arm, one fixture and one model; it records an observed wall/token outcome but supplies no within-arm spread or general quality/cost conclusion.
+      每个 arm 仅运行一次 board、使用一个 fixture 和一个 model 的 live 研究对比；它记录观测到的 wall/token 结果，但不能提供 arm 内 spread，也不能得出通用质量或成本结论。
+    owner: docs/experiments/execution/ooo-fusion-trial-2026-09-19/README.md
+    anchor: What ran
+    status: canonical
+  - term: per-unit token delta
+    aliases: [unit token difference, 单元 token 差值]
+    definition: >-
+      The difference between the corresponding unit's token count in the fusion and control runs; in this trial all four are positive and the second unit in each fused session has the larger increase.
+      fusion 与 control 两次运行中对应 unit 的 token 数差值；本试验四个差值均为正，且每个 fused session 的第二个 unit 增幅更大。
+    owner: docs/experiments/execution/ooo-fusion-trial-2026-09-19/README.md
+    anchor: Result
+    status: canonical
+  - term: loose conclusion path
+    aliases: [looseConclusion, 宽松结论路径]
+    definition: >-
+      The fused-session path whose prompt permits a broader conclusion string because its session surface is fixed at creation; it does not alter the strict single-attempt path.
+      fused session 路径：由于 session surface 在创建时固定，其 prompt 允许更宽的 conclusion string；该路径不改变严格的单次尝试路径。
+    owner: docs/experiments/execution/ooo-fusion-trial-2026-09-19/README.md
+    anchor: What the arm cost to measure, and the two defects it found
+    status: canonical
+references:
+  - execution fusion
+  - product-loop activation boundary
+  - wall-clock saving
+  - research-instrument evidence
+  - provider cost
+  - artifact envelope

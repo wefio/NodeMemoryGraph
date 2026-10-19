@@ -1,72 +1,47 @@
-# LongMemEval 94.15% 基线"漂移"定位：embedding profile 回归（2026-08-03）
+# LongMemEval 94.15% Baseline Drift: Embedding Profile Regression (2026-08-03)
 
-> 结论先行：**不是检索机制回归，是 embedding 配置漂移**。`NMG_EMBED_PROFILE` 丢失后
-> 默认回落 `qwen3`，BGE 模型的 query 被套上 `Instruct: ... Query: ...` 模板，破坏 query
-> 语义，LongMemEval any-evidence recall 从 **94.15% 掉到 76.0%**。恢复
-> `NMG_EMBED_PROFILE=bge-en` 后以 94.15%/87.95% 精确复现历史基线，动态 QPP 机制
-> 在修复配置下进一步提升到 **95.19%/89.71%**。
+[English](longmemeval-profile-regression-2026-08-03.md) | [简体中文](longmemeval-profile-regression-2026-08-03.zh-CN.md) · [Terms](longmemeval-profile-regression-2026-08-03.terms.yaml)
 
-## 背景
+**Status:** Historical benchmark report. The original scores were not reproduced in this documentation pass. Current source still selects `bge-en` by default for BGE-named models unless `NMG_EMBED_PROFILE` is explicitly set; this source fact does not revalidate the historical benchmark scores.
 
-历史 LongMemEval any-evidence recall 基线 94.15%（`nmg_lme500_bge_merged_20260728`、
-`nmg_bge_wide20_merged_20260801` 两个 run 同一数字）。当前代码固定 top-20 重跑只有
-76.0%，18pp 差异一度指向代码/向量环境回归。本实验完整定位并修复。
+> **Conclusion:** The reported regression was attributed to embedding configuration drift, not a retrieval-mechanism change. Losing `NMG_EMBED_PROFILE` fell back to `qwen3`; applying its `Instruct: ... Query: ...` template to BGE queries degraded ranking. The report recorded LongMemEval any-evidence recall falling from **94.15% to 76.0%**. Restoring `NMG_EMBED_PROFILE=bge-en` reproduced 94.15%/87.95% in the historical run; dynamic QPP under the repaired configuration reported 95.19%/89.71%.
 
-## 定位过程（证据链）
+## Background
 
-1. **代码排除**：wide20 时代 commit `ecdd661` 原样重跑固定 top-20 = 76.0%（与当前
-   B0 几乎相同）→ 不是代码差异；git diff `ecdd661..HEAD` 中 base.ts/select 逻辑零改动。
-2. **数据排除**：B0 store（user 5）469 条记录完整、向量覆盖率 100%，证据记录存在。
-3. **排序差异实测**：同 query「What was my last name before I changed it?」+ 同 store：
-   - `profile=qwen3`（默认）：证据 rank **14** → top-12 token 截断漏掉 → 76%
-   - `profile=bge-en`：证据 rank **5** → 命中
-   - `profile=plain`：证据 rank **9** → 命中
-4. **hash 溯源**：embedding cache 中当前 index hash `e84bb38b824d` 全部在 08-03 生成；
-   08-01 的 `e20245358378`（1645 条）只是调试 session。用代码重现：
-   - `qwen3` profile → `e84bb38b824d`（当前默认 ✓）
-   - `bge-en` profile → `1e9807091681`
-5. **全量验证**：`NMG_EMBED_PROFILE=bge-en` + 固定 top-20 全量重跑 → **any=94.15%
-   overall=87.95%，类别级与历史 run 完全一致**（knowledge-update 100.00/99.31、
-   multi-session 97.60/85.63、temporal 88.64/83.01）。
+The historical LongMemEval any-evidence recall baseline was 94.15% in runs `nmg_lme500_bge_merged_20260728` and `nmg_bge_wide20_merged_20260801`. A fixed top-20 rerun in the later checkout produced 76.0%, an 18-point gap that initially suggested a code or vector-environment regression. This investigation attributed it to profile configuration.
 
-## 根因
+## Diagnostic evidence chain
 
-`src/core/embedding-providers/openai.ts` 的 `commonOpenAiOptions` 默认
-`profile: profile(environment, "qwen3")`——无论模型是什么，未设
-`NMG_EMBED_PROFILE` 时一律用 qwen3 模板。BGE 系列模型（BAAI/bge-small-en-v1.5）
-的 query 提示是 `Represent this sentence for searching relevant passages: {text}`；
-qwen3 模板 `Instruct: {instruction}\nQuery:{text}` 会让 BGE query 向量偏离，系统性
-劣化排序。历史 run 的 env 显式设置了 profile（或当时默认行为不同），08-02/03 期间
-env 被重写后丢失该行，静默回落到错误的 qwen3 模板。
+1. **Code ruled out:** rerunning the `ecdd661` wide20-era commit with fixed top-20 also yielded 76.0%, close to current B0. The report's diff from `ecdd661..HEAD` found no change in `base.ts` or selection logic.
+2. **Data ruled out:** B0's store (user 5) had 469 records, 100% vector coverage, and the target evidence record.
+3. **Ranking difference measured:** for the same query, “What was my last name before I changed it?”, against the same store:
+   - `profile=qwen3` (default): evidence ranked **14**, outside the top-12 token-truncated context;
+   - `profile=bge-en`: evidence ranked **5**;
+   - `profile=plain`: evidence ranked **9**.
+4. **Hash provenance:** the report says the then-current embedding-cache index hash `e84bb38b824d` was generated on 08-03; `e20245358378` (1,645 rows) from 08-01 was only a debugging session. It reproduced the profile-to-hash mapping: `qwen3` → `e84bb38b824d`; `bge-en` → `1e9807091681`.
+5. **Full-run check:** with `NMG_EMBED_PROFILE=bge-en` and fixed top-20, the report recorded any-evidence recall **94.15%**, overall **87.95%**, with category results matching the historical run: knowledge-update 100.00/99.31, multi-session 97.60/85.63, temporal 88.64/83.01.
 
-## 修复
+## Root cause and source correction
 
-`commonOpenAiOptions` 按模型自动选择默认 profile：model 名含 `bge` 时默认
-`bge-en`，否则 `qwen3`；显式 `NMG_EMBED_PROFILE` 始终优先。新增单测
-（bge 默认 bge-en / 显式覆盖 / 非 bge 保持 qwen3 / indexId 区分）。
+The report traced the issue to `commonOpenAiOptions` in `src/core/embedding-providers/openai.ts`: a default `qwen3` profile had been used regardless of model unless `NMG_EMBED_PROFILE` was set. The BGE model (`BAAI/bge-small-en-v1.5`) expects the query template `Represent this sentence for searching relevant passages: {text}`; the Qwen3 wrapper `Instruct: {instruction}\nQuery:{text}` shifted BGE query embeddings and degraded ranking. The historical run environment had an explicit profile (or a different default), which disappeared during an environment-file rewrite around 08-02/03.
 
-## 修复后 LongMemEval 全量矩阵（n=479，any-evidence recall）
+The recorded fix chose a model-sensitive default: model names containing `bge` use `bge-en`; other models use `qwen3`; explicit `NMG_EMBED_PROFILE` still wins. The current implementation in [`src/core/embedding-providers/openai.ts`](../../../src/core/embedding-providers/openai.ts) and [`tests/core/embedding-provider.test.ts`](../../../tests/core/embedding-provider.test.ts) retains that behavior. Tests cover BGE default, explicit override, non-BGE `qwen3`, and index-ID distinction.
 
-| 配置 | any | overall | answer acc | 平均记录数 | 说明 |
-|---|---|---|---|---|---|
-| 历史基线（07-28 / 08-01 wide20） | 94.15% | 87.95% | — | ~12 | bge-en + 固定 top-20 |
-| 修复后固定 top-20 | 94.15% | 87.95% | 81.2% | 15.1 | 精确复现历史 |
-| **修复后动态 init13（无 strong hit）** | **95.19%** | **89.71%** | **82.3%** | 20.5 | 优于固定基线 |
-| 漂移期固定 top-20（qwen3 默认） | 76.0% | 62.3% | — | 12 | 回归期对照 |
+## Historical LongMemEval matrix (n=479, any-evidence recall)
 
-动态机制（QPP init13 + Fibonacci 渐进，strong hit 关闭）在修复配置下仍全面优于
-固定 top-20：any +1.04pp、overall +1.76pp、answer 正确率 +1.1pp（81.2% →
-82.3%）。类别级亮点（answer 正确率）：single-session-preference 73.3 vs 66.7
-（+6.6pp）、single-session-assistant 98.2 vs 94.6（+3.6pp）、knowledge-update
-86.8 vs 84.6（+2.2pp）、multi-session 75.8 vs 74.4（+1.4pp）；single-session-user
-（-1.5pp）与 temporal（-0.7pp）小幅回退。代价是平均记录数 20.5 vs 15.1（token
-更高，QPP 爬升部分）。
+| Configuration | Any | Overall | Answer accuracy | Mean records | Note |
+|---|---:|---:|---:|---:|---|
+| Historical baseline (07-28 / 08-01 wide20) | 94.15% | 87.95% | — | ~12 | `bge-en` + fixed top-20 |
+| Repaired fixed top-20 | 94.15% | 87.95% | 81.2% | 15.1 | Exact reproduction reported |
+| **Repaired dynamic init13 (no strong hit)** | **95.19%** | **89.71%** | **82.3%** | 20.5 | Higher than fixed baseline in this run |
+| Drift-period fixed top-20 (`qwen3` default) | 76.0% | 62.3% | — | 12 | Drift-period comparison |
 
-## 教训
+The report says dynamic QPP init13 with Fibonacci progression and strong-hit disabled exceeded fixed top-20 in this matrix: any +1.04 percentage points, overall +1.76 pp, answer accuracy +1.1 pp (81.2% → 82.3%). Category answer-accuracy changes included single-session-preference 73.3 vs 66.7 (+6.6 pp), single-session-assistant 98.2 vs 94.6 (+3.6 pp), knowledge-update 86.8 vs 84.6 (+2.2 pp), and multi-session 75.8 vs 74.4 (+1.4 pp); single-session-user (-1.5 pp) and temporal (-0.7 pp) regressed slightly. The mean record count rose from 15.1 to 20.5, so token use was higher during QPP progression.
 
-- 向量检索配置（profile/模板）错误是**静默的**：没有报错，只是排序变差。indexId
-  hash 变更 + 全量 cache 失效是配置漂移的第一信号。
-- 历史基线对比前必须先确认**配置可复现**（本案例 18pp 差异 100% 来自配置，0% 来自
-  机制）；用同 commit 重跑 + 类别级对比（而非只比总分）能快速定位。
-- 代码默认值要按模型适配（bge → bge-en），不能给所有 OpenAI 兼容端点一个 qwen3
-  默认模板。
+## Lessons recorded
+
+- Embedding profile/template errors can be silent: no exception, only poorer ranking. An index-ID hash change and full cache invalidation were early signals of configuration drift.
+- Before comparing a historical baseline, verify that its configuration is reproducible. In this case the report attributed the 18 pp gap to configuration rather than retrieval mechanism; same-commit reruns and category-level comparisons helped localize it.
+- Defaults should account for the model family: BGE → `bge-en`, rather than applying a Qwen3 template to every OpenAI-compatible endpoint.
+
+All benchmark values here remain attached to the historical dataset, configuration, and run; the source-level default alone is not a new benchmark receipt.

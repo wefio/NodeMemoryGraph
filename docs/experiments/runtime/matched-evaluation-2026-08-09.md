@@ -1,5 +1,14 @@
 # Matched LongMemEval backend probe — 2026-08-09
 
+[English](matched-evaluation-2026-08-09.md) | [简体中文](matched-evaluation-2026-08-09.zh-CN.md) · [Terms](matched-evaluation-2026-08-09.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a historical
+record. Its configurations, measured results and implementation-status statements
+are not current test receipts or default-policy authorization. This review did
+not rerun the experiment or independently revalidate the original run artifacts.
+
+## Seven-question backend probe — 2026-08-09
+
 This is a seven-question engineering probe, not a leaderboard result. It uses
 one fixed case from each locally sampled LongMemEval category, one repeat,
 DeepSeek V4 Flash for answering and judging, and two question-level workers.
@@ -34,11 +43,14 @@ The two NMG answer failures are diagnostically different:
 
 The first attempt at this run exposed a SQLite expression-depth failure when a
 long record produced more than one thousand supersession prefilter terms. The
-prefilter is now bounded to 64 selective terms and covered by a 1,500-term
+report records a prefilter fix bounded to 64 selective terms and a 1,500-term
 regression test. The successful rerun also exposed false daemon-limit warnings:
 old descriptors had PIDs reused by live Pi processes. Daemon counting now
 requires an authenticated `hello` response and deduplicates overlapping scan
-roots; no daemon remained alive after the run.
+roots; the record reports no daemon left alive after the run. These are historical
+engineering observations, not fresh regression receipts or the current daemon
+discovery contract; current behavior belongs to the
+[daemon lifecycle owner](../../design/daemon-lifecycle-design.md).
 
 Future reports calculate official session recall for flat retrieval as well as
 NMG. This run predates that final reporting change, so its flat official cells

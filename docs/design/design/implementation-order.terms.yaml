@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: implementation phase status label
+    aliases: [实现阶段状态标签, Complete 标签]
+    definition: >-
+      The "**Complete**" / "**Open**" / "**Rejected**" phrasing attached to individual P0–P5 work items, recording what a step did or did not finish in the current prototype; it is a progress ledger entry, not a product guarantee, default activation, or evidence that a capability is useful.
+      P0–P5 各工作项上标注的 "**完成**" / "**未完成**" / "**否决**" 措辞，记录某一步在当前原型中做完或没做完什么；它是进度账本条目，不是产品保证、默认启用，也不证明该能力有用。
+    owner: docs/design/design/implementation-order.md
+    anchor: Revised implementation order
+    status: canonical
+  - term: deferred-until-measured capability
+    aliases: [推迟至测得前提的能力]
+    definition: >-
+      A capability (ANN, unattended topology mutation, cloud sync, automatic reasoning-workspace activation, unattended consolidation) that stays off until its measured prerequisite appears; the deferral is a policy decision, so newly wired mechanisms do not shorten it.
+      在其被度量的前提出现之前保持关闭的能力（ANN、无人值守拓扑变更、云同步、自动推理工作区启用、无人值守巩固）；这种推迟是策略决定，新接线的机制不会缩短它。
+    owner: docs/design/design/implementation-order.md
+    anchor: Immediate validation order
+    status: canonical
+references:
+  - Lab
+  - NMG Lite
+  - activation
+  - consolidation
+  - QPP
+  - learnable controller
+  - hierarchical activation mode

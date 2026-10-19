@@ -1,0 +1,29 @@
+version: 2
+terms:
+  - term: hierarchical vector granularity comparison
+    aliases: [分层向量粒度比较]
+    definition: >-
+      Comparing full MemoryRecord vector scans, node-only routing, node plus leaf/block routing, and record-level USearch ANN on the same wide-node workload, with the deterministic hashing embedder serving only as a systems baseline rather than a semantic-quality claim.
+      在同一份宽节点工作负载上比较全 MemoryRecord 向量扫描、仅节点路由、节点加叶子/块路由与记录级 USearch ANN；确定性哈希嵌入器只作系统基线，不是语义质量主张。
+    owner: evals/hierarchy-scale/README.md
+    anchor: Hierarchical vector granularity evaluation
+    status: canonical
+  - term: scaling-cost fix versus representation quality
+    aliases: [扩展成本修复与表示质量]
+    definition: >-
+      The negative result that hierarchical indexing fixes scaling cost but cannot compensate for a weak semantic representation: with hashing, node-plus-leaf headers used about 31.6x fewer vectors than per-record vectorization at 100K while hashing recall stayed unstable, so a working semantic embedder must be tested before choosing the production candidate budget or selective record fallback policy.
+      负结果：分层索引修复扩展成本，但无法补偿弱的语义表示 —— 哈希条件下 100K 时节点加叶子头使用的向量约为按记录向量化的 31.6 分之一，而哈希召回仍不稳定，因此在选择生产候选预算或选择性记录回退策略之前必须先测试可用的语义嵌入器。
+    owner: evals/hierarchy-scale/README.md
+    anchor: Initial local result (hashing baseline)
+    status: canonical
+  - term: ANN calibration boundary
+    aliases: [ANN 标定边界]
+    definition: >-
+      Qwen3 node-plus-leaf retrieval reached 100% at 100, 1K and 10K memories while the current USearch leaf ANN ranged 62.5%–75% at Top-64/128/256 and only near-exhaustive Top-512 recovered 100%; until ANN construction and search are calibrated separately, exact-scan a cached leaf-vector matrix at this scale and keep record vectors for selective fallback, and do not read the ANN result as a Qwen embedding failure.
+      Qwen3 的节点加叶子检索在 100、1K、10K 记忆上达到 100%，而当前 USearch 叶子 ANN 在 Top-64/128/256 为 62.5%–75%，只有近乎穷举的 Top-512 恢复到 100%；在 ANN 构建与搜索被单独标定之前，此规模下应精确扫描缓存叶子向量矩阵，并把记录向量留给选择性回退，且不要把 ANN 结果读作 Qwen 嵌入失败。
+    owner: evals/hierarchy-scale/README.md
+    anchor: Qwen3 result
+    status: canonical
+references:
+  - embedding profile
+  - evidence

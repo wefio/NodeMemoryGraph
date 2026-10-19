@@ -1,5 +1,7 @@
 # Formalized retrieval-quality benchmark
 
+[English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
+
 One command, one pinned protocol, one table: `npm run eval:retrieval` measures
 the shared NMG product retrieval and Agent Surface used by automatic recall,
 `nmg_search`, Pi-class adapters, the daemon, and the OmniMemEval bridge as a
@@ -169,22 +171,22 @@ Formal run results are recorded as dated experiments under `docs/`:
 - [Lexical tie ranking and neural ranker outcome](../../docs/experiments/retrieval-quality/lexical-tie-ranking-2026-09-30.md)
   — paired five-dataset lexical evaluation and the failed local neural ranking arm.
 
-- [Retrieval-quality baseline 2026-08-16](../../docs/experiments/retrieval-quality-baseline-2026-08-16.md)
+- [Retrieval-quality baseline 2026-08-16](../../docs/experiments/retrieval-quality/baseline-2026-08-16.md)
   — first pinned run, lexical arm, the original three-dataset protocol.
-- [Retrieval-quality hybrid arm 2026-08-16](../../docs/experiments/retrieval-quality-hybrid-2026-08-16.md)
+- [Retrieval-quality hybrid arm 2026-08-16](../../docs/experiments/retrieval-quality/hybrid-2026-08-16.md)
   — hybrid (external-embedding) arm on all three datasets + LME full-500
   runs for both arms; includes the supersede-scan O(N²) fix measurements.
-- [Retrieval-quality summaries arm 2026-08-18](../../docs/experiments/retrieval-quality-summaries-2026-08-18.md)
+- [Retrieval-quality summaries arm 2026-08-18](../../docs/experiments/retrieval-quality/summaries-2026-08-18.md)
   — leaf-block summary arm (`--summaries`) and stacked arm
   (`--hybrid --summaries`); LoCoMo R@20 24.1% → 48.6%, BEAM 16.9% → 27.0%.
-- [Retrieval-quality node-summary tier 2026-08-24](../../docs/experiments/retrieval-quality-node-summaries-2026-08-24.md)
+- [Retrieval-quality node-summary tier 2026-08-24](../../docs/experiments/retrieval-quality/node-summaries-2026-08-24.md)
   — node summaries (from block summaries, hysteresis refresh); BEAM stacked
   27.0% → 27.4%, LoCoMo unaffected (degenerate 1-block nodes).
-- [Retrieval-quality cross-block chain pull 2026-08-24](../../docs/experiments/retrieval-quality-chains-2026-08-24.md)
+- [Retrieval-quality cross-block chain pull 2026-08-24](../../docs/experiments/retrieval-quality/chains-2026-08-24.md)
   — ±1-hop chain neighbors (edges + positional) pulled into the block-member
   budget; BEAM 27.4% → 27.7%, historical `any@full` (then mislabeled
   `any@20`) 65.1% → 80.0%, ctx 51.1k → 159.4k chars.
-- [Retrieval-quality activation-gated chain expansion 2026-08-25](../../docs/experiments/retrieval-quality-chain-activation-2026-08-25.md)
+- [Retrieval-quality activation-gated chain expansion 2026-08-25](../../docs/experiments/retrieval-quality/chain-activation-2026-08-25.md)
   — whole-chain `expandChains` replaced by activation gating (proximity +
   query overlap + importance, hard cap); BEAM ctx 159.4k → 93.9k chars at
   ~40% of the coverage gain; event_ordering back to the no-chain level.

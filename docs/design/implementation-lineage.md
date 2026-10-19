@@ -1,5 +1,7 @@
 # Implementation lineage
 
+[English](implementation-lineage.md) | [简体中文](implementation-lineage.zh-CN.md)
+
 **Status:** current  
 **Authority:** this document maps implementation history to owners; it does not
 replace the normative [system design](design.md), decisions, experiments, or the

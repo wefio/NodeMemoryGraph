@@ -1,5 +1,12 @@
 # Pool-Aware HyDE on LongMemEval — full-corpus results
 
+[English](hyde-pool-full-2026-08-04.md) | [简体中文](hyde-pool-full-2026-08-04.zh-CN.md) · [Terms](hyde-pool-full-2026-08-04.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this dated record is
+historical research material, not a current runtime contract or authorization
+to run provider experiments. No cited experiment or original run artifact was
+rerun or independently revalidated in this review.
+
 Date: 2026-08-04 · Branch: nmg_search advanced syntax + multi-clause fusion
 
 ## What was tested
@@ -28,12 +35,20 @@ recomputed baseline is bit-for-bit the official fixed-top-20 run:
 | regressed | — | 0 | — |
 | errors | — | 0 | — |
 
+The recall table uses a 479-question denominator, whereas the answer/judge
+stages below report 500 successes. The other 21 judged questions are not included
+in that recall denominator; their per-question mapping is not supplied here.
+Also, the displayed rounded evidence-recall values subtract to 4.57pp, while
+the original table reports +4.58pp. Rounding of underlying values could explain
+that 0.01pp difference, but the underlying counts were not rechecked; +4.58pp
+is retained as reported, not independently validated.
+
 Rescue concentration: temporal-reasoning (HyDE recovers date/entity anchors
 from the pool that the question itself does not mention). Cost: +1 LLM call
 (deepseek-chat, ~200 out tokens) + 1 fused search per question.
 
 Pitfall recorded: earlier run without the sourceActor filter reproduced
-89.35% baseline (user-message dilution) and overstated the HyDE delta
+89.35% baseline (an actor-mixed candidate pool) and overstated the HyDE delta
 (+3.97pp); after alignment the true delta is +2.51pp.
 
 ## Judged accuracy (real LongMemEval score)
@@ -53,7 +68,9 @@ with deepseek-chat for both answer and judge, same prompts and same
 | temporal-reasoning | 77.4% (133) | 80.5% (133) | +3.1 |
 | context tokens / question | 856 | 1100 | +28% |
 
-Notes: judge temperature 0 (deterministic), 500/500 success on both steps.
+Notes: judge temperature 0, with 500/500 success reported on both steps.
+Temperature 0 does not guarantee repeat-identical hosted-model outputs; answer
+and judge use the same model, so this is not independent quality validation.
 multi-session is the largest gain (HyDE stitches cross-session detail into the
 context); preference is the only regressing class (hypothetical recommendations
 can inject noise). Run artifacts: `results/lme/nmg-hyde-pool/`.

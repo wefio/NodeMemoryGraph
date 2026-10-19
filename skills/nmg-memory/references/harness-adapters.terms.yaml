@@ -1,0 +1,25 @@
+version: 2
+terms:
+  - term: harness adapter
+    aliases: [Harness 适配器, 适配器]
+    definition: >-
+      A thin host integration that exposes NMG operations without importing the core store or taking ownership of the shared daemon.
+      不导入核心存储、也不接管共享 daemon 生命周期的轻量宿主集成；它负责暴露 NMG 操作。
+    owner: skills/nmg-memory/references/harness-adapters.md
+    anchor: The stable contract
+    status: canonical
+  - term: state carriage
+    aliases: [状态携带]
+    definition: >-
+      A host-specific preparation and insertion of maintained AG state into model input; it is distinct from storing the state, recording disclosure, or confirming final provider input.
+      依宿主而异地准备并将维护中的 AG 状态放入模型输入；它不同于状态存储、披露记录或最终 provider 输入确认。
+    owner: docs/decisions/implemented/2026-10-08-ag-working-state-input.md
+    anchor: Decision
+    status: canonical
+references:
+  - Active Graph
+  - Long-Term Graph
+  - Short-Term Graph
+  - Task Board
+  - state space
+  - projection revision

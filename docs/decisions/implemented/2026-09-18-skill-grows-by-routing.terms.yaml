@@ -1,0 +1,19 @@
+version: 2
+terms:
+  - term: always-read Skill entry
+    aliases: [Skill entry, 常读 Skill 入口]
+    definition: >-
+      The bounded SKILL.md file that carries the workflow every invocation needs; it retains the common path and routes occasional details to references rather than raising its byte ceiling or compressing away conditions.
+      每次调用都需要读取、承载通用工作流的限长 SKILL.md；它保留常见路径，并将偶发细节路由到 references，而不是提高字节上限或压掉条件。
+    owner: docs/decisions/implemented/2026-09-18-skill-grows-by-routing.md
+    anchor: Decision
+    status: canonical
+  - term: on-demand reference route
+    aliases: [reference trigger, 按需 reference 路由]
+    definition: >-
+      An entry-level task trigger paired with the specific reference path that supplies occasional detail, so an Agent loads that material only when the task needs it.
+      在 Skill 入口中将任务触发条件与提供偶发细节的特定 reference 路径配对，使 Agent 只在任务需要时加载该材料。
+    owner: docs/decisions/implemented/2026-09-18-skill-grows-by-routing.md
+    anchor: Decision
+    status: canonical
+references: []

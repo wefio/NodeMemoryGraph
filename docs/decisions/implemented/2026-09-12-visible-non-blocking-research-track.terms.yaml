@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: visible non-blocking research result
+    aliases: [visible non-required check, 可见但非阻塞的研究结果]
+    definition: >-
+      A research CI job whose true pass/fail result remains visible on pull requests but does not participate in the required aggregate; uncovered test suites are separately counted or explicitly acknowledged with a reason.
+      在 pull request 上保留真实通过／失败结果、但不参与 required aggregate 的研究 CI job；未覆盖测试套件须单独计数或提供理由明确认领。
+    owner: docs/decisions/implemented/2026-09-12-visible-non-blocking-research-track.md
+    anchor: Decision
+    status: canonical
+references:
+  - gate
+  - evidence

@@ -1,0 +1,36 @@
+version: 2
+terms:
+  - term: cyclomatic complexity
+    aliases: [complexity score, 圈复杂度]
+    definition: >-
+      A count of linearly independent execution paths through a method; each listed branching operator adds one to the count.
+      方法中线性独立执行路径的计数；每个列出的分支运算符都会使计数增加一。
+    owner: skills/complexity-reduction/SKILL.md
+    anchor: Complexity reduction
+    status: canonical
+  - term: guard clause
+    aliases: [early return, 守卫子句]
+    definition: >-
+      A condition checked early that returns before the main path, replacing deeper nesting without changing the guarded behavior.
+      在主路径前提前检查并返回的条件，用于减少嵌套且不改变受保护行为。
+    owner: skills/complexity-reduction/SKILL.md
+    anchor: The four techniques (in order of value)
+    status: canonical
+  - term: composed function extraction
+    aliases: [extract one responsibility, 组合函数提取]
+    definition: >-
+      Move one responsibility from a multi-purpose function into a small helper so the caller orchestrates work and each helper has fewer branches.
+      将多职责函数中的一项职责移入小型 helper，使调用方负责编排、各 helper 的分支更少。
+    owner: skills/complexity-reduction/SKILL.md
+    anchor: The four techniques (in order of value)
+    status: canonical
+  - term: branch lookup-table dispatch
+    aliases: [lookup table instead of switch, 分支查找表派发]
+    definition: >-
+      Represent data-driven alternatives in a Record or Map keyed by the discriminant instead of a long switch or if/else chain.
+      将由数据驱动的分支表示为以判别值为 key 的 Record 或 Map，而不是长 switch 或 if/else 链。
+    owner: skills/complexity-reduction/SKILL.md
+    anchor: The four techniques (in order of value)
+    status: canonical
+references:
+  - complexity measurement baseline

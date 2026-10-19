@@ -1,98 +1,42 @@
-# 渐进推荐：Fibonacci 档位替换固定 limit（QPP 信号修复）
+# Historical design note: progressive recall and QPP signal repair
 
-> 依据：`docs/experiments/qpp/evidence-signal-experiments-2026-08-02.md` 实验结论——检索信号预测
-> "证据完备"最佳为 NQC 归一化离散度（AUC 0.667）；LLM 充分性判断（0.732）验证了
-> "判断证据够不够"可行，但判断者是消费者模型本身，故不做 NMG 内建 LLM judge，改为
-> **提示词驱动的按需追加**（`MEMORY_POLICY` 已授权：证据不足可请求追加、忽略无关头）。
-> 本设计用 Fibonacci 档位替换固定 top-K：首趟按 `initialEvidenceTarget` 给量（默认值
-> 可配置，不构成设计主张），QPP 判不够升档，limit 作硬上限；追加 = 消费者模型驱动的
-> 爬档（LLM 判断充分性，而非 NMG 内建 judge）。
+[English](llm-sufficiency-recall-design.md) | [简体中文](llm-sufficiency-recall-design.zh-CN.md) · [Terms](llm-sufficiency-recall-design.terms.yaml)
 
-**Status:** current — 2026-08-02 实现；阶段三评测后收敛，测试 502/502 通过
-**Updated:** 2026-08-02
+> **Status:** Historical implementation/design note dated 2026-08-02, not the current contract. Its test count, measured values, and “implemented” labels describe that dated rollout and are not current verification. The current owners are [retrieval confidence and controller boundaries](retrieval-confidence-controller.md) and [Fibonacci progressive recall](fibonacci-progressive-recall.md).
 
-## 背景
+## Context at the time
 
-`nmg_automatic_recall` → `searchContext` 用 `shouldTriggerSecondPass` 决定是否按
-Fibonacci 档位展开。实测（`audit-qpp-trigger-stats.ts`，3140 条真实 trace）发现两个问题：
+The note followed a trace audit of `nmg_automatic_recall` and `searchContext`. It reported that QPP score `C` stayed near `0.92` because `reasonHealth` was `1.0` and `intentCoverage` was `0.5` on the audited benchmark traces; only one of 3,140 recorded traces triggered. It also reported that one evaluation path began at a fixed limit and immediately stopped, while the Pi extension did not pass `secondPass`.
 
-1. **展开从未真正跑动**：QPP C 分数恒 0.92（reasonHealth 恒 1.0 + intentCoverage 恒
-   0.5 把 C 抬过阈值），3140 次仅触发 1 次；评测路径第一档（=limit 21 条）就判
-   "sufficient" 停，实际等价固定 Top-21；生产路径（Pi 扩展）根本不传 `secondPass`。
-2. **Fibonacci 是"固定 top-K + 可选追加"的摆设**，不是"推荐条数决策器"——设计意图是
-   单条证据就 1 条、按需 Fibonacci 升档，实现却是固定 limit 打底。
+The accompanying evidence-signal experiment later documented why the score needed to change: NQC dispersion predicted `complete@20` better than the then-used signals in that sample, while the LLM sufficiency judgment was an offline comparator, not a reason to build an NMG-hosted judge. See the [experiment report](../experiments/qpp/evidence-signal-experiments-2026-08-02.md).
 
-## 需求
+## Decisions recorded on 2026-08-02
 
-- **R1**：Fibonacci 档位替换固定 limit——首趟按 `initialEvidenceTarget`（默认 13，
-  `NMG_AUTO_RECALL_INITIAL_TARGET` 可配置）给量，QPP 判不够按 1, 2, 3, 5, 8, ... 升档，
-  够了停；`limit` 变为硬上限（最多推多少条）。
-- **R2**：QPP 触发信号修复——去掉 intentCoverage/reasonHealth 的常量正贡献（在真实
-  benchmark 上无区分度），改为 NQC 归一化离散度（实验最佳 0.667）。
-- **R3**：预算护栏——展开不超 `expandActiveGraphBudget` 硬上限与调用方 `limit`。
-- **R4**：强单证据信号——相对 top1-top2 gap ≥ 0.05（真悬崖，唯一实测有效的无监督
-  信号）→ 首趟 1-3 条；top1 分数本身无判别力，不用。
-- **R5**：追加 = 消费者模型驱动的爬档——MEMORY_POLICY 授权 agent 证据不足时请求
-  追加；QPP 自动爬档降级为 guardrail（空集 / all-fallback / low-top1）。
+The note proposed five changes:
 
-## 已实现（2026-08-02）
+1. Start the progressive walk from a configurable `initialEvidenceTarget` rather than treating the initial fixed limit as the answer; use `limit` as a hard ceiling.
+2. Remove constant positive contributions from `intentCoverage` and `reasonHealth` and use normalized dispersion (`NQC`) in the QPP score.
+3. Preserve the expanded-budget and caller-limit guardrails.
+4. Use a relative Top-1/Top-2 gap of at least `0.05` as the measured strong-hit condition for a smaller initial target; absolute Top-1 alone did not predict evidence count in the cited sample.
+5. Do not add an NMG-hosted LLM sufficiency judge. The proposal assigned semantic sufficiency judgment to the consuming Agent and described further retrieval as request-driven.
 
-### 档位循环（`retrieval.ts` secondPass 分支）
+The note also stated that QPP was not intended to predict whether a question needs one or multiple evidence records. That boundary is consistent with the later evidence report, but the exact implementation and defaults have since evolved.
 
-```
-档位序列：fibonacciEvidenceBudgets(maxEvidence) → [1, 2, 3, 5, 8, 13, ...]
-首趟：从 requestedInitial 起（默认 initialEvidenceTarget=13；topGap≥0.05 强单证据
-       信号 → 3），逐档 selectWithinBudget(min(target, hardLimit))
-       → QPP 判定 → 够则停（sufficient）/ 不够升档 / 到 limit 或预算上限停
-limit：硬上限 = min(调用方原始 limit, expand 后 maxEvidence)，不再 clamp 到原始预算
-```
+## What the dated note recorded as implemented
 
-修复了三个隐藏问题：
-- `requestedInitial` 默认从配置的 initialEvidenceTarget 起（不再是 1）——多证据查询
-  一次到位，减少消费者模型追加往返；
-- `limit` 入口被 clamp 到原始 `budget.maxEvidence`（`retrieval.ts:114`）→ hardLimit 改用
-  调用方原始 `options.limit`，否则升档永远被原始预算挡住；
-- 每档记录 stages（target/selected/tokens/qpp/trigger/reason）到 trace，shadow 可审计。
+It recorded a Fibonacci walk with an initial target of `13`, a strong-hit target of at most `3` when the relative gap reached `0.05`, a hard caller limit, a QPP threshold of `0.55`, and stage details in the retrieval trace. It reported 30 focused tests and a full `502/502` test run, followed by a build. These are historical claims from the 2026-08-02 note, not checks run for this documentation update.
 
-### QPP 信号（`qpp.ts`）
+The same note cited the LoCoMo 1,986-question comparison: records `-27.8%`, noise `-28.6%`, and evidence coverage `+0.8` percentage points against fixed Top-20, using an oracle append upper bound. The [experiment record](../experiments/qpp/evidence-signal-experiments-2026-08-02.md) scopes those figures; they do not establish current product quality or a live consumer-model append rate.
 
-新公式 `C = Top1 + 0.5·NQC`，阈值 `DEFAULT_QPP_THRESHOLD = 0.55`：
-- `NQC = stdev(top-k)/mean(top-k)`（clamp [0,1]），衡量 top1 相对其余结果的差距（
-  NQC 文献：分数高度离散 = 好查询，对应实验 complete AUC 0.667 最佳信号）；
-- 单个候选时 NQC=0 → C 退化为 top1 绝对锚（单条强命中即够，符合"单条证据就 1 条"）；
-- `intentCoverage`/`reasonHealth` 仍计算并记录（shadow/guardrail），但不再进 C——
-  实测它们在真实 benchmark 上恒 0.5/1.0，是 QPP 永不触发的根因。
+## Current behavior boundary
 
-### 行为变化
+- The current score is `Top1 + 0.5 × NQC`; `intentCoverage`, `reasonHealth`, and other components are diagnostic, not score terms. The current QPP and guardrail definitions are in the [controller design](retrieval-confidence-controller.md).
+- `searchContext()` does not enable `secondPass` by default. The convenience wrapper does; Pi QPP2 is default-off; the OmniMemEval bridge defaults it on. Once a caller enables the pass, the core walks eligible Fibonacci tiers and lets QPP stop at sufficient evidence. These are caller-specific contracts, not a universal default.
+- The caller's `limit` is a hard ceiling and does not create an arbitrary intermediate Fibonacci rung. The walk re-selects from one over-sampled candidate pool; it does not rerun ANN/FTS or progressively increase relation expansion.
+- Learned listwise folding and the deterministic QPP walk are distinct. The 2026-07 local-probe experiment does not prove that its QPP2 model is the current product model.
 
-- 强单证据查询（topGap≥0.05）：首趟 1-3 条（最省）；
-- 多证据/质量差：从 `initialEvidenceTarget` 起按 Fibonacci 升档到 QPP 判够或 limit/
-  预算上限；
-- 消费者模型判断证据不足：请求追加（第二趟升档）——追加即爬档，判断者是 agent；
-- `secondPass=false`：行为不变（固定 limit + shadow QPP）。
+See the current [caller-specific activation table](retrieval-confidence-controller/confidence-and-trigger-design.md#caller-specific-activation) and [progressive-recall details](fibonacci-progressive-recall.md).
 
-## 测试
+## Historical scope limits
 
-- `tests/core/qpp.test.ts`：30 用例（topGap 组件、默认首趟、强单证据、limit 硬上限、
-  档位循环、爬档、guardrail）；
-- 全量 502/502 通过；`npm run build` 后 dist 同步。
-
-## 验收（阶段三）
-
-固定 top-20 基线对比（LoCoMo 1986 题，oracle 追加上界）：records -27.8%、噪声 -28.6%、
-覆盖 +0.8pp——token 更少、噪声更少、覆盖不劣化。详见实验文档阶段三。
-
-## 待办（下一步）
-
-- 阈值 0.55 在 partial-evidence eval 上标定（可选）；
-
-`NMG_SEARCH_RECOMMENDATION` 的提示词模板化已经完成：模板位于
-`src/prompts/nmg-prompts.yaml`，由 Pi adapter 通过 `renderDisclosure` 渲染，
-并有 prompt-source 与 `off|advisory|guardrail` 行为回归测试。其开关仍由
-operator 决定，不与阈值标定混为一项。
-
-## 范围外
-
-- 不改变"证据数量（单条/多条）"的任何信号（实验判定不可行）；
-- 不做 NMG 内建 LLM judge（判断者是消费者模型本身，提示词驱动足够）；
-- 不接 QPP2（列表内压缩），保持独立。
+The original note explicitly excluded an NMG-hosted LLM judge and listwise QPP2 compression at that stage. Those were decisions for that design snapshot, not permanent product prohibitions: the current deterministic pass and optional Pi QPP2/controller paths have separate owners and defaults. Do not use the historical “Status: current” or old test receipt as evidence of present behavior.

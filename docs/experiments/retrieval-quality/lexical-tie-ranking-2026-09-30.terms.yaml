@@ -1,0 +1,20 @@
+version: 2
+terms:
+  - term: lexical tie cutoff boundary
+    aliases: [input-pool versus selected-prefix invariant, 词法并列截断边界]
+    definition: >-
+      The distinction between preserving a tie-reorder helper's input pool and preserving final membership after a cap or Active Graph budget. A pre-cap permutation can change selected membership; unchanged R@20 in the historical fixed-set trial does not establish an arbitrary-cutoff invariant.
+      保留同分重排 helper 输入池，与保留 cap 或 Active Graph 预算后的最终成员不同。cap 前置换可以改变入选成员；历史固定集合试验中 R@20 不变，不建立任意截断不变量。
+    owner: docs/experiments/retrieval-quality/lexical-tie-ranking-2026-09-30.md
+    anchor: Current implementation boundary
+    status: canonical
+  - term: neural ranker adoption bar
+    aliases: [神经排序器采纳门槛]
+    definition: >-
+      This historical task required demonstrated material gain over product ranking on its reported 19-query trace pool with 43 explicit-useful labels and no verified negatives. The tested MLP was reported not to meet that bar; this does not prove general neural-ranking failure, precision on irrelevant items or independence of all query rows.
+      本历史任务要求在所报 19 查询、43 个显式有用标签且无经核验负例的轨迹池中，相对产品排序展示实质收益。被测 MLP 被报告未达门槛；这不证明神经排序普遍失败、无关项精确率或所有查询行独立。
+    owner: docs/experiments/retrieval-quality/lexical-tie-ranking-2026-09-30.md
+    anchor: Neural ranking outcome
+    status: canonical
+references:
+  - pre-budget lexical tie-break

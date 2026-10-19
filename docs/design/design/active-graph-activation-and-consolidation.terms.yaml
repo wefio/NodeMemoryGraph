@@ -1,0 +1,70 @@
+version: 2
+terms:
+  - term: node activation
+    aliases: [A_v, 节点激活]
+    definition: >-
+      The fast-changing, session/task-local score that manages current working memory over a target scoring family of query relevance, task relevance, recency, importance, learned prior and retrieval cost; a highly active node is not thereby true, durable or stable, and a stable LTG constraint may remain inactive in an unrelated task.
+      变化快、属于会话／任务本地的分数，跨查询相关性、任务相关性、时近性、重要性、学习先验与检索成本构成的打分族管理当前工作记忆；高度活动的节点并不因此为真、持久或稳定，而一条稳定的 LTG 约束在与它无关的任务中可以保持不活动。
+    owner: docs/design/design/active-graph-activation-and-consolidation.md
+    anchor: HA activation, MGR reasoning, and typed edge layers
+    status: canonical
+  - term: edge activation
+    aliases: [A_e, 边激活]
+    definition: >-
+      The function of source and target activation, relation type, query, task and path cost that records the current cognitive/retrieval path; AG must separately record which nodes and edges were selected, which exact evidence was disclosed, which records only overlapped the answer and which evidence was verified, contradicted or rejected, and only the last class may supervise persistence and controller learning.
+      由源与目标激活、关系类型、查询、任务与路径成本构成的函数，记录当前认知／检索路径；AG 必须分别记录哪些节点与边被选中、哪些精确证据被披露、哪些记录只是与答案重叠、以及哪些证据被验证、反驳或拒绝，只有最后一类可以监督持久化与控制器学习。
+    owner: docs/design/design/active-graph-activation-and-consolidation.md
+    anchor: HA activation, MGR reasoning, and typed edge layers
+    status: canonical
+  - term: typed edge layers
+    aliases: [semantic/activation/reasoning edges, 带类型边分层]
+    definition: >-
+      The three layers the Active Graph maintains — semantic edges referenced from STG/LTG, activation/attention edges produced by HA, and reasoning/operator edges produced by MGR; they may inform one another during a bounded runtime iteration, but activation or hypothetical reasoning must never silently increase semantic confidence or LTG edge stability, and the projection ledger preserves each exposed edge's layer and origin.
+      Active Graph 维护的三个层——从 STG/LTG 引用的语义边、HA 产生的激活／注意边、MGR 产生的推理／算子边；它们可以在一次有界运行时迭代中相互提供信息，但激活或假设推理绝不能悄悄提高语义置信度或 LTG 边稳定性，而投影账本保留每条被暴露边的层与来源。
+    owner: docs/design/design/active-graph-activation-and-consolidation.md
+    anchor: HA activation, MGR reasoning, and typed edge layers
+    status: canonical
+  - term: adaptive semantic granularity
+    aliases: [observational equivalence class, 自适应语义粒度]
+    definition: >-
+      The treatment of a node as an observational equivalence class under current evidence, where records stay together while the system lacks reliable information to distinguish their use and new evidence, scope, time, relations or query behaviour can supply the discriminating information; size alone is not a split condition and topology changes use hysteresis with a minimum evidence count, a gain threshold and a cooldown period.
+      把节点视为当前证据下的一种观察等价类：当系统缺乏可靠信息以区分记录用途时，这些记录留在一起，而新的证据、作用域、时间、关系或查询行为可以提供区分信息；仅凭规模不是拆分条件，拓扑变更使用带最小证据数、增益阈值与冷却期的滞后。
+    owner: docs/design/design/active-graph-activation-and-consolidation.md
+    anchor: Adaptive semantic granularity
+    status: canonical
+  - term: split versus refinement
+    aliases: [leaf/block split, node refinement, 拆分与细化]
+    definition: >-
+      The distinction between a leaf/block split, where the node meaning is still coherent but its evidence is too large or diverse for efficient local retrieval, and node refinement, where one header no longer describes materially different entities, scopes, states or query behaviours so stable child or new nodes are warranted; merge/split preserves records and evidence, marks old nodes inactive, retains redirects, and a split requires a complete disjoint memory partition.
+      「leaf/block 拆分」（节点含义仍连贯，但证据规模过大或过于多样而不适合高效局部检索）与「节点细化」（单个 header 不再描述实质不同的实体、作用域、状态或查询行为，因此稳定的子节点或新节点是合理的）之间的区分；合并／拆分保留记录与证据、把旧节点标记为不活动、保留重定向，且拆分要求完整且不相交的记忆划分。
+    owner: docs/design/design/active-graph-activation-and-consolidation.md
+    anchor: Adaptive semantic granularity
+    status: canonical
+  - term: chain write authority
+    aliases: [temporal versus logical chain, 链写入权限]
+    definition: >-
+      The rule that a temporal chain orders records by explicit event time or another attributable sequence, where timestamp order may be derived mechanically but a missing event time must never be invented, while a logical chain stores only an explicit or naturally supervised order or dependency, so similarity, co-retrieval, message adjacency or model speculation cannot create a causal edge; a memory may join multiple chains and each chain's directed `order` edges must stay acyclic.
+      规则：时间链按显式事件时间或另一种可归因顺序排序，其中时间戳顺序可以由机器派生，但缺失的事件时间绝不能被发明；逻辑链只存储显式或经受自然监督的顺序或依赖，因此相似性、共检索、消息相邻性或模型推测都不能创建因果边；一条记忆可以加入多条链，且每条链的有向 `order` 边必须保持无环。
+    owner: docs/design/design/active-graph-activation-and-consolidation.md
+    anchor: Static temporal and logical memory chains
+    status: canonical
+  - term: structure disclosure budget
+    aliases: [2048-character structure budget, 结构披露预算]
+    definition: >-
+      The independent 2048-character budget for rendering logical chain structure, which may be omitted without truncating or removing exact evidence; the shared integration projector emits each full statement once with a short stable response-local label and renders logical structure with label-only Mermaid-style edges, grouping fan-in and fan-out with the shorter exact representation, while temporal ordering stays in record timestamps.
+      用于渲染逻辑链结构的独立 2048 字符预算，可以不渲染它而不截断或移除精确证据；共享集成投影器把每条完整陈述各输出一次并配一个简短稳定的响应本地标签，用仅标签的 Mermaid 风格边渲染逻辑结构，扇入与扇出用更短的精确表示分组，而时间顺序保留在记录时间戳中。
+    owner: docs/design/design/active-graph-activation-and-consolidation.md
+    anchor: Static temporal and logical memory chains
+    status: canonical
+  - term: memory chain
+    aliases: [记忆链]
+    definition: >-
+      A bounded ordered view over existing memory identities that expresses temporal order or explicit dependencies without copying the evidence.
+      对既有记忆身份构成的有界有序视图，用于表达时间顺序或显式依赖，而不复制证据。
+    owner: docs/design/design/active-graph-activation-and-consolidation.md
+    anchor: Static temporal and logical memory chains
+    status: canonical
+references:
+  - Active Graph
+  - consolidation
+  - hierarchical activation mode

@@ -1,0 +1,37 @@
+version: 2
+terms:
+  - term: coordinator-owned admission
+    aliases: [coordinator admission, 协调器拥有的准入]
+    definition: >-
+      A bounded fixed-plan research probe in which the coordinator rechecks authoritative generation, owner, input binding, check result, and lease state before accepting a worker artifact; a worker-supplied `passed` flag is not evidence of acceptance.
+      有界固定计划研究探测：协调器在接受 worker artifact 前重新核验权威 generation、owner、input binding、check 结果与 lease 状态；worker 提供的 `passed` 标志不是接受证据。
+    owner: docs/experiments/ooo-admission-2026-09-08.md
+    anchor: Question and scope
+    status: canonical
+  - term: mutant-survived-baseline proof
+    aliases: [mutant-survived-baseline, mutant 存活基线证明]
+    definition: >-
+      A host-controlled fault survives the frozen check suite for the measured revision, providing evidence of a specific coverage gap; it does not prove that the suite misses every related behavior or that the product path has the same property.
+      宿主控制的故障在被测 revision 的冻结检查套件中存活，证明一个特定覆盖缺口；它不证明套件漏测所有相关行为，也不证明产品路径具有相同性质。
+    owner: docs/experiments/ooo-admission-2026-09-08.md
+    anchor: S1 round 3 — 2026-09-11
+    status: canonical
+  - term: S1 promotion exit
+    aliases: [S1 exit condition, S1 提升退出条件]
+    definition: >-
+      The historical S1 criterion was met when a round produced a useful change, an independent host verifier accepted it, and a human promoted it into the next baseline; this does not establish autonomous self-improvement, general speed or quality gains, or product-runtime integration.
+      历史 S1 条件要求 round 产生有用变更、由独立的宿主 verifier 接受，并经人类提升到下一轮基线；这不证明自主自我改进、普遍速度或质量收益，也不证明产品运行时集成。
+    owner: docs/experiments/ooo-admission-2026-09-08.md
+    anchor: S1 exit: promotion — 2026-09-11
+    status: canonical
+references:
+  - constrained OoO bootstrap
+  - real external wait
+  - candidate promotion
+  - independently accepted development change
+  - research-instrument evidence
+  - product-loop activation boundary
+  - historical round-instrument record
+  - recorded-answer replay
+  - replay round identity
+  - fenced attempt identity

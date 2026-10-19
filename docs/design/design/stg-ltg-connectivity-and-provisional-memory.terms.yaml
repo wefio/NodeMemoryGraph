@@ -1,0 +1,55 @@
+version: 2
+terms:
+  - term: provenance link
+    aliases: [derived_from, provenance 链接]
+    definition: >-
+      The immediate and mandatory edge class by which every semantic memory reaches its exact source message, session or tool result; a model assertion is not provenance, so a `derived_from` edge without the Core derivation transaction and exact source memory IDs is rejected.
+      即时且强制的一类边：每条语义记忆借此到达其精确的来源消息、会话或工具结果；模型断言不是 provenance，因此缺少 Core 派生事务与精确来源记忆 ID 的 `derived_from` 边会被拒绝。
+    owner: docs/design/design/stg-ltg-connectivity-and-provisional-memory.md
+    anchor: STG/LTG connectivity and provisional memory
+    status: canonical
+  - term: entailed by a governed operation
+    aliases: [immediate edge authority, 受治理操作所蕴含]
+    definition: >-
+      The test that decides whether an inferred edge may materialize immediately: the edge must be mechanically entailed by the transaction that creates it, not chosen by a model with high confidence; relation type alone grants no write authority, and administrative `linkNodes` stays an explicit trust boundary rather than unattended model authority.
+      决定一条推断边能否立即物化的判据：该边必须由创建它的事务机械蕴含，而不是由模型以高置信度挑选；仅凭关系类型不授予写入权限，管理性 `linkNodes` 仍是显式信任边界，而不是无人值守的模型权限。
+    owner: docs/design/design/stg-ltg-connectivity-and-provisional-memory.md
+    anchor: STG/LTG connectivity and provisional memory
+    status: canonical
+  - term: STG semantic inbox
+    aliases: [semantic inbox, STG 语义收件箱]
+    definition: >-
+      The STG entry point for new semantic candidates with four outcomes: a confirmed durable atom preserves its ID and is promoted to LTG, a high-confidence match attaches to an existing STG/LTG node, an explicit new concept creates a provisional STG node, and an ambiguous candidate stays globally searchable and unassigned.
+      新语义候选进入 STG 的入口，含四种结局：已确认的持久原子保留其 ID 并晋升到 LTG、高置信匹配附着到既有 STG/LTG 节点、显式新概念创建暂定 STG 节点、歧义候选保持全局可检索且未指派。
+    owner: docs/design/design/stg-ltg-connectivity-and-provisional-memory.md
+    anchor: STG/LTG connectivity and provisional memory
+    status: canonical
+  - term: index Delta
+    aliases: [Inbox/Delta, 索引 Delta]
+    definition: >-
+      The existing index bookkeeping for records whose derived leaf/vector index has not yet been compacted; it tracks index state rather than memory lifecycle, so a long-term memory may sit in index Delta while a short-term memory already has a compacted index.
+      既有索引记账：跟踪那些派生 leaf/vector 索引尚未压缩的记录；它跟踪的是索引状态而不是记忆生命周期，因此一条长期记忆可以位于索引 Delta 中，而一条短期记忆可能已有压缩后的索引。
+    owner: docs/design/design/stg-ltg-connectivity-and-provisional-memory.md
+    anchor: STG/LTG connectivity and provisional memory
+    status: canonical
+  - term: owner isolation identity
+    aliases: [runtime_id + session_id filter, 所有者隔离身份]
+    definition: >-
+      The non-forgeable runtime/session identity that a multi-Agent runtime must carry through search and exact access so that every STG row, temporary edge, AG trace and feedback event is filtered by it, with shared cache rows left explicitly visible; a separate `semantic_task_id` deduplicates repeated evidence across Agents and must not be used as the isolation identity, while a non-forgeable `runtime_id` remains a future harness boundary because Pi does not currently provide one to this adapter.
+      多 Agent 运行时必须贯穿 search 与精确访问的不可伪造运行时／会话身份，使每条 STG 行、临时边、AG trace 与反馈事件都按其过滤，而共享 cache 行保持显式可见；单独的 `semantic_task_id` 只用于跨 Agent 去重重复证据，不得用作隔离身份，而不可伪造的 `runtime_id` 仍是未来的宿主边界，因为 Pi 目前不向该适配器提供它。
+    owner: docs/design/design/stg-ltg-connectivity-and-provisional-memory.md
+    anchor: STG/LTG connectivity and provisional memory
+    status: canonical
+  - term: diagnostic answer attribution
+    aliases: [implicit answer attribution, 诊断性答案归因]
+    definition: >-
+      The conservative, language-aware overlap recorded at `agent_end` (distinctive whole words for Latin text, character bigrams for contiguous Han text) that helps audit whether retrieved text surfaced and which retrieval to ask the user about; it and exact `get` reads cannot raise edge stability, and historical co-retrieval observations are never backfilled as useful.
+      在 `agent_end` 记录的保守、语言感知的重叠（拉丁文本用有区分度的整词，连续汉文本用字符双字组），用于审计检索到的文本是否浮现、以及向用户询问哪一次检索；它和精确 `get` 读取都不能提升边稳定性，历史共检索观察也永远不会被回溯补记为有用。
+    owner: docs/design/design/stg-ltg-connectivity-and-provisional-memory.md
+    anchor: STG/LTG connectivity and provisional memory
+    status: canonical
+references:
+  - Active Graph
+  - Long-Term Graph
+  - Short-Term Graph
+  - same-scope supersession

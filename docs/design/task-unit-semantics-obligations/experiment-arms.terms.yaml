@@ -1,0 +1,25 @@
+version: 2
+terms:
+  - term: directional-only result
+    aliases: [directional measurement, 仅具方向性的结果]
+    definition: >-
+      A measured difference under a limited model, task family and sample size; it can indicate a trend but does not establish a general quality, cost or speedup claim.
+      在有限模型、任务族与样本量下测得的差异；可显示趋势，但不能证明一般性的质量、成本或加速结论。
+    owner: docs/design/task-unit-semantics-obligations/experiment-arms.md
+    anchor: "F. Later phase: the experiment arms"
+    status: canonical
+  - term: held-out task family
+    aliases: [held-out family, 留出任务族]
+    definition: >-
+      A task family withheld from driver/instrument development and tuning, then used as a bounded check of whether the mechanism transfers to an unseen task shape.
+      在 driver/工具开发与调参期间保留未用，之后用于有限检验机制能否迁移到未见任务形状的任务族。
+    owner: docs/design/task-unit-semantics-obligations/experiment-arms.md
+    anchor: "F. Later phase: the experiment arms"
+    status: canonical
+references:
+  - declared slot budget
+  - pre-budget single-claim probe
+  - execution fusion
+  - bounded speculation
+  - Task Board
+  - proven obligation

@@ -1,0 +1,23 @@
+version: 2
+terms:
+  - term: work identity digest
+    aliases: [caller-frozen work digest, work-identity.ts digest]
+    definition: >-
+      The full SHA-256 hexadecimal digest of the exact caller-frozen bytes or JSON text to which a verdict binds; canonicalization remains the caller's responsibility, and shortened report or branch identifiers are presentation choices.
+      判词所绑定的、由调用方冻结的精确字节或 JSON 文本的完整 SHA-256 十六进制摘要；规范化仍由调用方负责，较短的报告或分支标识只是呈现选择。
+    owner: docs/design/mechanism-in-the-middle/implementation-artifacts.md
+    anchor: What landed with this document
+    status: canonical
+  - term: artifact value binding
+    aliases: [verdict artifact digest binding, 产物值摘要绑定]
+    definition: >-
+      The acceptance rule compares a verdict digest with the artifact value carried by the run; substituting the store's deliverable hash makes an accepted unit appear unaccepted.
+      验收规则将判词摘要与运行携带的产物值比较；若改用 store 的交付物哈希，已验收单元就会显示为未验收。
+    owner: docs/design/mechanism-in-the-middle/implementation-artifacts.md
+    anchor: What landed with this document
+    status: canonical
+references:
+  - two-face board entry model
+  - mechanism-policy boundary
+  - legality read
+  - Task Board

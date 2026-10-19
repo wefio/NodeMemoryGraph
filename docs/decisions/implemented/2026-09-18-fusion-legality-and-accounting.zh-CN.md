@@ -1,6 +1,6 @@
 # 融合合法性是一个成对谓词，融合的成本是两条线
 
-[English](2026-09-18-fusion-legality-and-accounting.md)
+[English](2026-09-18-fusion-legality-and-accounting.md) · [术语](2026-09-18-fusion-legality-and-accounting.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit
@@ -8,7 +8,8 @@
 [其义务台账](../../design/task-unit-semantics-obligations.md)（行 F4）、
 [融合与推测试点提案](../implemented/2026-09-18-fusion-and-speculation-pilot.md)、
 [成本模型记录](../../experiments/execution/ooo-cost-model-2026-09-17.md)、
-[实验臂试点](../../experiments/execution/ooo-arms-pilot-2026-09-18.md)
+[实验臂试点](../../experiments/execution/ooo-arms-pilot-2026-09-18.md)、
+[会话机制](2026-09-19-fusion-session-mechanism.zh-CN.md)
 
 ## 问题
 
@@ -41,8 +42,10 @@
 `PlanDriverSpec.fusion` 声明上界与逐单元声明；`runPlan` 只从**被接受**的单元继续会话，并在被拒裁决、
 worker 失败、边界处后继不合法或达到声明上界时结束会话，并在 `PlanRun.sessions` 里每个会话记一条。
 融合的证据是 `WorkerMetrics.sessionId`——worker 自己说它用了哪个会话；因此一个悄悄新建会话的 worker
-会被记录成边界，而不是融合。`piWorker` 对它无法兑现的接续**拒绝**并报出会话名，因为 `executePiPatch`
-每次调用都新建会话；也就是说融合的 live 机制尚未落地，而运行会如实这么说，而不是把新会话报成复用。
+会被记录成边界，而不是融合。按单次调用工作的 `piWorker` 仍会对接续**拒绝**并报出会话名，因为它的 `executePiPatch`
+路径会新建会话。融合 live run 使用后续实现的 `piSessionWorker`，由 `createPiSessionRunner`
+支持并在一次 run 内持有同一会话；详见[会话机制决策](2026-09-19-fusion-session-mechanism.zh-CN.md)。
+拒绝仍是单次调用 worker 的诚实行为，不表示会话复用机制仍未实现。
 
 ## 考虑过的替代方案
 
@@ -61,12 +64,9 @@ worker 失败、边界处后继不合法或达到声明上界时结束会话，�
 
 ## 后果
 
-- F4 的离线部分已有证据：合法性 12 个产品用例 + 8 个具名 mutant，记账 12 个成本模型用例 + 4 个具名
-  mutant，策略 15 个驱动器用例 + 12 个具名 mutant——每个 mutant 都被"点名它破坏的那条规则"的用例抓住。
-- **付费 F6 的 D 臂在当前 harness 下无法按规格运行。** 可复用会话需要 Pi 扩展跨调用持有一个会话；在那
-  之前唯一能表达的形式是设计点名的兜底（用已接受前缀作种子的新会话），那是顺序交接，不是融合。这是关于
-  harness 的实测事实，也正是试点 D 臂没有跑的原因。
+- 在本决策记录的时点，F4 离线部分记录了合法性 12 个产品用例 + 8 个具名 mutant、记账 12 个成本模型用例 + 4 个具名 mutant、策略 15 个驱动器用例 + 12 个具名 mutant。这些是该快照的既有结果，不是当前测试运行。
+- **在本决策记录的快照中，付费 F6 的 D 臂受阻。** 后续的[会话机制决策](2026-09-19-fusion-session-mechanism.zh-CN.md)
+  加入可复用的 Pi 会话 runner，之后付费实验臂按其记录运行。早先的阻塞是历史状态，不是对当前 harness 的描述。
 - `src/integration/ooo-execution.ts` 新增了一条目前没有产品调用方的规则：实验臂是它的消费者，而设计把
   "合法融合候选"指派给共享层。若 D 臂最终不进入产品，这条规则随它一起退休——与轮次仪器相同的处置。
-- `piWorker` 里那段拒绝文字，就是未来扩展改动必须删掉的位置：当扩展能持有会话时，那个分支就变成它所
-  描述的那个接续。
+- `piWorker` 仍是单次调用路径，并会拒绝会话接续。融合 live run 选择 `piSessionWorker`；两条路径有意区分，不能仅因会话机制存在就删除原来的拒绝。

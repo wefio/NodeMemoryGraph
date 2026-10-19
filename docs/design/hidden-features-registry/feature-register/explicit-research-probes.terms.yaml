@@ -1,0 +1,20 @@
+version: 2
+terms:
+  - term: declared slot budget
+    aliases: [BoardAdmission slots, 声明式 slot 预算]
+    definition: >-
+      The explicit number of concurrent claims a research run may admit, bounded by its handoff target and enforced by BoardAdmission.
+      研究 run 可并发准入的显式 claim 数量；由 handoff target 限定并由 BoardAdmission 执行。
+    owner: docs/design/hidden-features-registry/feature-register/explicit-research-probes.md
+    anchor: "Explicit research probes"
+    status: canonical
+  - term: "plan-driver"
+    aliases: ["experiment-arm driver","实验臂驱动器"]
+    definition: >-
+      The evals/ooo-execution/plan-driver.ts research entry point for declared plans, slots and arm execution; the instrument does not establish product-runtime wiring.
+      针对声明的 plan、slots 和实验臂执行的 evals/ooo-execution/plan-driver.ts 研究入口；该工具不证明产品运行时接入。
+    owner: docs/design/hidden-features-registry/feature-register/explicit-research-probes.md
+    anchor: "Explicit research probes"
+    status: canonical
+references:
+  - research probe

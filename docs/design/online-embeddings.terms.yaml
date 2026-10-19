@@ -1,0 +1,35 @@
+version: 2
+terms:
+  - term: embedding provider
+    aliases: [vector provider, embedding 提供方]
+    definition: >-
+      A configurable service or endpoint that converts input text into vectors; NMG tracks provider/model/profile identity so incompatible embeddings are not mixed.
+      将输入文本转换为向量的可配置服务或 endpoint；NMG 跟踪 provider／model／profile identity，避免混用不兼容的 embedding。
+    owner: docs/design/online-embeddings.md
+    anchor: "Online Embedding Providers"
+    status: canonical
+  - term: embedding profile
+    aliases: [preprocessing profile, embedding preprocessing 配置]
+    definition: >-
+      A named preprocessing configuration associated with an embedding provider, such as plain, bge-en, or qwen3; changing it requires a compatible re-index.
+      与 embedding provider 关联的命名预处理配置，例如 plain、bge-en 或 qwen3；更改后需要重新建立兼容索引。
+    owner: docs/design/online-embeddings.md
+    anchor: Shared options
+    status: canonical
+  - term: hashing-vector semantic blend
+    aliases: [local hashing retrieval fallback, 哈希向量语义混合检索]
+    definition: >-
+      The rejected degraded-search approach that blends lexical retrieval with 256-dimensional deterministic hashing vectors; word-level hashing for spelling tolerance or near-duplicate candidates is a separate question.
+      已拒绝的降级搜索方案：将词法检索与 256 维确定性哈希向量混合；用于拼写容错或近重复候选的词级哈希属于另一问题。
+    owner: docs/decisions/rejected/2026-09-03-hashing-vector-retrieval-fallback.md
+    anchor: Why rejected
+    status: canonical
+  - term: "VectorEmbedder"
+    aliases: ["同步向量编码接口"]
+    definition: >-
+      Core's synchronous text-to-vector interface with dimensions, model and embed(text); it alone selects no hosted provider and establishes no embedding-space compatibility.
+      Core 的同步文本到向量接口，包含 dimensions、model 和 embed(text)；接口本身不选择托管 provider，也不证明 embedding 空间兼容。
+    owner: docs/design/online-embeddings.md
+    anchor: "Core embedding interface"
+    status: canonical
+references: []

@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: pool-aware HyDE
+    aliases: [池感知 HyDE, 池感知假设答案]
+    definition: >-
+      Generating a hypothetical answer for a second search from the question plus its auto-recommended pool, rather than from the question alone; in this report it costs one extra LLM call and one extra fused search per question.
+      结合问题与其自动推荐池生成用于第二次检索的假设答案，而不是只依据问题本身；在本报告中它每题多付一次 LLM 调用与一次融合检索。
+    owner: docs/experiments/retrieval/hyde-pool-full-2026-08-04.md
+    anchor: What was tested
+    status: canonical
+  - term: fused candidate union
+    aliases: [融合候选并集, 基线∪HyDE 并集]
+    definition: >-
+      Combining baseline and HyDE-only candidates with memory.id deduplication. Candidate-coverage gains under a fixed scorer can reflect new evidence; answer-score changes also involve answering and judging and cannot be attributed to union alone.
+      合并基线与仅 HyDE 候选，并按 memory.id 去重。固定评分器下的候选覆盖增益可反映新证据；答案分数变化还涉及回答与判定，不能仅归因于并集。
+    owner: docs/experiments/retrieval/hyde-pool-full-2026-08-04.md
+    anchor: What was tested
+    status: canonical
+  - term: sourceActor alignment
+    aliases: [sourceActor 对齐]
+    definition: >-
+      Matching the historical bridge's actor filter (user except for assistant-evidence queries). The report records a different baseline for a mixed-actor pool; this is a comparison-specific control, not a universal current search rule.
+      匹配历史 bridge 的来源过滤（除 assistant-evidence 查询外取 user）。报告记录了混合来源候选池下不同的基线；这是该对比的控制条件，不是当前搜索的通用规则。
+    owner: docs/experiments/retrieval/hyde-pool-full-2026-08-04.md
+    anchor: "Recall results (official metric alignment)"
+    status: canonical

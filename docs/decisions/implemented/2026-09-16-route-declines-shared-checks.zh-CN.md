@@ -2,17 +2,14 @@
 
 **Status:** implemented  
 **Approved:** explicit
-Date: 2026-09-16
-Branch: feat/ooo-run-namespace
-
 治理 meta-rule：[self-governance meta-rule](2026-09-07-self-governance-meta-rule.md) ——
 本规则变更本身也是一次受治理的决策（决策 + 归属 + 替代方案）。
 
-English: [2026-09-16-route-declines-shared-checks.md](2026-09-16-route-declines-shared-checks.md)
+English: [2026-09-16-route-declines-shared-checks.md](2026-09-16-route-declines-shared-checks.md) · [术语](2026-09-16-route-declines-shared-checks.terms.yaml)
 
 ## 问题
 
-narrow gate（`agent:verify`，见 [CI/RCP §7.14](../../design/ci-cd-and-quality.md#714-轻量验证默认narrow-gate)）
+narrow gate（`agent:verify`，见 [CI/RCP Narrow 与 full 验证门](../../design/ci-cd-and-quality/repository-control-plane/lightweight-verification.zh-CN.md#narrow-与-full-验证门-1)）
 对**任何** narrow 改动都会运行常驻共享检查（`NARROW_SHARED_CHECKS`：`check`、`docs:check`、
 `format:check`、`glossary:check`、`lint`、`package:check`、`rtm:check`），不管改的是什么表面。
 对一次被单一路由干净拥有、且不含代码的改动——例如给 `.gitignore` 加一行——这些检查**都不可能因它而失败**：

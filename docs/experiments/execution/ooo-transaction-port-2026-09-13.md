@@ -1,5 +1,14 @@
 # The store owns the transaction boundary, and a port is how work joins it - 2026-09-13
 
+[English](ooo-transaction-port-2026-09-13.md) | [简体中文](ooo-transaction-port-2026-09-13.zh-CN.md) · [Terms](ooo-transaction-port-2026-09-13.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a dated research
+or fixture record. Table names, source positions, status statements, test counts
+and unresolved-work labels belong to its snapshot, not current daemon `taskRun`
+integration. No listed suite or mutation was rerun here, and historical/local
+replay commands are not confirmed available in this checkout. The current
+[task-unit contract](../../design/task-unit-semantics.md) owns product boundaries.
+
 The design's "事务参与与连接生命周期" contract (docs/design/task-unit-semantics.md) requires that one
 connection is not one transaction, that the store is the only place that runs BEGIN/COMMIT, and that
 a caller already inside a transition joins it through a capability issued for that transition. This
@@ -8,7 +17,9 @@ slice implements that primitive and moves the one boundary the contract names by
 
 ## What changed
 
-- `NmgStoreBase.writeTransaction(callback)` is the only BEGIN/COMMIT. It refuses to open a second
+- `NmgStoreBase.writeTransaction(callback)` supplies the shared boundary for the
+  migrated board-write path; the four methods listed under limits still used
+  separate boundaries in this slice. It refuses to open a second
   transaction while one is live, refuses to run at all on a quarantined connection, and refuses a
   callback that returns a thenable - a port must not survive an await.
 - `withPort(port, work)` joins the live transition. Validity is identity against the store's own
@@ -38,13 +49,17 @@ slice implements that primitive and moves the one boundary the contract names by
   and a swallowed failure still committing).
 - `npm run check`, `npm run docs:check`, `npm run complexity:gate` - clean.
 
-Confirmed by reading the code, not restated from the design: the board methods used inside the
-round's own transitions do not open a second BEGIN today (publishing happens after the outer commit),
-which is why the whole product and research suites stayed green while the boundary moved. The design's
-static finding about the cancelled-round cleanup is also correct as written: `runCycle` returns from
-its early-cancel branch after `gate.close()` (src/integration/ooo-cycle.ts:814) while the default
-temporary directory is only removed in the `finally` (line 1037), so a cancelled round leaves it
-behind.
+The original source review described publication after the outer commit and a
+cancelled-round cleanup leak: `runCycle` returned after `gate.close()` at
+src/integration/ooo-cycle.ts:814, before the default-directory cleanup `finally`
+at line 1037. Passing suites alone do not establish every call's ordering. The
+source revision of those positions is not supplied here, so this is an
+attributed historical finding, not independent verification of a current leak.
+
+The recorded progression is [task-table split](ooo-task-tables-2026-09-13.md),
+this port slice, [round transition](ooo-round-transition-2026-09-13.md), then
+[single boundary](ooo-single-boundary-2026-09-13.md). Their changing suite counts
+belong to separate snapshots, not repeated measurements of identical inputs.
 
 ## What this does not do
 

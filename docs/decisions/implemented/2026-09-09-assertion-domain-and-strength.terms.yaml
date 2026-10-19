@@ -1,0 +1,21 @@
+version: 2
+terms:
+  - term: assertion domain
+    aliases: [claim domain, 断言定义域]
+    definition: >-
+      The declared set of cases over which a contract assertion's statement is claimed; a present string makes the scope reviewable but does not mechanically prove that the evidence covers it.
+      契约断言的 statement 声称适用的案例集合；填写该字符串使范围可供审阅，但不会机械地证明证据覆盖了该范围。
+    owner: docs/decisions/implemented/2026-09-09-assertion-domain-and-strength.md
+    anchor: Decision
+    status: canonical
+  - term: assertion strength
+    aliases: [evidence strength, 断言证据强度]
+    definition: >-
+      The assertion's declared evidence class: `decision` claims a decision procedure, while `witness` claims only a witness; absent strength defaults to `witness`. It is distinct from whether a check executed or passed.
+      断言声明的证据类别：`decision` 表示决策过程证据，`witness` 只表示 witness；未填写时默认为 `witness`。它与检查是否执行或通过是不同维度。
+    owner: docs/decisions/implemented/2026-09-09-assertion-domain-and-strength.md
+    anchor: Decision
+    status: canonical
+references:
+  - contract
+  - evidence

@@ -1,0 +1,62 @@
+version: 2
+terms:
+  - term: Base/Delta index split
+    aliases: [indexed Delta, Base 与 Delta]
+    definition: >-
+      The physical index dimension orthogonal to STG/LTG semantic lifecycle and consolidation status: new records are added to a searchable Delta and marked dirty for later compaction, so an LTG fact can sit in Delta immediately after insertion while an STG candidate may already be compacted into Base.
+      与 STG/LTG 语义生命周期及巩固状态正交的物理索引维度：新记录被加入可检索 Delta 并标记为脏以便稍后压缩，因此一条 LTG 事实可以在插入后立即位于 Delta 中，而一个 STG 候选可能已被压缩进 Base。
+    owner: docs/design/design/incremental-storage-and-index-maintenance.md
+    anchor: Incremental storage and index maintenance
+    status: canonical
+  - term: maintenance scope
+    aliases: [local/accumulated/neighbourhood, 维护范围]
+    definition: >-
+      The three maintenance scopes — local (rebuild only the affected block, leaf vector or node header), accumulated (compact when record/token/dirty-ratio thresholds are reached or during an idle period) and neighbourhood (batch nearby dirty nodes that share records, embeddings or likely topology work).
+      三种维护范围——局部（只重建受影响的 block、leaf 向量或节点 header）、累积（达到记录／token／脏比例阈值时或空闲期压缩）、邻域（对共享记录、embedding 或很可能有拓扑工作的邻近脏节点批量处理）。
+    owner: docs/design/design/incremental-storage-and-index-maintenance.md
+    anchor: Incremental storage and index maintenance
+    status: canonical
+  - term: dual-trigger due check
+    aliases: [hot node versus global backlog, 双触发到期检查]
+    definition: >-
+      The rule that a single hot node is selected as soon as its own write or eligible access counter reaches the threshold, while equally a bounded slice selects the largest then oldest non-empty node backlogs when many sparse nodes leave every local counter below the threshold but their global pending total reaches it; another slice is scheduled while a full `nodeLimit` batch was consumed, a below-threshold tail stays deferred but bounded, and per-node and global totals count only indexed, active or disputed records.
+      规则：单个热节点在自身写入或合格访问计数器达到阈值时立即被选中；而当许多稀疏节点使每个本地计数器都低于阈值、但全局待处理总量达到阈值时，同一有界切片选出积压量最大、其次最旧的节点。消费完整 `nodeLimit` 批次时会再调度一个切片，低于阈值的尾部保持延后但仍有界，且逐节点与全局总量只统计已索引、活动或有争议的记录。
+    owner: docs/design/design/incremental-storage-and-index-maintenance.md
+    anchor: Incremental storage and index maintenance
+    status: canonical
+  - term: storage state ladder
+    aliases: [L4 dormant, L5 quarantine, 存储状态阶梯]
+    definition: >-
+      The lifecycle states after the indexed cold tier — L4 Dormant/Unindexed retains authoritative content and minimal lookup metadata but is removed from normal FTS, vector/ANN, automatic recall, recommendations and Active Graph construction while remaining addressable by stable ID, and L5 Quarantine is a deletion-candidate zone entered only after a further retention interval plus dependency/protection review, invisible during a configurable recovery window; normal cleanup follows `indexed -> dormant -> quarantine -> purge`, and history is immutable while retained, not guaranteed to be retained forever.
+      已索引冷层之后的生命周期状态——L4 Dormant/Unindexed 保留权威内容与最小查找元数据，但被移出普通 FTS、向量／ANN、自动召回、推荐与 Active Graph 构建，同时仍可按稳定 ID 寻址；L5 Quarantine 是删除候选区，只有在又一个保留间隔加依赖／保护审阅之后才进入，并在可配置恢复窗口内不可见；普通清理遵循 `indexed -> dormant -> quarantine -> purge`，历史在被保留期间不可变，但不保证永久保留。
+    owner: docs/design/design/incremental-storage-and-index-maintenance.md
+    anchor: Incremental storage and index maintenance
+    status: canonical
+  - term: retention protection versus resident injection
+    aliases: [protected but not injected, 保留保护与常驻注入]
+    definition: >-
+      The distinction between protection from automatic L4/L5 movement (records whose type is `constraint`, `preference` or `state`, whose evidence role is `contradict` or `exception`, that support a surviving derivation, or that carry a `critical`, `pinned`, `protected`, `safety_constraint` or `user_defined` marker) and resident injection, which is narrower: only active, indexed, tier-0 constraints of importance at least `0.8` asserted or verified by a user/tool/system source are eligible under a small global limit.
+      区分：受保护而不被自动 L4/L5 迁移（类型为 `constraint`、`preference` 或 `state`，证据角色为 `contradict` 或 `exception`，支撑存活派生，或携带 `critical`、`pinned`、`protected`、`safety_constraint` 或 `user_defined` 标记的记录）与常驻注入——后者更窄：只有活动的、已索引的、重要性至少 `0.8` 且由用户／工具／系统来源断言或验证的 tier-0 约束在一个小的全局上限下具备资格。
+    owner: docs/design/design/incremental-storage-and-index-maintenance.md
+    anchor: Incremental storage and index maintenance
+    status: canonical
+  - term: physical privacy erasure order
+    aliases: [erasure receipt, 物理隐私擦除顺序]
+    definition: >-
+      The required seven-step propagation for physical erasure — compute the unsupported derived-memory closure and freeze concurrent writes; remove links and delete a HistoryRecord body only when nothing surviving references it; remove vectors, FTS rows, leaf membership, ANN/cache entries, dirty deltas, claim state and proposals; delete retrieval traces that referenced the target rather than editing result arrays; invalidate and rebuild summaries, relation evidence, aliases and empty nodes; reset non-subtractable learned aggregates and call adapter erasure hooks; then physically delete with SQLite secure-delete/VACUUM or key destruction — run as one reviewed job producing a receipt with only non-sensitive identifiers and counts. Until it exists, `forget`/`memory delete` describe themselves as logical withdrawal.
+      物理擦除要求的七步传播——计算失去支持的派生记忆闭包并冻结并发写入；移除链接且只在无存活引用时删除 HistoryRecord 正文；移除向量、FTS 行、leaf 成员关系、ANN／cache 条目、脏增量、claim 状态与提议；删除引用了目标的检索 trace 而不是仅编辑结果数组；失效并重建 summary、关系证据、别名与空节点；重置不可减除的学习聚合并调用适配器擦除钩子；最后用 SQLite secure-delete/VACUUM 或密钥销毁物理删除——作为一个受审阅作业运行并产生只含非敏感标识符与计数的回执。在该作业存在之前，`forget`/`memory delete` 只把自己描述为逻辑撤回。
+    owner: docs/design/design/incremental-storage-and-index-maintenance.md
+    anchor: Incremental storage and index maintenance
+    status: canonical
+  - term: ordered batch write primitive
+    aliases: [rememberMany, rememberBatch, 有序批量写入原语]
+    definition: >-
+      `rememberMany`, an ordered transaction primitive rather than an unordered bulk loader: each item observes earlier writes in the same transaction so duplicate and replacement semantics match repeated `remember`, one failure rolls back the batch, and the daemon's capability-negotiated `rememberBatch` RPC bounds a request to 512 items against one physical LTG or session-owned STG store without changing the protocol compatibility epoch.
+      `rememberMany`，一个有序事务原语而非无序批量加载器：每一项都能观察到同一事务中更早的写入，使重复与替换语义与重复调用 `remember` 一致，任一失败回滚整批，而 daemon 经能力协商的 `rememberBatch` RPC 把一次请求限定为 512 项并指向单个物理 LTG 或归会话所有的 STG store，且不改变协议兼容 epoch。
+    owner: docs/design/design/incremental-storage-and-index-maintenance.md
+    anchor: Incremental storage and index maintenance
+    status: canonical
+references:
+  - Long-Term Graph
+  - Short-Term Graph
+  - consolidation

@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: pre-registration
+    aliases: [预注册, 预注册协议]
+    definition: >-
+      Prospectively locking the suite, owner map, objective, arms, costs, metrics, margins, analysis and stop rules before outcome inspection, with deviations disclosed. This historical proposal leaves required settings unresolved and does not demonstrate a completed freeze; selecting a suite from prior criteria is a prerequisite, not an invalidation.
+      在查看结果前前瞻性锁定套件、owner 映射、目标、臂、成本、指标、边际、分析及停止规则，并披露偏离。本历史提案仍缺必需设置，不证明完整冻结；按事先判据选择套件是前提，不是使其失效的行为。
+    owner: docs/experiments/context/live-comparison-preregistration-2026-09-07.md
+    anchor: 1. The question
+    status: canonical
+  - term: independent unit
+    aliases: [独立单元]
+    definition: >-
+      The proposed owner-level grouping unit, kept intact across train/validation/test. Nearby rows and paraphrases from one owner are not separate units; the exact owner map remains unresolved, and distinct identifiers alone do not prove statistical independence.
+      提案以 owner 为分组单元，完整保留在 train/validation/test 的某一角色中。同一 owner 的相邻行或改写不算不同单元；具体 owner 映射仍未解决，不同标识符本身也不证明统计独立。
+    owner: docs/experiments/context/live-comparison-preregistration-2026-09-07.md
+    anchor: 3. Population, unit, and eligibility (locked before any outcome inspection)
+    status: canonical
+  - term: retrieve-constant null
+    aliases: [retrieve-constant 无增益结果, 无附加价值的 retrieve 复现]
+    definition: >-
+      A router reproducing the retrieve-always fallback at the selected lambda and meeting non-inferiority without demonstrated added value. Null here means no demonstrated benefit, not an empty context or missing result.
+      路由器在所选 lambda 下复现 always-retrieve 回退，达到非劣却未证明附加价值。此处 null 指未证明收益，不是上下文为空或结果缺失。
+    owner: docs/experiments/context/live-comparison-preregistration-2026-09-07.md
+    anchor: 5. Cost penalty λ must participate (fixes the offline P1)
+    status: canonical

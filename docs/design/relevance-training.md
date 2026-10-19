@@ -1,4 +1,6 @@
-# Relevance training data and evaluation
+# Relevance Training Data and Evaluation
+
+[English](relevance-training.md) | [简体中文](relevance-training.zh-CN.md) · [Terms](relevance-training.terms.yaml)
 
 **Status:** current
 

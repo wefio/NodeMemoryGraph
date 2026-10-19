@@ -1,5 +1,7 @@
 # External Source Design（外部来源设计）
 
+[English](external-source-design.md) | [简体中文](external-source-design.zh-CN.md) · [Terms](external-source-design.terms.yaml)
+
 **Status:** current
 **Updated:** 2026-08-01
 **Related:** [memory-graphs.md](memory-graphs.md), [edge-activation-design.md](edge-activation-design.md), [tiered-disclosure-design.md](tiered-disclosure-design.md), design.md §5a/§9
@@ -27,10 +29,10 @@ re-fetch, no freshness crawler.
 | Boundary | no background channel, no new maintenance component | new always-on subsystem, violates Lite |
 | Failure mode | agent may use stale fact (visible via marker) | agent may use stale fact (invisible — false freshness) |
 
-The last row is the decisive one: a background re-verifier that fails to run
-**lies** (the memory looks fresh when it is not), while a marker can never
-lie — it says "external, unverified" regardless of what the agent does. NMG
-rejects invisible freshness.
+The last row is the decisive trade-off: if a background re-verifier silently
+fails, its freshness state can mislead; a preserved marker keeps the external,
+unverified provenance visible. This does not make the marker itself a truth
+oracle—its accuracy still depends on the write path.
 
 This also matches the memory-reconsolidation view: a memory is re-validated
 when it is retrieved and used, not on a schedule. Unused memories do not need

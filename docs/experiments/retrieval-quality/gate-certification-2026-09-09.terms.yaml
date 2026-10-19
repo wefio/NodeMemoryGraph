@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: certified threshold pair
+    aliases: [经认证的阈值对]
+    definition: >-
+      A historical tool-selected set-cut/model-floor point passing its calibration criterion: question binomial under sampling assumptions or approximate item cluster bootstrap. Held-out DROPS means failure to re-pass that bound, not necessarily observed risk above alpha; neither pass grants runtime authority.
+      通过历史工具标定判据的集合截断／模型下限点：题级是在抽样假设下的二项检验，条目级是近似整群 bootstrap。留出 DROPS 是未重过统计界，不必是观察风险超 alpha；通过不授予运行时权限。
+    owner: docs/experiments/retrieval-quality/gate-certification-2026-09-09.md
+    anchor: Certification
+    status: canonical
+  - term: iso-acceptance frontier
+    aliases: [等接受率前沿]
+    definition: >-
+      Comparison of selected lattice points meeting a minimum acceptance L on calibration, not necessarily identical realized coverage on test. The recorded L=10% reversal and model-off selection from L=20% describe that lattice/split, not universal model equivalence.
+      对标定接受率至少 L 的格点比较，不保证 test 实现覆盖相同。L=10% 反转及 L=20% 起模型关闭只描述该格点／切分，不是模型普适等价。
+    owner: docs/experiments/retrieval-quality/gate-certification-2026-09-09.md
+    anchor: Iso-acceptance frontier (the robust comparison)
+    status: canonical
+  - term: pool ceiling
+    aliases: [候选池上限]
+    definition: >-
+      The fraction of questions with benchmark-matched gold somewhere in a fixed retrieved pool. Remove-only gating cannot increase this availability, but the 15.6% pool fraction does not force 84% risk on selective gates; accept-all risk and selective risk have different denominators.
+      固定检索池中某处有 benchmark 匹配 gold 的题占比。纯移除不能提高该可用性，但 15.6% 池比例不强迫选择性闸门承受 84% 风险，全接受与选择风险分母不同。
+    owner: docs/experiments/retrieval-quality/gate-certification-2026-09-09.md
+    anchor: The number that bounds everything
+    status: canonical

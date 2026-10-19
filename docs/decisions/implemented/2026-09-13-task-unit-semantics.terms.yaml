@@ -1,0 +1,9 @@
+version: 2
+terms: []
+references:
+  - task unit
+  - Task IR
+  - task refinement
+  - execution fusion
+  - bounded speculation
+  - Task Board

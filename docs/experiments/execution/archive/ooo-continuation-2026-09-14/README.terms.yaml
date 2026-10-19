@@ -1,0 +1,40 @@
+version: 2
+terms:
+  - term: G7 continuation sample archive
+    aliases: [G7 samples, G7 延续样本归档]
+    definition: >-
+      The retained 2026-09-14 research-instrument logs, rejected artifacts and 35 candidate modules supporting ledger row G7; it does not establish product-runtime integration.
+      为义务台账 G7 行保留的 2026-09-14 research-instrument 日志、被拒 artifact 与 35 个 candidate module；它不能证明已接入产品运行时。
+    owner: docs/experiments/execution/archive/ooo-continuation-2026-09-14/README.md
+    anchor: Run logs (`run-logs/`)
+    status: canonical
+  - term: continuation provenance digest
+    aliases: [continuedFrom, 延续来源 digest]
+    definition: >-
+      The digest of the artifact a part2 record continued from; it shows that continuation began from delivered bytes rather than the original stub.
+      part2 记录所延续 artifact 的 digest；它表明延续从已交付 bytes 开始，而不是从原始 stub 开始。
+    owner: docs/experiments/execution/archive/ooo-continuation-2026-09-14/README.md
+    anchor: Run logs (`run-logs/`)
+    status: canonical
+  - term: legal conclusion misclassification
+    aliases: [invalid patch structure false positive, 合法结论误分类]
+    definition: >-
+      A conclusion artifact incorrectly rejected as malformed patch structure by a reader that only accepts patch artifacts; the stored bytes show a reader-selection defect, not an invalid conclusion.
+      只接受 patch artifact 的 reader 将 conclusion artifact 错误拒绝为 malformed patch structure；保存的 bytes 表明这是 reader 选择缺陷，不是 conclusion 本身无效。
+    owner: docs/experiments/execution/archive/ooo-continuation-2026-09-14/README.md
+    anchor: Rejected artifacts (`rejected-artifacts/`)
+    status: canonical
+  - term: missing usage record
+    aliases: [null token count, 缺失用量记录]
+    definition: >-
+      A failed call whose usage was never recorded; its `null` token field means unknown, not zero and not an estimate.
+      用量记录生成前就失败的调用；其 `null` token 字段表示未知，不表示零，也不能估算替代。
+    owner: docs/experiments/execution/archive/ooo-continuation-2026-09-14/README.md
+    anchor: What this archive does not hold
+    status: canonical
+references:
+  - research-instrument evidence
+  - product-runtime integration boundary
+  - artifact digest
+  - rejected artifact
+  - run record

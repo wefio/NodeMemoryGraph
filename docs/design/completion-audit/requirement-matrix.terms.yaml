@@ -1,0 +1,28 @@
+version: 2
+terms:
+  - term: verified core
+    aliases: [已验证核心]
+    definition: >-
+      The matrix state meaning the contract is designed, wired into the stable boundary and covered by deterministic tests; it says nothing about natural utility, default activation or product proof, and several rows carry remaining proof or work even in this state.
+      矩阵状态之一：契约已设计、接入稳定边界并由确定性测试覆盖；它不涉及自然效用、默认启用或产品证明，且多行在此状态下仍带有剩余证明或工作。
+    owner: docs/design/completion-audit/requirement-matrix.md
+    anchor: Requirement matrix
+    status: canonical
+  - term: calibration gate row
+    aliases: [标定闸门行]
+    definition: >-
+      The matrix state meaning the mechanism exists while its thresholds or default activation still require independent natural evidence; it is a validation blocker rather than a missing storage mechanism, so new subsystems are not the remedy.
+      矩阵状态之一：机制存在，但其阈值或默认启用仍需独立的自然证据；它属于验证型阻塞而不是缺失的存储机制，因此新增子系统并非补救。
+    owner: docs/design/completion-audit/requirement-matrix.md
+    anchor: Requirement matrix
+    status: canonical
+references:
+  - Lab
+  - promotion gate
+  - NMG Lite
+  - Active Graph
+  - task frame
+  - projection revision
+  - consolidation
+  - QPP
+  - disclosure

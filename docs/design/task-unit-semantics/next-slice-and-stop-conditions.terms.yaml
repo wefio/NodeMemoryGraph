@@ -1,0 +1,16 @@
+version: 2
+terms:
+  - term: offline semantics slice
+    aliases: [offline slice, 离线语义切片]
+    definition: >-
+      The first proposed implementation slice: a shared-layer pure-data compiler and offline execution model over existing frozen contracts and facts, without model calls, board-schema changes, multi-actor execution or paid speculation.
+      首个拟实现切片：在现有冻结契约与事实之上构建共享层纯数据编译器和离线执行模型，不调用模型、不改 board schema、不启用多执行者或付费推测。
+    owner: docs/design/task-unit-semantics/next-slice-and-stop-conditions.md
+    anchor: Next executable slices and stop conditions
+    status: proposed
+references:
+  - task unit
+  - task view
+  - execution fusion
+  - bounded speculation
+  - Task Board

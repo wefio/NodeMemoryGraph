@@ -1,0 +1,11 @@
+version: 2
+terms:
+  - term: historical SQLite tuning assessment
+    aliases: [dated SQLite tuning note, SQLite 调优历史评估]
+    definition: >-
+      A dated architecture and tuning assessment whose recommendations are historical context; current pragmas and performance claims must be checked against current source and measurements.
+      有日期的架构与调优评估，其建议仅作历史背景；当前 PRAGMA 配置和性能主张必须对照现行源码与测量结果核实。
+    owner: docs/design/sqlite-assessment.md
+    anchor: "3. Historical action summary"
+    status: canonical
+references: []

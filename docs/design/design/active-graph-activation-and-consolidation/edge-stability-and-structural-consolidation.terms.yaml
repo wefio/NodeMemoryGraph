@@ -1,0 +1,55 @@
+version: 2
+terms:
+  - term: edge stability
+    aliases: [S_e, 边稳定性]
+    definition: >-
+      The slowly changing estimate of whether a typed relation has repeatedly helped across independent contexts, updated by decay, cross-task usefulness, independent recurrence, user/tool verification and contradictions or failures; repeated retrieval alone must not raise it, otherwise an accidental edge creates a co-retrieval feedback loop, and useful observations are deduplicated by session/task/source lineage.
+      对一条带类型关系是否在独立上下文中反复有帮助的缓慢变化估计，由衰减、跨任务有用性、独立复现、用户／工具验证与矛盾或失败更新；仅重复检索不得提升它，否则偶然形成的边会产生共检索反馈回路，而有用观察按会话／任务／来源 lineage 去重。
+    owner: docs/design/design/active-graph-activation-and-consolidation/edge-stability-and-structural-consolidation.md
+    anchor: Edge stability and structural consolidation
+    status: canonical
+  - term: consolidation hysteresis
+    aliases: [retained-threshold demotion, 合并滞后]
+    definition: >-
+      The rule that demotion or reopening requires a lower threshold than promotion, preventing repeated promote/demote oscillation; the operation is versioned, auditable, preserves evidence and must be reversible by rebuilding the semantic projection from history, and stable co-activation supports a relation without proving a factual claim.
+      规则：降级或重开所需的阈值低于晋升阈值，从而避免反复的晋升／降级振荡；该操作带版本、可审计、保留证据，且必须能通过从历史重建语义投影而回退，而稳定的共激活只支持一条关系、并不证明某项事实主张。
+    owner: docs/design/design/active-graph-activation-and-consolidation/edge-stability-and-structural-consolidation.md
+    anchor: Edge stability and structural consolidation
+    status: canonical
+  - term: posterior eligibility gate
+    aliases: [vote/mean/lower-bound gate, 后验资格门禁]
+    definition: >-
+      The per-claim gate for automatic posterior-based STG→LTG consolidation of an already stored atomic claim — minimum independent votes, posterior mean and a conservative lower bound; this is distinct from governed immediate admission of a confirmed atomic memory. Retrieval frequency, repeated rendering and silence never qualify a memory, and the copied LTG record carries a `consolidated_from_stg` marker whose exact same-scope deduplication makes retry after interruption idempotent.
+      对已存储原子声明执行基于后验的自动 STG→LTG 合并时所用的逐声明门禁——最小独立票数、后验均值与保守下界；这与经治理操作立即接纳已确认的原子记忆不同。检索频率、重复渲染与沉默永远不能让一条记忆合格，而被复制的 LTG 记录携带 `consolidated_from_stg` 标记，其精确同作用域去重使中断后的重试幂等。
+    owner: docs/design/design/active-graph-activation-and-consolidation/edge-stability-and-structural-consolidation.md
+    anchor: Edge stability and structural consolidation
+    status: canonical
+  - term: retained hysteresis gate
+    aliases: [reverse path, 保留滞后门禁]
+    definition: >-
+      The lower retained-mean and retained-lower-bound thresholds under which an already materialized LTG copy stays active; once it falls below them NMG logically withdraws only the active LTG row whose `consolidated_from_stg.sourceMemoryId` matches the STG source, while manual or pre-existing LTG duplicates carry no such ownership marker and requalification creates a new LTG version rather than reviving the withdrawn interpretation.
+      已物化的 LTG 副本借此保持活动的更低保留均值与保留下界阈值；一旦跌破，NMG 只逻辑撤回那条 `consolidated_from_stg.sourceMemoryId` 与 STG 来源匹配的活动 LTG 行，而手工或既有 LTG 重复项不携带这种所有权标记，重新合格会创建新的 LTG 版本而不是复活被撤回的解释。
+    owner: docs/design/design/active-graph-activation-and-consolidation/edge-stability-and-structural-consolidation.md
+    anchor: Edge stability and structural consolidation
+    status: canonical
+  - term: identity automation assessment
+    aliases: [read-only merge eligibility, 身份自动化评估]
+    definition: >-
+      The read-only assessment a pending `same_as` proposal must pass — at least five observations, mean confidence at least 0.98, at least four active evidence memories in total, with at least one represented on each node, identical evidence scope, no pending `distinct_from` or `contradicts` proposal, user or tool evidence with a shared source-actor class, exactly one non-empty identity value whose canonical name is not already an active node; passing is eligibility only, actuation is fail-closed unless `NMG_TOPOLOGY_AUTO_MERGE=1`, and default per-pass actuation is one eligible proposal hard-capped at four.
+      `same_as` 待处理提议必须通过的一次只读评估——至少五次观察、平均置信度至少 0.98、活动证据记忆总计至少四条，且每个节点至少有一条、完全相同的证据作用域、无待处理的 `distinct_from` 或 `contradicts` 提议、来自用户或工具且共享来源 actor 类别的证据、恰好一个非空身份值且其规范名称尚不属于活动节点；通过只代表资格，除非设置 `NMG_TOPOLOGY_AUTO_MERGE=1` 否则执行 fail-closed，且默认每轮至多执行一个合格提议、硬上限为四。
+    owner: docs/design/design/active-graph-activation-and-consolidation/edge-stability-and-structural-consolidation.md
+    anchor: Edge stability and structural consolidation
+    status: canonical
+  - term: three orthogonal edge quantities
+    aliases: [confidence/usefulness/activation, 三个正交边量]
+    definition: >-
+      The separation of confidence (Beta posterior over validity in time and scope, gated by a conservative lower bound), usefulness/stability (repeated helpfulness across independent tasks) and activation (private to one Active Graph and decaying rapidly with normalized, budget-clipped outflow); edge strength is not one scalar, and a route score may combine these values without overwriting them, with pinned or safety-critical constraints exempt from access-frequency demotion.
+      置信度（对时间与作用域内有效性的 Beta 后验，以保守下界作门禁）、有用性／稳定性（跨独立任务的反复帮助）与激活（单个 Active Graph 私有、快速衰减且外向流规范化并受预算裁剪）三者的分离；边强度不是一个标量，route score 可以组合这些值而不覆盖它们，固定或安全关键约束豁免于访问频率降级。
+    owner: docs/design/design/active-graph-activation-and-consolidation/edge-stability-and-structural-consolidation.md
+    anchor: Edge stability and structural consolidation
+    status: canonical
+references:
+  - consolidation
+  - claim outcome
+  - Active Graph
+  - same-scope supersession

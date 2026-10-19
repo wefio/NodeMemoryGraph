@@ -1,0 +1,29 @@
+version: 2
+terms:
+  - term: mutation tooth
+    aliases: [named mutant rule, 突变牙]
+    definition: >-
+      A durable mutation case consisting of its name, operator, syntax-aware selector and the named test case that must fail; the source range and replacement bytes are derived at run time rather than stored as a copied line.
+      一条持久突变用例，由名称、操作符、语法感知选择器及必须失败的具名测试组成；源码范围和替换字节在运行时推导，而不是以复制的源码行保存。
+    owner: docs/decisions/implemented/2026-09-24-mutants-are-derived-not-anchored.md
+    anchor: Decision
+    status: canonical
+  - term: "mutation testing"
+    aliases: ["变异测试"]
+    definition: >-
+      Evaluating tests on the original implementation and deliberately altered variants to find changes the tests do not reject; matching a test title alone does not prove behavioral coverage.
+      对原始实现和有意改动的变体运行测试，找出测试未拒绝的变更；仅匹配测试标题不证明行为覆盖。
+    owner: docs/design/ooo-execution-bootstrap.md
+    anchor: "Checkable evidence for a conclusion"
+    status: canonical
+references:
+  - Repository Control Plane
+  - contract
+  - route
+  - receipt
+  - gate
+  - assertion
+  - check
+  - evidence
+  - assertion context
+  - trusted baseline

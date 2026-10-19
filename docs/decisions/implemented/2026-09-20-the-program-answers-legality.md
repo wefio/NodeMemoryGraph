@@ -1,6 +1,6 @@
 # The program answers legality, and nothing else
 
-[中文](2026-09-20-the-program-answers-legality.zh-CN.md)
+[中文](2026-09-20-the-program-answers-legality.zh-CN.md) · [Terms used](2026-09-20-the-program-answers-legality.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

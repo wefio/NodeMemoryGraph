@@ -1,6 +1,6 @@
 # 融合机制：一个 run 一个会话
 
-[English](2026-09-19-fusion-session-mechanism.md)
+[English](2026-09-19-fusion-session-mechanism.md) · [术语](2026-09-19-fusion-session-mechanism.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

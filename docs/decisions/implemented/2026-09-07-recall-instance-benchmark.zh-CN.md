@@ -2,14 +2,11 @@
 
 **Status:** implemented  
 **Approved:** unrecorded
-Date: 2026-09-07
-Branch: pr/recall-instance-benchmark
-
 受 self-governance 元规则与 hidden-features 规则治理
 (`docs/decisions/implemented/2026-09-07-register-hidden-features.md`):本改动新增一个
 默认开启的 env-gated 特性(`NMG_RECALL_INSTANCES`),故在同一改动内注册进 hidden-features 注册表。
 
-English: [2026-09-07-recall-instance-benchmark.md](2026-09-07-recall-instance-benchmark.md)
+English: [2026-09-07-recall-instance-benchmark.md](2026-09-07-recall-instance-benchmark.md) · [术语](2026-09-07-recall-instance-benchmark.terms.yaml)
 
 ## 问题
 

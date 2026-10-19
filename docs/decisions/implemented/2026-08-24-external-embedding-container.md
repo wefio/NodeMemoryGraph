@@ -1,6 +1,6 @@
 # Separate the NMG runtime from the embedding environment
 
-[中文](2026-08-24-external-embedding-container.zh-CN.md)
+[中文](2026-08-24-external-embedding-container.zh-CN.md) · [Terms used](2026-08-24-external-embedding-container.terms.yaml)
 
 **Status:** implemented  
 **Approved:** unrecorded

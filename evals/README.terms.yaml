@@ -1,0 +1,70 @@
+version: 2
+terms:
+  - term: two kinds of evaluation
+    aliases: [两类评测]
+    definition: >-
+      The strategy split that deterministic engineering cases detect implementation regressions while public memory benchmarks measure whether the system improves agent behaviour; public scores never replace the deterministic core suite, because a system can answer benchmark questions correctly while corrupting provenance, exceeding its retrieval budget, or rebuilding an index unnecessarily.
+      策略上的划分：确定性工程用例检测实现回归，公开记忆 benchmark 衡量系统是否改善 agent 行为；公开分数永不替代确定性核心套件，因为系统可以在正确回答 benchmark 问题的同时破坏来源、超出检索预算或不必要地重建索引。
+    owner: evals/README.md
+    anchor: NMG evaluation strategy
+    status: canonical
+  - term: stable entry point
+    aliases: [稳定入口点]
+    definition: >-
+      A command surface allowed in `package.json`; one-off scripts live beside their evidence family and must not silently define benchmark or product policy, and a research family's directory root is not itself a command surface (use its local README or package script).
+      允许出现在 `package.json` 中的命令面；一次性脚本放在其证据族旁边，且不得静默定义 benchmark 或产品策略；研究族的目录根本身不是命令面（用它的本地 README 或 package script）。
+    owner: evals/README.md
+    anchor: Layout
+    status: canonical
+  - term: strict three-arm matched gate
+    aliases: [严格三臂闸门]
+    definition: >-
+      The default `matched` command's exactly three arms — `no-memory`, `nmg-deterministic`, and `nmg-shadow` — each starting from an independent copy of the same seeded database and sharing the reader model, thinking level, user prompt, question IDs and official scorer; other modes such as `raw-session`, `flat-hybrid`, `nmg-nodes` and `nmg-graph` remain diagnostic ablations rather than gate members, and one repeat is only a smoke signal.
+      默认 `matched` 命令恰好三个臂 —— `no-memory`、`nmg-deterministic`、`nmg-shadow` —— 每个都从同一份种子数据库的独立副本开始，并共用 reader 模型、thinking 等级、用户提示词、问题 ID 与官方打分器；`raw-session`、`flat-hybrid`、`nmg-nodes`、`nmg-graph` 等模式仍是诊断消融而非闸门成员，且一次重复只是冒烟信号。
+    owner: evals/README.md
+    anchor: Matched capability gate
+    status: canonical
+  - term: matched product audit
+    aliases: [matched 产品审计]
+    definition: >-
+      The fail-closed audit attached to a scored artifact: a complete causal arm comparison emits `matchedProduct.metrics`, while partial labels, unpaired rows, or an observational candidate emit blockers and `metrics: null`. Because the current shadow arm cannot change ranking its expected audit result is `candidate_does_not_affect_ranking`, which proves the measurement path rather than controller activation quality.
+      附在打分制品上的失败即关闭审计：完整的因果臂比较输出 `matchedProduct.metrics`，而标签不完整、行不成对或候选属观察性时输出 blocker 与 `metrics: null`。由于当前 shadow 臂无法改变排序，其预期审计结果是 `candidate_does_not_affect_ranking`，它证明的是测量路径而不是控制器激活质量。
+    owner: evals/README.md
+    anchor: Real-use controller calibration
+    status: canonical
+  - term: score snapshot comparability
+    aliases: [快照可比性]
+    definition: >-
+      Two local score snapshots are comparable only when their `sampleFingerprint` matches; a differing fingerprint means the runs covered different cases rather than that quality changed. Each snapshot carries per-mode scores plus code revision, sample fingerprint, judge model, protocol, sample size and a resolved non-secret parameter block, and any result selected for a design document must be copied into a manually reviewed summary with its fingerprint and protocol because raw run output is never committed.
+      两份本地分数快照只有在 `sampleFingerprint` 相同时才可比较；指纹不同意味着两次运行覆盖了不同用例，而不是质量变化。每份快照带各模式分数，以及代码版本、样本指纹、判定模型、协议、样本量与已解析的非机密参数块；任何被选进设计文档的结果都必须连同指纹与协议复制进经人工审阅的摘要，因为原始运行输出永不提交。
+    owner: evals/README.md
+    anchor: Local score snapshots
+    status: canonical
+  - term: ablation attribution rule
+    aliases: [消融归因规则]
+    definition: >-
+      The requirement that capability experiments isolate one mechanism at a time (STG on/off, node/leaf versus flat record retrieval, projection versus unbounded injection, graph expansion, agent-confirmed feedback, consolidation, and lexical/vector/hybrid routing) so gains are attributed to mechanisms; a larger NMG configuration is not better when the same result comes from a smaller arm.
+      要求能力实验一次隔离一个机制（STG 开关、节点/叶子与扁平记录检索、投影与无界注入、图扩展、agent 确认反馈、consolidation、词法/向量/混合路由），使增益被归因到机制；当同一结果来自更小的臂时，更大的 NMG 配置并不更好。
+    owner: evals/README.md
+    anchor: NMG-specific ablations
+    status: canonical
+  - term: report-only absence from evidence
+    aliases: [证据缺席只作报告]
+    definition: >-
+      The audit rule that absence from an evidence list is never treated as a negative claim label, so the consolidation audit deliberately does not report false-promotion precision, and a clean read-only inventory run is not evidence that natural precision or reversibility has been validated; missing evidence is emitted as an explicit `evidenceGaps` list.
+      审计规则：证据列表中的缺席永不当作负面 claim 标签，因此 consolidation 审计有意不报告错误晋升精确率；一次干净的只读清单运行也不是"自然精确率或可逆性已被验证"的证据；缺失证据以显式 `evidenceGaps` 列表输出。
+    owner: evals/README.md
+    anchor: Consolidation policy audit
+    status: canonical
+references:
+  - gate
+  - evidence
+  - QPP
+  - Active Graph
+  - Lab
+  - promotion gate
+  - Long-Term Graph
+  - Short-Term Graph
+  - consolidation
+  - disclosure
+  - tessera

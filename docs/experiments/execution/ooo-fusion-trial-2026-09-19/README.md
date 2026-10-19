@@ -1,5 +1,10 @@
 # Fusion quality field trial, 2026-09-19
 
+[中文](README.zh-CN.md) · [Terms used](README.terms.yaml)
+
+**Scope:** one live board run per arm, one model and one fixture. This is a bounded research comparison,
+not a general quality, cost or product-integration result.
+
 Two arms, one real model, one board run each. The question is whether continuing a session buys
 anything in quality or cost at a boundary; the arms differ in one declaration, so anything else that
 differs is not the comparison.
@@ -30,8 +35,8 @@ current fixture
 
 ## Result
 
-Both arms accepted all four units and the composed parent; neither produced a rejected unit, so this
-pair says nothing about quality differences and everything about cost.
+Both arms accepted all four units and the composed parent; neither produced a rejected unit. One pair
+cannot compare quality. The table records wall time and token/cache counts, not provider monetary cost.
 
 | Term            | Control                       | Fusion                        | Fusion / control              |
 | --------------- | ----------------------------- | ----------------------------- | ----------------------------- |
@@ -47,9 +52,9 @@ pair says nothing about quality differences and everything about cost.
 | per-unit tokens | 7 524 / 7 339 / 7 246 / 7 891 | 7 873 / 9 635 / 7 601 / 9 492 | 1.05x / 1.31x / 1.05x / 1.20x |
 
 So on this fixture, this model and one rep each: fusion did not save tokens, it spent 15% more, and
-the per-unit deltas are all positive. The wall clock was 35% lower. The second unit of a fused
-session is where the spend is, and it is higher, not lower - a warm context is a longer context, and
-the claim that a continued session spends less on the next unit is not what this pair shows.
+the per-unit deltas are all positive. The wall clock was 35% lower. The second unit in each fused
+session had the larger token increase, not a decrease; a warm context was longer, not cheaper, in this
+single comparison. This pair does not establish the general cost of a continued session.
 
 ## What the arm cost to measure, and the two defects it found
 

@@ -1,0 +1,19 @@
+version: 2
+terms:
+  - term: BEAM adapter
+    aliases: [eval:beam, BEAM 适配器]
+    definition: >-
+      The loader that recursively discovers BEAM cases containing `<case>/chat.json` and `<case>/probing_questions/probing_questions.json` from `evals/beam/data/chats/100K` or any directory named by `NMG_BEAM_DATA`, flattens chat batches into timestamp-preserving sessions, retains source chat ids when supplied, and samples independently across all probing question categories.
+      加载器：从 `evals/beam/data/chats/100K` 或 `NMG_BEAM_DATA` 指定的任意目录递归发现含 `<case>/chat.json` 与 `<case>/probing_questions/probing_questions.json` 的 BEAM case，把 chat 批次展平为保留时间戳的会话，在提供时保留来源 chat ID，并在全部探测问题类别上独立抽样。
+    owner: evals/beam/README.md
+    anchor: BEAM adapter
+    status: canonical
+  - term: judge substitution
+    aliases: [not leaderboard-comparable, 判定器替换]
+    definition: >-
+      The separate BEAM scorer that applies the official rubric semantics with DeepSeek V4 Flash, using normalized Kendall tau-b for `event_ordering` to match BEAM's primary report aggregation; because a different model judges, the substitution is explicitly not leaderboard-comparable.
+      独立的 BEAM 评分器：用 DeepSeek V4 Flash 施加官方 rubric 语义，对 `event_ordering` 使用归一化 Kendall tau-b 以匹配 BEAM 的主报告聚合；由于由不同模型评判，该替换被明确声明为不可与排行榜比较。
+    owner: evals/beam/README.md
+    anchor: BEAM adapter
+    status: canonical
+references: []

@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: opaque protocol payload
+    aliases: [protocol payload, 不透明协议负载]
+    definition: >-
+      The proposed single protocol-owned payload document that the board does not parse and that does not restate information already held in typed board or Task-Unit tables.
+      拟议的单份协议自有 payload 文档，黑板不解析它，且它不重复已由类型化黑板字段或 Task-Unit 表保存的信息。
+    owner: docs/decisions/proposed/2026-09-21-the-frame-and-its-storage.md
+    anchor: Proposal
+    status: proposed
+references:
+  - Task Board
+  - coordination frame

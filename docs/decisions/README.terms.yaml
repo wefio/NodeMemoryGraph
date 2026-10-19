@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: decision record
+    aliases: [决策记录]
+    definition: >-
+      A lifecycle-managed note that preserves the rationale and consequences of a non-trivial choice without replacing the normative behavior owner.
+      以生命周期管理的记录，用于保留非平凡选择的理由与后果，但不取代规范行为 owner。
+    owner: docs/decisions/README.md
+    anchor: Lifecycle
+    status: canonical
+  - term: lifecycle directory
+    aliases: [生命周期目录]
+    definition: >-
+      The directory containing a decision record; its location determines whether the record is proposed, implemented, rejected or archived.
+      决策记录所在的目录；其位置决定记录处于提议、已实现、已拒绝还是已归档状态。
+    owner: docs/decisions/README.md
+    anchor: Lifecycle
+    status: canonical
+  - term: decision supersession
+    aliases: [决策取代]
+    definition: >-
+      A recorded relationship in which a later decision replaces all or part of an earlier decision, with both records linked and the remaining scope stated.
+      后续决策全部或部分替代早期决策的记录关系；两条记录需相互链接，并说明各自剩余范围。
+    owner: docs/decisions/README.md
+    anchor: The header block
+    status: canonical
+references: []

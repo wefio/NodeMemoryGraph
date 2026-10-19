@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: state classification axis
+    aliases: [lifecycle axis, 状态分类轴]
+    definition: >-
+      A dimension that organizes records: use directories when lifecycle states are balanced and transitions recur; use an explicit line for sparse exceptions, and group experiments by the inquiry they answer rather than by a mostly concluded lifecycle.
+      用于组织记录的分类维度：生命周期状态分布较均衡且转换频繁时使用目录；例外稀少时使用显式状态行；实验则按其回答的探究主题分组，而不是按几乎都已结题的生命周期分组。
+    owner: docs/decisions/implemented/2026-09-09-design-and-experiment-classification.md
+    anchor: Decision
+    status: canonical
+references:
+  - decision record

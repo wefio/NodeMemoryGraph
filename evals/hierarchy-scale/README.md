@@ -1,5 +1,7 @@
 # Hierarchical vector granularity evaluation
 
+[English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
+
 Compares full MemoryRecord vector scans, node-only routing, node plus leaf/block
 routing, and record-level USearch ANN on the same wide-node workload.
 

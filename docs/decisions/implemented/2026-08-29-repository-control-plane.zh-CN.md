@@ -1,6 +1,6 @@
 # 外部 Repository Control Plane
 
-[English](2026-08-29-repository-control-plane.md)
+[English](2026-08-29-repository-control-plane.md) · [术语](2026-08-29-repository-control-plane.terms.yaml)
 
 **Status:** implemented  
 **Approved:** unrecorded
@@ -85,7 +85,7 @@ RCP 只通过窄 provider 扩展 repository/forge、harness、verifier、policy�
 6. 只有出现真实持续 contract 和独立发布需求后，才加入 watcher、queue、catalog 与拆分。
 
 规范数据契约、生命周期、安全默认值、阶段计划和完整验收由
-[ci-cd-and-quality.md §7](../../design/ci-cd-and-quality.md#7-repository-control-plane)
+[ci-cd-and-quality.md Repository Control Plane](../../design/ci-cd-and-quality/repository-control-plane.md#repository-control-plane-1)
 拥有。
 
 ### 固定可信基线
@@ -94,7 +94,7 @@ RCP 只通过窄 provider 扩展 repository/forge、harness、verifier、policy�
 安装版本，临时快照中的候选产品是被测物。规则或依赖变化需要单独审阅并安装新版本，不能
 由候选自行晋升。它扩展本地工作流，不静默增强普通 reconcile，也不切换轻量默认。
 命令、支持的输入与验收边界由
-[§7.13](../../design/ci-cd-and-quality.md#713-fixed-trusted-baseline-verification) 拥有。
+[Fixed trusted baseline verification](../../design/ci-cd-and-quality/repository-control-plane/trusted-baseline-verification.md#fixed-trusted-baseline-verification) 拥有。
 
 该选择借用证据产出与小接受规则的分离，不声称密码学简洁性。对抗性契约检查位于
 `tests/rcp/trusted.test.ts`；存在实现与在某环境完成验证是两种不同状态。

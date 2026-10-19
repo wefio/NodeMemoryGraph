@@ -1,6 +1,6 @@
 # A gate asserts a property of the result, never the identity of the tool
 
-[中文](2026-09-09-gates-assert-results-not-tools.zh-CN.md)
+[中文](2026-09-09-gates-assert-results-not-tools.zh-CN.md) · [Terms used](2026-09-09-gates-assert-results-not-tools.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit
@@ -25,12 +25,12 @@ standardized, convenient tools already exist. Three findings converge:
   clones rose from 8.3% to 12.3%, with copy/paste exceeding moved code for the
   first time.
 
-The same pattern holds here. `skills/doc-maintenance/SKILL.md` line 48 already
-said status rots in prose, yet 19 of 40 design documents carried free-form
-statuses. `AGENTS.md` requires `npm run agent:context` as the first step of any
-change; the session that audited script usage never ran it. `nmg-rcp` is invoked
-by no npm script and no workflow, while a 538-line tool composes the same library
-by hand.
+The 2026-09-09 audit found the same pattern here. `skills/doc-maintenance/SKILL.md`
+line 48 already said status rots in prose, yet 19 of 40 design documents carried
+free-form statuses. The then-current `AGENTS.md` required `npm run agent:context`
+as the first step of any change; the session that audited script usage never ran it.
+At that time, `nmg-rcp` had no npm-script or workflow caller, while a 538-line tool
+composed the same library by hand.
 
 The mitigation literature agrees on the mechanism: _"everything you feed an Agent
 through its context window is, in the end, a suggestion"_ and _"an Agent that can

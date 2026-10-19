@@ -1,0 +1,35 @@
+version: 2
+terms:
+  - term: three kinds of persisted task fact
+    aliases: [manifest/facts/derived split, 三类持久化任务事实]
+    definition: >-
+      The historical ooo_probe_tasks split into a once-written task manifest, latest fact rows keyed by (run_id, id), and a recomputable input_digest cache with a SQL projection. The fact rows do not retain an append-only sequence of all attempts, and this is not the product taskRun schema.
+      历史 ooo_probe_tasks 拆分：一次写入的任务 manifest、按 (run_id, id) 保存的最新事实行，以及可重算 input_digest cache 与 SQL 投影。事实行不保留所有 attempt 的 append-only 序列，也不是产品 taskRun schema。
+    owner: docs/experiments/execution/ooo-task-tables-2026-09-13.md
+    anchor: The shapes
+    status: canonical
+  - term: rebuild that promotes a fact out of the cache
+    aliases: [owner and claim_time are facts, 重算把事实移出 cache]
+    definition: >-
+      The finding that `owner` and `claim_time` cannot live in the cache: after the round resolves the entry when it accepts the artifact, the board stops reporting `claimedBy`, so a rebuild re-derives `null` where the cache held a name and the fields move to the facts table.
+      `owner` 与 `claim_time` 不能留在 cache 的发现：round 在接受 artifact 时 resolve 该 entry 之后，board 停止报告 `claimedBy`，因此重建会在 cache 曾保存姓名的地方重新派生出 `null`，这些字段因此移入 facts 表。
+    owner: docs/experiments/execution/ooo-task-tables-2026-09-13.md
+    anchor: What the recomputation check found
+    status: canonical
+  - term: rebuild must also be usable
+    aliases: [deliver-after-rebuild check, 重建结果必须可用]
+    definition: >-
+      The extra step in the recomputation test that delivers the next task in the round after rebuilding the cache, so a digest that is merely equal but unusable cannot pass the comparison alone.
+      重算测试中多出的一步：重建 cache 之后交付 round 中的下一个任务，因此一个仅相等但不可用的 digest 无法只靠比较就通过。
+    owner: docs/experiments/execution/ooo-task-tables-2026-09-13.md
+    anchor: What the recomputation check found
+    status: canonical
+  - term: mutation marker retaken from file bytes
+    aliases: [formatter rewrapped marker, 从文件字节重取 mutation 标记]
+    definition: >-
+      The historical local script depended on exact source-line markers, which broke after formatter wrapping. Recopying the bytes repaired that local instrument; this is not the later runtime-derived mutation-selector contract or an instruction to maintain copied source anchors.
+      历史本地脚本依赖精确源行标记，格式化换行后便失配。重新取字节修复的是当时工具，不是后来的运行时派生 mutation selector 契约，也不要求继续维护复制的源码锚点。
+    owner: docs/experiments/execution/ooo-task-tables-2026-09-13.md
+    anchor: Evidence (re-runnable)
+    status: canonical
+references: []

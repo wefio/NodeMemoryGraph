@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: synthetic lexical scale probe
+    aliases: [EVAL_SCALE-style scale check, 合成词法规模探针]
+    definition: >-
+      The 2026-08-09 engineering check that ran eight fixed probes among generated unrelated records with every external embedding provider disabled; it measures storage and lookup cost, not answer quality.
+      2026-08-09 的工程检查：在关闭所有外部 embedding provider 的情况下，于生成的无关记录之间运行八个固定探针；它测量存储与查找成本，不是答案质量。
+    owner: docs/experiments/store/scale-evaluation-2026-08-09.md
+    anchor: Results
+    status: canonical
+  - term: unindexed scan cost growth
+    aliases: [seconds-level scan cost, 未建索引扫描成本增长]
+    definition: >-
+      The observed pattern that scoring records or nodes without an index is not scale-independent: hashing, legacy and no-external-vector hybrid modes reach seconds per probe at one million records while FTS5 stays below a millisecond at P95 in this probe.
+      观察到的不带索引记录／节点打分并非与规模无关：在 100 万条记录时，hashing、legacy 与无外部向量 hybrid 模式的单次探针进入秒级，而本次探针中 FTS5 的 P95 仍低于 1 毫秒。
+    owner: docs/experiments/store/scale-evaluation-2026-08-09.md
+    anchor: Interpretation
+    status: canonical
+  - term: single-service concurrency probe
+    aliases: [one-writer concurrency probe, 单服务并发探针]
+    definition: >-
+      The reported 800 governed LTG writes from 32 logical sessions through one `NmgService` and synchronous SQLite writer, plus one scoped FTS lookup per session. It records sample failures and latencies, not a guaranteed concurrency or latency bound, multi-process load result or distributed-writer requirement.
+      报告通过一个 `NmgService` 及同步 SQLite writer，从 32 个逻辑 session 完成 800 次受治理 LTG 写入，并各做一次带 scope 的 FTS 查找。它记录样本失败数与延迟，不保证并发或延迟界限，也不是多进程负载结果或分布式 writer 要求。
+    owner: docs/experiments/store/scale-evaluation-2026-08-09.md
+    anchor: Single-service concurrency probe
+    status: canonical
+references: []

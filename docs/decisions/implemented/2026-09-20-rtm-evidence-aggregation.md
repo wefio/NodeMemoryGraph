@@ -1,6 +1,6 @@
 # The traceability report is evidence, not a count
 
-[中文](2026-09-20-rtm-evidence-aggregation.zh-CN.md)
+[中文](2026-09-20-rtm-evidence-aggregation.zh-CN.md) · [Terms used](2026-09-20-rtm-evidence-aggregation.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

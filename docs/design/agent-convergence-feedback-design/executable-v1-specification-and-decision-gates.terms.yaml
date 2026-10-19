@@ -1,0 +1,32 @@
+version: 2
+terms:
+  - term: context-features-v1
+    aliases: [上下文特征契约 v1]
+    definition: >-
+      The versioned 16-value plus 16-missing-indicator feature schema for this candidate, with missing encoded as `(0,1)` and an observed zero as `(0,0)`, counts saturating at 32, all features available before selection, history scoped to a task frame and cleared when the acceptance version changes; unavailable measurements stay missing rather than being guessed by an LLM.
+      本候选的版本化特征契约：16 个值加 16 个缺失指示器，缺失编码为 `(0,1)`、观察到的零编码为 `(0,0)`，计数在 32 处饱和，所有特征在选择前可得，历史以任务帧为界并在验收版本变化时清除；无法获得的测量保持缺失，不由 LLM 猜测。
+    owner: docs/design/agent-convergence-feedback-design/executable-v1-specification-and-decision-gates.md
+    anchor: Exact feature contract
+    status: canonical
+  - term: decision journal barrier
+    aliases: [决策日志屏障]
+    definition: >-
+      The requirement that an immutable decision revision be written before any side effect: an unwritten decision cannot execute, and a write failure after execution leaves an unknown outcome that forbids automatic re-execution until reconcile with the external tool's idempotency identity.
+      要求在任何副作用之前先写下不可变决策修订：未写下的决策不能执行；执行之后的写失败留下未知结果，在按外部工具的幂等身份 reconcile 之前禁止自动重复执行。
+    owner: docs/design/agent-convergence-feedback-design/executable-v1-specification-and-decision-gates.md
+    anchor: Actions, journal and failure handling
+    status: canonical
+  - term: integration acceptance table
+    aliases: [集成验收表]
+    definition: >-
+      The list of integrations (lifecycle producers, bookmarked fragments, long-lived quests, model exposure, production journal, outcome admission, efficacy) together with the acceptance each needs before it may be called complete; it separates a specified design from an implemented system and an implemented system from an empirically useful default, and authorizes no overall completion claim while open.
+      各集成项（生命周期生产者、带定位书签的片段、长期任务、模型暴露、生产日志、结果准入、效力）及其称完成之前所需验收的清单；它区分已规定的设计、已实现的系统与经验上有用的默认，且在仍开放期间不授权任何整体完成主张。
+    owner: docs/design/agent-convergence-feedback-design/executable-v1-specification-and-decision-gates.md
+    anchor: Remaining integration acceptance
+    status: canonical
+references:
+  - promotion gate
+  - learnable controller
+  - activation
+  - task frame
+  - Lab

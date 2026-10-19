@@ -1,21 +1,21 @@
 # 按各自的轴分类 design 与 experiment
 
-[English](2026-09-09-design-and-experiment-classification.md)
+[English](2026-09-09-design-and-experiment-classification.md) · [术语](2026-09-09-design-and-experiment-classification.terms.yaml)
 
 **Status:** implemented  
 **Approved:** unrecorded
 
 ## 问题
 
-`docs/design/` 完全没有状态纪律。40 个文档里有 19 个带 `**Status:**` 行，而这 19 行
-用了 **21 个不同的取值**：`诚实评估 / honest assessment`、`requirement ledger`、
+在 2026-09-09 审阅时，`docs/design/` 完全没有状态纪律。40 个文档里有 19 个带
+`**Status:**` 行，而这 19 行用了 **21 个不同的取值**：`诚实评估 / honest assessment`、`requirement ledger`、
 `documentation convention and curated recovery index`、
 `the actuator exists behind an explicit, default-off policy…`。机器无法从中读出生命
 周期；而一个标着 `superseded` 的设计和现行设计并排放着，后继链接也不强制。
 
-`docs/experiments/` 是相反的问题。40 份报告里 38 份都已结题，所以生命周期轴在那里
-不携带任何信息；而四条相关的运行线——`retrieval-quality-*` 6 个、`context-*` 6 个、
-`topology-*` 3 个、`qpp-*` 3 个——没有任何分组。
+同一轮审阅发现 `docs/experiments/` 存在相反的问题：40 份报告里有 38 份已结题，因此
+生命周期轴几乎不携带信息；而四条相关的运行线——`retrieval-quality-*` 6 个、`context-*`
+6 个、`topology-*` 3 个、`qpp-*` 3 个——没有任何分组。
 
 ## 决策
 
@@ -63,21 +63,20 @@ design 的散文会为它已经陈述的事实多出一种语法。
 日期，按「一事一家」应当从 20 个文档里删除。暂时保留：它们不是本决策要修的漂移，
 churn 目前也不划算。记入 Deferred。
 
-**连头部块里的裸 `Word:` 行也拒绝。** 与决策头部块同一个延后缺口，理由相同：有一条
-未提交的决策仍带着它们。
+**连头部块里的裸 `Word:` 行也拒绝。** 决策头部块将无粗体的行视为散文，不把它们扩展为元数据语法。原审阅时带有 `Date:` 和 `Branch:` 的旧决策头部仍在并行编辑，现已清理；本决定不改变验证器。
 
 ## Deferred
 
 `Created:` 和 `Updated:` 仍然重述 git 的首次与末次提交日期。若它们开始漂移再议；目前
 它们稳定且便宜。
 
-头部块里的裸 `Word:` 行在 decisions 和 design 中仍被当作散文处理。
+decisions 和 design 中没有粗体标记的 `Word:` 行仍被视为散文；现有检查只识别有文档定义的粗体字段语法。是否要更广泛地禁止此类行，不属于本决定范围。
 
 ## 后果
 
-`docs/design/` 现在有一个归档文档（`archived/file-content-source-design.md`），没有
-自由文本状态值。18 条状态句变成枚举令牌，其警示信息保留为限定语，因此没有丢失信息。
-封闭集之外的六个字段（`Date`、`Owner`、`Commits`、`Purpose`、`Normative source`、
-`Implementation recovery`）变成 `Updated:` 或散文。`docs/experiments/` 现在有 8 个
-主题目录，容纳每一次运行；其文件名门禁现在检查 basename，因此主题子目录内的报告仍会
-被检查日期。`benchmark-results.md` 是唯一留在顶层的记录，因为它跨主题。
+实施这项决定时，`docs/design/` 有一个归档文档（`archived/file-content-source-design.md`），
+且没有自由文本状态值。18 条状态句改为枚举令牌，并保留其限定语；封闭集之外的六个字段
+（`Date`、`Owner`、`Commits`、`Purpose`、`Normative source`、`Implementation recovery`）
+改成 `Updated:` 或散文。实验目录的初次重组把当时的运行记录放进八个主题目录，并加入按
+basename 检查日期的门禁；跨主题的 `benchmark-results.md` 留在顶层。当前清单和命名由
+[实验索引](../../experiments/README.zh-CN.md)拥有。

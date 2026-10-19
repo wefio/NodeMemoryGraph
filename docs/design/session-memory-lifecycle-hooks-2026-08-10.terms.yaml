@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: historical lifecycle note
+    aliases: [dated hook inventory, 生命周期钩子历史记录]
+    definition: >-
+      A dated design record that points to current lifecycle owners but is not itself an authoritative API reference, current implementation checklist, or fresh test receipt.
+      指向当前生命周期 owner 的有日期设计记录；它本身不是权威 API 参考、当前实现清单或新的测试回执。
+    owner: docs/design/session-memory-lifecycle-hooks-2026-08-10.md
+    anchor: Evidence boundary
+    status: canonical
+references:
+  - ReasoningWorkspace

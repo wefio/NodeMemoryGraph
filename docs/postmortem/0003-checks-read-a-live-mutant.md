@@ -1,6 +1,6 @@
 # 0003 - The checks I read were reading a mutant
 
-[中文](0003-checks-read-a-live-mutant.zh-CN.md)
+[中文](0003-checks-read-a-live-mutant.zh-CN.md) · [Terms used](0003-checks-read-a-live-mutant.terms.yaml)
 
 **Status:** resolved
 

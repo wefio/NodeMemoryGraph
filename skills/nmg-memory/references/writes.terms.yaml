@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: state key
+    aliases: [状态键, state-key]
+    definition: >-
+      A stable identifier for one replaceable property within a canonical scope; it names the property, not its current value or topic.
+      规范 scope 中一个可替换属性的稳定标识；它命名属性，而不是当前值或主题。
+    owner: skills/nmg-memory/references/writes.md
+    anchor: Changeable state
+    status: canonical
+  - term: open record
+    aliases: [开放记录]
+    definition: >-
+      An attributable unresolved memory structure that must reference at least one existing memory in the same store and can be explicitly resolved or reopened.
+      可归因的未解决记忆结构，必须引用同一 store 中至少一条现存记忆，并且可以显式 resolve 或 reopen。
+    owner: skills/nmg-memory/references/writes.md
+    anchor: Open, resolved, and reopened structures
+    status: canonical
+references:
+  - Active Graph
+  - Long-Term Graph
+  - Short-Term Graph
+  - projection revision
+  - state space
+  - working state
+  - claim outcome
+  - recall trigger

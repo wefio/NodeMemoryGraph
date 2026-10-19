@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: first-response timing trace
+    aliases: [opt-in first-response timing, 首次响应计时 trace]
+    definition: >-
+      An explicitly enabled, metadata-only sequence of native lifecycle boundary timings used to inspect slow input-to-recall preparation; it excludes compaction/queued cases and does not claim client-visible TTFT or exact provider-send time.
+      显式启用、仅含元数据的原生生命周期边界计时序列，用于检查输入到 recall 准备缓慢的问题；它排除 compaction／排队案例，且不声称测得客户端可见 TTFT 或精确 provider 发送时间。
+    owner: docs/decisions/implemented/2026-10-04-first-response-timing-is-opt-in.md
+    anchor: Decision
+    status: canonical
+references:
+  - evidence

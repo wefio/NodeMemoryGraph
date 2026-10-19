@@ -1,0 +1,42 @@
+version: 2
+terms:
+  - term: projection revision
+    aliases: [ProjectionRevision, 投影修订]
+    definition: >-
+      An immutable selection/disclosure revision frozen from a session Active Graph;
+      it is neither the mutable session graph nor confirmation of final provider input.
+      从会话活动图冻结的不可变选择／披露修订，既不是可变会话图，也不证明最终 provider 输入。
+    owner: docs/design/memory-graphs/session-runtime-graph-and-projection-revisions.md
+    anchor: "AG: session runtime graph and projection revisions"
+    status: canonical
+  - term: task frame
+    aliases: [任务帧]
+    definition: >-
+      A bounded partition of session Active Graph work selected by taskFrameId;
+      its identity is distinct from a coordination channel and does not imply automatic semantic task detection.
+      由 taskFrameId 选择的会话活动图工作分区，受预算约束；其身份不同于协调频道，也不意味着自动识别语义任务。
+    owner: docs/design/memory-graphs/session-runtime-graph-and-projection-revisions.md
+    anchor: "AG: session runtime graph and projection revisions"
+    status: canonical
+  - term: shared disclosure copy
+    aliases: [shared search/get copy, 共享披露文案]
+    definition: >-
+      The common explanatory text wrapped around search/get candidate and evidence content; compressing it changes presentation only, not the underlying records, selection or retrieval contract.
+      search/get 候选项与证据内容外侧的共享说明文本；压缩它只改变呈现，不改变底层记录、选择结果或检索合同。
+    owner: docs/decisions/implemented/2026-10-10-shared-disclosure-copy.md
+    anchor: Decision
+    status: canonical
+  - term: compound retrieval reference
+    aliases: [graph-scoped compound reference, 组合取回引用]
+    definition: >-
+      A graph-scoped selector combining a canonical-ID hexadecimal prefix and a literal short, whitespace-normalized statement quote, resolved against original ID/quote witnesses in a bounded retrieval projection. The RPC supplies current readable targets; a pure helper relies on caller-supplied targets and does not refresh them. It does not freeze the full body, create a durable alias or replace canonical IDs.
+      结合规范 ID 十六进制前缀与短的、仅作空白归一化的字面陈述引文，在有界检索 projection 中按原始 ID／引文见证解析的图作用域选择器。RPC 提供当前可读目标；纯 helper 依赖调用者提供目标，不自行刷新。不冻结整条正文、不建立持久别名，也不取代规范 ID。
+    owner: docs/decisions/implemented/2026-10-11-compound-retrieval-reference.md
+    anchor: Decision
+    status: canonical
+references:
+  - Active Graph
+  - Long-Term Graph
+  - Short-Term Graph
+  - Task Board
+  - state space

@@ -1,0 +1,19 @@
+version: 2
+terms:
+  - term: check identity
+    aliases: [CheckTicket, 检查身份]
+    definition: >-
+      The host-issued identity for an external check, represented by `CheckTicket`; it identifies the check but is not the runner that executes it.
+      由 host 为外部检查签发的身份，以 `CheckTicket` 表示；它标识检查，但不是执行检查的 runner。
+    owner: docs/decisions/implemented/2026-09-19-name-the-check-and-runner.md
+    anchor: Decision
+    status: canonical
+  - term: check runner
+    aliases: [检查运行器]
+    definition: >-
+      The component that executes a check and returns its result, distinct from the identity assigned to that check.
+      执行检查并返回结果的组件，与分配给该检查的身份不同。
+    owner: docs/decisions/implemented/2026-09-19-name-the-check-and-runner.md
+    anchor: Decision
+    status: canonical
+references: []

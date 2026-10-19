@@ -9,7 +9,7 @@
 治理 meta-rule：[self-governance meta-rule](2026-09-07-self-governance-meta-rule.md) ——
 本规则变更本身也是一次受治理的决策（决策 + 替代方案 + 一个规则一个家）。
 
-English version: [2026-09-18-detached-long-checks.md](2026-09-18-detached-long-checks.md)
+English version: [2026-09-18-detached-long-checks.md](2026-09-18-detached-long-checks.md) · [术语](2026-09-18-detached-long-checks.terms.yaml)
 
 ## 问题
 

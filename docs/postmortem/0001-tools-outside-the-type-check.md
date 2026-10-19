@@ -1,6 +1,6 @@
 # 0001 - The tool that checks the others is not itself checked
 
-[中文](0001-tools-outside-the-type-check.zh-CN.md)
+[中文](0001-tools-outside-the-type-check.zh-CN.md) · [Terms used](0001-tools-outside-the-type-check.terms.yaml)
 
 **Status:** open
 

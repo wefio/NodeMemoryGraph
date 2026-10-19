@@ -1,0 +1,67 @@
+version: 2
+terms:
+  - term: measurement cell
+    aliases: [cell, 测量 cell]
+    definition: >-
+      One planned experimental condition with a declared task shape, execution surface, slot count and bound, used to answer a named question.
+      以声明的任务形状、执行 surface、槽数与 bound 组成的一项实验条件，用于回答一个具名问题。
+    owner: docs/experiments/execution/ooo-arm-plan-2026-09-19.md
+    anchor: The cells
+    status: canonical
+  - term: plain execution surface
+    aliases: [plain surface, 普通执行 surface]
+    definition: >-
+      An execution condition that makes one worker call per task unit, without carrying a session across units.
+      每个 task unit 调用一次 worker、不跨 unit 延续 session 的执行条件。
+    owner: docs/experiments/execution/ooo-arm-plan-2026-09-19.md
+    anchor: The cells
+    status: canonical
+  - term: chain execution surface
+    aliases: [chain surface, 链式执行 surface]
+    definition: >-
+      An execution condition in which one session carries work across units and the worker submits artifacts turn by turn through patchSessionInput.
+      一个 session 跨 unit 承载工作、worker 通过 patchSessionInput 逐轮提交 artifact 的执行条件。
+    owner: docs/experiments/execution/ooo-arm-plan-2026-09-19.md
+    anchor: The cells
+    status: canonical
+  - term: single-observation grade
+    aliases: [single observation, 单次观测等级]
+    definition: >-
+      A one-rep comparison; it is separated only when the observed gap exceeds five times the larger cell's spread.
+      仅有一次重复的对比；只有观测差值超过较大 cell 的 spread 五倍时才判定分离。
+    owner: docs/experiments/execution/ooo-arm-plan-2026-09-19.md
+    anchor: How cells are compared: the rules
+    status: canonical
+  - term: pair grade
+    aliases: [paired-observation grade, 配对等级]
+    definition: >-
+      A two-rep comparison; it is separated only when the observed gap exceeds twice the larger cell's spread.
+      有两次重复的对比；只有观测差值超过较大 cell 的 spread 两倍时才判定分离。
+    owner: docs/experiments/execution/ooo-arm-plan-2026-09-19.md
+    anchor: How cells are compared: the rules
+    status: canonical
+  - term: rate grade
+    aliases: [three-or-more-rep grade, 速率等级]
+    definition: >-
+      A comparison with at least three reps; it is separated only when the observed gap is wider than the larger cell's own spread.
+      至少有三次重复的对比；只有观测差值大于较大 cell 自身的 spread 时才判定分离。
+    owner: docs/experiments/execution/ooo-arm-plan-2026-09-19.md
+    anchor: How cells are compared: the rules
+    status: canonical
+  - term: same-instrument condition
+    aliases: [same instrument, 同一工具条件]
+    definition: >-
+      Runs treated as one comparison condition only when their instrument commit agrees; matching specs alone do not establish the same execution condition.
+      只有 instrument commit 一致时，运行才按同一对比条件处理；spec 相同本身不能证明执行条件相同。
+    owner: docs/experiments/execution/ooo-arm-plan-2026-09-19.md
+    anchor: How cells are compared: the rules
+    status: canonical
+references:
+  - declared slot budget
+  - execution fusion
+  - bounded speculation
+  - directional-only result
+  - task unit
+  - run record
+  - obligation ledger
+  - research-instrument evidence

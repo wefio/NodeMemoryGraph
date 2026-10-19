@@ -1,5 +1,7 @@
 # Progressive disclosure probe
 
+[English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
+
 Run `npm run eval:disclosure` to compare full versus folded L1 disclosure and
 measure how the session injection window replaces repeated headers with compact
 memory references. This is a deterministic mechanism probe, not an answer-

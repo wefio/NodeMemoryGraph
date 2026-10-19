@@ -1,0 +1,52 @@
+version: 2
+terms:
+  - term: ledger reading
+    aliases: [reading at a revision, 账本读数]
+    definition: >-
+      A reported historical command/instrument observation with whatever revision/date is explicitly supplied. Relocation provenance is not a joint run identity or a new receipt; the old no-log phrase does not negate the later end-of-run JSON record.
+      带明确给出之修订／日期的历史命令／仪器观察。搬移来源不是共同运行身份或新回执，旧“不写日志”不否定后来结束 JSON 的记录。
+    owner: docs/experiments/verification/task-unit-semantics-ledger-readings-2026-10-14.md
+    anchor: Historical task-unit ledger verification readings
+    status: canonical
+  - term: retired instrument
+    aliases: [retirement pass, 退役仪器]
+    definition: >-
+      An instrument explicitly retired with a research object, such as round-plan.test.ts on 2026-09-18, because that decision found no product counterpart for its property. It does not excuse unrelated missing product verification.
+      随研究对象被明确退役的仪器，如 2026-09-18 的 round-plan.test.ts，该决策认定其性质无产品对应；不为其他缺失产品验证免责。
+    owner: docs/experiments/verification/task-unit-semantics-ledger-readings-2026-10-14.md
+    anchor: Historical task-unit ledger verification readings
+    status: canonical
+  - term: wrong flaky label
+    aliases: [recorded as flaky not fixed, 错误的 flaky 标签]
+    definition: >-
+      The retracted description of a failure followed by 1433/1433 as flaky/not fixed. This record attributes that clock-boundary defect to 2 of 3000 historical write/read rounds and reports a grace fix with six cases/four mutants; it is not a current failure-rate measurement.
+      把失败后 1433/1433 重跑通过称为 flaky／未修复的已撤回描述。记录将该时钟缺陷归于历史 3000 次写读中的 2 次，并报告宽限修复及六用例／四 mutant，不是当前失败率测量。
+    owner: docs/experiments/verification/task-unit-semantics-ledger-readings-2026-10-14.md
+    anchor: Historical task-unit ledger verification readings
+    status: canonical
+  - term: lane-parallel mutation sweep
+    aliases: [four lanes, lane 并行 mutation sweep]
+    definition: >-
+      The reported four-lane run used one worktree per lane, three added detached at the same commit. Mutations serialize within a tree; worktree-local targets are separate across trees, not automatically shared absolute paths/caches/services. Historical completion/restoration receipts do not guarantee cleanup after arbitrary interruption.
+      所报四 lane 各用一棵 worktree，其中三棵同提交 detached 创建。树内变体串行、跨树本地目标分开，不自动隔离共享绝对路径／缓存／服务；历史完成／还原回执不保证任意中断后清理。
+    owner: docs/experiments/verification/task-unit-semantics-ledger-readings-2026-10-14.md
+    anchor: Historical task-unit ledger verification readings
+    status: canonical
+  - term: orphan tooth
+    aliases: [no row names the tooth, 孤儿 tooth]
+    definition: >-
+      A historical obligation-map gap where no row named a tooth, not proof that no test exercised the behavior. The record maps publication to B3, pin release to B4, ordered mode to A6 and judge-loop rules to F2b-slot/F2c rather than inventing replacement rules.
+      没有义务行点名 tooth 的历史映射缺口，不证明无测试覆盖行为。记录将发布归 B3、pin 释放归 B4、ordered 归 A6、judge-loop 归 F2b-slot／F2c，不另造替代规则。
+    owner: docs/experiments/verification/task-unit-semantics-ledger-readings-2026-10-14.md
+    anchor: Historical task-unit ledger verification readings
+    status: canonical
+  - term: derived selector conversion
+    aliases: [teeth converted to derived selectors, 派生选择器转换]
+    definition: >-
+      A change in how a mutation target is located, not by itself proof that the intended assertion kills the fault. The reported wrong within and suite-only catches distinguish resolution, suite failure, expected-case failure and timeout.
+      变体目标定位方式的变化，本身不证明预期断言杀死故障。所报错误 within 及仅套件抓到区分定位、套件失败、预期用例失败和超时。
+    owner: docs/experiments/verification/task-unit-semantics-ledger-readings-2026-10-14.md
+    anchor: Historical task-unit ledger verification readings
+    status: canonical
+references:
+  - mutation tooth

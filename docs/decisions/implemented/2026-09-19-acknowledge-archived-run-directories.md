@@ -1,6 +1,6 @@
 # CI coverage acknowledges archived run directories
 
-[中文](2026-09-19-acknowledge-archived-run-directories.zh-CN.md)
+[中文](2026-09-19-acknowledge-archived-run-directories.zh-CN.md) · [Terms used](2026-09-19-acknowledge-archived-run-directories.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

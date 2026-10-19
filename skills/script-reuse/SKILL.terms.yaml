@@ -1,0 +1,23 @@
+version: 2
+terms:
+  - term: one-off script
+    aliases: [一次性脚本, ad-hoc script]
+    definition: >-
+      A task-specific script entry point intended to answer one question or run one analysis; a reusable helper belongs in a shared part only when another script needs it.
+      为回答一个问题或执行一次分析而编写的任务专用脚本入口；只有其他脚本也需要时，可复用辅助函数才应放入共享部件。
+    owner: skills/script-reuse/SKILL.md
+    anchor: Write the one-off script, and write it right
+    status: canonical
+  - term: self-check
+    aliases: [结果自检]
+    definition: >-
+      An assertion about a script's measured result that fails the run when the expected invariant is false; successful execution alone is not evidence of correctness.
+      对脚本测量结果作出的断言；预期不变量不成立时必须使运行失败。仅仅执行成功不是正确性的证据。
+    owner: skills/script-reuse/SKILL.md
+    anchor: What makes it right
+    status: canonical
+references:
+  - reusable script part
+  - Repository Control Plane
+  - gate
+  - receipt

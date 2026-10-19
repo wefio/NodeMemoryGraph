@@ -1,6 +1,6 @@
 # Independent relevance training data
 
-[中文](2026-09-15-independent-relevance-training.zh-CN.md)
+[中文](2026-09-15-independent-relevance-training.zh-CN.md) · [Terms used](2026-09-15-independent-relevance-training.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

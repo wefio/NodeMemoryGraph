@@ -1,20 +1,20 @@
 # 检索相关度门限:两个松门限 AND 成一个严门限
 
-[English](2026-09-09-retrieval-relevance-gate.md)
+[English](2026-09-09-retrieval-relevance-gate.md) · [术语](2026-09-09-retrieval-relevance-gate.terms.yaml)
 
 **Status:** implemented
 **Approved:** unrecorded
 
 ## Problem
 
-披露路径在注入召回记忆时**没有任何绝对相关度门限**。候选只需
+在本决策实现之前的快照中,披露路径注入召回记忆时**没有任何绝对相关度门限**。候选只需
 `combinedScore > 0`(`src/core/store/retrieval.ts`),而
 `selectWithinActiveGraphBudget`(`src/core/store/active-graph.ts`)按名次从上往下
 取 top N,直到满足 evidence target / 预算为止,**从不拿分数和某个下限比较**。QPP
 (`src/core/qpp.ts`)只决定"要不要再加深一轮",不决定"什么进上下文"。
 
-在 19 条真实召回(auto + explicit,经 recall-instance 语料标注)上实测:precision
-0.211——on_target 0、partial 4、noise 15。**宿主自动召回最糟:15 条里 13 条 noise。**
+2026-09-09 的首批 19 条真实召回(auto + explicit,经 recall-instance 语料标注)实测:precision
+0.211——on_target 0、partial 4、noise 15。**当时宿主自动召回最糟:15 条里 13 条 noise。**
 
 相关度分数**分不开两类**,所以单靠分数的门限修不了:
 
@@ -39,8 +39,9 @@
 
 **程序门限(确定性、便宜;擅长结构 / 分数 / 精确性):**
 
-- 跑在**确定性信号**上——词法匹配、embedding 相似度、结构/分数特征——比较前归一化成
-  **一个**有界、路径一致的分数。
+- 跑在确定性的词法、embedding、结构与分数信号上。绝对下限使用有界、路径一致的相关度；默认情况下，
+  逐查询形状离散度与相对比较使用原始分数尺度，避免有界分数压平信号。调用方还可提供可选的
+  相对下限 `relevanceMinZ`。
 - k 视为**上限而非目标**:返回更少、甚至 0 条。
 - 只剔除**明显坏**的结果(松门限),保留现有 strong-hit / 落差早停;无候选过松门限时 abstain。
 
@@ -55,8 +56,11 @@
 
 - 注入两道的**交集**;交集为空则 **abstain(什么都不注入)**。
 - 每个门限在它擅长的地方工作并保持松,所以任何一道都不单独过度过滤;**严完全在 AND 里**。
-- 学到的门限只对已过程序门限的候选运行,使每次召回的成本有界。尽力而为:出错时召回降级为
-  仅程序门限,**永不阻塞**;无可用训练模型时路径完全确定性。
+- 有经验证的模型加载时,检索先用它重排 surfaced candidate pool,再应用程序门限与 learned threshold；
+  交集决定候选是否保留,模型分数也会改变排序。候选池受检索的 `MAX_SEARCH_CANDIDATES` 上限约束,
+  但模型计算并不只针对已通过程序门限的候选。缺少、不可读取或 embedder 身份不匹配的模型会在加载时被拒绝,默认产品路径
+  因此保持确定性。这里不会把推理期模型异常转换成仅用程序门限的成功结果,所以不能保证所有模型错误
+  都不阻塞。
 
 **不对称**:自动(未经请求)的注入可以抬高任一门的松度标准,因为注入的噪声是每一个回合
 都在消耗消费方模型,而不只是它开口问的那一次。
@@ -68,7 +72,7 @@
 - 任何一道都**不单独过度过滤**:各自保持松,相关候选仍能两道都过。
 - **abstain 可表达**:交集为空时不注入任何东西。
 - 未配置/无可用训练模型时,召回路径**完全确定性**,仅由程序门限把关。
-- **召回永不被阻塞**:学到的门限失败降级为程序门限。
+- 缺少或无效的模型文件会让默认路径保持确定性；不承诺运行时推理失败可优雅降级。
 
 ## Alternatives considered
 
@@ -96,28 +100,31 @@
 - 门限标定需要数据量;19 条标签只能给一个保守初值,必须随标签累积滚动。
 - **学到的门限需要训练数据。** 在 recall-instance 标签足够多之前它欠训练;一个松却欠训练的
   模型仍可能误杀有用上下文。**松**是缓解,不是保证。
-- 学到的门限在每次“候选过程序门限”的召回上都有推理成本。
+- 有经验证的模型加载时,它会在程序门限前重排 surfaced pool,随后再对通过程序门限的候选应用 learned threshold；其成本不只发生在通过程序门限的候选上。
 - 库的同质性是被门限**压制**而非**解决**的数据问题。
 
 ## Implementation status
 
+以下源代码状态已按当前实现检查；benchmark 与校准数字是历史测量，不是本次文档审查中运行的结果。
+
 **程序门限 —— 默认开,无 env 开关。** `src/core/relevance-gate.ts` +
 `src/core/store/retrieval.ts`;代码常量 `DEFAULT_RELEVANCE_FLOOR = 0.05`(词法路径上
 ≈ BM25 0.53 —— 这才是真的松;0.4 意味着 BM25 ≈ 6.7,测试一跑就看出那是硬过滤)、
-`DEFAULT_RELEVANCE_MAX_CV = 0.002`(平坦即弃,且仅在候选数 ≥ `MIN_CV_COUNT = 4` 时
-生效:低于这个量散布估不出来,而该规则是在 k≈20 的完整列表上校准的)。它是确定性的,且只会**删除**候选、不会新增,
-所以不可能引入新错误;LoCoMo 回归(`tools/relevance-gate-calibration.ts`)显示平坦
-列表规则保留 **81%(217/268)** 命中题,同时把 kept precision 从 5.9% 抬到 13.1%、
-候选只留下 36.8%。**需要被
+`DEFAULT_RELEVANCE_MAX_CV = 0.002`(平坦即弃,且仅在候选数 ≥ `MIN_CV_COUNT = 3` 时
+生效；规则是在 k≈20 的完整列表上校准,两条候选的列表不作为平坦证据)。平坦度使用原始分数尺度，
+绝对下限使用有界且路径一致的相关度；调用方还可选用相对下限 `relevanceMinZ`。该门确定且只会**删除**候选：
+它不会新增候选,但可能引入假阴性。记录中的 LoCoMo 回归
+(`tools/relevance-gate-calibration.ts`)显示平坦列表规则保留 **81%(217/268)** 命中题,同时把
+kept precision 从 5.9% 抬到 13.1%、候选只留下 36.8%；这些数字是历史测量。**需要被
 打开的闸门就是永远不会跑的闸门**——这就是没有 `NMG_RELEVANCE_GATE` 的原因。
 
-**模型门限 —— 靠"生产出一个模型"来 opt-in。** `src/core/relevance-features.ts` +
+**模型门限 —— 生成并放置模型后 opt-in。** `src/core/relevance-features.ts` +
 `src/core/learned-gate.ts` + `src/lab/relevance-model.ts`,由
 `tools/relevance-model-train.ts` 训练;把经校准的模型放到
 `<dataDir>/relevance-model.json` 即启用(无 env),在程序门限之后 AND。
 LoCoMo 留出集:AUC ≈0.89、ECE ≤0.012(Platt 校准)。**不默认开**的原因:AND 会被
 模型那一半卡住召回(有 gold 的题上 `program 0.729 / learned 0.271 / AND 0.271 /
-OR 0.729`),而且现有模型是 LoCoMo 专用(线上即 OOD)。
+OR 0.729`),而且已测量的 LoCoMo 模型具有数据集特异性,不作为线上默认模型。
 
 **验收线是一个流程,不是一个数字。** `tools/relevance-model-train.ts --certify`
 把(集合级切点, 模型阈值)当作一个格点格,逐点对目标风险 α 做有限样本检验

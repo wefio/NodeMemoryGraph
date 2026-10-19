@@ -1,5 +1,7 @@
 # Natural evidence loop
 
+[中文](natural-evidence.zh-CN.md) · [Terms used](natural-evidence.terms.yaml)
+
 Use this procedure when NMG should improve from ordinary Agent work. The goal is
 to collect attributable observations as a side effect of real tasks, not to
 manufacture labels or silently tune production behavior from benchmark data.

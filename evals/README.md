@@ -1,5 +1,7 @@
 # NMG evaluation strategy
 
+[English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
+
 NMG uses two complementary kinds of tests:
 
 - deterministic engineering cases detect implementation regressions;

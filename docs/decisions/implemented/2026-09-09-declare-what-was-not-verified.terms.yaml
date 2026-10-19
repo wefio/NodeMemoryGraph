@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: unverified surface
+    aliases: [not-verified scope, 未验证面]
+    definition: >-
+      The route, platform, environment, build mode or behavior an author knows was not exercised by a delivered change; its pull-request declaration communicates scope and is not execution evidence or a substitute for checks.
+      作者明确知道交付变更未覆盖的 route、平台、环境、构建模式或行为；pull request 中的声明用于说明范围，不是执行证据，也不能替代检查。
+    owner: docs/decisions/implemented/2026-09-09-declare-what-was-not-verified.md
+    anchor: Decision
+    status: canonical
+references:
+  - evidence
+  - gate

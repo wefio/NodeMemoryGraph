@@ -1,0 +1,14 @@
+version: 2
+terms:
+  - term: integration-layer route
+    aliases: [integration route, 集成层 route]
+    definition: >-
+      An `agent-context.yaml` route that assigns an integration-layer path set to its owning design and verification checks; distinct responsibilities are split by owner, not hidden in a catch-all directory route.
+      `agent-context.yaml` 中将集成层路径集合分配给其设计 owner 和验证检查的 route；不同职责按 owner 拆分，不用目录级 catch-all 隐藏。
+    owner: docs/decisions/implemented/2026-09-19-route-the-integration-layer.md
+    anchor: Decision
+    status: canonical
+references:
+  - route
+  - gate
+  - evidence

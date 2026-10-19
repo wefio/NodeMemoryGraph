@@ -1,0 +1,30 @@
+version: 2
+terms:
+  - term: Kimi hook
+    aliases: [Kimi 事件钩子]
+    definition: >-
+      The NMG integration for Kimi Code that adds the event hooks Kimi lacks: a completion nudge that appends a weak, non-binding reminder to the context, a degraded board wake polled on each user prompt submit, and system-layer identity reporting on the existing daemon; the tool surface itself is supplied by the MCP server, not by this plugin.
+      Kimi Code 的 NMG 集成，补上 Kimi 缺失的事件钩子：把一条弱提醒（不强制写入）附进上下文的完成提示、在每次 UserPromptSubmit 轮询的降级版黑板唤醒，以及在既有 daemon 上的系统层身份上报；工具面由 MCP server 提供，不由本插件提供。
+    owner: kimi-plugin/README.md
+    anchor: NMG plugin for Kimi Code CLI
+    status: canonical
+  - term: degraded board wake
+    aliases: [降级版黑板唤醒]
+    definition: >-
+      The wake variant available where no background timer exists: it polls the world channel and this session's subscribed channels on each user prompt submit and notifies only for new open, not-yet-delivered entries, so arrival timing is the next user message rather than immediate; deduplication, echo skipping and delivery receipts follow the same protocol as the Pi extension, and the budget/cooldown counters are kept separate from Pi's wake state.
+      在没有后台定时器的环境下使用的唤醒变体：每次 UserPromptSubmit 轮询世界频道与本会话订阅的频道，只对新的、尚未投递的 open 条目发通知，因此到达时机是下一条用户消息而非即时；去重、跳过自己的回声与投递回执沿用与 Pi 扩展相同的协议，预算/冷却计数与 Pi 的唤醒状态互不消耗。
+    owner: kimi-plugin/README.md
+    anchor: Wake controls
+    status: canonical
+  - term: fail-open hook
+    aliases: [fail-open 钩子]
+    definition: >-
+      The hook-side rule that the script always exits with code zero and never blocks an operation, that a missing daemon is skipped silently rather than started, and that an unexpected script error is also treated as fail-open by the host; stderr-free context output is attached to the context while observational events whose output is discarded cannot carry a reminder.
+      hook 侧规则：脚本永远以退出码 0 结束、从不阻断操作；daemon 未运行时静默跳过而不是替你启动；脚本异常时宿主同样按 fail-open 处理；写到 stdout 的上下文文本会被附加进上下文，而输出会被丢弃的观察型事件无法承载提醒。
+    owner: kimi-plugin/README.md
+    anchor: Notes
+    status: canonical
+references:
+  - Task Board
+  - disclosure
+  - harness adapter

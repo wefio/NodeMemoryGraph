@@ -1,0 +1,19 @@
+version: 2
+terms:
+  - term: paired retrieval experiment
+    aliases: [matched retrieval comparison, 配对检索实验]
+    definition: >-
+      A comparison that holds the dataset, candidate pool, and other stated settings constant while changing the retrieval policy under test.
+      固定数据集、候选池及明确列出的其他设置，只改变待测检索策略的比较。
+    owner: docs/experiments/qpp/small-scale-experiment-2026-07-29.md
+    anchor: Compared setups
+    status: canonical
+  - term: strict evidence hit
+    aliases: [gold evidence hit, 严格 evidence 命中]
+    definition: >-
+      A retrieved record whose identity matches an item in the benchmark's labelled evidence set.
+      检索到的记录身份与 benchmark 标注 evidence 集合中的项目相匹配。
+    owner: docs/experiments/qpp/small-scale-experiment-2026-07-29.md
+    anchor: Retrieval results
+    status: canonical
+references: [QPP, same-pool progressive re-selection]

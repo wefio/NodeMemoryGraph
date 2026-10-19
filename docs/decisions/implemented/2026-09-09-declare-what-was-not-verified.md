@@ -1,6 +1,6 @@
 # Declare what was not verified
 
-[中文](2026-09-09-declare-what-was-not-verified.zh-CN.md)
+[中文](2026-09-09-declare-what-was-not-verified.zh-CN.md) · [Terms used](2026-09-09-declare-what-was-not-verified.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit

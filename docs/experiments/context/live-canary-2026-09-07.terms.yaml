@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: wiring canary
+    aliases: [接线金丝雀, 实机金丝雀]
+    definition: >-
+      A tiny end-to-end check that a designed decision path really reaches a real main model and the official grader with exact capture; in this report n=3 on temporal-only questions, so it establishes the wiring, not effectiveness or a strategy preference.
+      一个小型端到端检查，用于确认设计出的决策路径确实到达真实主模型与官方评分器并被精确捕获；本报告中 n=3 且仅时序类问题，因此它确立的是接线，而不是效能或策略偏好。
+    owner: docs/experiments/context/live-canary-2026-09-07.md
+    anchor: What this does and does not establish
+    status: canonical
+  - term: replayed retrieval context
+    aliases: [回放检索上下文]
+    definition: >-
+      Context taken from a stored search artifact instead of a live retrieval call, marked `retrievalLive=false`; therefore no retrieval cost is observable and no executor call count may be inferred or fabricated.
+      取自既有检索产物而非实时检索调用的上下文，标记为 `retrievalLive=false`；因此不存在可观测的检索成本，也不得推断或伪造执行器调用次数。
+    owner: docs/experiments/context/live-canary-2026-09-07.md
+    anchor: Hard constraints baked into the design
+    status: canonical
+  - term: captured model call
+    aliases: [捕获的模型调用]
+    definition: >-
+      One record written by a client-side proxy around `chat.completions.create`, holding the real `messages`, `messagesHash`, `usage` and per-call duration; one record per answer and per judge, with errors recorded rather than zero-filled.
+      由 `chat.completions.create` 外层客户端代理写入的一条记录，保存真实 `messages`、`messagesHash`、`usage` 与单次调用耗时；每次回答与每次判定各一条，错误被记录而不是零填充。
+    owner: docs/experiments/context/live-canary-2026-09-07.md
+    anchor: Model and grading
+    status: canonical

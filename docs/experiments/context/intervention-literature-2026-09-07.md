@@ -1,5 +1,12 @@
 # Literature scan: is a cost-aware, history-sensitive context-injection router a sound premise?
 
+[English](intervention-literature-2026-09-07.md) | [简体中文](intervention-literature-2026-09-07.zh-CN.md) · [Terms](intervention-literature-2026-09-07.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this dated record is
+historical research material, not a current runtime contract or authorization
+to run provider experiments. No cited experiment or original run artifact was
+rerun or independently revalidated in this review.
+
 **Date:** 2026-09-07
 **Status:** external-literature synthesis (Exa/TinyFish web search); not a formal survey.
 **Purpose:** test the premises behind
@@ -9,17 +16,23 @@ memory injection for agents, context selection/compression. English academic foc
 
 ## Headline
 
-The experiment's **core premise is well supported**: indiscriminate retrieval
-(our fixed fallback F0 = retrieve-always) is documented as suboptimal, and
-cost-aware, per-query injection routing is an active and supported direction
-that matches exactly our `utility − λ·cost` framing. What is **not** established
+The scan interpreted selective retrieval and per-query cost/quality control as
+motivation for testing the fixed fallback F0 (retrieve-always) against a router
+using `utility − λ·cost`. That interpretation does not establish that F0 is
+suboptimal for NMG, or that this router is novel or better. What is **not** established
 by the literature — and is genuinely open — is whether a *learned, outcome/history-
 sensitive* four-action router (our H1/H2) beats a fixed fallback; most adaptive-RAG
 work decides by *query complexity or model uncertainty*, not by measured history
 and verified outcomes. That is the novel claim our pre-registration is designed to
-test, and it remains unproven (a valid null is expected to be common).
+test, and it remains unproven. A no-added-value result is valid; this scan does
+not estimate how often it should occur.
 
 ## What supports the premise
+
+The following are the scan's interpretations of its cited sources, retained as
+research leads. Bibliographic matches, quoted effects and coverage of the field
+were not independently verified in this documentation review; they are not
+reproduced NMG results or a systematic novelty assessment.
 
 - **"When NOT to retrieve" is a real, studied problem.** Mallen et al. (2023)
   adapt retrieval by query entity frequency; *Retrieval Helps or Hurts?*
@@ -37,10 +50,9 @@ test, and it remains unproven (a valid null is expected to be common).
 - **Diminishing returns and a "completeness" floor exist.** The getzep 50-run
   study reports diminishing accuracy returns from more retrieved context and that
   under-retrieval leads to guessing (accuracy running ahead of completeness). Our
-  canary's `none` arm hallucinating/refusing and the LoCoMo need for the gold
-  reinforce that pure cost minimization would hurt quality → the quality NI margin
-  and F1 floor are necessary, and an optimal policy is query-dependent (not
-  "always none" nor "always retrieve").
+  three-question canary recorded wrong dates/refusals under `none`/`cue`.
+  Those observations motivate quality safeguards, but do not establish an
+  optimal policy or a general causal quality loss from cost minimization.
 
 ## Caveats and controls this implies for the run (design-level, before any outcome)
 

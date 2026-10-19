@@ -1,0 +1,29 @@
+version: 2
+terms:
+  - term: router-only candidate
+    aliases: [仅路由候选方案]
+    definition: >-
+      A design-level limited-compute policy candidate. The repository has separate research primitives for a 132-parameter action-value head, `context-features-v1`, and a four-action bounded adapter, but their existence does not assemble, train, validate, or activate the candidate as a product controller; the evidence and budget boundaries here take precedence over broader Harness hypotheses.
+      受限算力策略的设计级候选方案。仓库已有 132 参数动作价值头、`context-features-v1` 与四动作有界适配器等分立研究原语，但这些原语的存在并不等于候选方案已组装、训练、验证或作为产品控制器启用；本文的证据与预算边界优先于更广的 Harness 假设。
+    owner: docs/design/agent-convergence-feedback-design/harness-formalization/low-compute-router-candidate.md
+    anchor: Low-compute, router-only candidate
+    status: canonical
+  - term: observed-action regression
+    aliases: [已观察动作回归]
+    definition: >-
+      Squared-error regression of an action value onto the outcome of the action actually executed, where unexecuted actions receive no label and are not failures; it estimates association rather than causal action value, and `r_observed` is a scoped outcome under a fixed window rather than an automatic reward for a lifecycle transition.
+      把动作价值以平方误差回归到实际被执行动作的结果上，未执行的动作没有标签也不算失败；它估计的是关联而非因果动作价值，且 `r_observed` 是固定窗口下范围界定的结果，而不是对生命周期状态转换的自动奖励。
+    owner: docs/design/agent-convergence-feedback-design/harness-formalization/low-compute-router-candidate.md
+    anchor: Observed-action learning and evaluation
+    status: canonical
+  - term: allowed-action set
+    aliases: [允许动作集合]
+    definition: >-
+      The permission and hard-budget envelope computed by rules outside the learner; the router may only pick within it, `none` stays available but cannot suppress mandatory verification or safety feedback, and a cost penalty never authorizes exceeding a hard limit.
+      由学习者之外的规则计算出的权限与硬预算包络；路由只能在其中选择，`none` 始终可用但不能压制强制验证或安全反馈，成本惩罚从不授权超出硬上限。
+    owner: docs/design/agent-convergence-feedback-design/harness-formalization/low-compute-router-candidate.md
+    anchor: Low-compute, router-only candidate
+    status: canonical
+references:
+  - learnable controller
+  - Lab

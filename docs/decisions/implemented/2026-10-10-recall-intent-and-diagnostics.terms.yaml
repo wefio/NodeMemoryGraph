@@ -1,0 +1,24 @@
+version: 2
+terms:
+  - term: bounded degraded diagnostic
+    aliases: [compact degradation reason, 有界降级诊断]
+    definition: >-
+      A compact display reason that preserves a known provider/index code or HTTP status and uses `unknown` for unrecognized details, while retaining the original structured result and daemon health.
+      一种紧凑显示原因：保留已知 provider/index code 或 HTTP status，对未知细节使用 `unknown`，同时保留原始结构化结果和 daemon 健康状态。
+    owner: docs/decisions/implemented/2026-10-10-recall-intent-and-diagnostics.md
+    anchor: Decision
+    status: canonical
+  - term: shutdown archive deadline
+    aliases: [archive write deadline, 归档写入 deadline]
+    definition: >-
+      The bounded timer for a session-shutdown archive write; it is released in `finally` after completion while stalled-write staging and the existing wait bound remain.
+      session shutdown archive 写入的有界 timer；写入完成后在 `finally` 中释放，同时保留 stalled-write staging 和现有等待上限。
+    owner: docs/decisions/implemented/2026-10-10-recall-intent-and-diagnostics.md
+    anchor: Decision
+    status: canonical
+references:
+  - Active Graph
+  - Short-Term Graph
+  - Long-Term Graph
+  - evidence
+  - explicit recall intent

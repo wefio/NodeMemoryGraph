@@ -1,6 +1,6 @@
 # 书签功能继续命名为 "anchors"
 
-[English](2026-09-02-keep-bookmarks-named-anchors.md)
+[English](2026-09-02-keep-bookmarks-named-anchors.md) · [术语](2026-09-02-keep-bookmarks-named-anchors.terms.yaml)
 
 **Status:** rejected  
 

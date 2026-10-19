@@ -1,0 +1,38 @@
+version: 2
+terms:
+  - term: external-provider image
+    aliases: [外部 provider 镜像]
+    definition: >-
+      The container target that carries Node.js and NMG only, deliberately excluding Python, PyTorch, CUDA, sentence-transformers and model weights, falling back to built-in SQLite FTS5 retrieval when no embedding configuration is given; an OpenAI-compatible embedding service is reached by URL and model, and provider health sits outside this container's health boundary, so an outage preserves FTS search and leaves failed embedding work observable and retryable instead of marking the store dead.
+      只带 Node.js 与 NMG 的容器 target：刻意排除 Python、PyTorch、CUDA、sentence-transformers 与模型权重，未给嵌入配置时回退到内置 SQLite FTS5 检索；通过 URL 与模型接入 OpenAI 兼容嵌入服务；provider 健康度位于本容器健康边界之外，因此故障时保留 FTS 检索、失败的嵌入工作保持可观察可重试，而不是把记忆库标记为死亡。
+    owner: docker/README.md
+    anchor: External-provider image (recommended base)
+    status: canonical
+  - term: self-contained BGE image
+    aliases: [自包含 BGE 镜像]
+    definition: >-
+      The default container target that downloads a pinned BGE-small model during build and runs it beside NMG so runtime startup needs no model network access; its CUDA-enabled PyTorch stack is large even when runtime falls back to CPU, a CPU-only build is selected through the torch index URL build argument, and its health check covers both the local embedding endpoint and the NMG daemon.
+      默认容器 target：构建期下载固定版本 BGE-small 模型并与 NMG 一起运行，因此运行时启动不需要模型网络访问；其启用 CUDA 的 PyTorch 栈即使运行时回退 CPU 也很大；纯 CPU 构建通过 torch index URL 构建参数选择；其健康检查同时覆盖本地嵌入端点与 NMG daemon。
+    owner: docker/README.md
+    anchor: Self-contained local BGE image
+    status: canonical
+  - term: container embedding auto-sync
+    aliases: [容器内嵌入自动同步]
+    definition: >-
+      The image-side default that schedules an incremental, deduplicated record-index update on every accepted remember when an embedding provider is configured; outside these images auto-sync stays opt-in so provider configuration cannot silently alter a normal host installation.
+      镜像侧的默认行为：配置了嵌入 provider 时，每次被接受的 remember 都安排一次增量、去重的记录索引更新；在这些镜像之外自动同步仍是可选加入的，因此 provider 配置不会静默改变普通的宿主机安装。
+    owner: docker/README.md
+    anchor: Embedding synchronization
+    status: canonical
+  - term: container process and storage boundary
+    aliases: [容器进程与存储边界]
+    definition: >-
+      One container starts exactly one daemon for one mounted database, the database lease rejects a second daemon for the same database, multiple containers are supported only with separate volumes, agents and sessions share that daemon through NMG ownership and scope boundaries rather than starting one per session, and benchmark adapters must connect through the existing daemon client instead of opening a second service against the same SQLite file.
+      一个容器为一份挂载数据库启动恰好一个 daemon；数据库租约拒绝同库第二个 daemon；仅在各自使用独立卷时才支持多容器；Agent 与会话通过 NMG 的所有权与作用域边界共享该 daemon，而不是每会话启动一个；benchmark adapter 必须通过既有 daemon 客户端接入，而不是对同一 SQLite 文件打开第二个服务。
+    owner: docker/README.md
+    anchor: Process and storage boundary
+    status: canonical
+references:
+  - embedding profile
+  - harness adapter
+  - evidence

@@ -1,6 +1,6 @@
 # Enforce the documented documentation rules
 
-[中文](2026-09-09-enforce-documentation-rules.zh-CN.md)
+[中文](2026-09-09-enforce-documentation-rules.zh-CN.md) · [Terms used](2026-09-09-enforce-documentation-rules.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit

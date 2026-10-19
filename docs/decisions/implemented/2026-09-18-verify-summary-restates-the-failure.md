@@ -9,7 +9,7 @@
 Governing meta-rule: [self-governance meta-rule](2026-09-07-self-governance-meta-rule.md) —
 this change alters verification tooling, so it carries its own decision and alternatives.
 
-中文版: [2026-09-18-verify-summary-restates-the-failure.zh-CN.md](2026-09-18-verify-summary-restates-the-failure.zh-CN.md)
+中文版: [2026-09-18-verify-summary-restates-the-failure.zh-CN.md](2026-09-18-verify-summary-restates-the-failure.zh-CN.md) · [Terms used](2026-09-18-verify-summary-restates-the-failure.terms.yaml)
 
 ## Problem
 

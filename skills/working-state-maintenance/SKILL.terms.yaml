@@ -1,0 +1,17 @@
+version: 2
+terms:
+  - term: provisional working-state snapshot
+    aliases: [working-state snapshot, 临时工作状态快照]
+    definition: >-
+      The smallest temporary state that preserves only facts needed to choose the next authorized action, meet an obligation, honor a constraint, or resume from evidence; it is neither a journal, a second task contract, nor proof of completion.
+      仅保留选择下一项获授权操作、履行义务、遵守约束或依据证据恢复所必需事实的最小临时状态；它不是日志、第二份任务契约或完成证明。
+    owner: skills/working-state-maintenance/SKILL.md
+    anchor: Working-state maintenance
+    status: canonical
+references:
+  - working-state content maintenance
+  - working state
+  - in-flight goal entry
+  - Task IR
+  - task unit
+  - Task Board

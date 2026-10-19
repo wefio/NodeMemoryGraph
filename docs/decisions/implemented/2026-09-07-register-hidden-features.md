@@ -2,12 +2,9 @@
 
 **Status:** implemented  
 **Approved:** explicit
-Date: 2026-09-07
-Branch: feat/meta-rule-governance
-
 Governing meta-rule: [self-governance meta-rule](../implemented/2026-09-07-self-governance-meta-rule.md) — this rule change is itself recorded as a governed decision (decision + registry + alternatives) under it.
 
-中文版: [2026-09-07-register-hidden-features.zh-CN.md](2026-09-07-register-hidden-features.zh-CN.md)
+中文版: [2026-09-07-register-hidden-features.zh-CN.md](2026-09-07-register-hidden-features.zh-CN.md) · [Terms used](2026-09-07-register-hidden-features.terms.yaml)
 
 ## Problem
 

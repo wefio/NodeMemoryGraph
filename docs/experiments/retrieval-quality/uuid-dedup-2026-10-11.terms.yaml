@@ -1,0 +1,44 @@
+version: 2
+terms:
+  - term: shared feedback affordance
+    aliases: [actionable feedback instruction, 共享反馈提示位]
+    definition: >-
+      The feedback instruction modified by this historical copy-only slice: its graph ID becomes one occurrence within the affordance, while a complete header-plus-feedback message retains two occurrences. It is not a global one-ID-per-message guarantee or a current-host rendering receipt.
+      本历史纯文案切片修改的反馈指令：图 ID 在提示位内变为一次，完整 header 加反馈消息仍保留两次。它不是全局每消息一次 ID 的保证，也不是当前宿主渲染回执。
+    owner: docs/experiments/retrieval-quality/uuid-dedup-2026-10-11.md
+    anchor: Frozen scope
+    status: canonical
+  - term: offline representation matrix
+    aliases: [paired UUID tokenization matrix, 离线表示矩阵]
+    definition: >-
+      The local named-encoding study reusing 100 paired UUIDs across four representations, two contexts and two encodings: 16 aggregate cells and 1,600 tokenizations, not 1,600 independent UUIDs. It adopts no alternate representation; optional tokenizer vocabulary fetching does not establish a wholly air-gapped execution.
+      本地具名编码研究，在四种表示、两种上下文和两种编码间复用 100 个配对 UUID：16 个聚合单元、1,600 次分词，不是 1,600 个独立 UUID。它不采纳替代表示；tokenizer 可选的词表抓取不证明全程隔离网络执行。
+    owner: docs/experiments/retrieval-quality/uuid-dedup-2026-10-11.md
+    anchor: Frozen scope
+    status: canonical
+  - term: decoder-free spelling
+    aliases: [generation choice versus encoding, 免解码拼写]
+    definition: >-
+      For literal identifier lookup, avoiding lookup-time decoding requires the exact stored identifier string. Re-encoding a UUID is not by itself such a lookup; a native compact-ID generator instead changes identity generation. The separate graph-scoped compound selector is an explicitly resolved path, not arbitrary alternate UUID-spelling support.
+      对字面标识符查找，免除查找时解码要求使用精确的存储字符串。重新编码 UUID 本身不能实现该查找；原生紧凑 ID 生成器改变的是身份生成。独立的图作用域组合选择器具有显式解析路径，不支持任意替代 UUID 拼写。
+    owner: docs/experiments/retrieval-quality/uuid-dedup-2026-10-11.md
+    anchor: Sources and compatibility boundary
+    status: canonical
+  - term: canonical-ID exact-string lookup
+    aliases: [literal canonical-ID lookup, 规范 ID 字符串查找]
+    definition: >-
+      The study's literal canonical-ID route trims nonempty string inputs and compares them using WHERE id = ?. It does not decode undashed hex/Base64/decimal into stored UUIDs; graph-scoped ref selectors use their separate explicit resolver. Numeric identifiers must remain exact strings, not JavaScript numbers; new generation or coexistence rules need separate approval and verification.
+      本研究的字面规范 ID 路径 trim 非空字符串并用 WHERE id = ? 比较，不把无短横线十六进制／Base64／十进制解码为存储 UUID；图作用域 ref 选择器使用独立显式解析器。数字标识符须为精确字符串而非 JavaScript 数字；新生成或共存规则需要另行批准与验证。
+    owner: docs/experiments/retrieval-quality/uuid-dedup-2026-10-11.md
+    anchor: Sources and compatibility boundary
+    status: canonical
+  - term: red-before-change test
+    aliases: [graph-count test, 改动前为红的测试]
+    definition: >-
+      This record's graph-count regression was reported red on the baseline (two occurrences rather than one) before the YAML copy change. That historical negative control and the accompanying suite/diagnostic readings do not constitute a new test execution or present acceptance of the edited documentation.
+      本记录的图计数回归在 YAML 文案修改前，被报告为在基线上红灯（两次而非一次）。该历史负向对照及相伴套件／诊断读数不构成新测试执行，也不验收现已编辑的文档。
+    owner: docs/experiments/retrieval-quality/uuid-dedup-2026-10-11.md
+    anchor: Results
+    status: canonical
+references:
+  - shared disclosure copy

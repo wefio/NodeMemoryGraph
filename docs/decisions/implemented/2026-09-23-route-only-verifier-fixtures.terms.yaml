@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: route-only verifier fixture
+    aliases: [route-failure fixture, 路由专用验证 fixture]
+    definition: >-
+      A verifier test fixture that disables shared checks only when asserting route-test failures or TAP evidence, while separate default-narrow and full-mode cases continue to cover their respective shared-check sets.
+      仅在断言路由测试失败或 TAP 证据时禁用共享检查的验证 fixture；默认 narrow 和 full 模式仍由独立案例覆盖各自的共享检查集合。
+    owner: docs/decisions/implemented/2026-09-23-route-only-verifier-fixtures.md
+    anchor: Decision
+    status: canonical
+references:
+  - gate
+  - evidence

@@ -1,8 +1,13 @@
 # A granularity and cost sweep before any paid call - 2026-09-17
 
-**Status:** offline measurement. No model call was made; nothing here is a result about model quality.
+[中文](ooo-cost-model-2026-09-17.zh-CN.md) · [Terms used](ooo-cost-model-2026-09-17.terms.yaml)
+
+**Status:** Historical offline measurement. No model call was made; nothing here is a result about model quality.
 **Related:** [task-unit semantics design](../../design/task-unit-semantics.md) ·
-[its obligation ledger](../../design/task-unit-semantics-obligations.md)
+[its obligation ledger](../../design/task-unit-semantics-obligations.md) ·
+[later paid pilot](ooo-arms-pilot-2026-09-18.md)
+
+This report records the offline model before the paid pilot. The round instrument it modeled was retired on 2026-09-18; this is not a description of current product runtime.
 
 The design orders the arms as "离线模型先覆盖不同粒度、依赖密度、共享上下文、事实命中率及验证成本；它只能
 发现逻辑错误和成本转折点，不能预测真实模型质量", and says the real-model stage "须另行明确模型、预算与
@@ -32,15 +37,14 @@ Cost vector, with what each term stands for:
 
 The schedule is greedy list scheduling over `slots`, followed by **one host check queue**: a candidate
 check never runs concurrently with another check. A dependency is satisfied by an _accepted_ artifact,
-so a unit waits for its predecessor's check, not for its model call — which is the difference the
-out-of-order round exists to exploit.
+so a unit waits for its predecessor's check, not for its model call — the distinction the
+out-of-order research instrument was designed to exploit.
 
 ## What the model got wrong first
 
 Its initial self-check demanded that four independent units on four slots finish in "one unit plus one
 check". It did not, and the model was wrong, not the check: the host serialises four checks, so the
-floor is one unit **plus four** checks. That number is now the check. The same instrument without the
-queue would have reported a concurrency gain no round can have.
+floor is one unit **plus four** checks. That number is now the check. Without that queue, the model would have reported concurrency the specified research scheduler could not realize.
 
 ## The sweep
 
@@ -75,15 +79,17 @@ saving 0.5, 4 slots. Milliseconds.
    the result object ever grows a key matching `/quality|pass|accept|correct|success/i`, so a simulated
    pass rate cannot quietly become a reported one. The design's caveat stays true by construction.
 
-## Consequences for the paid pilot
+## Recommendations made for the later paid pilot
 
-- Choose a parent task whose legal refinement yields **several** units (≥ 4) with **density well below
-  0.5** and per-unit checks that do not dominate the unit's work. A refinement that yields two units or
-  a chain is predicted to lose, and running it would spend tokens to confirm the model.
-- Expect A < B on cost and A ≈ B on quality, with the gain (if any) appearing only at C. A pilot that
-  shows a B-arm cost saving contradicts this sweep and needs its instrument checked first.
-- Fix the model, budget and repetitions separately, as the design requires; this record fixes none of
-  them and used no paid call.
+These were predictions and advice from the offline model, not measurements. The later paid pilot is
+linked above and owns its actual setup and results.
+
+- Prefer a parent task whose legal refinement yields **several** units (≥ 4), has **density well below
+  0.5**, and has per-unit checks that do not dominate each unit's work. The model predicted a loss for
+  a two-unit refinement or a chain.
+- The model predicted A would cost less than B and have similar quality, with any gain appearing only
+  at C. A B-arm cost saving would contradict this sweep and warrant checking that pilot's instrument.
+- The sweep fixed no paid model, budget or repetition count and made no paid call.
 
 ## Commands
 

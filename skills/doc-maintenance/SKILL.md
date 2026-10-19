@@ -5,32 +5,30 @@ description: Maintain this repository's design, decision, experiment, post-morte
 
 # Documentation maintenance
 
+[中文](SKILL.zh-CN.md) · [Terms used](SKILL.terms.yaml)
+
 Keep NMG documentation useful as an interface between users, Agents, design, and
 implementation. Use [the documentation index](../../docs/README.md#ownership-and-authority)
 to resolve ownership when it is unclear; read its CI contract when changing checks
 and its bilingual policy when changing paired content.
 
+Before drafting, reorganizing, condensing or publishing reader-facing text,
+apply the [reader-oriented writing and review standard](references/reader-review.md).
+It owns reader-task structure, controlled-language-inspired expression and
+semantic acceptance. Structural checks do not replace that review.
+
 ## Content that can be read locally
 
-- Keep the root bootstrap limited to the discovery protocol and stable shared-work
-  principles. Put changing commands and setup at their operational owner.
-- A document explains its own subject; describe direct children only by purpose
-  and link to their owners for detail. Do not mirror a directory or symbol inventory
-  already recoverable from source. Add local orientation only where names and
-  structure leave a concrete ambiguity.
-- Give sections searchable subject names. Keep a rule's scope, necessary
-  definitions, conditions, and exceptions in the same readable section, or link
-  explicitly to the required definition. Label conditional procedures by their
-  trigger and background links by their purpose; do not imply every link is required.
-  If the necessary section is too large, narrow the action or read it in bounded
-  parts; do not drop a condition or exception to meet a reading budget.
-- Keep one authoritative text. Indexes and generated summaries are disposable
-  navigation aids with source references, not new specifications. Link current
-  knowledge by repository-relative path and section; bind historical evidence to
-  a shared revision. Do not make local memory IDs or a prior session necessary.
-- After a change, check affected incoming links and applicable workflow triggers.
-  Existing link checks catch broken targets; review must still check meaning and
-  whether the selected section contains the constraints needed to act.
+Use the writing standard's [local-reading criteria](references/reader-review.md#local-reading-and-content-ownership)
+for section boundaries, required versus background links, source references and
+inventory duplication. Its [review procedure](references/reader-review.md#review-and-acceptance)
+checks incoming references and the meaning of their targets after a move.
+
+The root [bootstrap](../../AGENTS.md) owns the stable discovery protocol.
+Changing commands and setup belong at their operational owner; the
+[documentation index](../../docs/README.md#ownership-and-authority) resolves
+which surface owns a fact. This Skill routes that work rather than maintaining
+another copy of the writing criteria.
 
 ## Meta-rule: NMG's own rules are governed
 
@@ -103,8 +101,11 @@ Free-form status sentences are what this replaced.
 1. **Classify the change before writing.** Decide whether it changes normative
    behavior, records rationale, reports evidence, changes completion status, adds
    unresolved work, or changes user instructions.
-2. **Find the existing owner.** Search titles and relevant terms. Update the
-   owning document instead of creating another summary. Git preserves editing
+2. **Find the existing owner.** Search titles and relevant terms. When a name
+   could be an alias or have several meanings, use the existing
+   [terminology lookup](../../docs/design/documentation-governance.md#yaml-files-and-query-contract)
+   in the relevant scope, then widen a miss rather than declaring absence.
+   Update the owning document instead of creating another summary. Git preserves editing
    history. If a detail remains only in Git and would be expensive to rediscover,
    leave a commit or decision link in the relevant audit or decision document.
 3. **Update the right surface.**
@@ -124,10 +125,10 @@ Free-form status sentences are what this replaced.
 4. **Handle supersession explicitly.** Refine an existing owner when possible.
    Cross-link old and new decisions; archive a fully superseded decision, or
    state the remaining scope when supersession is partial.
-5. **Maintain useful bilingual coverage.** Root and docs indexes stay paired.
-   New or materially changed decisions should normally be paired. Preserve the
-   same decision, warnings, and commands, but do not force paragraph-for-paragraph
-   equivalence. Experiments and internal notes may remain single-language.
+5. **Maintain the complete document group.** Apply the documentation index's
+   [bilingual scope and three-artifact contract](../../docs/README.md#bilingual-policy).
+   Review the English text, Chinese text and shared terminology together;
+   neither a language variant nor its term-use file is a separate specification.
 6. **Keep status honest.** Separate implemented, validated, enabled, default,
    deferred, and out-of-scope states. A passing controlled test is not natural
    product evidence; an experiment result is not a default-policy decision.
@@ -162,5 +163,6 @@ hardening fix, locate validation evidence, or avoid retrying a superseded design
 - Do not make every fixed bug a post-mortem. The tier's
   [triage rule](../../docs/postmortem/README.md#when-to-write-one) decides which
   failures earn a record.
-- Do not block a useful change solely because a non-public translation is late.
+- Report missing document-group members as unfinished work under the owning
+  bilingual policy; a green structural check does not settle that work.
 - Do not rewrite unrelated experiment reports while reorganizing documentation.

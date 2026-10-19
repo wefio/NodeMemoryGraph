@@ -1,6 +1,6 @@
 # Name the collaboration protocol and its task-unit sub-protocol
 
-[中文](2026-09-20-name-the-collaboration-protocol.zh-CN.md)
+[中文](2026-09-20-name-the-collaboration-protocol.zh-CN.md) · [Terms used](2026-09-20-name-the-collaboration-protocol.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit
@@ -49,7 +49,7 @@ The two levels and what they are made of:
 | Protocol-governed collaboration | Agents coordinate through a published protocol, while the mechanics and the deciding stay with the program                                            | this record; [concept map](../../guides/concept-map.md)                                                                                                                      |
 | Task-Unit Protocol              | A task is declared as a unit and the protocol fixes its adoption, claim, delivery, judging and the facts the runtime owns                             | [task-unit-semantics.md](../../design/task-unit-semantics.md), [its obligations ledger](../../design/task-unit-semantics-obligations.md)                                     |
 | task unit                       | A unit of work that can be handed off, verified and independently voided, declared by inputs, dependencies, acceptance, capability and budget         | [task-unit-semantics.md](../../design/task-unit-semantics.md)                                                                                                                |
-| Task Board                      | Attributed, expiring, task-scoped Agent coordination outside semantic memory                                                                          | [memory-graphs.md §2](../../design/memory-graphs.md#shared-task-board-cross-agent-coordination-not-a-memory-graph)                                                           |
+| Task Board                      | Attributed, expiring, task-scoped Agent coordination outside semantic memory                                                                          | [memory-graphs.md Shared Task Board (cross-Agent coordination, not a memory graph)](../../design/memory-graphs/session-runtime-graph-and-projection-revisions/shared-task-board.md#shared-task-board-cross-agent-coordination-not-a-memory-graph-1)                                                           |
 | entry                           | One board item - goal, question, handoff, blocker, result, note or decision - carrying a claim lease, deliveries and verdicts                         | [board-find-serial-a2a-compat](../../design/board-find-serial-a2a-compat-2026-08-13.md)                                                                                      |
 | wake                            | A directed entry notifies that Agent's session; the board does not decide who works, only that someone was addressed                                  | [board-find-serial-a2a-compat](../../design/board-find-serial-a2a-compat-2026-08-13.md)                                                                                      |
 | serial channel                  | At most one un-directed actionable entry is pushed at a time; the next is promoted when the outstanding one is claimed or resolved                    | [board-find-serial-a2a-compat](../../design/board-find-serial-a2a-compat-2026-08-13.md)                                                                                      |
@@ -122,8 +122,9 @@ are still missing, and which of them already have a name in distributed systems:
   and the existing words (board, run, adopt, managed entry) for the parts.
 - No identifier changes. `run`, `adopt`, `managed`, `dispatch`, the `ooo-` file prefix and every file
   name stay as they are, so no historical record needs repairing.
-- The name lives in the concept map with aliases for search. `docs/glossary.yaml` is untouched: it
-  owns the repository and process vocabulary, and this is a product concept.
+- The name lives in the concept map with aliases for search. This naming does not register
+  a product definition in the [repository terminology resolver](2026-09-08-repository-terminology-index.md),
+  whose admitted vocabulary covers repository and process concepts.
 - The naming builds nothing. The sub-protocol's mechanism exists (the run surface, the managed-write
   fence, the shared dispatch loop) and the product path still has no adopter, which is the next piece
   of work rather than a consequence of the name.

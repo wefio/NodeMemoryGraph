@@ -1,0 +1,29 @@
+version: 2
+terms:
+  - term: board deliverable
+    aliases: [delivered artifact, 黑板交付物]
+    definition: >-
+      An artifact identity recorded by the live claim holder for the current attempt, with a digest and optional reference and summary; the board stores its identity, not artifact bytes or an acceptance verdict.
+      当前 attempt 的有效认领者记录的产物身份，包含 digest 及可选引用和摘要；黑板保存其身份，不保存产物字节，也不等同于验收裁决。
+    owner: docs/decisions/implemented/2026-09-06-board-governance-addressing.md
+    anchor: "P1 implementation slice: deliverable + verdict (2026-09-12)"
+    status: canonical
+  - term: independent board verdict
+    aliases: [deliverable verdict, 独立黑板裁决]
+    definition: >-
+      An accepted, rejected, or undecidable judgement bound to the exact deliverable digest and recorded by someone other than its deliverer; it is distinct from resolving the board entry.
+      绑定到精确 deliverable digest、由交付者以外的人记录的 accepted、rejected 或 undecidable 判断；它不同于 resolve 黑板条目。
+    owner: docs/decisions/implemented/2026-09-06-board-governance-addressing.md
+    anchor: "P1 implementation slice: deliverable + verdict (2026-09-12)"
+    status: canonical
+  - term: attempt fencing
+    aliases: [attempt boundary, attempt 栅栏]
+    definition: >-
+      A new claim attempt clears the preceding attempt's deliverable and verdict unless the live holder is merely renewing its claim, preventing stale artifacts from surviving reassignment.
+      新 claim attempt 会清除前一 attempt 的 deliverable 与 verdict；有效持有者仅续租时例外，以免重新分配后继续读取旧产物。
+    owner: docs/decisions/implemented/2026-09-06-board-governance-addressing.md
+    anchor: "P1 implementation slice: deliverable + verdict (2026-09-12)"
+    status: canonical
+references:
+  - Task Board
+  - evidence

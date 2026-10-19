@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: regenerable build output
+    aliases: [generated build artifact, 可重新生成的构建输出]
+    definition: >-
+      An output reproducible from tracked inputs and the owning build command; it remains untracked and is verified by regeneration rather than committed as a second source of truth.
+      可由已跟踪输入和所属构建命令重现的输出；它不纳入版本控制，而通过重新生成验证，不作为第二事实来源提交。
+    owner: skills/repo-development/references/builds.md
+    anchor: Builds and generated artifacts
+    status: canonical
+  - term: frozen-lockfile subpackage build
+    aliases: [subpackage build verification, frozen lockfile 子包构建]
+    definition: >-
+      A build of a subpackage from its own lockfile using frozen installation, covered by the repository package-verification route when that route applies.
+      使用子 package 自有 lockfile 和 frozen installation 执行的构建；适用时由仓库的 package-verification 路由覆盖。
+    owner: skills/repo-development/references/builds.md
+    anchor: Builds and generated artifacts
+    status: canonical

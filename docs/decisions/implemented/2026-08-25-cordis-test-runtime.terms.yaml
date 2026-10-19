@@ -1,0 +1,11 @@
+version: 2
+terms:
+  - term: test-runtime wrapper
+    aliases: [test runtime adapter, 测试运行时包装层]
+    definition: >-
+      A test-only lifecycle boundary that owns Cordis fibers and cleanup, while NMG-specific workspace, database and daemon fixtures are composed separately and product code does not import Cordis.
+      仅供测试使用的生命周期边界，负责管理 Cordis fibers 与清理；NMG 工作区、数据库和 daemon fixture 在其外单独组合，产品代码不导入 Cordis。
+    owner: docs/decisions/implemented/2026-08-25-cordis-test-runtime.md
+    anchor: Decision
+    status: canonical
+references: []

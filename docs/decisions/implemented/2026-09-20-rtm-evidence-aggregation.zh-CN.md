@@ -1,6 +1,6 @@
 # 追溯报告是证据，不是计数
 
-[English](2026-09-20-rtm-evidence-aggregation.md)
+[English](2026-09-20-rtm-evidence-aggregation.md) · [术语](2026-09-20-rtm-evidence-aggregation.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

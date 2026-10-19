@@ -1,0 +1,84 @@
+version: 2
+terms:
+  - term: OmniMemEval
+    aliases: [upstream user-memory harness, 上游用户记忆 harness]
+    definition: >-
+      NMG's preferred upstream harness for public user-memory benchmarks, running LongMemEval, LoCoMo, BEAM, PersonaMem v2 and HaluMem through one shared lifecycle of add, memory backend, search, answer model, official scorer and report; its user-memory runner forcibly calls the selected backend's `search()`, so it measures NMG ingestion, retrieval, deletion, evidence coverage and cost but not whether Pi decides to recall or uses the result correctly.
+      NMG 首选的公共用户记忆 benchmark 上游 harness，经 add、记忆后端、search、答案模型、官方评分器与报告这套共享生命周期运行 LongMemEval、LoCoMo、BEAM、PersonaMem v2 与 HaluMem；它的用户记忆 runner 强制调用所选后端的 `search()`，因此测量的是 NMG 摄取、检索、删除、证据覆盖与成本，而不是 Pi 是否决定召回或是否正确使用结果。
+    owner: evals/omnimemeval/README.md
+    anchor: OmniMemEval integration
+    status: canonical
+  - term: benchmark bridge
+    aliases: [NMG adapter, NDJSON subprocess, benchmark 桥]
+    definition: >-
+      The thin Python client NMG contributes to OmniMemEval's `scripts/client_factory` registry: it forwards `add(...)` to session ingestion and extraction, `search(...)` to budgeted NMG recall returning plain-text context, and cleanup to deletion of the benchmark user's isolated namespace, through a stable local NMG HTTP or CLI boundary; it must not read SQLite tables, duplicate graph logic in Python, or make benchmark semantics part of NMG core. The current implementation is a persistent NDJSON subprocess rather than an HTTP service.
+      NMG 在 OmniMemEval 的 `scripts/client_factory` 注册表里贡献的薄 Python 客户端：经稳定的本地 NMG HTTP 或 CLI 边界把 `add(...)` 转发到会话摄取与抽取、把 `search(...)` 转发到有预算并返回纯文本上下文的 NMG 召回、把清理转发到删除该 benchmark 用户的隔离 namespace；它不得读取 SQLite 表、在 Python 里复制图逻辑，或把 benchmark 语义变成 NMG core 的一部分。当前实现是持久 NDJSON 子进程而不是 HTTP 服务。
+    owner: evals/omnimemeval/README.md
+    anchor: Integration boundary
+    status: canonical
+  - term: matched no-memory baseline
+    aliases: [no_memory arm, 匹配无记忆基线]
+    definition: >-
+      A transformed copy of a search artifact that preserves the same questions, golden answers, reader, judge and prompts while removing only retrieved context, so the reported delta over it — not the absolute score — is the memory system's contribution; it is an internal lower bound, not an OmniMemEval memory-backend leaderboard entry.
+      一份检索工件的转换副本，保留同样的问题、金标答案、reader、judge 与 prompt，只移除检索上下文，因此相对它的差值（而不是绝对分数）才是记忆系统的贡献；它是内部下界，不是 OmniMemEval 记忆后端的排行榜条目。
+    owner: evals/omnimemeval/README.md
+    anchor: Two evaluation boundaries
+    status: canonical
+  - term: strict evidence audit
+    aliases: [exact-text evidence audit, 严格证据审计]
+    definition: >-
+      The auxiliary audit that matches returned context against the dataset's labelled evidence ids as exact normalized text and reports three figures — questions with at least one evidence turn, questions with every evidence turn, and recall over all labelled turns; it is deliberately strict and is not an official benchmark score, and paraphrased memories can be useful without exact text.
+      把返回上下文对照数据集标注证据 ID 按精确规范化文本匹配的辅助审计，报告三个数字——至少有一条证据轮次的问题、有全部证据轮次的问题，以及全部标注轮次上的召回；它有意严格，不是官方 benchmark 分数，而改写过的记忆即使没有精确文本也可能有用。
+    owner: evals/omnimemeval/README.md
+    anchor: LoCoMo
+    status: canonical
+  - term: record-level embedding
+    aliases: [record vectors, 记录级 embedding]
+    definition: >-
+      Embedding each memory record rather than a node or leaf summary: on LoCoMo it raises exact evidence recall from 45.1% to 52.9% and on BEAM 100K from 26.2% to 32.9% while returning slightly less text, which is why an enabled embedding provider defaults to record granularity for the benchmark bridge; node and leaf vectors stay useful as a bounded directory or a future large-scale routing stage but must not replace fine-grained evidence retrieval until a matched experiment shows equal or better recall.
+      嵌入每条记忆记录而不是节点或 leaf 摘要：在 LoCoMo 上把精确证据召回从 45.1% 提到 52.9%，在 BEAM 100K 上从 26.2% 提到 32.9%，同时返回略少的文本，因此启用 embedding provider 时 benchmark 桥默认使用记录粒度；节点与 leaf 向量作为有界目录或未来大规模路由阶段仍有用，但在匹配实验证明召回持平或更好之前不得替代细粒度证据检索。
+    owner: evals/omnimemeval/README.md
+    anchor: Embedding-granularity ablation
+    status: canonical
+  - term: shared embedding cache
+    aliases: [.benchmarks/shared-embedding-cache.sqlite, 共享 embedding 缓存]
+    definition: >-
+      The single benchmark-wide cache keyed by embedding index identity, input kind and text hash, so repeated corpora and queries reuse vectors across users and runs; changing the model or preprocessing contract changes the index identity and cannot reuse incompatible vectors, and creating a new per-eval cache is a documented boundary violation (before the merge, five caches held 906k rows of which 248k, 27%, were duplicates across eval variants).
+      全 benchmark 唯一的缓存，按 embedding 索引身份、输入种类与文本哈希为键，使重复语料与查询可跨用户、跨运行复用向量；改变模型或预处理契约会改变索引身份且无法复用不兼容向量，而新建逐 eval 缓存是被记录的边界违规（合并前 5 个缓存持有 906k 行，其中 248k、即 27% 是各 eval 变体之间的重复）。
+    owner: evals/omnimemeval/README.md
+    anchor: Current-code BGE full rerun (2026-08-01)
+    status: canonical
+  - term: forget marker
+    aliases: ["[forget]", 遗忘标记]
+    definition: >-
+      Typed, extensible control metadata that records logical forgetting while leaving the searchable statement clean: the original active memory is soft-deleted, the immutable source history stays auditable, and the adapter renders `[forget] statement` only at the model-input boundary with guidance that this is not an active fact and must not be reconstructed or used; it is not a substitute for the separate physical delete required for privacy erasure, and marker kinds are deliberately open.
+      带类型、可扩展的控制元数据，记录逻辑遗忘同时让可检索陈述保持干净：原始活动记忆被软删除，不可变来源历史仍可审计，适配器只在模型输入边界渲染 `[forget] statement`，并附「这不是活动事实、不得重建或使用」的指引；它不是隐私擦除所需之独立物理删除的替代品，标记载体有意开放。
+    owner: evals/omnimemeval/README.md
+    anchor: PersonaMem v2
+    status: canonical
+  - term: marker projection budget
+    aliases: [Top-1 marker, 标记投影预算]
+    definition: >-
+      The projection rule that after retrieval ranking exposes at most the highest-ranked marker of each registered control kind while all marker records stay in the structured result and audit trace; on 5,000 PersonaMem questions it preserved 18.70% on `ask_to_forget` and improved overall accuracy against exposing every marker, which supports an Active Graph projection budget rather than a storage limit.
+      投影规则：检索排序之后，每种已注册控制种类最多暴露排名最高的那一个标记，而所有标记记录仍保留在结构化结果与审计 trace 中；在 5,000 个 PersonaMem 问题上它保住 `ask_to_forget` 的 18.70%，并相对暴露全部标记改善了总体准确率，这支持的是 Active Graph 投影预算而不是存储上限。
+    owner: evals/omnimemeval/README.md
+    anchor: PersonaMem v2
+    status: canonical
+  - term: incremental add-time index
+    aliases: [flush before search, 写入时增量索引]
+    definition: >-
+      Building the per-user record index during session adds instead of lazily on the first query: on BEAM 100K it preserved retrieval quality while cutting mean first-query latency from 2,102 to 193 ms; the adapter accumulates pending records across a user's session adds and flushes them in one or more batches immediately before search, and Pi separately schedules the same synchronizer in the background after turns while continuing to use FTS until the index is ready.
+      在会话 add 期间构建逐用户记录索引，而不是在首次查询时惰性构建：在 BEAM 100K 上它保持检索质量同时把平均首次查询延迟从 2,102 ms 降到 193 ms；适配器在某个用户的会话 add 期间累积待处理记录，并在检索之前立即作为一个或多个批次冲刷，而 Pi 另外在轮次之后于后台调度同一同步器，并在索引就绪前继续使用 FTS。
+    owner: evals/omnimemeval/README.md
+    anchor: BEAM 100K retrieval experiment
+    status: canonical
+  - term: cold versus warm search
+    aliases: [search-perf sidecar, 冷态与热态检索]
+    definition: >-
+      The reporting split between the official cold end-to-end `search_duration_ms`, which includes per-user GPU embedding construction and index build, and the NMG core sidecar phases reported separately (P50 25.63 ms, P95 59.70 ms, P99 66.26 ms for graph/search work), where a same-corpus warm check kept identical returned contexts and cut end-to-end search from 44.73 seconds to 260.09 ms; future performance work must report the two separately.
+      报告上的区分：官方冷态端到端 `search_duration_ms`（含逐用户 GPU embedding 构建与索引构建），与 NMG core 侧车分别报告的阶段（图／检索工作的 P50 25.63 ms、P95 59.70 ms、P99 66.26 ms），其中一次同语料热态检查保持返回上下文完全相同并把端到端检索从 44.73 秒降到 260.09 ms；未来的性能工作必须分别报告这两类数字。
+    owner: evals/omnimemeval/README.md
+    anchor: Current-code BGE full rerun (2026-08-01)
+    status: canonical
+references:
+  - Active Graph

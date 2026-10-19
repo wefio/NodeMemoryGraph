@@ -1,6 +1,6 @@
 # 派发循环是共享的；臂保留自己的声明与测量
 
-[English](2026-09-19-dispatch-loop-is-shared.md)
+[English](2026-09-19-dispatch-loop-is-shared.md) · [术语](2026-09-19-dispatch-loop-is-shared.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit
@@ -33,7 +33,7 @@
 
 - **测量保持可比。** 驱动的报告格式与 CLI 不变；它调用的循环是同一份代码，所以在此之前与之后记录的格子是同一个格子。归档的 `matrix.json` 与计划的读数分级规则照旧可用。
 - **黑板是端口。** 循环消费 `DispatchBoard`、已准入的不透明声明、worker 端口与共享会话决策；不新增产品策略或存储列。
-- **抽取不等于产品启用。** 快速测试使用假 board，并以真 Store 验证会话事实落库；它们不证明现有 `nmg_board` 宿主流程调用了该循环。产品接入沿用现有黑板与宿主流程，不新增工具、命令或独立 OoO 入口。[调用链审查](../../design/task-unit-semantics-obligations.md#product-call-path-audit-2026-09-20)分别记录已有规则、已有生命周期操作与实际观察到的调用边界。
+- **抽取不等于产品启用。** 快速测试使用假 board，并以真 Store 验证会话事实落库；它们不证明现有 `nmg_board` 宿主流程调用了该循环。产品接入沿用现有黑板与宿主流程，不新增工具、命令或独立 OoO 入口。[调用链审查](../../design/task-unit-semantics-obligations/product-call-path-audit-2026-09-20.md#product-call-path-audit-2026-09-20-1)分别记录已有规则、已有生命周期操作与实际观察到的调用边界。
 - **臂的身份保留。** 它的驱动保留 spec 格式、实时/桩 worker 的选择、报告与归档；评审者仍然可以只读臂的驱动就知道"臂跑了什么"。
 
 ## 未完成项

@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: embedding provider
+    aliases: [向量嵌入提供方, embedding 服务]
+    definition: >-
+      A configured service that converts query or memory text into vectors; semantic retrieval requires a provider and a ready index.
+      将查询或记忆文本转换为向量的已配置服务；语义检索要求 provider 可用且索引已就绪。
+    owner: skills/nmg-memory/references/embedding.md
+    anchor: 1. Configuration
+    status: canonical
+  - term: embedding index
+    aliases: [向量索引, embedding 索引]
+    definition: >-
+      The built, derived vector lookup structure required before vector retrieval can engage; its readiness is observable through `index:status`.
+      向量检索启用前必须构建的派生向量查找结构；可通过 `index:status` 观察其就绪状态。
+    owner: skills/nmg-memory/references/embedding.md
+    anchor: 2. Building the index
+    status: canonical
+  - term: semantic retrieval
+    aliases: [语义检索]
+    definition: >-
+      Retrieval using vectors generated from memory and query text; NMG may combine it with lexical retrieval in hybrid mode.
+      使用由记忆文本和查询文本生成的向量进行检索；NMG 可在 hybrid 模式下将其与词法检索结合。
+    owner: skills/nmg-memory/references/embedding.md
+    anchor: 3. Search modes
+    status: canonical
+references: []

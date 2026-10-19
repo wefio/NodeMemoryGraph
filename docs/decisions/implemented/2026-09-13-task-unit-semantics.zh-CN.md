@@ -1,6 +1,6 @@
 # 将逻辑任务单元与 Agent 执行分配分开
 
-[English](2026-09-13-task-unit-semantics.md)
+[English](2026-09-13-task-unit-semantics.md) · [术语](2026-09-13-task-unit-semantics.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

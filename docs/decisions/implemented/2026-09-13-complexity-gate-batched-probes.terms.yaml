@@ -1,0 +1,21 @@
+version: 2
+terms:
+  - term: batched source-preserving complexity probes
+    aliases: [batched complexity measurement, 批量源码扩展名保真复杂度探针]
+    definition: >-
+      A complexity-gate measurement path that batches changed-file probes within the argument budget while retaining each source extension, so ESLint selects the matching parser and per-file verdicts remain unchanged; an incomplete measurement remains explicitly unmeasured.
+      复杂度门的测量路径，在参数长度预算内批量处理改动文件的探针并保留各自源码扩展名，使 ESLint 选择匹配的解析器且不改变逐文件裁决；测量不完整时仍明确报告为未测量。
+    owner: docs/decisions/implemented/2026-09-13-complexity-gate-batched-probes.md
+    anchor: Decision
+    status: canonical
+  - term: complexity measurement baseline
+    aliases: [baseline revision, 复杂度测量基线]
+    definition: >-
+      The repository revision from which the baseline-side probes are read; both sides of the diff use the same source-preserving measurement path.
+      读取基线侧探针所依据的仓库修订；diff 两侧使用相同且保留源码扩展名的测量路径。
+    owner: docs/decisions/implemented/2026-09-13-complexity-gate-batched-probes.md
+    anchor: Decision
+    status: canonical
+references:
+  - gate
+  - evidence
