@@ -4,7 +4,7 @@
 
 **Status:** implemented
 **Approved:** explicit
-**Relates to:** [Recall intent](2026-10-10-recall-intent-and-diagnostics.md)
+**Relates to:** [Recall intent](2026-10-10-recall-intent-and-diagnostics.md), [Unified recall vocabulary](2026-10-20-unified-recall-vocabulary.md)
 
 ## Problem
 

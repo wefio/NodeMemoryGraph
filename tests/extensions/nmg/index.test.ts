@@ -2464,9 +2464,9 @@ test("session recall piggybacks a search proposal without a prepare RPC or injec
     );
     assert.equal(turnCalls.length, 1);
     assert.equal(
-      "recall" in turnCalls[0]!.params,
-      false,
-      "the existing turn RPC carries no raw prompt",
+      (turnCalls[0]!.params.recall as { prompt: string }).prompt,
+      "apply palette 老规矩",
+      "the existing turn RPC carries bounded normalized matching input for the unified owner",
     );
     assert.equal(
       calls.some((call) => call.method === "lab" && call.params.operation === "prepare"),

@@ -1,4 +1,7 @@
-import { decideMemoryLoad } from "./gate.ts";
+import { recallTermDecision } from "./gate.ts";
+import { RecallPool } from "./recall-pool.ts";
+import { type RecallTerm, RECALL_VOCABULARY, RECALL_POOL_CAPACITY } from "./recall-vocabulary.ts";
+import { recallInput, normalizeRecallPhrase, literalPositions } from "./recall-matcher.ts";
 import type { MemoryGateDecision } from "./types.ts";
 import { containsSecret } from "./write-policy.ts";
 
@@ -7,6 +10,9 @@ export interface SessionRecallCue {
   reason: string;
   sourceQuery: string;
   sourceRevision: number;
+  origin?: "seed" | "learned";
+  protected?: boolean;
+  mode?: RecallTerm["mode"];
 }
 
 export interface SessionRecallPreparation {
@@ -41,6 +47,7 @@ interface SessionRecallState {
   revision: number;
   skipped: boolean;
   cues: SessionRecallCue[];
+  pool: RecallPool;
 }
 
 /** Operational weak hints, never facts, relevance labels or executable regexes.
@@ -50,6 +57,13 @@ export class SessionRecallTrial {
   readonly #sessions = new Map<string, SessionRecallState>();
   #revision = 0;
   #generation = 0;
+  readonly #seeds: readonly RecallTerm[];
+  readonly #capacity: number;
+
+  constructor(seeds: readonly RecallTerm[] = RECALL_VOCABULARY, capacity = RECALL_POOL_CAPACITY) {
+    this.#seeds = seeds;
+    this.#capacity = capacity;
+  }
 
   snapshot(sessionId: string, projectDir: string): SessionRecallHints {
     const state = this.#state(sessionId, projectDir);
@@ -76,7 +90,7 @@ export class SessionRecallTrial {
     sourceTurn?: number,
   ): boolean {
     if (!canProposeSessionRecallCue(prompt, phrase)) return false;
-    const prepared = this.prepare(sessionId, projectDir, prompt);
+    const prepared = this.prepare(sessionId, projectDir, prompt, false, sourceTurn);
     return this.offerPrepared(sessionId, prepared.revision, phrase, sourceTurn);
   }
 
@@ -115,6 +129,7 @@ export class SessionRecallTrial {
         skipped: false,
         cues: [],
         events: [],
+        pool: new RecallPool(this.#seeds, this.#capacity),
       };
     }
     this.#sessions.delete(sessionId);
@@ -133,23 +148,18 @@ export class SessionRecallTrial {
     projectDir: string,
     prompt: string,
     alreadyScheduled = false,
+    sourceTurn?: number,
   ): SessionRecallPreparation {
     const state = this.#state(sessionId, projectDir);
-    // Bound both capture and matching work. Long inputs still use the ordinary gate.
-    state.query = prompt.length <= 4096 ? cueText(prompt) : "";
+    state.query = recallInput(prompt);
     state.revision = ++this.#revision;
-    const decision = decideMemoryLoad(prompt);
+    const term = state.pool.observe(prompt, sourceTurn ?? state.revision);
+    const decision = recallTermDecision(term?.mode, term?.origin === "learned");
     state.skipped = !alreadyScheduled && decision.mode === "none";
-    if (!state.skipped) return { status: "unchanged", revision: state.revision, decision };
-    const cue = state.cues.find((entry) => literalMatch(state.query, entry.phrase));
-    if (!cue) return { status: "skipped", revision: state.revision, decision };
-    state.skipped = false;
-    return {
-      status: "hint",
-      revision: state.revision,
-      phrase: cue.phrase,
-      decision: decideMemoryLoad(prompt, { sessionCue: true }),
-    };
+    if (alreadyScheduled || term?.origin === "seed")
+      return { status: "unchanged", revision: state.revision, decision };
+    if (!term) return { status: "skipped", revision: state.revision, decision };
+    return { status: "hint", revision: state.revision, phrase: term.phrase, decision };
   }
 
   correct(
@@ -164,11 +174,11 @@ export class SessionRecallTrial {
     if (!state?.skipped || state.revision !== revision) {
       throw new Error("recall correction requires the current skipped-query revision");
     }
-    const normalized = normalizePhrase(phrase);
+    const normalized = normalizeRecallPhrase(phrase);
     if (!isLiteralCuePhrase(normalized)) {
       throw new Error("recall phrase must be 3..80 literal word characters, not a regex");
     }
-    if (!literalMatch(state.query, normalized)) {
+    if (!literalPositions(state.query, normalized).length) {
       throw new Error("recall phrase must occur in the current unquoted query");
     }
     if (!reason.trim() || reason.length > 240) {
@@ -193,8 +203,13 @@ export class SessionRecallTrial {
     );
     state.cues = state.cues.filter((entry) => entry.phrase !== normalized);
     state.cues.push(cue);
-    if (state.cues.length > 8)
-      this.#event(state, { kind: "evicted", phrase: state.cues.shift()!.phrase });
+    for (const retired of state.pool.add(
+      { phrase: normalized, mode: "cue" },
+      sourceTurn ?? state.revision,
+    )) {
+      state.cues = state.cues.filter((entry) => entry.phrase !== retired.phrase);
+      this.#event(state, { kind: "evicted", phrase: retired.phrase });
+    }
     this.#event(state, {
       kind: reintroduced ? "reintroduced" : "admitted",
       phrase: normalized,
@@ -207,17 +222,28 @@ export class SessionRecallTrial {
   }
 
   list(sessionId: string): SessionRecallCue[] {
-    return (this.#sessions.get(sessionId)?.cues ?? []).map((cue) => ({ ...cue }));
+    const state = this.#sessions.get(sessionId);
+    return (
+      state?.pool.entries().map((entry) => ({
+        phrase: entry.phrase,
+        reason: "Seed vocabulary",
+        sourceQuery: "",
+        sourceRevision: 0,
+        ...state.cues.find((cue) => cue.phrase === entry.phrase),
+        origin: entry.origin,
+        protected: entry.protected,
+        mode: entry.mode,
+      })) ?? []
+    );
   }
 
   remove(sessionId: string, phrase: string): boolean {
     const state = this.#sessions.get(sessionId);
     if (!state) return false;
-    const before = state.cues.length;
-    state.cues = state.cues.filter((cue) => cue.phrase !== normalizePhrase(phrase));
-    const removed = state.cues.length !== before;
+    const removed = state.pool.remove(phrase);
+    state.cues = state.cues.filter((cue) => cue.phrase !== normalizeRecallPhrase(phrase));
     if (removed) {
-      this.#event(state, { kind: "removed", phrase: normalizePhrase(phrase) });
+      this.#event(state, { kind: "removed", phrase: normalizeRecallPhrase(phrase) });
       this.beginTurn(sessionId);
     }
     return removed;
@@ -233,10 +259,10 @@ export function matchSessionRecallCue(
   phrases: readonly string[],
 ): string | undefined {
   if (prompt.length > 4096) return undefined;
-  const query = cueText(prompt);
+  const query = recallInput(prompt);
   return phrases
-    .map(normalizePhrase)
-    .find((phrase) => isLiteralCuePhrase(phrase) && literalMatch(query, phrase));
+    .map(normalizeRecallPhrase)
+    .find((phrase) => isLiteralCuePhrase(phrase) && literalPositions(query, phrase).length > 0);
 }
 
 export function canProposeSessionRecallCue(prompt: string, phrase: string): boolean {
@@ -249,41 +275,4 @@ function isLiteralCuePhrase(phrase: string): boolean {
     phrase.length <= 80 &&
     /^[\p{L}\p{N}][\p{L}\p{N} '\u2019-]*[\p{L}\p{N}]$/u.test(phrase)
   );
-}
-
-function normalizePhrase(value: string): string {
-  return value.normalize("NFKC").replace(/\s+/gu, " ").trim().toLowerCase();
-}
-
-function cueText(prompt: string): string {
-  prompt = prompt.normalize("NFKC");
-  if (prompt.length > 4096 || containsSecret(prompt)) return "";
-  // Conservative pilot exclusions, not a semantic intent classifier.
-  if (
-    /(?:翻译|字符串|打印|translate|literal string|print)/iu.test(prompt) ||
-    /(?:不要|不用|不需要|别).{0,8}(?:记忆|回忆|检索)|\b(?:without|no|don't use|do not use)\s+memory\b/iu.test(
-      prompt,
-    )
-  )
-    return "";
-  return normalizePhrase(
-    prompt
-      .replace(/```[\s\S]*?(?:```|$)/gu, " ")
-      .replace(/`[^`\n]*(?:`|$)|“[^”]*”|「[^」]*」|"[^"\n]*"|'[^'\n]*'/gu, " "),
-  );
-}
-
-function literalMatch(text: string, phrase: string): boolean {
-  let position = text.indexOf(phrase);
-  while (position >= 0) {
-    const left = text[position - 1] ?? "";
-    const right = text[position + phrase.length] ?? "";
-    const leftBoundary =
-      !/^[\p{Script=Latin}\p{N}_]/u.test(phrase) || !/[\p{Script=Latin}\p{N}_]/u.test(left);
-    const rightBoundary =
-      !/[\p{Script=Latin}\p{N}_]$/u.test(phrase) || !/[\p{Script=Latin}\p{N}_]/u.test(right);
-    if (leftBoundary && rightBoundary) return true;
-    position = text.indexOf(phrase, position + 1);
-  }
-  return false;
 }

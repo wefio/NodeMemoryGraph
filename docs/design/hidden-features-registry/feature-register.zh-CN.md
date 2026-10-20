@@ -29,7 +29,7 @@
 | Auto-recall tuning knobs | `NMG_AUTO_RECALL_TIER` (1)、`NMG_AUTO_RECALL_LIMIT` (13)、`NMG_AUTO_RECALL_INITIAL_TARGET` (13)、`NMG_AUTO_RECALL_STRONG_HIT_TOP_GAP` (0.05)、`NMG_AUTO_RECALL_STRONG_HIT_INITIAL_TARGET` (3) | 如列值 | 调节默认开启的 auto-recall | 默认开启功能的 knobs |
 | Board wake cadence | `NMG_BOARD_WAKE_INTERVAL_SEC` | 未设置 | board coordination loop 的唤醒间隔 | knob |
 | Daemon idle timeout | `NMG_DAEMON_IDLE_TIMEOUT_MS` | 未设置 | daemon 空闲关闭时间 | knob |
-| Session-only recall cue pilot | Lab 租约 `recall_gate` | OFF | 普通补充检索可在本来被跳过的一条之后携带字面提词；有界词池、按需事件环、显式客户端的准备修订号、生命周期退役；不持久化，也不做真值／相关性反馈 | 实验性；仅受控机制，无自然质量／成本证据 |
+| Session-only recall cue pilot | Lab 租约 `recall_gate` | OFF | 普通补充检索可在本来被跳过的一条之后携带字面提词；一个由可编辑词表播种的轮换词池（按不同用户回合驱动的分段 LRU）加按需事件环；原生 Pi 复用回合元数据，不增加逐回合 prepare RPC 或提示；显式客户端使用准备修订号；生命周期退役；不持久化，也不做真值／相关性反馈 | 实验性；仅受控机制，无自然质量／成本证据 |
 | Controlled daemon code reload | 显式 `nmg daemon reload`；owner 能力 `controlled-reload`；内部 `daemon run --reload-ticket` | OFF（仅操作员动作） | 独占交接、排空已接受调用、持票替代、持久数据保留、易失 AG／租约清空；缺少能力与孤儿门禁 fail closed | 隔离契约测试；没有自动生产替换 |
 | Agent identity／capabilities | `NMG_AGENT_ID`、`NMG_AGENT_CAPABILITIES`、`NMG_AGENT_ONLINE_MS`、`DSH_SESSION_ID` | 自动 | board／agent 注册身份 | 配置 |
 | Paths | `NMG_DATA_DIR`、`NMG_PROJECT_DIR`、`HOME`、`USERPROFILE` | 依环境 | data／project 目录 | 配置 |

@@ -4,7 +4,10 @@ import test from "node:test";
 import { decideMemoryLoad } from "../../src/core/gate.ts";
 import { SessionRecallTrial } from "../../src/core/session-recall.ts";
 
-// Contract: actual search proposals admit bounded cues, never a candidate-library import.
+const learned = (trial: SessionRecallTrial, session = "a") =>
+  trial.list(session).filter((cue) => cue.origin === "learned");
+
+// Contract: proposals admit bounded cues without bypassing provenance or source fences.
 test("search admission, project generation and current prepared revision are fenced", () => {
   const trial = new SessionRecallTrial();
   const first = trial.snapshot("a", "/project");
@@ -37,11 +40,11 @@ test("search proposals reject invalid source forms without throwing or admitting
   for (const phrase of ["ab", "unseen phrase", "a.*b", "x".repeat(81)]) {
     assert.equal(trial.offerFromSearch("a", "/project", "Apply 老规矩", phrase), false);
   }
-  assert.deepEqual(trial.list("a"), []);
+  assert.deepEqual(learned(trial), []);
 });
 
-test("retirement and reintroduction events are bounded, copied and never renewed by matching", () => {
-  const trial = new SessionRecallTrial();
+test("retirement and reintroduction events remain bounded and copied", () => {
+  const trial = new SessionRecallTrial([], 8);
   const first = trial.snapshot("a", "/project");
   assert.equal(trial.offerFromSearch("a", "/project", "Apply 老规矩", "老规矩", 1), true);
   trial.remove("a", "老规矩");
@@ -144,7 +147,7 @@ test("temporary cues do not capture known secrets", () => {
     () => trial.correct("a", current.revision, "usual setup", "password=fixture-only"),
     /secret/u,
   );
-  assert.equal(trial.list("a").length, 1);
+  assert.equal(learned(trial).length, 1);
 });
 
 test("session, project, explicit removal and fresh instances do not share cues", () => {
@@ -152,7 +155,7 @@ test("session, project, explicit removal and fresh instances do not share cues",
   learn(trial);
   assert.equal(trial.prepare("b", "/project", "Apply 老规矩").status, "skipped");
   assert.equal(trial.prepare("a", "/other", "Apply 老规矩").status, "skipped");
-  assert.deepEqual(trial.list("a"), []);
+  assert.deepEqual(learned(trial), []);
   learn(trial);
   assert.equal(trial.remove("a", "老规矩"), true);
   assert.equal(trial.prepare("a", "/project", "Apply 老规矩").status, "skipped");
@@ -169,13 +172,13 @@ test("Latin cues have word boundaries, case normalization and copied metadata", 
   for (const prompt of ["gold styles", "old stylesheet"]) {
     assert.equal(trial.prepare("a", "/project", prompt).status, "skipped");
   }
-  const rows = trial.list("a");
+  const rows = learned(trial);
   rows[0]!.phrase = "a mutated hint";
-  assert.equal(trial.list("a")[0]!.phrase, "old style");
+  assert.equal(learned(trial)[0]!.phrase, "old style");
 });
 
 test("cache cardinality and captured queries are bounded", () => {
-  const trial = new SessionRecallTrial();
+  const trial = new SessionRecallTrial([], 8);
   for (let index = 0; index < 9; index++) learn(trial, `special phrase ${index}`);
   assert.equal(trial.list("a").length, 8);
   assert.equal(

@@ -4,7 +4,7 @@
 
 **Status:** implemented
 **Approved:** explicit
-**Relates to:** [召回意图](2026-10-10-recall-intent-and-diagnostics.zh-CN.md)
+**Relates to:** [召回意图](2026-10-10-recall-intent-and-diagnostics.zh-CN.md), [统一召回词表](2026-10-20-unified-recall-vocabulary.zh-CN.md)
 
 ## Problem
 
