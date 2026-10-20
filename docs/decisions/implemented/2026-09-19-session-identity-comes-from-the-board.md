@@ -1,6 +1,6 @@
 # A unit's session comes from the board
 
-[中文](2026-09-19-session-identity-comes-from-the-board.zh-CN.md)
+[中文](2026-09-19-session-identity-comes-from-the-board.zh-CN.md) · [Terms used](2026-09-19-session-identity-comes-from-the-board.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

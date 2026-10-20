@@ -1,6 +1,6 @@
 # 让已写明的文档规则真正生效
 
-[English](2026-09-09-enforce-documentation-rules.md)
+[English](2026-09-09-enforce-documentation-rules.md) · [术语](2026-09-09-enforce-documentation-rules.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit

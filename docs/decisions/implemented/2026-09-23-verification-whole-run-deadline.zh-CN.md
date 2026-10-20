@@ -1,6 +1,6 @@
 # 将 Agent 验证限制为一整轮预算
 
-[English](2026-09-23-verification-whole-run-deadline.md)
+[English](2026-09-23-verification-whole-run-deadline.md) · [术语](2026-09-23-verification-whole-run-deadline.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

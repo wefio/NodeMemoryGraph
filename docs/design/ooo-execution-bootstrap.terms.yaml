@@ -1,0 +1,83 @@
+version: 2
+terms:
+  - term: constrained OoO bootstrap
+    aliases: [self-bootstrap, 受限 OoO 自举]
+    definition: >-
+      A staged development method in which real repository tasks determine the next out-of-order capability; its draft phase contract does not imply that the runtime already implements every capability.
+      由真实仓库任务决定下一项 OoO 能力的分阶段开发方法；草案中的阶段契约不表示运行时已实现所有能力。
+    owner: docs/design/ooo-execution-bootstrap.md
+    anchor: Goal and scope
+    status: canonical
+  - term: bootstrap boundary
+    aliases: [minimal bootstrap, 最小引导边界]
+    definition: >-
+      The minimum three capabilities before a real bootstrap round: frozen-input patch production, a bounded external-check event, and isolated patch acceptance that alone unlocks dependencies.
+      真实自举轮次前所需的三项最小能力：基于冻结输入生成补丁、有界的外部检查事件，以及只有通过该隔离验收才能解锁依赖。
+    owner: docs/design/ooo-execution-bootstrap.md
+    anchor: Minimal bootstrap boundary
+    status: canonical
+  - term: real external wait
+    aliases: [external wait event, 真实外部等待]
+    definition: >-
+      A host-observed check or operation with a bound start identity and terminal event; stale input, dependency failure, insufficient permission, or an artificial delay is not a wait that permits skipping the queue head.
+      由 host 观察、具有绑定启动身份与终态事件的检查或操作；过期输入、依赖失败、权限不足或人为延迟都不是允许越过队首的等待。
+    owner: docs/design/ooo-execution-bootstrap.md
+    anchor: Goal and scope
+    status: canonical
+  - term: candidate promotion
+    aliases: [promotion, 候选提升]
+    definition: >-
+      Applying an independently accepted candidate to the shared tree for use as the next round's baseline; it occurs outside the current round's protected execution boundary.
+      将独立验收通过的 candidate 应用到共享树，作为下一轮基线；此操作发生在当前轮次受保护的执行边界之外。
+    owner: docs/design/ooo-execution-bootstrap.md
+    anchor: Minimal bootstrap boundary
+    status: canonical
+  - term: independently accepted development change
+    aliases: [independent acceptance, 独立验收的开发变更]
+    definition: >-
+      A useful change to OoO produced by the execution chain, accepted by a verifier independent of the worker, and actually used by the following round; a title-only task, simulated worker or no-change demonstration does not qualify.
+      由执行链产出、经独立于 worker 的 verifier 接受、并被下一轮实际使用的 OoO 有用变更；纯标题任务、模拟 worker 或无变更演示均不符合条件。
+    owner: docs/design/ooo-execution-bootstrap.md
+    anchor: First real development task
+    status: canonical
+  - term: historical round-instrument record
+    aliases: [retired round instrument, 退役轮次工具记录]
+    definition: >-
+      The S3/S4 description of `round-cli.ts` and related tooling is a dated historical record; the round instrument was retired on 2026-09-18 and the subsequent experiment-arm driver is research tooling, not product-runtime activation.
+      关于 `round-cli.ts` 等工具的 S3/S4 描述是带日期的历史记录；轮次工具于 2026-09-18 退役，后续 experiment-arm driver 属于研究工具，不表示产品运行时已接入。
+    owner: docs/design/ooo-execution-bootstrap.md
+    anchor: Advance on real blockers
+    status: canonical
+  - term: "no-change conclusion"
+    aliases: ["无需修改的结论"]
+    definition: >-
+      In the bootstrap proposal, an evidence-backed answer that declared cases need no patch; it must cite frozen cases and does not itself constitute a useful self-bootstrap change.
+      在自举提案中，依据证据说明声明用例不需要补丁的答复；必须引用冻结用例，且本身不构成有用的自举改进。
+    owner: docs/design/ooo-execution-bootstrap.md
+    anchor: "Checkable evidence for a conclusion"
+    status: proposed
+  - term: "baseline digest"
+    aliases: ["baselineDigest","基线摘要"]
+    definition: >-
+      A content identifier binding a candidate to the frozen input baseline used to produce and check it; patch application checks the binding instead of assuming a changing directory is unchanged.
+      将候选绑定到其生成与验证所用冻结输入基线的内容标识；应用补丁时核对绑定，不假定变化中的目录仍未改变。
+    owner: docs/design/ooo-execution-bootstrap.md
+    anchor: "The old version drives; the candidate version is tested"
+    status: proposed
+  - term: "external check event"
+    aliases: ["外部检查事件"]
+    definition: >-
+      In the bootstrap proposal, a host-reported observation of an allowed background check's start identity, terminal state and bounded logs; the waiting task releases its execution claim.
+      在自举提案中，宿主报告的已授权后台检查启动身份、终态和有界日志观测；等待该事件的任务释放执行 claim。
+    owner: docs/design/ooo-execution-bootstrap.md
+    anchor: "Minimal bootstrap boundary"
+    status: proposed
+references:
+  - Task Board
+  - no-change conclusion
+  - mutation testing
+  - research-instrument evidence
+  - product-loop activation boundary
+  - execution fusion
+  - baseline digest
+  - external check event

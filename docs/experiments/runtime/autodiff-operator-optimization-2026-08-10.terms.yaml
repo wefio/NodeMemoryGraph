@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: compiled tape
+    aliases: [compiled execution tape, 编译执行 tape]
+    definition: >-
+      A reusable linear execution representation built from a stable autodiff graph, allowing later steps to rebind data and execute without rebuilding the graph; historical speedups apply only to the measured workload and mode.
+      从稳定 autodiff 图构建、可复用的线性执行表示，使后续 step 可重新绑定数据并执行而无需重建图；历史加速结果仅适用于测量过的 workload 与 mode。
+    owner: docs/experiments/runtime/autodiff-operator-optimization-2026-08-10.md
+    anchor: Main findings recorded
+    status: canonical
+  - term: profile-before-optimize
+    aliases: [measured-bottleneck discipline, 先 profile 再优化]
+    definition: >-
+      Choose an optimization only after profiling identifies the workload's actual bottleneck, and retain it only when a controlled before/after measurement supports the change.
+      只有在 profile 确认 workload 的实际瓶颈后才选择优化，并且仅在受控前后测量支持该改动时才保留。
+    owner: docs/experiments/runtime/autodiff-operator-optimization-2026-08-10.md
+    anchor: Design lessons from the report
+    status: canonical

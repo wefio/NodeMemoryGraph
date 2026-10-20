@@ -1,10 +1,10 @@
 # The granularity arms against a real model - 2026-09-18
 
-**Status:** paid measurement, 14 runs and 29 model calls, one model, two task families, one of them held
-out of the instrument. **Directional only**: the sample cannot resolve a small difference, and no
-quality difference appeared to resolve.
+[中文](ooo-arms-pilot-2026-09-18.zh-CN.md) · [Terms used](ooo-arms-pilot-2026-09-18.terms.yaml)
 
-The runs behind every number below are kept, unedited, in [the archive](archive/ooo-arms-2026-09-19/README.md) - they were rescued out of after the fact - and [the plan](ooo-arm-plan-2026-09-19.md) fixes what the next paid run must store before it is allowed to run.
+**Status:** A–D paid measurements comprise 14 runs and 29 model calls on one model. The E arm was run separately twice: 8 attempts in the first run and 9 paid units in the evidence-backed second run. **Directional only**: the samples cannot resolve a small difference, and no quality difference appeared to resolve.
+
+The [archive](archive/ooo-arms-2026-09-19/README.md) keeps D/E and cap-experiment reports verbatim; A/B/C have summary results but their per-run files are not in the repository. The [plan](ooo-arm-plan-2026-09-19.md) records what later paid runs must store before they run. These are research-instrument measurements, not proof of a product-runtime caller.
 **Related:** [task-unit semantics design](../../design/task-unit-semantics.md) ·
 [its obligation ledger](../../design/task-unit-semantics-obligations.md) ·
 [the offline sweep that ordered this](./ooo-cost-model-2026-09-17.md)
@@ -132,27 +132,23 @@ unit). The only difference between the two arms is `fusion.unitsPerSession`: 1 i
 driver already described, 2 is fused. Everything else is identical - the same spec, the same envelope
 (`turns: 6`, `reads: 3`, `timeoutMs: 120 000`), `--slots 1`, the same model, and three reps each.
 
-| Arm     | Bound | Sessions per run | Accepted units | Median tokens | Median wall | Failures |
-| ------- | ----- | ---------------- | -------------- | ------------- | ----------- | -------- |
-| unfused | 1     | `1/1` ×3         | 2/2 ×3         | 22 498        | 12 948 ms   | 0        |
-| fused   | 2     | `2` ×3           | 2/2 ×3         | 22 533        | 11 048 ms   | 0        |
+| Arm     | Units per session | Pi sessions per run | Accepted units | Median tokens | Median wall | Failures |
+| ------- | ----------------- | ------------------- | -------------- | ------------- | ----------- | -------- |
+| unfused | 1                 | 2 ×3                | 2/2 ×3         | 22 498        | 12 948 ms   | 0        |
+| fused   | 2                 | 1 ×3                | 2/2 ×3         | 22 533        | 11 048 ms   | 0        |
 
 **What this sample carries.** Quality parity holds - every unit was accepted in every run of both arms,
 so the wall-time comparison is admissible - and the fused arm's median run was ~1.9 s faster:
 11.8 / 9.6 / 11.0 s against 11.9 / 12.9 / 14.1 s, about 15 % of the unfused median.
 
 **What the 1.9 s does not carry.** The same numbers deny the reading this section first gave them: the
-gap between the medians (1.9 s) is _smaller_ than each arm's own spread (2.2 s in both), so two reps per
+gap between the medians (1.9 s) is _smaller_ than each arm's own spread (2.2 s in both), so three reps per
 arm do not separate the session-startup term from ordinary run-to-run model time, and the difference is
 not "wider than either arm's own spread". The startup term stays what the cost model recorded - an
 unmeasured parameter - until the cap experiment below measures it, and that experiment finds it
 plan-dependent rather than a constant.
 
-**Fusion is not what this arm failed to resolve.** The cap experiment runs the same comparison on the
-four-unit fine plan and measures a positive effect there: cap 1 to cap 2 saves 8 451 ms on the medians
-against within-cell spreads of 1 783 ms and 571 ms, and its two-rep cells alone do not overlap (26.2-27.1 s
-against 17.7-18.0 s). What stays unresolved on this axis is what fusing _costs_, since the token columns
-at three reps are wider than the gaps they would be compared across - not whether it saves wall clock.
+**Fusion is not what this arm failed to resolve.** The cap experiment in the [archive](archive/ooo-arms-2026-09-19/README.md) runs the same comparison on the four-unit fine plan and measures a positive wall-time effect: cap 1 to cap 2 saves 8 451 ms on the three-rep medians against within-cell spreads of 1 783 ms and 571 ms. The first two reps alone also separate (26.2–27.1 s against 17.7–18.0 s); the third rep used a newer prompt. What stays unresolved is what fusing _costs_: at three reps, the token spread is wider than the gap being compared, not whether this cap saves wall clock.
 
 **What it does not carry.** Tokens did not fall: 22 498 against 22 533 is 0.2 %, and the fused arm's own
 spread (17.6k - 26.3k) is wider than the difference. The per-unit numbers are read the same way, as
@@ -196,12 +192,7 @@ false, which is the whole point of measuring the waste - and buys the work's lat
 turn on the hit rate, which is what the design's utility formula says and what this sample cannot yet
 price.
 
-**Two defects the first run found.** The extension accepted an artifact the host refuses: one candidate
-carried `digest, kind, conclusion, summary, evidence, citations` and no `files`, which
-`artifactEnvelope` admitted and `patchCandidate` then refused as "invalid patch structure" - a
-submission the adapter can accept that the board can never accept. And the instrument's own quality
-harness deleted the candidate tree on failure, so the first run could not say why every check failed;
-it now keeps the tree, and the control rows record the check's own output.
+**The first-run diagnosis, corrected by the second run.** The first report raised two issues: the harness deleted candidate trees on failure, and an apparent mismatch where `artifactEnvelope` admitted a candidate containing `digest, kind, conclusion, summary, evidence, citations` but `patchCandidate` refused it as "invalid patch structure". The second run confirmed the missing-tree problem, but corrected the mismatch claim: `artifactEnvelope` supports both patch and conclusion shapes; the harness incorrectly sent every artifact to the patch-only reader. Eight of nine attempts produced conclusion artifacts that this unit's check could not accept; the one patch attempt used `rows: [...]` instead of the required `lines: [...]`. The instrument now selects the reader by artifact kind and preserves the candidate tree and check output.
 
 ## E arm: second run, with evidence (2026-09-19)
 

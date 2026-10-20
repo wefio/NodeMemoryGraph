@@ -1,4 +1,6 @@
-# Fresh Pi recall: matched questions and preparation timing
+# Fresh Pi Recall: Matched Questions and Preparation Timing
+
+[English](fresh-pi-recall-diagnostics-2026-10-10.md) | [简体中文](fresh-pi-recall-diagnostics-2026-10-10.zh-CN.md) · [Terms](fresh-pi-recall-diagnostics-2026-10-10.terms.yaml)
 
 ## Scope
 
@@ -37,16 +39,16 @@ trust-resolution callback, `createAgentSession` with an in-memory session and
 used no watcher. Preparation received valid system-prompt options including
 `cwd`; results were read from `messages` and `systemPromptOptions`.
 
-| Observation         | Ordinary discovery | Explicit NMG only |
-| ------------------- | -----------------: | ----------------: |
-| Resource loading    |        1779.846 ms |        218.233 ms |
-| Session creation    |          47.320 ms |         42.245 ms |
-| Extension binding   |        1070.608 ms |         22.312 ms |
-| Recall preparation  |         853.368 ms |        647.928 ms |
-| Candidate rows      |                  5 |                 5 |
-| Load/handler errors |                  0 |                 0 |
-| NMG policy present  |                yes |               yes |
-| Model calls         |                  0 |                 0 |
+| Observation | Ordinary discovery | Explicit NMG only |
+| --- | ---: | ---: |
+| Resource loading | 1779.846 ms | 218.233 ms |
+| Session creation | 47.320 ms | 42.245 ms |
+| Extension binding | 1070.608 ms | 22.312 ms |
+| Recall preparation | 853.368 ms | 647.928 ms |
+| Candidate rows | 5 | 5 |
+| Load/handler errors | 0 | 0 |
+| NMG policy present | yes | yes |
+| Model calls | 0 | 0 |
 
 Candidate counts include only candidate rows, not the `fields: memory=id` format
 legend. Both surfaces exposed lexical degradation with reason

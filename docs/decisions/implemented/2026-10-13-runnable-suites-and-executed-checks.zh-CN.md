@@ -1,6 +1,6 @@
 # 区分可运行套件与测试输入、通过与未执行
 
-[English](2026-10-13-runnable-suites-and-executed-checks.md)
+[English](2026-10-13-runnable-suites-and-executed-checks.md) · [术语](2026-10-13-runnable-suites-and-executed-checks.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

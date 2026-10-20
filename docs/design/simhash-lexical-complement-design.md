@@ -1,108 +1,70 @@
-# SimHash 词法层补充设计（工单 7）
+# SimHash lexical complement for supersession candidates
 
-**Status:** draft  
-**Updated:** 2026-09-03
+[English](simhash-lexical-complement-design.md) | [简体中文](simhash-lexical-complement-design.zh-CN.md) · [Terms](simhash-lexical-complement-design.terms.yaml)
 
-Owner: supersession 候选召回（写路径），与 `supersession-design.md` 互补。
+**Status:** draft
 
-## 1. 问题
+Draft proposal, not implemented for memory supersession candidate recall. The repository has a shared SimHash utility, but current callers use it for tessera file-drift recovery, not for `memory_records` or `supersedeCandidates`.
 
-`supersedeCandidates`（写路径的候选召回）目前用：
-- **instr 子串预过滤**（lower(statement) 匹配 token）
-- **token 规范化**（小写 + 去标点）
-- **转换结构检测**（`transitionFromTokens`）
-- 排序：转换命中优先 → `statementSimilarity`（word-set Jaccard）
+Origin: dated 2026-09-03 draft for work item 7. This proposal complements the current [supersession design](supersession-design.md); it does not change its semantic-judgment boundary.
 
-**盲区**：所有词法判定都是**词级精确匹配**。词形变化与拼写变体导致召回为 0：
+## 1. Problem
 
-| 已有表述 | 新写入 | 词级判定 | 语义上是同一物？ |
-|---|---|---|---|
-| "用户偏好 Chinese explanations" | "用户偏好 Chinese explanation" | instr 匹配（explanation ⊂ explanations 前缀？否，词边界）→ 漏 | 是 |
-| "embedding 配置" | "embeddings 配置" | token "embedding" vs "embeddings" 不同词 → 漏 | 是 |
-| "colour scheme" | "color scheme" | 拼写变体 → 漏 | 是 |
+The current `supersedeCandidates` path uses same-scope token prefiltering, normalized token overlap, transition phrases, caller-supplied polarity, and `statementSimilarity`. The memory write-token path lowercases tokens, strips non-ASCII characters, and keeps tokens of at least two characters; it does not stem or normalize spelling variants. For example:
 
-这些变体是真实的（用户在 2026-08-12 的 supersede 链实测中见到 "Employed" ≡ "employed" 靠 token 规范化救回，但**复数/拼写/派生词形**仍漏）。
+| Existing statement | Incoming statement | Current candidate-path issue |
+| --- | --- | --- |
+| `解释: explanations` | `解释: explanation` | The incoming singular token can pass the substring prefilter, but exact token overlap is zero. |
+| `embeddings 配置` | `embedding 配置` | Han text is removed from this write-token set; the remaining singular/plural tokens differ. |
+| `colour` | `color` | There is no shared token substring, so the current prefilter can omit the old row. |
 
-## 2. 目标与边界
+These illustrate possible recall gaps, not measured miss rates. For a Han-only incoming statement with no recognized transition phrase, the current write-token path returns no supersession candidates; polarity alone does not bypass that early return. The current code and decision boundary are described in the [supersession design](supersession-design.md).
 
-**目标**：用确定性词法指纹（Feature Hashing / SimHash）补上"词形/拼写变体"的近重复候选召回——让变体重复能进 judge 候选池，而不是被词级精确匹配挡住。
+## 2. Goal and boundaries
 
-**边界（明确不做）**：
-- 不判语义、不替代 judge——只负责**召回候选**
-- 不碰搜索排序（检索路径的 hashing 语义混合已被 rejected，见
-  `docs/decisions/rejected/2026-09-03-hashing-vector-retrieval-fallback.md`）
-- 不引入外部依赖、不建巨大索引（本地轻量：一列整数 / 内存 ~KB 每千条）
-- NMG 只对**精确规范化等值**自动行动；近似判定始终交给 judge（维持
-  supersession-design.md 的分工红线）
+**Goal:** Evaluate a deterministic lexical-fingerprint channel that can put morphology, spelling, or script variants into a candidate set for caller review.
 
-## 3. 方案设计
+**Non-goals:**
 
-### 3.1 指纹：64-bit SimHash（token 级）
+- Do not infer semantic identity, merge records, or apply supersession from a fingerprint. A caller still decides whether the records describe the same scoped, single-valued property.
+- Do not change retrieval ranking or reuse the rejected hashing-retrieval fallback.
+- Do not add an external dependency or treat a threshold from another system as an NMG result.
+- Do not assume the existing tessera fingerprint and threshold are appropriate for memory statements.
 
-```
-simhash(text) -> 64-bit integer
-  tokens = 小写 + 去标点 + 分词（复用现有 token 规范化）
-  v[0..64) 每个 token 的 64-bit 哈希累加 ±1
-  指纹 = 每一位取 v[i] 符号
-```
+NMG already has `src/core/simhash.ts`, used by the tessera file-drift path. That establishes an available implementation primitive, not validated performance for supersession candidates. The shared utility's persisted tessera fingerprint is stored as 16-character hex text; the full unsigned 64-bit range must not be persisted as a SQLite signed `INTEGER`.
 
-64-bit 是记忆系统先例验证过的量级（claude-memory-system issue #53：64-bit、
-Hamming ≤ 3 召回近重复、每千条 < 1KB 索引）。
+## 3. Candidate proposal
 
-### 3.2 存储
+A draft variant is a 64-bit token SimHash over normalized lexical tokens, with Hamming distance as the comparison measure. The earlier `Hamming <= 3` value is an experiment starting point only; it is not a validated threshold.
 
-`memory_records` 加一列 `simhash INTEGER`（或复用 markers 通道？——**列更优**：
-可索引、可 SQL 范围查询）。写入时随 `upsertEmbedding` 同事务算好存下。
+A functional retrieval channel must be independent of the exact-token prefilter for variants such as `colour`/`color`; running a Hamming check only on rows already selected by `instr()` cannot recover rows that the prefilter omitted. A single fingerprint column also does not by itself provide an efficient Hamming-radius lookup. Storage encoding, scoped candidate lookup, index strategy, migration/backfill, and write cost therefore remain open design questions.
 
-### 3.3 召回落点（候选检测内）
+Any implementation must merge and deduplicate its candidates with the existing list, respect same-scope and status rules, preserve `SUPERSEDE_CANDIDATE_MAX`, and leave semantic judgment to a caller. The current exact-token, transition, and polarity channels remain the baseline.
 
-在 `supersedeCandidates` 现有 instr 预过滤之后、排序之前，加一个**指纹召回通道**：
-- 新 statement → simhash
-- `Hamming(new_simhash, old.simhash) ≤ 3` 且**词级判定未命中**的记录进候选
-- 与现有候选合并、去重，仍走 `SUPERSEDE_CANDIDATE_MAX = 10` 上限
+## 4. Evidence needed before implementation
 
-这样变体重复**先进候选池**，由 judge 判是否 supersede。
+The original work item called for a local comparison before implementation. A source-accurate experiment should:
 
-### 3.4 阈值与误召回
+1. Use a declared, reproducible corpus and report its size, source, and scope; do not assume an old estimate such as “~330 memories” describes the current database.
+2. Construct one-token morphology and spelling variants from eligible statements, with a frozen generator and separate test/validation examples.
+3. Measure current candidate recall, proposed-channel recall, false-candidate rate, and added lookup/write cost. Keep candidate recall separate from semantic supersession accuracy.
+4. Include representative short statements, Chinese/mixed-script text, and variants with no exact shared token.
+5. Decide whether the additional recall justifies its storage and query cost; otherwise retain the current path and record the result.
 
-Hamming ≤ 3 在 64-bit 上对"同主题不同句"的误召回率需实测（不同长句可能恰好近
-Hash）。实验阶段先测误召回率，若高则收紧（≤2）或加"至少共享 1 个核心 token"
-的护栏——指纹只作**召回补充**，不单独成判定。
+No result for this experiment is claimed by this draft. The `src/core/simhash.ts` unit tests and tessera drift tests exercise a different use case and do not validate supersession candidate recall.
 
-## 4. 实验设计（先测缺口，再决定实现）
+## 5. Open questions
 
-工单 7 的 Done when 要求先证明"Jaccard 路径确实漏词形变体、SimHash 能召回"。
-实验不需要 LLM、不需要外部——纯本地真实库 + 构造变体：
+- Which fingerprint/tokenization and threshold preserve useful recall without flooding review with unrelated candidates?
+- What scoped index or lookup strategy supports a Hamming-radius query without scanning every memory on each write?
+- Which record types and statement lengths should be excluded?
+- How should candidates from the fingerprint channel rank against explicit transition/polarity hits and current token overlap?
+- Does a frozen, product-representative corpus show a useful recall gain after accounting for false candidates and write latency?
 
-1. **取真实库全部记忆**（~330 条）
-2. **构造变体对**：对每条含实质内容的记忆，程序化生成词形变体（复数化 /
-   拼写变体 / 派生词形——只变一个 token，其余不变）
-3. **测量 A（现状）**：变体作为新写入 → `supersedeCandidates` 能否召回原记忆
-4. **测量 B（加指纹）**：同一变体 → 加 SimHash 通道后能否召回
-5. **结论**：B - A 的召回增益 > 0 且误召回率可接受 → 实现；否则记录"缺口已
-   被其他机制覆盖"并关闭
+## 6. Research references
 
-（可选）对照：真实近重复对（如 2026-08 多次出现的同名 supersede 链）验证
-指纹在真实重复上不误伤。
+The original draft cites [claude-memory-system issue #53](https://github.com/nikhilsitaram/claude-memory-system/issues/53), [Qdrant pull request #8707](https://github.com/qdrant/qdrant/pull/8707), and character n-gram vector-space methods as external precedents. These references are not reproduced measurements for NMG; their thresholds and quality claims must not be treated as project evidence.
 
-## 5. 实现规划（实验通过后）
+## Source references
 
-1. schema：`memory_records.simhash INTEGER` + migrate（旧行回填：遍历已有记录
-   算指纹——一次性，可复用现有 normalizeStatement）
-2. 写入：remember 事务内随 upsertEmbedding 算指纹
-3. 召回：`supersedeCandidates` 加指纹通道（Hamming ≤ 阈值）
-4. 测试：变体召回单测（"employments" vs "employment" 等）+ 误召回率上限断言
-5. 文档：本设计 + supersession-design.md 候选检测节更新
-
-## 6. 开放问题
-
-- Hamming 阈值（3 vs 2）与误召回护栏（是否需"共享核心 token"条件）——实验定
-- 指纹对**短陈述**（session 元数据等噪音）是否应跳过（无实质 token → 指纹无意义）
-- SimHash 与现有 `statementSimilarity` Jaccard 的关系：Jaccard 保留（词级精确），
-  指纹只补变体——两者并存的排序权重
-
-## 7. 研究基础
-
-- [claude-memory-system: SimHash near-duplicate pre-filter](https://github.com/nikhilsitaram/claude-memory-system/issues/53)：记忆系统先例——64-bit SimHash、Hamming ≤ 3、写路径预筛、每千条 < 1KB
-- [qdrant: Lexical Fuzzy Filter](https://github.com/qdrant/qdrant/pull/8707)、字符 n-gram VSM：词法容错的工业做法（NMG surface anchors 的 trigram 已覆盖显式 token，本设计补**写入侧**变体召回）
-- Feature hashing / SimHash 定位为词法级工具（拼写容错、近似去重）——与本设计的语义检索边界一致（见 rejected ADR）
+See [`src/core/simhash.ts`](../../src/core/simhash.ts), the [tessera fingerprint service](../../src/cli/service.ts), [tessera storage and retrieval](../../src/core/store/retrieval.ts), [`supersedeCandidates`](../../src/core/store/writes.ts), and the [supersession design](supersession-design.md).

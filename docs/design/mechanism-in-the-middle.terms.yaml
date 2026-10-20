@@ -1,0 +1,29 @@
+version: 2
+terms:
+  - term: two-face board entry model
+    aliases: [two-faces model, 双面黑板条目模型]
+    definition: >-
+      A draft explanatory model in which a board entry has write and read faces while a protocol supplies the compositor between them; it does not assert that these roles are separate modules or a new product interface.
+      一种草稿级解释模型：黑板条目有写面与读面，二者之间的裁定者由协议带入；它不声称这些角色对应独立模块或新的产品接口。
+    owner: docs/design/mechanism-in-the-middle.md
+    anchor: The model
+    status: proposed
+  - term: second-implementation seam rule
+    aliases: [seam eligibility rule, 第二实现建缝规则]
+    definition: >-
+      The draft rule that a boundary earns a built seam only when a second implementation exists; with one implementation the seam is declared, not pre-built against an imagined shape.
+      一条草稿规则：只有边界出现第二个实现时才构建分界；只有一个实现时应声明边界，不应针对想象中的形态提前建缝。
+    owner: docs/design/mechanism-in-the-middle.md
+    anchor: Which boundary earns a seam
+    status: proposed
+  - term: mechanism-policy boundary
+    aliases: [mechanism versus policy, 机制／策略边界]
+    definition: >-
+      The core owns how a declared rule is checked, while the protocol, plan and Agents own its name, wording, enablement and choices; enforcing a selected rule does not select it.
+      核心拥有如何检查已声明规则；协议、计划与 Agent 拥有规则的名称、表述、启用方式和选择；执行已选规则不等于替人选择规则。
+    owner: docs/decisions/implemented/2026-09-21-mechanism-not-policy.md
+    anchor: Decision
+    status: canonical
+references:
+  - legality read
+  - coordination frame

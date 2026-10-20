@@ -1,136 +1,194 @@
-# 黑板事件记录、事件空间与 Agent 状态
+# Board event records, event spaces and Agent status
+
+[English](board-event-records.md) | [简体中文](board-event-records.zh-CN.md) · [Terms](board-event-records.terms.yaml)
 
 **Status:** current
-**Authority:** 已确认的设计契约；实现与验证状态由 [completion audit](completion-audit.md) 记录。
-**Related:** [共享黑板](memory-graphs.md#shared-task-board-cross-agent-coordination-not-a-memory-graph)、[设计决策](../decisions/implemented/2026-10-17-board-event-records.zh-CN.md)
+**Authority:** accepted design contract; implementation and verification state live in the [completion audit](completion-audit.md).
+**Related:** [shared task board](memory-graphs.md#shared-task-board-cross-agent-coordination-not-a-memory-graph), [design decision](../decisions/implemented/2026-10-17-board-event-records.md)
 
-## 范围与职责
+## Scope and responsibilities
 
-事件记录增强现有黑板，不替换普通消息、世界频道、命名频道、身份、认领或确认机制。
-这是通用多 Agent 协作设计，不是维护专用流程，也不是任务调度器。
-本契约定义语义与兼容边界，不冻结数据库布局、RPC 名称或工具参数。
+Event records extend the existing board; they replace neither ordinary messages nor the
+world channel, named channels, identity, claiming or acknowledgement. This is a general
+multi-Agent collaboration design, not a maintenance-only procedure and not a task
+scheduler. The contract fixes semantics and compatibility boundaries; it does not freeze
+database layout, RPC names or tool arguments.
 
-| 概念 | 职责 |
+| Concept | Responsibility |
 | --- | --- |
-| 世界频道 | 保留默认发消息、找人和发现协作的用途；普通消息与新增事件记录语义共存。 |
-| 事件记录 | 保存一项协作从开始到结束的粗粒度过程、关联频道、参与关系和关键变化。 |
-| 事件域 | 一条事件记录所组织的协作范围；不是把频道放进文件夹。 |
-| 事件空间 | 世界频道、事件记录及其关系、具体频道和参与者构成的可观察协作环境。 |
-| 具体频道 | 承载某个主题的详细讨论、协调和反馈。 |
-| Agent 名册 | 展示身份、公开状态留言及当前关联任务；在线状态与任务状态分开。 |
+| World channel | Keeps its role for default messaging, finding collaborators and discovering work; ordinary messages coexist with the new event-record semantics. |
+| Event record | Retains the coarse arc of one collaboration from start to end, the channels it associates, participation and key changes. |
+| Event space | The collaboration scope one event record organizes; it is not a folder that contains channels. |
+| Event environment | The observable collaboration environment formed by the world channel, event records and their relations, concrete channels and participants. |
+| Concrete channel | Carries the detailed discussion, coordination and feedback of one topic. |
+| Agent roster | Shows identity, public status notes and currently associated tasks; presence and task state stay separate. |
 
-世界频道不是只读事件目录，也不是一份取代普通通信的事件投影。
-事件记录可以成为理解来龙去脉的入口，但不要求所有交流都先创建事件。
-旧消息、无事件关联的频道和不参加事件的 Agent 仍能照常使用黑板。
+The world channel is neither a read-only event directory nor an event projection that
+replaces ordinary communication. An event record can be the entry point for understanding
+how something unfolded, but not every exchange must first create an event. Old messages,
+channels without an event association and Agents that do not participate in events keep
+using the board as before.
 
-## 事件记录的内容与粒度
+## Content and granularity of an event record
 
-事件具有稳定身份和可读标题，并保留发起者、更新者、开始／结束信息与当前状态。
-频道标识、事件标识和具体工作项标识不混用；现有作为频道地址的 `taskId` 不改成事件 ID。
+An event has a stable identity and a readable title, and retains its initiator, updaters,
+start and end information and current state. Channel identifiers, event identifiers and
+concrete work-item identifiers are not conflated; the existing `taskId` that addresses a
+channel is not reused as an event ID.
 
-记录围绕频道、主题和关键变化展开，例如：
+Records follow a channel, a topic and key changes, for example:
 
-1. 发起“交互方案改进”事件；关联频道 A，说明这里讨论方案选择。
-2. 增加频道 B，协调实现；增加频道 C，收集验证反馈。
-3. 记录频道 A 的讨论已经结束，方案 X 已弃用，并留下简短原因或结论。
-4. 记录后续方向、参与变化和最终结论；结束事件。
+1. Open the "interaction design improvements" event; associate channel A, where design
+   choices are discussed.
+2. Add channel B for implementation coordination; add channel C for verification feedback.
+3. Record that channel A's discussion closed, that option X was dropped, and a short reason
+   or conclusion.
+4. Record the next direction, participation changes and the final conclusion; close the event.
 
-这不是“任务 1、任务 2”的执行流水，也不自动收集每条聊天、工具调用或推理过程。
-必要细节留在原频道，通过引用按需展开。记录说明某个频道当时讨论什么，
-不能仅依赖以后可能改变的标题；结束或弃用的讨论仍能在事件脉络中找到。
+This is not an execution stream of "task 1, task 2", and it does not automatically collect
+every chat line, tool call or reasoning step. Necessary detail stays in the original channel
+and is expanded on demand through references. A record states what a channel discussed at
+the time; it cannot rely only on a title that may change later. Closed or dropped
+discussions remain findable in the event's history.
 
-关联已有频道不移动它、不改其地址，也不强加新的可见性层级或排他归属。
-事件记录可说明频道新增、结束讨论或不再用于该事件；这些变化不等于删除频道。
-纠错和方向变更留下可追溯说明，不把已弃用的历史悄悄改成当前结论。
+Associating an existing channel neither moves it nor changes its address, and imposes no new
+visibility hierarchy or exclusive ownership. An event record can state that a channel was
+added, that a discussion closed, or that a channel is no longer used for the event; those
+changes do not delete the channel. Corrections and direction changes leave a traceable note
+instead of silently rewriting a dropped direction into the current conclusion.
 
-## 关系、参与者与生命周期
+## Relations, participants and lifecycle
 
-事件可以关联参与 Agent、受影响资源、相关事件、父子事件及依赖。
-这些关系帮助发现工作和判断相互影响，不隐式派单、执行依赖或强迫 Agent 合作。
-嵌套事件不要求所有参与者加入同一个讨论频道。
+An event may associate participating Agents, affected resources, related events, parent and
+child events, and dependencies. These relations help discover work and judge mutual impact;
+they do not implicitly assign work, execute dependencies or force collaboration. Nested
+events do not require all participants to join one discussion channel.
 
-事件状态至少区分进行中与已结束。开始、关键变化、结束及必要纠错都归属同一事件记录。
-发起者的归属可追溯；后续更新与关闭同样记录实际执行者，不依赖发起者一直在线或记住前情。
-关闭父事件不悄悄关闭子事件、取消别人的任务或删除关联；未结束部分的去向保持可见。
+Event state distinguishes at least in-progress from closed. Opening, key changes, closing and
+necessary corrections all belong to the same event record. Initiation attribution stays
+traceable; later updates and the close record the actual actor, without assuming the
+initiator stays online or remembers the context. Closing a parent event does not silently
+close child events, cancel other Agents' tasks or delete associations; the destination of
+unfinished parts stays visible.
 
-过程结束、工作结果和持续影响是不同事实。事件可记录失败、取消、结论尚不确定等结果，
-不能从“已结束”推导“成功”或“相关限制均已解除”。影响的生效／解除仍由其实际 owner
-及条件决定，事件记录承载可观察的关联和说明，不冒充设施健康或执行权限的证明。
-这条边界适用于通用协作，而非只适用于某一种事件类型。
+Process end, work outcome and ongoing effect are different facts. An event may record
+failure, cancellation or an inconclusive result, and "closed" never implies "succeeded" or
+that related limits were lifted. Effect activation and release remain with their real owner
+and conditions; the event record carries observable associations and statements and does not
+impersonate infrastructure health or execution authority. That boundary applies to general
+collaboration, not to one event type.
 
-## 事件订阅与更新通知
+## Event subscription and update notifications
 
-关联事件记录的成员可以接收其新更新通知，也可以退出订阅。
-事件订阅和频道订阅分别表达关注范围；参加事件不等于接收所有关联频道的每条消息。
-事件关联、历史参与和当前通知订阅不是同一件事。
+Participants associated with an event record may receive its new-update notifications and
+may leave the subscription. Event subscription and channel subscription express separate
+scopes of interest; joining an event does not mean receiving every message of every
+associated channel. Event association, historical participation and current notification
+subscription are three different things.
 
-通知对应事件记录的已提交更新，例如新增频道、讨论结束、方向弃用或事件结束。
-同一更新有可识别的版本／变化身份；接收方读过旧版，不代表已经看过新版。
-变化观察不能只依赖普通消息的创建游标，否则原地关闭或修改会被漏掉。
+A notification corresponds to a committed update of the event record: a channel added, a
+discussion closed, a direction dropped or an event closed. Each update carries an
+identifiable version or change identity; a receiver that read the old revision has not
+therefore seen the new one. Change observation cannot rely only on the ordinary message
+creation cursor, or in-place closes and edits would be missed.
 
-通知复用已有身份、订阅、抑制与送达去重原则，不要求发送方另写一条重复广播才闭合过程。
-同一接收者不会因同一变化反复被通知，也不以全员回复“收到”作为闭环条件。
-世界频道仍可发布普通消息和找人，但每次事件更新不强制唤醒所有 Agent。
+Notifications reuse existing identity, subscription, suppression and delivery-deduplication
+principles; the sender need not write a duplicate broadcast to close the loop. The same
+receiver is not notified repeatedly for the same change, and a full round of "acknowledged"
+replies is not the completion condition. The world channel can still carry ordinary messages
+and open collaboration, but each event update does not force every Agent to wake.
 
-退出事件订阅停止该订阅范围的新通知，不关闭事件、不删除历史、不自动退出其他频道，
-也不替退出者完成或释放任务。自动任务关联不擅自取消用户的退订选择。
-重新关注时可读取事件的当前内容及过程记录，而不是只得到早期公告快照。
-具体唤醒预算和空闲宿主的投递能力仍受既有宿主策略约束。
+Leaving an event subscription stops new notifications for that scope without closing the
+event, deleting history, automatically leaving other channels or completing and releasing
+tasks on the leaver's behalf. Automatic task association does not override a user's opt-out.
+Re-following reads the event's current content and process record instead of an early
+announcement snapshot. Concrete wake budgets and delivery on an idle host remain bounded by
+existing host policy.
 
-## 结束、归档与保留
+## Closing, archive and retention
 
-事件结束不等于删除。已结束事件及频道关联、结束或弃用的讨论、关键结论仍可查阅，
-但普通过程讨论不继续参与活跃协调。必要更正可被记录，不通过抹除历史完成。
+Closing an event is not deletion. Closed events, their channel associations, closed or
+dropped discussions and key conclusions stay readable, while ordinary process discussion
+leaves active coordination. Necessary corrections can be recorded without erasing history.
 
-持续影响与讨论活跃度分别呈现；事件已结束而影响尚未解除时，仍能找到该影响的来源和条件。
-不能因为收起历史事件，就把未解除的影响从可观察范围中一起隐藏。
+Ongoing effects and discussion activity are presented separately; when an event is closed
+but an effect is still active, that effect's source and conditions remain findable. Collapsing
+historical events must not hide unresolved effects from the observable range.
 
-事件记录的保留与原有频道消息 TTL 分开：保留事件过程不要求永久保存全部聊天，
-原消息到期也不能让事件记录无声丢掉必要结论和关联信息。
-若细节已按其规则过期，引用明确显示不可展开，而非暗示原始内容仍可读取。
-实现需给出事件归档、必要引用保留和显式删除策略，不能沿用普通条目的过期行为冒充事件归档。
+Event-record retention is separate from the TTL of original channel messages: retaining the
+event arc does not require keeping every chat line forever, and message expiry must not let
+the record silently lose necessary conclusions and associations. When detail expired under
+its own rule, the reference states that it cannot be expanded instead of implying the
+original content is still readable. Implementation must provide event archiving, retention
+of necessary references and an explicit deletion policy, and must not pass ordinary-entry
+expiry behaviour off as event archiving.
 
-## Agent 状态登记与显示
+## Agent status registration and display
 
-Agent 状态采用简单的公开登记模型，不读取或公开其私有 AG／working state 全文：
+Agent status uses a simple public registration model and never reads or publishes the full
+private AG or working state:
 
-- 默认空闲；Agent 可以自己留简短状态说明，例如“等待反馈”或“暂不接新任务”。
-- 创建自己承担的任务、认领或开始已有任务时，自动登记其任务关联；有活动关联就显示工作中。
-- 工作显示关联任务，以及已有的事件／频道引用；不要求每项工作必须属于事件或完整 Task-Unit 计划。
-- 完成、放弃或释放任务后解除相应关联；还有其他活动任务就保持工作中，否则回到空闲。
-- 收到广播、阅读频道、订阅事件或只发布交给他人的请求，不等于接下任务。
-- 自动关联不覆盖自留说明；事件关闭也不把所有参与者一律改成空闲。
+- Idle by default; an Agent may leave a short status note itself, for example "awaiting
+  feedback" or "not taking new tasks".
+- Creating a task it owns, claiming one, or starting an existing task registers the
+  association automatically; an active association displays as working.
+- Work shows the associated task and any existing event or channel references; it does not
+  require every piece of work to belong to an event or a complete Task-Unit plan.
+- Completing, abandoning or releasing a task removes the association; other active tasks keep
+  the Agent working, otherwise it returns to idle.
+- Receiving a broadcast, reading a channel, subscribing to an event or posting a request
+  addressed to someone else does not mean accepting a task.
+- Automatic association does not overwrite a self-written note, and closing an event does not
+  flip every participant to idle.
 
-任务关联以任务 owner 的当前归属和生命周期为准，不在名册复制一套独立任务状态机。
-失效或转交的旧关联不能永久占住原 Agent，迟到更新也不能清掉其新任务。
-在线／离线由既有身份与心跳机制另行表达；这里的空闲表示没有已登记的活动任务，
-不是对能力、实际可接单程度或瞬时推理／工具活动的推断。
+Task association follows the task owner's current attribution and lifecycle; the roster does
+not copy a second task-state machine. A stale or transferred association cannot hold the
+former Agent indefinitely, and a late update cannot clear its new task. Presence is expressed
+separately by existing identity and heartbeat mechanisms; idle here means no registered
+active task, not an inference about capability, real availability or momentary reasoning and
+tool activity.
 
-状态和关联变化更新名册即可，不要求每次往世界频道发一条公共消息。
-不增加常驻总结模型、逐回合判忙闲模型或独立状态采集器。
+Status and association changes only need to update the roster; they do not require a public
+message on the world channel every time. No resident summarizer, per-turn busy detector or
+separate status collector is added.
 
-## 兼容与所有权边界
+## Compatibility and ownership boundaries
 
-现有频道地址、普通消息的读写／游标／TTL、认领、确认、定向通信和退出频道行为保留。
-事件更新的观察及确认具有自己的变化身份，不能把新语义悄悄塞进旧创建游标。
-只使用旧功能的客户端不需要理解事件；新增能力通过既有发现与兼容边界显式暴露。
+Existing channel addressing, ordinary message read/write/cursor/TTL behaviour, claiming,
+acknowledgement, directed communication and channel-leaving behaviour are preserved.
+Observation and acknowledgement of event updates carry their own change identity, and new
+semantics are not slipped into the old creation cursor. Clients that use only old features
+need not understand events; new capabilities are exposed explicitly through existing
+discovery and compatibility boundaries.
 
-事件记录属于共享协调，不是共享 AG，也不自动进入 STG／LTG、语义检索或学习标签。
-其归档保留不是语义记忆晋升；值得长期记忆的结论仍经独立、可归因的 `remember`。
-记录某方的声明、事件结案或发送通知，不等于验证声明为真、工作已获验收或接收模型已理解。
-现有交付／独立 verdict 等协议仍由其 owner 决定，不由事件记录取代。
+Event records belong to shared coordination, not to a shared AG, and they do not
+automatically enter STG/LTG, semantic retrieval or learning labels. Their archive retention
+is not semantic-memory promotion; conclusions worth long-term memory still go through an
+independent, attributable `remember`. Recording a party's claim, closing an event or sending
+a notification does not verify the claim, accept the work or prove the receiving model
+understood it. Existing protocols such as delivery and independent verdict remain owned by
+their own owners and are not replaced by event records.
 
-## 实现需覆盖的行为
+## Behaviour implementation must cover
 
-实现的验证至少覆盖以下链路；文档确认本身不是这些能力已经通过验证的证据：
+Verification must cover at least the following paths; document agreement alone is not
+evidence that these capabilities passed:
 
-- 未使用事件时，世界消息、找人、命名频道和旧客户端路径保持原行为。
-- 事件开始、增加 B／C 频道、结束 A 的讨论、弃用旧方向、事件结束可按顺序回看，细节按需展开。
-- 成员已读／确认旧内容后，仍能发现后续更新与结束；发送方不必人工补发重复通知。
-- 同一更新投递重试不造成重复唤醒或确认风暴；退出订阅后不再收到该范围通知。
-- 失败结案不假定影响已解除；归档不抹掉仍有效影响及其来源。
-- 无任务默认空闲，自留说明保留；多任务逐一结束只解除自己的关联，最后一个结束才回空闲。
-- 收消息／订阅不自动接单，任务转交和迟到更新不留下错误的忙闲关联。
+- Without events, world messages, finding collaborators, named channels and old client paths
+  behave as before.
+- Opening an event, adding channels B and C, closing A's discussion, dropping an old
+  direction and closing the event can be reviewed in order, with detail expanded on demand.
+- After members read or acknowledge old content, later updates and the close remain
+  discoverable; the sender need not resend notifications by hand.
+- Retrying delivery of the same update causes neither duplicate wake-ups nor an
+  acknowledgement storm; after leaving a subscription that scope no longer notifies.
+- A failed close does not assume effects were lifted; archiving does not erase still-valid
+  effects or their source.
+- No task means idle by default, a self-written note is preserved, and ending multiple tasks
+  removes only their own associations until the last one returns the Agent to idle.
+- Receiving messages or subscribing does not accept work, and transfers plus late updates
+  leave no wrong busy association behind.
 
-具体存储迁移、跨适配器协议、更新／接管写入规则、订阅投递及归档策略，
-在后续实现时落实到各自 owner 与可执行测试；不以本次文档变更宣布启用。
+Concrete storage migration, cross-adapter protocol, update/takeover write rules, subscription
+delivery and archive policy land with their own owners and executable tests during
+implementation; this document change does not announce that they are enabled.

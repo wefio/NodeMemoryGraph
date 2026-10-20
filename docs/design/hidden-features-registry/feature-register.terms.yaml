@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: default-off capability
+    aliases: [hidden feature, 默认关闭能力]
+    definition: >-
+      A capability whose gate or mode keeps it inactive unless an explicit caller or operator opts in; listing it does not imply production integration.
+      由 gate 或 mode 控制、只有调用方或 operator 显式 opt-in 才启用的能力；列入注册表不代表已接入生产路径。
+    owner: docs/design/hidden-features-registry.md
+    anchor: Conventions
+    status: canonical
+  - term: research probe
+    aliases: [instrument-only path, research-only entry point, 研究探针, 仅研究入口]
+    definition: >-
+      A bounded evaluation or research entry point that does not register a product session tool or establish product runtime behavior or integration unless separately integrated.
+      有界的评测或研究入口；除非另行集成，否则不注册产品 session tool，也不能证明产品 runtime 行为或集成已存在。
+    owner: docs/design/hidden-features-registry/feature-register/explicit-research-probes.md
+    anchor: Explicit research probes
+    status: canonical

@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: progressive candidate routing
+    aliases: [node-summary progressive ordering, 渐进式候选路由]
+    definition: >-
+      A proposal to search promising node-local candidates first and expand to a broader candidate pool when evidence is insufficient; it does not by itself guarantee zero recall loss.
+      先搜索高潜力节点内候选、证据不足时再扩大候选池的提案；它本身不保证零召回损失。
+    owner: docs/experiments/retrieval/node-summary-accelerated-retrieval-2026-08-19.md
+    anchor: Problem and alternatives
+    status: canonical
+  - term: learned node pruning
+    aliases: [feedback-driven candidate-pool reduction, 学习式节点剪枝]
+    definition: >-
+      A proposed long-term reduction of the searched node pool using learned routing, requiring cold-start, distribution, and recall safeguards before activation.
+      使用学习式路由长期缩小搜索节点池的提案；启用前需满足冷启动、分布内与召回保护条件。
+    owner: docs/experiments/retrieval/node-summary-accelerated-retrieval-2026-08-19.md
+    anchor: Safety conditions proposed for learned pruning
+    status: canonical

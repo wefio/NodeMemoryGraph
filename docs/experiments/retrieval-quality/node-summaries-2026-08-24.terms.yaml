@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: node-summary tier
+    aliases: [节点摘要层]
+    definition: >-
+      A coarser index tier above leaf-block summaries that writes one summary per node from that node's block summaries and routes a hit to its largest blocks within the shared expansion budget; a node qualifies only with at least two summarized blocks.
+      位于叶子块摘要之上、更粗粒度的索引层：按节点的块摘要为每个节点写一条摘要，命中后在同一份扩展预算内路由到该节点最大的块；节点至少拥有两个已摘要块才具备资格。
+    owner: docs/experiments/retrieval-quality/node-summaries-2026-08-24.md
+    anchor: "Results (R@20, stacked vs stacked+node)"
+    status: canonical
+  - term: degenerate clustering
+    aliases: [退化聚类]
+    definition: >-
+      The experiment's mostly one-block-per-node grouping, for which the two-summarized-block admission rule excluded node summaries to avoid duplication; it does not prove every one-block grouping is useless.
+      该实验大多数节点各含一个块的分组结果；要求两个已摘要块的准入规则排除了节点摘要以避免重复，不表示所有单块分组都没有用途。
+    owner: docs/experiments/retrieval-quality/node-summaries-2026-08-24.md
+    anchor: "Results (R@20, stacked vs stacked+node)"
+    status: canonical
+  - term: hysteresis refresh
+    aliases: [滞回刷新]
+    definition: >-
+      Regenerating a node summary only when a membership-change or elapsed-time-with-change threshold is met; unchanged repeats need not regenerate, while later qualifying changes still can.
+      仅在成员变化或有变化的累计时间达到阈值时重新生成节点摘要；没有变化的重复运行不必重生成，但后续达到条件的变化仍可触发。
+    owner: docs/experiments/retrieval-quality/node-summaries-2026-08-24.md
+    anchor: "Results (R@20, stacked vs stacked+node)"
+    status: canonical

@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: stable discovery protocol
+    aliases: [local-context discovery, 稳定发现流程]
+    definition: >-
+      A bootstrap instruction to use current repository structure, local instructions, the owning contract and exact implementation, without requiring a global module map or a routing command for every edit.
+      一项启动指引：依据当前仓库结构、局部指令、所属合同和具体实现开展发现工作；不要求维护全局模块图，也不要求每次编辑前执行路由命令。
+    owner: docs/decisions/implemented/2026-09-16-stable-entry-local-context.md
+    anchor: Decision
+    status: canonical
+references:
+  - evidence

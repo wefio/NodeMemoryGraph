@@ -1,0 +1,31 @@
+version: 2
+terms: []
+references:
+  - contract
+  - work order
+  - route
+  - receipt
+  - gate
+  - trusted baseline
+  - assertion
+  - check
+  - check kind
+  - stage
+  - evidence
+  - assertion context
+  - terminology index
+  - terminology definition
+  - terminology reference
+  - section confirmation record
+  - Contract IR
+  - harness
+  - run-to-completion
+  - Active Graph
+  - Long-Term Graph
+  - Short-Term Graph
+  - projection revision
+  - task frame
+  - Task Board
+  - state space
+  - UOp
+  - tessera

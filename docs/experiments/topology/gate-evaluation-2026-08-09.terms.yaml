@@ -1,0 +1,35 @@
+version: 2
+terms:
+  - term: read-only same_as eligibility gate
+    aliases: [identity gate, 只读 same_as 资格 gate]
+    definition: >-
+      The gate assesses `same_as` eligibility and can withdraw it after a conflicting `distinct_from` proposal without accepting a relation or merging nodes. The assessment arm is read-only; a separate forced-merge probe measures physical contamination and rollback.
+      该 gate 评估 `same_as` 资格，并可在出现冲突的 `distinct_from` proposal 后撤回资格，而不接受关系或合并节点。评估组只读；另一个强制合并探针测量物理污染与回滚。
+    owner: docs/experiments/topology/gate-evaluation-2026-08-09.md
+    anchor: Protocol
+    status: canonical
+  - term: oracle candidate construction
+    aliases: [injected identity candidates, oracle candidate 构造]
+    definition: >-
+      Building the gate arm's candidates by hand from stable speaker labels (early/late speaker pairs as positives, cross-speaker pairs as negatives) instead of discovering them; results from this arm do not establish candidate-discovery quality.
+      用稳定的 speaker label 人工构造 gate 组的 candidate（早／晚同人节点对作为正样本，跨 speaker 节点对作为负样本），而不是去发现它们；该组的结果不确立 candidate 发现质量。
+    owner: docs/experiments/topology/gate-evaluation-2026-08-09.md
+    anchor: Protocol
+    status: canonical
+  - term: content-only candidate discovery arm
+    aliases: [non-oracle discovery arm, 仅内容 candidate 发现组]
+    definition: >-
+      The arm that embeds only early/late utterance content with NMG's local hashing embedder (no node name, scope or speaker label), selects the most similar late fragment, and consults official labels only after ranking; it measures blocking and ranking, and neither submits nor actuates proposals.
+      只用 NMG 本地 hashing embedder 嵌入早／晚话语内容（不含节点名、scope 或 speaker label），选出最相似晚期片段，且只在排序之后查阅官方标签的组；它衡量 blocking 与排序，不提交也不 actuate proposal。
+    owner: docs/experiments/topology/gate-evaluation-2026-08-09.md
+    anchor: Protocol
+    status: canonical
+  - term: structural co-location measure
+    aliases: [forced-merge contamination count, 结构性共置度量]
+    definition: >-
+      Counting foreign records observed under a wrong shared identity node during forced merges (12 records across four probes here). It measures structural contamination, not answer accuracy or safe unattended merge actuation.
+      强制合并时统计实际观察到位于错误共享身份节点之下的外来记录数（本次四个探针共 12 条）。它衡量结构污染，不是答案准确率，也不证明无人值守合并安全。
+    owner: docs/experiments/topology/gate-evaluation-2026-08-09.md
+    anchor: Interpretation and remaining risk
+    status: canonical
+references: []

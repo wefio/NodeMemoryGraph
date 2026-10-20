@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: whole-run verification deadline
+    aliases: [shared verification budget, 整次验证时限]
+    definition: >-
+      One time budget for the entire verifier invocation; each check receives only the remaining time, and checks that cannot start before exhaustion are recorded as failures rather than omitted from the verdict.
+      覆盖整个验证器调用的一份时间预算；每项检查只获得剩余时间，预算耗尽前无法启动的检查会被记录为失败，而不是从结论中省略。
+    owner: docs/decisions/implemented/2026-09-23-verification-whole-run-deadline.md
+    anchor: Decision
+    status: canonical
+references:
+  - gate
+  - evidence

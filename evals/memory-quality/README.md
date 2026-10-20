@@ -1,5 +1,7 @@
 # Memory quality invariant suite
 
+[English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
+
 Run with:
 
 ```powershell

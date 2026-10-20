@@ -1,6 +1,6 @@
 # 非平凡改动必须携带决策记录
 
-[English](2026-09-09-non-trivial-change-requires-decision.md)
+[English](2026-09-09-non-trivial-change-requires-decision.md) · [术语](2026-09-09-non-trivial-change-requires-decision.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit

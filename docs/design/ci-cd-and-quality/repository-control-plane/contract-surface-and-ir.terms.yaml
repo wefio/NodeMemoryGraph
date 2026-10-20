@@ -1,0 +1,12 @@
+version: 2
+terms: []
+references:
+  - contract
+  - Contract IR
+  - invariant
+  - assertion
+  - check
+  - check kind
+  - stage
+  - evidence
+  - assertion context

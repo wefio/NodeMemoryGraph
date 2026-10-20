@@ -1,6 +1,6 @@
 # 测试组合已有对象上的行为
 
-[English](2026-10-12-deliverable-tests-compose-behavior.md)
+[English](2026-10-12-deliverable-tests-compose-behavior.md) · [术语](2026-10-12-deliverable-tests-compose-behavior.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

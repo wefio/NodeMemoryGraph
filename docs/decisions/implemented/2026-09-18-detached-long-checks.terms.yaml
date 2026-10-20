@@ -1,0 +1,21 @@
+version: 2
+terms:
+  - term: detached verification run
+    aliases: [background verification check, 分离式验证运行]
+    definition: >-
+      A long check launched outside the foreground command, with its own pid, exit result and source-tree snapshot; its result is collected and compared with the current tree before commit, without treating elapsed time alone as failure.
+      在前台命令之外启动的长检查，拥有自己的 pid、退出结果与源码树快照；提交前收集结果并与当前树比较，不能仅凭耗时将其判作失败。
+    owner: docs/decisions/implemented/2026-09-18-detached-long-checks.md
+    anchor: Decision
+    status: canonical
+  - term: natural collection checkpoint
+    aliases: [next natural checkpoint, 自然收集检查点]
+    definition: >-
+      A point reached while doing other work at which a detached check's state is read; it replaces polling or sleeping and ensures a check with no parallel work is run synchronously.
+      并行处理其他工作时自然到达、适合读取分离式检查状态的时点；它取代轮询或 sleep，并要求没有并行工作的检查改为同步运行。
+    owner: docs/decisions/implemented/2026-09-18-detached-long-checks.md
+    anchor: Decision
+    status: canonical
+references:
+  - gate
+  - evidence

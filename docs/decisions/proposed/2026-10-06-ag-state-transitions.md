@@ -1,9 +1,9 @@
 # Slim AG exposure, shared information views and maintained state
 
-[中文](2026-10-06-ag-state-transitions.zh-CN.md)
+[中文](2026-10-06-ag-state-transitions.zh-CN.md) · [Terms used](2026-10-06-ag-state-transitions.terms.yaml)
 
 **Status:** proposed
-**Relates to:** [Session AG decision](../implemented/2026-08-29-session-active-graph-runtime.md), [AG runtime](../../design/session-active-graph-runtime-design.md), [Task continuity](../../design/task-unit-semantics.md#长任务的连续性与任务视图)
+**Relates to:** [Session AG decision](../implemented/2026-08-29-session-active-graph-runtime.md), [AG runtime](../../design/session-active-graph-runtime-design.md), [Task continuity](../../design/task-unit-semantics/task-continuity.md#长任务的连续性与任务视图-1)
 
 The [shared information-output foundation](../implemented/2026-10-07-shared-information-output.md) is implemented; the remaining state/input protocol is still proposed, and slice A is not complete.
 
@@ -11,7 +11,7 @@ The [shared information-output foundation](../implemented/2026-10-07-shared-info
 
 The user's stated preference is to slim existing model-visible AG content first and add SKILL.state-like rules/protocol for maintaining and displaying current state, because excessive injection quickly exhausts context. “Display” means model exposure, not merely terminal UI. The user agrees to shared typed information views and an explicit output protocol for AG and the board, but rejects a dependency on Pi codemode orchestration to preserve generality. Specific wire fields, update triggers and budgets remain unvalidated; the overall mechanism is not implemented.
 
-Preserve AG's role from [design.md §1](../../design/design.md#1-definition) and [§7.1](../../design/design.md#71-session-ag-update-and-projection-revisions): a private, session-owned resident working graph, not a third authoritative memory store. Exposure cost is the problem; deleting everything retained internally is not the objective.
+Preserve AG's role from [design.md Definition](../../design/design.md#definition) and [Session AG update and projection revisions](../../design/design/active-graph-activation-and-consolidation/session-ag-and-projection-revisions.md#session-ag-update-and-projection-revisions-1): a private, session-owned resident working graph, not a third authoritative memory store. Exposure cost is the problem; deleting everything retained internally is not the objective.
 
 Relevant implementation boundaries:
 
@@ -44,15 +44,15 @@ Candidate directories discover knowledge; working state supports continuity. Do 
 
 Priorities for slimming:
 
-| Content                                                                | Default treatment                                                                      | Boundary to preserve                                                                                 |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Unchanged material already visible                                     | Avoid repeated full injection                                                          | Reassess visibility after compaction or input replacement                                            |
-| Repeated format explanations, long disclaimers and operation tutorials | Put at existing stable tool/policy owners; keep only necessary short dynamic reminders | Remove redundant expression, not provenance, validity or authority rules                             |
-| Internal topology, scores and debug metadata                           | Exclude from ordinary context                                                          | Preserve internal traces and administration                                                          |
-| Candidate node/type/time/scope attributes                              | Show when relevant to disambiguation or validity                                       | Never omit interpretation-critical time, scope, revocation, external provenance or hypothesis labels |
-| Long outputs, old state and resolved process descriptions              | Exclude from default working-state exposure                                            | Keep necessary sources accessible under existing permissions and retention                           |
-| Original evidence                                                      | Compact entry points by default; expand on demand                                      | Explicit exact-evidence requests must not silently lose evidence to display slimming                 |
-| Feedback nudges                                                        | Short prompts only for reviewable opportunities, not repeated tutorials                | Silence, retrieval and state updates are not positive feedback                                       |
+| Content | Default treatment | Boundary to preserve |
+| --- | --- | --- |
+| Unchanged material already visible | Avoid repeated full injection | Reassess visibility after compaction or input replacement |
+| Repeated format explanations, long disclaimers and operation tutorials | Put at existing stable tool/policy owners; keep only necessary short dynamic reminders | Remove redundant expression, not provenance, validity or authority rules |
+| Internal topology, scores and debug metadata | Exclude from ordinary context | Preserve internal traces and administration |
+| Candidate node/type/time/scope attributes | Show when relevant to disambiguation or validity | Never omit interpretation-critical time, scope, revocation, external provenance or hypothesis labels |
+| Long outputs, old state and resolved process descriptions | Exclude from default working-state exposure | Keep necessary sources accessible under existing permissions and retention |
+| Original evidence | Compact entry points by default; expand on demand | Explicit exact-evidence requests must not silently lose evidence to display slimming |
+| Feedback nudges | Short prompts only for reviewable opportunities, not repeated tutorials | Silence, retrieval and state updates are not positive feedback |
 
 Avoid repeating the same content in state, recall and evidence within one dynamic surface. Remove unnecessary fields before arbitrarily truncating every record. Compact previews retain decision-relevant values, identifiers, relations and negation rather than only vague topic labels.
 
@@ -60,13 +60,13 @@ Avoid repeating the same content in state, recall and evidence within one dynami
 
 Existing board primitives live in [`TaskBoardEntry/TaskBoardPreview`](../../../src/core/types.ts), [`readTaskBoardPreviews/readInboxTaskBoard`](../../../src/core/store/base.ts) and [`renderTaskBoardSurface`](../../../src/integration/agent-surface.ts). Borrow their read/maintenance semantics without forcing AG into the same DTO or writing private state to the board:
 
-| Board mechanism                                                                                                                         | AG counterpart                                                                                    | What not to import                                                                     |
-| --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Separate identity/status from short content; bounded previews                                                                           | Content first; identity/status only when necessary for disambiguation or validity                 | Do not routinely show author, lease, attempt, ack or verdict coordination headers      |
-| `readInbox` exposes actionable work for this agent                                                                                      | Prioritize state needing attention in the current task, not all cooled frames or old observations | Relevant knowledge is not an instruction; AG is not an inbox replica                   |
-| `memory=<id>` and deliverable refs point to original owners                                                                             | Keep exact immediately necessary values; reference large evidence by stable ID/path               | A pointer list cannot replace critical visible facts; do not copy authoritative bodies |
-| Closed/expired entries leave default active views                                                                                       | Invalid, expired or no-longer-relevant state leaves default exposure                              | Coordination `resolve` is not authority for AG to grant acceptance                     |
-| The [in-flight registry convention](../../../skills/nmg-memory/references/board.md#in-flight-registry) avoids per-step progress entries | Revise one current snapshot instead of adding a progress record per tool call                     | Borrow the convention, not shared-board publication of private summaries               |
+| Board mechanism | AG counterpart | What not to import |
+| --- | --- | --- |
+| Separate identity/status from short content; bounded previews | Content first; identity/status only when necessary for disambiguation or validity | Do not routinely show author, lease, attempt, ack or verdict coordination headers |
+| `readInbox` exposes actionable work for this agent | Prioritize state needing attention in the current task, not all cooled frames or old observations | Relevant knowledge is not an instruction; AG is not an inbox replica |
+| `memory=<id>` and deliverable refs point to original owners | Keep exact immediately necessary values; reference large evidence by stable ID/path | A pointer list cannot replace critical visible facts; do not copy authoritative bodies |
+| Closed/expired entries leave default active views | Invalid, expired or no-longer-relevant state leaves default exposure | Coordination `resolve` is not authority for AG to grant acceptance |
+| The [in-flight registry convention](../../../skills/nmg-memory/references/board.md#in-flight-registry) avoids per-step progress entries | Revise one current snapshot instead of adding a progress record per tool call | Borrow the convention, not shared-board publication of private summaries |
 
 Borrow separation of exposure from internal records, on-demand reads and explicit closure, not a fixed short header + body + references template. Packaging can exceed the body. Include headers, summaries and references according to necessity and whole-block cost. Minimal presentation primitives may be shared; maintenance and access authority retain separate owners.
 
@@ -81,11 +81,11 @@ The [frame/storage proposal](2026-09-21-the-frame-and-its-storage.md#2-the-data-
 
 Share data/output contracts, not a database, graph type or collaboration state machine. Ordinary tool/RPC calls are the baseline; direct calls, SDK clients and any host orchestration consume the same operations/results. Borrow Pi codemode's separation of capability declarations, structured data and explicit output, without depending on its JavaScript, QuickJS, text(), store/load, execution lifecycle or an extra orchestration adapter. Codemode can already call ordinary tools and needs no dedicated NMG entry points. Clients without codemode must remain fully functional.
 
-| Boundary        | AG                                                   | Board                                                                     | Shareable facilities                                                               |
-| --------------- | ---------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Scope/residence | Private session/frame, memory-resident               | Shared channel; entries may span sessions, governed by TTL and closure    | Source handles and admitted information projections, not storage                   |
-| Update/control  | Current-state replace/clear and frame lifecycle      | Publication, claim/resolve/deliver/judge, leases and independent verdicts | Typed arguments/results and failure representation, not permissions/state machines |
-| Exposure        | Working content, observations and source projections | Entry content and necessary collaboration status                          | Representation selection, budgets, fingerprints and detail entry points            |
+| Boundary | AG | Board | Shareable facilities |
+| --- | --- | --- | --- |
+| Scope/residence | Private session/frame, memory-resident | Shared channel; entries may span sessions, governed by TTL and closure | Source handles and admitted information projections, not storage |
+| Update/control | Current-state replace/clear and frame lifecycle | Publication, claim/resolve/deliver/judge, leases and independent verdicts | Typed arguments/results and failure representation, not permissions/state machines |
+| Exposure | Working content, observations and source projections | Entry content and necessary collaboration status | Representation selection, budgets, fingerprints and detail entry points |
 
 AG also owns references, activation, edges and retrieval projections; shared views do not reduce it to an entry container. Sharing does not make board content factual truth or grant AG projections authority to mutate board coordination.
 
@@ -182,12 +182,12 @@ Replacement changes provisional text only, not LTG or collaboration state. Shape
 
 The shared renderer receives §2.2's admitted typed information views, actual visibility and display budget, without invoking a summarization model or script runtime. Choose a valid representation:
 
-| Situation                                            | Representation                         | Required check                                       |
-| ---------------------------------------------------- | -------------------------------------- | ---------------------------------------------------- |
-| Short sufficient current text                        | Direct body                            | Clear task context; necessary labels retained        |
-| Critical values with long supporting evidence        | Body plus necessary source entry point | No duplicate facts or lost exact conditions          |
-| Large detail not currently needed; source accessible | Meaningful short preview or reference  | Valid entry point; reference/hint overhead justified |
-| No safe compact form or oversized state              | Insufficiency/overflow result          | No silent loss or invented source                    |
+| Situation | Representation | Required check |
+| --- | --- | --- |
+| Short sufficient current text | Direct body | Clear task context; necessary labels retained |
+| Critical values with long supporting evidence | Body plus necessary source entry point | No duplicate facts or lost exact conditions |
+| Large detail not currently needed; source accessible | Meaningful short preview or reference | Valid entry point; reference/hint overhead justified |
+| No safe compact form or oversized state | Insufficiency/overflow result | No silent loss or invented source |
 
 Internal DTO metadata need not all enter model text. For forms preserving equally necessary information, compare complete cost including body, labels, references, separators and hints. Keep direct text when packaging is longer. No universal length threshold decides all content types. State and candidate directories remain distinct under §2; short bodies do not eliminate necessary addressing IDs.
 
@@ -213,12 +213,12 @@ Hosts without input selection use §4's change-triggered append and compaction r
 
 #### 6.4 Smallest implementation sequence
 
-| Slice                             | Change                                                                                                            | Independent claim to verify                                                                                                                           |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Slice | Change | Independent claim to verify |
+| --- | --- | --- |
 | A: shared views and pure slimming | Existing public types/results, shared agent-surface, prompt wording, total dynamic budget and output confirmation | Ordinary tools work without orchestration dependencies; less wrapping/repetition preserves critical information, excluding state-maintenance benefits |
-| B: current-state protocol         | AG dedicated item, replace/clear through existing RPC, Lab descriptor and short acknowledgement                   | Model can write one replaceable state while retaining private/provisional boundaries                                                                  |
-| C: host visibility                | Actual input wiring, latest-fragment selection, compaction recovery and fallback reporting                        | Old AG state fragments genuinely leave input, without extending that claim to tool history                                                            |
-| D: matched evaluation             | Existing/slim/slim-plus-maintenance arms under Acceptance criteria                                                | Continuity benefit at matched display cost and justified maintenance overhead                                                                         |
+| B: current-state protocol | AG dedicated item, replace/clear through existing RPC, Lab descriptor and short acknowledgement | Model can write one replaceable state while retaining private/provisional boundaries |
+| C: host visibility | Actual input wiring, latest-fragment selection, compaction recovery and fallback reporting | Old AG state fragments genuinely leave input, without extending that claim to tool history |
+| D: matched evaluation | Existing/slim/slim-plus-maintenance arms under Acceptance criteria | Continuity benefit at matched display cost and justified maintenance overhead |
 
 Shared types/results live with existing core/protocol owners; exposure rules live at [`agent-surface.ts`](../../../src/integration/agent-surface.ts), the [prompt source](../../../src/prompts/nmg-prompts.yaml) and existing AG owner. Declare capabilities at [`lab-capabilities.ts`](../../../src/integration/lab-capabilities.ts) and daemon/protocol discovery. Adapters map identity, result fields, actual output confirmation and host lifecycle only. Core code imports no Pi/codemode API and adds no orchestration executor. Generated prompts are not edited directly. Complete-context rebuilding, domain schemas, structured patch engines and HA/MGR learning are not prerequisites.
 

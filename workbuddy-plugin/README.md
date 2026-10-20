@@ -1,23 +1,25 @@
 # NMG plugin for WorkBuddy
 
-把 NMG 接入 WorkBuddy（Claude Code 兼容宿主）的接入面，共三层：
+[中文](README.zh-CN.md) · [Terms used](README.terms.yaml)
 
-| 层 | 实现 |
+The WorkBuddy integration surface for NMG (Node Memory Graph), a Claude Code-compatible host, has three layers:
+
+| Layer | Implementation |
 |---|---|
-| 工具层 | MCP connector，复用 `claude-plugins/nmg-memory`（注册方式见其 CLAUDE.md） |
-| 知识层 | skill 同步：`npm run skill:nmg:sync -- --target ~/.workbuddy/skills/nmg-memory` |
-| 事件层 | 本目录 `nmg-hook.ts`，注册到 `~/.workbuddy/settings.json` 的 `hooks` 字段 |
+| Tools | MCP connector reusing `claude-plugins/nmg-memory` (see its `CLAUDE.md` for registration). |
+| Knowledge | Skill sync: `npm run skill:nmg:sync -- --target ~/.workbuddy/skills/nmg-memory`. |
+| Events | `nmg-hook.ts` in this directory, registered in the `hooks` field of `~/.workbuddy/settings.json`. |
 
-## Hook 行为
+## Hook behavior
 
-- **UserPromptSubmit**：自动召回提示（小预算 search：limit 13 / maxTier 1 / graphHops 1，注入共享 Agent Surface 的 compact 头，按 session 折叠重复 id）+ agent 身份注册 + 任务板 wake 轮询。Hook 和 MCP 不共享宿主 session，因此 hook 不泄漏自己的 `activeGraphId`；模型需要精确证据时，先通过 MCP 的 `nmg_search` 建立当前工具 session 的投影，再调用 `nmg_get`。
-- **PreToolUse(Bash)**：`git commit` → remember 提醒
+- **UserPromptSubmit**: automatic recall hint (small-budget search: `limit 13`, `maxTier 1`, `graphHops 1`; injects compact headers from the shared Agent Surface and folds repeated IDs per session), agent identity registration, and Task Board wake polling. The hook and MCP do not share a host session. The hook uses the namespaced identity `workbuddy-hook:<sessionId>`; the injected `activeGraphId` belongs to that separate AG and must not be passed to MCP-side `nmg_get`. To load exact evidence, the model must first call MCP-side `nmg_search` to create a projection for the current tool session, then call `nmg_get`.
+- **PreToolUse(Bash)**: a reminder to call `remember` after `git commit`.
 
-Hook 完全被动：只在存在活 HTTP lease（`<dataDir>/nmg.sqlite.server.json` 且 pid 存活）时调用 daemon，从不启动 daemon；它只接受 `127.0.0.1`，先执行 `hello` 并校验兼容纪元，所有失败静默，恒 exit 0。自动召回使用一次性 hook session，渲染后立即释放内存态 AG，不会与 MCP 的 session 所有权混淆。候选渲染全部走 `src/integration/agent-surface.ts` 共享面，不手拼字符串（配方出处：`skills/nmg-memory/references/harness-adapters.md`）。
+The hook is passive: it calls the daemon only when a live HTTP lease exists (`<dataDir>/nmg.sqlite.server.json` with a live PID), never starts the daemon, accepts only `127.0.0.1`, sends `hello` first and checks the compatibility epoch, silently handles failures, and always exits 0. Automatic recall uses a separate namespaced hook session. The current hook path does not send a `release` RPC, so do not claim that the in-memory AG is released immediately after rendering. Candidate rendering uses the shared surface in `src/integration/agent-surface.ts`; it does not hand-build strings. See the integration recipe in `skills/nmg-memory/references/harness-adapters.md`.
 
-召回函数的 hello、搜索与披露共用五秒总等待预算，后续阶段超时保留及时返回的候选；身份登记与 wake 轮询独立计算。显式 MCP 搜索不受自动期限约束。[钩子契约](../docs/design/session-memory-lifecycle-hooks-2026-08-10.md#自动召回等待预算)说明取消和同步工作的限制。
+Recall hello, search and disclosure share one absolute five-second waiting budget; later-phase expiry preserves timely candidates. Identity registration and wake polling are outside that function's budget, and explicit MCP search is not bounded by the automatic deadline. The [waiting-budget contract](../docs/design/session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.md) owns cancellation and synchronous-work limits.
 
-## 注册
+## Registration
 
 ```json
 {
@@ -32,9 +34,9 @@ Hook 完全被动：只在存在活 HTTP lease（`<dataDir>/nmg.sqlite.server.js
 }
 ```
 
-env 可选：`NMG_DATA_DIR`（默认 `~/.nmg`）、`NMG_AGENT_ID` / `NMG_AGENT_CAPABILITIES`（板身份）、`NMG_ENABLE_COORDINATION=0`（只关闭身份注册与板协作，不关闭自动召回）。板 wake 开关与 Pi/Kimi 共用 `<dataDir>/board-wake.json`。
+Optional environment variables: `NMG_DATA_DIR` (default `~/.nmg`), `NMG_AGENT_ID` / `NMG_AGENT_CAPABILITIES` (board identity), and `NMG_ENABLE_COORDINATION=0` (disables identity registration and board coordination only; automatic recall remains enabled). The board-wake switch shares `<dataDir>/board-wake.json` with Pi/Kimi.
 
-## 已知坑
+## Known pitfalls
 
-- `skill:nmg:sync` 在 WorkBuddy 托管环境里删锁文件会被 safe-delete shim 拦截报错，但文件本体同步成功；残留 `.nmg-memory.sync-*` 手动清理即可，`--check` 可验证一致性。
-- 沙箱内运行时 `~/.nmg` 状态文件读写可能被隔离，去重状态失效不影响正确性（顶多重复注入）。
+- In WorkBuddy's managed environment, deleting the lock file during `skill:nmg:sync` can be blocked by the safe-delete shim even though the skill files were synchronized. Remove the leftover `.nmg-memory.sync-*` manually; `--check` can verify consistency.
+- Sandbox isolation may block reads/writes to `~/.nmg` state files. A deduplication-state failure does not affect correctness; it can cause repeated injection.

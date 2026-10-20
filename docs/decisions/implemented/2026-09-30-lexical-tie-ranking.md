@@ -1,6 +1,6 @@
 # Resolve lexical score ties before evidence budgets
 
-[中文](2026-09-30-lexical-tie-ranking.zh-CN.md)
+[中文](2026-09-30-lexical-tie-ranking.zh-CN.md) · [Terms used](2026-09-30-lexical-tie-ranking.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

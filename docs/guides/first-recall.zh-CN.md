@@ -1,6 +1,6 @@
 # 第一次回忆教程
 
-[English](first-recall.md) · [概念地图](concept-map.zh-CN.md)
+[English](first-recall.md) · [概念地图](concept-map.zh-CN.md) · [术语](first-recall.terms.yaml)
 
 这个可执行演练展示 NMG 最小但完整的记忆闭环：
 

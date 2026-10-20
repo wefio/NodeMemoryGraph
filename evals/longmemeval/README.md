@@ -1,5 +1,7 @@
 # LongMemEval adapter
 
+[English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
+
 The local data directory contains the official cleaned LongMemEval-S and oracle
 files and is intentionally ignored by Git.
 

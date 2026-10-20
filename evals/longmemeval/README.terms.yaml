@@ -1,0 +1,39 @@
+version: 2
+terms:
+  - term: category-count sample selection
+    aliases: [按类别计数的样本选择]
+    definition: >-
+      Taking the trailing positional argument as examples per category while selection always comes from the ordering in `longmemeval_s_cleaned.json`, so every mode uses the same question IDs; a checked-in sample manifest takes precedence over that positional count, and every repeat gets an isolated NMG database so earlier access statistics cannot change a later trial.
+      把末尾的位置参数当作每类样例数，而选择始终来自 `longmemeval_s_cleaned.json` 中的顺序，因此各模式使用同一批问题 ID；签入仓库的样本 manifest 优先于该位置计数，且每次重复得到隔离的 NMG 数据库，使早先的访问统计不会改变后一次试验。
+    owner: evals/longmemeval/README.md
+    anchor: LongMemEval adapter
+    status: canonical
+  - term: independent sufficiency scoring
+    aliases: [独立充分性打分]
+    definition: >-
+      Scoring answer correctness and retrieval sufficiency separately: the retrieval judge sees only the context actually injected (or the successful `nmg_get` output for explicit NMG modes), official session recall is computed from the exact loaded memory IDs and their immutable `sourceRef` values, and the LLM retrieval judge remains a diagnostic sufficiency measure rather than the official evidence metric.
+      把答案正确性与检索充分性分开打分：检索判定器只看到实际注入的上下文（或显式 NMG 模式下成功的 `nmg_get` 输出），官方 session recall 由实际加载的确切记忆 ID 及其不可变 `sourceRef` 值计算，LLM 检索判定器仍是诊断性充分性度量而非官方证据指标。
+    owner: evals/longmemeval/README.md
+    anchor: LongMemEval adapter
+    status: canonical
+  - term: deterministic matched import
+    aliases: [确定性 matched 导入]
+    definition: >-
+      The matched-mode ingestion that makes every source turn an immutable `conversation_evidence` and gives adjacent session nodes a temporal `related_to` edge, isolating retrieval from stochastic memory extraction; it therefore does not test the quality of automatic extraction or learned topology.
+      matched 模式的摄取：把每个源轮次变成不可变 `conversation_evidence`，并给相邻 session 节点一条时间性 `related_to` 边，从而把检索与随机记忆抽取隔离；因此它不测试自动抽取或学习到的拓扑的质量。
+    owner: evals/longmemeval/README.md
+    anchor: Modes
+    status: canonical
+  - term: equal score without retrieval equivalence
+    aliases: [同分不等于检索等价]
+    definition: >-
+      The reported finding that two arms can share an equal answer and evidence-judge score while their official exact-evidence recall differs, because the model made different search/get choices and loaded different exact evidence even though ranking was unchanged; repeated paired trials are still required before a cost or recall claim.
+      报告中的发现：两个臂可以共享相同的答案与证据判定分数，而官方精确证据召回不同，因为即使排序未变，模型做出了不同的 search/get 选择并加载了不同的精确证据；在做出成本或召回主张之前仍需要重复的配对试验。
+    owner: evals/longmemeval/README.md
+    anchor: 2026-08-11 matched regression after controller telemetry changes
+    status: canonical
+references:
+  - evidence
+  - retrieval sufficiency
+  - gate
+  - QPP

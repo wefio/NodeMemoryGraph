@@ -2,8 +2,6 @@
 
 **Status:** implemented
 **Approved:** explicit
-Date: 2026-09-18
-Branch: feat/ooo-run-namespace
 **Relates to:** [task-unit 语义设计](../../design/task-unit-semantics.md)、
 [义务台账](../../design/task-unit-semantics-obligations.md)、
 [实验臂自建驱动器](2026-09-17-arms-get-their-own-driver.md)
@@ -11,7 +9,9 @@ Branch: feat/ooo-run-namespace
 治理 meta-rule：[self-governance meta-rule](2026-09-07-self-governance-meta-rule.md) ——
 本规则变更本身也是一次受治理的决策（决策 + 替代方案 + 一个规则一个家）。
 
-English: [2026-09-18-declared-slot-budget.md](2026-09-18-declared-slot-budget.md)
+English: [2026-09-18-declared-slot-budget.md](2026-09-18-declared-slot-budget.md) · [术语](2026-09-18-declared-slot-budget.terms.yaml)
+
+后续测量：F2c 的离线规格对与 F3 付费试点后来均已完成。试点结论仅具方向性，见[实验臂台账](../../design/task-unit-semantics-obligations/experiment-arms.md)与[已记录结果](../../experiments/execution/ooo-arms-pilot-2026-09-18.md)。下文决策描述机制，不表示测量仍待完成。
 
 ## 问题
 
@@ -19,7 +19,7 @@ English: [2026-09-18-declared-slot-budget.md](2026-09-18-declared-slot-budget.md
 `docs/design/task-unit-semantics.md:371`），而设计的主问题里有一半是并发。做实验臂的驱动器时**测出这条臂没有
 机制**：在一个前三个单元互相独立的计划上请求 `slots: 4`，运行报告 `slotsUsed: 1`，其余按名字拒绝
 （"no published handoff for this task"）。测量记录见
-[台账](../../design/task-unit-semantics-obligations.md#what-f2b-measured-a-run-can-hold-exactly-one-claim)。
+[台账](../../design/task-unit-semantics-obligations/experiment-arms/single-claim-experiment.md#what-f2b-measured-a-run-can-hold-exactly-one-claim-1)。
 
 造成它的是三条规则，各自在自己的家：
 
@@ -91,4 +91,4 @@ C 臂需要 N 个认领共存，所以必须回答存储的按 channel 串行化
   `src/integration/ooo-execution.ts` 的预算与可启动集合突变体、`src/integration/ooo-board.ts` 的
   许可/发布/目标突变体，以及驱动器声明预算那条。
 
-仍欠的是实测臂对比：F2c 的规格对与 F3 的付费试点（需另行固定模型、预算与重复次数）。
+在本决策的快照中，实测臂对比仍待完成：F2c 规格对与 F3 付费试点（需另行固定模型、预算与重复次数）。两者后来均已完成，见上文记录；F3 仍仅具方向性。

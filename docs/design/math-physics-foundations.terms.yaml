@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: formal guarantee
+    aliases: [proven bound, 形式化保证]
+    definition: >-
+      A theorem-backed statement that holds only under its explicit assumptions and only for the quantity the theorem covers; it does not automatically establish product-level quality.
+      仅在明确假设下、且仅对定理覆盖的量成立的定理结论；它不会自动证明产品级质量。
+    owner: docs/design/math-physics-foundations.md
+    anchor: What the survey was trying to distinguish
+    status: canonical
+  - term: mathematical analogy
+    aliases: [math-inspired design language, 数学类比]
+    definition: >-
+      Explanatory vocabulary borrowed from a mathematical model without establishing that the implementation computes that model or inherits its guarantees.
+      借用数学模型的解释性词汇，但不表示实现计算了该模型或继承其保证。
+    owner: docs/design/math-physics-foundations.md
+    anchor: What the survey was trying to distinguish
+    status: canonical

@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: historical status snapshot
+    aliases: [dated status audit, 历史状态快照]
+    definition: >-
+      A dated record of an earlier implementation assessment; it does not establish present status without checking current owning sources.
+      对较早实现评估的带日期记录；未经当前 owner 源码复核，不能据此断定现状。
+    owner: docs/design/improvement-areas/status-audit-2026-08-24.md
+    anchor: "Status audit — 2026-08-24"
+    status: canonical
+  - term: promotion gate
+    aliases: [promotion criterion, 晋升门槛]
+    definition: >-
+      Evidence and acceptance conditions that must be met before a research or experimental capability is promoted into a product path.
+      将研究或实验能力晋升到产品路径前必须满足的证据与验收条件。
+    owner: docs/design/improvement-areas/status-audit-2026-08-24.md
+    anchor: "Status audit — 2026-08-24"
+    status: canonical

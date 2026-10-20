@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: external-source provenance
+    aliases: [external_source marker, 外部来源 provenance]
+    definition: >-
+      A marker identifying where external evidence came from and when it was retrieved; it preserves provenance independently from whether the claim is verified.
+      标识外部证据来源及获取时间的 marker；它独立于该陈述是否已核实而保留来源信息。
+    owner: docs/design/external-source-design.md
+    anchor: "3. The marker"
+    status: canonical
+  - term: trust-provenance separation
+    aliases: [truthStatus and external marker, 信任状态与来源分离]
+    definition: >-
+      Verification status may change after evidence is reviewed, while the external-source marker remains to show that the content originated outside NMG.
+      证据复核后可以改变核实状态，但外部来源 marker 仍保留，以显示内容来自 NMG 之外。
+    owner: docs/design/external-source-design.md
+    anchor: "4. Three orthogonal dimensions"
+    status: canonical

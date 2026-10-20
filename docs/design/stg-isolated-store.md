@@ -1,6 +1,8 @@
 # STG Isolated Store（STG 独立库）
 
-**Status:** current
+[English](stg-isolated-store.md) | [简体中文](stg-isolated-store.zh-CN.md) · [Terms](stg-isolated-store.terms.yaml)
+
+**Status:** current architecture; rollout labels are historical
 **Updated:** 2026-08-13
 **Related:** [memory-graphs.md](memory-graphs.md) §1/§3/§5, [external-source-design.md](external-source-design.md), docs/design/design.md §1
 
@@ -121,17 +123,22 @@ query
 
 ## 7. Phased rollout
 
+The implementation labels below reflect the document's 2026-08-13 status;
+they are not fresh test receipts or evidence that this documentation audit ran
+the listed suites.
+
 | Phase | Scope | Evidence gate |
 | --- | --- | --- |
 | 1 | **Implemented:** separate project-local SQLite store | daemon/CLI/Pi isolation tests pass |
 | 2 | **Implemented, opt-in:** `cached_from_ltg` marker + usage-ranked explicit or search-triggered sync | copy/idempotency and bounded cooldown tests pass; natural cost/benefit remains uncalibrated |
 | 3 | **Implemented:** STG-first dual-store search with QPP fallback + authoritative dedupe | service and adapter tests pass; benchmark gate pending |
 
-The daemon keys stores by `projectDir + sessionId` and opens them lazily. Pi
-supplies both its current working directory and native session ID on remember,
-search, automatic recall, and get. CLI exposes `--project-dir` plus optional
-`--session-id`; when omitted it uses the isolated administrative session
-`cli`, preserving the fallback workflow without joining a Pi session.
+The daemon opens the project-local STG file lazily. `stgStorePath()` uses
+`projectDir` only; session identity is passed for row-level filtering, not as a
+separate file key. Pi supplies its current working directory and native session
+ID on remember, search, automatic recall, and get. CLI exposes `--project-dir`
+plus optional `--session-id`; when omitted it uses the isolated administrative
+session `cli`, without joining a Pi session.
 
 ## 8. Non-goals
 

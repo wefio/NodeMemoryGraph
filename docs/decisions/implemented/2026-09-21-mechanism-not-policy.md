@@ -1,6 +1,6 @@
 # Mechanism, not policy
 
-[中文](2026-09-21-mechanism-not-policy.zh-CN.md)
+[中文](2026-09-21-mechanism-not-policy.zh-CN.md) · [Terms used](2026-09-21-mechanism-not-policy.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

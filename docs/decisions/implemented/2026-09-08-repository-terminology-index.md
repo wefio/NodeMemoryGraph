@@ -1,9 +1,10 @@
 # Repository terminology index
 
-[中文](2026-09-08-repository-terminology-index.zh-CN.md)
+[中文](2026-09-08-repository-terminology-index.zh-CN.md) · [Terms used](2026-09-08-repository-terminology-index.terms.yaml)
 
 **Status:** implemented  
-**Approved:** unrecorded
+**Approved:** explicit
+**Relates to:** [distributed terminology design](../../design/documentation-governance.md)
 
 ## Problem
 
@@ -41,43 +42,54 @@ mechanical check. The repository's meta-rule prefers the mechanical check.
 
 ## Decision
 
-One machine-readable **terminology index**, one validator, and one
-creation-time guard. No third hand-maintained table.
+Keep one machine-readable lookup and validation path over topic-owned
+definitions, not a third hand-maintained full-corpus table. One owner per concept
+does not require one physical file. The [governance design](../../design/documentation-governance.md#yaml-files-and-query-contract)
+owns identity, discovery scope and query behavior. Creation-time duplicate
+detection remains a separate deferred obligation.
 
-1. A single term table (`docs/glossary.yaml`, or the `agent-context.yaml`
-   capability list extended to terms) maps `term → canonical → aliases (en/zh) →
-   owner (doc#anchor) → status`. The concept map is rendered from it, or is the
-   same file, so the two cannot drift.
-2. The table **points, it does not define**. Each entry resolves to the document
-   that owns the full contract, making the concept map's existing rule — "when
-   this map and an owner disagree, the owner wins" — mechanical.
-3. The index is consumed by retrieval, not only by humans: aliases feed the
-   search path, so `轻量验证`, `narrow`, and `lightweight verification` resolve to
-   the same owner. Extending `capabilities[].aliases` from explicit selection to
-   query resolution is the smallest version of this.
-4. The validator fails closed on: a term whose `owner` does not resolve to an
-   existing file and heading; two entries claiming the same canonical term; a
-   `deprecated` term without a `successor`. It runs as a blocking check
-   (`glossary:check`) on the narrow and full paths, and its rule digest is pinned
-   in `.rcp/trusted-policy.json`, the same shape as `testOutputPassed` and
-   `rtm:check`.
-5. The creation-time guard catches what the validator cannot: **duplicate
-   detection, not search logging**. Adding a concept, contract, or decision whose
-   name or aliases already resolve to an owner fails, unless the record declares
-   which existing home it refines or supersedes. Recording "I searched" is
-   gameable; detecting "this already has a home" is not.
-6. The index covers the process vocabulary as well as the product vocabulary, so
-   `assertion`, `check`, `stage`, `kind`, `evidence`, `context`, `route`,
-   `receipt`, `narrow` and `gate` each have one owner before the traceability
-   matrix starts using them.
+1. Colocated v2 `*.terms.yaml` files own definition text and canonical English terms.
+   All fourteen legacy process entries migrate with their names, aliases, status
+   and contract targets intact; the manual `docs/glossary.yaml` index is retired.
+   Aggregation reads definitions directly, without a second maintained catalog.
+2. A v2 entry uses its canonical term as the key, qualified only for homonyms, and its behavior
+   contract separately by `owner` and `anchor`. The short word meaning does not
+   rewrite that contract or duplicate its full conditions and exceptions.
+3. The command-line resolver consumes canonical names and precise aliases; existing v2 IDs remain readable for compatibility.
+   This is repository-term lookup, not an integration with NMG memory retrieval.
+4. `glossary:check` fails closed on malformed registered metadata, conflicting
+   identity, unresolved contract locations and declared successors. It remains
+   blocking on narrow and full verification paths. Trusted-policy digest pinning
+   is a separate deferred obligation, not established by this working-tree check.
+5. A directory-bounded lookup reports its observed corpus. Cross-namespace
+   matches remain candidates; it does not pick a convenient owner or infer global
+   absence from a local miss.
+6. Coverage is explicit: registered definitions, including the migrated process
+   vocabulary. Product-map generation and creation-time duplicate detection remain
+   deferred; metadata consistency cannot prove that an unregistered concept is absent.
+7. The parser still accepts a present v1 index, including its original three-column
+   CLI output. A missing legacy file is valid when distributed sources exist;
+   an empty corpus or a malformed present source fails. Migrated v2 entries retain
+   the three-column first line and add namespace, status, definition and source lines. An existing optional ID retains its ID line; new entries do not need one.
+   Their namespace is the topic namespace, not the v1 `repository` namespace;
+   consumers must not parse all stdout as one TSV record.
+8. The user's English/Chinese/used-terms group uses one shared YAML companion.
+   Optional `references` lists canonical English terms without copying definitions. Only ambiguous words need a `{term, namespace}` reference. Explicit
+   reference-only or no-specialized-terms companions may have empty `terms`;
+   malformed, repeated or unresolved references fail in the selected corpus.
+   This does not load outside a bounded query or register a second definition.
+   Empty overall vocabularies still fail. Older validators reject the new shape;
+   existing v1 and ID-bearing v2 files remain readable, without generating IDs for new words. A namespace is optional unless needed to distinguish meanings.
 
-Implemented 2026-09-08: `docs/glossary.yaml` holds the process vocabulary and
-`npm run glossary:check` validates owner resolution, duplicate terms and
-aliases, and deprecated successors, with negative controls in
-`tests/tools/glossary-check.test.ts`. The check is blocking in `verify:static`,
-in the narrow shared checks, in the `documentation` route's blocking set, and in
-both authored contracts. `npm run glossary:check -- --resolve <name>` maps a term
-or alias to its owner, which is the retrieval path.
+The initial 2026-09-08 implementation used the v1 pointer index. The distributed
+rollout retains its lookup vocabulary while adding word meanings at their topic
+owners. The existing validator discovers the sources, reports actual scope and
+refuses invalid catalogs before lookup. YAML reuses the existing parser; neither
+a Markdown definition copy nor a terminology platform is required.
+
+The check remains blocking in `verify:static`, narrow shared checks, the
+`documentation` route and both authored contracts. These execution bindings do
+not establish trusted-baseline pinning or creation-time protection.
 
 ## Alternatives considered
 
@@ -95,6 +107,26 @@ or alias to its owner, which is the retrieval path.
   primary home: memory is historical and session-scoped, while the repository's
   vocabulary must be reviewable in a pull request and available offline. Memory
   can still carry aliases as recall triggers.
+- **Maintain Markdown definitions and YAML metadata as separate artifacts.**
+  Not chosen for this pilot: the user selected YAML word entries, which keep
+  definition text and identity together using the existing parser. This does not
+  require mirrored definition copies. The user's later three-artifact grouping
+  requires a shared term-use companion, which may explicitly state no specialized
+  terms; it does not manufacture a definition merely to fill the group.
+- **Copy definitions into each document's term file.** Rejected for the shared
+  bilingual group: canonical-word references retain one lexical owner. The cost is
+  validating those references and widening a local corpus when its owner is
+  outside the selection, not weakening the bounded-reading contract.
+- **Assign every word a separate stable ID.** Rejected after the user's explicit
+  simplification: a canonical English word already supplies the key; namespace
+  qualification handles actual homonyms. Extra IDs would add an unnecessary
+  author-maintained mapping. The accepted cost is migrating references and
+  same-namespace successor names when the canonical word changes; aliases preserve
+  discovery, not stale reference validity. Old IDs are read compatibility only.
+- **Keep the manual v1 index after migration.** Rejected: it would require every
+  owner or alias change to update two catalogs. Retiring it costs source/namespace
+  migration and additive CLI output; alias-to-owner checks and v1 compatibility
+  fixtures cover the declared boundary. Missing sources still fail closed.
 - **Adopt a formal ontology or SKOS.** Rejected as too heavy for one
   maintainer; the needed properties are a canonical name, aliases, one owner,
   and a status.
@@ -113,16 +145,18 @@ Verified as of 2026-09-08:
 
 ## Deferred
 
-- The table covers the process vocabulary. The product concepts stay in the
-  concept map, which the table references, so they are not indexed in the same
-  table yet.
-- The concept map is not generated from the table, so the two can still drift.
+- Extending registered [YAML definitions](../../design/documentation-governance.md#yaml-files-and-query-contract)
+  beyond active topic designs and extracting references from prose remain deferred.
+  Aggregation is a query result, not another hand-maintained vocabulary.
+- Product concepts remain in the [concept map](../../guides/concept-map.md);
+  their definitions are not all registered in this resolver.
+- The concept map is not generated from registered definitions, so they can drift.
 - The rule digest is not pinned in `.rcp/trusted-policy.json`. `trusted-verify`
   reads the policy from the installed baseline, so an obligation written only
   into the working tree would be a claim with no effect until the next
   `trust-install`.
 - Creation-time duplicate detection for a new concept, contract or decision is
-  not implemented. Only duplicates inside the table are rejected today.
+  not implemented. Only conflicts inside the registered metadata corpus are rejected.
 
 ## Consequences
 
@@ -132,8 +166,9 @@ Verified as of 2026-09-08:
   registered term has one home. "Not found" must never be read as "does not
   exist". The `## Deferred` items are part of that boundary: product terms and
   newly created concepts are not yet covered by the guard.
-- Aliases raise retrieval recall but do not guarantee a hit; a miss is still
-  possible, which is why the guard is creation-time duplicate detection.
+- Aliases improve discovery but do not guarantee a hit. A future creation-time
+  guard must account for concepts outside the registered vocabulary; the current
+  metadata validator is not that guard.
 - Registering every noun would make the index noise; entries should be concepts
   with an owner and a contract, not general vocabulary.
 - A blocking terminology check can be gamed by renaming rather than resolving

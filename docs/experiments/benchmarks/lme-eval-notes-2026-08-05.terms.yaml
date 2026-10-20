@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: versioned evaluation-store identity
+    aliases: [version/userId binding, 版本化评测 store 身份]
+    definition: >-
+      In the historical LongMemEval runner, the version label selected the store identity; changing or omitting the baseline prefix could silently point a run at a different store.
+      在历史 LongMemEval runner 中，version label 决定 store 身份；修改或漏掉基线前缀可能静默地使 run 指向不同 store。
+    owner: docs/experiments/benchmarks/lme-eval-notes-2026-08-05.md
+    anchor: Historical workflow and version contract
+    status: canonical
+  - term: replayable baseline comparison
+    aliases: [same-version regression check, 可复跑基线对比]
+    definition: >-
+      A comparison that reuses the same versioned store and recorded configuration, while distinguishing retrieval metrics from judge-sensitive answer accuracy.
+      复用相同版本化 store 与记录配置进行对比，并区分检索指标和受 judge 影响的答案准确率。
+    owner: docs/experiments/benchmarks/lme-eval-notes-2026-08-05.md
+    anchor: Historical regression decision rule
+    status: canonical

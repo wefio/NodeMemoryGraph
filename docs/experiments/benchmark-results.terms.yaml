@@ -1,0 +1,43 @@
+version: 2
+terms:
+  - term: partial benchmark status
+    aliases: [pending/in-progress row, 部分完成的 benchmark 状态]
+    definition: >-
+      The historical snapshot's completed BEAM version and staged/pending other suites. Pending cells are progress reports, not scores; this wording does not establish present checkpoint health, current-code coverage or exact resumption.
+      历史快照中已完成的 BEAM 版本及其他套件的分阶段／待完成状态。Pending 单元是进度而非分数；此措辞不建立当前 checkpoint 健康、当前代码覆盖或精确续跑。
+    owner: docs/experiments/benchmark-results.md
+    anchor: NMG Benchmark Results
+    status: canonical
+  - term: different-judge comparability caveat
+    aliases: [not a head-to-head comparison, 不同 judge 的可比性限制]
+    definition: >-
+      The record quotes official reference rows under one answer/judge pair and NMG rows under another, without a newly verified matched model/prompt/item/cost comparison. Shared table structure is not a backend ranking, and same-model answering/judging does not provide independent validation.
+      记录引用一对 answer／judge 下的官方参照行及另一对下的 NMG 行，没有新核验的模型／prompt／题目／成本配对。表结构相同不形成后端排名，同模型回答／判定也不提供独立验证。
+    owner: docs/experiments/benchmark-results.md
+    anchor: Evaluation Setup
+    status: canonical
+  - term: chain-injection A/B
+    aliases: [eval-only logical-chain injection, 链注入 A／B]
+    definition: >-
+      The historical four-configuration comparison over none, temporal, logical and both. Its about +3.0pp logical reading does not define a current default or isolate a universal event-ordering ceiling; sample sizes and comparable spreads are not supplied here. The inspected current bridge enables logical only by explicit NMG_CHAIN_INJECTION=logical.
+      历史 none、temporal、logical、both 四配置对比。Logical 约 +3.0pp 的读数不定义当前默认，也不单独证明普适事件排序上限；此处未提供样本量及可比离散度。所读当前 bridge 仅在显式 NMG_CHAIN_INJECTION=logical 时启用逻辑注入。
+    owner: docs/experiments/benchmark-results.md
+    anchor: Chain-Injection A/B (same harness, 2026-08-16 runs)
+    status: canonical
+  - term: embedding availability preflight
+    aliases: [one real query embedding request, embedding 可用性预检]
+    definition: >-
+      The inspected config-driven runPlan attempts one embedQueries call with one query before spawning its runner for a configured provider, skipping cache-only/no-provider cases; invalid configuration may fail before I/O. This is point-in-time availability, not full-run health, a universal direct-shell guard or a probe performed by this review.
+      所读配置驱动 runPlan 在 provider 已配置时，于启动 runner 前尝试以一个 query 调用一次 embedQueries；cache-only／无 provider 时跳过，无效配置可在 I/O 前失败。这只是时点可用性，不保证整次运行健康，不是通用直接 shell 守卫，也不是本轮执行的探测。
+    owner: docs/experiments/benchmark-results.md
+    anchor: Embedding availability contract
+    status: canonical
+  - term: benchmark embedding cache-only mode
+    aliases: [NMG_EMBED_CACHE_ONLY=1, 评测 embedding 仅缓存模式]
+    definition: >-
+      An embedding-only mode that serves cached vectors by declared indexId, input kind and text hash and refuses a required vector miss with embedding cache-only miss. Required run inputs must be covered; neither a partial checkpoint nor this mode establishes a complete result or absence of answer/judge network calls.
+      仅作用于 embedding 的模式，按声明的 indexId、输入种类及文本哈希提供缓存向量，必需向量缺失时以 embedding cache-only miss 拒绝。须覆盖该次运行所需输入；部分 checkpoint 或此模式都不证明结果完整，也不排除 answer／judge 网络调用。
+    owner: docs/experiments/benchmark-results.md
+    anchor: Embedding availability contract
+    status: canonical
+references: []

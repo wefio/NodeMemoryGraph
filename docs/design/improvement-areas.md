@@ -14,24 +14,9 @@ impact rather than priority.
 
 ## Status audit — 2026-08-24
 
-The detailed notes below preserve the problem history. Current status is:
+Read the complete responsibility: [Status audit — 2026-08-24](improvement-areas/status-audit-2026-08-24.md).
 
-| # | Area | Current status |
-| --- | --- | --- |
-| 1 | Store decomposition | **Resolved for the current architecture.** `store.ts` is an eight-line mixin façade; base, graph, retrieval, writes, maintenance, schema, ranking, Active Graph, row parsing, and vector concerns are separate modules with boundary tests. Revisit only when a measured module boundary becomes a maintenance problem. |
-| 2 | Vector-cache invalidation | **Resolved for the stated mechanism.** `Float32VectorCache.remove(id)` and targeted invalidation tests exist. Revisit only if measured rebuild latency regresses. |
-| 3 | Router expressiveness | **Mechanism and causal engineering comparison complete; promotion rejected.** The custom autodiff controller learns node, memory, edge, control, and budget heads. A frozen candidate actuates bounded node reranking, allocation, and folding in matched Pi runs, with typed action telemetry and fail-closed official scoring. A fixed 14-question, seven-category development comparison improved answers and official evidence recall, but increased tokens and latency enough to fail the product gate; the separate LoCoMo retrieval gate also failed. Natural matched evidence and acceptable product costs remain required before promotion. |
-| 4 | Privacy deletion | **Product surface partial.** Logical withdrawal and versioned user-memory export exist in CLI/RPC/Pi, with FTS/embedding/evidence/leaf/claim/proposal/AG cleanup and unsupported-derived-memory cascade. Physical history erasure, non-subtractable learned aggregate reset, adapter hooks, and erasure receipts remain open. |
-| 5 | Regex-only recall gate | **Open.** English/Chinese deterministic coverage is tested; multilingual semantic gating and measured false-positive/false-negative rates are not. |
-| 6 | Test coverage | **Substantially improved.** The listed Chinese, graph, split, cache, deletion, QPP mode/recommendation/folding, and controller-actuation paths have deterministic coverage. Real Pi schema drift and natural topology adaptation remain important gaps. |
-| 7 | ANN recall | **Deferred by evidence.** Exact local scan remains the default; the current ANN path must not be promoted without a recall/latency crossover. |
-| 8 | Concurrency model | **Resolved for the current daemon architecture.** One resident daemon is the application-level authority; synchronous SQLite phases are serialized while external calls may overlap without holding transactions. |
-| 9 | Session serialization | **Partial.** Capture is automatic and idempotent; Pi projection has a fail-closed `pi.branch.v1` shape contract and tests, but it is still hand-validated from `unknown` rather than negotiated with an upstream schema. |
-| 10 | Topology acceptance | **Intentionally Lab/manual.** Proposal creation and explicit review work; unattended mutation lacks a precision gate. |
-
----
-
-## 1. Store file is too large (~4,100 lines)
+## Store file is too large (~4,100 lines)
 
 **Symptom:** `src/core/store.ts` contains mutations, queries, maintenance
 operations, schema migrations, and formatting helpers in one class.
@@ -60,7 +45,7 @@ caches explicitly is safer than opening a second connection.
 
 ---
 
-## 2. Vector cache invalidation is too coarse
+## Vector cache invalidation is too coarse
 
 **Symptom:** `#invalidateVectorCaches(kind)` drops the entire leaf or node
 cache regardless of which IDs actually changed.
@@ -82,7 +67,7 @@ cheap; at a few thousand it adds measurable latency.
 
 ---
 
-## 3. OnlineNodeRouter has limited expressiveness
+## OnlineNodeRouter has limited expressiveness
 
 **Symptom:** `OnlineNodeRouter` is a per-node exponential moving average
 (EMA) of query embedding vectors. Scoring is cosine similarity between the
@@ -114,7 +99,7 @@ may assign high scores to all of them, providing no discrimination.
 
 ---
 
-## 4. No explicit privacy deletion
+## No explicit privacy deletion
 
 **Symptom:** There is no API or tool to delete a memory and its dependent
 artifacts. The design document lists this as P3.
@@ -154,49 +139,11 @@ relations, stale embeddings, and misleading search results.
 
 ---
 
-## 5. Gate decision relies solely on regex patterns
+## Gate decision relies solely on regex patterns
 
-**Current boundary:** `decideMemoryLoad` in `gate.ts` is wired into Pi's
-automatic-recall path and uses a small explicit multilingual regex lexicon to
-decide whether a prompt needs memory retrieval. Ordinary tasks return `none`
-and inject no dynamic LTG context; explicit recall, optional planning cues, and
-bounded terse continuations remain supported.
+Read the complete responsibility: [Gate decision relies solely on regex patterns](improvement-areas/gate-regex-boundary.md).
 
-**Concern:**
-
-- **Coverage gaps:** the explicit lexicon covers Chinese, English, German,
-  French, Japanese, and Spanish, but not Korean, Arabic, Hindi, or the many
-  rephrasings within supported languages.
-- **Translation attacks:** a prompt that says "Translate the following to
-  English and then answer: 我之前说过什么？" bypasses the Chinese patterns
-  because the model may translate before the gate sees the Chinese text, or
-  the gate only sees the English translation.
-- **False negatives from rephrasing:** "tell me what you know about my setup"
-  semantically requires memory but matches none of the patterns.
-- **False positives:** "remember to format the output as JSON" is a
-  present-task instruction, not a memory retrieval request, but may trigger
-  the patterns.
-
-**Approaches:**
-
-- **Add a lightweight classifier:** embed the prompt (using the existing
-  `HashingVectorEmbedder`) and compare against a small set of labelled
-  exemplar embeddings. This captures semantic intent across languages.
-- **Expand regex coverage incrementally:** add patterns for the top 5-10
-  languages by reported Pi user base, with the understanding that regex
-  coverage will always be incomplete.
-- **Fallback heuristic:** when the prompt contains a question word and a
-  past-time or possessive marker in any language (detected via Unicode
-  script), default to `mode: "cue"` rather than `mode: "none"`. A cue is
-  cheap and avoids the worst failure mode (missed recall).
-- **Model-assisted gate (cost trade-off):** ask the model (with a short
-  system prompt and zero temperature) whether this prompt needs long-term
-  memory. Adds one extra inference call but removes the regex maintenance
-  burden. Only worth it if regex-based false-negative rates are high.
-
----
-
-## 6. Test coverage gaps
+## Test coverage gaps
 
 **Symptom:** Chinese gate patterns, graph expansion correctness, and
 end-to-end relation traversal are under-tested.
@@ -218,7 +165,7 @@ and fast; no model or Pi process needed.
 
 ---
 
-## 7. ANN recall is not yet production-quality
+## ANN recall is not yet production-quality
 
 **Symptom:** The README reports 87.5% leaf ANN accuracy versus 100% for exact
 scan on a 10K near-duplicate workload. The design document states "the current
@@ -243,7 +190,7 @@ False negatives cascade: the query never reaches the correct leaf's records.
 
 ---
 
-## 8. Daemon-owned phase concurrency
+## Daemon-owned phase concurrency
 
 **Status:** resolved in the primary design contract and exercised by the
 single-service concurrency probe.
@@ -264,7 +211,7 @@ budget. See `design.md` section 4.1.1 for the normative contract and
 
 ---
 
-## 9. Pi evidence-source resolution is versioned and fails visibly
+## Pi evidence-source resolution is versioned and fails visibly
 
 **Status:** resolved at the adapter boundary. Selective evidence admission
 projects Pi's current `unknown[]` branch through one strict, versioned validator
@@ -288,7 +235,7 @@ harness-verified excerpt.
 
 ---
 
-## 10. Topology auto-acceptance is implemented but not promoted
+## Topology auto-acceptance is implemented but not promoted
 
 **Status:** the actuator exists behind an explicit, default-off policy. Semantic
 maintenance can accept only a strongly gated `same_as` identity proposal when

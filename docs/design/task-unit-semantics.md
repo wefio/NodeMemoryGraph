@@ -1,193 +1,132 @@
-# 可拆分、可融合的 Agent 任务语义
+# Splittable, fusable Agent task semantics
+
+[中文](task-unit-semantics.zh-CN.md) · [Terms used](task-unit-semantics.terms.yaml)
 
 **Status:** draft
-**Related:** [受限 OoO](ooo-execution-bootstrap.md)、[选择与验收条件](../decisions/implemented/2026-09-13-task-unit-semantics.zh-CN.md)
+**Related:** [Constrained out-of-order execution](ooo-execution-bootstrap.md), [the task-unit decision](../decisions/implemented/2026-09-13-task-unit-semantics.md)
 
-## 问题与目标
+## Problem and goal
 
-本仓库的术语里，本文描述的协议叫**任务单元协议（Task-Unit Protocol）**，是**协议化协作（Protocol-Governed Collaboration）**的子协议；定名记录见[命名决策](../decisions/implemented/2026-09-20-name-the-collaboration-protocol.md)。
+The protocol described here is the **Task-Unit Protocol**, a sub-protocol of **Protocol-Governed Collaboration**; see the [naming decision](../decisions/implemented/2026-09-20-name-the-collaboration-protocol.md).
 
-任务单元是可以交接、验证和独立作废的工作；Agent 是执行这些工作的资源。两者不必一一对应。先表达工作成立的条件，再由运行时决定分配给谁、是否连续执行，才可能同时获得细粒度并发与上下文复用。
+A task unit is work that can be handed off, verified and independently voided. An Agent is an execution resource; the two need not map one-to-one. State the conditions under which work is valid first, then let the runtime decide who performs it and whether units run in sequence. That is how fine-grained concurrency and context reuse can coexist.
 
-本文提出现有任务契约的内部编译视图（Task IR），不新增用户输入语言或独立持久化 schema。首个检验对象是冻结仓库上的提案型工作。自然语言仍描述意图；结构化字段描述输入、产物、权限和可检查义务。无法形式化的意图保留人工或独立评审，不伪装成编译器能证明的事实。
+This design proposes an internal compiled view of existing task contracts (Task IR). It adds neither a user-facing input language nor a separate persisted schema. Its first test case is proposal work on a frozen repository. Natural language still states intent; structured fields state inputs, artifacts, permissions and checkable obligations. Intent that cannot be formalized remains subject to human or independent review; it is not a fact a compiler can prove.
 
-用户已确定的架构约束是：协作能力和工具语义位于共享层，harness 经薄适配接入，黑板是协作载体。本文的拆分规则、融合机制和推测方案仍是待检验设计；它不启用功能、不放宽现行受限 OoO，也不宣称已有通用多执行者运行时。
+The user-set architecture constraints are: collaboration capabilities and tool semantics belong in the shared layer; harnesses integrate through thin adapters; and the board carries collaboration. The decomposition rules, fusion mechanism and speculation design below remain to be tested. This document does not enable a feature, relax current constrained out-of-order execution, or claim a general multi-actor runtime exists.
 
-### 主验证问题与范围
+### Main validation question and scope
 
-主问题是：同一个父任务采用比 Agent 更细的合法单元后，能否暴露粗粒度任务遮住的并发机会，并通过融合抵消拆分带来的交接、上下文与验证成本。确定并发与融合获得证据后，再研究有限推测是否带来额外收益。拆分不以执行者失败为唯一触发条件；一个 Agent 能完成的任务，也可能因可并发而值得拆分。
+The main question is whether dividing one parent task into legal units smaller than an Agent can expose concurrency hidden by coarse tasks, and whether fusion can offset the added handoff, context and verification costs. Evaluate bounded speculation only after there is evidence for concurrency and fusion. Splitting is not triggered only by a worker's inability to finish: a task one Agent can complete may still merit decomposition when its parts can run concurrently.
 
-优先复用黑板的交接、认领、交付、判定、租约与 attempt，以及既有任务契约中的输入、访问范围和验证配置。对宿主已明确依赖、隔离和组合检查的固定工作流，这些语义可以足够；只有具体场景无法可靠判断依赖、效果或父义务覆盖时，才扩展对应 owner。本文的概念清单不要求先实现通用任务语言或调度平台。
+Prefer the board's handoff, claim, delivery, judgment, lease and attempt mechanisms, plus inputs, access scope and validation settings already present in task contracts. For fixed workflows whose host already declares dependencies, isolation and composition checks, these semantics may suffice. Extend an owner only when a concrete case cannot reliably decide dependency, effect or parent-obligation coverage. This concept list does not require a general task language or scheduler platform first.
 
-跨会话接续用于检验交接边界；识别已满足义务用于消除冗余；事务与恢复用于支撑实际接入。这些工作保留各自价值，但不能代替粒度、并发与融合的主对照，也不要求先完成所有辅助实验或全量迁移。被执行路径仍须满足权限、隔离、验收与生命周期约束。
+Cross-session continuation tests handoff boundaries; identifying already-satisfied obligations may remove redundant work; transactions and recovery support practical integration. These efforts retain their own value, but do not replace the main granularity, concurrency and fusion comparison. Nor must every supporting experiment or full migration finish first. Any execution path must still satisfy permission, isolation, acceptance and lifecycle constraints.
 
-## CPU OoO 与 ILP 的出发点
+## CPU out-of-order execution and ILP as a starting point
 
-用户明确指出，这些约束来自沿 CPU 乱序执行与 ILP（指令级并行）的思路继续推演：先有合法指令的含义，再讨论如何调度执行资源；执行安排可以改变，提交边界仍需保留。任务粒度小于 Agent 粒度及运行时融合，是这条思路在协作系统中的延伸。
+The user explicitly connected these constraints to CPU out-of-order execution and instruction-level parallelism (ILP): define legal instruction semantics before scheduling execution resources. Execution placement may change; the commit boundary remains. Tasks finer than Agent granularity and runtime fusion extend that idea to collaboration systems.
 
-| CPU 中的角色              | 本设计中的对应问题                          |
-| ------------------------- | ------------------------------------------- |
-| 指令的可观察语义          | Task IR 的输入、效果与接受义务              |
-| 指令/微操作与执行单元分离 | 逻辑任务与 Agent 会话分离；不是逐项硬件同构 |
-| 数据相关与就绪选择        | 版本化产物、事实依赖及受约束的资源效果      |
-| 执行完成与 retire 分离    | 生成、验证、发布分别处理                    |
-| 分支恢复                  | 候选作废、尝试围栏与分支上下文重建          |
+| CPU role | Question here |
+| --- | --- |
+| Observable instruction semantics | Task IR inputs, effects and acceptance obligations |
+| Instructions/micro-ops separate from execution units | Logical tasks separate from Agent sessions; not a one-to-one hardware analogy |
+| Data dependencies and readiness selection | Versioned artifacts, factual dependencies and constrained resource effects |
+| Execution completion separate from retirement | Generation, verification and publication are separate |
+| Branch recovery | Candidate invalidation, attempt fences and branch-context reconstruction |
 
-[BOOM 的 ROB 文档](https://docs.boom-core.org/en/latest/sections/reorder-buffer.html)具体展示了执行完成后等待顺序提交，以及异常时恢复已提交的重命名状态。这里借鉴的是保留可观察状态的边界，不把 blackboard 本身等同于 ROB，也不把会话复用等同于某种 CPU 指令融合实现。
+The [BOOM reorder-buffer documentation](https://docs.boom-core.org/en/latest/sections/reorder-buffer.html) shows work completing before ordered commit, and recovery of committed rename state after an exception. The analogy here is the boundary that preserves observable state. The board is not a reorder buffer, and session reuse is not an implementation of CPU instruction fusion.
 
-CPU 类比还暴露出两个研究缺口：自然语言任务没有现成 ISA 那样明确的含义与资源访问；模型会话的隐含状态也不能假定可以精确回滚。因此本设计要补的是受限任务语义与恢复契约，而不是靠增加 Agent 数量获得 ILP。
+The analogy also exposes two research gaps: natural-language tasks lack an ISA's explicit semantics and resource accesses; model-session state cannot be assumed to roll back exactly. The design therefore adds constrained task semantics and recovery contracts, not more Agents as a substitute for ILP.
 
-## 证据边界与借鉴
+## Evidence boundary and analogies
 
-[等待实验](../experiments/execution/wait-value-2026-09-12.md)只覆盖固定 A/B/C 计划；它区分任务覆盖的等待与宿主检查重叠，未测量拆分、融合或推测的收益。不能据此断言推测是本项目最大的性能杠杆。
+The [wait-value experiment](../experiments/execution/wait-value-2026-09-12.md) covered only a fixed A/B/C plan. It separates waits covered by task work from overlap with host checks; it did not measure the payoff of splitting, fusion or speculation. It cannot support a claim that speculation is this project's largest performance lever.
 
-三个已有机制可作为设计参照，而非 Agent 收益证据：
+Three mechanisms inform the design but are not evidence of Agent gains:
 
-- [Legion 的权限与依赖模型](https://legion.stanford.edu/tutorial/privileges.html)用资源区域及访问权限计算依赖，并将合法执行与处理器映射分开。这里借鉴“语义先于资源分配”，不照搬其确定性计算假设。
-- [Dask 图优化](https://docs.dask.org/en/latest/optimize.html)通过融合减少任务间通信。这里把融合视为成本优化，保留每个 Agent 任务的验收边界。
-- [乐观并发检查](https://learn.microsoft.com/en-us/dotnet/framework/data/adonet/optimistic-concurrency)在更新时核对原始状态。这里借鉴提交点验证；版本匹配只证明输入未漂移，不证明模型结论正确。
+- [Legion privileges and dependencies](https://legion.stanford.edu/tutorial/privileges.html) computes dependencies from resource regions and access privileges, separating legal execution from processor mapping. The analogy is “semantics before resource placement,” not its deterministic-computation assumption.
+- [Dask graph optimization](https://docs.dask.org/en/latest/optimize.html) fuses tasks to reduce communication. Here fusion is a cost optimization and each Agent task keeps its acceptance boundary.
+- [Optimistic concurrency](https://learn.microsoft.com/en-us/dotnet/framework/data/adonet/optimistic-concurrency) checks the original state at update time. Here validation at commit is analogous: a matching version proves only that input did not drift, not that a model conclusion is correct.
 
-## 长任务的连续性与任务视图
+<a id="声明存储与恢复"></a>
 
-[SKILL.state v3](https://arxiv.org/html/2608.26263v3)以固定技能说明、结构化执行状态和最新观察构造每步输入，由运行时验证模型提出的状态更新，跨步不携带中间推理。其局限包括状态未保留后来才显现价值的信息，以及尚未验证多 Agent 并发更新。本文借鉴显式状态承载任务连续性的方向，不把单 Agent 结果当作共享协作或 OoO 的收益证据。
+## Declaration storage and recovery
 
-[The Horizon Gap v1](https://arxiv.org/html/2608.06663v1)区分任务跨度、上下文容量与跨任务记忆，并将规划、记忆、执行恢复和评估放在同一生命周期内。本文据此把父任务完成与恢复能力作为检验目标，局部步骤通过或过程评分只作诊断；增加拆分、记忆或调度设施本身不代表长任务能力提升。
+[Default declarations, frozen inputs and recovery refusals](task-unit-semantics/declaration-storage-and-recovery.md) owns the complete contract; run-record ownership still governs connections and transactions.
 
-任务连续性的目标是：在显式交接边界，具备所需能力与权限的另一个 Agent，能够凭任务契约、当前事实和可访问证据继续工作，不依赖原 Agent 未交付的对话或内部推理。它是输入闭合与产物可交接的端到端检验，不要求任意推理步骤都可中断恢复，也不要求每个单元强制换 Agent。
+## Long-task continuity and task view
 
-| 信息                             | 所属职责与进入下一步的方式                                                                                        |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| 目标、允许动作与完成条件         | Skill 与既有任务契约提供程序说明和约束，不另建技能状态语言                                                        |
-| 认领、交付、判定、取消等执行事实 | 黑板与共享执行设施提供权威观察，按本文运行记录规则派生当前状态                                                    |
-| 当前相关知识、证据及待确认假设   | 各 Agent 的私有 [session AG](session-active-graph-runtime-design.md)组织获准可见的上下文；AG 不成为共享任务状态库 |
-| 跨任务可复用经验与知识           | NMG 长期记忆按来源与有效性检索，不自动继承为当前任务的已验收事实                                                  |
-| 模型下一步输入                   | 共享层组合契约、执行事实视图、相关证据及最新观察，薄适配层交给模型                                                |
+Read the complete responsibility: [Long-task continuity and task view](task-unit-semantics/task-continuity.md).
 
-任务视图是这些既有信息的按需投影，不另存一份可编辑的任务真相，也不等同于 Task IR 的依赖分析视图。模型可以提出产物、观察或假设，不能通过状态补丁自行确认 accepted、改变租约或覆盖取消事实。结构校验与协议校验各自约束形状和状态转移，领域验收仍检查产物；开发任务沿用其 RCP/检查设施，不新增独立 OoO 验证器。
+## Minimum legal task unit
 
-不携带完整历史，不等于删除恢复和审计所需的证据。持久事实及保留期限由下文运行记录规则拥有；AG 投影可重建，相关原始观察可按授权检索。检索或重建缺少必要依据时明确报告缺口，不能把未查到当作从未发生。固定字段数也不保证字段内容有界，本文不承诺任意任务的上下文恒定大小或无损压缩。
+Legal granularity is set by boundaries, not token count, file count or instruction length. A unit must meet at least these obligations:
 
-这一目标为换人、重试、融合与调度提供共同基础：会话复用可以降低成本，正确性不能依赖复用才存在的隐含信息。它服务于现有黑板协作路径，不增加独立工具或启用门控；实际接续能力仍须通过下文实验验证。
+| Obligation | Checkable expression | If unmet |
+| --- | --- | --- |
+| Closed inputs | Bind every required datum to a versioned reference; identify which task produced each prerequisite artifact | Wait or push back for missing input; do not fill it from shared conversation |
+| Handoff-ready artifact | A bounded, typed, locatable proposal or evidence reference | “I have already thought it through” cannot unlock a successor |
+| Closed permissions | Host-constrained readable resources, proposal write set and tool effects | Treat unknown effects as conflicts; do not trust a worker's self-report |
+| Explicit acceptance | Host-selected validator and obligations; distinguish accept, reject and undecidable | Keep undecidable work unaccepted; do not call it success |
+| Stoppable and voidable | Explicit attempt, lease, budget and cancellation boundaries | A late result may be recorded but cannot take effect |
+| Composition fidelity | Explicit composition still covers every parent obligation | Passing child tasks does not mean the parent is complete |
 
-## 最小合法任务单元
+A unit may be as small as “extract one interface fact from frozen source and cite its lines and digest,” if a successor needs that checkable fact. “Think about error handling” has no handoff-ready result and should remain inside a unit.
 
-合法粒度由边界决定，不由 token 数、文件数或一句指令的长度决定。一个单元至少满足以下义务：
+Legality and value are separate judgments. A very small unit may be legal but not worth dispatching by itself because of prompt, handoff or verification cost. Fusion addresses the latter; it cannot conceal the former.
 
-| 义务         | 可检查的表达                                         | 不满足时的处理                             |
-| ------------ | ---------------------------------------------------- | ------------------------------------------ |
-| 输入闭合     | 所有必要数据绑定版本化引用；前置产物明确来自哪个任务 | 缺输入就等待或回推，不靠共享对话补齐       |
-| 产物可交接   | 有限大小、有类型、可定位的提案或证据引用             | “我已经想好了”不能解锁后继                 |
-| 权限闭合     | 可读资源、提案写集、工具效果受宿主约束               | 未知效果按冲突处理；不能凭 worker 自报放行 |
-| 验收明确     | 宿主选定验证器和义务；accept/reject/undecidable 分开 | 无法判定保持未接受，不能当作成功           |
-| 可停止与作废 | attempt、租约、预算、取消边界明确                    | 迟到结果只能记录，不能生效                 |
-| 组合保真     | 子任务产物经明确组合仍覆盖父任务的全部义务           | 子任务各自通过不等于父任务完成             |
+## Task IR and existing vocabulary
 
-允许粒度小到“从固定源码提取一个接口事实并引用行与摘要”，前提是后继确实需要这个可检查事实。“先思考错误处理”若没有可交接结果，应留在一个单元内部。
+Read the complete responsibility: [Task IR and existing vocabulary](task-unit-semantics/task-ir-vocabulary.md).
 
-合法与划算是两个判断。一个非常小的单元可以合法，却因提示、交接或验证成本不值得单独派发。融合解决后一个问题，不能用它掩盖前一个问题。
+## Task refinement: split a parent contract
 
-## Task IR 与现有语汇的映射
+Read the complete responsibility: [Task refinement: split a parent contract](task-unit-semantics/refinement-and-concurrency.md#task-refinement-split-a-parent-contract).
 
-Task IR 是从现有声明与记录计算出的只读视图；不接收另一份 `inputs/outputs/effects/accept` JSON，也不落一份可独立修改的 IR。下表中的概念名用于解释分析结果，输入与校验仍使用现有字段。需要新语义时扩展对应 owner，不增加同义字段。
+## Deterministic concurrency and commit conflicts
 
-| 分析概念                    | 当前字段与唯一类型 owner                                                                                                                                                                                  | 编译与边界                                                                                                                                                                                                        |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| identity / intent           | [BoardTicket、PatchTaskSpec](../../src/integration/ooo-board.ts)：`runId/taskId/revision/attempt/inputDigest`、`instruction`；[PatchWork](../../src/integration/ooo-patch.ts)                             | 复用现有身份与 `instruction`，不增加 `id/contractRevision/intent` 别名。board entry ID 与逻辑 taskId 不等同，绑定键包含 runId                                                                                     |
-| inputs                      | `PatchTaskSpec.files` → `FrozenPatchTask.files`；`ProbePlan` 依赖列表 → `BoardTicket.dependencies`                                                                                                        | 文件内容冻结；依赖产物由宿主在认领时绑定。编译视图只派生引用与摘要；当前没有多端口输入语言                                                                                                                        |
-| outputs                     | [PatchSubmission、ConclusionKind](../../src/integration/ooo-patch.ts)；`PatchTaskSpec.admittedConclusions`；board `deliverableDigest/Ref`                                                                 | 沿用 patch/conclusion 和单次交付。`cannot-complete` 不因结构合法而成为成功。多输出端口与任意 artifact kind 尚不支持，不能偷偷序列化进说明文字                                                                     |
-| effects                     | `ProbePlan` 的 effect / [DispatchTask.effect](../../src/integration/ooo-execution.ts)；`PatchTaskSpec.visible/editable`                                                                                   | 现有 effect 是粗类别 `read-only/isolated-artifact`；worker 读范围来自 `visible`，提案写范围来自 `editable`，宿主验证还消费完整 `files`。它们不是完整的语义读写集；不透明工具效果按冲突处理                        |
-| accept                      | `PatchTaskSpec.verify`；[Requirement](../../src/integration/task-semantics.ts)（原与 `CycleOptions.checks`、`CaseRule` 同处 `ooo-cycle.ts`，随轮次退役后留在语义模块）；board 独立 `verdict/judgedDigest` | 沿用宿主验证和 board 判定，不新增第二个 accepted。当前 `verify` 是进程内函数，不能持久化；恢复所需的可序列化验证描述必须从既有 checks/cases/mutations 等配置冻结，并由共享宿主重建，不存函数或任意 checker 字符串 |
-| budget                      | [PatchBudget](../../src/integration/ooo-patch.ts)：`perFile/output`                                                                                                                                       | 限制输出字节，不是 tokens；取消独立的 `outputs.maxBytes` 别名。模型 token 预算若要成为可强制限制，应先扩展其 owner 与执行协议，当前视图不得假称支持                                                               |
-| limits                      | `PatchLimits.turns/reads/timeoutMs` → `FrozenPatchTask.limits`                                                                                                                                            | 保留原单位与执行时限，不另设 `deadlineMs`；不等于 board claim 的租约时限，也不等于轮次总预算                                                                                                                      |
-| placement                   | 无现有等价字段                                                                                                                                                                                            | 仅由共享调度策略产生临时融合/分配建议，不进入当前票据，不影响验收；`visible/editable` 不承担 placement 语义。持久化执行关联用记录中的任务/attempt/执行者引用，不复制任务声明                                      |
-| deps / requires             | `ProbePlan` 依赖列表；`CycleOptions.requires: Requirement[]`                                                                                                                                              | deps 是派发与产物依赖；requires 是 cycle 对已记录产物的 `verified/mutant-killed/test-title` 条件。两者不等同，当前 requires 不是通用授权/分支谓词注册表                                                           |
-| external fact / assumptions | `ProbePlan` wait event、[外部检查票据](../../src/integration/check-ticket.ts)；无通用 assumptions 类型                                                                                                       | 检查事件保留原身份；本文的有限事实推测仍需在共享协议显式扩展，不能把缺失功能伪装成 `requires` 或票据已有字段                                                                                                      |
-| refinement | [RefinementSpec](../../src/integration/task-semantics.ts)：父义务到输出的映射，以及显式具名 `constraints` | 只读模型声明，不是持久化任务正文；`within-parent-writes` 比较规范化的提议写资源集，不读取补丁信封。协议给出名字，出现即启用，未启用也声明空列表；父权限义务不能通过漏约束丢失。 |
+Read the complete responsibility: [Deterministic concurrency and commit conflicts](task-unit-semantics/refinement-and-concurrency.md#deterministic-concurrency-and-commit-conflicts).
 
-board `kind` 的唯一 owner 是 [TaskBoardKind](../../src/core/types.ts)。它描述协作消息用途：`handoff` 交接、`result` 返回、`decision` 判定；不是 patch/conclusion 类型，也不是 effect。OoO 行内的 patch/snapshot `kind` 又是内部任务类别。三者不得互相转换或新增 `task-ir` kind、工具、频道来承载重复定义。
+## Fusion: reuse resources, preserve logical tasks
 
-数据流为：现有 RoundSpec 研究入口 → 共享规范化/校验 → 现有任务契约与计划 → 派生分析视图 → `BoardTicket`。需要产品接入的解析规则必须移到共享 owner，由研究入口和各 harness 调用；不能把研究 A/B/C 输入格式提升为通用语言。默认补丁采用方用 `preparePatchWork` 生成完整冻结声明，不重抄字段子集。票据和共享循环通过带摘要的不透明 `declaration` 携带它，不要求所有采用方的声明都有补丁字段；冻结、解释和验收由采用方负责。[声明边界决策](../decisions/implemented/2026-09-21-mechanism-not-policy.zh-CN.md#不透明派发声明)说明缺失声明与具名拒绝的区别。
+Start with execution fusion: one Agent session runs several logical units in sequence, while each unit keeps its own ticket, artifact and host boundary. Do not start with transaction fusion or turn several units into one indivisible acceptance.
 
-### 声明存储与恢复
+A fusion candidate must satisfy all five conditions:
 
-声明语义与编码归协议，执行冻结与恢复归采用方，store 提供同一个连接与事务，黑板只解释协作状态。默认 Task-Unit 的类型、DDL、读写与规范化相等性由 [task-unit-declaration-store.ts](../../src/integration/task-unit-declaration-store.ts) 拥有；`task_run_tasks` 保留为唯一任务定义，store 的既有方法是默认适配层兼容转发，不是所有协议必须采用的字段契约。
+1. Execution capability, authority and data visibility are compatible; session reuse does not widen read permission.
+2. The successor starts only after its dependency is accepted; an unverified answer just produced by the same Agent does not satisfy it.
+3. Each unit retains separate identity, deadline, cancellation check, verification result and cost. Record shared startup and context cost separately, without counting it once per unit.
+4. Put a host-yield boundary between units. On failure, keep the accepted prefix and reschedule the remaining units; do not claim the whole batch at once and hold it indefinitely.
+5. Do not reuse uncleared conversation history across an unresolved speculation branch.
 
-默认补丁采用方在认领事务内把原始输入字节、显式 budget/limits、允许结论种类及执行声明摘要写入 `task_run_facts` 的 `task-unit.patch-inputs-frozen` 回执，按 run/task/attempt 定位。说明、依赖与权限名单仍从冻结任务行读取，不在回执或黑板正文中复制定义。认领、输入回执与认领事实一起提交；任何冻结错误使整个转移回滚。合法性和恢复查询不补写事实。
+The fifth condition is Agent-specific: rejecting a proposal does not make the model forget it. Even after tool permissions are revoked, the old session may keep answering from a false assumption. When a branch is invalidated, destroy its session or restore a supported trusted checkpoint; otherwise start a new session. Ordinary session fusion also requires compatible visible inputs, and its context bias must still be measured for quality impact.
 
-恢复必须用对应 attempt 的原始输入和参数重建，并核对声明摘要；未知回执版本、非法字段、摘要不符或验收时缺少回执都明确拒绝，不以当前工作区兜底。未认领的任务仍由宿主提供初始输入。验收回调由宿主重新提供，这份回执不持久化函数，也不证明恢复了验收配置。计划、执行声明和交付产物使用各自的摘要身份。
+The runtime may rank legal fusion candidates by “saved startup/context cost − added wait, verification and context burden.” The initial policy considers only ready short chains, not greedy absorption of a whole DAG. Include delay when work has other consumers or urgent independent tasks. Derive thresholds from experiments, not guesses.
 
-[归属决策](../decisions/implemented/2026-10-02-declarations-have-one-owner.zh-CN.md)记录为何保留类型表而不复制 JSON；peer 外框的协议字段与 payload 迁移仍是独立范围。
+## Strict semantics and bounded speculation
 
-编译必须对无映射能力明确拒绝，不静默丢字段或降为自由文本。第一版只分析现有 patch/snapshot 契约，验证器、预算和访问规则不重实现。新增语义先扩展 owner、身份摘要及对应检查，再进入派生视图。
+Narrow “guess what the Agent will do next” to “prepare a candidate ahead of one declared, finite-valued fact.” Keep three gates distinct:
 
-字段检查能证明计划无环、引用存在、现有产物形状兼容、权限不扩张、预算有界。它不能证明意图完整、读集声明真实或测试足以证明正确。读集真实性依赖实际工具访问限制；普通 shell 不受约束时，任务按 opaque 工作处理。
+| Gate | May it be crossed early? | Requirement at commit |
+| --- | --- | --- |
+| Data input | Not by default; missing content cannot be replaced by `true` | Bind the exact input and artifact version |
+| Branch fact | Research only preparation of a discardable candidate with no external write | Authoritative evidence for the assumption, with a still-valid version |
+| Permission/safety precondition | Never a guessable branch | Satisfied before the action executes |
 
-## 拆分是对父任务契约的细化
+For example, a test proposal T may use a frozen interface, while publishing T must wait for check event g. If T does not depend on g, moving pure preparation before g is dependency refinement, not speculation. If g decides whether T is needed, preparing T early is control speculation that may be wasted. If T must read a failure log not yet produced, guessing “failure” does not supply the missing input and cannot start the work.
 
-将 T 拆成 G=(T1,…,Tn,join)，需要显式的 refinement 记录：父契约摘要、义务到子产物的映射、保留的联合义务、join 验证器。父义务不能因为拆分而消失，子任务不得扩大父权限或绕过授权。
+The candidate ticket records `assumptions=[{predicateId, version, expected}]`. Inside the publish transaction the host checks each assumption against authoritative evidence, input versions, attempt, cancellation state and verification receipt. If evidence is uncertain, wait or return `undecidable`; if it contradicts the assumption, void the candidate. A summary only binds the assumption; it does not discover that it is false. The checks and invalidation propagation must be implemented. A long-running check executes outside the transaction; re-check its bound version inside to close the drift window after the check completes.
 
-候选正确性条件是：对子任务允许的产物与交错执行，join 能接受的外部结果均满足父契约；原有失败、取消和无法判定的处理仍成立。对于非确定性的 Agent，这不要求两个调度产生字节相同的答案，也不证明两种调度的成功概率相同。质量与完成率需要另测。
+The first speculation experiment allows one pending fact, one candidate, no speculative successor and no irreversible external operation. A false assumption discards the candidate and closes its branch session; the real path reruns under a new ticket. Cap resources, cost and waits; necessary work always has priority. Consider propagating speculative chains only after this boundary is proven.
 
-例子：把“修复取消行为”拆为冻结接口提取 I、实现提案 P、回归测试提案 T、组合验证 J。只有 I 被接受且契约足够时，P/T 才可能独立。J 依赖两份已接受提案，并检查组合行为。若 T 实际需要 P 发明的新接口，P→T 是真依赖，不能因文件不同而删除。
+These semantics reduce the complexity of what must be predicted, but provide no predictor and guarantee neither hit rate nor net gain.
 
-拆分的停止条件是再切一刀会丢失可交接产物、输入闭合或独立验证，或者只剩不值得调度的内部步骤。运行时可以报告未满足义务，但不自动发明父任务缺失的意图。
+## Cost and relation to the earlier proposal
 
-## 确定并发与提交冲突
+The [speculation decision](../decisions/implemented/2026-09-11-ooo-speculation.md) retains its lifecycle; this research does not enable it automatically. Two of its implications are not universal rules: zero tokens still consumes CPU, I/O and verification capacity, so benefit need not be non-negative; and repeated passing checks do not prove a dependency can be removed. Dependency removal needs a contract-level proof of non-dependence.
 
-先区分读取冻结快照、生成候选提案和修改共享资源。两个 worker 可以基于同一冻结输入并发提出修改，即使提案写同一文件；这只证明生成阶段可隔离，不证明两份修改可共同接受或提升。
-
-对会真正读写同一版本域的两个动作，保守的充分条件是没有数据或控制依赖，且：
-
-```text
-W(A) ∩ (R(B) ∪ W(B)) = ∅
-W(B) ∩ (R(A) ∪ W(A)) = ∅
-```
-
-资源不仅是路径，也包括接口契约、配置、环境和外部效果。目录别名、重命名或语义范围不明时扩大冲突集合；相同资源上的可交换操作只有注册了组合规则才能例外。文件写集互不相交也不能排除接口语义冲突，联合验收仍然必要。
-
-最初使用冻结计划的稳定拓扑顺序作为发布顺序；生成和验证可以越序。私有候选接受与提升到共享仓库是不同边界：后者还需要目标版本检查及联合验收。黑板上的 accepted 不代表文件已经合并。更宽松的可串行化发布策略是独立后续研究。
-
-“发现确定并发”的准确含义是：在受宿主约束的声明范围内找到不干扰的工作，不是从自然语言自动证明所有任务独立。
-
-## 融合：复用执行资源，保留逻辑任务
-
-先实现 execution fusion：同一 Agent 会话连续执行多个逻辑单元，每个单元独立拿票据、交产物并过宿主边界。不先做 transaction fusion，不把多个单元改成一份不可分的接受结果。
-
-融合候选须满足：
-
-1. 执行能力、授权主体和数据可见性兼容，复用会话不扩大读权限。
-2. 后继启动时其依赖已接受；同一 Agent 刚生成的未验收答案不算依赖已满足。
-3. 每个单元的身份、截止时间、取消检查、验证结果与费用仍单独记录；共享启动和上下文成本另列，不能重复记账。
-4. 单元间设置宿主 yield 边界。失败保留已接受前缀，剩余单元重新调度，不能一次 claim 整批导致长期占用。
-5. 不跨未决推测分支复用不可清除的对话历史。
-
-第五条是 Agent 特有的限制：拒收提案不会使模型忘记它。即使所有工具已经收回权限，旧会话也可能继续基于错误假设作答。分支失效时销毁该分支会话，或从受支持的可信检查点恢复；若 harness 没有这种能力，就新建会话。普通会话融合也只在双方可见输入兼容时进行，且仍要测量上下文偏置对质量的影响。
-
-运行时可以用“节省的启动/上下文成本 − 新增等待/验证/上下文负担”排序合法融合候选。初始策略只考虑就绪短链，不贪心吞并整个 DAG；存在其他消费者或紧迫独立工作时，把延迟纳入选择。阈值来自实验，不固化猜测。
-
-## 严格语义怎样重新打开推测
-
-把“猜 Agent 接下来想做什么”缩小为“对一个已声明、有限取值的事实提前准备候选”。必须分别表达三种门：
-
-| 门            | 能否提前越过                           | 提交时要求                       |
-| ------------- | -------------------------------------- | -------------------------------- |
-| 数据输入      | 默认不能；缺失内容不能用一个 true 代替 | 精确输入与产物版本绑定           |
-| 分支事实      | 仅可丢弃、无外部写入的候选准备可研究   | 有权威事件证明假设，且版本仍有效 |
-| 权限/安全前提 | 不能作为可猜测分支                     | 在执行动作之前已满足             |
-
-例如 T 的测试提案只使用已冻结接口；发布 T 还需等待检查事件 g。若提案内容完全不依赖 g，移动纯准备工作到 g 之前属于依赖细化，不是推测。若 g 决定本轮是否需要 T，提前准备 T 才是可能白跑的控制推测。若 T 必须读取尚未产生的错误日志，猜“失败”仍不能补全输入，不能启动。
-
-候选票据记录 `assumptions=[{predicateId, version, expected}]`。宿主在发布事务中核对每项权威证据、输入版本、attempt、取消状态与验证收据；不确定就等待或 undecidable，矛盾则作废。摘要只绑定假设，不会自行发现假设为假；检查及失效传播必须实现。耗时验证发生在事务外，事务内重核其绑定的版本，关闭检查后再漂移的窗口。
-
-首个推测实验只允许一个未决事实、一个候选、不运行推测后继、不产生不可逆外部操作。假设为假即丢弃候选并关闭分支会话；真实路径在新票据下重新执行。资源、费用和等待都有上限，必要工作始终优先。推测链传播留待这个边界被证明后再讨论。
-
-这套语义降低需要预测的对象复杂度，但不提供预测器，也不保证命中率或净收益。
-
-## 成本判断与旧提案的关系
-
-[推测提案](../decisions/implemented/2026-09-11-ooo-speculation.md)维持原生命周期；本文不以新研究自动启用它。其中两项推论不能作为普遍规则：无 token 仍消耗 CPU、I/O 和验证容量，收益不必非负；检查长期通过也不能证明可删依赖，删除需要契约层的不依赖证明。
-
-推测应同时报告延迟、额外费用和质量，而不是混为一个“收益”。若确需单一门控，可预先声明成本换算系数，用下式作估计而非保证：
+Report latency, extra cost and quality separately, not as one “benefit.” If one gate is necessary, declare the cost-conversion coefficient in advance and use this expression as an estimate, not a guarantee:
 
 ```text
 estimatedUtility = p * savedCriticalPath
@@ -196,196 +135,20 @@ estimatedUtility = p * savedCriticalPath
                  - lambda * extraCost
 ```
 
-`extraCost` 包括命中和未命中的额外调用、检查和会话成本；`p` 来自相同类型任务的校准数据，不能由 Agent 的自信代替。被覆盖的等待并不等于关键路径缩短。没有可信估计时保留确定工作调度。
+`extraCost` includes additional calls, checks and session costs on both hits and misses. Derive `p` from calibrated data for comparable tasks, not the Agent's confidence. A covered wait is not necessarily a shorter critical path. Without a trustworthy estimate, keep scheduling deterministic work.
 
-## 复用 autodiff、HA 与 MGR
+## Reuse autodiff, HA and MGR
 
-复用现有计算与推演能力，不为 OoO 另建可微引擎、激活系统或推理图存储。任务依赖图描述执行约束，autodiff 图描述数值运算，MGR 图描述记忆关联；它们可以通过版本化投影关联，但节点和边的语义不能直接等同。
+Read the complete responsibility: [Reuse autodiff, HA and MGR](task-unit-semantics/autodiff-ha-mgr-integration.md).
 
-| 能力与 owner                                                       | 在任务协作中的复用方向                                            | 保留的边界                                                                                               |
-| ------------------------------------------------------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| [autodiff](../../src/lab/autodiff.ts) 的 Tensor/UOp 与梯度计算     | 为明确构造的成本、收益或动作评分模型提供数值底座                  | Agent 调用、离散调度和工具副作用不因表示成图就可微；不声称梯度穿过整个 Agent 任务                        |
-| [HA：Hierarchical Activation](hierarchical-activation.md)          | 对任务所需上下文做激活与保留评分，研究上下文复用的价值信号        | 激活分数不改变语义置信度、访问权限、硬预算或任务依赖；时间状态仍归 session/branch 所有                   |
-| [MGR：MemoryGraphReasoner](../../src/lab/memory-graph-reasoner.ts) | 利用已有遍历与 what-if 推演提出有来源的上下文、路径或有限假设候选 | `MemoryNode.requires` 的软门控不等于任务依赖成立；what-if 结果不等于真实检查结果，也不能自行开启推测执行 |
-| 共享任务语义与协调器                                               | 生成合法动作集合，校验建议并执行原子认领与提交                    | 合法性和接受权不交给评分模型；建议失效、不可用或关闭时仍能确定性执行                                     |
+## Shared layer and board
 
-未来接线顺序是：共享语义计算合法候选 → 可选 HA/MGR 提供上下文或建议 → 共享策略在合法集合内排序 → 认领/提交点重新校验。模型提出集合外动作时拒绝，而不是提高分数后放行。需要新任务或新依赖的建议须走显式计划修订，不能隐式改写冻结计划。关联使用现有 run/task/attempt 和 AG 投影身份，不引入第二套任务 ID 或 board kind。
+Read the complete responsibility: [Shared layer and board](task-unit-semantics/shared-layer-and-task-board.md).
 
-投影与产物生命周期沿用 [session AG 设计](session-active-graph-runtime-design.md)：HA/MGR 仅消费有界、获准可见的投影，推演产物保留来源、假设标记与 TTL。被选为真实执行依据的证据必须经宿主接纳并冻结到任务输入；临时投影或假设过期，不能悄悄改变已冻结票据。它们不直接写 board 判定，也不自动把假设写入 STG/LTG。
+## Physical ownership of run records and the sole writer
 
-可重算不表示只需要当前图。数值建议重现还需绑定参数/实现版本、输入投影、必要的初始时间状态与观察顺序；存在随机选择时还需相应随机状态。HA 的递归时间投影不能从当前快照凭空恢复。可训练参数仍由版本化 Lab/controller state 拥有，会话快状态按既有隔离与清理规则管理，OoO 不另存一套。缺少这些条件时重新评分并标明是新建议，不能声称复现了旧评分；已经实际采用的动作仍由运行事实记录，不靠重新评分恢复。
+Read the complete responsibility: [Physical ownership of run records and the sole writer](task-unit-semantics/run-record-ownership.md).
 
-先完成确定性语义与规则基线，再用同一合法动作集合比较无 HA/MGR、仅 HA、仅 MGR 和两者组合，分别记录质量、上下文开销、延迟与假设误导。训练信号来自可归因的实际结果；未经采用的动作效果保持未知，不能用模型自己的评分作真值。没有稳定收益时保持规则策略。
+## Next executable slices and stop conditions
 
-本节记录复用方向，不把已有实验引擎标成已接入任务运行时，不改变现有启用门控，也不新增开关。未来接线与门控变化仍由相应能力 owner 和隐藏能力登记管理；harness 只承担薄适配，不各自实现评分或推演策略。
-
-**已落地的只是这条接线顺序本身**（[task-advisers](../../src/integration/task-advisers.ts)）：`selectableTasks` 给出合法候选集合（规则仍只有一份，`nextTask` 是它的头），可选来源只能在该集合内排序，共享策略定序，认领点重新校验。来源看到的是有界投影，建议只能是“排序集合内已有的任务”——它无法新增任务或依赖（没有这样的字段），`assumptions` 只作来源记录、永不参与合法性，所以软前提不能把任何东西变合法；`fuse`/`prepare` 这类未建模动作在动作字段上就被拒绝；参数/投影版本、观察顺序或初始状态对不上的分数被重新评分并标明是新建议；跨 session/branch 的来源被拒绝；关闭或失败的来源退回规则策略并留下理由。默认配置不带任何来源，也就是规则策略本身，所以上句仍然成立：没有 HA/MGR 实现被接入，门控与开关未变；四个对比臂的预算仍属 F 组。
-
-## 共享层与黑板
-
-| 所有者             | 职责                                                               |
-| ------------------ | ------------------------------------------------------------------ |
-| 共享任务语义模块   | 解析/规范化 Task IR、依赖与效果检查、拆分义务检查、合法融合候选    |
-| 共享运行时         | 计划冻结、选择/派发、票据、验证、发布、取消、费用与事件记录        |
-| 黑板及协调存储     | 跨进程发现、交接、认领、结果引用；经所有者操作更新权威状态         |
-| 共享 Agent Surface | 同一工具目录、参数/结果语义与可发现入口                            |
-| harness 薄适配     | 原生工具 schema 编码、会话启动/恢复/终止、模型调用、能力与用量回报 |
-
-黑板是工具和载体，不凭自然语言条目推导依赖，也不充当裁判。共享运行时通过 board 的租约、attempt 与 deliver/judge 操作执行状态转移，具体持久化和写入权按下节固定。
-
-共享协议不意味着每个 harness 都有同等执行能力。适配器报告 capability；缺少会话复用或隔离能力时降级为独立执行，不能把正确性规则留给适配器自行解释。
-
-### 产品入口：由现有协作设施吸收 OoO
-
-用户确定的产品方向是：OoO 作为协作内部的执行能力，被黑板、共享任务语义、执行生命周期与验收设施吸收；Agent 通过普通任务交接使用它，不需要选择或调用独立的 OoO 工具。黑板负责交接、依赖/产物引用、认领和交付；共享语义派生合法动作；执行设施负责分配、等待、会话复用和取消；任务指定的检查负责产物验收，协调器按协议提交。黑板本身不承担通用执行器或验证器的全部职责。
-
-普通黑板文本不会自动变成可执行任务。只有通过现有操作进入、具有明确任务契约与执行授权的交接，才参与上述派生和调度；元数据缺口在既有 owner 扩展。不得通过新增 `ooo` 工具、专用频道、另一份任务正文或 `board.runRound` 包装，保留一套独立计划、状态和生命周期。研究 round 是实验组织单位，不要求所有日常协作都先创建一个独立 round。
-
-现有 Pi `ooo_round` 仅作为迁移期间的兼容入口，最终从产品工具目录退出。兼容期间复用同一共享操作与权威事实，不发展新功能或维持双写；研究 CLI 可继续做受控顺序/OoO 对照，但不成为产品功能的必经入口。本次只确定目标，不宣称兼容接线或工具删除已经完成。实际移除时同步工具目录、适配层、操作说明及隐藏能力登记。
-
-退出前必须走通一条普通协作路径：Agent 经现有黑板交接一个契约明确的父任务，任务语义识别其中独立工作，执行设施按资源条件重排/执行，产物通过既有交付与独立验收返回；全程不调用 `ooo_round` 或研究 CLI，也不生成平行任务状态。验证真实 accepted 产物及依赖解锁，并覆盖失败、取消和无独立工作时的顺序回退；同时确认原入口承担的必要查询/取消能力可从既有设施到达，再删除独立工具。没有推测授权不执行推测，没有多槽或融合能力时使用合法退化路径。
-
-## 运行记录的物理归属与唯一写入者
-
-目标选定为：不能重建的运行事实位于当前 NMG daemon 所拥有的 SQLite 数据库，与 `task_board_entries` 同库、同连接、同事务；OoO 任务状态则是这些事实的可重算视图，不建立权威的 `ooo_tasks` 状态表。不为生产轮次创建 `<runDir>/store.sqlite`，不建立跨库状态引用或对账流程。数据库位置服从 daemon 已有配置，不增加路径配置。
-
-唯一物理写入者是该 daemon；唯一运行状态转移入口是 daemon 内共享运行协调服务，经注入的 Store 事务操作执行。runner、harness、worker、status/cancel 客户端不打开可写数据库，也不各自构造 `BoardAdmission`。多个协作者可以提交请求，不能各写一份状态。共享协调器不继承 Store 来获得另一条连接；宿主模型循环和检查子进程仍在事务外运行，只回报带票据的事实。
-
-新增持久化只承担两类事实：不可变的运行 manifest（冻结现有计划、配置与版本），以及 board 没有的追加运行事实。可以分别用 manifest 表与事件表实现，但不得增加与 board 竞争的每任务当前状态表。下面固定事实 owner；物理表名以迁移实现为准，同库与权威分工不变：
-
-| 事实                                                                            | 权威位置                                                           | 写入与读取规则                                                                                                                                         |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| runId、冻结计划/验证配置、输入及摘要、保留策略                                  | 不可变运行 manifest                                                | 协调服务经 daemon Store 注册；依赖图从计划派生。新计划产生新版本，不能覆盖旧输入                                                                       |
-| 逻辑任务与 board entry 的绑定、检查签发与终态、候选字节或内容寻址引用、取消事实 | 同库追加运行事实，键含 runId/sequence，任务事实另带 taskId/attempt | 只保存不能从 manifest 或 board 推导的事实；取消事件与 board 围栏操作原子提交。候选存在不等于接受                                                       |
-| claim owner、lease、attempt、deliverable、独立 verdict、resolve                 | 现有 board 记录                                                    | board 生命周期操作是唯一写入逻辑；受管理条目的通用写请求也必须经过同一协调事务，禁止直接 judge/resolve 绕开运行围栏                                    |
-| 费用、执行尝试观察与恢复证据                                                    | 同一追加运行事实                                                   | 外部结果由宿主报告、协调服务验证后写；worker 不批准自己的产物。重复结果幂等，旧代次拒收；board 转移的历史可在事务内记录，但当前 board 状态仍只读 board |
-| ready/blocked/accepted 任务集合、依赖满足、取消后的有效性、融合候选             | 无权威存储；从上述来源计算                                         | 同一共享派生函数服务 status、next 与依赖解锁；可缓存，不允许独立写入或修复缓存来改事实                                                                 |
-| `round.jsonl`、`run.json`、工作目录日志                                         | 导出或执行产物                                                     | JSONL 可导出作研究重放，文件不决定当前完成/取消状态；导出失败不回滚已提交判定                                                                          |
-
-事务内同时完成版本/租约/取消校验、board deliver/judge/resolve、产物关联与事件追加；失败则全部回滚。外部验证收据先生成，入事务后重核绑定，不能在持有写事务时等待模型或检查进程。断线重试以 run/task/attempt 和事件身份去重；未知检查结果保持无法判定，不从 PID 消失推断成功。
-
-接受查询与依赖解锁必须调用同一谓词：绑定 entry 对当前产物 digest 的有效 board verdict，加当前运行版本与围栏检查。不得一条路径看 board verdict，另一条仅检查 artifact 非空。历史 event 中曾 accepted 不表示当前仍 accepted。
-
-### 事务参与与连接生命周期
-
-同一个连接不等于已经处于同一个事务。Store 拥有事务边界；round 加入某一次同步状态转移，不能把整轮或整个异步 RPC 包进数据库事务。以下是接入契约，不表示当前 Store 已提供这些接口。
-
-| 能力                                          | 持有者                                                       | 责任                                                                                                 |
-| --------------------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| 连接创建、schema migration、checkpoint、close | daemon 的 Store owner；离线 fixture 则由创建它的外层宿主拥有 | 启动时完成初始化；关闭前停止并收束所有使用者；创建者负责异常清理                                     |
-| 同步写事务入口                                | Store                                                        | 唯一执行 `BEGIN IMMEDIATE/COMMIT/ROLLBACK`；无外层事务时建立事务，已有事务时须显式提供有效事务作用域 |
-| 已有事务的操作端口                            | round 与 board 内部操作                                      | 只调用绑定当前 Store 的类型化操作；不暴露原始连接、SQL 事务控制或 `close()`                          |
-| round 执行作用域                              | 共享协调器                                                   | 管理本轮 worker/check、订阅和计时器；释放这些资源不关闭借用的 Store，也不删除非本轮所有的目录        |
-
-事务端口是 Store 签发、仅在同步回调期间有效的能力，绑定连接与当前事务代次。其他 Store 的端口、退出回调后的端口，以及未提供端口却在已有事务内再次进入的写事务调用，都明确拒绝。不能仅凭 `isTransaction` 或全局深度猜测调用方是否有权加入。
-
-board 的独立写入口和组合写入口复用同一实现：独立调用由 Store 包装事务，round 内调用显式使用当前事务端口，不再执行第二次 BEGIN。凡在一次转移内触及的 put、claim、deliver、judge、resolve、保留关系和运行事实写入都遵循此规则；不能只改 round 的事务包装，遗漏 `putTaskBoardEntry()` 自带的 BEGIN。清理、串行晋升等伴随写入也在同一边界内，或明确由独立维护事务承担。
-
-初版采用整笔原子事务，不增加 savepoint 级局部恢复。内层操作抛错时将当前事务标记为 rollback-only；即使调用方捕获异常，最外层也不得 COMMIT。预期的 stale/conflict 应在该操作首次写入前返回，或作为失败使整笔回滚；不得先写一部分，再用普通返回值掩盖失败。事务是否已提交只由最外层决定。ROLLBACK 自身失败时保留原错误并隔离该连接，不能假定连接仍可继续使用。
-
-回调必须同步且不接受 Promise/thenable；类型约束之外，端口在回调结束即撤销，防止延迟回调继续写入。外部验证、模型调用和通知都不得持有端口跨越 `await`。提交路径保持：读取并冻结验证输入 → 事务外验证 → 新的短事务内重读 fence/lease/cancel 并原子写入。不能通过“复用事务”取消验证后的复核。
-
-共享运行时在事务成功后才返回已提交结果并发送通知。必须可靠送达的通知先把待发送事实写进同一事务，再在事务外发送；瞬时通知失败不改写已经提交的事实。调用方未收到响应时按同一身份查询/重试，得到已提交或 duplicate；不重新执行 worker。`afterCommit` 一类 hook 只具有提交后观察语义，不能把其异常解释成数据库已回滚。
-
-生命周期采用外层拥有、内层借用的单一路径：daemon 创建 Store，构造不含 close 的操作端口传入 round；离线宿主也先创建自己的 Store，再调用相同 round 入口，并由外层 finally 关闭。round 内不使用 `ownsStore` 分支分散关闭逻辑。正常返回、初始化失败、提前取消、检查抛错都经过各资源 owner 的统一清理；资源每成功创建一步就纳入清理范围。status 的借用视图构造不迁移 schema、不发布 handoff、不因查询触发 round 初始化写入。
-
-daemon 关闭顺序为：停止接收新工作，取消/围栏在途尝试，撤销订阅并等待使用 Store 的异步任务退出，完成已开始的同步事务，最后 checkpoint/close 一次。无法及时终止的外部进程不得保留数据库操作能力；其迟到结果由已关闭的运行作用域拒绝。此顺序需要 daemon 生命周期 owner 配合，不能只保证 round 不调用 close，却让其他后台使用者在关库后写入。
-
-### 运行面的形状
-
-另一个进程到达运行事实的唯一入口是 daemon 的 `taskRun`：`register`（注册运行身份，同一计划只能注册一次）、`freeze`（一次转移冻结整份计划，位置取数组顺序，悬空依赖与自依赖在冻结前按名字拒绝）、`bind`（把已存在条目绑到已冻结任务）、`cancel`（取消整个运行，或计划中的某个任务）、`status`（读回运行记录）。`taskBoard` 的 `put` 增加可选 `adopt`，使“创建条目”与“绑定”落在同一转移里：先建后绑是两次调用，中间崩溃会留下一个没有运行管理的条目，正是本围栏要消除的洞。取消事实的唯一写入者是 `cancelRun`：围栏与派发派生都读它，而在这之前 `src/` 里没有任何写入者，即“运行已取消”这个状态只能由测试直接 append——真实客户端不可达。`status` 是纯读：不注册、不追加、不迁移、不发布，也不派生 ready/blocked/accepted——那是共享纯函数在同一批事实上的结果，在这里再算一遍就是设计禁止的第二份真相。
-
-这些加法在兼容 epoch 内，不推进 epoch：旧同 epoch daemon 缺 `taskRun` 时由客户端报“能力不可用”，而它会静默忽略 `put` 的 `adopt`（该字段与 `taskRun` 同一次变更引入，描述符目录在 daemon 生命周期内冻结）——所以客户端只在 `hello.methods` 含 `taskRun` 时才发这个字段，epoch 规则因此无需变动（见 [design.md](design.md) 的兼容性段落）。CLI 只暴露操作者需要的一半（`nmg run status`、`nmg run cancel`）；运行自己的转移由 runner 用 daemon 客户端调用，不为它们另设人类入口。
-
-客户端的边界按“服务者可能被堵住”来设计，而不是按“它总会回应”：同一进程既服务端点又同步等待子进程时，它永远回不了那个请求，这不是事务或锁能修的问题（写入者、`BEGIN IMMEDIATE`、围栏都已经是最悲观的），而是回复机制本身被占用。因此 `taskRun`/`taskBoard` 的调用都有上界，超时按名字报出上界、端点与持有该端点的 pid，而不是把传输层自己的超时抛给调用者；并且**客户端不调用自己服务的端点**：租约记录里的 pid 就是服务者的 pid，所以这是可判定的，宿主自己的调用走进程内的 round 入口（`round-host.ts` 的 `host.call(...)`），需要走线的客户端则由独立进程的宿主服务。
-
-### status 借用视图的形态
-
-共享 daemon 的 status 使用 owner 从现有 Store 提供的窄查询端口，复用当前连接和共享状态派生函数。端口只有类型化查询方法，不暴露写方法、原始连接、任意 SQL、事务控制或 close；构造端口不创建数据库连接。只读是调用方持有的能力范围，不是将共享连接切换为只读模式，因此不得在该连接上设置 `query_only`，影响正常写请求。
-
-查询不得调用带迁移、懒清理、租约晋升或 handoff 发布副作用的 Store 方法。到期状态在查询视图中计算，必要的持久清理由独立写入口负责。status 与调度读取同一套事实和判定规则，但 status 不因发现待处理事项而执行它们。
-
-离线宿主查看已有私有轮次库时，允许由该宿主通过 Store owner 的只读打开路径创建独立连接，并负责释放。该路径使用真正的只读数据库句柄；跳过迁移、初始化、写型 PRAGMA 和关闭时的 checkpoint。独立连接可额外设置 `query_only`，但它不能代替真正的只读打开。共享层可提供这个 owner 工厂，`src/integration` 的 status 消费者不能自行按路径创建句柄。两条路径复用查询实现，不复制状态逻辑。
-
-不以 `BoardAdmissionOptions.view` 将初始化/执行类改成多模式查询类；采用 owner 提供查询端口、外层宿主拥有连接的组合。`NmgStoreOptions.readOnly` 若用于实现独立只读打开，属于 owner 工厂配置，不进入 round 票据，也不成为每个调用方切换连接的开关。cancel 走正常可写操作端口；它不能通过重新构造 BoardAdmission 顺带初始化不存在的 run。
-
-库不存在、schema 缺失或不支持、指定 run 不存在均明确拒绝，并区分错误原因；不得创建库、迁移旧库或返回“空运行”。只有存在有效 manifest 且 schema 可识别、run 身份匹配时，才能报告“运行存在但尚无事件”。旧 schema 若已有明确支持的只读解析规则可读取，否则报告不支持；不能通过默认空字段掩盖未知格式。
-
-接入验证分开覆盖两种形态：共享端口构造/查询不写入且不暴露写入或关闭能力，释放视图后 owner 仍能读写；离线只读打开不创建缺失文件、不迁移旧 schema、不执行写入或 checkpoint，且宿主关闭自己创建的句柄。两者在相同事实快照与求值时间下给出一致结果。独立只读连接的变异检查需单独把只读打开退回可写，证明测试能抓住它，即使 `query_only` 仍在；只测试最终写入被拒绝不足以区分这两种保护。
-
-### 重算的范围与代价
-
-视图可写为 `derive(manifest, boardSnapshot, runFactsThroughSequence, now)`。一次求值使用一致的数据库读快照与固定的 `now`，否则可能把旧 claim 和新判定拼在一起。租约是否到期依赖时间，不能只按事件序号缓存；缓存至少绑定事实版本，并在相关租约边界失效。缓存丢失只影响性能。
-
-两个调用者可以同时算出同一个 ready 任务，但只有 daemon 的原子 claim/围栏校验能授予执行权；重算不代替并发控制。提交时再次验证，不能拿较早算出的 ready/accepted 视图当写入许可。
-
-重算只回放已记录事实，不重新调用模型或重新运行检查来猜历史。执行已发出但进程在记录结果前崩溃时，结果是 unknown；只有外部提供幂等查询或该操作明确可重入时才能恢复/重试，不能因记录缺失断言从未执行。非幂等外部操作不在首版范围内。
-
-首次可直接按计划和事实扫描重算；规模扩大后用有版本键的内存缓存或可删除 checkpoint 优化。只有测出重算瓶颈才增加物化视图，且须证明删掉它能从权威来源恢复。不能为省一次 join 而把 accepted、attempt 或 lease 复制成另一份真相。
-
-board TTL 需要显式的运行保留关系：运行记录引用的交付/判定条目在运行可恢复或证据保留期间不能被普通 TTL prune 删除，即使已 resolve 或轮次终止。未绑定的普通 board 条目维持原 TTL。运行到期且无在途工作/依赖引用后，由 daemon 的显式运行 GC 在同库事务中清理引用及关联记录；不承诺 GC 后仍可恢复。历史若需长期保留，先导出，再删除，不能仅保留失效的跨表指针。
-
-### 当前实现与接入前置条件
-
-当前为每轮建立私有 store 的 runner 只剩 [live-continuation](../../evals/ooo-execution/live-continuation.ts)；`round-runner.ts` 曾做同样的事，已随轮次于 2026-09-18 退役（[决策](../decisions/implemented/2026-09-18-retire-the-round-instrument.md)）。[BoardAdmission](../../src/integration/ooo-board.ts)在该库里同时建 OoO 表并使用通用 board 表。这是每轮同库，不是上面选定的共享 daemon 模式；其 meta 单行、taskId 主键和固定 channel 也不能原样搬入多轮共享库。三个证据驱动（[board-worker](../../evals/ooo-execution/board-worker.ts)、[board-deliver](../../evals/ooo-execution/board-deliver.ts)、[board-judge](../../evals/ooo-execution/board-judge.ts)）已经不再打开该文件：它们经 [round-client](../../evals/ooo-execution/round-client.ts) 调用服务该 store 的 daemon，无 daemon 时按名字拒绝（[round-host](../../evals/ooo-execution/round-host.ts) 是把它服务起来的宿主）；仍未接入的是 runner 自身——它既创建 store、又构造 `BoardAdmission`，所以研究轮次自己的计划/候选/探针状态还在私有 schema 里，而不在上文选定的运行命名空间。
-
-当前 `accepted()` 联查 board verdict 与 digest，而部分依赖路径依据 artifact 存在；board 被 TTL 清除可能使两种观察分离。接入前必须统一派生函数并实现保留关系。现有 `ooo_probe_tasks` 混合了不可变输入、候选字节和可派生状态，不能整表复制为新权威。现有 `RoundLog`（JSONL 记录，随轮次退役）不能宣称已经具备同库原子历史，也不能作为新权威。
-
-事务与生命周期静态审查定位到以下接入依据；它们尚未由本次文档修改修复：
-
-- `BoardAdmission.transaction()` 与 `NmgStoreBase.putTaskBoardEntry()` 各有独立 BEGIN。当前 claim/commit 路径内使用的 board 方法不另开事务，发布又在外层提交后，因此不能把未来共享接入风险报告成当前已经发生的嵌套失败。共享接入须同时改两侧事务边界。
-- `runCycle`（已随轮次退役）曾是这一依据的样本：拥有自建连接并在 finally 关闭；提前取消分支位于这个 finally 之前，只关闭 gate，遗漏默认临时数据库目录清理。退役删掉了样本本身，但这一依据仍针对剩下的 runner：借用模式不能照搬这些 close 路径，统一外层资源作用域也须覆盖初始化阶段。
-- `submit()` 在 `commitArtifact()` 后等待 `afterCommit` 并发布：后续异常发生时提交已经生效。接入接口需要明确提交结果与通知失败，不假定一次抛错证明数据库未提交。
-
-这三条依据在本分支上的当前状态与逐项证据见 [task-unit-semantics-obligations.md](task-unit-semantics-obligations.md) 的 D 组。
-
-迁移顺序是：先实现从既有契约与事实派生视图的纯函数；再注入共享事务 Store 与多轮命名空间，持久化最小 manifest/事实并接入受管理 board 生命周期与保留规则；最后让研究 runner 和薄适配经 daemon 调用。旧私有轮次只读保留作研究证据，不与新运行双写；需要重放时以新 runId 显式创建新轮次，不把旧 accepted 导入为新轮次接受。新运行身份与旧日志格式不兼容时明确拒绝，不能默默回放。
-
-## 下一步可执行切片与停止条件
-
-先做语义判定，不先搭建通用调度平台。下一实现切片限定为共享层的纯数据编译器与离线执行模型，复用已有身份类型；不接模型、不改 board 表、不启用多执行者或付费推测。后续产品接入优先完成上面的普通黑板完整场景，仅补它实际需要的能力；全量研究调用点迁移不是检验任务拆分价值的先决条件。事务、权限和生命周期约束在该场景涉及的路径上仍必须满足，不能用缩小切片绕过。
-
-输入为现有冻结任务契约、父契约与已记录事实，内部派生 Task IR；输出为合法计划或带任务/字段/义务位置的拒绝原因，以及允许动作的分析结果。离线模型不实际发布或另存运行状态；上述同库与唯一写入者是后续接入的确定目标，不是首切片建库的理由。实现时通过 repo context 定位拥有的模块和测试路由；研究枚举与成本模拟保持 advisory，成熟的版本/权限/错误发布不变量才进入产品阻塞测试。
-
-最小鉴别用例：
-
-- 同一冻结接口的 P/T 可以准备，J 必须等两者接受；同文件候选并发不自动变成可合并。
-- 拆分漏掉一个父义务或扩大子权限被拒；假数据依赖不可由控制假设补齐。
-- 融合中途失败只保留已接受前缀；后继未过验收时不能偷跑；取消不被整批 claim 吞掉。
-- 提交前输入漂移、租约换代、取消与迟到结果交错都不能错误发布。
-- 推测 true、false、unknown 三种结果分别走验证发布、作废重做、保持未接受；失效会话不能复用到真实路径。
-- 没有适合的融合或推测点时退化为基线；不要人为制造等待以通过成功标准。
-
-进入持久化接入时另须证明：两轮相同 taskId 不冲突；重试不重复交付；事务故障不会只写判定不写关联；被保留的 board entry 不被 TTL 清除；状态查询与依赖解锁一致；直接通用 board 操作不能绕开受管理任务的围栏；JSONL 导出失败不改变终态。字段映射检查须抓住预算单位混淆、requires/deps 混淆及未知字段静默丢弃。
-
-重算检查须证明：删除全部派生缓存后得到相同视图；时钟越过租约边界能失效旧视图；并发读取相同 ready 只有一次合法认领；崩溃窗口中的未知外部结果不被猜成成功或未执行。
-
-可选 HA/MGR 接入时须证明：最高分的非法动作仍被拒绝；软前提与假设不能解锁真实依赖；关闭或失败时回退规则策略；跨 session/branch 不泄漏状态；参数或投影版本变化不复用旧建议；缺少历史状态时不谎报精确重现。这些不扩大首个离线语义切片。
-
-对至多四个单元枚举合法事件交错，核对每次发布的义务、输入与来源；用故意删除关键条件的变异证明用例能抓错。通过仅说明该有限模型满足所列性质，不证明任意 Agent 程序正确。
-
-### 辅助验证：真实任务接续
-
-普通黑板产品路径走通后，先在一个真实父任务的合法交接边界更换 Agent 会话。接手者不接收原始对话，只接收上述任务视图并可检索必要证据，继续完成同一个父任务。记录遗漏约束、重复劳动、误认完成、过期依据导致的动作，以及恢复耗时和上下文成本；由固定的父级验收检查最终产物。检查数量与台账完成率不替代这个结果。
-
-需要定位上下文交接问题时，对同一交接点保存受控输入，比较完整可见历史、同预算摘要、任务视图加按需证据三种上下文策略，固定模型、任务权限、工具与父级验收，计入检索和视图构造费用；可见历史不包含隐藏推理。这项辅助对照不作为下表全部实验的前置门槛。单个场景只能暴露缺口，不能证明通用长任务收益。真实模型调用仍遵循下文预算与重复次数要求，本设计记录不启动付费实验。
-
-### 主验证：粒度、并发与融合
-
-选择一个确有独立工作的父任务，明确哪条数据或控制依赖因合法细化而不再阻塞独立工作，并保留组合验收。仅把测试分成普通与边界两组、串行换会话，不能证明发现并发。已有[接续实验](../experiments/execution/ooo-real-continuation-2026-09-14.md)及[后续分析](../experiments/execution/ooo-real-continuation-comparison-2026-09-14.md)用于交接与运行器缺陷诊断，不作为下列主假设已成立的证据。
-
-优先完成 A–D，E 在确定并发与融合得到证据后独立评估：
-
-| 实验臂                  | 改变的内容              | 要回答的问题                     |
-| ----------------------- | ----------------------- | -------------------------------- |
-| A 粗任务基线            | 原父任务与原验收        | 真实成本与质量基线是什么         |
-| B 细任务、同一执行槽    | 拆分，独立会话          | 拆分本身增加多少交接与验证成本   |
-| C 同一细计划、多槽      | 仅改变执行槽数/合法顺序 | 确定并发能减少多少关键路径       |
-| D 同一细计划/槽数、融合 | 仅改变合法会话复用      | 节省是否超过上下文负担与等待     |
-| E 同 D、有限事实推测    | 仅加入有预算的候选准备  | 额外费用与失败恢复后是否仍有收益 |
-
-A/B 是任务分解比较，不能声称只改派发顺序；B/C、C/D、D/E 各自控制其余变量。父级验收固定，另记分解所需检查与规划成本。离线模型先覆盖不同粒度、依赖密度、共享上下文、事实命中率及验证成本；它只能发现逻辑错误和成本转折点，不能预测真实模型质量。
-
-真实模型阶段须另行明确模型、预算与重复次数；随机化实验臂顺序，冻结模型设置、输入、验证规则，保留失败和超时样本，使用留出任务。报告父级质量、完成率、wall time 分布、输入/输出/缓存 token、实际费用、宿主成本、白跑成本及人工介入。质量不等不宣称提速；模拟的 token 或命中率不冒充实测。
-
-若大部分任务无法声明可检查边界，停止自动拆分，保留粗任务；若融合改善成本但损害质量，缩小可融合范围；若推测无净收益，保留语义层与确定并发，不把推测当作必须交付的成果。
+Read the complete responsibility: [Next executable slices and stop conditions](task-unit-semantics/next-slice-and-stop-conditions.md).

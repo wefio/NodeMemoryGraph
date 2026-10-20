@@ -1,0 +1,21 @@
+version: 2
+terms:
+  - term: structural signature
+    aliases: [pattern-type signature, 结构签名]
+    definition: >-
+      A summary of selected graph-structure patterns used by the analogy candidate generator; it is not a semantic representation of node content.
+      类比候选生成器使用的图结构模式摘要；它不是结点内容的语义表示。
+    owner: docs/design/temporal-logical-chains-design-2026-08-13/cross-domain-analogies.md
+    anchor: Current structural signature
+    status: canonical
+  - term: structural analogy result
+    aliases: [analogy candidate, 结构类比结果]
+    definition: >-
+      An advisory candidate ranked by overlap of structural pattern types; it is not a semantic-equivalence verdict and does not mutate memory or retrieval ranking.
+      按结构模式类型重叠度排序的建议候选；它不是语义等价判定，也不会更改记忆或检索排序。
+    owner: docs/design/temporal-logical-chains-design-2026-08-13/cross-domain-analogies.md
+    anchor: Goal and non-goals
+    status: canonical
+references:
+  - memory chain
+  - design analogy

@@ -1,0 +1,39 @@
+version: 2
+terms:
+  - term: task unit
+    aliases: [logical task unit, 任务单元]
+    definition: >-
+      Work that can be handed off, verified and independently voided, declared through its inputs, dependencies, acceptance obligations, capability and budget; a task unit is not defined by an Agent or token count.
+      可交接、可验证且可独立作废的工作，通过输入、依赖、验收义务、能力与预算声明；任务单元不由 Agent 或 token 数量定义。
+    owner: docs/design/task-unit-semantics.md
+    anchor: Problem and goal
+    status: canonical
+  - term: Task IR
+    aliases: [Task Intermediate Representation, 任务内部表示]
+    definition: >-
+      The proposed internal compiled view of an existing task contract; it adds neither a user-facing task language nor a separate persisted schema.
+      对现有任务契约提出的内部编译视图；它不新增面向用户的任务语言，也不新增独立持久化 schema。
+    owner: docs/design/task-unit-semantics.md
+    anchor: Problem and goal
+    status: proposed
+  - term: execution fusion
+    aliases: [session fusion, 执行融合]
+    definition: >-
+      Several logical task units execute in one Agent session while each retains its own ticket, artifact, host boundary, verification and acceptance; it is session reuse, not transaction fusion.
+      多个逻辑任务单元在同一 Agent 会话中执行，同时各自保留 ticket、artifact、宿主边界、验证与验收；这是会话复用，不是事务融合。
+    owner: docs/design/task-unit-semantics.md
+    anchor: "Fusion: reuse resources, preserve logical tasks"
+    status: canonical
+  - term: bounded speculation
+    aliases: [single-fact speculation, 有界推测]
+    definition: >-
+      The proposed preparation of one discardable candidate ahead of one declared finite-valued branch fact, with authoritative re-check at publication, bounded cost and no speculative successor or irreversible external operation.
+      针对一个已声明的有限取值分支事实提前准备一个可丢弃候选，并在发布时依据权威证据重核；成本受限，且不运行推测后继或不可逆外部操作。
+    owner: docs/design/task-unit-semantics.md
+    anchor: Strict semantics and bounded speculation
+    status: proposed
+references:
+  - task refinement
+  - protocol-governed collaboration
+  - Task-Unit Protocol
+  - Task Board

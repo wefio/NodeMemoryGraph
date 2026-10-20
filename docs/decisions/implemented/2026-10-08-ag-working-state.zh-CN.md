@@ -4,7 +4,7 @@
 **Approved:** explicit
 **Relates to:** [持续状态提案](../proposed/2026-10-06-ag-state-transitions.zh-CN.md)
 
-English: [2026-10-08-ag-working-state.md](2026-10-08-ag-working-state.md)
+English: [2026-10-08-ag-working-state.md](2026-10-08-ag-working-state.md) · [术语](2026-10-08-ag-working-state.terms.yaml)
 
 ## Problem
 
@@ -51,7 +51,7 @@ schema 引擎、宿主专属执行器或新的权威。
 
 既有 owner 仍为 `src/core/session-active-graph.ts`、
 `src/integration/lab-capabilities.ts`、`src/cli/protocol.ts`／`service.ts` 和普通
-daemon／CLI 传输客户端。`agent-surface.ts` 投影状态；提示词只改
+ daemon／CLI 传输客户端。`agent-surface.ts` 投影状态；提示词只改
 `src/prompts/nmg-prompts.yaml` 并由生成器更新。Pi、MCP、DSH 保持薄工具注册，
 包导出 runtime 绑定和普通客户端 helper。
 

@@ -1,0 +1,14 @@
+version: 2
+terms:
+  - term: restricted OoO bootstrap
+    aliases: [bootstrap-first development, 受限 OoO 自举]
+    definition: >-
+      A minimal conventional seed used to develop a later version through the previous frozen version, with bounded artifacts and independent candidate verification; it does not imply production readiness or default scheduling.
+      用最小常规种子通过上一冻结版本开发后续版本，并使用有界产物和独立候选验证；它不表示已生产就绪或默认启用调度。
+    owner: docs/decisions/implemented/2026-09-09-ooo-bootstrap.md
+    anchor: Decision
+    status: canonical
+references:
+  - gate
+  - evidence
+  - work order

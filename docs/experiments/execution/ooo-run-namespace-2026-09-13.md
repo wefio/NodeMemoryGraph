@@ -1,5 +1,14 @@
 # Run-scoped round storage — 2026-09-13
 
+[English](ooo-run-namespace-2026-09-13.md) | [简体中文](ooo-run-namespace-2026-09-13.zh-CN.md) · [Terms](ooo-run-namespace-2026-09-13.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a dated research
+or fixture record. Table names, source positions, status statements, test counts
+and unresolved-work labels belong to its snapshot, not current daemon `taskRun`
+integration. No listed suite or mutation was rerun here, and historical/local
+replay commands are not confirmed available in this checkout. The current
+[task-unit contract](../../design/task-unit-semantics.md) owns product boundaries.
+
 The design's migration step 2 (`docs/design/task-unit-semantics.md`, "persistence"): a round's
 storage is namespaced by run, so one store can hold several rounds, and every place that used to
 be a singleton is keyed by `(run_id, …)`.
@@ -53,5 +62,9 @@ Two things this exercise found rather than assumed:
 2. Scoping `checkId` by run looked like the obvious completion of "one row per run" and was wrong:
    replay is a _different_ run reproducing the _same_ attempts, and the round suites said so.
 
-Both are recorded here rather than in the commit message, because a reviewer can re-run these
-commands and a commit message is not evidence.
+Run-level terminal metadata is distinct from artifact acceptance: preserving a
+terminal run decision does not restore the old self-reported acceptance column.
+These command names identify historical check entry points; neither the command
+list nor a commit message alone establishes that a run succeeded. Original
+source revisions and receipts, rather than current command availability, govern
+any attempt to reproduce the recorded counts.

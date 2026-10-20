@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: disposable scope index
+    aliases: [per-scope write index, 可丢弃 scope 索引]
+    definition: >-
+      A process-local index over same-scope candidates that is built lazily and invalidated after deletes, retention transitions, expiry and node transforms; SQLite remains the authority, so the index is an acceleration layer and never a second source of truth.
+      进程内针对同 scope candidate 的索引，惰性构建，并在 delete、retention 转换、expiry 与节点变换之后失效；SQLite 仍是权威，因此该索引只是加速层，不是第二个事实来源。
+    owner: docs/experiments/store/write-path-scope-index-batching-2026-08-31.md
+    anchor: Interpretation and boundary
+    status: canonical
+  - term: ordered write batch equivalence
+    aliases: [rememberMany ordering guarantee, 有序写入批次等价]
+    definition: >-
+      The requirement that `rememberMany` preserves input order so later items observe earlier batch writes, that exact-duplicate and state-supersession semantics match repeated `remember`, and that a failure rolls back the whole batch while invalidating touched scope caches; the ablation runner refuses a run unless every arm produces the same stable projection.
+      要求 `rememberMany` 保持输入顺序，使较后的条目能观察到较早的批次写入；精确重复与 state-supersession 语义与重复调用 `remember` 一致；失败时回滚整个批次并使涉及的 scope 缓存失效。除非每个组都产生相同的稳定投影，ablation runner 会拒绝该次运行。
+    owner: docs/experiments/store/write-path-scope-index-batching-2026-08-31.md
+    anchor: Method
+    status: canonical
+  - term: controlled write-path benchmark boundary
+    aliases: [not natural daemon evidence, 受控写入路径证据边界]
+    definition: >-
+      The limit that the reported speed-ups come from a fixed 1,000-record bridge-shaped workload with fresh databases; memory growth across many scopes and cache rebuild after rare maintenance operations still require observation in ordinary Agent use.
+      所报告加速比的边界：它来自固定的 1,000 条记录、bridge 形状的负载与全新 database；跨多个 scope 的内存增长与罕见维护操作后的缓存重建，仍需在普通 Agent 使用中观察。
+    owner: docs/experiments/store/write-path-scope-index-batching-2026-08-31.md
+    anchor: Interpretation and boundary
+    status: canonical
+references: [supersedeCandidates, same-scope supersession]

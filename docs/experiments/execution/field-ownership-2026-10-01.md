@@ -1,21 +1,33 @@
 # Field ownership and the opaque dispatch seam
 
+[English](field-ownership-2026-10-01.md) | [简体中文](field-ownership-2026-10-01.zh-CN.md) · [Terms](field-ownership-2026-10-01.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a dated research
+or fixture record. Table names, source positions, status statements, test counts
+and unresolved-work labels belong to its snapshot, not current daemon `taskRun`
+integration. No listed suite or mutation was rerun here, and historical/local
+replay commands are not confirmed available in this checkout. The current
+[task-unit contract](../../design/task-unit-semantics.md) owns product boundaries.
+
 Measured on 2026-10-01, Windows / Node v24.19.0. This is controlled evidence, not a
 live workload or an approval of the frame/storage proposal.
 
 ## Method
 
-[The machine-readable record](field-ownership-2026-10-01.json) binds five compiled
-models to their base revision and the SHA-256 of each semantic source. The
-[probe](../../../evals/ooo-execution/field-ownership.ts) supplies the complete inputs
-and assertions. From the repository root:
+[The required machine-readable record](field-ownership-2026-10-01.json) retains
+`controlledModels: 5`, base revision `256bcc0e66ebe8a946e300b8d465731caea02bf4`,
+and three semantic-source SHA-256 values; it does not list five individual model
+identities. Model construction, complete inputs and assertions belong to the
+[probe](../../../evals/ooo-execution/field-ownership.ts). From the repository root:
 
 ```sh
 node --experimental-strip-types evals/ooo-execution/field-ownership.ts --out .temp/field-ownership-replay.json
 ```
 
 The stored observation is preserved; replay writes a separate output. There are
-no model calls, embeddings, database writes, or official benchmark data.
+no model calls, embeddings, database writes, or official benchmark data in that
+field-ownership probe. This does not describe the separate real-store fixture
+below, which exercises store writes.
 
 ## Field observations
 
@@ -30,7 +42,7 @@ no model calls, embeddings, database writes, or official benchmark data.
   declared revision and dependency facts. The freezer binds content; this
   eligibility calculation does not inspect the bytes. It does not authorize
   changing a live declaration or establish a universal input representation.
-- **Declared edges bind release to acceptance.** With B depending on A, A is
+- **Declared dependency edges bind downstream release to predecessor acceptance.** With B depending on A, A is
   offered before acceptance and B after A's digest-bound acceptance fact. The
   fact is controlled input to the pure model, not a worker's self-report.
 - **Operation interprets a result.** `double` and `sum` have the same legal set

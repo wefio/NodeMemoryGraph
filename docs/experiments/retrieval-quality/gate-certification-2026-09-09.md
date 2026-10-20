@@ -1,16 +1,30 @@
 # Gate certification: can the relevance gate promise anything?
 
+[English](gate-certification-2026-09-09.md) | [简体中文](gate-certification-2026-09-09.zh-CN.md) · [Terms](gate-certification-2026-09-09.terms.yaml)
+
 **Date:** 2026-09-09
 **Status:** measurement (LoCoMo, lexical/degraded path); provisional.
 **Method:** `tools/relevance-model-train.ts --certify` (see "Reproduce" below).
-**Prefaced by:**
-`docs/experiments/retrieval-quality/gate-cascade-literature-2026-09-09.md`, which
-found that cutting a cascade's thresholds jointly under a finite-sample risk
-bound (BalanceRAG) is the only shape in the literature that turns "should this
-gate ship?" into a decision rather than a preference. This note runs exactly that
-test on our own data.
+**Prefaced by:** [the selected literature scan](gate-cascade-literature-2026-09-09.md).
+This is a historical lexical/degraded-path analysis, not a current deployment
+certificate. External papers, raw cached runs and reported defaults were not
+reverified here. "Noise" means failure of the benchmark gold-match rule, not an
+independently verified negative relevance judgment. Current admissible data,
+manifest isolation and deployment-ineligible artifacts belong to the
+[training protocol](../../design/relevance-training.md); the legacy LoCoMo
+fit/split described here is not a permitted current training recipe.
 
 ## What is being certified
+
+Here certification is a statistical-tool outcome, not permission to ship.
+Risk needs accepted > 0; all-abstain is not a zero-risk certificate.
+Question-disjoint splits are not proof of independent users/conversations or
+i.i.d. questions. Exact binomial validity needs the stated sampling assumptions
+and valid candidate-family construction. The old text derives cuts on calibration;
+today's protocol constructs them on training data. Bonferroni over one lattice
+at one alpha does not validate arbitrary adaptive families, repeated test tuning
+or all alpha choices at once. Item cluster-bootstrap bounds are approximate,
+not the same exact finite-sample theorem as the question binomial test.
 
 The question is not "what is the precision" but **"may this gate ship?"**:
 
@@ -25,11 +39,14 @@ The question is not "what is the precision" but **"may this gate ship?"**:
   `H: R > α` with the exact one-sided binomial tail, and certified when
   `p ≤ δ / |lattice|` (Bonferroni, δ = 0.05; BalanceRAG's sequential graphical
   testing is a tighter alternative we did not implement).
-- **Lattice:** 67 pairs — 4 cv cuts and 7 QPP cuts (both auto-derived as quantiles
-  of the split's own scores; hardcoded cuts keep nothing when the score scale
-  moves), × {model off, floors 0.2/0.35/0.5/0.65/0.8}.
+- **Lattice:** 67 points = one no-gate baseline + (4 cv cuts + 7 QPP cuts) ×
+  {model off, floors 0.2/0.35/0.5/0.65/0.8}. The inspected `latticeSpec` builder
+  includes that baseline, explaining 67 rather than 66 under these reported axes.
+  The old quantile derivation used the split's own scores. The later 109-point
+  controller-expanded run is a different lattice (an extra 42 points is consistent
+  with seven cuts × six floors); the complete old cut lists were not recovered.
 - The chosen pair is the **highest-acceptance certified pair**, then re-evaluated
-  on a held-out test split (n = 307). The second figure is the honest one.
+  on a held-out test split (n = 307). That is an additional held-out check, not a population guarantee or proof of sampling independence.
 
 The set-level score is either raw-scale `cv` (the shipped program gate) or the
 product's own QPP score (`composeQpp` = `top1 + 0.5·nqc`, `src/core/qpp.ts`,
@@ -37,10 +54,13 @@ rebuilt from the cached bounded hybrid scores).
 
 ## The number that bounds everything
 
-Only **48 / 307 (15.6%)** of test questions have a gold **anywhere in the pool**.
-No gate can help the other 84.4% except by abstaining, so the question-level risk
-of any accept-everything gate is ≥ 84%, and the frontier below is a contest over
-how much of that 84% a gate can learn to refuse.
+Only **48 / 307 (15.6%)** of test questions have gold anywhere in this fixed
+pool. A remove-only gate cannot recover absent gold. Accept-all question risk is
+84.4% (at least 84%), but this does not impose the same risk on selective gates.
+For accepted fraction a and gold-bearing fraction c, an oracle lower bound is
+max(0, 1 − c/a) for a > 0. At 10% acceptance with c = 15.6%, zero risk is not
+excluded by pool coverage alone. The measured threshold-family frontier is not
+a universal best-achievable-risk bound.
 
 ## Frontier (chosen on calibration, test uses the same floor)
 
@@ -87,6 +107,13 @@ original complaint was about, and it behaves differently.
 
 ## Item level: the promise the original complaint was about
 
+In this table n counts kept items and acc is item acceptance; earlier n/acc
+count questions. `DROPS` means failing the same statistical bound on the new
+split, not necessarily observed noise exceeding alpha: at alpha 0.40/0.50 the
+14.3%/23.1% point risks remain below target. Source inspection of `boundHolds`
+confirms it re-applies the binomial/bootstrap criterion. Finite cluster resampling
+cannot rule out unseen errors; all-zero observed clusters resample as all-zero.
+
 "Auto-recall injects mostly noise" is an **item-level** claim (what share of the
 injected memories is irrelevant), not the question-level claim above. The two
 need different tests, so `--risk item` bounds the _aggregate_ noise share of the
@@ -109,10 +136,11 @@ Two things follow, and they point in opposite directions:
 
 - **The item-level promise is formulable and certifiable on calibration**, unlike
   the question-level one — a pair certifies at α = 0.10-0.50.
-- **Every certified pair drops on the held-out split.** The test noise is 1.4-2.5×
-  the calibrated value (0.0% → 33.3% at the tightest point), and the operating points
-  carry only 6-49 kept items. At this sample size the certificate is measuring noise,
-  not the gate.
+- **Every reported selected pair is labelled DROPS on the held-out bound recheck.**
+  The earlier "1.4-2.5×" summary is not uniform: 12.5% → 35.7% is about 2.86×,
+  and 0.0% → 33.3% has no finite ratio. Operating points retain only 6-49 items.
+  Small samples, resampling limitations and split differences are concerns, not
+  an isolated proof that sample size alone caused the result.
 
 **Which knob actually moves item noise?** Not the set-level cut: throwing away 90%
 of the candidates (`cv ≥ 0.1414`) still leaves 78.1% noise, because `cv`/QPP are
@@ -140,63 +168,49 @@ points now, so the Bonferroni threshold is tighter for every family).
 
 ## Findings
 
-1. **The binding constraint is the pool, not the threshold.** 84.4% of questions
-   have no gold to retrieve. The best achievable frontier at 10% acceptance is a
-   34% risk; the gate cannot promise more because the evidence it would need was
-   never retrieved. This is the retriever claim, now with a certification bound on
-   it instead of an argument.
-2. **Nothing certifies below α = 0.60.** With 307 calibration questions and 67
-   lattice points, Bonferroni demands a near-zero error count, which only points
-   with tiny acceptance have. That is the finite-sample discipline working, not a
-   bug: a promise needs evidence, and we have ~300 questions.
-3. **The two points that do certify at α = 0.6/0.7 do not survive the split**
-   (calibration risk 27–37%, test risk 41–53%). Certifying on one split and
-   shipping on another is exactly where this dies.
-4. **The learned half earns no place.** At iso-acceptance its calibration gain
-   reverses on test at L = 10% and is noise elsewhere; from L = 20% up the chosen
-   point is model-off. This is consistent with the earlier AUC 0.89 / "cannot move
-   recall" result — and it is a stronger statement, because it is stated at a fixed
-   acceptance level rather than at a fixed floor.
-5. **The product's QPP and the ad-hoc `cv` rank queries the same way here.** Their
-   frontiers coincide, so on a single retrieval path the QPP advantage (scale and
-   path consistency) is not visible. QPP remains the better _carrier_ of the signal
-   — it is productized, has a documented threshold, and is path-consistent — but
-   as a first axis it changes nothing on this data.
-6. **The shipped program gate's item-level promise is weak.** At `cv ≥ 0.0583` the
-   injected set is still 84.4% noise (item level) / 53.2% (question level); the
-   accept-everything baseline is 94.3%/83.1%. The gate does reduce injected noise,
-   but "most of what we inject is relevant" is **not** achievable at any
-   non-trivial acceptance on this data.
-7. **The item-level promise is the one that is reachable, and it is reachable only
-   through the item model.** Item noise goes 94% → 10-24% via the model floor, but
-   only at 1-2% item acceptance; the set-level cut alone cannot get below ~70%
-   however tight it is.
-8. **Certification succeeds on calibration at the item level (α = 0.10-0.50) and
-   fails on the held-out split every time.** The blocker is now sample size at the
-   operating point (6-49 kept items), not the method or the threshold: a bound
-   needs evidence, and 307 questions do not provide it at these acceptances.
-9. **The gate controller is a real but small win at the set level and no win at
-   the item level** (48.1% vs 53.2% question risk at 20% acceptance; worse test
-   noise than the constant cut wherever it certifies).
+1. The 84.4% no-gold fraction limits fixed-pool coverage, not selective precision
+   at every acceptance. The reported ~34% risk at 10% acceptance describes this
+   tested family, not all possible gates.
+2. Nothing in the reported question-family run certifies below alpha 0.60 with
+   307 calibration questions and 67 points. This is a tool result conditional on
+   its inputs/assumptions, not proof that a different method cannot certify.
+3. The alpha 0.6/0.7 points have calibration risk 27–37% and test risk 41–53%.
+   Failed re-certification does not imply those test point risks exceed alpha.
+4. At L = 10% the observed calibration advantage reverses on test; at L = 20%
+   and up the selected point is model-off. L is a calibration acceptance floor,
+   not necessarily equal held-out coverage. AUC 0.89 does not settle the policy.
+5. The reported cv/QPP frontiers coincide in this restricted comparison. That
+   does not prove identical query ordering, path invariance or universal equality.
+6. At the evaluated cv ≥ 0.0583 point, calibration item/question risks are
+   84.4%/53.2%, versus 94.3%/83.1% accept-all; test risks are 87.2%/63.0%.
+   Keep these units and splits separate. This is not a current-default audit.
+7. The item head's reported 94% → 10-24% noise reduction occurs at 1-2% item
+   acceptance. It does not establish that only this model can achieve such a point
+   or that calibration tool passes are population guarantees.
+8. Item-level calibration passes at alpha 0.10-0.50 fail held-out bound rechecks.
+   The 6-49 kept-item sample is small; neither the statistical method nor split
+   construction is thereby cleared of responsibility.
+9. The controller's 48.1% versus 53.2% calibration question-risk points at 20%
+   acceptance, with test 56.3% versus 63.0%, are descriptive. Item test noise
+   42.9% versus 35.7% is worse in that comparison; no replicated general win is proved.
 
 ## What this implies
 
-- **Do not enable the model gate**, and do not replace the shipped defaults with
-  the α = 0.6 certified pair: its test risk (41-53%) is worse than the shipped
-  program gate's own measured risk, and its acceptance is 9-13%.
-- **The enablement bar is now a procedure, not a number.** Enable a threshold pair
-  when `tools/relevance-model-train.ts --certify` certifies it at a target α on a
-  calibration split **and it HOLDS on test**. On the current data no pair clears
-  α ≤ 0.5 at the question level, and although pairs clear the item level on
-  calibration, none holds.
-- **What would settle the item-level question is more evidence, not a better
-  model.** Five benchmark stores are ingested under `.benchmarks/retrieval-stores/`
-  (`locomo`, `longmemeval`, `beam`, `halumem`, `personamem`); certifying per dataset
-  and requiring the promise to hold on at least two raises the sample at the
-  operating point by an order of magnitude. That is the next run, and it is cheap
-  — the whole apparatus now exists.
-- **The retriever is still the lever** for every number above; no threshold pair
-  can substitute for a pool that lacks the evidence.
+- Retain the original recommendation **not to enable the model or replace defaults**.
+  Its old reason that 41–53% test risk is "worse" than the program point is wrong:
+  question-risk 40.7%/52.5% is below 63.0%, while 87.2% is item risk, not a valid
+  cross-unit comparison. Acceptance also differs (about 9-13% versus 26.4%).
+  Failed held-out bound checks and limited evidence, not that reversed comparison,
+  support withholding promotion.
+- A calibration pass and HOLDS check are evaluation evidence, not sufficient
+  runtime authority. Current data admission, natural validation and reviewed
+  activation policy remain separate; this report creates no enablement procedure.
+- The five recorded stores (`locomo`, `longmemeval`, `beam`, `halumem`,
+  `personamem`) under `.benchmarks/retrieval-stores/` motivated an old multi-store
+  proposal. Requiring at least two does not prove a tenfold independent sample
+  increase or measured cheapness. Current policy makes memory benchmarks
+  evaluation-only; no new training/experiment/spending is authorized.
+- A remove-only gate cannot create evidence absent from its fixed input pool.
 
 ## What would change the answer
 
@@ -207,6 +221,10 @@ points now, so the Bonferroni threshold is tighter for every family).
   between the query and the kept set, i.e. an embedding-derived feature).
 
 ## Reproduce
+
+This is the preserved legacy command/split description, not a current runnable
+recipe. The current trainer requires a manifest and training-derived lattice;
+follow the training owner. No command was executed in this review.
 
 ```bash
 node --experimental-strip-types tools/relevance-model-train.ts --certify \

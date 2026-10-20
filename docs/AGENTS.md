@@ -1,5 +1,7 @@
 # Documentation instructions
 
+[中文](AGENTS.zh-CN.md) · [Terms used](AGENTS.terms.yaml)
+
 For documentation work in this directory, use
 [`skills/doc-maintenance/SKILL.md`](../skills/doc-maintenance/SKILL.md) and read
 the ownership rules in [README.md](README.md) or
@@ -10,13 +12,9 @@ incident narrative, and unresolved work in their owning documents. Do not
 duplicate an existing owner merely to preserve editing history; Git already does
 that.
 
-A failure that escaped and meets the [post-mortem triage
-rule](postmortem/README.md#when-to-write-one) gets a numbered record under
-`postmortem/`, with its index row.
-
-A failure that escaped and meets the [post-mortem triage
-rule](postmortem/README.md#when-to-write-one) gets a numbered record under
-`postmortem/`, with its index row.
+For an escaped failure, apply the [post-mortem triage
+rule](postmortem/README.md#when-to-write-one). When it qualifies, write the
+numbered record under `postmortem/` and add its index row.
 
 NMG's repository collaboration surface is Agent-first:
 the root `AGENTS.md` is the stable bootstrap, this file routes documentation work,

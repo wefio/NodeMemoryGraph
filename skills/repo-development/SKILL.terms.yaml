@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: in-flight goal entry
+    aliases: [open Task Board goal, 进行中的目标条目]
+    definition: >-
+      One open Task Board record for a coherent task, containing only its goal, approach, and scope; it marks active ownership and is resolved on completion or deliberate abandonment, rather than serving as step-by-step history.
+      一个连贯任务对应的开放 Task Board 记录，只包含 goal、approach 和 scope；它标记当前工作归属，并在完成或明确放弃时 resolve，不充当逐步历史。
+    owner: skills/repo-development/SKILL.md
+    anchor: Before editing
+    status: canonical
+  - term: Agent completion claim
+    aliases: [completion claim, Agent 完成声明]
+    definition: >-
+      A statement that an Agent's change is complete is a proposal until targeted tests, independent verification, clean CI, and any required real integration run provide evidence for the behavior and scope at issue.
+      Agent 声称改动已完成，只是提案；只有定向测试、独立验证、干净 CI 以及所需的真实集成运行，才能为相关行为和范围提供证据。
+    owner: skills/repo-development/SKILL.md
+    anchor: Repository governance
+    status: canonical
+references:
+  - Task Board
+  - detached verification run
+  - live mutant
+  - evidence has no third state
+  - guardrail
+  - product-runtime evidence
+  - research-instrument evidence

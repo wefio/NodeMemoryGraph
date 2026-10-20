@@ -1,6 +1,6 @@
 # Gate speculation on measured payoff, and do not speculate to hide a wait
 
-[中文](2026-09-11-ooo-speculation.zh-CN.md)
+[中文](2026-09-11-ooo-speculation.zh-CN.md) · [Terms used](2026-09-11-ooo-speculation.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

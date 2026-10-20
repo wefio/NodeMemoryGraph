@@ -1,6 +1,6 @@
 # Working-state content maintenance as a small Skill
 
-[中文](2026-10-14-working-state-maintenance-skill.zh-CN.md)
+[中文](2026-10-14-working-state-maintenance-skill.zh-CN.md) · [Terms used](2026-10-14-working-state-maintenance-skill.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

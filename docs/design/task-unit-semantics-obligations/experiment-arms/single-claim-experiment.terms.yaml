@@ -1,0 +1,15 @@
+version: 2
+terms:
+  - term: pre-budget single-claim probe
+    aliases: [historical F2b probe, 预算前单 claim 探针]
+    definition: >-
+      The first F2b driver probe before the declared slot budget; its one-claim refusal records an earlier instrument state and does not describe current multi-slot behavior.
+      声明式槽预算出现前的首个 F2b driver 探针；其单 claim 拒绝记录的是较早的工具状态，不代表当前多槽行为。
+    owner: docs/design/task-unit-semantics-obligations/experiment-arms/single-claim-experiment.md
+    anchor: "Historical F2b probe: one claim at a time"
+    status: canonical
+references:
+  - declared slot budget
+  - startable task set
+  - Task Board
+  - task unit

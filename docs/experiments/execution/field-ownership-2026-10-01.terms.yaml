@@ -1,0 +1,35 @@
+version: 2
+terms:
+  - term: opaque dispatch seam
+    aliases: [opaque declaration port, 不透明派发接口]
+    definition: >-
+      The declaration-port boundary through which a task shape reaches dispatch without the store interpreting it; a shape the loop does not support returns its name before a lease is taken or a worker invoked, and this 2026-10-01 measurement does not establish that a policy-free mechanism has been proved.
+      任务 shape 在不被 store 解释的情况下到达派发的声明端口边界；循环不支持的 shape 会在取得 lease 或调用 worker 之前返回其名称，而这次 2026-10-01 的测量并不确立「无策略机制」已被证明。
+    owner: docs/experiments/execution/field-ownership-2026-10-01.md
+    anchor: Field ownership and the opaque dispatch seam
+    status: canonical
+  - term: class-label gate versus resource-set exclusion
+    aliases: [effect class gate, class 标签 gate 与资源集合互斥]
+    definition: >-
+      The observed behavior that changing a unit's effect class changes which units are legal, while both units still propose the same path; it evidences a class-label gate, not exclusion by resource set, and says nothing about the safety of arbitrary side effects or about concurrent writes to a shared file.
+      观察到的行为：改变 unit 的 effect class 会改变哪些 unit 合法，而两个 unit 仍然提出同一路径；它证明的是 class 标签 gate，不是按资源集合互斥，也不涉及任意副作用的安全性，或对共享文件的并发写入。
+    owner: docs/experiments/execution/field-ownership-2026-10-01.md
+    anchor: Field observations
+    status: canonical
+  - term: content binding versus byte inspection
+    aliases: [freezer binds content, 内容绑定与字节检查]
+    definition: >-
+      The separation observed on 2026-10-01 between the freezer, which binds a declaration's content by digest, and the eligibility calculation, which does not inspect those bytes and therefore leaves the legal set unchanged when only content changes at the same declared revision.
+      2026-10-01 观察到的分离：freezer 以 digest 绑定声明内容，而资格计算不检查这些字节，因此在同一声明 revision 下只改变内容时合法集合不变。
+    owner: docs/experiments/execution/field-ownership-2026-10-01.md
+    anchor: Field observations
+    status: canonical
+  - term: numeric adopter
+    aliases: [value-shape carrier, 数值 adopter]
+    definition: >-
+      A small programmatic adopter that declares `{ digest, values: [2, 3] }` instead of patch work, carries the declaration through the opaque port, and performs its own declaration validation and numeric acceptance; it is not an installed product peer protocol and does not add or validate the proposed `payload` separation, selectors, quarantine or threat model.
+      一个声明 `{ digest, values: [2, 3] }` 而非 patch 工作的小型程序化 adopter，通过不透明端口承载该声明，并自行完成声明校验与数值 acceptance；它不是已安装的产品对等 protocol，也未新增或验证所提议的 `payload` 分离、选择器、隔离或威胁模型。
+    owner: docs/experiments/execution/field-ownership-2026-10-01.md
+    anchor: Numeric adopter
+    status: canonical
+references: []

@@ -2,12 +2,9 @@
 
 **Status:** implemented  
 **Approved:** unrecorded
-Date: 2026-09-07
-Branch: pr/feedback-affordance
-
 Governing meta-rule: [self-governance meta-rule](../implemented/2026-09-07-self-governance-meta-rule.md) — this change to a standing feedback/staging convention is itself recorded as a governed decision.
 
-中文版: [2026-09-07-recall-feedback-affordance.zh-CN.md](2026-09-07-recall-feedback-affordance.zh-CN.md)
+中文版: [2026-09-07-recall-feedback-affordance.zh-CN.md](2026-09-07-recall-feedback-affordance.zh-CN.md) · [Terms used](2026-09-07-recall-feedback-affordance.terms.yaml)
 
 ## Problem
 

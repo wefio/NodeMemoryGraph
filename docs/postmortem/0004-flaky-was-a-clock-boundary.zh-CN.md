@@ -1,6 +1,6 @@
 # 0004 - "flaky" 其实是一个时钟边界
 
-[English](0004-flaky-was-a-clock-boundary.md)
+[English](0004-flaky-was-a-clock-boundary.md) · [术语](0004-flaky-was-a-clock-boundary.terms.yaml)
 
 **Status:** resolved
 

@@ -1,0 +1,115 @@
+version: 2
+namespace: repository.rcp
+terms:
+  - term: contract
+    aliases: [RCP contract, 契约]
+    definition: >-
+      A declaration of repository-change goals and constraints: scope, preserved behavior, assertions, verification and authority. It compiles to Contract IR, not a shell script or proof of implementation.
+      仓库变更的目标和约束声明，限定 scope、应保留的行为、assertions、验证和操作权限。
+      声明编译为 Contract IR；它不是逐条 shell 操作，也不因存在就证明目标已实现。
+    owner: docs/design/ci-cd-and-quality/repository-control-plane/contract-surface-and-ir.md
+    anchor: "Contract surface and IR"
+    status: canonical
+  - term: work order
+    aliases: [WorkOrder, 工作单]
+    definition: >-
+      Bounded work derived by the Planner from a Contract and repository observations, carrying goals, allowed paths, preserved behavior, assertions, checks and budget. Dispatch or Agent completion is not independent verification.
+      Planner 从契约和仓库观测产生的有界执行任务，向 Agent 提供目标、允许路径、
+      保留项、断言、检查和预算。任务的派发或 Agent 完成声明不是独立验证结果。
+    owner: docs/design/ci-cd-and-quality/repository-control-plane.md
+    anchor: "Work orders, Agents and PRs"
+    status: canonical
+  - term: route
+    aliases: [route declaration, 路由]
+    definition: >-
+      An agent-context.yaml declaration selecting ownership and verification by changed paths, separating blocking from advisory. It is navigation and check selection, not dependency analysis, architecture review or execution evidence.
+      agent-context.yaml 中按改动路径选择 owner 与验证要求的声明，区分 blocking 和 advisory。
+      Route 用于导航和检查选择，不是依赖分析，也不代替架构审查或执行证据。
+    owner: docs/design/ci-cd-and-quality/repository-context.md
+    anchor: "Agent-native repository context"
+    status: canonical
+  - term: receipt
+    aliases: [verification receipt, 收据]
+    definition: >-
+      A structured result recorded by ReceiptSink, binding Contract, work order, candidate observations, checks and invocation identity. It supports local audit and recovery; a self-hash checks consistency, not source authenticity or historical execution.
+      经 ReceiptSink 记录的结构化验证结果，绑定契约、工作单、候选观测、检查和调用身份。
+      它服务本地审计和恢复；自哈希只检查自洽，不认证来源，不单独证明历史执行。
+    owner: docs/design/ci-cd-and-quality/repository-control-plane/verifier-and-receipts.md
+    anchor: "Verifier and receipts"
+    status: canonical
+  - term: gate
+    aliases: [narrow gate, full gate, 窄化, 轻量验证, 全量门]
+    definition: >-
+      The verification check surface required for a change. Narrow uses shared checks and owner tests, subject to an applicable sharedChecks declaration; full uses the route blocking set. Records retain mode and reason; narrow does not claim full or unselected execution.
+      一次变更必须通过的验证检查面。Narrow 按归属运行共享检查与 owner 测试，
+      适用的 sharedChecks 声明可排除本路由共享检查；full 使用路由的 blocking 集。
+      模式和选择理由由验证记录保留，narrow 不声称运行了 full 或未选中的检查。
+    owner: docs/design/ci-cd-and-quality/repository-control-plane/lightweight-verification.md
+    anchor: "Narrow and full verification gates"
+    status: canonical
+  - term: trusted baseline
+    aliases: [trusted install, 可信基线]
+    definition: >-
+      Verifier source, dependencies and policy installed from an explicitly reviewed fixed Git commit outside the candidate repository. Explicit trusted verification judges a candidate snapshot; ordinary agent:verify lacks this automatic isolation. It does not resist same-permission malicious processes, compromised toolchains or incomplete specifications.
+      操作者从明确审阅的固定 Git commit 安装到候选仓库外的验证程序、依赖和策略。
+      显式可信验证用它裁决候选快照；普通 agent:verify 不自动获得这种隔离，
+      基线也不防同权限恶意进程、被污染工具链或不完整规格。
+    owner: docs/design/ci-cd-and-quality/repository-control-plane/trusted-baseline-verification.md
+    anchor: "Fixed trusted baseline verification"
+    status: canonical
+  - term: invariant
+    aliases: [invariants, 不变量]
+    definition: >-
+      A property the change must preserve, not a check command. Legacy invariants text does not verify itself; an assertion statement and check or documentedOnly explain how evidence supports the property.
+      变更必须维持的性质，不等同于一次检查命令。旧 invariants 文本不能自动形成验证；
+      契约通过 assertion 的 statement 和 check 或 documentedOnly 明确该性质如何获得证据。
+    owner: docs/design/ci-cd-and-quality/repository-control-plane/contract-surface-and-ir.md
+    anchor: "Contract surface and IR"
+    status: canonical
+  - term: Repository Control Plane
+    aliases: [RCP, 仓库控制面]
+    definition: >-
+      The external control plane that compiles repository Contracts, plans bounded work and verifies observations.
+      位于 NMG daemon 外部，编译仓库契约、规划有界工作并验证观测的控制面。
+    owner: docs/design/ci-cd-and-quality/repository-control-plane.md
+    anchor: "Repository Control Plane"
+    status: canonical
+  - term: Contract IR
+    aliases: [契约中间表示]
+    definition: >-
+      The normalized Agent-neutral intermediate representation produced by compiling a Contract.
+      Contract 编译后经过规范化、与 Agent 无关的中间表示，不是执行成功证明。
+    owner: docs/design/ci-cd-and-quality/repository-control-plane/contract-surface-and-ir.md
+    anchor: "Contract surface and IR"
+    status: canonical
+  - term: harness
+    aliases: [Agent harness, 执行 harness]
+    definition: >-
+      The execution adapter that receives bounded work and returns changes and results, without replacing independent verification.
+      接收有界工作并返回变更与结果的执行适配边界，不能替代独立验证。
+    owner: docs/design/ci-cd-and-quality/repository-control-plane/run-to-completion-cli.md
+    anchor: "Run-to-completion CLI"
+    status: canonical
+  - term: operation key
+    aliases: [operation-key, 操作键]
+    definition: >-
+      The operation identity used with Contract and observation bindings to distinguish idempotent reconciliation work.
+      与 Contract 和观测身份共同区分幂等协调工作的操作标识，不单独证明成功。
+    owner: docs/design/ci-cd-and-quality/repository-control-plane/run-to-completion-cli.md
+    anchor: "Run-to-completion CLI"
+    status: canonical
+  - term: run-to-completion
+    aliases: [运行至终态]
+    definition: >-
+      A bounded control-plane invocation that reaches a terminal condition and exits, not a resident continuous watcher.
+      到达终态后退出的一次有界控制面调用，不是常驻持续 watcher。
+    owner: docs/design/ci-cd-and-quality/repository-control-plane/run-to-completion-cli.md
+    anchor: "Run-to-completion CLI"
+    status: canonical
+references:
+  - Active Graph
+  - Short-Term Graph
+  - Long-Term Graph
+  - assertion
+  - check
+  - evidence

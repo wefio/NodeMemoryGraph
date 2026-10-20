@@ -1,9 +1,17 @@
 # LongMemEval re-run: recall-header refinement is format-only
 
-2026-08-04. Verifies that the recall-header refinements (`819bd53`, `25a410f`,
+[English](lme-recall-headers-2026-08-04.md) | [简体中文](lme-recall-headers-2026-08-04.zh-CN.md) · [Terms](lme-recall-headers-2026-08-04.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a historical
+experiment record. The configurations, measurements, implementation descriptions
+and follow-up proposals below are scoped to that experiment. This review did not
+rerun the experiment or independently revalidate its original artifacts; these
+are not current test receipts, default-policy decisions or general guarantees.
+
+The 2026-08-04 report compared retrieval metrics after the recall-header refinements (`819bd53`, `25a410f`,
 `1a6210b`: `matches=` anchor instead of mechanism, event time + expiry fields,
-slim `AG activeGraphId` line, one-line field legend) are format-only and do
-not regress retrieval. Commit `82ec4c7` at run time; manifest in
+slim `AG activeGraphId` line, one-line field legend). It reported unchanged
+retrieval metrics, within the bridge path described below. Commit `82ec4c7` at run time; manifest in
 `results/lme/nmg-lme500_bgefix_header_20260804/experiment_manifest.json`.
 
 ## Setup
@@ -25,10 +33,11 @@ not regress retrieval. Commit `82ec4c7` at run time; manifest in
 | all-evidence recall | 82.67% | 82.67% | 0.00 |
 | answer accuracy | 81.2% | 82.33% | +1.13 |
 
-Retrieval metrics are bit-identical, as expected: the eval bridge builds its
-context via `projectMemoryContext` (bridge.ts) and never reads the extension's
-`formatSearchHeaders` output. The answer-accuracy delta is LLM/API run-to-run
-noise on the same prompt and config.
+The report records bit-identical retrieval metrics and describes a bridge path
+that builds context via `projectMemoryContext` (bridge.ts), without reading the
+extension's `formatSearchHeaders` output. That comparison does not exercise or
+validate the changed Pi header renderer. The answer-accuracy delta cannot be
+attributed to that renderer; this unpaired run does not isolate LLM/API variance.
 
 ## Process hardening landed on the way
 

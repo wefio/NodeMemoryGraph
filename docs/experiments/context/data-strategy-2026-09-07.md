@@ -1,7 +1,9 @@
 # Data strategy: which dataset, how to get training data, does it generalize, is it good?
 
+[English](data-strategy-2026-09-07.md) | [简体中文](data-strategy-2026-09-07.zh-CN.md) · [Terms](data-strategy-2026-09-07.terms.yaml)
+
 **Date:** 2026-09-07
-**Status:** synthesis of internal OmniMemEval data structure + external literature.
+**Status:** Dated synthesis of internal OmniMemEval data structure and external literature, not a live dataset inventory or current implementation contract. Revalidate external claims, artifact availability, and code paths before a new experiment.
 **Purpose:** answer the four data questions behind the pre-registered router experiment.
 
 ## TL;DR

@@ -1,5 +1,12 @@
 # STG → LTG consolidation gate evaluation — 2026-08-09
 
+[English](consolidation-evaluation-2026-08-09.md) | [简体中文](consolidation-evaluation-2026-08-09.zh-CN.md) · [Terms](consolidation-evaluation-2026-08-09.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a historical
+record. Its configurations, measured results and implementation-status statements
+are not current test receipts or default-policy authorization. This review did
+not rerun the experiment or independently revalidate the original run artifacts.
+
 This is a policy-coverage and reversibility audit, not a claim that automatic
 consolidation is ready for default use.
 
@@ -7,7 +14,9 @@ consolidation is ready for default use.
 
 - Dataset: official LoCoMo `locomo10.json`.
 - Unit: one evidence source ID within one conversation.
-- Independent outcomes: distinct official QA tasks that cite that source ID.
+- Outcome units: distinct official QA tasks that cite that source ID. Task IDs
+  are distinct in this instrument; that does not establish statistically
+  independent confirmations drawn from the same conversation.
 - Labels: official evidence IDs only; no model-generated judgments.
 - Prior: the zero-annotation write path (`confidence = 0.5`, prior strength 2).
 - Policy: the current default STG consolidation and retention thresholds.
@@ -36,8 +45,9 @@ retention gate. A pre-existing or manually written LTG duplicate has no such
 marker and is never retracted by STG feedback. A later requalification creates
 a fresh auditable LTG version.
 
-This benchmark cannot estimate false-promotion precision: a memory absent from
-one QA evidence list is irrelevant to that question, not contradicted. Automatic
+This benchmark cannot estimate false-promotion precision: absence from
+one QA evidence list is neither a contradiction nor an authoritative negative
+promotion label; it may simply mean that the memory was not used for that question. Automatic
 actuation therefore remains off by default until natural corrections or another
 authoritative negative-label source can measure false-promotion cost.
 
@@ -54,7 +64,7 @@ false-promotion precision benchmark.
 HaluMem is the most relevant authoritative source already present through
 OmniMemEval: it publishes operation-level memory points and includes
 interference and dynamic updates. The operation adapter and official-judge
-wrapper are now implemented. A one-user, one-session natural slice achieved
+wrapper are described in the cited follow-up. Its user-1, session-6 natural slice achieved
 full expected-memory recall but only 0.683 all-candidate weighted accuracy,
 rejected 0/1 interference records, and updated 3/4 targets correctly. The high
 official extraction F1 (0.933) therefore does not imply a clean write set.
@@ -66,4 +76,6 @@ STG-to-LTG promotion gate. It closes the missing operation-level harness and
 demonstrates an authoritative pollution failure, but unattended consolidation
 remains disabled until real promotion candidates are scored and false-promotion
 cost plus retraction are measured. Full protocol and results are in
-`halumem-operation-evaluation-2026-08-11.md`.
+[the HaluMem operation report](../benchmarks/halumem-operation-evaluation-2026-08-11.md).
+That follow-up is dated 2026-08-11; the filename of this record does not date
+all subsequently included material to 2026-08-09.

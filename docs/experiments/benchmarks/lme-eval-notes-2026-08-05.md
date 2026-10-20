@@ -1,77 +1,56 @@
-# LME 评测流程 + 防回退验证（2026-08-05）
+# LongMemEval Evaluation Workflow and Regression Check (2026-08-05)
 
-> 固化 LongMemEval（500 问）评测的可复制流程与版本约定，避免每次重复踩坑。
-> 与 `docs/design/pmv2-eval-forget-design-2026-08-05.md`（pmv2）配套。
+[English](lme-eval-notes-2026-08-05.md) | [简体中文](lme-eval-notes-2026-08-05.zh-CN.md) · [Terms](lme-eval-notes-2026-08-05.terms.yaml)
 
----
+**Status:** Dated historical evaluation record. The scripts, commands, and timings below describe the 2026-08 run and are not current workflow instructions. Use the [OmniMemEval evaluation skill](../../../.pi/skills/omnimemeval-eval/SKILL.md) and current configuration. Related: [PersonaMem v2 and forget-rendering record](../../design/pmv2-eval-forget-design-2026-08-05.md).
 
-## 一、流程与版本约定（重要）
+## Historical workflow and version contract
+
+The recorded LongMemEval run used:
 
 ```bash
-# 全流程（ingest + search + answer + judge + metric + report）
+# Full pipeline: ingest + search + answer + judge + metric + report
 bash evals/omnimemeval/run-lme.sh --env-file .env.nmg-bgefix --version lme500_bgefix_header_20260804
 
-# 防回退（复用 store + 断点续跑）
-bash evals/omnimemeval/run-lme.sh --env-file .env.nmg-bgefix --version <同基线 version> --skip-ingest --llm-workers 16
+# Regression check: reuse store and resume
+bash evals/omnimemeval/run-lme.sh --env-file .env.nmg-bgefix --version lme500_bgefix_header_20260804 --skip-ingest --llm-workers 16
 ```
 
-**⚠️ version 必须与基线完全一致**（含 `lme500` 前缀）：
-- 基线 version：`lme500_bgefix_header_20260804`（结果目录 `nmg-lme500_*`）
-- **version 决定 store 的 userId label**——漏 `lme500` 前缀 → store 不匹配 → search evidence 全空 → recall 0（废结果）
-- **跑之前**：`cat results/lme/<基线目录>/experiment_config.sh` 确认 VERSION 原样复制
+For that runner, the version had to match the baseline exactly, including the `lme500` prefix. The report says the version determined the store's `userId` label: omitting the prefix selected a different store, yielding empty search evidence and a useless zero-recall result. The recorded preflight step was to inspect `results/lme/<baseline-directory>/experiment_config.sh` and copy `VERSION` verbatim.
 
-### 环境
-- 必须通过 `run-lme.sh`（固化：PYTHONUTF8/PYTHONIOENCODING/NMG_ROOT/kill_strays）
-- **不要直接跑官方 `run_lme_eval.sh`**——会丢 PYTHONUTF8 → rich emoji 打印 GBK 崩溃
-- bge-server（8000）独立运行；run-lme.sh 的 kill_strays 不杀它
+The wrapper then fixed Python UTF-8 settings, `NMG_ROOT`, and stray-process cleanup. The note warned that directly invoking the upstream `run_lme_eval.sh` could lose `PYTHONUTF8` and fail when Rich printed a Unicode bullet to a GBK console. The embedding server on port 8000 was separate and was not killed by `run-lme.sh`.
 
-### 断点续跑（checkpoint/resume——官方自带）
-- ingest/search/answer/judge 都按文件存在自动跳过：
-  - `nmg_lme_responses.json`（answer 500 全 → 跳过）
-  - `nmg_lme_judged.json`（judge 已判定 → 跳过）
-- 失败重跑（--skip-ingest）会重跑 search（~2 分钟）但 answer/judge 只补未完成的
+The runner resumed by file existence: a complete `nmg_lme_responses.json` skipped answer generation, and a complete `nmg_lme_judged.json` skipped judging. A failed `--skip-ingest` retry repeated search (reported at about two minutes) and filled only incomplete answer/judge rows.
 
-## 二、实测性能（16 并发，deepseek-chat）
+## Historical performance observations (16 workers, `deepseek-chat`)
 
-| 阶段 | 修前 | 修后 | 说明 |
-|---|---|---|---|
-| answer 500 问 | **~3 小时** | **54 秒** | 每问 `atomic_json_dump` 全量重写 873KB（fsync）→ 批量 checkpoint 25 问一次 |
-| judge 500 问 | ~30+ 分钟 | ~1-3 分钟 | 同上（judge 额外每次 `convert_numpy_types` 全量转换） |
-| search 500 问 | ~2 分钟 | ~2 分钟 | 与 LLM 无关 |
+| Stage | Before | After | Reported explanation |
+|---|---:|---:|---|
+| Answer, 500 questions | about 3 hours | 54 seconds | `atomic_json_dump` rewrote an 873 KB file with fsync per question; checkpointing every 25 questions reduced writes |
+| Judge, 500 questions | 30+ minutes | 1–3 minutes | Similar write cost, plus repeated full `convert_numpy_types` conversion |
+| Search, 500 questions | about 2 minutes | about 2 minutes | Not LLM-bound |
 
-**性能修复**（fork 本地，可提 PR）：
-- `scripts/longmemeval/lme_responses.py`：answer 循环批量 checkpoint（25 问）
-- `scripts/longmemeval/lme_eval.py`：judge 循环批量 checkpoint（25 问）
-- `scripts/utils/nlp_metrics.py`：`extract_label_json` 容忍 label 后多字段
-  （`{"label": "WRONG", "reason": ...}`——旧正则要求 `}` 紧跟 label → 2/500 问 judge 失败）
-- **非 429**：16 并发实测 9.3 req/s 零错误——慢的真因是每问 dump
+The report says 16-way concurrency achieved 9.3 requests/second with zero errors; the delay was attributed to per-question file dumps, not 429s. These timings are historical measurements, not current performance guarantees.
 
-## 三、防回退判定方法
+The local fork's recorded changes were:
 
-1. 备份基线：`cp -r results/lme/nmg-lme500_bgefix_header_20260804 results/lme/_bak_bgefix_header_20260804`
-2. 同 version --skip-ingest 重跑（resume：answer/judge 只补缺的）
-3. 对比 `experiment_manifest.json` 的 results 字段：
+- `scripts/longmemeval/lme_responses.py`: batch answer checkpoints every 25 questions.
+- `scripts/longmemeval/lme_eval.py`: batch judge checkpoints every 25 questions.
+- `scripts/utils/nlp_metrics.py`: make `extract_label_json` accept fields after `label`, e.g. `{"label": "WRONG", "reason": ...}`; the old regex reportedly caused 2/500 judge failures.
 
-| 指标 | 基线 | 判定 |
-|---|---|---|
-| any_evidence_recall / evidence_recall / all_evidence_recall | 94.15 / 87.95 / 82.67 | **必须逐位一致**（检索无回退的硬标准） |
-| answer_accuracy | 82.33 | **±2pp 内算 judge 波动**（judge LLM 判定变化实测 28/498 = 5.6%） |
+## Historical regression decision rule
 
-- **2026-08-05 实测**：recall 三项逐位复现（forget 脱敏 + 披露层重构**零检索回退**✓）；
-  answer 80.8（-1.53pp）——同 answer 重判 28/498 判定变化（judge 波动），**在波动带内——无回退**。
-- answer 文本本身 93% 变化（披露层文本微调——LLM 对 prompt 文本敏感——但语义中立、recall 不变）。
+The report backed up the baseline result directory, reran with the same version and `--skip-ingest`, then compared `experiment_manifest.json` results.
 
-## 四、本次修复清单
+| Metric | Baseline | Historical decision rule |
+|---|---:|---|
+| `any_evidence_recall` / `evidence_recall` / `all_evidence_recall` | 94.15 / 87.95 / 82.67 | Require exact equality as the no-retrieval-regression check |
+| `answer_accuracy` | 82.33 | Treat ±2 percentage points as judge variation; the report measured 28/498 relabel changes (5.6%) |
 
-| 文件 | 修复 | 状态 |
-|---|---|---|
-| `scripts/longmemeval/lme_responses.py` | answer 批量 checkpoint | ✅ 已改（fork 本地） |
-| `scripts/longmemeval/lme_eval.py` | judge 批量 checkpoint | ✅ 已改（fork 本地） |
-| `scripts/utils/nlp_metrics.py` | extract_label_json 容错 | ✅ 已改（fork 本地） |
-| 主仓库 `evals/omnimemeval/run-lme.sh` | 环境/断点固化（8/4 已有） | 已有 |
-| 主仓库 `docs/design/pmv2-eval-forget-design-2026-08-05.md` | pmv2 配套文档 | 已有 |
+For the 2026-08-05 rerun, the report says all three recall values reproduced exactly after forget redaction and disclosure-layer reconstruction. Answer accuracy was 80.8 (-1.53 pp), within the stated judge-variation band. Answer text changed in 93% of rows after a disclosure-text adjustment, while recall was unchanged.
 
-## 五、结果目录
+## Historical result location and limitations
 
-- 基线 + 本次防回退：`results/lme/nmg-lme500_bgefix_header_20260804/`（备份 `_bak_bgefix_header_20260804`）
-- 防回退跑法回顾：完整经历了 answer 3h（dump bug）→ judge 提取失败（正则 bug）→ version 漏前缀（人工错）→ 修完一遍过（judge 152/152 13s）
+The baseline and regression run were recorded under `results/lme/nmg-lme500_bgefix_header_20260804/`, with backup `_bak_bgefix_header_20260804`. The report describes earlier failures from the dump bug, a judge-extraction regex bug, and a manually omitted version prefix, followed by a final run in which judging completed 152/152 in 13 seconds.
+
+These are results from that particular benchmark setup and local fork. They do not establish today's runner interface, current throughput, or general answer-quality stability. Current reproduction and configuration guidance belongs to the evaluation skill and `evals/omnimemeval/` owners.

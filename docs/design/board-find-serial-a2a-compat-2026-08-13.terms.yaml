@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: board acknowledgement
+    aliases: [delivery receipt, board ack, 黑板确认回执]
+    definition: >-
+      A record that a board entry was delivered or read; it does not mean the recipient accepted responsibility or claimed the work.
+      记录黑板条目已投递或已读；不表示接收方已承担责任或 claim 该工作。
+    owner: docs/design/board-find-serial-a2a-compat-2026-08-13.md
+    anchor: Design distinctions
+    status: canonical
+  - term: board claim boundary
+    aliases: [claim versus acknowledgement, claim 与 acknowledgement 的边界]
+    definition: >-
+      A claim is an explicit ownership transition, distinct from delivery or acknowledgement; serial handoff logic must use the state transition defined by its current owner.
+      Claim 是显式所有权转换，区别于投递或 acknowledgement；串行交接逻辑必须使用当前 owner 定义的状态转换。
+    owner: docs/design/board-find-serial-a2a-compat-2026-08-13.md
+    anchor: Design distinctions
+    status: canonical

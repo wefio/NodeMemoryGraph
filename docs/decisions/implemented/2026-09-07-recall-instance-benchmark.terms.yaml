@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: recall instance
+    aliases: [self-contained retrieval instance, 召回实例]
+    definition: >-
+      A disclosure search captured with its trigger, retrieved candidates and `activeGraphId`, so retrieval relevance can be judged independently of any downstream answer; it is a retrieval-layer signal, not an answer-usefulness claim.
+      与 trigger、检索候选和 `activeGraphId` 一同捕获的一次披露搜索，使检索相关性可脱离下游回答独立判断；它是检索层信号，不是回答有用性的主张。
+    owner: docs/decisions/implemented/2026-09-07-recall-instance-benchmark.md
+    anchor: Decision
+    status: canonical
+references:
+  - evidence

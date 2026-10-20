@@ -1,6 +1,6 @@
 # A tooth is an operator over a symbol, not a copy of a line
 
-[中文](2026-09-24-mutants-are-derived-not-anchored.zh-CN.md)
+[中文](2026-09-24-mutants-are-derived-not-anchored.zh-CN.md) · [Terms used](2026-09-24-mutants-are-derived-not-anchored.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

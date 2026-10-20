@@ -1,6 +1,6 @@
 # One state entry for AG and board spaces
 
-[中文](2026-10-12-state-space-entry.zh-CN.md)
+[中文](2026-10-12-state-space-entry.zh-CN.md) · [Terms used](2026-10-12-state-space-entry.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

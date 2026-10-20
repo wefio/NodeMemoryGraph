@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: natural evidence
+    aliases: [自然证据]
+    definition: >-
+      Attributable observation produced as a side effect of an ordinary real task, distinct from controlled probes, benchmarks and synthetic tasks.
+      普通真实任务自然产生的可归因观察，与受控探针、基准和合成任务相区分。
+    owner: skills/nmg-memory/references/natural-evidence.md
+    anchor: Enable passive collection
+    status: canonical
+  - term: readiness packet
+    aliases: [就绪行动包]
+    definition: >-
+      An Agent-facing summary of required, available and blocked evidence-collection or audit actions; it does not itself validate evidence or authorize a production change.
+      面向 Agent 汇总所需、可用和受阻的证据收集／审计操作；它本身不验证证据，也不授权生产更改。
+    owner: skills/nmg-memory/references/natural-evidence.md
+    anchor: Audit without changing policy
+    status: canonical
+references:
+  - Active Graph
+  - Long-Term Graph
+  - Short-Term Graph
+  - projection revision
+  - claim outcome
+  - QPP
+  - state space
+  - working state

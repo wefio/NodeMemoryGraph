@@ -5,6 +5,8 @@ description: Reduce cyclomatic complexity in NMG code (CodeFactor Complex Method
 
 # Complexity reduction
 
+[简体中文](SKILL.zh-CN.md) · [Terms used](SKILL.terms.yaml)
+
 Cyclomatic complexity counts linearly independent paths through a method: every
 `if`, `else if`, `for`, `while`, `case`, `catch`, `&&`, `||`, and `?:` adds one.
 High complexity means many paths to test and maintain. CodeFactor enforces a

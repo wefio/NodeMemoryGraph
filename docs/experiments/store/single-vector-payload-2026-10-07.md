@@ -1,5 +1,7 @@
 # Single-vector-payload storage probe
 
+[中文](single-vector-payload-2026-10-07.zh-CN.md) · [Terms used](single-vector-payload-2026-10-07.terms.yaml)
+
 ## Scope
 
 Local synthetic evidence for the

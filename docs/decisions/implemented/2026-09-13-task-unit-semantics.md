@@ -1,6 +1,6 @@
 # Separate logical task units from Agent execution placement
 
-[中文](2026-09-13-task-unit-semantics.zh-CN.md)
+[中文](2026-09-13-task-unit-semantics.zh-CN.md) · [Terms used](2026-09-13-task-unit-semantics.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

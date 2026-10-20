@@ -1,20 +1,28 @@
 # Optional capability manual
 
+[中文](optional-capabilities.zh-CN.md) · [Terms used](optional-capabilities.terms.yaml)
+
 Use this reference when a feature is implemented but not part of the default Lite
 path. Environment variables are read when Pi or the daemon starts; restart the
 owning process after changing them. A switch makes a mechanism available. It does
 not turn benchmark evidence into production authorization.
 
+Routine AG working-state and Task Board operations use the unified `nmg_state`
+entry, not the Lab tool. The [state-space contract](../../../docs/design/state-spaces.md)
+owns those interfaces. The `working_state` Lab capability below documents its
+lease/administrative compatibility path; it is not a reason to route ordinary
+status updates through Lab.
+
 ## Retrieval controls
 
-| Capability                   | Default  | Enable                                              | Boundary                                                                       |
-| ---------------------------- | -------- | --------------------------------------------------- | ------------------------------------------------------------------------------ |
-| QPP1 allocation              | `shadow` | `NMG_QPP1_MODE=active`                              | Pi explicit searches only; a caller-supplied `limit` wins.                     |
-| QPP2 progressive fold        | `off`    | `NMG_QPP2_MODE=active`                              | Keeps top-1 and folded IDs in AG; `NMG_QPP2_RETAINED_MASS` defaults to `0.98`. |
-| Search recommendation        | `off`    | `NMG_SEARCH_RECOMMENDATION=advisory` or `guardrail` | `guardrail` recommends search only for hard recall failures.                   |
-| Deterministic Fibonacci pass | explicit | `nmg search "..." --second-pass`                    | Re-selects one over-sampled pool; no second vector search.                     |
-| Sequential storage tiers     | explicit | `nmg search "..." --tiered-disclosure`              | Opens L0 first, then deeper tiers while deterministic QPP says insufficient.   |
-| Full warm window             | folded   | `nmg search "..." --full-warm`                      | Diagnostic override; normally load deferred IDs with `nmg get`.                |
+| Capability | Default | Enable | Boundary |
+| --- | --- | --- | --- |
+| QPP1 allocation | `shadow` | `NMG_QPP1_MODE=active` | Pi explicit searches only; a caller-supplied `limit` wins. |
+| QPP2 progressive fold | `off` | `NMG_QPP2_MODE=active` | Keeps top-1 and folded IDs in AG; `NMG_QPP2_RETAINED_MASS` defaults to `0.98`. |
+| Search recommendation | `off` | `NMG_SEARCH_RECOMMENDATION=advisory` or `guardrail` | `guardrail` recommends search only for hard recall failures. |
+| Deterministic Fibonacci pass | explicit | `nmg search "..." --second-pass` | Re-selects one over-sampled pool; no second vector search. |
+| Sequential storage tiers | explicit | `nmg search "..." --tiered-disclosure` | Opens L0 first, then deeper tiers while deterministic QPP says insufficient. |
+| Full warm window | folded | `nmg search "..." --full-warm` | Diagnostic override; normally load deferred IDs with `nmg get`. |
 
 Observe QPP before active use:
 
@@ -100,7 +108,7 @@ more `--scope KEY=VALUE`. Content and scope proposals must later be applied with
 the existing explicit maintenance command; retrieval defects may only use
 `observe` and belong to retrieval-policy calibration.
 
-## Session Lab capabilities
+## Optional Session Lab capabilities
 
 Lab uses the existing daemon. Discover before enabling:
 
@@ -121,8 +129,9 @@ read it before calling `invoke`; do not guess an operation name.
 ### Enablement rules
 
 - Agent-self-service capabilities (`agentMayEnable=true`) are:
-  - `working_state`: replace/clear one provisional current AG text through `nmg_state`
-    (`space=ag`); the Lab CLI/RPC is an administrative compatibility path;
+  - `working_state`: lease management is exposed through the normal `nmg_state`
+    interface (`space=ag`), which owns routine replace/clear. The Lab CLI/RPC is an
+    administrative compatibility path, not the daily model-facing entry point;
   - `reasoning_workspace`: session-private scratch graph and checkpoints;
   - `recall_gate`: experimental session-only literal intent cues; [operations](#recall_gate-operations);
   - `memory_graph_reasoner`: read-only differentiable traversal, fuzzy logic,
@@ -249,15 +258,15 @@ recovery. Every node carries one `kind`. Confirmed `kind` values:
 `goal`, `observation`, `hypothesis`, `evidence`, `conclusion`, `decision`,
 `open_question`, `next_action`.
 
-| Operation            | Required input keys            | Returns                                                                            | Status          |
-| -------------------- | ------------------------------ | ---------------------------------------------------------------------------------- | --------------- |
-| `add`                | `id`, `kind`, `content`        | node `{id, kind, content, status, importance, evidenceRefs, createdAt, updatedAt}` | verified live   |
-| `link`               | `sourceId`, `targetId`, `type` | `{sourceId, targetId, type, createdAt}`                                            | verified live   |
-| `checkpoint`         | `label` (optional)             | snapshot `{sessionId, nodes, edges, omittedNodes, text}`                           | verified live   |
-| `update`             | node id + fields               | node                                                                               | not re-verified |
-| `mark_compacted`     | session                        | compaction marker                                                                  | not re-verified |
-| `consume_checkpoint` | session                        | checkpoint consumption                                                             | not re-verified |
-| `clear`              | session                        | cleared workspace                                                                  | not re-verified |
+| Operation | Required input keys | Returns | Status |
+| --- | --- | --- | --- |
+| `add` | `id`, `kind`, `content` | node `{id, kind, content, status, importance, evidenceRefs, createdAt, updatedAt}` | verified live |
+| `link` | `sourceId`, `targetId`, `type` | `{sourceId, targetId, type, createdAt}` | verified live |
+| `checkpoint` | `label` (optional) | snapshot `{sessionId, nodes, edges, omittedNodes, text}` | verified live |
+| `update` | node id + fields | node | not re-verified |
+| `mark_compacted` | session | compaction marker | not re-verified |
+| `consume_checkpoint` | session | checkpoint consumption | not re-verified |
+| `clear` | session | cleared workspace | not re-verified |
 
 `link` uses `sourceId`/`targetId`/`type` — not `from`/`to`/`relation`.
 `checkpoint` output includes a ready-to-inject `text` projection; treat it as an
@@ -280,16 +289,16 @@ query the LTG store; you pass the graph in every call. A graph node is
 array** (not a query string). The daemon converts a JSON array of nodes into the
 internal `Map<id, node>`.
 
-| Operation      | Required input keys                                                         | Returns                                                                                 | Status                      |
-| -------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | --------------------------- |
-| `traverse`     | `queryVector`, `graph`, `maxSteps`                                          | `{path:[{nodeId,score,queryBefore,queryAfter,gate}], finalQuery, pathScore}`            | verified live               |
-| `logic_search` | `expr`, `graph`, `topK`                                                     | `[{nodeId, membership, atomScores}]` (ranked by `membership`)                           | from source (`logicSearch`) |
-| `what_if`      | `queryVector`, `graph`, `hypotheticalNode`, `maxSteps` (+`impactThreshold`) | `{baseline, withNode, impacted:[{nodeId, scoreBefore, scoreAfter, delta, pathChange}]}` | from source (`whatIf`)      |
+| Operation | Required input keys | Returns | Status |
+| --- | --- | --- | --- |
+| `traverse` | `queryVector`, `graph`, `maxSteps` | `{path:[{nodeId,score,queryBefore,queryAfter,gate}], finalQuery, pathScore}` | verified live |
+| `logic_search` | `expr`, `graph`, `topK` | `[{nodeId, membership, atomScores}]` (ranked by `membership`) | from source (`logicSearch`) |
+| `what_if` | `queryVector`, `graph`, `hypotheticalNode`, `maxSteps` (+`impactThreshold`) | `{baseline, withNode, impacted:[{nodeId, scoreBefore, scoreAfter, delta, pathChange}]}` | from source (`whatIf`) |
 
 - `queryVector` must be a non-empty finite number array (sends `queryVector is
-required` otherwise); it is the traversal anchor.
+  required` otherwise); it is the traversal anchor.
 - `graph` is a JSON array of node objects (`graph must contain between 1 and
-10000 nodes`).
+  10000 nodes`).
 - `traverse` greedily advances from the globally best start node; each step's
   `queryAfter` becomes the next step's `queryBefore`.
 - When any node declares `outgoing: string[]`, traversal is topology-constrained

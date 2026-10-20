@@ -1,106 +1,96 @@
-# SQLite 评估与性能调优
+# SQLite Assessment and Performance Tuning
+
+[English](sqlite-assessment.md) | [简体中文](sqlite-assessment.zh-CN.md) · [Terms](sqlite-assessment.terms.yaml)
+
+Historical assessment and recommendations created 2026-07-20. Actions such as “add immediately” were recommendations at that time, not a current TODO list, and do not establish measured performance gains.
+
+Current source check: As of 2026-10-16, the writable store in [`src/core/store/base.ts`](../../src/core/store/base.ts) sets `foreign_keys=ON`, `journal_mode=WAL`, `synchronous=NORMAL`, `cache_size=-64000`, `temp_store=MEMORY`, `mmap_size=268435456`, and `busy_timeout=5000`. The read-only store uses the listed settings except `journal_mode` and `synchronous`. This is a source inspection, not a fresh performance measurement.
 
 **Created:** 2026-07-20
 
-## 1. 是否真的需要 SQLite
+## 1. Does NMG really need SQLite?
 
-### 1.1 NMG 对存储的实际需求
+### 1.1 NMG's storage requirements
 
 ```
-✓ 关系型查询（JOIN memory ← node ← evidence）
-✓ 全文搜索（FTS5）
-✓ 事务（多表原子写入）
-✓ BLOB 存储（向量 embeddings）
-✓ 嵌入式（随 Pi 进程启动，零配置）
-✓ 单机本地（数据库文件一个 .sqlite）
+✓ Relational queries (JOIN memory ← node ← evidence)
+✓ Full-text search (FTS5)
+✓ Transactions (atomic multi-table writes)
+✓ BLOB storage (vector embeddings)
+✓ Embedded (starts with the Pi process; zero configuration)
+✓ Single-machine local storage (one .sqlite database file)
 ```
 
-### 1.2 替代方案对比
+### 1.2 Alternatives considered in the historical assessment
 
-| 方案 | JOIN | 全文搜索 | 事务 | 嵌入式 | 适合吗 |
+| Option | JOIN | Full-text search | Transactions | Embedded | Assessment at the time |
 |---|---|---|---|---|---|
-| **SQLite** | ✓ | ✓ FTS5 | ✓ | ✓ | **是** |
-| LevelDB / RocksDB | ✗ 无 SQL | ✗ | ✗ 单 key | ✓ | 否。NMG 查 memory 要 JOIN node 和 evidence，用 KV 得在应用层手动 join |
-| LMDB | ✗ 无 SQL | ✗ | ✓ | ✓ | 否。同 KV 问题 |
-| DuckDB | ✓ | ✓ | ✗ OLAP | ✓ | 否。分析引擎，不适合高频小事务 OLTP |
-| PostgreSQL | ✓ | ✓ GIN/tsvector | ✓ | ✗ 需独立进程 | 否。违反 "local-first, zero-config" 原则 |
-| 纯 JSON 文件 | ✗ | ✗ | ✗ | ✓ | 否。每次检索要全量载入解析 |
+| **SQLite** | ✓ | ✓ FTS5 | ✓ | ✓ | **Suitable** |
+| LevelDB / RocksDB | ✗ no SQL | ✗ | ✗ single-key | ✓ | Not selected: NMG queries join memory, node, and evidence; a KV layer would require application-side joins |
+| LMDB | ✗ no SQL | ✗ | ✓ | ✓ | Not selected for the same KV-join reason |
+| DuckDB | ✓ | ✓ | ✗ (as characterized by the note) | ✓ | Not selected: the note treated it as an OLAP rather than frequent-small-transaction OLTP engine |
+| PostgreSQL | ✓ | ✓ GIN/tsvector | ✓ | ✗ separate process | Not selected under the local-first, zero-config principle |
+| Plain JSON files | ✗ | ✗ | ✗ | ✓ | Not selected: each retrieval would load and parse the whole dataset |
 
-**结论：SQLite 是正确的选择。** NMG 的数据模型（memory → node → evidence，多对多，有 FTS）天然是关系型的。换成 KV 或文档存储会在应用层重新发明 SQLite 已经做好的东西。
+The note concluded SQLite fit NMG's relational memory → node → evidence model, many-to-many links, and FTS needs. This is a dated architecture assessment, not a current comparative benchmark of database products.
 
-### 1.3 唯一的真实替代场景
+### 1.3 The alternative scenario identified at the time
 
-当 NMG 需要**多进程并发读写**时（例如多个 Pi agent 共享一份记忆），SQLite 的 WAL 模式支持一写多读，但不是为高并发写的。这个场景下可以考虑：
-- **LiteFS**（分布式 SQLite，基于 FUSE）：保持 SQLite API，复制到多节点
-- **Turso**（libSQL，SQLite 兼容但有远程同步）
-- **PostgreSQL**：仅当部署模式从嵌入式变成服务化时
+For multi-process concurrent writes—for example, multiple Pi agents sharing memory—the note observed that SQLite WAL supports one writer and concurrent readers, but is not designed for high write concurrency. It listed these possibilities for a future deployment change:
 
-但目前这些都是 P3（设计文档明确写了 "cloud sync is optional and never authoritative"），不需要现在处理。
+- **LiteFS** (distributed SQLite over FUSE), retaining the SQLite API and replicating across nodes;
+- **Turso** (libSQL, SQLite-compatible with remote synchronization);
+- **PostgreSQL**, only if deployment changed from embedded to service-oriented.
+
+The note classified these as P3 and cited the design rule that cloud sync is optional and never authoritative. These were future possibilities, not approved migration plans.
 
 ---
 
-## 2. SQLite 性能调优
+## 2. SQLite tuning proposals from the assessment
 
-### 2.1 当前状态
+### 2.1 State recorded at the time
 
 ```sql
--- 仅此两行
+-- The 2026-07-20 note recorded only these two pragmas
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
 ```
 
-### 2.2 立即加上的 PRAGMA（零风险）
+### 2.2 Pragmas recommended then
 
 ```sql
--- WAL 模式下 NORMAL 是安全的：崩溃恢复由 WAL 保证，不是由 fsync 保证
--- 写事务不等待 fsync，显著提升写入吞吐
+-- The note proposed NORMAL for WAL mode, with crash recovery through WAL
 PRAGMA synchronous = NORMAL;
 
--- 默认缓存 2MB（-2000 KB）。对于 NMG 的访问模式（高频检索，几百到几千条内存记录）
--- 增大到 16-64MB，让热数据（低 tier 的 memory + index pages）留在内存
-PRAGMA cache_size = -64000;  -- 64MB
+-- Default cache was recorded as 2 MB (-2000 KB); the proposal suggested 16–64 MB
+PRAGMA cache_size = -64000;  -- 64 MB
 
--- 临时表和临时索引放内存而非磁盘
+-- Keep temporary tables and indexes in memory
 PRAGMA temp_store = MEMORY;
 
--- 内存映射 I/O：把数据库文件的一部分映射到进程地址空间
--- 对只读为主的检索查询有显著提升（省掉 read() 系统调用）
--- 设置成数据库文件预期最大大小。NMG 的数据库通常不会超过几百 MB
-PRAGMA mmap_size = 268435456;  -- 256MB
+-- Map part of the database file into the process address space
+PRAGMA mmap_size = 268435456;  -- 256 MB
 ```
 
-加在 constructor 里，紧接现有 PRAGMA 之后：
+The proposal suggested adding these after the existing pragmas in the constructor. Its safety/performance statements were design reasoning, not a current guarantee or result. The current settings are listed in the source-check block above.
 
-```typescript
-this.#db.exec(`
-  PRAGMA foreign_keys = ON;
-  PRAGMA journal_mode = WAL;
-  PRAGMA synchronous = NORMAL;
-  PRAGMA cache_size = -64000;
-  PRAGMA temp_store = MEMORY;
-  PRAGMA mmap_size = 268435456;
-`);
-```
-
-### 2.3 周期性维护
+### 2.3 Periodic maintenance proposals
 
 ```sql
--- 更新统计信息，让查询优化器做出更好的索引选择
--- 在 N 条记录变更后或定时执行
+-- Refresh planner statistics
 PRAGMA optimize;
 
--- 整理空闲页面，回收空间
--- 仅在数据库文件显著膨胀后执行（如在大量 delete/update 后）
+-- Reclaim free pages after substantial database growth
 PRAGMA vacuum;
 ```
 
-加到 `rebalanceNode` 末尾或做一个独立的 `maintenance` 方法，建议每 1000 次写入或每次大 eval 后触发一次 `PRAGMA optimize`。Vacuum 很少需要，手动触发即可。
+The note suggested `PRAGMA optimize` after a number of changed records or on a schedule, possibly after `rebalanceNode`, and proposed `VACUUM` only after substantial delete/update activity. These are dated recommendations; consult the current maintenance owner before adding a new trigger.
 
-### 2.4 查询优化
+### 2.4 Query optimizations proposed
 
-#### 2.4.1 热路径：`#searchWithVector`
+#### 2.4.1 Hot path: `#searchWithVector`
 
-这是每次检索都走的方法。核心查询是三表 JOIN：
+The note described a three-table join with a left join to embeddings:
 
 ```sql
 SELECT ... FROM memory_records m
@@ -112,44 +102,17 @@ ORDER BY m.tier ASC, m.importance DESC, m.access_count DESC
 LIMIT ?
 ```
 
-**缺失的索引：**
+It proposed a `memory_records(status)` index, while warning that the query planner might prefer a tier index depending on data distribution. The suggested check was `EXPLAIN QUERY PLAN`; the index proposal is not asserted as a current missing index.
+
+#### 2.4.2 Large `IN` clauses
+
+For up to 2,000 `forcedCandidateIds` or `ftsIds`, the note illustrated a large parameterized `IN` list and proposed a temporary candidate table joined by ID if this became a measured bottleneck. It judged the existing `IN` approach adequate for its then-estimated scale (<500 candidates). Neither the scale estimate nor the need for a rewrite is a current benchmark result.
+
+#### 2.4.3 FTS5 query cost
+
+The note described `#ftsCandidates` using FTS5 BM25 and quoted this historical table definition:
 
 ```sql
--- memory_records.status 被所有查询过滤，没有单独索引
--- 当前只能通过 tier 索引间接过滤
-CREATE INDEX IF NOT EXISTS idx_memory_records_status
-  ON memory_records(status);
-```
-
-**注意**：加了不一定有用——查询优化器可能选择 tier 索引而不是 status 索引，取决于数据分布。应该用 `EXPLAIN QUERY PLAN` 验证。
-
-#### 2.4.2 大量 IN 子句
-
-当 `forcedCandidateIds` 或 `ftsIds` 很多时（上限 2000 个），SQL 变成：
-
-```sql
-WHERE m.id IN (?, ?, ?, ... 2000 个参数 ...)
-```
-
-大量参数绑定有开销。如果经常达到上限，改写成临时表：
-
-```sql
--- 替代方案：把候选 ID 写入临时表，用 JOIN 替代 IN
-CREATE TEMP TABLE IF NOT EXISTS _search_candidates (id TEXT PRIMARY KEY);
-INSERT INTO _search_candidates VALUES (?), (?), ...;
-SELECT ... FROM memory_records m
-JOIN _search_candidates c ON c.id = m.id
-...
-```
-
-但对于 NMG 的 scale（通常 < 500 candidate），当前 IN 子句足够，不需要这个优化。
-
-#### 2.4.3 FTS5 查询开销
-
-`#ftsCandidates` 每次走 FTS5 BM25 排序，可能在几十万条记录上搜索。这是冷路径（只在 fts5/hybrid 模式触发），但耗时可能显著。
-
-```sql
--- 当前 FTS5 表
 CREATE VIRTUAL TABLE memory_fts USING fts5(
   memory_id UNINDEXED,
   statement,
@@ -159,55 +122,25 @@ CREATE VIRTUAL TABLE memory_fts USING fts5(
 );
 ```
 
-`unicode61` tokenizer 对中文支持不好。如果中文用户多，考虑：
+It raised Chinese tokenization as a possible concern and listed ICU, a trigram tokenizer, or `LIKE` as alternatives. It also judged `unicode61` adequate for the then-assumed scale of agent memory. These are historical observations and suggestions; verify the current FTS schema and corpus before changing tokenization.
 
-```sql
--- 需要 sqlite3 编译时开启 ICU 或安装 trigram tokenizer 扩展
--- 或者用简单的：把 statement 作为整体做 LIKE '%keyword%' 而不是依赖分词
-```
+### 2.5 Write path and statement-cache proposals
 
-但对 NMG 的规模（agent 长期记忆而非搜索引擎），`unicode61` 够用。
+The note described the write path as already using WAL, `BEGIN IMMEDIATE`, batched transactions, and prepared statements. It proposed `synchronous=NORMAL` as a way to reduce commit waiting, while explicitly treating the data-loss risk under combined OS crash and disk-write reordering as acceptable for agent memory. That risk assessment is not a current durability guarantee.
 
-### 2.5 写入优化
+The note also suggested explicitly caching a prepared statement for a high-frequency query, but observed that dynamic SQL with variable-length `IN` clauses limits reuse. It classified explicit statement caching as low priority.
 
-当前写入路径是好的：
+## 3. Historical action summary
 
-```
-✓ PRAGMA journal_mode = WAL（写不阻塞读）
-✓ BEGIN IMMEDIATE（避免 SQLITE_BUSY）
-✓ 事务批量提交（不是每条 INSERT 一个事务）
-✓ 使用 prepared statement（避免每次编译 SQL）
-```
+| Recommendation in the 2026-07-20 note | Expected effect at the time | Historical action |
+|---|---|---|
+| `synchronous = NORMAL` | Faster writes | “Add immediately” |
+| `cache_size = 64MB` | Lower retrieval latency | “Add immediately” |
+| `mmap_size = 256MB` | Lower read latency | “Add immediately” |
+| `temp_store = MEMORY` | Faster temporary operations | “Add immediately” |
+| `PRAGMA optimize` | Better query plans | Periodic |
+| `idx_memory_records_status` | Possible retrieval improvement | Add only with `EXPLAIN` evidence |
+| Prepared-statement cache | Lower CPU overhead | Low priority |
+| Temporary table for large `IN` | Faster large candidate sets | Only if measured/benchmarked |
 
-**可改进：** 加上 `synchronous = NORMAL` 后，写事务提交更快（不等待 fsync）。在 WAL 模式下这是安全的：即使进程崩溃，WAL 文件保证可以恢复。只有在操作系统崩溃 + 磁盘写入乱序的极端情况下可能丢最后一个事务——对 agent 记忆系统这个风险可以接受。
-
-### 2.6 Prepared Statement 缓存
-
-当前代码每次都调用 `this.#db.prepare(...)`，SQLite 内部对相同 SQL 字符串有 LRU 缓存，但显式缓存 prepared statement 对象可以减少哈希查找开销。
-
-```typescript
-// 对高频查询（#searchWithVector 的主查询），显式缓存
-#searchStmt: StatementSync | undefined;
-
-get #searchStatement(): StatementSync {
-  if (!this.#searchStmt) {
-    this.#searchStmt = this.#db.prepare(`SELECT ... 长查询 ...`);
-  }
-  return this.#searchStmt;
-}
-```
-
-**但如果查询 SQL 是动态拼接的**（当前确实如此，因为 IN 子句参数数量变化），则没法缓存。这就是动态 SQL 的代价——不需要急着改，只是标注为已知限制。
-
-## 3. 总结
-
-| 优化 | 效果 | 风险 | 动作 |
-|---|---|---|---|
-| `synchronous = NORMAL` | 写入速度 ↑ | WAL 保护下极低 | 立即加 |
-| `cache_size = 64MB` | 检索延迟 ↓ | 多用 64MB 内存 | 立即加 |
-| `mmap_size = 256MB` | 读延迟 ↓ | 虚拟地址空间（不影响物理内存） | 立即加 |
-| `temp_store = MEMORY` | 临时操作加速 | 大排序可能 OOM | 立即加 |
-| `PRAGMA optimize` | 查询计划质量 | 零 | 周期性执行 |
-| `idx_memory_records_status` | 可能改善检索 | 写入微微变慢 | 加索引后用 EXPLAIN 验证 |
-| Prepared statement 缓存 | CPU 开销 ↓ | 无 | 低优先级 |
-| 临时表替代大 IN | 大量候选时加速 | 需要 benchmark | 有需要时做 |
+This table is retained for historical context; it is not a current work list. Current code and current measurements take precedence.

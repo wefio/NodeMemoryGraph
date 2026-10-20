@@ -1,0 +1,19 @@
+version: 2
+terms:
+  - term: historical design note
+    aliases: [dated implementation record, historical design record, dated design snapshot, 历史设计记录]
+    definition: >-
+      A retained description of a past design and rollout; its implementation and verification claims must not be read as the current contract. Current runtime behavior must be checked against its present code and owning contract.
+      保留的既往设计与落地描述；其中的实现和验证陈述不能视为当前契约。当前运行时行为必须对照现行源码和 owner 契约确认。
+    owner: docs/design/llm-sufficiency-recall-design.md
+    anchor: Context at the time
+    status: canonical
+  - term: consumer-side sufficiency judgment
+    aliases: [consumer model judgment, 消费方充分性判断]
+    definition: >-
+      A decision by the caller or consuming Agent that more evidence is needed; it is distinct from the core QPP score and from enabling the core second pass.
+      调用方或消费检索结果的 Agent 判断还需要更多 evidence；它不同于核心 QPP 分数，也不同于启用核心 second pass。
+    owner: docs/design/llm-sufficiency-recall-design.md
+    anchor: Decisions recorded on 2026-08-02
+    status: canonical
+references: [QPP, cumulative Fibonacci evidence tier, same-pool progressive re-selection]

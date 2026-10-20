@@ -1,79 +1,58 @@
-# 小预算下的词法同分排序
+# Lexical Tie-Breaking Under a Small Budget
 
-## 冻结协议
+[English](lexical-budget-2026-10-10.md) | [简体中文](lexical-budget-2026-10-10.zh-CN.md) · [Terms](lexical-budget-2026-10-10.terms.yaml)
 
-基线为 `94ca7e8f8000fb275e73961b25ba0c517e2f63df`。本轮仅研究 FTS5 同分排序的位置；
-不改变候选生成、分数、gate、默认条数、QPP 参数或输出格式。用户已确认公开测试边界为
-`NmgStore.search` / `searchContext`；共享入口 `searchMemoryContext` 验证无 embedding
-及本地模拟降级，不调用网络模型。
+## Historical pre-budget mechanism
 
-| 格子 | 比较问题 | 固定检查 |
-| --- | --- | --- |
-| 同分与小预算 | 完整陈述与仅节点名命中并列时，截断是否先于排序？ | 同一二条夹具在 limit=1/2 的首条目标一致；两个公开接口均检查 |
-| 跨直接候选截断 | 目标是否在 searchContext 的中间截断被挤出？ | 超过默认 20 条直接候选的同分夹具，在 limit=1 保留完整陈述 |
-| 非同分与稳定性 | 是否越过原始分数边界或扰动覆盖度相同的记录？ | 非同分顺序、等覆盖原序与已有单元契约不退化 |
-| 中文 | 规则是否只对英文夹具成立？ | 中文独立夹具通过同一公开接口；不使用生产 memory ID |
-| 无关、作用域与时效 | 排序是否引入新候选或绕过过滤？ | 无命中仍空；作用域、过期记录、历史查询约束保持 |
-| 共享入口及审计 | 无 provider 与降级路径是否保持预算和归因？ | 同一目标入选；AG、selections、trace 的 ID/顺序一致，降级码保留 |
-| 语义负对照 | 词法改动是否波及 hybrid？ | 固定本地向量夹具结果不变；不调用 live embedding |
+This is a frozen source-branch experiment on ordering before evidence budgets, not the current mainline ranking contract or a claim that this documentation PR delivers the runtime change. The current FTS5-only rule resolves ties after AG evidence selection; see the [mainline retrieval contract](../../design/design/progressive-retrieval.md). The original experimental question, measurements and proof limits remain below.
 
-每格只比较基线与单一候选，不新增第三臂；保留逐格结果，不只报平均数。退出条件是
-小预算同分夹具从红到绿、负对照不退化、静态/产品门禁通过。若不满足则回滚候选，
-不追加临时目标。这些是受控契约验证，不是线上垃圾率或回答质量验收。
+## Frozen protocol
 
-## 诊断证据
+Baseline: `94ca7e8f8000fb275e73961b25ba0c517e2f63df`. This slice studies only the position of FTS5 tie-breaking; it does not change candidate generation, scores, gates, default result count, QPP parameters, or output format. The user confirmed the public test boundary as `NmgStore.search` / `searchContext`; the shared `searchMemoryContext` entry verifies no-embedding and locally simulated degradation paths without calling a network model.
 
-在基线现有 `tests/core/store/retrieval.test.ts` 的词法并列夹具上通过 DAP 检查：
-查询 `Atlas SQLite`，节点命中的旁支陈述 `The store uses WAL` 与完整陈述
-`Atlas SQLite stores project data` 的 `combinedScore` 都为 22。
+| Cell | Comparison question | Fixed check |
+|---|---|---|
+| Ties under a small budget | When a full-statement hit ties a node-name-only hit, does truncation occur before sorting? | The same two-row fixture selects the same target first at `limit=1/2`; check both public interfaces |
+| Truncation across direct candidates | Can the target be pushed out by `searchContext`'s intermediate truncation? | A tie fixture with more than the default 20 direct candidates retains the full-statement hit at `limit=1` |
+| Non-ties and stability | Does the change cross raw-score boundaries or perturb records with equal coverage? | Non-tie order, equal-coverage input order, and existing unit contracts do not regress |
+| Chinese | Does the rule work only for English fixtures? | An independent Chinese fixture passes through the same public interfaces; no production memory IDs |
+| Irrelevance, scope, and time | Does sorting add candidates or bypass filters? | No-hit remains empty; scope, expired-record, and historical-query constraints remain |
+| Shared entry and audit | Do no-provider and degradation paths preserve budget and attribution? | Same target selected; IDs/order agree across AG, selections, and trace; degradation code is preserved |
+| Semantic negative control | Does the lexical change affect hybrid retrieval? | Fixed local-vector fixture is unchanged; no live embedding call |
 
-- `searchContext(limit=1)` 只返回旁支陈述；`limit=2` 返回完整陈述在前。
-- `search(limit=1/2)` 均先返回旁支陈述。
-- 已有排序在 AG 选取之后才执行，不能改变已截断集合。这证明一个小预算截断限制，
-  不证明它是此前真实 AG 召回失败的完整原因，也不证明所有 FTS5 同分组的覆盖度即相关性。
+Each cell compares baseline with one candidate, without adding a third arm; per-cell results are retained rather than reporting only an average. Exit conditions: the small-budget tie fixture changes from red to green, negative controls do not regress, and static/product gates pass. These are controlled contract checks, not production noise-rate or answer-quality acceptance.
 
-## 结果
+## Diagnostic evidence
 
-一条小预算回归在基线失败（0/1），改动后通过（1/1）。三份定向测试文件共 49 条通过，
-包括中文、25 条同分候选跨直接截断、非同分、无命中、作用域/过期/历史过滤、
-无 provider、本地模拟 provider 失败、语义负对照及原有开放条目契约。
+A DAP inspection passed on the baseline's existing lexical-tie fixture in `tests/core/store/retrieval.test.ts`: for query `Atlas SQLite`, the node-hit side statement `The store uses WAL` and the full statement `Atlas SQLite stores project data` both had `combinedScore` 22.
 
-另作固定二臂 CPU 对照：内存库生成 2/25/100/500 条同分候选，各取 limit=1/2，
-分别调用 search/searchContext。每格先预热 2 次，再交替运行两臂各 10 次；共 32 条
-臂级汇总。目标是唯一在陈述中包含完整查询的记录，旁支只在节点名中命中。
-基线首条命中为 1/16 个格子，候选为 16/16；这只是已知目标的合成夹具结果，
-不是自然检索 precision 或线上噪声率。
+- `searchContext(limit=1)` returned only the side statement; `limit=2` put the full statement first.
+- `search(limit=1/2)` also returned the side statement first.
+- Existing sorting happened only after AG selection and therefore could not change the already-truncated set. This proves a small-budget truncation limitation; it does not prove that this was the full cause of the earlier real AG recall failure, nor that coverage among all FTS5 ties means relevance.
 
-| 同分池大小 | limit=1 search 中位 ms（基线→候选） | limit=1 searchContext 中位 ms（基线→候选） |
-| --- | ---: | ---: |
+## Results
+
+One small-budget regression failed on baseline (0/1) and passed after the change (1/1). Three targeted test files passed 49 tests, including Chinese, 25 tied candidates across direct truncation, non-ties, no-hit, scope/expiry/history filters, no provider, locally simulated provider failure, semantic negative control, and existing open-record contracts.
+
+A fixed two-arm CPU comparison was also run: an in-memory database generated 2/25/100/500 tied candidates, each queried at `limit=1/2` via `search` and `searchContext`. Each cell was warmed twice, then the arms ran in alternation for 10 iterations each, yielding 32 arm-level aggregates. The target was the unique row whose statement contained the complete query; side rows matched only in the node name. The baseline's first result was the target in 1/16 cells; the candidate did so in 16/16. This is a synthetic fixture with a known target, not natural retrieval precision or a production noise rate.
+
+| Tied-pool size | `limit=1` `search` median ms (baseline → candidate) | `limit=1` `searchContext` median ms (baseline → candidate) |
+|---:|---:|---:|
 | 2 | 0.546 → 0.603 | 0.847 → 0.868 |
 | 25 | 1.001 → 1.150 | 1.528 → 1.830 |
 | 100 | 2.450 → 2.866 | 2.745 → 3.785 |
 | 500 | 20.302 → 23.257 | 11.523 → 13.946 |
 
-limit=2、500 条时 search 为 11.573 → 15.735 ms，是本次观察到的最大中位
-增量（约 4.16 ms）；不是普遍上界。时间包含本地完整 store 查询，不只排序。
-候选仍用原始同分覆盖规则，不新增模型、阈值或生产记忆 ID。
+At `limit=2` with 500 rows, `search` measured 11.573 → 15.735 ms, the largest observed median increase in this run (~4.16 ms); it is not a general upper bound. Timings include a full local store query, not only sorting. The candidate keeps the original coverage rule for ties and adds no model, threshold, or production memory ID.
 
-本地完整数值收据为 `.nmg/verification/lexical-budget/paired-probe.json`；记录测量时间、
-两臂根路径、基线 HEAD、源码哈希与逐次耗时。验证脚本是一轮使用的临时脚本，已清除。
-首次完整门禁失败：新 worktree 未先 build，依赖 dist 的产品测试失败；新增内联判断也使
-两个已有大方法的复杂度增长。已显式 build，并把模式判断归入私有排序函数，未放宽
-复杂度门槛；最终源码重新执行相同 CPU 协议。首次失败收据保留为
-`.nmg/verification/lexical-budget/first-failed.json`。
+The full local numeric receipt is `.nmg/verification/lexical-budget/paired-probe.json`; it records measurement time, both arm roots, baseline HEAD, source hashes, and per-iteration timings. The one-run probe script was removed. The first full gate failed: the new worktree had not been built, so product tests depending on `dist` failed; an added inline condition also increased complexity in two existing large methods. The code explicitly built and moved the mode check into a private sorting function without relaxing the complexity threshold. The final source then reran the same CPU protocol. The first-failure receipt remains at `.nmg/verification/lexical-budget/first-failed.json`.
 
-最终完整 `agent:verify` 的 16 项 blocking 检查均通过，产品测试 1689/1689，LSP
-三份变更源码/测试 0 diagnostics，复杂度门槛仍为 15。第二次执行的内部成功收据为
-`0206d7f4-bf54-41ec-9e9e-85512970527b`，但外层任务工具超时，未把它当作正常退出。
-使用独立同步子进程、隔离 stdio 后再次运行同一门禁，收据为
-`6afd8345-1da2-43fd-9993-937b809dcd39`，实际进程 exit=0、signal=null；退出证明保存在
-`.nmg/verification/lexical-budget/verify-exit.json`。research/chaos advisory 未运行。
-本轮未进行线上部署、付费 judge、live embedding 或完整 benchmark。
+All 16 blocking checks in the final `agent:verify` passed; product tests: 1689/1689; LSP on three changed source/test files: 0 diagnostics; complexity threshold remained 15. The internal success receipt from the second run was `0206d7f4-bf54-41ec-9e9e-85512970527b`, but the outer task tool timed out, so it was not treated as a normal exit. The same gate was run again in an isolated synchronous subprocess with separated stdio; receipt `6afd8345-1da2-43fd-9993-937b809dcd39`, process exit=0, signal=null. The exit proof is `.nmg/verification/lexical-budget/verify-exit.json`. Research/chaos advisory checks were not run. No production deployment, paid judge, live embedding, or full benchmark was performed.
 
-## 边界
+## Boundaries
 
-- 这是前移已有词法规则，不解决正确证据从未进入 FTS 候选池的情形。
-- 词覆盖不是语义真值，IDF 随各阶段候选池变化；不承诺所有预算的排序前缀普遍一致。
-- QPP 的参数未改，但其所观察的已选证据和停止决定可能变化。
-- 主动与自动共享的词法入口获益已在受控接口验证；没有运行真实 harness 两入口回放。
-- 输出瘦身、自动触发/弃权策略、模型 gate 版本差异均不属于本切片；没有部署或重启 daemon。
+- This moves an existing lexical rule earlier; it does not solve cases where correct evidence never enters the FTS candidate pool.
+- Token coverage is not semantic truth, and IDF varies with each stage's candidate pool; there is no claim that ranking prefixes are universally stable at all budgets.
+- QPP parameters were unchanged, but its selected evidence and stopping decision may change.
+- The shared lexical entry was validated through controlled active and automatic interfaces; no replay through real harnesses was run.
+- Output slimming, automatic trigger/abstention policy, and model-gate version differences are outside this slice; there was no deployment or daemon restart.

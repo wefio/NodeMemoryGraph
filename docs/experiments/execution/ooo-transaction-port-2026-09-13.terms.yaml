@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: identity-validated transaction port
+    aliases: [withPort capability, 身份校验的事务 port]
+    definition: >-
+      The capability issued for one live transition and validated by identity against the store's own open transaction, so a port from another store, a port whose callback already returned and a port never issued are refused by name; no authority is inferred from a flag or a depth counter, and a thenable-returning callback is refused so a port cannot survive an await.
+      为一个正在运行的 transition 签发、并以身份对照 store 自己尚未关闭的事务来校验的能力；因此来自另一个 store 的 port、callback 已返回的 port 与从未签发的 port 都被按名称拒绝。权威不从标志位或深度计数器推断，返回 thenable 的 callback 被拒绝，以免 port 在 await 之后继续存活。
+    owner: docs/experiments/execution/ooo-transaction-port-2026-09-13.md
+    anchor: What changed
+    status: canonical
+  - term: swallowed-failure rollback-only
+    aliases: [inner catch cannot commit, 被吞掉的失败仍为 rollback-only]
+    definition: >-
+      Marking the transaction rollback-only when work inside `withPort` fails, even if the caller catches that failure, because the work up to the failure already happened and only the outermost scope decides what commits; a failed ROLLBACK keeps the original error and quarantines the connection.
+      `withPort` 内部的工作失败时把事务标记为 rollback-only，即使调用方捕获了该失败，因为失败之前的工作已经发生，只有最外层才能决定提交什么；ROLLBACK 失败时保留原始错误并隔离该 connection。
+    owner: docs/experiments/execution/ooo-transaction-port-2026-09-13.md
+    anchor: What changed
+    status: canonical
+  - term: historically reported cancelled-round cleanup leak
+    aliases: [ooo-cycle.ts:814/1037 finding, 历史取消 round 清理泄漏报告]
+    definition: >-
+      The original record's static finding that an early-cancel return preceded directory cleanup in ooo-cycle.ts, quoted at lines 814/1037. Those positions are not pinned to a source revision here and were not revalidated as a current defect by this review.
+      原记录的静态发现：ooo-cycle.ts 的 early-cancel 返回早于目录清理，引用行号为 814／1037。此处未把这些位置固定到源码版本，本轮也未重新验证它是当前缺陷。
+    owner: docs/experiments/execution/ooo-transaction-port-2026-09-13.md
+    anchor: What this does not do
+    status: canonical
+references: [rollback-only]

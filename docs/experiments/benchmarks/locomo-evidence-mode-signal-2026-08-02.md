@@ -1,8 +1,16 @@
 # LoCoMo evidence-mode signal audit (2026-08-02)
 
+[English](locomo-evidence-mode-signal-2026-08-02.md) | [简体中文](locomo-evidence-mode-signal-2026-08-02.zh-CN.md) · [Terms](locomo-evidence-mode-signal-2026-08-02.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a historical
+experiment record. The configurations, measurements, implementation descriptions
+and follow-up proposals below are scoped to that experiment. This review did not
+rerun the experiment or independently revalidate its original artifacts; these
+are not current test receipts, default-policy decisions or general guarantees.
+
 ## Question
 
-Can query-independent retrieval signals from the three-route weighted-RRF path
+Can label-free retrieval signals from the three-route weighted-RRF path
 distinguish questions requiring one evidence record from questions requiring
 multiple records? Can the same signals predict whether the visible Top-20 is
 already evidence-complete?

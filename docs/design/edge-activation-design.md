@@ -1,5 +1,7 @@
 # Edge Activation Design
 
+[English](edge-activation-design.md) | [简体中文](edge-activation-design.zh-CN.md) · [Terms](edge-activation-design.terms.yaml)
+
 **Status:** current — advanced calibration remains experimental
 **Updated:** 2026-08-01
 
@@ -30,6 +32,13 @@ Consequences:
 ## 2. The function family
 
 ### 2.1 Conductive edges (activation flows)
+
+The following per-type formulas describe intended relation semantics, not a claim
+that each formula is implemented. Current `propagateEdgeActivation()` uses the
+bounded common form `source × strength × decay^hop / dilution`, with special
+handling for `contradicts`, `supersedes`, and `exception_to`; relation defaults
+also select direction and conductive versus regulatory channel. See §4 for the
+implemented boundary.
 
 ```
 A_e(u,v) = σ( w_uv · φ(a_u, a_v) )

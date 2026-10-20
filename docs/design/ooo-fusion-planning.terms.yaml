@@ -1,0 +1,115 @@
+version: 2
+terms:
+  - term: offline fusion ceiling
+    aliases: [fusion ceiling, 融合上界]
+    definition: >-
+      A research-only optimistic graph that reports a structural session floor and a cap-constrained greedy schedule; multiplying sessions avoided by an explicit startup assumption yields a wall-clock projection, not a cost or quality claim.
+      仅用于研究的乐观图，给出结构性 session 下界与受 bound 约束的贪心调度；用明确的启动耗时假设乘以避免的 sessions，只能得到 wall-clock 投影，不能支持成本或质量主张。
+    owner: docs/design/ooo-fusion-planning.md
+    anchor: "Offline: the ceiling"
+    status: canonical
+  - term: optimistic fusion projection
+    aliases: [optimistic plan, 乐观融合投影]
+    definition: >-
+      An offline view that marks every unit accepted, uncancelled and externally ready while preserving its declarations, then applies sharedSessionLegal; it is not a live schedule.
+      离线视图：将每个 unit 标为 accepted、未取消且 external-ready，同时保留其 declarations，再应用 sharedSessionLegal；它不是实时调度。
+    owner: docs/design/ooo-fusion-planning.md
+    anchor: "Offline: the ceiling"
+    status: canonical
+  - term: chain-cover floor
+    aliases: [structural floor, 链覆盖下界]
+    definition: >-
+      The minimum number of sessions in a chain cover of a transitive successor partial order, computed as units minus maximum matching over the transitive closure; it is a lower bound, not a schedule.
+      对传递后继偏序进行链覆盖所需的最少 sessions 数，按 units 减去传递闭包二分图的最大匹配数计算；它是下界，不是调度方案。
+    owner: docs/design/ooo-fusion-planning.md
+    anchor: "Offline: the ceiling"
+    status: canonical
+  - term: feasible list-scheduling bound
+    aliases: [list-scheduling bound, 可行列表调度上界]
+    definition: >-
+      The number of sessions produced by the plan-order greedy rule that appends each unit to the fullest open session whose last unit may legally continue it, subject to the declared cap.
+      按 plan 顺序应用贪心规则得到的 sessions 数：在声明的 cap 内，将每个 unit 追加到其末尾 unit 可合法延续且当前最满的开放 session。
+    owner: docs/design/ooo-fusion-planning.md
+    anchor: "Offline: the ceiling"
+    status: canonical
+  - term: D-arm startup assumption
+    aliases: ["1,900 ms startup assumption", D-arm 1.9-second value, D arm 启动耗时假设]
+    definition: >-
+      The explicit 1,900 ms value used by the research ceiling, derived from a D-arm median gap smaller than that arm's within-cell spread; it is not a general measured startup constant.
+      研究 ceiling 使用的明确 1,900 ms 数值，来源是小于 D arm cell 内 spread 的中位差；它不是经普遍测量得出的启动耗时常量。
+    owner: docs/design/ooo-fusion-planning.md
+    anchor: The problem this answers
+    status: canonical
+  - term: product-loop activation boundary
+    aliases: [product integration boundary, 产品 loop 接入边界]
+    definition: >-
+      The shared dispatch loop and one-move function exist and are used by research, but the existing product nmg_board host path has not been shown invoking the extracted programmatic loop; integration remains deferred.
+      共享 dispatch loop 与单步决策函数已存在并用于研究，但尚无证据表明现有产品 nmg_board host path 会调用抽取出的程序化 loop；接入仍属延期事项。
+    owner: docs/design/ooo-fusion-planning.md
+    anchor: When the chain path may be entered
+    status: canonical
+  - term: "session move"
+    aliases: ["nextSessionMove decision","会话单步决策"]
+    definition: >-
+      A deterministic admit-or-close decision for the current session under its declared plan and current facts, with plan-order tie breaking and no offline ceiling or numeric cost input.
+      根据声明的 plan 和当前事实对当前 session 作出的确定性 admit-or-close 决策，以 plan 顺序打破平局，不读取离线 ceiling 或数值成本。
+    owner: docs/design/ooo-fusion-planning.md
+    anchor: "Online: ready set, repair-first, baseline"
+    status: canonical
+  - term: "repair-first continuation"
+    aliases: ["repair-first","修复优先延续"]
+    definition: >-
+      A named constraint a plan enables to continue a legal session and repair unfinished work when declared facts change; enabling no constraints keeps one unit per session.
+      由 plan 启用的命名约束，用于延续合法 session，并在声明事实变化时修复未完成部分；未启用约束时保持每 session 一个 unit。
+    owner: docs/design/ooo-fusion-planning.md
+    anchor: "Online: ready set, repair-first, baseline"
+    status: canonical
+  - term: "plain execution surface"
+    aliases: ["plain tool set","普通执行工具集合"]
+    definition: >-
+      The Pi runner's tool set selected from the first attempt's required operations when chain mode is off; a capability configuration rather than a measured price.
+      Pi runner 未启用 chain 模式时，按首个 attempt 所需操作选择的工具集合；它是能力配置，不是测得的价格。
+    owner: docs/design/ooo-fusion-planning.md
+    anchor: "Execution tool sets"
+    status: canonical
+  - term: "chain execution surface"
+    aliases: ["chain tool union","链式执行工具并集"]
+    definition: >-
+      The Pi runner's tool union registered once for several units; unavailable per-unit operations still refuse, and string conclusion kinds still face artifact-envelope and host validation.
+      Pi runner 为多个 unit 一次注册的工具并集；当前 unit 不可用的操作仍拒绝，字符串 conclusion kind 仍受 artifact envelope 和宿主验证。
+    owner: docs/design/ooo-fusion-planning.md
+    anchor: "Execution tool sets"
+    status: canonical
+  - term: "measured versus unpriced evidence"
+    aliases: ["测量与未定价证据的区分"]
+    definition: >-
+      The distinction between recorded wall/token/cache observations and an established fusion price; the cited cap reports lack matching instrument and usage evidence for pricing fused provider cost.
+      已记录的 wall／token／cache 观测与已确立 fusion 价格的区别；引用的 cap 报告缺少为融合 provider 成本定价所需的匹配工具版本与 usage 证据。
+    owner: docs/design/ooo-fusion-planning.md
+    anchor: "Offline: the ceiling"
+    status: canonical
+  - term: "sharedSessionLegal"
+    aliases: ["共享 session 合法性判定"]
+    definition: >-
+      The shared predicate checking session-sharing declarations against plan facts; applying it to an optimistic offline projection does not authorize a live schedule.
+      根据 plan 事实检查 session 共享声明的共享判定；将其应用到离线乐观投影，不会授权实时调度。
+    owner: docs/design/ooo-fusion-planning.md
+    anchor: "Offline: the ceiling"
+    status: canonical
+  - term: "PLAN_CONSTRAINTS"
+    aliases: ["协议命名约束列表"]
+    definition: >-
+      The protocol's closed list of constraint names a plan may enable; unknown names are refused, and repair-first orders continuation rather than changing legal-set membership.
+      plan 可以启用的协议约束名称封闭列表；未知名称被拒绝，repair-first 排定延续顺序而不改变合法集合成员资格。
+    owner: docs/design/ooo-fusion-planning.md
+    anchor: "Online: ready set, repair-first, baseline"
+    status: canonical
+references:
+  - execution fusion
+  - repair-first continuation
+  - session move
+  - plain execution surface
+  - chain execution surface
+  - measured versus unpriced evidence
+  - sharedSessionLegal
+  - PLAN_CONSTRAINTS

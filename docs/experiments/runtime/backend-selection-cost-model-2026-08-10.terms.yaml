@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: stacked batch representation
+    aliases: [stacked, 堆叠批量表示]
+    definition: >-
+      A batch layout that combines examples into a larger matrix while keeping the computation graph approximately constant in size.
+      将样本合并为较大矩阵、同时使计算图大小近似保持不变的批量布局。
+    owner: docs/experiments/runtime/backend-selection-cost-model-2026-08-10.md
+    anchor: Batch representations and protocol
+    status: canonical
+  - term: executable backend tier
+    aliases: [selectable backend, 可执行后端档位]
+    definition: >-
+      A backend choice that the current runtime can actually execute; a cost-model threshold must not select a hypothetical or unavailable backend.
+      当前 runtime 确实能够执行的 backend 选项；成本模型阈值不得选择假设中的或不可用的 backend。
+    owner: docs/experiments/runtime/backend-selection-cost-model-2026-08-10.md
+    anchor: GPU threshold: hypothesis only
+    status: canonical

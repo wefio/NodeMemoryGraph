@@ -1,5 +1,7 @@
 # Semantic search and embeddings
 
+[中文](embedding.zh-CN.md) · [Terms used](embedding.terms.yaml)
+
 NMG has two retrieval paths: **lexical** (FTS5, zero configuration) and
 **semantic** (vectors, requires an embedding provider and a built index).
 Both run inside one query when `--retrieval-mode hybrid` is used.

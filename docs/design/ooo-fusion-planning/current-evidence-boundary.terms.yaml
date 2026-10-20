@@ -1,0 +1,48 @@
+version: 2
+terms:
+  - term: within-cell spread
+    aliases: [cell spread, cell 内 spread]
+    definition: >-
+      The max-minus-min range among repeated runs of one experimental cell; a difference smaller than or comparable to the relevant spread is not resolved by that sample.
+      同一实验 cell 的重复运行中最大值减最小值；若效应差值小于或接近相关 spread，该样本就无法区分该效应。
+    owner: docs/design/ooo-fusion-planning/current-evidence-boundary.md
+    anchor: The cap experiment, measured (2026-09-19)
+    status: canonical
+  - term: cap-sample wall difference
+    aliases: [cap result, bound comparison, cap 样本 wall 差]
+    definition: >-
+      The observed wall-time difference between recorded session-cap cells; it is bounded to their plan shape and recorded prompt/instrument provenance, not a universal session-startup benefit.
+      已记录 session-cap cells 之间观测到的 wall 时间差；其结论受 plan 形状及 prompt/instrument provenance 限定，不是通用的 session 启动收益。
+    owner: docs/design/ooo-fusion-planning/current-evidence-boundary.md
+    anchor: The cap experiment, measured (2026-09-19)
+    status: canonical
+  - term: instrument commit provenance
+    aliases: [instrument commit, commit provenance, instrument commit 来源]
+    definition: >-
+      The recorded code commit identifying the instrument used by a run; without it, runs cannot be established as the same instrument version from matching specs alone.
+      运行记录中的代码 commit，用于标识所用 instrument；没有它，仅凭 spec 相同不能证明运行使用了相同 instrument 版本。
+    owner: docs/design/ooo-fusion-planning/current-evidence-boundary.md
+    anchor: The cap experiment, measured (2026-09-19)
+    status: canonical
+  - term: unpriced fusion cost
+    aliases: [fusion cost unpriced, 融合成本未定价]
+    definition: >-
+      Provider cost and token-direction effects for fused cells are unresolved because archived cap reports lack the later usage split and provider-price fields; no monetary benefit or penalty may be inferred.
+      归档 cap 报告缺少后来增加的 usage 拆分与 provider 价格字段，因此 fused cells 的 provider 成本与 token 方向效应尚未解决；不得推断货币收益或损失。
+    owner: docs/design/ooo-fusion-planning/current-evidence-boundary.md
+    anchor: The cap experiment, measured (2026-09-19)
+    status: canonical
+  - term: "sessions avoided"
+    aliases: ["避免的会话数"]
+    definition: >-
+      The session-count reduction from the one-unit-per-session baseline in the offline comparison; multiplication by a startup assumption is a projection, not measured cost or latency savings.
+      离线比较中相对于每 session 一个 unit 基线减少的 session 数；乘以启动耗时假设所得是投影，不是测得的成本或延迟收益。
+    owner: docs/design/ooo-fusion-planning/current-evidence-boundary.md
+    anchor: "What the ceiling says today"
+    status: canonical
+references:
+  - offline fusion ceiling
+  - D-arm startup assumption
+  - sessions avoided
+  - research-instrument evidence
+  - directional-only result

@@ -1,0 +1,21 @@
+version: 2
+terms:
+  - term: declared slot budget
+    aliases: [run slot count, 自声明槽预算]
+    definition: >-
+      A run-level maximum for simultaneous live claims; each outstanding claim consumes one slot, the default is one, and a multi-slot budget requires per-task directed handoffs without changing the board's ordinary per-channel serialization.
+      单次 run 可同时持有的有效 claim 上限；每个未完成 claim 占用一个槽，默认值为一；多槽预算要求按任务定向 handoff，不改变黑板通常的按频道串行规则。
+    owner: docs/decisions/implemented/2026-09-18-declared-slot-budget.md
+    anchor: Decision
+    status: canonical
+  - term: startable task set
+    aliases: [startable tasks, 可启动任务集]
+    definition: >-
+      The ordered legal task set cut to the run's remaining slots after already claimed tasks are counted; this is the only set a claim licence may name.
+      将已认领任务计入后，按 run 剩余槽数裁切得到的有序合法任务集；claim licence 只能指名其中任务。
+    owner: docs/decisions/implemented/2026-09-18-declared-slot-budget.md
+    anchor: Decision
+    status: canonical
+references:
+  - Task Board
+  - task unit

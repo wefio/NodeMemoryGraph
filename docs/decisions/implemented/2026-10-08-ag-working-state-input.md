@@ -4,7 +4,7 @@
 **Approved:** explicit
 **Relates to:** [Maintained state](2026-10-08-ag-working-state.md)
 
-[中文](2026-10-08-ag-working-state-input.zh-CN.md)
+[中文](2026-10-08-ag-working-state-input.zh-CN.md) · [Terms used](2026-10-08-ag-working-state-input.terms.yaml)
 
 ## Problem
 
@@ -32,7 +32,7 @@ provider-send confirmation or completion of C.
   `context` hook: a later model call in the same turn re-sends nothing and no
   earlier position is rewritten or removed.
 - The mixed recall projection keeps excluding the state (`includeWorkingState:
-false`), so one turn never carries the same value in two shapes.
+  false`), so one turn never carries the same value in two shapes.
 - A mid-turn need to read the state is served by the history already in the
   session or by the read-only `/nmg state` view. No model-side read-only entry
   point is added.

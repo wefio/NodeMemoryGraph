@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: flat-list abstain rule
+    aliases: [平坦列表弃权规则, 离散度弃权规则]
+    definition: >-
+      A recorded heuristic over candidate-list dispersion, not a proved safe classifier. The 19/23-recall cohorts and score units are unresolved, and off/default labels belong to those checkpoints; normalization/calibration or a low ECE does not supply current activation permission.
+      记录中的候选列表离散度启发式，不是已证安全分类器。19／23 召回总体及分数单位未明，关闭／默认属于当时检查点；归一化／标定或低 ECE 不提供当前启用权限。
+    owner: docs/experiments/retrieval-quality/relevance-gate-calibration-2026-09-09.md
+    anchor: "Feature experiment: can any single program-side signal gate?"
+    status: canonical
+  - term: bounded score compression
+    aliases: [有界分数压缩]
+    definition: >-
+      A proposed explanation of the recorded narrow score bands, not an isolated diagnosis of anisotropy/hubness or proof every bounded score loses signal. CV is invariant to positive multiplication, not arbitrary offsets/nonlinear maps; partial top1 9.00/gap 2.00 leave the old bounded-unit claim unresolved.
+      对所记录窄分数带的拟议解释，不是各向异性／hubness 的独立诊断，也不证明所有有界分数失信号。CV 对正乘法不变、不对任意平移／非线性不变；partial top1 9.00／gap 2.00 使旧有界单位声称未解。
+    owner: docs/experiments/retrieval-quality/relevance-gate-calibration-2026-09-09.md
+    anchor: Benchmark generalization check (LoCoMo, lexical)
+    status: canonical
+  - term: staged gate rollout
+    aliases: [分阶段闸门上线]
+    definition: >-
+      The historical offline/shadow/canary/default proposal, not evidence any stage is deployed or an automatic enablement procedure. Score calibration and conformal claims retain loss/sampling/domain assumptions; current data admission and runtime authority remain with their owners.
+      历史离线／shadow／canary／default 提案，不证明任何阶段已部署，也不是自动启用流程。分数标定及 conformal 保留损失／抽样／领域假设，当前数据准入与运行时权限仍归各 owner。
+    owner: docs/experiments/retrieval-quality/relevance-gate-calibration-2026-09-09.md
+    anchor: "Turning the gate on by default: what the literature prescribes"
+    status: canonical

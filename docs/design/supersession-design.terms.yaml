@@ -1,0 +1,46 @@
+version: 2
+terms:
+  - term: same-scope supersession
+    aliases: [memory supersession, 同 scope 记忆取代]
+    definition: >-
+      A declared replacement of an older value by a newer value for the same scoped property; similarity or contradiction alone is insufficient.
+      同一作用域属性的新值明确取代旧值；仅有相似或矛盾不足以建立此关系。
+    owner: docs/design/supersession-design.md
+    anchor: Memory supersession design
+    status: canonical
+  - term: supersedeCandidates
+    aliases: [supersession candidates, 取代候选]
+    definition: >-
+      A bounded heuristic list of same-scope memories that may be stale predecessors; it is not a semantic verdict and is not automatically applied by remember().
+      可能是同 scope 旧前驱的有界启发式列表；它不是语义裁定，也不会由 remember() 自动应用。
+    owner: docs/design/supersession-design.md
+    anchor: Candidate discovery
+    status: canonical
+  - term: disputed predecessor
+    aliases: [old-only supersede, 有争议的旧前驱]
+    definition: >-
+      An old value marked disputed when its staleness is known but the replacement record has not yet been supplied.
+      已知旧值过时、但尚未提供替代记录时，将其标记为 disputed。
+    owner: docs/design/supersession-design.md
+    anchor: Caller and feedback paths
+    status: canonical
+  - term: "memory scope"
+    aliases: ["记忆作用域"]
+    definition: >-
+      The scope attached to a memory record; applying supersession requires identical predecessor/successor scope, not merely similar topics.
+      记忆记录附带的 scope；应用取代关系要求前驱与后继具有相同 scope，而不只是主题相似。
+    owner: docs/design/supersession-design.md
+    anchor: "Applying supersession"
+    status: canonical
+  - term: "memory evidence role"
+    aliases: ["evidence_role","记忆证据角色"]
+    definition: >-
+      Record metadata describing a memory's evidence function; post-write supersession sets the successor role to update without proving its claim true.
+      描述记忆证据职能的记录元数据；写后取代将后继角色设为 update，但不由此证明其声明为真。
+    owner: docs/design/supersession-design.md
+    anchor: "Applying supersession"
+    status: canonical
+references:
+  - MemoryRecord
+  - memory scope
+  - memory evidence role

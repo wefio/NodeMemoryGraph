@@ -1,0 +1,37 @@
+version: 2
+terms:
+  - term: bounded embedding drain
+    aliases: [maxBatches, 有界 embedding 排空]
+    definition: >-
+      The per-operation top-up in which every `remember`/`search` signals maintenance with `{ maxBatches: 1 }` so one small batch of missing vectors is filled in the background, deliberately without `writeThreshold`/`accessThreshold` batching; low-activity stores therefore still converge and a 429 merely queues the remainder for the next operation.
+      逐操作补批：每次 `remember`/`search` 以 `{ maxBatches: 1 }` 发出维护信号，在后台补一小批缺失向量，刻意不做 `writeThreshold`/`accessThreshold` 批处理；因此低活动 store 仍会收敛，而一次 429 只是把剩余部分排到下一次操作。
+    owner: docs/design/temporary-todo/default-embedding.md
+    anchor: Make embedding work by default on store and retrieve
+    status: canonical
+  - term: pause not fail
+    aliases: [429 cooldown, 暂停而非失败]
+    definition: >-
+      The provider-failure policy in which a 429/5xx records `last_failed_at` plus a reason and resumes on the next drain instead of setting the whole index to `failed`, which would disable hybrid until a full rebuild; search serves hybrid from a partial index via `LEFT JOIN` so a failed index is never a dead end, and a provider failure starts a 30-second cooldown that reports `degraded: true` with the reason.
+      provider 失败策略：429/5xx 记录 `last_failed_at` 加原因并在下一次排空时恢复，而不是把整个索引置为 `failed`（那会一直禁用 hybrid 直到完全重建）；检索经 `LEFT JOIN` 从部分索引提供 hybrid，使失败的索引绝不是死路，而 provider 失败会启动 30 秒冷却并以 `degraded: true` 加原因报告。
+    owner: docs/design/temporary-todo/default-embedding.md
+    anchor: Make embedding work by default on store and retrieve
+    status: canonical
+  - term: hashing dimensionality bottleneck
+    aliases: [nmg-hashing-v1, 哈希维度瓶颈]
+    definition: >-
+      The measured reason local hashing is a fallback rather than a semantic substitute: on the real store a 256-dimensional `nmg-hashing-v1` blended retrieval is byte-identical to pure lexical (self-recall 45/154 in both arms, vector scores around 0), and the known fix of NUMEN-style very high dimensions (16K–32K) costs enormous fixed memory per vector, which a local SQLite-backed store does not accept. Feature hashing and SimHash are word-level tools for spelling and near-deduplication, not semantic retrieval.
+      局部哈希是兜底而非语义替代品的实测理由：在真实 store 上，256 维 `nmg-hashing-v1` 混合检索与纯词法逐字节相同（两条臂自召回都是 45/154，向量分数约为 0），而已知修法 NUMEN 式极高维度（16K–32K）每条向量要付巨大固定内存，本地 SQLite 支撑的 store 不接受。特征哈希与 SimHash 是面向拼写与近似去重的词级工具，不是语义检索。
+    owner: docs/design/temporary-todo/default-embedding.md
+    anchor: Make embedding work by default on store and retrieve
+    status: canonical
+  - term: operator incident
+    aliases: [silent provider loss, 操作者事故]
+    definition: >-
+      The observed failure that motivated this workstream: the embedding configuration lived only in a repository `.env` the daemon never reads, so a daemon restart silently dropped the API key, every later search fell back to lexical while the operator believed embedding was on, and `embedding_index_state.status` sat at `failed` with `last_succeeded_at = null` after a single free-tier 429. The configured provider did build 96 vectors on 2026-09-01 and then never ran again.
+      促使这条工作流的观察到的失败：embedding 配置只放在 daemon 从不读取的仓库 `.env` 里，于是一次 daemon 重启就静默丢掉 API key，之后每次检索都退回词法而操作者以为 embedding 开着，并且一次免费额度 429 之后 `embedding_index_state.status` 停在 `failed`、`last_succeeded_at = null`。配置好的 provider 确实在 2026-09-01 建过 96 个向量，此后再没跑过。
+    owner: docs/design/temporary-todo/default-embedding.md
+    anchor: Make embedding work by default on store and retrieve
+    status: canonical
+references:
+  - Long-Term Graph
+  - Short-Term Graph

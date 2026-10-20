@@ -1,5 +1,7 @@
 # Hybrid correctness and context-level scoring — 2026-10-10
 
+[中文](hybrid-context-scoring-2026-10-10.zh-CN.md) · [Terms used](hybrid-context-scoring-2026-10-10.terms.yaml)
+
 ## Correctness before timing
 
 Base `ee32e448b2d978174754ab5d97c47bf0a0d72588` has the hybrid positional-binding

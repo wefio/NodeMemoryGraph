@@ -1,5 +1,7 @@
 # PersonaMem adapter
 
+[English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
+
 Place one official question/context pair under `evals/personamem/data/`:
 
 ```text

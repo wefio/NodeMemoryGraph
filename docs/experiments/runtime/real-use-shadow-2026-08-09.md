@@ -1,5 +1,15 @@
 # Pi controller-shadow smoke — 2026-08-09
 
+[English](real-use-shadow-2026-08-09.md) | [简体中文](real-use-shadow-2026-08-09.zh-CN.md) · [Terms](real-use-shadow-2026-08-09.terms.yaml)
+
+## Reading the dated observations
+
+The first natural-use observation and later controlled follow-ups are different
+episodes, not one calibration dataset. Counts, guards and reported tests describe
+those checkpoints, not new executions or current acceptance. This review did not
+reopen logs or run Pi, a provider, a daemon or calibration; its current source
+view is separated below.
+
 This is a single natural Agent-use observation, not a calibration dataset or a
 capability score. Terminology and trust boundaries were tightened after this
 run: events originally called `exact-use` are legacy ambiguous observations,
@@ -31,9 +41,12 @@ The eight explicit searches were mostly synonym reformulations of ANN,
 approximate nearest-neighbour, default selection, HNSW, and brute-force search.
 This is evidence of a search/stop loop, not evidence that more retrieval was
 useful. The uncorrected/incomplete run remains an unknown outcome and is not a
-positive training example.
+positive training example. Nine outcome-event rows do not establish nine
+completed user tasks, independent users or successful outcomes.
 
 ## Resulting engineering changes
+
+These are the record's reported follow-ups, not a present-day regression receipt.
 
 - Shadow retrieval events now record actual injected characters separately
   from backend token estimates.
@@ -43,14 +56,16 @@ positive training example.
 - `npm run eval:controller-shadow` audits event and label coverage and refuses
   to claim calibration readiness.
 - The headless Pi helper uses a writable isolated Agent directory, a bounded
-  prompt timeout, and a tool-call ceiling. Its hard timeout covers the entire
-  RPC operation rather than relying on Pi's event-collection timeout. These
+  prompt timeout, and a tool-call ceiling. The timer wraps the prompt/settling
+  operation rather than relying only on Pi's event-collection timeout; it is
+  not a demonstrated whole-helper wall-clock deadline. These
   protect evaluation runs; they do not change product retrieval budgets.
 - The helper now passes one project-local path contract to Pi
   (`NMG_DATA_DIR`, `NMG_PROJECT_DIR`, and `PI_CODING_AGENT_DIR`). It explicitly
   acquires the daemon before starting Pi and shuts it down only when the helper
-  owns it. A timed-out child therefore cannot leave a detached daemon behind;
-  a daemon that predated the helper remains untouched.
+  owns it. The reported policy arranges owned-daemon cleanup on controlled
+  timeout paths while leaving a pre-existing daemon untouched; it is not an
+  all-crash/race guarantee.
 - The helper and report resolve the same project-local `.nmg` because the helper
   explicitly supplies `NMG_DATA_DIR`. Ordinary Pi use is intentionally different:
   without an override, all clients resolve the user-level `~/.nmg` store. A
@@ -64,13 +79,42 @@ The first run was asking for an ANN policy that did not yet exist in the NMG
 store. After the verified project decision was remembered, a second isolated
 run added exactly one automatic retrieval, one use event, and one explicit
 feedback event. Pi labelled the task successful and the injected evidence
-sufficient; it did not perform another synonym-search loop.
+sufficient; it did not perform another synonym-search loop. These are explicit
+Agent task/retrieval judgments, not independently verified claim-support labels.
+The two episodes do not isolate a causal effect of seeding the decision.
 
 The second helper process still failed to exit on its own because Pi's
 `promptAndWait()` event timeout does not bound a stalled prompt RPC. The run was
 terminated through its exact owned process handle, never through a system-wide
-PID heuristic. The helper now wraps the whole operation in a hard timeout and
+PID heuristic. The recorded helper wraps the prompt/settling operation in a hard timeout and
 lets `RpcClient.stop()` terminate only the child it created.
+
+## Current source boundary
+
+This source view is separate from the historical run receipts:
+
+- [`resolveNmgDataDir`](../../../src/cli/data-path.ts) prefers nonempty
+  `NMG_DATA_DIR`, then the caller's fallback (user-level `~/.nmg` by default).
+  A project-local helper run does not validate ordinary-client defaults or every caller.
+- [`pi-control.ts`](../../../scripts/pi-control.ts) uses a `finally` block but
+  awaits `client.stop()` before `shutdownOwnedDaemon()`. Its timer wraps each
+  `promptUntilSettled(...)` call, not startup, later result-fetch calls or cleanup.
+  Cleanup if that await
+  fails or the host exits is not established here; controlled shutdowns are not
+  an all-crash/race guarantee.
+- The [dataset builder](../../../evals/controller-shadow/dataset.ts) requires
+  natural-origin collection, semantic-task IDs, required explicit labels and
+  replayable inputs. Missing `verified_claim_support` may remain as flagged
+  control-label-only rows, not evidence-ranking/budget supervision. The old
+  controlled/ambiguous observations below are not thereby valid training rows.
+- [Calibration](../../../evals/controller-shadow/calibrate.ts) emits a candidate
+  with `eligibleForActivation: false`. The
+  [gate](../../../src/lab/controller-gate.ts) also includes quality, cost and
+  matched-product conditions, not just the historical eight-primary-target
+  condition. An offline pass does not enable runtime modes or supply a reviewed
+  activation receipt. The setup's `NMG_CONTROLLER_SHADOW=1` configures observation
+  collection; a candidate's `eligibleForShadow` is not that logging switch.
+  Neither field is active/default deployment approval.
 
 ## What this does not prove
 
@@ -110,7 +154,7 @@ without treating suppression as task success or evidence sufficiency.
 New retrieval events also preserve the Active Graph query fingerprint, QPP
 decision/components, progressive expansion stages, and per-candidate selection
 scores. `npm run eval:controller-dataset` can therefore join those features with
-exact use, outcome, and explicit feedback, then split whole semantic tasks by
+then-recorded `exact-use` events, outcome, and explicit feedback, then split whole semantic tasks by
 time. At that stage it deliberately returned zero rows: only one partial
 feedback event existed and no semantic task had all four required retrieval
 labels. The later bounded collection follow-up below supersedes that snapshot.
@@ -123,7 +167,7 @@ moment. New events now carry a versioned global/memory/node/edge feature snapsho
 and the AG budget envelope. The dataset builder excludes labelled legacy rows
 that lack either input rather than pretending they are calibratable.
 
-`npm run eval:controller-calibrate` is the now-complete offline mechanism. It
+`npm run eval:controller-calibrate` is the recorded offline-replay mechanism. It
 uses chronological semantic-task splits, trains a fresh candidate, compares it
 with baseline ranking on held-out rows, reports cost observations, and persists
 an auditable non-active artifact with log and rollback fingerprints. Running it
@@ -135,7 +179,8 @@ not a controller failure and not permission to substitute benchmark labels.
 
 The headless helper now accepts repeated conventional `--turn` arguments in one
 Pi process. This preserves one session across the answer/review boundary while
-retaining the existing whole-run timeout, tool-call ceiling, owned-daemon
+retaining the timeout described at that checkpoint (not a current whole-helper
+deadline), tool-call ceiling, owned-daemon
 shutdown, and isolated writable Agent directory. The legacy one-message form is
 unchanged.
 
@@ -157,8 +202,9 @@ The daemon was stopped after every helper run. The
 Agent still decides whether the four labels are observable: silence, normal
 completion, lack of correction, and candidate exposure never become labels.
 
-`npm run eval:controller-dataset` now produces a chronological two-task train /
-one-task validation split with no protocol blockers. This proves the collection
+With the then-current event format, `npm run eval:controller-dataset` reported a
+chronological two-task train / one-task validation split with no protocol blockers.
+That historical result does not establish admission by the current builder. This proves the collection
 and replay boundary, not statistical sufficiency. The latest resulting
 `npm run eval:controller-calibrate` artifact remains a non-active candidate:
 
@@ -179,20 +225,20 @@ The correct product result is continued collection. Three controlled labelled
 tasks are sufficient to exercise the split and fail-closed gate, but not to
 calibrate a routing policy or authorize activation.
 
-The three current task IDs cover only two actual topics (ANN activation and
+The three recorded task IDs cover only two actual topics (ANN activation and
 progressive-disclosure evaluation). They are controlled lifecycle probes, not
 three semantically independent natural tasks. Query hashes must therefore not be
 used as a diversity claim; future calibration needs a materially broader set of
 ordinary Pi work even though the exporter can already form a legal split.
 
-The calibration gate now enforces a stricter distinction mechanically. In
-addition to whole-task chronological splitting, current code derives one
+The calibration gate now enforces a stricter distinction mechanically. At that follow-up, in
+addition to whole-task chronological splitting, the gate was described as deriving one
 conservative primary evidence target per row from the first rank-ordered exact
 record supported by `verified_claim_support`. It requires at least eight
 distinct primary training targets,
 which prevents one multi-evidence task from inflating diversity. Separately, it
 rejects any overlap between the complete training and validation verified-attribution sets,
-including non-primary evidence. The current artifact reports
+including non-primary evidence. The historical artifact reports
 `primaryTrainingTargets=2`, `primaryValidationTargets=1`,
 historical `exactTrainingTargets=7`, `exactValidationTargets=2`, and
 `overlappingExactTargets=1`, so it fails closed even though query-derived task

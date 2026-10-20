@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: approval tier
+    aliases: [content approval level, 批准等级]
+    definition: >-
+      The authority required when a document is wrong: descriptive content needs no approval, checkable properties are owned by the check, and unchecked normative content needs explicit or condition-bound auto acceptance; `unrecorded` marks historical debt.
+      根据文档出错时的后果确定所需权限：描述性内容无需批准，可检查属性由检查负责，无法检查的规范内容需 explicit 或满足严格条件的 auto 接受；`unrecorded` 表示历史债务。
+    owner: docs/decisions/implemented/2026-09-09-approval-tiers.md
+    anchor: Decision
+    status: canonical
+references:
+  - decision record

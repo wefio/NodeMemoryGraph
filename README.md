@@ -1,8 +1,8 @@
 # Node Memory Graph (NMG)
 
-English | [简体中文](README.zh-CN.md)
+English | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
 
-> **Your agent may change. Your memory doesn't have to.****
+> **Your agent may change. Your memory doesn't have to.**
 
 NMG is a local-first, long-term memory layer for AI agents. Durable memory lives
 in one SQLite file on your machine — not in someone's cloud.
@@ -182,7 +182,7 @@ By default, the extension stores shared LTG and Task Board data in
 `~/.nmg/nmg.sqlite`. Set `NMG_DATA_DIR` to use another directory. Project-local
 `.nmg/` data is reserved for isolated STG sessions and controlled/headless runs.
 
-Pi provides [opt-in first-output timing](docs/design/session-memory-lifecycle-hooks-2026-08-10.md#首次输出计时)
+Pi provides [opt-in first-output timing](docs/decisions/implemented/2026-10-04-first-response-timing-is-opt-in.md)
 through `/nmg-latency on|off|status`; it records metadata only and does not change
 recall waiting policy. The hook contract defines slow-recall retention and
 host-event interpretation.

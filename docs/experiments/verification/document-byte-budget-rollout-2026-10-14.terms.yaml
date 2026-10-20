@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: active-design byte budget
+    aliases: [活动设计字节预算]
+    definition: >-
+      The threshold exercised by this historical rollout: 15,000 UTF-8 bytes for active design Markdown, including new nested topics, with separate archived/evidence roles and 5,000 B AGENTS/decision-index limits. The linked CI contract, not this result record, owns current policy.
+      该历史推广测量的阈值：活动设计 Markdown（含新建嵌套主题）为 15,000 UTF-8 字节，归档／证据保留各自角色，AGENTS／决策索引为 5,000 B。当前策略由所链接的 CI 契约拥有，而非由本结果记录定义。
+    owner: docs/experiments/verification/document-byte-budget-rollout-2026-10-14.md
+    anchor: Original-input refusal
+    status: canonical
+  - term: responsibility relocation
+    aliases: [职责迁移]
+    definition: >-
+      Moving whole responsibilities and splitting oversized chapters at coherent existing subsections. The reported 106 outputs comprise 21 original entries, 84 new budgeted design topics and one dated historical-reading record, without raising the ceiling.
+      整体迁移职责，并在连贯的既有小节处拆分过长章节。报告的 106 个输出包含 21 个原始条目、84 个新预算内设计主题和一份带日期的历史阅读记录，未抬高上限。
+    owner: docs/experiments/verification/document-byte-budget-rollout-2026-10-14.md
+    anchor: Responsibility relocation
+    status: canonical
+  - term: textual atom conservation
+    aliases: [文本原子守恒]
+    definition: >-
+      This rollout's normalized comparison of original nonblank source atoms and obligation-row multiplicities. Its normalization did not validate inherited metadata scope and missed the recorded draft-status propagation error; it is not a semantic-equivalence or writing-quality proof.
+      本次推广对原始非空源原子与义务行重数的归一化比较。该归一化不验证继承的元数据作用域，漏掉了所记的草稿状态传播错误；它不证明语义等价或正文质量。
+    owner: docs/experiments/verification/document-byte-budget-rollout-2026-10-14.md
+    anchor: Verification and limits
+    status: canonical

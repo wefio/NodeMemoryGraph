@@ -1,6 +1,6 @@
 # When a post-mortem record becomes a rule
 
-[中文](2026-09-13-postmortem-promotion-policy.zh-CN.md)
+[中文](2026-09-13-postmortem-promotion-policy.zh-CN.md) · [Terms used](2026-09-13-postmortem-promotion-policy.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit

@@ -1,0 +1,14 @@
+version: 2
+terms:
+  - term: reader-local acknowledgement candidate
+    aliases: [local acknowledgement candidate, 读取者本地确认候选]
+    definition: >-
+      A candidate produced only when a reader's exact rendered fragment matches the prepared output; it is not authentication, task acceptance or a disclosure-ledger write.
+      仅当某读取者提供的精确渲染片段与准备好的输出匹配时产生的候选；它不是认证、任务验收或 disclosure ledger 写入。
+    owner: docs/decisions/implemented/2026-10-07-shared-information-output.md
+    anchor: Decision
+    status: canonical
+references:
+  - working state
+  - evidence
+  - prepared information output

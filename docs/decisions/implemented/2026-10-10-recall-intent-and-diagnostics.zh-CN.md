@@ -1,6 +1,6 @@
 # 召回意图与有界降级诊断
 
-[English](2026-10-10-recall-intent-and-diagnostics.md)
+[English](2026-10-10-recall-intent-and-diagnostics.md) · [术语](2026-10-10-recall-intent-and-diagnostics.terms.yaml)
 
 **Status:** implemented
 **Approved:** auto

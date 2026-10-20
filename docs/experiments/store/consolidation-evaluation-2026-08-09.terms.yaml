@@ -1,0 +1,37 @@
+version: 2
+terms:
+  - term: consolidation policy-coverage audit
+    aliases: [STG consolidation gate audit, consolidation 策略覆盖审计]
+    definition: >-
+      The 2026-08-09 historical audit that counted which official LoCoMo evidence items meet the default consolidation gates and how many retract afterwards; it measures policy coverage and reversibility on benchmark QA tasks, not the readiness, precision or default activation of automatic consolidation.
+      2026-08-09 的历史审计，统计有哪些官方 LoCoMo evidence 条目满足默认 consolidation gate、以及之后有多少被撤回；它衡量的是 benchmark QA 任务上的策略覆盖与可逆性，不是自动 consolidation 的可用性、精度或默认启用。
+    owner: docs/experiments/store/consolidation-evaluation-2026-08-09.md
+    anchor: Protocol
+    status: canonical
+  - term: retention hysteresis
+    aliases: [retention thresholds, 保留滞回阈值]
+    definition: >-
+      Using lower thresholds for retention than for consolidation. With the report's `mean >= 0.65` and conservative lower bound `>= 0.35`, the 75 sampled candidates retracted after two to four contradictions; that observation does not guarantee every eligible candidate survives one contradiction.
+      保留阈值低于 consolidation 阈值的安排。在报告的 `mean >= 0.65`、保守下限 `>= 0.35` 条件下，75 个样本候选在两至四次矛盾后撤回；该观察不保证所有已合格候选都能承受一次矛盾。
+    owner: docs/experiments/store/consolidation-evaluation-2026-08-09.md
+    anchor: Result
+    status: canonical
+  - term: false-promotion precision label
+    aliases: [negative-label source, false-promotion 精度标签]
+    definition: >-
+      An attributable negative judgment about a wrongly consolidated memory. Absence from one QA evidence list is not a contradiction or a reliable negative relevance label, so recurrence alone cannot estimate false-promotion precision or authorize automatic consolidation.
+      对错误 consolidation 记忆的可归因负向判断。未出现在某个 QA 的 evidence 列表中，不等于被反驳，也不是可靠的负相关性标签；仅靠重现次数不能估计错误 consolidation 的精度或授权自动 consolidation。
+    owner: docs/experiments/store/consolidation-evaluation-2026-08-09.md
+    anchor: Engineering conclusion
+    status: canonical
+  - term: cross-store state-projection audit
+    aliases: [STG/LTG projection check, 跨 store 状态投影审计]
+    definition: >-
+      The record's check of newest-value projection across separate STG/LTG stores and older-value availability under an as-of query. It examines current-state replacement separately from posterior consolidation hysteresis; the linked state owners define the contract.
+      本记录对独立 STG/LTG store 之间最新值投影、以及 as-of 查询中旧值可得性的检查。它把当前状态替换与后验 consolidation 滞回分开考察；契约由所引用的状态 owner 定义。
+    owner: docs/experiments/store/consolidation-evaluation-2026-08-09.md
+    anchor: Engineering conclusion
+    status: canonical
+references:
+  - same-scope supersession
+  - state supersession

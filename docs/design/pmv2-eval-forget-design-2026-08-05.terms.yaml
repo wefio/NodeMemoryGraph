@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: forget rendering boundary
+    aliases: [withdrawn-content redaction, 撤销内容渲染边界]
+    definition: >-
+      Preserve only the approved identity metadata for a forgotten memory in agent-facing context while replacing its statement with a withdrawn-content marker.
+      在 Agent-facing context 中仅保留 forgotten memory 获准展示的身份元数据，并将 statement 替换为撤销内容标记。
+    owner: docs/design/pmv2-eval-forget-design-2026-08-05.md
+    anchor: Forget rendering decision
+    status: canonical
+  - term: multiple-choice overlap metric
+    aliases: [ask_to_forget overlap count, 多选重叠指标]
+    definition: >-
+      A count of answer text overlapping withdrawn phrases; when choices themselves contain those phrases and answers have no provenance, it cannot establish that the model relied on retrieved memory.
+      答案文本与撤销短语重叠的计数；若选项本身含有这些短语且答案无来源信息，就无法证明模型依赖了检索记忆。
+    owner: docs/design/pmv2-eval-forget-design-2026-08-05.md
+    anchor: Reported PersonaMem v2 sample
+    status: canonical

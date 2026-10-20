@@ -1,0 +1,19 @@
+version: 2
+terms:
+  - term: publication joins the caller's transition
+    aliases: [port-threaded publication, 发布加入调用方 transition]
+    definition: >-
+      In the reported slice, publication inside an existing transition joins it through the store-issued port, and publication there without the port is refused. Standalone publication outside a transition may open the store boundary; the conditional refusal is not a requirement to pass a port to every call.
+      在报告切片中，既有 transition 内的发布经 store 签发的 port 加入；在该处缺少 port 时会被拒绝。Transition 外的独立发布可打开 store 边界；该条件性拒绝不表示所有调用都必须传 port。
+    owner: docs/experiments/execution/ooo-round-transition-2026-09-13.md
+    anchor: What changed
+    status: canonical
+  - term: refactor-induced breakage outside the touched file
+    aliases: [moved-table collateral test, 重构波及未触碰文件的失败]
+    definition: >-
+      The failure mode recorded here: a refactor that moves a table can break a test in a file the refactor never touched, and this one reached the pushed branch because the adaptation was left out of the commits rather than caught by a gate.
+      此处记录的失败模式：搬动表的重构可能破坏该重构从未触碰的文件里的测试；这一例之所以进入已推送的分支，是因为相关改写被漏在提交之外，而不是被某个 gate 捕获。
+    owner: docs/experiments/execution/ooo-round-transition-2026-09-13.md
+    anchor: Evidence (re-runnable)
+    status: canonical
+references: []

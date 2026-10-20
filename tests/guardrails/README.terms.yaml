@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: guardrail
+    aliases: [临时护栏]
+    definition: >-
+      A blocking test that carries an explicit removal or promotion plan: it lives in `tests/guardrails/<id>/` beside a `guardrail.yaml` declaring id, status, reason, review date and exit criteria, and may block CI only while active. It is not a permanent design decision; once the exit criteria are met the test is deleted or the behavior is promoted to a durable safety or contract test.
+      带有明确移除或晋升计划的阻断型测试：位于 `tests/guardrails/<id>/`，旁边有声明 id、status、reason、复查日期与退出条件的 `guardrail.yaml`；只在 active 期间可以阻断 CI。它不是永久设计决策；退出条件满足后删除该测试，或把该行为晋升为持久的安全/契约测试。
+    owner: tests/guardrails/README.md
+    anchor: Temporary guardrails
+    status: canonical
+references:
+  - gate
+  - evidence

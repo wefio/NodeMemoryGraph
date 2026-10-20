@@ -1,0 +1,35 @@
+version: 2
+terms:
+  - term: matched empty-memory control
+    aliases: [empty-retrieval-context control, 空记忆对照, 空检索上下文对照]
+    definition: >-
+      A control arm that keeps every question, rubric, prompt, reader and judge setting but replaces the retrieved context with an empty string, so it measures NMG versus no retrieved evidence rather than versus an official raw-session or full-history reader.
+      保留全部问题、rubric、prompt、reader 与 judge 设置，只把检索上下文替换为空字符串的对照组；它衡量的是 NMG 对比无检索 evidence，而不是对比官方 raw-session 或 full-history reader。
+    owner: docs/experiments/benchmarks/beam-100k-evaluation-2026-08-13.md
+    anchor: Matched empty-memory control
+    status: canonical
+  - term: bounded fixed-run context claim
+    aliases: [single-run BEAM value claim, 单次 run 上下文价值结论]
+    definition: >-
+      The claim that retrieved NMG context improved answers on one pinned BEAM 100K run; it does not isolate retrieval, storage, graph or QPP mechanisms and does not transfer to other datasets or configurations without reproduction.
+      在这组固定的 BEAM 100K run 上，检索到的 NMG 上下文提升了答案的结论；它不区分检索、存储、图或 QPP 各机制的作用，未经复现也不适用于其他数据或配置。
+    owner: docs/experiments/benchmarks/beam-100k-evaluation-2026-08-13.md
+    anchor: Interpretation and next gate
+    status: canonical
+  - term: non-representative pipeline wall time
+    aliases: [wall-time caveat, 非代表性流水线耗时]
+    definition: >-
+      Reported stage timing dominated by upstream connection failures, a 600-second request timeout and retries; it is a record of that run, not a steady-state retrieval benchmark or a general timing guarantee.
+      由上游连接失败、600 秒请求超时与重试主导的阶段耗时报告；它只记录那次 run，不是稳态检索基准或通用耗时保证。
+    owner: docs/experiments/benchmarks/beam-100k-evaluation-2026-08-13.md
+    anchor: Pipeline timing and engineering findings
+    status: canonical
+  - term: token-ledger merge requirement
+    aliases: [cross-resume token accounting, 跨续跑 token 记账]
+    definition: >-
+      The requirement that a resumed run merge token usage across processes instead of overwriting the ledger file; the single-process NMG arm and the resumed empty-memory arm are therefore not comparable by tokens.
+      续跑 run 必须跨进程合并 token 用量、而不是覆盖账本文件的要求；因此单进程的 NMG 组与需要续跑的空记忆组不能按 token 比较。
+    owner: docs/experiments/benchmarks/beam-100k-evaluation-2026-08-13.md
+    anchor: Interpretation and next gate
+    status: canonical
+references: [QPP]

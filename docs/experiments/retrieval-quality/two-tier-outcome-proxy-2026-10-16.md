@@ -1,111 +1,154 @@
-# 两层召回影子对照：执行代理与容量压力
+# Two-tier recall shadow comparison: executed-action proxies and capacity pressure
 
-## 结果与运行边界
+[English](two-tier-outcome-proxy-2026-10-16.md) | [简体中文](two-tier-outcome-proxy-2026-10-16.zh-CN.md) · [Terms](two-tier-outcome-proxy-2026-10-16.terms.yaml)
 
-本轮未找到留后数据支持的有用分档子集，保留 FIFO，不把分档接入运行路径。
-在推断词源的 8 词、共同 1 小时年龄上界回放中，池峰值只有 2，容量淘汰为 0。
-只改变满池淘汰顺序的两层方案因此没有产生不同决策的机会；这不是“所有分层无效”的证据。
+## Results and run boundaries
 
-这是[首轮词汇标定](recall-tier-calibration-2026-10-16.md)的后续离线实验，
-不重复分布拟合，不用层内方差代替策略收益。没有运行时代码或配置变更，
-没有共享重启、Pi 重载、额外评测模型／embedding 调用或新增在线采集器。
-2026-10-16 的只读状态检查返回 `recall_gate.activation = null`：本轮没有启用在线试点，
-也没有验证当前 Pi 已加载哪一版桥接代码，不能称 FIFO 词池已在线运行。
+This round found no held-out-backed useful tier subset, so FIFO stays and tiers are not
+wired into the runtime path. In the 8-word, 1-hour shared-age replay with inferred word
+sources, the pool peak was only 2 and capacity evictions were 0. A two-tier scheme that only
+changes full-pool eviction order therefore never had the chance to produce a different
+decision; that is not evidence that all tiers are useless.
 
-## 数据与升级后的代理
+This is the offline follow-up to the
+[first vocabulary calibration](recall-tier-calibration-2026-10-16.md): it repeats no
+distribution fitting and uses no within-tier variance as a stand-in for policy benefit. There
+was no runtime code or configuration change, no shared restart, no Pi reload, no extra
+evaluation model or embedding call, and no new online collector. A read-only status check on
+2026-10-16 returned `recall_gate.activation = null`: this round enabled no online pilot and
+did not verify which bridge version the current Pi has loaded, so the FIFO word pool cannot
+be called live.
 
-读取同项目目录自 2026-08-01 起的 116 个会话文件固定完整行前缀。
-114 个分支通过完整最新祖先链检查，2 个损坏文件整份排除，不猜测其工具动作。
-丢弃 27 条非当前分支记录；不将早于文件头创建时点的 6,577 条用户记录再次计数。
-该保守时间过滤用于避免导入历史重复计数，也可能漏掉文件初始上下文。
-得到 112 个有可用原生记录的会话、2,367 条记录，其中当前静态入口规则回放跳过 2,188 条。
-用户角色不独立证明真人来源；静态规则回放不重建历史 task-anchor／宿主调度。
+## Data and the upgraded proxy
 
-| 可核对信号                                       | 数量 | 解释边界                                         |
-| ------------------------------------------------ | ---: | ------------------------------------------------ |
-| 新时间窗内普通搜索请求                           |  160 | 请求不是执行或需要的证明                         |
-| 直接请求／结果配对且有成功结构化检索结果         |  140 | 包括空候选，不作质量标签                         |
-| 嵌套调用执行元数据与既有 recall journal 唯一关联 |   17 | 同会话、原样查询、父调用时间区间；不解析展示文本 |
-| 搜索后成功精取返回同一记录的链路                 |   18 | 主代理；不是模型阅读、采纳、事实支持或真实需要   |
-| 仅有精取调用执行、缺少返回载荷的额外链路         |    2 | 次级信号，不能提升为主代理                       |
-| 原文／实际搜索词可对齐的影子准入                 |   44 | 42 个不同词片段，来自 25 个会话                  |
+A fixed, complete line prefix was read from 116 session files under the same project
+directory from 2026-08-01 on. 114 branches passed the full latest-ancestor chain check and 2
+corrupt files were excluded entirely rather than having their tool actions guessed. 27 rows
+from non-current branches were dropped, and the 6,577 user rows older than each file's
+creation time were not counted again. That conservative time filter avoids importing
+historical double counts and may also miss a file's initial context. It yielded 112 sessions
+with usable native records and 2,367 rows, of which the current static entry-rule replay
+skipped 2,188. The user role does not independently prove a human author, and static rule
+replay does not reconstruct historical task anchors or host scheduling.
 
-关联优先使用显式 graph；没有 graph 时，只接受同回合、检索先于精取、记录 ID 唯一匹配。
-1 个多源关联保持歧义，不重复计功；精取结果为空时不从请求参数补造“返回成功”。
-嵌套 `ok` 是执行元数据，不是代码里的调用语法；缺少参数或返回载荷仍保持未知。
-没有精取、不再出现或自动命中均不标成“不需要／有收益”。
+| Checkable signal | Count | Interpretation boundary |
+| --- | ---: | --- |
+| Ordinary search requests inside the new time window | 160 | a request is not proof of execution or need |
+| Direct request/result pairs with a successful structured search result | 140 | includes empty candidates, carries no quality label |
+| Nested call execution metadata uniquely joined to an existing recall journal row | 17 | same session, verbatim query, parent-call time span; displayed text is not parsed |
+| Successful post-search exact get returning the same record | 18 | main proxy; not model reading, adoption, factual support or real need |
+| Extra chains with only the exact-get call and no return payload | 2 | secondary signal, not promoted to main proxy |
+| Shadow admissions whose original text/matched search term align | 44 | 42 distinct word fragments from 25 sessions |
 
-词源不再从整个词库均匀抽取：每个静态跳过回合，取首个可核对普通搜索与用户原文
-共同出现、通过共享 literal／引用／秘密过滤的词片段；优先有效的声明提词，否则取最长
-1–4 个 ICU 词单元片段（3–80 字符）。27 个来源有多个可选片段。
-本样本没有可用的声明提词来源，44 次都是推断，不是实际已准入的 LLM 提词。
-最长片段偏好是工程假设；升级执行代理并没有消除提词选择的不确定性。
+Joins preferred an explicit graph; without one, only same-turn, search-before-get and a unique
+record-ID match were accepted. One multi-source join stays ambiguous and is not counted twice;
+an empty exact-get result is never backfilled into a "successful return" from request
+parameters. A nested `ok` is execution metadata, not the call syntax in code; missing arguments
+or payloads stay unknown. No exact get, no later appearance and an automatic hit are never
+labelled "not needed" or "beneficial".
 
-## 两层对照与预设子集
+Word sources are no longer drawn uniformly from the whole vocabulary: for each static skipped
+turn, the first checkable word fragment that appears both in an ordinary search and in the
+user's original text and passes the shared literal/reference/secret filters is taken, preferring
+a valid declared cue and otherwise taking the longest 1–4 ICU word-unit fragment of 3–80
+characters. 27 sources had several candidate fragments. This sample had no usable declared-cue
+source, so all 44 are inferences, not actually admitted LLM cues. Preferring the longest
+fragment is an engineering assumption, and the upgraded proxy does not remove cue-selection
+uncertainty.
 
-- 对照：按准入次序 FIFO。候选：普通／保护两层，满池先退最老普通词，层内仍 FIFO。
-  当前词周期内，分别用至少 1 次或 2 次不同普通查询的成功精取跟进作为保护条件。
-  它是弱行为计数，不是需要概率、稳定性判定或永久晋级。
-- 同准入来源、容量、寿命、每回合最多一次浅查机会、候选 5／0 hops 的资源约束。
-  自动命中不准入、不晋级、不续命；重复提词及精取也不更新出生时间。
-  迟到信号不能复活或晋级替换后的词周期。
-- 只比较容量淘汰，不同时改变 TTL、触发资格或查询阈值。
-  1 小时为共同年龄上界影子假设，不是完整重建产品共同父租约；不推断跨会话寿命。
-- 用户输入到达时先冻结预测，再处理本回合提词／精取。
-  主覆盖要求：当时保留的词匹配原输入，其过去成功精取的记录 ID 与本回合精取返回 ID 相交。
-  这是记录重用机会，不是实际重新检索命中、模型阅读或答对；同 ID 也不保证事实版本相同。
-  另列“任意保留词命中输入”的宽松机会上界，不把当前回合准入回填成召回成功。
-- 预先定义全体、既往容量淘汰压力、压力且普通／保护词混合、过去关键词已重复出现四个子集。
-  分组只用输入到达前的参考 FIFO 状态，不用当前精取结果挑组。
+## Two-tier comparison and prespecified subsets
 
-设计在策略回放前固定。首版按完整会话起点切分，但审计发现两个训练会话的观察跨过留后边界；
-整段剔除这 2 个会话／174 条记录，保留原报告，不据留后收益调整保护阈值或子集。
-最终训练 76 个会话／1,471 条记录，留后 34 个会话／722 条记录，边界为
-`2026-09-10T05:21:54.189Z`；训练的原生输入及相关记忆动作观察都早于边界。
-会话块仍不保证独立任务，固定历史准入带也不是新策略运行后会自然出现的反事实轨迹。
+- Control: FIFO by admission order. Candidate: an ordinary/protected two-tier scheme that
+  evicts the oldest ordinary word first and keeps FIFO inside a tier. Within the current word
+  cycle, the protection condition is a successful exact-get follow-up on at least 1 or 2
+  distinct ordinary queries. It is a weak behaviour count, not a probability, a stability
+  verdict or permanent promotion.
+- Same admission sources, capacity, lifetime, at most one shallow-lookup chance per turn, and
+  the five-candidate/0-hop resource constraint. Automatic hits neither admit, promote nor
+  extend life; repeated cues and exact gets do not update birth time. A late signal cannot
+  revive or promote a replaced word cycle.
+- Only capacity eviction is compared; TTL, trigger eligibility and query thresholds are not
+  changed at the same time. The 1-hour common age bound is a shadow assumption, not a full
+  reconstruction of the product's shared parent lease; no cross-session lifetime is inferred.
+- When user input arrives the prediction is frozen first, then that turn's cue and exact get are
+  processed. Main coverage requires a currently retained word to match the original input and
+  the record IDs of its past successful exact gets to intersect this turn's exact-get returned
+  IDs. That is a record-reuse opportunity, not an actual re-retrieval hit, model reading or a
+  correct answer; the same ID does not guarantee the same fact revision. A looser
+  "any retained word matched the input" upper bound is reported separately, and current-turn
+  admission is never backfilled into a recall success.
+- Four subsets were defined in advance: all turns, prior capacity-eviction pressure, pressure
+  with a mixed ordinary/protected pool, and past keywords that already repeated. Grouping uses
+  only the reference FIFO state before input arrival, never the current exact-get result.
 
-查询额度先用训练段普通搜索数的 25% 向上取整，再按训练每个合格回合的额度率映射留后，
-得到 13／7 次；另跑无额度上限敏感性。这是资源假设，不是货币最优或产品 quota。
-只在训练段挑严格提高主覆盖且子集内、全体查询数均不增加的候选；并列保留 FIFO。
-留后支持还要求收益不局限于一个会话块，不能据此声称自然收益。
+The design was fixed before policy replay. The first version split at whole session starts, but
+an audit found two training sessions whose observations crossed the held-out boundary; both
+sessions and their 174 rows were removed entirely, the original report was kept, and no
+protection threshold or subset was adjusted based on held-out benefit. Final training is 76
+sessions / 1,471 rows and held-out 34 sessions / 722 rows with a boundary at
+`2026-09-10T05:21:54.189Z`; all training native inputs and related memory-action observations
+predate it. Session blocks still do not guarantee independent tasks, and the fixed historical
+admission band is not a counterfactual trajectory that a new policy would naturally produce.
 
-## 回放结果
+Query budget started from 25% of the training segment's ordinary searches, rounded up, then
+mapped to held-out by the per-eligible-turn rate observed in training, giving 13/7; an
+unbudgeted sensitivity run was also done. That is a resource assumption, not a monetary
+optimum or product quota. Candidates were selected on the training segment only when they
+strictly increased main coverage without increasing query counts inside a subset or overall;
+ties kept FIFO. Held-out support also required the benefit not to be confined to one session
+block, and no natural benefit may be claimed from it.
 
-以下次数均为回放机会／额度计数，没有实际发起这些额外查询。
+## Replay results
 
-| 8 词／1 小时影子基准           |  训练 | 留后 |
-| ------------------------------ | ----: | ---: |
-| 合格跳过回合                   | 1,352 |  674 |
-| 主精取跟进链路                 |     7 |   10 |
-| FIFO 及两种两层方案查询机会    |     7 |    1 |
-| 主记录重用覆盖                 |     0 |    0 |
-| 宽松词命中覆盖主链路的机会上界 |     0 |    0 |
-| 容量淘汰                       |     0 |    0 |
+All counts below are replayed opportunities or budget units; none of these extra queries was
+actually issued.
 
-完整收集的 18 条主链路有 1 条随跨界会话剔除，故上表合计 17。
-主覆盖为零不能解释为没有记忆需要，也不能证明 FIFO 词 cue 有益。
-共同词源的稀疏性、推断片段选择及 literal 重复不足同样限制结果。
+| 8-word / 1-hour shadow baseline | Training | Held-out |
+| --- | ---: | ---: |
+| Eligible skipped turns | 1,352 | 674 |
+| Main exact-get follow-up chains | 7 | 10 |
+| Query opportunities for FIFO and both two-tier schemes | 7 | 1 |
+| Main record-reuse coverage | 0 | 0 |
+| Upper bound of loose word-match coverage of main chains | 0 | 0 |
+| Capacity evictions | 0 | 0 |
 
-12 个设置（容量 8／4／2 × 年龄上界 1／24 小时 × 有／无 quota），各跑三种策略。
-8 词时延长至 24 小时，峰值仍只有 3；唯一出现容量竞争的是人为压到 2 词且放宽到
-24 小时：训练淘汰 2 次、留后 1 次，留后压力子集 19 个回合／1 条主链路，仍无覆盖增益。
-四个预设子集均未选出优于 FIFO 的训练候选，无可宣布的留后优势。
-人工容量／寿命压力不能变成当前 8 词假设下的有效子集证据。
-空压力子集不计算置信区间；无压力下两方案相同是结构限制，不是总体等效性估计。
+One of the 18 fully collected main chains was removed with the cross-boundary sessions, so the
+table totals 17. Zero main coverage cannot be read as "no memory need", nor as proof that FIFO
+word cues help. Sparsity of shared word sources, inferred-fragment selection and insufficient
+literal repetition also limit the result.
 
-## 后续取舍与验证范围
+Twelve settings (capacity 8/4/2 × age bound 1/24 hours × with/without quota) each ran three
+policies. Extending to 24 hours at 8 words still peaked at 3; the only capacity contention
+appeared when capacity was artificially squeezed to 2 words and the bound widened to 24 hours:
+2 training evictions, 1 held-out eviction, a held-out pressure subset of 19 turns / 1 main
+chain, and still no coverage gain. None of the four prespecified subsets selected a training
+candidate better than FIFO, so no held-out advantage can be announced. Artificial
+capacity/lifetime pressure cannot become valid subset evidence under the current 8-word
+assumption. Empty pressure subsets get no confidence interval, and two schemes matching without
+pressure is a structural limit, not an estimate of overall equivalence.
 
-保留 FIFO；暂不继续调整切点、层数或长期／永久规则。
-值得再次比较的是自然出现容量竞争、且淘汰对象已有独立普通精取跟进的场景，
-而不是在无压力样本上继续拟合比例。需要真实已准入提词及后续结果，不能用推断词或自动命中补齐。
-可复用现有普通搜索参数、会话事件和原生日志；本轮未实现后台影子评估、轮询或第二采集器。
+## Follow-up choices and verification range
 
-21 项私有计算自检通过，含请求／结果绑定、歧义／空结果、无当前回合自证、无续命、
-过期／替换 fencing、硬额度、跨界会话剔除、无压力两策略相同；合成竞争样例能检出同查询数增益，
-但不作为自然效果证据。新脚本 LSP 检查与旧采样接口兼容性另有收据；它们不替代收益证明。
-未运行在线 A/B、真实退词后重学、provider-send、模型读取确认、完整父租约或净总成本评测。
+FIFO stays; cutting points, tier counts and long-term/permanent rules are not adjusted further
+for now. What deserves a later comparison is a scenario where capacity contention arises
+naturally and the evicted item already has an independent ordinary exact-get follow-up, rather
+than fitting further ratios on an unpressured sample. It needs real admitted cues and later
+outcomes; inferred words or automatic hits cannot substitute. Existing ordinary search
+parameters, session events and native logs are reusable; this round implemented no background
+shadow evaluation, polling or second collector.
 
-私有复跑包位于 `.nmg/verification/recall-tier-calibration/two-tier/`，包含设计、
-有界源前缀哈希、聚合数据、比较矩阵、自检、跨界修正前结果及失败收据；
-共享历史／词源读取辅助供旧采样器复用。公开报告不携带原始消息或记忆正文，
-私有词片段和输入数据不随仓库发布，不能声称 fresh clone 可以直接复跑私有样本。
+Twenty-one private computation self-checks passed, covering request/result binding,
+ambiguity/empty results, no current-turn self-evidence, no life extension, expiry/replacement
+fencing, hard budget, cross-boundary session removal and matching policies without pressure; a
+synthetic contention sample can detect equal-query-count gains but is not natural-effect
+evidence. LSP checks on the new scripts and compatibility with the old sampling interfaces have
+separate receipts; they do not replace benefit proof. No online A/B, real post-eviction
+relearning, provider send, model-read confirmation, full parent lease or net total cost
+evaluation was run.
+
+The private rerun package lives in `.nmg/verification/recall-tier-calibration/two-tier/` with the
+design, hashed bounded source prefixes, aggregated data, the comparison matrix, self-checks,
+pre-correction results and failure receipts; the shared history/word-source read helper is
+reusable by the old sampler. The public report carries no raw messages or memory statements,
+and private word fragments and input data are not published with the repository, so a fresh
+clone cannot replay the private sample.

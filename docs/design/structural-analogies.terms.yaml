@@ -1,0 +1,25 @@
+version: 2
+terms:
+  - term: structural analogy
+    aliases: [structural correspondence, 结构类比]
+    definition: >-
+      An explanatory comparison between an NMG implementation structure and a mathematical theorem, physical model, or classic algorithm; it does not derive a product requirement or prove that the compared systems share guarantees.
+      对 NMG 实现结构与数学定理、物理模型或经典算法所作的解释性比较；它不推导产品要求，也不证明被比较系统具有相同保证。
+    owner: docs/design/structural-analogies.md
+    anchor: Mathematical / physical structural analogies
+    status: canonical
+  - term: structural similarity depth
+    aliases: [similarity depth, 结构相似深度]
+    definition: >-
+      The analogy scale used here: isomorphism means element-by-element correspondence; strong similarity means the overall structure and key properties correspond with detail differences; weak similarity means only the abstract pattern is shared.
+      本文采用的类比尺度：isomorphism 表示逐元素对应；strong similarity 表示整体结构和关键性质对应但细节不同；weak similarity 表示仅共享抽象模式。
+    owner: docs/design/structural-analogies.md
+    anchor: Mathematical / physical structural analogies
+    status: canonical
+references:
+  - state supersession
+  - co-retrieval signal
+  - co-retrieval structural analogy
+  - multi-channel retrieval analogy
+  - memory residence
+  - Active Graph

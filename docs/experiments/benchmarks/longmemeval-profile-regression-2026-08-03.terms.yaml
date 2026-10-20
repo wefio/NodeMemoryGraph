@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: embedding profile
+    aliases: [query instruction template, embedding 配置模板]
+    definition: >-
+      A model/query formatting configuration used when generating embeddings; a profile mismatch can silently degrade ranking even when vector coverage is complete.
+      生成 embedding 时使用的模型／query 格式配置；即使向量覆盖完整，profile 不匹配也可能静默损害排序。
+    owner: docs/experiments/benchmarks/longmemeval-profile-regression-2026-08-03.md
+    anchor: Root cause and source correction
+    status: canonical
+  - term: historical benchmark baseline
+    aliases: [reproduced historical score, 历史 benchmark 基线]
+    definition: >-
+      A score tied to a particular dataset, configuration, and run; matching a source-level default does not constitute a new reproduction receipt.
+      绑定特定数据集、配置与 run 的分数；源码默认值匹配并不构成新的复现回执。
+    owner: docs/experiments/benchmarks/longmemeval-profile-regression-2026-08-03.md
+    anchor: Historical LongMemEval matrix (n=479, any-evidence recall)
+    status: canonical

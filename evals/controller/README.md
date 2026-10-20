@@ -1,5 +1,7 @@
 # Differentiable controller evaluation
 
+[English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
+
 This experiment isolates retrieval control from answer generation. It uses the
 official evidence identifiers supplied by LoCoMo and BEAM and performs no model
 API calls.

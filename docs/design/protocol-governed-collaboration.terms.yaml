@@ -1,0 +1,102 @@
+version: 2
+terms:
+  - term: sub-protocol inventory
+    aliases: [parts and gaps index, 子协议清单]
+    definition: >-
+      This document's role: a list of which sub-protocols of protocol-governed collaboration exist, which one is complete, which are missing, and which of those already have a name in distributed systems; each part's owner is named in its row, and where this document and an owner disagree the owner wins, because this is an index and not a second specification.
+      本文的角色：列出协议化协作有哪些子协议、哪一个是完整的、哪些缺失，以及这些（已有的与缺失的）在分布式领域里有哪些已经拥有名字；每一部分的归属写在它那一行，本文与归属方不一致时以归属方为准，因为它是索引而不是第二份规格。
+    owner: docs/design/protocol-governed-collaboration.md
+    anchor: "Protocol-governed collaboration: the parts, the gaps, and the distributed systems behind them"
+    status: canonical
+  - term: commit boundary
+    aliases: [adopter clause, 提交边界]
+    definition: >-
+      The missing clause that decides who may adopt a discussion into a run; distributed systems call it the commit boundary — the single point that makes a discussed arrangement binding. Its mechanism (expiry, serial promotion, the dispatch loop) exists while the responsibility does not.
+      缺失的条款：谁有权把一次讨论收编成一次 run；分布式系统称它为提交边界——让一份商定的安排生效的那个唯一点。机制（`expiry`、串行晋升、派发循环）存在，责任不存在。
+    owner: docs/design/protocol-governed-collaboration.md
+    anchor: The gaps, and the concepts available for them
+    status: canonical
+  - term: orphan reaper and restart responsibility
+    aliases: [restart responsibility, 孤儿回收与重启责任]
+    definition: >-
+      The missing responsibility for restarting work after a lease lapses; the ownership row records it as "mechanism complete; the responsibility to restart work is not assigned", and the distributed-systems name for it is orphan reaper or restart responsibility.
+      租约失效后重启工作所缺的责任；归属行把它记为「机制完整；谁来重启工作这份责任没有归属」，分布式领域里的名字是孤儿回收或重启责任。
+    owner: docs/design/protocol-governed-collaboration.md
+    anchor: The gaps, and the concepts available for them
+    status: canonical
+  - term: legality read
+    aliases: [legality(), program legality answer, 合法性读取, 程序合法性答复]
+    definition: >-
+      The board port's `legality()` answer under the declared plan and current facts — the ordered legal set, the room left, and a named cause per unit — which changes no state and therefore gives read-only precondition admission control a home; what is still missing is the asker without a workspace, because a plan is compiled from the caller's files and a process holding only the store cannot compute the answer. The read chooses no Agent, adopts nothing, judges nothing and wakes nobody.
+      黑板端口在声明的 plan 与当前事实下给出的 `legality()` 答案——有序合法集合、剩余余量、以及每个单元各自一条具名原因——它不改变任何状态，因此让只读前置条件准入控制有了家；仍然缺的是没有工作区的提问者，因为计划由调用方的文件编译而来，只持有 store 的进程算不出这份答案。该读取不选择 Agent、不采纳、不裁决，也不唤醒。
+    owner: docs/design/protocol-governed-collaboration.md
+    anchor: The gaps, and the concepts available for them
+    status: canonical
+  - term: declarative policy
+    aliases: [named constraint declaration, 声明式策略]
+    definition: >-
+      A named constraint a plan enables, which the shared planner reads instead of holding the preference itself, so a plan that enables nothing runs one unit per session; what still has no clause is who may enable a constraint and what a constraint is allowed to change, since one that changed which units are legal would be a different kind of answer.
+      计划可启用的具名约束，共享规划器读这份声明而不是自己持有偏好，因此什么都没启用的计划就是每个会话一个单元；仍无条款的是谁有权启用一条约束、以及一条约束允许改变什么，因为一条会改变哪些单元合法的约束会是一种不同性质的答案。
+    owner: docs/design/protocol-governed-collaboration.md
+    anchor: The gaps, and the concepts available for them
+    status: canonical
+  - term: read guarantees
+    aliases: [monotonic reads, read-your-writes, 读保证]
+    definition: >-
+      The unwritten statement of what a board reader may assume: reads are cursor-based and may lag, so it is unstated whether a reader may assume monotonic reads or read-your-writes, and across one agent's own sequence of sessions whether causal consistency holds.
+      尚未写下的说明：黑板读者可以假设什么。读基于游标、可能落后，所以读者是否可以假设单调读或读己所写并未说明，跨同一个 agent 自己一串会话是否具备因果一致性也未说明。
+    owner: docs/design/protocol-governed-collaboration.md
+    anchor: The gaps, and the concepts available for them
+    status: canonical
+  - term: fenced mutex
+    aliases: [mutual exclusion across runs, 带围栏的互斥锁]
+    definition: >-
+      The missing rule for several runs competing for one worktree or one file, currently handled only by practice (a throwaway worktree per arm) and by the slot budget: a lock whose holder cannot be believed after its lease lapses.
+      多个 run 争抢同一个工作树或同一个文件所缺的规则，目前只靠实践（每条臂一个一次性 worktree）与槽位预算应付：一种在其租约失效之后持有者就不能再被相信的锁。
+    owner: docs/design/protocol-governed-collaboration.md
+    anchor: The gaps, and the concepts available for them
+    status: canonical
+  - term: in-doubt transaction
+    aliases: [undecidable artifact, 存疑事务]
+    definition: >-
+      The missing resolution for work left in doubt: a delivery nobody judged is `undecidable` when the run ends, but an artifact left in doubt across runs has no clause — the fact is known, the outcome is not, and somebody must resolve it or write down why not.
+      对悬而未决之活所缺的归属：没人裁决的交付在 run 结束时算 `undecidable`，但跨 run 仍悬着的产物没有条款——事实已知、结果未知，必须有人解掉它，或者写下为什么不。
+    owner: docs/design/protocol-governed-collaboration.md
+    anchor: The gaps, and the concepts available for them
+    status: canonical
+  - term: attempt fencing
+    aliases: [attempt N+1, attempt 围栏]
+    definition: >-
+      The mechanism that answers lease expiry correctly: a new holder starts attempt N+1, which voids the previous attempt's artifact and verdict; expiry is a failure detector that reports a suspicion and never a fact, and this property must not be traded away for convenience.
+      正确回答租约过期的机制：新的持有者从第 N+1 次尝试开始，作废上一代的产物与裁决；过期是故障检测器，给出的是疑似而从不是事实，这条性质不能为了方便让掉。
+    owner: docs/design/protocol-governed-collaboration.md
+    anchor: Three analogies that mislead
+    status: canonical
+  - term: protocol-governed collaboration
+    aliases: [协议治理协作]
+    definition: >-
+      An arrangement in which Agents coordinate through a published protocol and the program, rather than model discussion, owns the mechanics and decisions of that coordination.
+      Agent 通过已发布协议协作，由程序而非模型讨论拥有协作机制与决策的安排。
+    owner: docs/decisions/implemented/2026-09-20-name-the-collaboration-protocol.md
+    anchor: Decision
+    status: canonical
+  - term: Task-Unit Protocol
+    aliases: [任务单元协议]
+    definition: >-
+      The collaboration sub-protocol that declares work as task units and governs adoption into a run, claims, delivery, independent judging and runtime-owned facts.
+      将工作声明为任务单元，并约束其纳入 run、claim、交付、独立裁决及运行时拥有事实的协作子协议。
+    owner: docs/decisions/implemented/2026-09-20-name-the-collaboration-protocol.md
+    anchor: Decision
+    status: canonical
+  - term: "startable task set"
+    aliases: ["可启动任务集"]
+    definition: >-
+      The currently legal task set cut to the declared slot budget by a read-only legality computation; returning it neither assigns Agents nor starts execution.
+      由只读合法性计算得到、按声明槽预算截取的当前合法任务集；返回该集合不分配 Agent，也不启动执行。
+    owner: docs/decisions/implemented/2026-09-20-the-program-answers-legality.md
+    anchor: "Decision"
+    status: canonical
+references:
+  - Task Board
+  - receipt
+  - claim outcome

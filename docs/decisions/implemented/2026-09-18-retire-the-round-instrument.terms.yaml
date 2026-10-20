@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: round instrument retirement
+    aliases: [round-instrument removal, 轮次仪器退役]
+    definition: >-
+      The decision to move round-owned evidence and types to their surviving owners and delete a research instrument that had no product caller, while retaining the plan driver and the experiment record.
+      将轮次持有的证据与类型移交给仍在使用的 owner，并删除无产品调用方的研究仪器，同时保留计划驱动器和实验记录的决定。
+    owner: docs/decisions/implemented/2026-09-18-retire-the-round-instrument.md
+    anchor: Decision
+    status: canonical
+references:
+  - task unit
+  - Task Board

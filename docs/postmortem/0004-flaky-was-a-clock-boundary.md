@@ -1,6 +1,6 @@
 # 0004 - "Flaky" was a clock boundary
 
-[中文](0004-flaky-was-a-clock-boundary.zh-CN.md)
+[中文](0004-flaky-was-a-clock-boundary.zh-CN.md) · [Terms used](0004-flaky-was-a-clock-boundary.terms.yaml)
 
 **Status:** resolved
 

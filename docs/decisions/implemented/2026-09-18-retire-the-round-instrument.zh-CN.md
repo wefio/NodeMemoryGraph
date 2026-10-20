@@ -1,9 +1,10 @@
 # 退役轮次仪器：有家的分发到各家，其余删掉
 
-[English](2026-09-18-retire-the-round-instrument.md)
+[English](2026-09-18-retire-the-round-instrument.md) · [术语](2026-09-18-retire-the-round-instrument.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit
+**Supersedes:** [实验臂自建驱动器](2026-09-17-arms-get-their-own-driver.zh-CN.md)
 **Relates to:** [任务单元语义设计](../../design/task-unit-semantics.md)、
 [其义务台账](../../design/task-unit-semantics-obligations.md)、
 [实验臂自建驱动器](../implemented/2026-09-17-arms-get-their-own-driver.md)、

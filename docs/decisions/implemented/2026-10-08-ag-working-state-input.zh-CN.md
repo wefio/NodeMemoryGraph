@@ -4,7 +4,7 @@
 **Approved:** explicit
 **Relates to:** [持续工作状态](2026-10-08-ag-working-state.zh-CN.md)
 
-[English](2026-10-08-ag-working-state-input.md)
+[English](2026-10-08-ag-working-state-input.md) · [术语](2026-10-08-ag-working-state-input.terms.yaml)
 
 ## Problem
 

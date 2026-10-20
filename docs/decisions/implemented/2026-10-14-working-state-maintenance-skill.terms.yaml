@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: working-state content maintenance
+    aliases: [工作状态正文维护]
+    definition: >-
+      A short procedure for selecting, updating and retiring a temporary working-state snapshot without turning it into a journal or a completion claim.
+      用于选择、更新和退役临时工作状态快照的简短流程，不把它变成日志或完成声明。
+    owner: docs/decisions/implemented/2026-10-14-working-state-maintenance-skill.md
+    anchor: Decision
+    status: canonical
+references:
+  - working state

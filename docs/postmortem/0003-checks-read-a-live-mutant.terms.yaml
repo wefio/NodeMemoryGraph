@@ -1,0 +1,14 @@
+version: 2
+terms:
+  - term: live mutant
+    aliases: [active mutant, 活跃 mutant]
+    definition: >-
+      A deliberately incorrect implementation substituted into a target file during a mutation sweep and not yet restored; checks that read the target during this interval measure the mutant.
+      变异扫描期间替换进目标文件、尚未还原的刻意错误实现；此期间读取该文件的检查测量的是 mutant。
+    owner: docs/postmortem/0003-checks-read-a-live-mutant.md
+    anchor: Root cause
+    status: canonical
+references:
+  - post-mortem
+  - guardrail
+  - gate

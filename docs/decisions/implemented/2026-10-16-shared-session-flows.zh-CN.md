@@ -1,6 +1,6 @@
 # 共享会话流转归入集成层
 
-[English](2026-10-16-shared-session-flows.md)
+[English](2026-10-16-shared-session-flows.md) · [术语](2026-10-16-shared-session-flows.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: accepted fact predicate
+    aliases: [acceptedFact(), 接受事实谓词]
+    definition: >-
+      The single deterministic condition used by scheduling and dependency-release paths to decide whether a task's artifact is currently accepted.
+      供调度与依赖释放路径共同使用的唯一确定性条件，用于判断任务 artifact 当前是否 accepted。
+    owner: docs/experiments/execution/ooo-acceptance-predicate-2026-09-13.md
+    anchor: What was actually wrong
+    status: canonical
+  - term: delivered versus accepted
+    aliases: [delivery is not acceptance, 已交付不等于已接受]
+    definition: >-
+      Delivery records that an artifact or entry arrived; acceptance additionally requires the current verifier/reviewer verdict and matching digest/revision conditions.
+      Delivery 仅记录 artifact 或 entry 已到达；accepted 还要求当前 verifier/reviewer verdict 与匹配的 digest／revision 条件。
+    owner: docs/experiments/execution/ooo-acceptance-predicate-2026-09-13.md
+    anchor: Behaviour, stated plainly
+    status: canonical

@@ -1,0 +1,32 @@
+version: 2
+terms:
+  - term: pull-request completion checklist
+    aliases: [完成检查项]
+    definition: >-
+      The pre-merge list in the pull-request template that the author walks through before merging: local quality commands, Repository Control Plane evidence writes, and CI observation. It is a submitter-side ordering of checks, not evidence that a check passed, and it does not replace CI.
+      pull request 模板里合并前由提交者自己逐项核对的清单：本地质量命令、Repository Control Plane 证据写入、以及 CI 观察。它是提交者侧的检查顺序，不是某项检查已通过的证据，也不替代 CI。
+    owner: .github/pull_request_template.md
+    anchor: Completion checklist
+    status: canonical
+  - term: CI completion confirmation
+    aliases: [CI 完成确认]
+    definition: >-
+      Reading CI to completion through an observer such as a forge-status check or a CI status snapshot whose conclusion and failure list are recorded, instead of polling individual jobs or treating "looks like it is running" as "passed". A status snapshot is observation-only and does not authorize or decide a merge.
+      通过 forge-status 检查或记录着结论与失败列表的 CI 状态快照等观察手段把 CI 读到完成，而不是逐个 job 轮询、也不把"看起来在跑"当作"已通过"。状态快照只是观察，不构成授权，也不决定合并。
+    owner: .github/pull_request_template.md
+    anchor: CI completion confirmation
+    status: canonical
+  - term: guardrail bookkeeping in the template
+    aliases: [模板中的护栏记账]
+    definition: >-
+      The template requirement that a non-trivial change carries a decision record and that the not-verified section is always filled, with the literal `None.` when nothing was left unverified; the template states the declaration's own limits and does not make an all-green gate sufficient.
+      模板要求：非平凡改动必须携带决策记录，且未验证项段落始终要填，确实没有遗留时写 `None.`。模板自身声明了该声明的作用边界，门禁全绿也不会让它变得多余。
+    owner: .github/pull_request_template.md
+    anchor: Not verified
+    status: canonical
+references:
+  - unverified surface
+  - Repository Control Plane
+  - in-flight goal entry
+  - gate
+  - evidence

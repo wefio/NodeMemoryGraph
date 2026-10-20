@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: activation-gated chain expansion
+    aliases: [激活门控链扩展, 激活门控]
+    definition: >-
+      Appending a chain member only when its activation — proximity to the nearest ranked hit, plus query-term relevance, plus a weighted static-importance prior — reaches the gate threshold, bounded by a hard member cap.
+      仅当成员的激活值（到最近排序命中的邻近度、查询词相关性、加权静态重要性先验之和）达到门控阈值时才追加该链成员，并受硬性成员上限约束。
+    owner: docs/experiments/retrieval-quality/chain-activation-2026-08-25.md
+    anchor: "Results (BEAM, R@20 / any@20 / all@20 / ctx chars)"
+    status: canonical
+  - term: density escalation
+    aliases: [密度升级]
+    definition: >-
+      A proposed trigger that expands a hit-spanning segment when at least two ranked members belong to one chain. Membership is a routing cue, not independent claim support; the report's diagnostic counted ranked golds rather than all possible seeds.
+      同一链中至少有两个已排序成员时扩展命中跨度区间的提案。成员归属是路由线索，不是独立主张支持；报告诊断统计的是已排序 gold，而非所有可能的扩展起点。
+    owner: docs/experiments/retrieval-quality/chain-activation-2026-08-25.md
+    anchor: "Follow-up: density-escalation precondition check (zero-cost, 2026-08-25)"
+    status: canonical
+  - term: first-hit recall per relevant session
+    aliases: [每个相关会话的首命中召回, 首命中召回]
+    definition: >-
+      Whether a relevant session has any ranked member that can seed within-session expansion. The seed need not itself be gold, so counting only ranked golds does not measure all possible chain triggers.
+      相关会话是否存在可作为会话内扩展起点的已排序成员；起点本身不必是 gold，因此仅统计已排序 gold 不能衡量所有可能的链触发。
+    owner: docs/experiments/retrieval-quality/chain-activation-2026-08-25.md
+    anchor: "Follow-up: density-escalation precondition check (zero-cost, 2026-08-25)"
+    status: canonical

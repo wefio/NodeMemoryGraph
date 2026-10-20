@@ -1,9 +1,9 @@
 # NMG documents
 
-[中文](README.zh-CN.md)
+[中文](README.zh-CN.md) · [Terms used](README.terms.yaml)
 
-This directory is the durable documentation surface for NMG. Its files have
-different jobs and must not compete as independent sources of truth.
+Use this index to choose a reading path or the owner of a documentation change.
+Start with the task below; the authority rules resolve conflicting explanations.
 
 ## Ownership and authority
 
@@ -44,7 +44,19 @@ copying the whole implementation narrative.
 
 ## Directory guide
 
-- **Start here:** [concept map](guides/concept-map.md) for terminology and owner
+| Reader task | Start here | What it answers |
+| --- | --- | --- |
+| Use memory for the first time | [First recall](guides/first-recall.md) | The runnable path from a write to a recall |
+| Understand a product concept | [Concept map](guides/concept-map.md) | Local explanations and links to behavior contracts |
+| Find a repository-process term | [Terminology lookup](design/documentation-governance.md#yaml-files-and-query-contract) | Canonical words, aliases, namespaces and their owners; a bounded miss is not absence |
+| Change behavior or architecture | [System model](design/design.md) and the relevant topic | The owning contract, including conditions and exceptions |
+| Check implementation evidence | [Completion audit](design/completion-audit.md) | What was implemented and validated, with evidence limits |
+| Write or reorganize documentation | [Maintenance workflow](#maintenance-workflow) | Where to edit, what to preserve and how to verify |
+
+The directory routes below locate specialized material; they are not a required
+reading sequence.
+
+- **Product introduction:** [concept map](guides/concept-map.md) for terminology and owner
   routes, then the executable [first-recall tutorial](guides/first-recall.md).
 - **Shared coordination design:** [event records and Agent task status](design/board-event-records.md) owns the additive event-space contract; delivery status stays in the completion audit.
 - **`guides/`** — non-normative navigation and tested walkthroughs.
@@ -61,7 +73,7 @@ copying the whole implementation narrative.
   [summaries + stacked](experiments/retrieval-quality/summaries-2026-08-18.md).
   Related records include the
   [node-summary acceleration research](experiments/retrieval/node-summary-accelerated-retrieval-2026-08-19.md)
-  and the current [benchmark result summary](experiments/benchmark-results.md).
+  and the retained [historical benchmark snapshot](experiments/benchmark-results.md).
 - **`postmortem/`** — numbered incident records with a failure-class index; read
   [its index](postmortem/README.md) before writing one.
 
@@ -73,36 +85,63 @@ owner accepts the result.
 
 ## Bilingual policy
 
-NMG is bilingual without requiring mechanically identical translations.
+All non-temporary reader-facing documentation requires English and Chinese
+versions. This includes retained designs, decisions, experiments, incident
+records, operating guides, Skills and their references. Being internal, draft or
+archived is not an exemption. A maintained TODO index is not disposable merely
+because its filename contains `temporary`.
 
-- Public entry documents are paired: root `README.md` / `README.zh-CN.md`, this
-  index, the decision index, and the post-mortem index.
-- New or materially changed decision notes and post-mortem records should
-  normally be paired. A missing translation is a maintenance warning, not a
-  blocker while the project is evolving.
-- Technical experiments, temporary investigations, and internal topic notes may
-  use the language that best preserves the work.
-- Paired documents link to each other and preserve the same decisions, warnings,
-  and user-visible commands. Paragraph count and wording need not match.
+Organize each topic as three related artifacts with one subject basename:
+
+- `topic.md`: English text;
+- `topic.zh-CN.md`: Chinese text;
+- `topic.terms.yaml`: the terms used by both versions, with locally owned
+  definitions and canonical-term references to definitions owned elsewhere.
+
+Link the language versions to each other and the shared term file. The versions
+must preserve the same facts, obligations, conditions, warnings and commands;
+paragraph count and wording need not match. A term reference does not create a
+second definition. Preserve correct literal APIs, paths, values and commands;
+change them only for an actual contract change or a verified correction of an
+incorrect example.
+
+Only explicitly disposable working material with a stated cleanup condition may
+remain single-language. If it is retained as documentation, bring it into the
+three-artifact form. Raw data, logs, source code and machine-input fixtures are
+not prose translations; preserve their original bytes and document them separately.
+
+Existing missing translations or term companions are remediation debt, not
+implicit exemptions. Updating the policy does not establish coverage completion.
+The CI table below still describes the admitted mechanical checks and severities;
+a passing check does not certify complete bilingual or terminology coverage.
 
 ## Maintenance workflow
+
+The accepted [documentation-governance direction](design/documentation-governance.md)
+explains reader review, distributed YAML definitions and the limits of each check.
+It does not replace the workflow or the CI policy below.
 
 Use [the `doc-maintenance` Skill](../skills/doc-maintenance/SKILL.md) whenever a
 change affects behavior, architecture, evaluation evidence, public instructions,
 or the document layout. Run `npm run docs:check` before committing documentation
-changes. The check intentionally enforces only structural errors; translation
-drift and missing decision translations are warnings for human review. In CI,
-only public/canonical entry breakage and malformed decision records block the
-build; internal and experimental document issues remain advisory.
+changes. The command runs structural verification and document-group completeness checks.
+Translation meaning and drift remain review responsibilities; missing group
+members in the admitted corpus are errors. In CI,
+public/canonical entry breakage, malformed decision records, and structural
+hygiene in active designs and Skill Markdown block the build. Other checks retain
+their separate error/warning scopes below; passing them does not establish prose
+quality or semantic equivalence.
 
 ## CI contract
 
 This section is the policy owner for automated documentation checks. Change this
-table before changing `scripts/verify-docs.mts`; the script implements these
-rules and must not invent additional policy.
+table before changing `scripts/verify-docs.mts` or
+`scripts/verify-document-groups.ts`; the scripts implement these rules and must
+not invent additional policy.
 
 | Rule                                                                                                                               | Scope                                                                                                                                               | CI result     |
 | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| Non-empty ATX headings and sections, and unique normalized sibling titles outside fenced code and HTML comments | all active `docs/design/**/*.md` (excluding `docs/design/archived/`) and all `skills/**/*.md`; required documents `docs/design/documentation-governance.md`, `docs/design/ooo-execution-bootstrap.md`, `skills/doc-maintenance/references/reader-review.md` must still exist | error |
 | English/Chinese entry files both exist                                                                                             | root README, docs index, decision index, post-mortem index                                                                                          | error         |
 | H1 and local links are valid                                                                                                       | root README, docs index, normative design baseline, completion audit, decision indexes and records, post-mortem index and records, each Skill entry | error         |
 | Filename, unique lifecycle location, exact status, and non-empty required sections match the decision contract                     | decision records                                                                                                                                    | error         |
@@ -110,17 +149,36 @@ rules and must not invent additional policy.
 | Skill frontmatter contains a name matching its directory and a non-empty description                                               | each `skills/<name>/SKILL.md`                                                                                                                       | error         |
 | H1 and local links are valid                                                                                                       | all other docs and Skill references                                                                                                                 | warning       |
 | Content documents live under `design/`, `decisions/`, `experiments/`, or `postmortem/`                                             | direct children of `docs/` other than README and AGENTS                                                                                             | warning       |
-| Paired documents exist, link to each other, and retain broadly aligned heading structures                                          | bilingual pairs                                                                                                                                     | warning       |
+| English, Chinese and terms companions are regular files; orphan companions also fail | root README and all Markdown/terms companions under `docs/` and `skills/`, including archives and new nested topics | error |
+| Paired documents link to each other and retain broadly aligned heading structures                                          | bilingual pairs                                                                                                                                     | warning       |
 | Run-report filenames end in `-YYYY-MM-DD.md`; rolling summaries and notes use `-results.md` or `-notes.md`                         | documents under `experiments/`                                                                                                                      | warning       |
 | Explicit decision supersession metadata uses valid local links in both directions                                                  | decision records that declare supersession                                                                                                          | warning       |
-| Standing rule docs stay within a byte budget (rules 2,000 words ~ 15,000 B; AGENTS.md and indexes 5,000 B)                         | AGENTS.md, each high-read `skills/*/SKILL.md`, the decision index                                                                                   | error         |
+| Standing rule entries stay within their existing UTF-8 byte budget: Skill entries 15,000 B; AGENTS.md and decision index 5,000 B | AGENTS.md, all `skills/*/SKILL.md` entries, the decision index | error |
+| Active design reading units stay within 15,000 UTF-8 bytes; new nested topic files inherit the same ceiling | all Markdown under `docs/design/`, excluding `docs/design/archived/` | error |
 | Translation quality, design correctness, experimental conclusions, prose style, and whether a failure class was promoted to a rule | all documents                                                                                                                                       | not automated |
+
+Group discovery uses the union of English, Chinese and terms files, not a
+migration list. Removing both prose files cannot hide a remaining terms file.
+Symlinked directories are not traversed; symlinked group members do not count as
+regular files. The sole disposable exception is the
+[cleanable run scratch](experiments/execution/archive/ooo-arms-2026-09-19/speculation-earm/run2-2026-09-19T05-40-04-311Z/CLEANABLE-scratch-2026-09-19.md),
+only while it has no companions and retains its stated cleanup condition. A new
+`CLEANABLE` filename is not an exemption. Reader-facing files outside this
+admitted corpus still follow the bilingual policy; this check does not establish
+their coverage or validate translation meaning, YAML semantics, or confirmation
+freshness. Existing link and glossary checks retain their own scope.
 
 An error means the repository's documented public or normative interface is
 broken in a mechanically reproducible way. A warning is maintenance input for an
 Agent or reviewer and must not fail CI.
 
-The byte budget covers the always-read entry of a Skill, not every file under it.
+Design documents grow by routing whole responsibilities to named topics, not by
+raising the ceiling or moving excess text into an unbudgeted design subdirectory.
+Keep required conditions, exceptions and dependencies together; re-root links and
+check incoming anchors after a move. Historical designs and experimental source
+evidence keep their own roles and are not assigned the active-design ceiling.
+
+The Skill byte budget covers its always-read entry, not every file under it.
 When an entry approaches its ceiling, route its occasionally-needed sections into
 `skills/<name>/references/` and name each trigger in the entry ([
 decision](decisions/implemented/2026-09-18-skill-grows-by-routing.md)), rather

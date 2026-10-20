@@ -1,0 +1,100 @@
+version: 2
+terms:
+  - term: retrieval layers
+    aliases: [resident/automatic/agent-directed, 检索三层]
+    definition: >-
+      The three-layer construction of the Active Graph, separate from both storage tiers and the STG/LTG lifecycle: a very small resident seed of critical constraints and stable profile information placed into every relevant AG, a bounded automatic recall layer selected from STG and LTG by current query, task, scope, time and budget, and an Agent-directed recall layer of compact headers/cues that let the model call `nmg_search` and expand through `nmg_get`; both dynamic layers share the same indexed records.
+      Active Graph 的三层构建，与两个存储层和 STG/LTG 生命周期都不同：一个非常小的常驻种子（关键约束与稳定画像信息）放入每个相关 AG；一个有界自动召回层，按当前查询、任务、作用域、时间与预算从 STG 和 LTG 选取；以及一个 Agent 主导的召回层，由紧凑 header／线索构成，让模型调用 `nmg_search` 并通过 `nmg_get` 展开；两个动态层共享同一批已索引记录。
+    owner: docs/design/design/progressive-retrieval.md
+    anchor: Progressive retrieval
+    status: canonical
+  - term: memory gate
+    aliases: [retrieve/cue/none, 记忆门]
+    definition: >-
+      The harness-side gate that first chooses `retrieve`, `cue` or `none`, where `none` must not search or inject dynamic long-term memory, so self-contained turns such as code inspection, tests, calculations and formatting remain memory-free; explicit Chinese temporal recall cues include both `之前` and `先前`, equivalent past-state questions use the same retrieval decision, and the gate may retain bounded task anchors so a terse continuation recalls the immediately preceding task without treating every substantive prompt as a history query.
+      宿主侧的先行门，选择 `retrieve`、`cue` 或 `none`；`none` 不得检索或注入动态长期记忆，因此代码检视、测试、计算与格式化等自足 turn 保持无记忆；显式中文时间召回线索同时包含 `之前` 与 `先前`，等价的过去状态问题使用同一检索决策，且该门可以保留有界任务锚点，使简短续问能召回紧邻的前一任务而不把每个实质 prompt 都当作历史查询。
+    owner: docs/design/design/progressive-retrieval.md
+    anchor: Progressive retrieval
+    status: canonical
+  - term: surface anchor
+    aliases: [contentless trigram retrieval, 表面锚点]
+    definition: >-
+      Contentless trigram retrieval for explicit quoted phrases, paths, versions, IDs, error codes, code-like identifiers and configured recall triggers, where NFKC normalization preserves equivalent surface forms while punctuation remains searchable; anchors are admitted beside semantic candidates before the shared AG budget and projection, plain prose produces no surface anchor solely from word overlap, and arbitrary model-generated regex is not a relevance ranker and must not scan the entire store by default.
+      针对显式引用短语、路径、版本、ID、错误码、类代码标识符与已配置 recall trigger 的无内容 trigram 检索；NFKC 规范化保留等价表面形式，标点仍可检索；锚点在共享 AG 预算与投影之前与语义候选并列准入，普通散文不会仅因词重叠产生表面锚点，而任意模型生成的 regex 不是相关性排序器，也不得默认扫描整个 store。
+    owner: docs/design/design/progressive-retrieval.md
+    anchor: Progressive retrieval
+    status: canonical
+  - term: QPP actuation
+    aliases: [QPP1, QPP2, search recommendation, QPP 执行]
+    definition: >-
+      The three independently configurable actions of the optional QPP control plane over the same Active Graph retrieval path: QPP1 predicts how broad the first candidate pool should be and can observe without acting or allocate a bounded initial Fibonacci tier, QPP2 operates only inside the candidate pool to continue progressive inspection and decide which headers are individually visible versus folded, and search recommendation converts insufficient automatic recall into an advisory signal that never invokes a tool by itself.
+      可选 QPP 控制面在同一 Active Graph 检索路径上的三个可独立配置的动作：QPP1 预测首个候选池应有多宽，可以只观察不行动或分配一个有界的初始 Fibonacci 层；QPP2 只在候选池内部运作，继续渐进检视并决定哪些 header 单独可见、哪些折叠；search recommendation 把不足的自动召回转成咨询信号，且绝不自行调用工具。
+    owner: docs/design/design/progressive-retrieval.md
+    anchor: QPP actuation and progressive disclosure
+    status: canonical
+  - term: progressive disclosure mass
+    aliases: [p_i, local mass, 渐进披露质量分配]
+    definition: >-
+      QPP2's progressive disclosure rather than deletion: listwise necessity scores `s_i` are converted to relative odds `o_i = clamp(s_i) / (1 - clamp(s_i))` and normalised local mass `p_i = o_i / sum_j(o_j)`, the smallest score-ranked set reaching `NMG_QPP2_RETAINED_MASS` (default `0.98`) is individually visible, Top-1 is a fixed anchor, folded candidates stay in the Active Graph and remain unfoldable, and the mass is a query-local relative allocation rather than a calibrated probability.
+      QPP2 的渐进披露而非删除：把 listwise 必要性分数 `s_i` 转换为相对几率 `o_i = clamp(s_i) / (1 - clamp(s_i))` 与归一化本地质量 `p_i = o_i / sum_j(o_j)`，达到 `NMG_QPP2_RETAINED_MASS`（默认 `0.98`）的最小按分数排序集合单独可见，Top-1 是固定锚点，被折叠的候选留在 Active Graph 且仍可展开，而该质量是查询本地的相对分配而非已校准概率。
+    owner: docs/design/design/progressive-retrieval.md
+    anchor: QPP actuation and progressive disclosure
+    status: canonical
+  - term: candidate generation pipelines
+    aliases: [inspectable stages, 候选生成流水线]
+    definition: >-
+      The staged composition of independent signals — Inbox/Delta plus surface anchors plus fine-grained record semantics, word-level FTS only as a zero-configuration or degraded fallback, optional node/leaf semantic routing at measured large scale, optional graph expansion, scope/time/truth filtering, type-aware reranking and diversity, bounded Active Graph projection, then compact headers and selected exact evidence — kept as inspectable stages rather than one `searchContext` ranking formula, with AG hard-budget selection, main-candidate ranking, projection selection and duplicate marking as pure functions while storage reads and optional expansion remain orchestration.
+      独立信号的分层组合——Inbox/Delta 加表面锚点加细粒度记录语义、仅作为零配置或降级兜底的词级 FTS、在已测量的大规模上可选的 node/leaf 语义路由、可选图扩展、作用域／时间／真值过滤、按类型重排与多样性、有界 Active Graph 投影，最后是紧凑 header 与选中的精确证据——保持为可检视阶段而非单个 `searchContext` 排序公式；其中 AG 硬预算选择、主候选排序、投影选择与重复标记是纯函数，而存储读取与可选扩展仍是编排。
+    owner: docs/design/design/progressive-retrieval.md
+    anchor: Progressive retrieval
+    status: canonical
+  - term: query formation boundary
+    aliases: [caller-generated queries, HyDE, 查询形成边界]
+    definition: >-
+      NMG accepts a primary query plus optional caller-generated `queries[]` produced by query decomposition, alternate wording, domain knowledge or a hypothetical answer (HyDE); HyDE is therefore not an NMG subsystem, and the retrieval boundary owns stable-ID deduplication, primary-query priority and the shared record/token budget, appending unique secondary-query results after the primary ranking, while weighted reciprocal rank fusion is a deterministic Lab primitive and reverse retrieval remains an offline probe.
+      NMG 接受一个主查询加可选的调用方生成 `queries[]`，后者可由查询分解、改写、领域知识或假设答案（HyDE）产生；因此 HyDE 不是 NMG 子系统，而检索边界拥有稳定 ID 去重、主查询优先与共享记录／token 预算，把唯一的次要查询结果追加在主排序之后，同时加权倒数排名融合是确定性的 Lab 原语，逆向检索仍是离线探针。
+    owner: docs/design/design/progressive-retrieval.md
+    anchor: Query formation and route fusion boundary
+    status: canonical
+  - term: QPP
+    aliases: [查询规划预测]
+    definition: >-
+      Optional query-planning control that estimates retrieval sufficiency and can govern bounded expansion, folding or search advice; it is not a separate store or retrieval engine.
+      可选查询规划控制，用于估计检索充分性，并可控制有界扩展、折叠或搜索建议；它不是独立存储或检索引擎。
+    owner: docs/design/design/progressive-retrieval.md
+    anchor: QPP actuation and progressive disclosure
+    status: canonical
+  - term: pre-budget lexical tie-break
+    aliases: [pre-budget lexical resolution, 预算前词法并列裁决]
+    definition: >-
+      The retained source-branch mechanism ordering equal-score adjacent FTS5 records before caps and AG selection using IDF-weighted query-word coverage; it is historical experimental evidence, not current mainline behavior.
+      保留的源分支机制，在 cap 与 AG 选择前按 IDF 加权查询词覆盖度排列相邻等分 FTS5 记录；它是历史实验证据，不是当前主线行为。
+    owner: docs/experiments/retrieval-quality/lexical-budget-2026-10-10.md
+    anchor: Historical pre-budget mechanism
+    status: canonical
+  - term: lexical tie-break
+    aliases: [lexical tie resolution, 词法并列排序]
+    definition: >-
+      Mainline FTS5-only reordering of adjacent exactly equal-score evidence after AG budget selection, using IDF-weighted query-word coverage in statements and bounded evidence; selected membership, non-tied order, QPP and hybrid retrieval do not change.
+      主线仅 FTS5 路径在 AG 预算选择后，按 statement 与有界证据中的 IDF 加权查询词覆盖度重排相邻完全等分证据；成员、非并列顺序、QPP 与 hybrid 检索不变。
+    owner: docs/design/design/progressive-retrieval.md
+    anchor: Progressive retrieval
+    status: canonical
+  - term: explicit recall intent
+    aliases: [explicit-recall synonym, 显式召回意图]
+    definition: >-
+      A recognized query signal that opens the explicit-recall path; synonym choice must be held constant when comparing extension or retrieval behavior.
+      用于触发显式召回路径的已识别查询信号；比较 extension 或检索行为时必须保持同义词选择一致。
+    owner: docs/decisions/implemented/2026-10-10-recall-intent-and-diagnostics.md
+    anchor: Decision
+    status: canonical
+  - term: hybrid SQL bind order
+    aliases: ["混合检索SQL绑定顺序"]
+    definition: >-
+      The positional SQL contract that all WHERE parameters precede repeated ORDER BY ID bindings, preserving conjunctive scope and inclusive event-time filtering. 全部 WHERE 参数先于重复 ORDER BY ID 绑定的位置契约，保留 scope 合取与含端点事件时间过滤。
+    owner: docs/design/design/progressive-retrieval.md
+    anchor: Progressive retrieval
+    status: canonical
+references:
+  - Active Graph
+  - memory chain

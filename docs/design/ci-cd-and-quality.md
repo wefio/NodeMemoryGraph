@@ -1,33 +1,77 @@
-# 代码质量与 CI/CD
+# Code quality and CI/CD
 
-**Created:** 2026-07-20  
-**Updated:** 2026-10-13
-**Authority:** 仓库测试、CI 与 Agent 开发流程契约
+[中文](ci-cd-and-quality.zh-CN.md) · [Terms used](ci-cd-and-quality.terms.yaml)
 
-NMG 的测试负责阻止可复现错误，不负责冻结尚未验证的设计。产品契约、研究测量与故障注入使用不同执行轨道，避免 benchmark 便利逻辑反向定义产品行为。
+**Created:** 2026-07-20
 
-## 0. 仓库治理不变量
+**Updated:** 2026-10-15
+**Authority:** Repository test, CI and Agent development contracts
 
-以下原则约束开发控制面、Agent 工作流与维护自动化；它们不建立新的状态库或审批层：
+Tests prevent reproducible failures; they do not freeze unvalidated designs.
+Product contracts, research measurements and fault injection use separate tracks,
+so benchmark conveniences do not define product behavior.
 
-1. **Repository as environment**：主动把仓库塑造成 Agent 可导航、可理解、可验证的工作环境。稳定入口、owner、route、Skill 和验证命令应让 Agent 从目标路径找到下一步；反复需要口头解释的隐含知识应回到其既有 owner，而不是积累新的旁路说明。
-2. **Proof before trust**：Agent 的完成声明、PR 文本或本地输出都不是修改成立的证据。目标测试、独立 verifier、干净环境 CI，以及适用时的真实外部运行共同提供分层 proof；每项证据只证明它实际测量的边界，benchmark 或单次绿灯不能替代架构审查。
-3. **Explicit state transitions**：工作、PR、decision、guardrail 与 release 使用显式状态和转换条件。自动化可以请求转换，但不能用自然语言的“完成”“ship it”绕过前置检查、授权、失败状态或回滚路径。
-4. **Aggressive entropy detection, conservative destruction**：主动发现已完成临时工作、过期 guardrail、重复测试、无消费者兼容层、陈旧分支和失效抽象。缓存、生成物和有明确期限的临时产物可按契约自动清理；源码、历史证据、公开接口、issue 和 PR 只能先形成可审查候选，再依据 owner、proof 与授权处理。
-5. **One fact, one owner**：每类状态只有一个权威写入者，其他组件只能观察、缓存或引用。GitHub 拥有 PR/CI 状态，Contract 拥有 desired state，observer 拥有当前观测，verifier/receipt 拥有验证事实；NMG 只提供记忆与通知价值，不竞争这些事实源。
+## Read by task
 
-治理目标是减少下一位 Agent 的重新发现成本，同时阻止自动化把一次局部便利固化为永久架构。只把可机械验证的边界写成测试；语义合理性、删除授权和架构取舍继续由 owner 与 review 判断。
+| Task | Entry | Decision it supports |
+| --- | --- | --- |
+| Choose product, research or fault injection | [Verification tracks](ci-cd-and-quality/verification-tracks.md) | Blocking status and what did not run. |
+| Find a change's owner and route | [Repository context](ci-cd-and-quality/repository-context.md) | Where to edit and which checks apply, not architectural correctness. |
+| Run and interpret local checks | [Verification pipeline](#agent-verification-pipeline) | Actual scope, command status, timeout and failure attribution. |
+| Determine narrow or full | [Gate selection](ci-cd-and-quality/repository-control-plane/lightweight-verification.md) | Check surface and escalation conditions. |
+| Review a receipt | [Verifier and receipts](ci-cd-and-quality/repository-control-plane/verifier-and-receipts.md) | Identity bindings and proof limits. |
+| Use independent reviewed rules | [Trusted baseline](ci-cd-and-quality/repository-control-plane/trusted-baseline-verification.md) | Installation, authority and failure paths. |
 
-## 1. 测试分类
+Shared word meanings belong to the [RCP](ci-cd-and-quality/repository-control-plane.terms.yaml)
+and [verification](ci-cd-and-quality/verification-tracks.terms.yaml) definitions.
+The companion lists terms used here without copying them. First use still needs
+local explanation; complete behavioral conditions remain at their owners. Query
+canonical words or aliases without reading the whole vocabulary:
 
-| 类型                        | 保护对象                                 | CI     | 生命周期             |
-| --------------------------- | ---------------------------------------- | ------ | -------------------- |
-| Safety                      | 数据损坏、资源泄漏、不安全删除、安全回归 | 阻塞   | 长期                 |
-| Contract                    | 公共 API、协议、包、持久化、支持的集成   | 阻塞   | 长期                 |
-| Guardrail                   | 已知回归修复期间的临时边界               | 阻塞   | 临时，必须退出或晋升 |
-| Characterization / research | 当前行为、假设、benchmark adapter        | 非阻塞 | 随研究更新           |
+```sh
+npm run glossary:check -- --resolve 收据
+npm run glossary:check -- --resolve "assertion context"
+```
 
-临时 guardrail 放在 `tests/guardrails/<id>/`，并提供 `guardrail.yaml`：
+## Repository governance invariants
+
+These constrain the development control plane, Agent workflows and maintenance
+automation—not a new state store or approval layer:
+
+1. **Repository as environment.** Stable entries, owners, routes, Skills and checks
+   let an Agent find the next action from its target. Repeatedly needed implicit
+   knowledge returns to its existing owner, not another side explanation.
+2. **Proof before trust.** Completion claims, PR prose and local output are not
+   sufficient evidence. Targeted tests, independent verification, clean CI and
+   applicable real external runs supply layered evidence, each limited to what
+   it measures. Benchmarks or one green check do not replace architecture review.
+3. **Explicit state transitions.** Work, PRs, decisions, guardrails and releases
+   have explicit states and prerequisites. Automation may request a transition,
+   not bypass checks, authority, failure states or rollback with “done” or “ship it”.
+4. **Aggressive detection, conservative destruction.** Find completed temporary
+   work, expired guardrails, duplicate tests, unused compatibility, stale branches
+   and abstractions. Contracts may clean generated/cached/explicitly expiring
+   material automatically. Source, historical evidence, public APIs, issues and
+   PRs first need reviewable candidates, then owner evidence and authorization.
+5. **One fact, one owner.** GitHub owns PR/CI state, Contracts desired state,
+   observers current observations, and verifiers/receipts verification facts.
+   Other components observe/cache/reference; NMG adds memory and notifications,
+   not a competing source of truth.
+
+Reduce rediscovery costs without making local convenience permanent architecture.
+Tests protect mechanically checkable boundaries; owners and review judge semantic
+soundness, deletion authority and architectural choices.
+
+## Test classifications
+
+| Kind | Protected surface | CI | Lifetime |
+| --- | --- | --- | --- |
+| Safety | Corruption, leaks, unsafe deletion, security regressions | Blocking | Durable. |
+| Contract | Public API, protocol, package, persistence, supported integration | Blocking | Durable. |
+| Guardrail | Known regression during a repair | Blocking | Temporary; exit or promote. |
+| Characterization / research | Current behavior, hypotheses, benchmark adapters | Non-blocking | Follows research. |
+
+Temporary guardrails live under `tests/guardrails/<id>/` with `guardrail.yaml`:
 
 ```yaml
 id: daemon-startup-race
@@ -37,565 +81,134 @@ review_after: 2026-10-01
 exit_criteria: Replace with a stable contract test or remove after the redesign ships.
 ```
 
-`agent:context:check` 会拒绝缺少 `reason`、`review_after` 或 `exit_criteria` 的 active guardrail。满足退出条件后必须删除，或明确晋升为长期 Safety/Contract 测试。
+`agent:context:check` rejects active guardrails missing `reason`, `review_after`
+or `exit_criteria`. On exit, delete or explicitly promote to durable Safety or
+Contract coverage.
 
-测试资源按断言边界选择，与上述阻塞分类正交：只断言路由测试失败的 narrow verifier fixture 可声明不适用共享检查，同时保留真实 CLI、Git 和路由测试；默认 narrow 的代表测试仍验证共享检查执行（[决策](../decisions/implemented/2026-09-23-route-only-verifier-fixtures.md)）。
+Resource choice is independent of blocking classification. A narrow-verifier
+fixture asserting route-test failure may decline inapplicable shared checks while
+retaining real CLI, Git and route tests. Representative default-narrow coverage
+still tests shared-check execution; see [the decision](../decisions/implemented/2026-09-23-route-only-verifier-fixtures.md).
 
-## 2. 执行轨道
+## Verification tracks
 
-| 命令                        | 内容                                                            | 用途             |
-| --------------------------- | --------------------------------------------------------------- | ---------------- |
-| `npm run test:product`      | core、CLI、adapter、docs、Skill、工具与 test support            | 产品正确性       |
-| `npm run test:coverage`     | 与 product 相同的集合并生成覆盖率                               | 阻塞 CI          |
-| `npm run test:research`     | `tests/benchmarks`、`tests/evals`、`tests/official`             | 非阻塞研究表征   |
-| `npm run test:chaos`        | Windows 故障注入与进程/文件锁生命周期                           | 独立阻塞轨道     |
-| `npm test`                  | 所有 `tests/**/*.test.ts`                                       | 本地完整兼容入口 |
-| `npm run verify:static`     | build/package/type/牙齿锚点/lint/format/docs/context/complexity | 本地与 CI 共用   |
-| `npm run verify:product-ci` | build + product coverage                                        | 本地与 CI 共用   |
+[The track reference](ci-cd-and-quality/verification-tracks.md) separates product,
+research and fault injection. Results cover executed checks, not architectural
+review or unrun tracks.
 
-另有三个命令只用于本地，刻意不作为 CI 轨道：`npm run lint:fix`（与 `lint` 同一 ESLint 范围，加 `--fix`）、`npm run hotspot:modules`（对 store 各方法做静态调用点计数）、`npm run perf:hotspots`（从某个 store 的 `perf_aggregates` 打印分段延迟占比）。
+## CI contract
 
-`npm run lint` 的扫描面是 `src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ tests/ evals/ scripts/ tools/`。两条**活性规则**（`@typescript-eslint/no-unused-vars`、`no-useless-assignment`，都在断言"这个值从未被读取"）在 `tests/`、`evals/`、`scripts/`、`tools/` 上只报告为 `warn`，在 `src/` 上仍为 error：静态工具最容易在这里把活代码判成死的（`tests/core/graph-cycles.test.ts` 的三个"未使用绑定"实际是漏掉的断言），阻塞门禁会把修法推向删掉线索。其余规则对开发面与 `src/` 同标准（决策：[静态覆盖面](../decisions/implemented/2026-09-16-ci-static-coverage.md)）。测试、研究 harness、脚本与仓库工具按设计打印，因此 `no-console` 对这些面关闭。扫描面自身由 `tests/tools/eslint-config-coverage.test.ts` 守住：`lint` 与 `lint:fix` 同面，config 里每个以目录锚定的 `files:` 块都必须落在扫描面内并仍能匹配到文件，且生效 severity 由 ESLint 自己回答（提升某条规则是一次刻意改动）。
+`.github/workflows/ci.yml` calls named package contracts—`verify:static`,
+`verify:product-ci`, `verify:research`, `verify:node-compat`, `verify:chaos`—instead
+of copying command lists into every job. Local and CI execution share owners:
 
-`format` 与 `format:check` 的 `**/*.ts` 面为 `src/`、`.pi/`、`workbuddy-plugin/`、`tests/`、`evals/`、`scripts/`、`tools/`；暂存格式 hook 与它们同面，子包保留独立流程。守卫测试锁定两条命令及 hook 一致，评估 fixture 的故意错误行为不因格式化而修正（[静态覆盖面决策](../decisions/implemented/2026-09-16-ci-static-coverage.md)）。
+- `static`: build, package, types, lint, format, docs, glossary, traceability,
+  Agent context and production dependency audit. `verify:static` runs blocking
+  `check:tests`, not a duplicate advisory type step. The two development-surface
+  ESLint liveness rules remain warnings, separate from TypeScript type/unused
+  checking; see [static coverage](../decisions/implemented/2026-09-16-ci-static-coverage.md).
+- `tests`: Node 24 product tests and coverage.
+- `research-tests`: visible non-blocking research/benchmark characterization.
+  It is excluded from `all-checks-passed`; failure does not block merge, but no
+  `continue-on-error` hides it, so the PR check is red on failure. See
+  [the decision](../decisions/implemented/2026-09-12-visible-non-blocking-research-track.md).
+- `node-compat`: build/package on minimum supported Node 22.19.
+- `chaos`: Windows resource/daemon fault injection on pushes to `main` only.
+  The [decision](../decisions/implemented/2026-09-09-chaos-tests-on-main-pushes.md)
+  records the historical one failure in 145 CI runs, on `main`.
+- `all-checks-passed`: aggregates blocking tracks only.
+- `ci:uncovered-tests` within `static`: derives uncovered tracked tests from called
+  globs. All uncovered files remain in inventory; unacknowledged files fail closed.
+  Acknowledged roots state whether they are directly runnable: standalone `evals/`
+  harnesses are; the more-specific `evals/ooo-execution/fixtures/` frozen candidate
+  checks and `docs/experiments/execution/archive/` historical evidence are not.
+  Specific roots win; a generic `fixtures` name does not filter other tests.
+- `.github/workflows/on-demand-suites.yml`: `workflow_dispatch` only. The tool's
+  `--list` emits only runnable uncovered files. Linux/Windows use concurrency one,
+  preserve each path argument and Node's failure exit, and upload TAP. An empty
+  list writes `1..0 # SKIP`, not an argument-free Node discovery run. This remains
+  a non-required track.
 
-`npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`）进入 `verify:static` 与 `ci-and-tests` 的阻塞集合。它检查 `tests/`、独立运行的 `evals/ooo-execution/*.test.ts` harness、配置显式包含的源文件以及它们导入的依赖；冻结的 `evals/ooo-execution/fixtures/` 和归档证据不作为独立检查入口。纳入类型检查不等于纳入默认产品执行轨；范围回归由 `tests/tools/test-groups.test.ts` 对照真实编译器入口与按需选择清单。它不声明覆盖全部 `evals/`、`scripts/`、`tools/`（[恢复测试修复决策](../decisions/implemented/2026-10-13-recovery-tests-use-frozen-declarations.md)）。
+For CI/packaging rule changes, run the full affected commands in a clean checkout
+or equivalent worktree as well as targeted tests. Untracked local files must not
+manufacture success.
 
-`check:policy-words` 在 `verify:static` 与 `ci-and-tests` 的阻塞集合中执行一次；维护词表、分类记录和扫描面由[机制，不是策略](../decisions/implemented/2026-09-21-mechanism-not-policy.zh-CN.md#决策)拥有。它阻止未登记的命中与记录漂移，不证明机制层已无策略。
+## Composable test runtime
 
-`verify:static` 中的 `mutation:anchors`（`tools/mutation-teeth.ts --anchors-only`）只做一件事：把 110 颗具名 mutant 的位置全部解析一遍，不跑任何用例、不写任何字节，在 1 秒内回答“每一颗牙是否还瞄着东西”。它进入静态契约是因为**一颗锚点失效时没有别的检查会注意到**：全量 sweep 不跑（`mutation:teeth` 不在任何 CI 作业里），而一颗匹配不到位置的牙在 sweep 报告里只是“不可应用”并被排除出分母——本轮修掉的两颗牙就是这样悄无声息地停摆的。全量 sweep 仍然不进闸门：它是分钟级、要跑用例，属于推送前的常设规则（[决策](../decisions/implemented/2026-09-24-mutants-are-derived-not-anchored.md)）。
+[Resource lifecycle and behavior fragments](ci-cd-and-quality/composable-test-runtime.md)
+owns fixture dependencies, boundary selection, GC reporting and behavior-helper contracts.
 
-`verify:static` 中的 `complexity:gate` 默认以 `git merge-base HEAD origin/main` 为基线（可用 `--base <ref>` 显式覆盖）。基线必须是 merge base 而不是 `HEAD`：后者只比较未提交的工作树，于是已提交到分支的改动完全不可见 —— 在 CI 的干净检出上它永远报“无改动”，等于每个 PR 都没有被这条 gate 检查过。同名方法必须按 object/class owner 区分，不能仅用 ESLint 的裸方法名覆盖 map：一个方法降到报告阈值以下后，另一个未变方法不得被套用它的基线，也不能由另一 owner 的高复杂度债务掩盖增长。身份由 AST owner 推导，不依赖行号；阈值和增长限制不变。因此每次运行都会**陈述自己用了哪个基线**，并**点名它未能测量的改动文件**（ESLint 拒绝某路径、或文件根本无法解析，都会产出“零发现”，与“量过且干净”无法区分）。
+## Agent-native repository context
 
-`eval:*`、`benchmark:*`、真实 LLM/embedding 与官方大数据集运行不进入 keyless CI。研究测试可以验证 adapter 和计分契约，但不得访问外部密钥或把实验常量提升为产品默认值。
+Use [repository context](ci-cd-and-quality/repository-context.md) when ownership
+or checks are unclear. It separates declarations, observations and evidence;
+returned owners are lookup paths, not mandatory whole-file reading.
 
-任何启动 daemon / MCP server 的测试在模块顶层调用 `tests/helpers/test-env.ts` 的 `stripProviderEnv()`，清空环境中的 `NMG_EMBED*` / `NMG_SUMMARY*` / `NMG_JUDGE*`。该约定由 `tests/support/test-env-guard.test.ts` 机械检查：扫描 `tests/**/*.test.ts`，凡是 spawn daemon（`connectDaemon(`、`StdioClientTransport`、`bin/nmg.mjs`、tutorial 脚本、pi extension harness）却没有模块顶层调用者一律失败。被测 daemon 继承测试进程环境；存在 ambient provider（如 `NMG_EMBED_PROVIDER=gemini`）时，recall 会依赖外部服务而变得缓慢且不确定。需要 provider 的测试必须显式传入环境，不得依赖 ambient 配置。
+## Agent verification pipeline
 
-覆盖率轨将测试并发限制为 2，避免 c8 插桩与跨进程/SQLite 测试叠加时制造内存峰值和 Windows 文件锁假失败；普通 product 轨仍使用并发 4。覆盖率轨还以 c8 的 0.01% 行覆盖率下限检查是否产生非零源码证据；它是活性检查，不是覆盖率质量目标（[决策](../decisions/implemented/2026-09-23-coverage-evidence-liveness.md)）。
-
-## 3. CI 契约
-
-`.github/workflows/ci.yml` 使用以下 job。各 job 不复制底层命令清单，而是调用
-`verify:static`、`verify:product-ci`、`verify:research`、`verify:node-compat` 和
-`verify:chaos` 这些命名 package contract，使本地可复现入口和远程 CI 保持同源：
-
-- `static`：build、package、type、lint、format、文档、术语索引、需求追溯、Agent context 与生产依赖审计；
-- `static` 通过 `verify:static` 阻塞执行 `check:tests`，不重复运行 advisory 类型检查步骤。ESLint 在开发面上的两条活性规则仍是 `warn`，与 TypeScript 的类型及 unused 检查分别执行（决策：[静态覆盖面](../decisions/implemented/2026-09-16-ci-static-coverage.md)）；
-- `tests`：Node 24 产品测试和覆盖率；
-- `research-tests`：研究/benchmark adapter 表征，**非阻塞但可见**：它不进入 `all-checks-passed`，因此失败不阻塞合并；但它不再带 `continue-on-error`，所以失败会以红色 check 出现在 PR 上，而不是永远显示绿色（决策：`docs/decisions/implemented/2026-09-12-visible-non-blocking-research-track.md`）。
-- `node-compat`：最低支持版本 Node 22.19 的 build/package；
-- `chaos`：Windows 上的资源与 daemon 故障注入，仅在推送到 `main` 时运行（145 次 CI 运行中仅 1 次失败，且在 `main` 上；见[决策](../decisions/implemented/2026-09-09-chaos-tests-on-main-pushes.md)）；
-- `all-checks-passed`：只聚合阻塞轨道。
-- `static` 内的 `ci:uncovered-tests`：从各 job 实际调用的 glob 推导出没有任何 job 覆盖的 tracked 测试文件；全部未覆盖文件仍在 inventory 中可见，未认领的文件一律失败关闭并指名。认领根同时注明是否可直接按需运行：`evals/` 的独立 harness 可运行；更具体的 `evals/ooo-execution/fixtures/` 是由 harness 填入候选后执行的冻结检查，`docs/experiments/execution/archive/` 是历史候选证据，两者不可直接运行。具体根优先匹配，不按泛化的 `fixtures` 名称过滤其他测试。
-- `.github/workflows/on-demand-suites.yml`（仅 `workflow_dispatch`）：工具的 `--list` 只输出可直接运行的未覆盖文件；workflow 在 Linux 与 Windows 上以 `--test-concurrency=1` 跑该清单，保留每个路径的参数边界及 Node 的失败退出码，并上传 TAP。空清单写出 `1..0 # SKIP` 的 TAP，不调用无文件参数的 Node 自动发现；该轨仍不是必需检查。
-
-CI 或打包规则变更除本地目标测试外，应在 clean checkout（或等价干净 worktree）运行其完整命令，防止未跟踪文件让本地验证产生假阳性。
-
-## 4. 可组合测试运行时
-
-Cordis 本身只出现在 `tests/support/cordis-adapter.ts`。该文件只导出
-`createTestRuntime()`，返回可组合 effect 与幂等 `dispose()` 的最小生命周期对象；它不导入 NMG
-Core、CLI 或 daemon。需要文件系统、SQLite 和 daemon 的集成测试再由
-`tests/support/test-runtime.ts` 组合 NMG 专用资源：
-
-```text
-TestRuntime
-├── testWorkspace
-├── testDatabase
-└── testDaemon
-```
-
-测试通过 `withTestRuntime(...)` 或显式 `dispose()` 获取 RAII 式回收。插件依赖必须显式：database 要求 workspace，daemon 要求 database；缺少依赖时失败，不偷偷创建隐含全局状态。daemon 在进程内使用真实 HTTP JSON-RPC handler，因此能验证协议，同时不会遗留后台进程。
-
-依赖 Node 显式 GC 的堆增长检查只在 `global.gc` 可用时执行；不可用时通过 `node:test` 的 skip 报告未执行，不用恒真断言代替。`tests/core/robustness.test.ts` 的 HA 无 NaN 压力检查与堆增长检查是两个具名用例，缺少 GC 不跳过前者。堆检查的显式本地入口是 `node --expose-gc --experimental-strip-types --test tests/core/robustness.test.ts`；该见证不声明所有分配模式都无泄漏。执行目标与结果报告的取舍见[决策](../decisions/implemented/2026-10-13-runnable-suites-and-executed-checks.md)。
-
-测试资源按断言需观察的边界分为四类，按需取得最轻且隔离的资源（[决策](../decisions/implemented/2026-09-24-resource-matched-test-fixtures.md)）：
-
-| 断言边界                                  | 测试资源                                     | 可省的准备工作             |
-| ----------------------------------------- | -------------------------------------------- | -------------------------- |
-| 纯数据或决策                              | 进程内输入                                   | 工作区、数据库和外部进程   |
-| 单个 SQLite 连接的读写                    | 每项独立的 `:memory:` store                  | 临时数据库文件及其清理     |
-| 重开、旧库迁移、WAL、独立连接或路径       | 每项唯一的文件数据库或工作区                 | 与断言无关的额外文件和服务 |
-| CLI、Git、HTTP、daemon lease 或跨进程共享 | 断言这些边界时使用实际进程、端口及所需工作区 | 不参与断言的重复启动和检查 |
-
-观察文件或跨进程语义的测试保留真实边界；只断言控制平面策略、receipt 或 harness 编排时，可以注入固定的 `RepositoryProvider` 观察值，另由真实 Git 集成测试覆盖发现、dirty 范围、提交和 forge 绑定。集成 `testDatabase()` 使用真实文件路径供 daemon 共享。真实 Git fixture 保留 `init/add/commit`，提交身份只传给 `commit`，避免每项再启动两次 `git config`。资源类别只决定 fixture 和可安全减少的准备工作，不改变 Safety/Contract/Guardrail 分类、阻塞地位或 narrow/full 验证范围；后两者由既有 route 与验证契约决定。
-
-该层精确锁定 `@deepseek-ai/cordis@4.0.1` 作为 **devDependency**，只借用插件 effect/fiber 生命周期。NMG Core、daemon、Pi adapter 和发布包均不依赖 Cordis；不引入其 loader、HMR 或配置系统。Cordis adapter 与 NMG fixture composition 分离，未来若替换框架只需修改生命周期 adapter。
-
-### 4.1 行为片段与资源 fixture
-
-行为组合不属于资源生命周期层。场景构造留在消费者本地；`tests/support/task-board-behavior.ts` 的 `claimAndDeliver` 作用于调用者已有的 entry 引用，组合领取与交付。Task Board 交付和保留期测试共享该函数，显式传入身份、digest、租期及 `now`，取得实际交付快照。时间输入只控制这两个动作，不代表创建、最终处理或整个测试都使用可注入时钟。
-
-两个动作是独立写入，不保证原子性；交付失败保留已成功的领取，异常直接传播。需要观察两步之间的状态或单独验证拒绝动作时，测试直接调用 store API。
-
-`tests/support/node-graph-behavior.ts` 的 `linkNodePath(store, nodeIds, relationType)` 在已有节点上按输入顺序连接每一对相邻 ID，返回每次 `linkNodes` 的实际关系快照。空路径或单节点路径没有相邻对，返回空数组且不写入。重复端点与显式回边保留，重复边仍执行并保留 store 的重连结果；函数不创建节点、排序、去重、自动闭环或套用 memory-chain 的 DAG 限制。各边独立写入并使用产品时钟；后续边失败时异常原样传播，成功前缀仍可观察，不补事务或回滚。场景创建、关系元数据写入、幂等／evidence 合并判定，以及需要逐边中间观察的动作留在消费者。
-
-既有具名声明、断言与资源生命周期保留，不引入 DSL 或生成器；取舍由[已有对象上的行为组合决策](../decisions/implemented/2026-10-12-deliverable-tests-compose-behavior.zh-CN.md)记录。
-
-## 5. Agent 原生仓库上下文
-
-根 `AGENTS.md` 保存稳定的查找协议。Agent 从任务术语、符号和目标目录定位实现与所属契约，按当前动作读取相关章节；入口不维护模块清单、命令或运行状态。所有权或检查要求不清楚时，可运行：
-
-```powershell
-npm run agent:context -- --scope <目标路径>
-```
-
-工具返回的 owner 路径用于定位，不要求整篇阅读，也不阻断直接搜索已知目标。文档按需阅读的维护规则由 `skills/doc-maintenance/SKILL.md` 拥有；开发验证仍按下节流程执行，不以是否调用查找工具作为正确性证据。
-
-`tools/repo-context.ts` 从 Git、`package.json`、`agent-context.yaml`、owner 文档和临时 guardrail manifest 生成当前任务视图。它是只读开发工具，不访问 NMG 数据库，不启动 daemon，也不调用 LLM 或 embedding。`--changed` 可以把当前工作树的全部改动作为 scope；共享脏工作树中应优先传入本任务拥有的精确 `--scope`，避免把其他 Agent 的改动误纳入计划。
-
-`skills/repo-development/SKILL.md` 定义修改、测试和提交工作流；`agent-context.yaml` 维护无法可靠自动推导的模块所有权、验证分类，以及一个轻量的仓库能力目录。每条 route 显式区分 `blocking` 与 `advisory`，且命令必须精确对应 `package.json` script；不允许用含义过宽的 `test` 代替 `test:product`、`test:research` 或 `test:chaos`。实现状态继续由源码、`completion-audit.md` 和 `temporary-todo.md` 分别拥有，避免第二事实源。
-
-能力目录回答“仓库已经有哪个稳定入口可以完成这类工作”，每项只声明稳定 ID/别名、简短职责、代码路径、入口命令和支持对象。Agent 可运行无参数 `npm run agent:context` 查看目录，或用位置参数 `capability:<id-or-alias>` 把能力映射回既有 route、owner 和 verification。目录不复制设计、完成状态、实验结果或运行中服务状态；`package.json` 仍拥有 npm 命令，源码和完成审计仍拥有实现事实，配置校验只防止声明路径、route 和 npm 入口漂移。
-
-### 5.1 声明状态协调
-
-`agent:context` 同时生成一个只读 reconciliation 视图，把仓库的事实源与自动化收据分开：
-
-- **desired revision** 是命中 route、验证分类及其 package script 的稳定指纹；
-- **observed revision** 绑定所选 scope 和该 scope 的当前内容；Git HEAD 另行记录用于溯源，但不让一次只改变提交元数据的操作使同一内容失去验证；
-- **verification evidence** 仍由 `.nmg/verification/latest.json` 提供，必须与前两者一致，并覆盖所有 blocking check。
-
-协调状态只有三种：`unknown` 表示尚无可适用证据或旧证据不含状态指纹；`converged` 表示同一声明、同一观测快照的 blocking checks 全部通过；`drifted` 表示 route 无法机械解析、声明或内容在验证后改变、证据损坏，或 blocking check 未通过/未执行。改变同一个脏文件的内容也会改变 observed revision，不能仅凭相同 HEAD 和文件名复用旧收据。
-
-这是由 `agent:context`、`agent:verify` 和 CI 事件驱动的轻量协调，不是后台 daemon。静态能力目录是 Agent 导航索引，不是动态 service catalog、健康检查或第二套仓库状态。`drifted` 只说明声明、观测和证据没有收敛，不等于架构错误；依赖方向、公共协议、持久化边界和默认能力等架构影响仍由 owner 文档、decision 与 Agent review 判断。静态测试可以机械保护已确定的 architecture fitness functions，但控制面不承载产品或架构智能。
-
-## 6. AI 开发验证流水线
-
-修改完成后直接运行：
+After edits, run:
 
 ```powershell
 npm run agent:verify
 ```
 
-零参数入口自动读取 Git 变更并选择 route；Git 不可用时失败关闭，不允许空跑后误报成功。共享脏工作树使用 `--scope <本任务路径>` 精确覆盖自动范围。执行器聚合所有命中 route，按首次出现顺序去重，并运行全部 blocking 命令；`ci-and-tests` route 将 `verify:static` 拆成与 CI contract 一致的原子检查，跨 route 共享的检查在同一计划内只执行一次，同时保留每项的状态和 route 归因。CI 仍运行命名的 `verify:static` contract。非 RCP full 计划对相邻的独立静态检查使用最多三个并发，包括测试源码类型检查、anchor 解析与 policy-word 检查；构建、打包和产品测试保持串行屏障，结果仍按计划顺序排列。产品测试使用最多八个 Node 文件 worker，完整 glob、断言、失败判定及清理契约不变；coverage 保持两个 worker。RCP 和 narrow 计划仍串行。一个命令退出失败、启动异常或被信号终止，都被归因到该命令且不会阻止后续检查收集证据，最终统一返回失败。官方 `npm run agent:verify` 入口的整轮验证默认预算为 150 秒，可用 `--timeout-ms` 调整；外层看门进程在超时后返回失败及 `incomplete` 证据。普通执行和 RCP full/narrow 执行也共用从执行器入口开始计算的剩余预算；每个子命令只得到剩余时间。预算用尽时不再启动后续检查，逐项记录为失败，整轮不能报通过。超时意味着验证未完成，需要缩短或重新划分检查后再运行，不能把已通过的局部检查当作整轮通过。
-
-advisory 命令默认只显示、不执行；显式传入 `--include-advisory` 后才运行，且其失败不改变 blocking 结果。`--dry-run` 只生成计划，`--json` 提供机器可读报告，`--require-clean` 为打包/CI 等任务增加干净工作树门槛。每次成功形成报告后会自动覆盖 `.nmg/verification/latest.json`；该文件包含 run ID、起止时间、运行时、Git HEAD、scope、route 和逐命令结果，位于已忽略的 `.nmg/` 下，不形成无限增长的日志历史。
-
-该流水线的自动化边界是机械路由、声明/观测协调、执行、失败归因和最近证据覆盖。它不负责判断架构是否合理，不自动格式化、修改代码、提交 Git，也不自动调用 LLM、embedding、benchmark 或官方数据集。真实外部评估仍须用户或 Agent 明确选择。GitHub CI 在 push/PR 自动执行命名验证契约；不安装强制本地 Git hook，避免修改未完成时制造隐式副作用。
-
-## 7. Repository Control Plane
-
-本节同时规定已实现的 run-to-completion 核心与仍延后的目标边界。`src/rcp/`、
-`nmg-rcp`、Contract compiler、observer、WorkOrder、独立 npm verifier、本地 receipt、
-forge adapter 和 optional NMG provider 已合并；持续 watcher/queue/catalog、多租户和
-portable attestation 尚未实现。Rationale 与替代方案见 implemented
-[Repository Control Plane decision](../decisions/implemented/2026-08-29-repository-control-plane.zh-CN.md)。
-
-### 7.1 产品边界与依赖方向
-
-Repository Control Plane（RCP）位于 NMG daemon 外部，负责把仓库中的声明式目标
-转成受约束的 Agent 工作，并持续比较目标、仓库观测和验证收据：
-
-```text
-Git contract + repository observation
-                  |
-                  v
-       Repository Control Plane
-       | compiler / policy / planner
-       | scheduler / reconciler / verifier
-       | receipt index / forge adapter
-       +--------------------+
-       |                    |
-       v                    v
-Agent harnesses          Git / PR / CI
-(Pi/Codex/DSH)                |
-       |                      |
-       +----------+-----------+
-                  |
-                  v
-          code and evidence
-
-Optional only:
-Repository Control Plane -> NMG client -> NMG daemon
-```
-
-RCP 可以先作为同仓库中的模块化 CLI 存在，逻辑外部不要求立即拆成新仓库或常驻服务。
-其核心必须在 `NMG_MODE=disabled` 或 NMG 不可用时仍能编译 contract、规划、观察、
-验证和生成 receipt。NMG 只可提供可迁移经验、历史回忆和 Task Board 通知；NMG
-daemon 不解析 contract、不启动 Agent、不判断 CI、不拥有 PR，也不回写控制面状态。
-
-### 7.2 真相域
-
-每类状态只有一个权威所有者，派生缓存不得竞争：
-
-| 真相域               | 权威来源                                                                                                                            | 非权威视图                                      |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| 期望仓库状态         | Git 中经版本控制的 Contract                                                                                                         | catalog、编译缓存、NMG 记忆                     |
-| 当前仓库状态         | 指定 commit/worktree 的 Repository Observer 输出                                                                                    | Agent 描述、PR 文本                             |
-| 验证事实             | 可信执行者的观测；本地 receipt 记录 contract digest、observed content revision、verifier identity，并在 clean/forge 场景绑定 commit | 自报日志、Task Board result、未经认证的 receipt |
-| PR/合并状态          | Git forge                                                                                                                           | 本地缓存、NMG                                   |
-| Agent 工作记忆与经验 | 各 harness 与 NMG 的 AG/STG/LTG 边界                                                                                                | RCP receipt 摘要                                |
-
-Contract 描述 desired state；Observer 产生 observed state；Receipt 记录执行者声称的输入、
-检查及结果。只有信任执行者与记录来源时，才可把它用作该次执行的证据；自哈希不能证明
-执行发生。任何一者都不能通过覆盖另外两者来“收敛”。
-
-Repository Observer 按 contract include 做保守目录剪枝：仅跳过可证明没有 include
-能够匹配其后代文件的目录。首段含通配符时保守禁用剪枝，并不表示该模式实际匹配
-所有目录。逐文件 allow/exclude 过滤语义不变；剪枝前的实现也在读取内容、计算哈希
-之前过滤文件。优化目标是减少无关目录枚举与后代 metadata 调用，不是消除原本不存在
-的全树内容哈希。此前约 67GB 的目录体积统计不是实际读取字节或加速比证据。
-
-当前 `observedBytes` 累计成功读取的普通文件的 stat 大小，超过默认 256MiB 时在
-观察完成后附加非阻塞诊断；它不是扫描前估计或大小硬门禁。文本 plan 展示观察完成后的
-文件数、字节数和诊断；JSON plan 保留 observation 字段。两者均不是读取前预警。
-Agent 默认不扫描超大目录的操作规则由 `skills/repo-development/references/control-plane.md` 维护；
-运行时仍须完整观察 scope 内文件，不可静默跳过。是否尊重 `.gitignore` 是独立的
-摘要语义决策，不在本次剪枝范围内。
-
-### 7.3 Contract surface 与 IR
-
-第一版使用容易编辑的 YAML/JSON 声明面，并编译为稳定、Agent-neutral 的 Contract
-IR；暂不引入完整 CUE/OPA 运行时。借用 CUE 的约束语义和 OPA 的纯策略边界，而不是
-复制它们的产品范围。
-
-最小 Contract 必须包含：
-
-```yaml
-apiVersion: repository.nmg.dev/v1alpha1
-kind: AgentChange
-metadata:
-  id: rcp-001 # 被引用后保持稳定
-spec:
-  intent: "what should be true"
-  scope:
-    include: ["src/**"]
-    exclude: ["docs/experiments/**"]
-  preserve: ["public protocol compatibility"]
-  assertions:
-    - id: daemon-independent
-      statement: "NMG daemon must not depend on RCP"
-      check: "node-test:daemon-cli"
-      kind: test
-      stage: unit
-  verification:
-    routes: ["product"]
-    checks: ["npm run agent:verify"]
-  authority:
-    mode: plan # plan | apply | continuous
-  extensions: {}
-```
-
-每条 assertion 必须解析到 `check`——package.json script、`node-test:<route>`（route 级证据），或 `node-test:<route>#<测试名>`（指向一条具名测试，`rtm:check` 会在该 route 的测试文件里核实名字真实存在）——或显式标为 `documentedOnly: true`；两者都无则编译失败。`rtm:check` 在 `verify:static`、窄化共享检查与两份 contract 中阻塞运行，并打印一份**证据报告**（[决策](../decisions/implemented/2026-09-20-rtm-evidence-aggregation.md)）：清单（断言数、可解析的检查数、仅文档、未覆盖、孤儿）**只是计数，不参与判定**；每条断言另有自己的成立等级，由 `agent:verify` 写进 `.nmg/verification/latest.json` 的执行证据决定——`executed`（承载它的命令通过，且证据是当前版本）、`historical`（在另一个版本上通过，不算执行）、`not-run`（本轮记为 skipped 或 failed 并带原因；**只有当前轮次的失败**让闸门失败）、`not-recorded`（没有记录、没有命令承载它，或没有证据文件）、`documented-only`、`uncovered`。风险类别（强度/种类/阶段）与作用域跨多个 route 的契约各自单独判，未决项列进反例，报告结尾明说「没有总判定」——计数是清单，不是结论。收据抓取的就是这份打印出来的报告；evidence 只在检查失败时写入。
-
-编译后的 IR 规范化默认值、路径、source locations、diagnostics、extension namespace
-和 `contractDigest`。语法升级不得改变稳定 `metadata.id`；未知必需字段失败关闭，未知
-可选 extension 可被保留但不能静默执行。Contract 写目标和约束，不写逐条 shell
-操作；具体动作由可替换 planner/provider 产生。
-
-### 7.4 控制循环
-
-```text
-Contract -> compile/validate -> DesiredState
-                                |
-Repository -> observe ---------+-> diff -> policy -> route/plan
-                                                    |
-                                                    v
-                                             bounded Agent run
-                                                    |
-                                                    v
-                                              code / Draft PR
-                                                    |
-                                                    v
-                                             independent verify
-                                                    |
-                                                    v
-                                                Receipt
-                                                    |
-                                                    `-> reconcile again
-```
-
-Reconciler 必须幂等、可恢复且不相信“动作已经成功”。复用 identity 绑定 Contract、
-observed revision、operation key、route/check 声明和 verifier definition；执行后重新观察，
-而不是依据工具返回值直接宣告收敛。Harness 执行前写本地 in-flight attempt，只有 receipt
-成功落盘后才清除。若进程在两者之间中断，普通重试失败关闭，操作者必须显式选择 recovery，
-只验证现有 workspace 而不重放 mutation。默认只生成 plan；写文件、推送、开 PR、合并、
-删除或权限变化均需 contract 授权和对应 provider。破坏性 drift 不自动修复。
-
-RCP 区分两类资源：
-
-- **run-to-completion change**：一次设计/实现 PR，验证后进入 terminal condition；
-- **continuous contract**：持续监测 architecture fitness、文档/协议契约或生成物漂移，
-  只在明确启用 watcher 时周期协调。
-
-### 7.5 Work Order、Agent 与 PR
-
-Route Planner 将 IR 与 observed state 转成 bounded `WorkOrder`，至少包含 contract ID/
-digest、允许路径、owner 文档、所需检查、保留项、断言、预算。Agent 只能
-提交 patch/PR 和证据，不能自行把 contract 标成 verified；超出 scope 时返回
-`scope_violation` 或提出 contract amendment。
-
-`expectedArtifacts`（预期产物）与 `HarnessResult.artifacts` 自首版起就是常量、无任何代码
-读取，也不进收据，2026-09-09 删除。若将来要做「产出物是否存在」的检查，应作为 per-contract
-的路径/glob 列表重新引入，而不是恢复一个无人读的字符串数组。
-
-Draft PR 是一次变更的持久在途实例和可审阅入口。Task Board 只负责短期发现、认领、
-阻塞与通知，并用稳定 ID 指向 WorkOrder/PR；它不是 WorkOrder 的 system of record。
-设计 PR 合并只表示 proposal 被接受，不能把未实现的 acceptance criteria 改成完成。
-
-### 7.6 Verifier 与 receipt
-
-Verifier 在 Agent 变更之后独立运行，检查至少分为结构、行为、边界、来源四类。Receipt
-通过 sink API 追加写入，不是操作日志，也不是自然语言完成声明。文件本身并非不可篡改；
-自哈希、文件名校验与确定性仅检查记录自洽，不能认证来源或证明执行。
-最小字段为：
-
-```json
-{
-  "receiptSchema": "repository.receipt/v1alpha1",
-  "contractId": "rcp-001",
-  "contractDigest": "sha256:...",
-  "observedRevisionBefore": "sha256:...",
-  "observedRevisionAfter": "sha256:...",
-  "commit": "git-sha",
-  "invocationId": "...",
-  "verifier": { "id": "verify:product-ci", "digest": "sha256:..." },
-  "workOrder": {
-    "id": "wo-...",
-    "routeDigest": "sha256:...",
-    "routes": ["repository-control-plane"],
-    "verificationChecks": ["check"],
-    "budget": { "maxAttempts": 1, "timeoutMs": 1800000 }
-  },
-  "scope": { "declared": ["src/**"], "actual": ["src/**"], "matched": true },
-  "checks": [{ "name": "...", "status": "passed", "evidence": "..." }],
-  "decision": "verified"
-}
-```
-
-默认 `FileReceiptSink` 把 receipt 写入被 Git 忽略的 `.rcp/receipts/`，并在同目录的
-`inflight/` 下维护异常中断恢复标记。标记不是 receipt 或证明，正常终态会被清除。Receipt
-服务本地幂等、恢复和操作者审计，不随 PR 传播，也不能单独充当第三方可验证证明。
-`npm run agent:verify` 仍写最近一次 `.nmg/verification/latest.json`；当选中 scope 被唯一一个
-RCP Contract 完整覆盖时，它还会自动以 workspace-ready 模式执行单次 reconcile，把同一批
-本地检查交给 RCP verifier 并经 `ReceiptSink` 生成 receipt。没有适用 Contract 时保持原有
-普通验证；多个 Contract 同时完整覆盖时失败关闭，要求先消除 intent 歧义。
-Receipt store 可有索引数据库或外部 artifact/attestation provider，但规范 receipt 必须
-绑定 immutable input/output identity。外部 provider 在出现跨机器复核需求前保持延后。
-GitHub required checks 只接受受信 verifier 的结果；PR 描述和评论用于解释，不作为唯一
-机器状态。一次 receipt 可被 NMG 作为来源引用，但不会自动成为 LTG；只有经归因、可复用
-且由独立 `remember` 接入的经验才进入记忆。
-
-### 7.7 扩展边界
-
-控制面通过窄接口扩展，而不是让插件直接写核心状态：
-
-- `RepositoryProvider`：Git/worktree/forge observe 与受权 mutation；
-- `HarnessProvider`：Pi、Codex、DSH 的 WorkOrder 投递和结果收集；
-- `VerifierProvider`：命名检查、超时、证据和可信身份；
-- `PolicyProvider`：对 IR/plan/receipt 的纯决策；
-- `ReceiptSink`：本地文件、CI artifact 或远程可审计存储；
-- `MemoryProvider`：可选 NMG recall/board/experience，故障时可降级。
-
-Provider 通过 capability declaration 注册；核心根据 Contract 请求和 policy 选择，禁止
-provider 隐式扩大权限。RCP 协议与 NMG memory protocol 独立，但可以共享 transport、
-schema hashing、diagnostics 和 capability-negotiation 库。
-
-### 7.8 分阶段交付
-
-1. **Contract compiler MVP**：schema、IR、digest、diagnostics、fixtures；只读 plan。
-2. **Observer + reconciler CLI**：复用 `agent:context` 路由，生成 Desired/Observed diff 和
-   WorkOrder；一次运行后退出。
-3. **Independent verifier + receipt**：复用 `agent:verify` 的验证原语，由 `nmg-rcp`
-   的 receipt sink 绑定 commit、scope、contract 与 verifier；当前 CI 验证同名检查，
-   但本地 receipt 本身不作为远程 artifact 发布。
-4. **Draft PR closed loop**：forge adapter、状态 conditions、重观察、重试/幂等；Task Board
-   只发布指针。
-5. **Provider boundary**：支持多个 harness；NMG adapter 设为 optional 并验证无 NMG 降级。
-6. **Continuous reconciliation**：只有真实持续契约需要后再加入 watcher、queue、backoff、
-   catalog 和多租户能力。
-
-每个阶段必须拥有行为测试、失败关闭路径和可删除的兼容边；不提前搭建服务 catalog、
-通用 DSL、分布式队列或控制面数据库。是否拆成独立产品/仓库由 provider 数量、独立发布
-需求和运行隔离证据决定，而不是概念规模决定。
-
-### 7.9 闭环状态与后续加固
-
-Run-to-completion 核心已通过真实 Contract-bound PR、远程 CI 和本地 receipt 闭环实现。
-`implemented` 只表示以下本地控制面能力成立，不表示已经具备持续控制器或第三方证明：
-
-- 同一 Contract 在无 NMG 情况下可编译、plan、执行受限 Agent 工作、验证并生成 receipt；
-- WorkOrder 把单次 attempt 和 timeout 预算传给 harness，process harness 只能采用相同或
-  更严格的时限；
-- desired、observed、receipt 和 PR 状态分别可追踪且不存在竞争写入者；
-- 普通 reconcile 拒绝自报完成与已检测的 scope/检查失败，但不隔离候选版本的 npm、测试和规则；
-  固定基线模式对规则修改的独立审批边界见 §7.13；
-- 重复 reconcile 不重复执行同一 mutation；异常中断由本地 attempt journal 检出，只有
-  显式 recovery 才会跳过 harness 并验证当前 workspace；
-- plan/apply/continuous 权限明确，破坏性动作默认不自动执行；
-- Pi、Codex 或 DSH 至少两个 harness 通过同一 WorkOrder contract；
-- NMG adapter 断开时闭环仍可工作，接入时只增加记忆/协调价值；
-- Draft PR、CI required check 与本地 receipt 可由同一次操作者运行绑定到同一 commit 和
-  contract digest；外部复核者目前只能复核 Git/PR/CI，不能取得被忽略的本地 receipt；
-- completion audit 只根据实现和验证证据升级，不根据规划或 PR 文本升级。
-
-Receipt 读取校验、route/verifier 复用绑定、Git/forge provenance、只读 receipt scan、
-harness 超时和中断恢复均由产品测试覆盖。当前边界之外只保留有前提的扩展：出现持续
-Contract 后再设计迭代收敛；出现跨机器独立复核需求后再增加 artifact/attestation provider。
-
-### 7.10 理论来源
-
-设计借鉴 [OpenGitOps principles](https://opengitops.dev/) 的 declarative/versioned/
-reconciled state、[Kubernetes controllers](https://kubernetes.io/docs/concepts/architecture/controller/)
-的 spec/status 与幂等控制循环、[Backstage catalog](https://backstage.io/docs/features/software-catalog/)
-的 repository-owned source of truth、[Crossplane](https://docs.crossplane.io/latest/whats-crossplane/)
-的 provider/composition 边界、[CUE](https://cuelang.org/docs/tour/basics/constraints/)
-的约束合一、[OPA](https://www.openpolicyagent.org/docs/philosophy) 的 policy/decision
-分离、[GitHub Spec Kit](https://github.github.com/spec-kit/) 的 spec-to-task 追踪，以及
-[SLSA provenance](https://github.com/slsa-framework/slsa/blob/main/spec/build-provenance.md)
-的输入、builder、invocation 和 artifact identity。它们是设计依据，不是首版依赖。
-
-### 7.11 Run-to-completion CLI
-
-已实现的 run-to-completion 核心提供独立的 `nmg-rcp` 入口；它不由 NMG daemon 托管。
-最小流程为：
-
-```text
-nmg-rcp compile .rcp/contracts/change.yaml
-nmg-rcp plan .rcp/contracts/change.yaml
-nmg-rcp reconcile .rcp/contracts/change.yaml --apply --workspace-ready --nmg disabled
-nmg-rcp reconcile .rcp/contracts/change.yaml --apply --workspace-ready --recover-attempt
-nmg-rcp forge-create .rcp/contracts/change.yaml --base main --head feature/change
-nmg-rcp forge-bind .rcp/contracts/change.yaml --pr 42
-nmg-rcp reconcile .rcp/contracts/change.yaml --apply --workspace-ready \
-  --pr 42 --operation-key pr-ci --nmg disabled
-```
-
-日常 Agent 开发不需要额外记忆该命令：`npm run agent:verify` 会自动发现唯一完整覆盖当前
-scope 的 Contract，并执行等价的 workspace-ready reconcile。独立 `nmg-rcp` CLI 仍用于
-plan、外部 harness、恢复、PR/forge 绑定以及显式管理场景。
-
-`reconcile` 默认只 plan；`--apply` 还必须显式选择当前 workspace 或外部 harness。
-本地验证 receipt 与 PR/CI receipt 使用不同 `operation-key`，但都绑定同一 Contract
-digest。带 `--pr` 的收敛还要求 PR body 中的机器标记、head commit 与成功 CI 状态一致。
-远程收敛只检查 Contract 的 `spec.verification.forgeChecks` 明确列出的检查；其他
-第三方或 advisory 状态仍记录进 receipt，但不能在未声明时取得控制面否决权。
-失败 receipt 只追加、不覆盖，并允许在外部状态修复后重试；只有通过完整性校验且绑定
-当前 route/check/verifier 的已验证 receipt 才用于幂等复用。`--recover-attempt` 只处理已
-存在的中断标记，并禁止再次运行外部 harness。`.rcp/receipts/` 不参与仓库 observed
-revision，避免控制面输出改变自身输入。
-
-当前只实现 run-to-completion 路径。`continuous` 是 Contract 可声明的权限上限，不表示
-已经存在 watcher；在出现真实持续 contract 前，常驻 queue/catalog/watcher 仍明确延后。
-
-#### 可选的会话反馈
-
-`reconcile` 可显式附加 `--nmg optional --session-id <id> --task-frame-id <id>`，
-把本次已落盘的 receipt 投影到调用方指定的会话 AG。两项身份必须同时给出，不能以
-Contract ID 猜测会话。该路径只连接 `NMG_DATA_DIR` 下已经运行且协议/能力兼容的
-`nmg.sqlite` daemon，不启动、替换或停止它；也不执行普通 NMG recall 或发布黑板结果。
-
-反馈保留 receipt ID、Contract digest、observed revision、检查结果与有界诊断，作为
-`tool_observation` 遵守既有 AG 激活、去重和会话清理规则。receipt 仍是完整证据源，
-AG 摘要不是任务完成标签，也不会自动进入 LTG 或控制器训练。收据完整性与成功条件分开：
-scope 越界的 `failed` 收据可以保存并反馈，但不能作为成功复用；`verified` 收据仍须 scope
-匹配。RCP 通过随包 CLI 的 `nmg session observe` 通讯，不导入 NMG 内部模块。plan 和 receipt reuse
-不产生新通知；反馈失败只记入 `memoryDiagnostics`，不会改写验证结论。当前边界不含
-通用事件总线、自动重试投递、跨会话任务续接或学习策略激活。
-
-### 7.12 CI 状态观察
-
-`.github/workflows/ci-status.yml` 在规范 `CI` workflow 完成后运行一个只读 GitHub-hosted
-worker。它读取该 run 的 jobs 和失败步骤，向 GitHub Step Summary 输出紧凑摘要，并上传
-`nmg.ci-status.v1` JSON artifact。该 artifact 明确标记为 `observation-only`：它方便 Agent
-和外部 RCP 消费状态，但不授权合并、不生成本地 receipt，也不替代 required checks。
-
-该观察器不评论 PR、不写 label、不运行仓库代码测试、不连接本地 NMG daemon，并仅持有
-`actions: read` 与 `contents: read`。消费者执行 reconcile 前仍必须通过 Forge provider
-重读 GitHub 当前状态；workflow-run payload 和 artifact 都可能过期，不能成为第二套
-source of truth。未来若确有本地自动唤醒需求，可在外部增加轮询或 webhook event bridge，
-但不改变本节的只读状态契约。
-
-### 7.13 Fixed trusted baseline verification
-
-固定可信版本验证是显式本地命令，与普通 `reconcile` / `agent:verify` 分开；后者不自动获得
-本节的基线隔离保证。本节规范和 [RCP decision](../decisions/implemented/2026-08-29-repository-control-plane.md)
-共同拥有该选择；轻量默认已实现，见 §7.14 与
-[decision](../decisions/implemented/2026-09-07-rcp-lightweight-verification-default.md)。
-
-```text
-# 操作者明确审阅一个包含本功能与验收策略的 commit；不自动提交工作区
-npm run rcp -- trust-install <repository> <reviewed-commit> <new-external-directory>
-
-# 用安装目录中的源文件启动；不用候选仓库中的验证器
-node --experimental-strip-types <new-external-directory>/src/rcp/trusted.ts verify <candidate-repository> <candidate-commit>
-```
-
-安装目录的父目录必须存在，目标必须不存在且位于候选仓库外。安装读取固定 Git commit，
-仅支持普通文件（拒绝 symlink/submodule），有界为 256 MiB 的 Git 输出；存在 lockfile 时
-自动 `npm ci --ignore-scripts --no-audit --no-fund`，不运行安装生命周期脚本。依赖安装失败即失败，
-不降级。需要 native 安装脚本或生成产物的验收若无法运行，其义务失败；不把缺环境当通过。
-升级重复执行安装命令到新目录并显式选择新入口，不覆盖旧安装，不自动信任候选。
-
-`.rcp/trusted-policy.json` 来自受审阅基线：`candidateRoots` 是可变产品目录，`obligations`
-为非空、唯一 ID 的具名主张、明确 `tests/*.test.ts` 路径和超时。当前策略仅允许 `src` 产品
-修改；所有其他路径变化（包括测试、测试 helper、工具、策略、根 package/lock/config、文档）
-都返回 `blocked` 并要求独立审批。允许目录内的 package/lock/tsconfig 也不能普通修改。
-新增义务、改测试或改依赖先按独立规则变更审阅并安装新基线，不能与普通产品变更一起偷偷放行。
-
-候选身份由一次解析得到的 commit 和 Git 内容摘要确定，不读取 dirty/untracked 工作区，
-也不自动 commit。验证将该快照展开到临时目录；测试及其 helper 与基线逐字节匹配，因此相对
-import 指向临时目录的候选产品实现，而非安装目录的旧产品。候选修改的 `src/rcp` 可作为被测物，
-不会替换外部裁决程序。依赖来自安装目录，候选依赖定义不得变化。安装源码全量摘要在运行前后
-复核；已有快照文件在运行后发生修改则失败。输出或测试环境的对抗性伪造不在本地信任边界内。
-
-每项义务用 Node test runner 的 TAP 完成计数裁决：退出 0、测试数非零、全部通过，且
-fail/cancelled/skipped/todo 均为零。缺失测试、无完成报告、异常、超时或任一义务失败均不通过。
-全部义务执行，不复用历史结果。JSON 输出绑定 invocation、候选 commit/content、基线
-commit/content、策略和验证器摘要及 Node 版本，包含实际具名主张与结果；退出码为
-0 passed、1 failed/输入异常、2 policy blocked。输出不作为第三方签名证明，不自动写 RCP
-receipt 或推进 `implemented`/合并状态；下游仅能引用这些具名义务，不得扩大成所有设计已实现。
-
-这是固定规则下重新执行测试，不是密码学 succinct argument，也不是形式验证。它针对普通
-Agent 的误改、自报完成和检查削弱，不防同权限恶意进程、管理员、被污染的 Node/Git/npm 或
-依赖，亦不保证测试规格完整。测试代码与产品代码同进程执行；缺权限隔离就不能宣称抗恶意
-代码。一次 JSON 自洽检查不能认证历史执行。相应对抗回归由 `tests/rcp/trusted.test.ts` 拥有；
-普通 full gate 不等于证明本设计或验证器正确。
-
-### 7.14 轻量验证默认（narrow gate）
-
-`npm run agent:verify` 的默认 gate 由改动归属决定。当每个改动 scope 恰好被一个路由拥有，
-且没有任何 scope 落在共享 / 横切根（`src/`、`tests/`、`scripts/`、`tools/`、`.github/`、
-`package.json`、`package-lock.json`、`tsconfig.json`、`tsconfig.build.json`、
-`agent-context.yaml`、`AGENTS.md`）之下时走 narrow：运行常驻共享不变量
-（`NARROW_SHARED_CHECKS`：`check`、`docs:check`、`format:check`、`glossary:check`、`lint`、
-`package:check`、`rtm:check`），加上属主路由自己的测试文件
-（由路由 `tests:` 模式解析为具体文件，排除被匹配到的目录；零匹配时 fail-closed），
-合成为 `node-test:<routeId>` 检查；该子进程不继承父进程的 `NODE_TEST_CONTEXT`，
-否则 node 会跳过执行并把空过记为通过；路由测试采用与可信基线相同的 TAP 接受规则
-（`tests > 0`、`pass == tests`、`fail`/`cancelled`/`skipped`/`todo` 均为 0），
-因此跳过、只 skip 或零执行都不算通过。其余情况（跨路由、无主、
-共享根、多个候选路由、无改动 scope）升级为路由声明的 blocking 集。`--full` 强制 full，
-`--narrow` 强制 narrow，两者互斥；有疑问时跑 full。
-
-narrow 与 full 都经 `reconcileOnce` 走 RCP 并写入 `.rcp/receipts/` receipt；没有 authored
-contract 覆盖时合成一个内存 contract，不存在旁路执行路径。receipt 的 `gate` 记录 `mode`
-（`narrow`/`full`）、可选 `reason` 与 `fullGateRun`（narrow 恒为 `false`），使“这次没有跑
-完整 gate”成为机器可读的可审计事实，而非推断。`validateReceipt` 拒绝 `fullGateRun` 与
-`mode` 矛盾的 receipt；`nmg-rcp receipt-verify` / `agent:verify --receipt <id>` 可独立复核。
-
-路由可以声明**常驻共享检查不适用于它自己拥有的表面**：`verify.sharedChecks: none`（默认
-`always`）。它只在本路由独占一个改动时生效，生效时 narrow 计划只跑该路由自己的测试；
-它**不能**让共享/横切根免于升级（那些 scope 仍然升级为路由声明的 blocking 集），而且
-路由未声明自己的测试时在配置加载期就被拒绝（否则计划会一个检查都不执行，而验证工具
-绝不能把“什么都没跑”报成通过）。receipt 的 `gate.reason` 会写明这条声明，使它不是靠数
-检查条数才能发现的事实。理由与替代方案见
-[decision](../decisions/implemented/2026-09-16-route-declines-shared-checks.md)。
-
-narrow 只减少运行的检查面，不削弱绑定：结果仍绑定候选 / 基线 / 验证器 / 策略 / 调用摘要，
-不复用历史证据，缺检查、跳过、超时、空报告、快照变动或依赖变化一律 fail-closed。
-narrow 不声称覆盖未运行的检查；`gate.fullGateRun=false` 就是这一事实的记录。选择规则是
-路由归属启发式，不是依赖分析：真实影响跨共享路径但未落在共享根上的改动仍可能不完整，
-因此归属不明时默认升级。对抗回归由 `tests/tools/agent-verify.test.ts`、
-`tests/tools/narrow-verify.test.ts` 与 `tests/rcp/receipts.test.ts` 拥有。
-
-## 8. 修改验证
-
-普通产品改动的 gate 由 §7.14 的选择规则决定：narrow 运行共享不变量加属主路由测试，
-其余升级为完整 blocking 集。完整 gate 至少运行目标测试、`npm run check`、
-`npm run test:product` 与 `npm run build`。文档按 [文档 CI 契约](../README.md#ci-contract)
-运行 `npm run docs:check`。仓库工具还运行 `npm run agent:context:check`；包边界运行
-`npm run package:check`。
-
-提交只包含本任务拥有的文件。工作区有用户或其他 Agent 修改时必须保留，不能为获得“干净”结果回滚它们。
+No arguments derives scope from dirty Git paths and selects routes. Without Git
+it fails closed, not an empty success. In a shared worktree, positional owned
+paths (or compatibility `--scope <target-path>`) limit scope; do not add
+`--changed` unless all dirty changes should be included.
+
+[Gate selection](ci-cd-and-quality/repository-control-plane/lightweight-verification.md)
+owns default narrow and full escalation. In a full plan, the executor aggregates
+matched routes, deduplicates by first occurrence and runs all blocking commands.
+For `ci-and-tests`, `verify:static` expands into the same atomic checks as the CI
+contract. Cross-route shared checks run once, retaining individual status and
+route attribution; CI still invokes the named contract.
+
+Non-RCP full plans run adjacent independent static checks with at most three
+workers, including test-source checking, anchor resolution and policy-word checks.
+Build, package and product-test commands remain serial barriers. Product tests
+use at most eight Node file workers; coverage uses two. Globs, assertions, failure
+judgments and cleanup contracts do not change. Results retain plan order; RCP and
+narrow plans remain serial. A failed exit, launch error or signal belongs to that
+command, does not prevent later evidence collection, and fails the run.
+
+The official wrapper defaults to a 150-second whole-run budget, adjustable with
+`--timeout-ms`. The watchdog returns failure and `incomplete` evidence on timeout.
+Ordinary and RCP full/narrow execution share the remaining budget measured from
+executor entry; each child receives only what remains. Exhaustion prevents later
+starts, records each as failed and cannot produce a passing run. Reduce/redivide
+the check work and rerun; earlier partial passes are not whole-run success.
+
+Advisory checks are displayed, not executed, unless `--include-advisory` is set;
+their failure does not change the blocking result. `--dry-run` plans only,
+`--json` emits machine-readable output, and `--require-clean` adds the clean-tree
+precondition for work such as packaging/CI. A formed report overwrites ignored
+`.nmg/verification/latest.json` with run ID, timestamps, runtime, HEAD, scope,
+routes and command results; it does not create unbounded history.
+
+Automation performs routing, declaration/observation reconciliation, execution,
+failure attribution and latest-evidence persistence—not architecture judgment,
+automatic formatting, edits or commits. It does not call LLMs, embeddings,
+benchmarks or official datasets automatically. Real external evaluations require
+explicit selection. GitHub runs named contracts on push/PR; no mandatory local
+Git hook is installed to introduce implicit side effects during incomplete work.
+
+## Repository Control Plane
+
+For Contracts, planning, execution or receipt lifecycle, use
+[the RCP reference](ci-cd-and-quality/repository-control-plane.md) and its complete
+sub-contracts. Agent completion claims do not establish independent verification,
+authority or merge state.
+
+## Verify a change
+
+The gate reference owns product-change selection: narrow runs shared invariants
+plus owner tests; other cases use the applicable full blocking set. A full product
+gate includes targeted tests, `npm run check`, `npm run test:product` and
+`npm run build`; this is not a requirement for every documentation-only full plan.
+Docs use `npm run docs:check` under [their CI contract](../README.md#ci-contract).
+Repository tooling also checks `npm run agent:context:check`; package boundaries
+use `npm run package:check`.
+
+Commit only owned files. Preserve user/other-Agent edits; never revert them to
+manufacture a clean result.

@@ -1,6 +1,6 @@
 # 受控 daemon 代码重载
 
-[English](2026-10-13-daemon-controlled-reload.md)
+[English](2026-10-13-daemon-controlled-reload.md) · [术语](2026-10-13-daemon-controlled-reload.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit
@@ -13,6 +13,9 @@
 
 ## Decision
 
+范围说明：本记录保留已审阅源分支的实现决策与当时证据；`implemented` 描述该记录的来源版本，不声明本次目标 checkout 已接入该能力。当前可用命令与能力由 CLI 和认证发现拥有，本次文档 PR 不交付该运行时实现。
+
+
 用户接受显式进程换代，允许清空临时 AG 与 writer 租约。`nmg daemon reload`
 获取独占交接门禁，要求旧 owner 发布 `controlled-reload` 能力，等待已接受调用完成、
 旧进程退出，再让持票子进程获取 daemon 租约。成功以新进程通过认证的就绪握手为准。
@@ -22,7 +25,7 @@
 旧管理 restart 与此路径分别保留。
 
 规范边界、恢复条件与验证由
-[daemon 生命周期](../../design/daemon-lifecycle-design.md#controlled-code-reload)拥有。
+[daemon 生命周期](../../design/daemon-lifecycle-design/controlled-code-reload.zh-CN.md#controlled-code-reload-1)拥有。
 
 ## Alternatives considered
 

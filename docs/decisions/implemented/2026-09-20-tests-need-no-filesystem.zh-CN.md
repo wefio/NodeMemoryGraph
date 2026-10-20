@@ -1,6 +1,6 @@
 # 测试不需要文件系统
 
-[English](2026-09-20-tests-need-no-filesystem.md)
+[English](2026-09-20-tests-need-no-filesystem.md) · [术语](2026-09-20-tests-need-no-filesystem.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: opaque dispatch declaration
+    aliases: [digest-bound opaque declaration, 不透明派发声明]
+    definition: >-
+      A caller-owned declaration passed unchanged through the shared dispatch mechanism, with only its digest required by that mechanism and without the loop parsing work-specific policy.
+      调用方拥有、经共享派发机制原样传递的声明；该机制只要求其 digest，不让循环解析特定工作的策略。
+    owner: docs/decisions/implemented/2026-09-21-mechanism-not-policy.md
+    anchor: Opaque dispatch declarations
+    status: canonical
+references:
+  - Task Board
+  - mechanism-policy boundary

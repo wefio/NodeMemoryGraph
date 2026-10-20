@@ -1,5 +1,7 @@
 # QPP calibration
 
+[中文](qpp-calibration.zh-CN.md) · [Terms used](qpp-calibration.terms.yaml)
+
 Use this procedure when tuning QPP thresholds or weights for a deployed Agent.
 Do not copy a benchmark optimum directly into the product default: benchmark
 queries, forced-search behavior, memory density, and answer judges can differ

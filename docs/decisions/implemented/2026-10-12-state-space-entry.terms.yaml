@@ -1,0 +1,14 @@
+version: 2
+terms:
+  - term: state-space entry
+    aliases: [unified state entry, 统一 state 入口]
+    definition: >-
+      One model-facing read/write interface with an `ag` or `board` space selector and space-specific operations; it unifies access without merging the domain owners, authority or lifetimes.
+      一个带 `ag` 或 `board` 空间选择器及对应空间操作的 model-facing read/write 接口；它统一访问入口，但不合并领域 owner、权限或生命周期。
+    owner: docs/decisions/implemented/2026-10-12-state-space-entry.md
+    anchor: Decision
+    status: canonical
+references:
+  - state space
+  - working state
+  - Task Board

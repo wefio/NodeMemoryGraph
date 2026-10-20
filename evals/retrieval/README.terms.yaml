@@ -1,0 +1,49 @@
+version: 2
+terms:
+  - term: rank-aware retrieval scorer
+    aliases: [保留排序的检索打分器]
+    definition: >-
+      The runner that measures the shared product retrieval and Agent Surface as a pure retriever without an answer model or judge and, unlike the existing coverage audits, keeps rank: every gold evidence records its first-hit rank inside the returned candidates, and chain or block members appended after ranking never acquire a ranked position.
+      把共享产品检索与 Agent Surface 当作纯 retriever 测量、且不需要答案模型或判定器的 runner；与既有的覆盖率审计不同，它保留排序：每条金标证据记录其在返回候选中的首次命中排名，排序之后追加的链或块成员永不获得排名位置。
+    owner: evals/retrieval/README.md
+    anchor: Formalized retrieval-quality benchmark
+    status: canonical
+  - term: gold matching direction
+    aliases: [金标匹配方向]
+    definition: >-
+      The per-dataset containment direction: `gold-in-candidate` for LoCoMo/BEAM (gold is the source message text of the evidence ids) and PersonaMem (gold is each official related-snippet message), but `candidate-in-gold` for LongMemEval (gold is the whole answer-session blob, so a hit means the candidate is backed by a gold session); normalization matches the legacy audits, a hit on either the statement or the bounded verbatim excerpt counts, and HaluMem questions without evidence stay in the report but outside gold-based rates.
+      逐数据集的包含方向：LoCoMo/BEAM 与 PersonaMem 用 `gold-in-candidate`（金标是证据 ID 的源消息文本／官方 related-snippet 的每条消息），而 LongMemEval 用 `candidate-in-gold`（金标是整个 answer-session 块，命中意味着候选由金标会话支撑）；归一化与既有审计一致，命中 statement 或有界逐字摘录任一部分即计，HaluMem 中无证据的问题留在报告里但不进入金标比率。
+    owner: evals/retrieval/README.md
+    anchor: Gold matching
+    status: canonical
+  - term: appended-evidence budget
+    aliases: [追加证据预算]
+    definition: >-
+      The rule that `topK = 20` maps to the ranked evidence budget while appended chain and summary-routed evidence shares the smaller of a hard 16,000-character ceiling and `1024 + 0.75 × primary evidence characters`, with at most 4 MMR-diverse chains, one chain-intersection hop and two logical-DAG memory hops.
+      `topK = 20` 映射到排序证据预算，而追加的链与摘要路由证据共享 16,000 字符硬上限与 `1024 + 0.75 × 主证据字符数` 两者的较小值；最多 4 条 MMR 多样化链、一个链交集跳与两个逻辑 DAG 记忆跳。
+    owner: evals/retrieval/README.md
+    anchor: Protocol (pinned)
+    status: canonical
+  - term: surface anchor
+    aliases: [表面锚点]
+    definition: >-
+      A contentless Unicode-normalized trigram index entry that preserves explicit quoted phrases, paths, versions, IDs, error codes, code-like identifiers and recall triggers, so plain prose does not become an anchor merely because English words overlap a gold answer; summary text is index metadata and never appears as a candidate.
+      无内容的 Unicode 归一化 trigram 索引条目，用于保留显式引号短语、路径、版本、ID、错误码、类代码标识符与 recall triggers，因此纯散文不会仅仅因为英文词与金标答案重叠就变成锚点；摘要文本是索引元数据，永不出现在候选中。
+    owner: evals/retrieval/README.md
+    anchor: Protocol (pinned)
+    status: canonical
+  - term: reused ingested store
+    aliases: [复用的已摄取存储]
+    definition: >-
+      Stores persist under `.benchmarks/retrieval-stores/<dataset>/` and are reused across runs only when the ingest manifest (dataset sha256 plus sample rule) matches, so unchanged data and config reproduce metrics bit-for-bit with only wall-clock latency varying; a mismatch or a `--full`/`--limit` change triggers a clean re-ingest.
+      存储持久化在 `.benchmarks/retrieval-stores/<dataset>/` 下，只有当摄取 manifest（dataset sha256 加样本规则）匹配时才跨运行复用，因此数据与配置不变会逐位复现指标、只有墙钟延迟不同；不匹配或 `--full`/`--limit` 变化会触发一次干净的重摄取。
+    owner: evals/retrieval/README.md
+    anchor: Output and reproducibility
+    status: canonical
+references:
+  - QPP
+  - disclosure
+  - Active Graph
+  - evidence
+  - retrieval sufficiency
+  - memory chain

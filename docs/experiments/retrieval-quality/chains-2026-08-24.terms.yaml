@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: cross-block chain pull
+    aliases: [跨块链拉取, 块成员链拉取]
+    definition: >-
+      Walking one chain step from each selected block member so positions adjacent in the chain fill the budget that block members left; it targets evidence spread across several blocks.
+      从每个被选中的块成员沿链走一步，用链上相邻位置填满块成员剩余的预算；它针对的是跨越多个块的证据。
+    owner: docs/experiments/retrieval-quality/chains-2026-08-24.md
+    anchor: "Results (BEAM, R@20 / any@20 / all@20 / ctx chars)"
+    status: canonical
+  - term: coverage-versus-ranking distinction
+    aliases: [覆盖收益与排序收益, 覆盖与排序之分]
+    definition: >-
+      Separating a change that puts more relevant evidence somewhere in the context (any@20, legacy evidence recall) from one that moves gold into the top ranks (R@20), because a coverage win can leave ranking untouched.
+      区分两类改动：一类让更多相关证据出现在上下文的某处（any@20、legacy 证据召回），另一类把 gold 移入前列（R@20），因为覆盖收益可能完全不改变排序。
+    owner: docs/experiments/retrieval-quality/chains-2026-08-24.md
+    anchor: Reading
+    status: canonical
+  - term: appended-section character budget
+    aliases: [追加段落字符预算]
+    definition: >-
+      A hard character bound on the appended expansion section so worst-case context growth is a protocol constant instead of a dataset-dependent outcome.
+      对追加的扩展小节设定硬字符上限，使最坏情况下的上下文增长成为协议常量，而不是随数据集变化的结果。
+    owner: docs/experiments/retrieval-quality/chains-2026-08-24.md
+    anchor: Reading
+    status: canonical

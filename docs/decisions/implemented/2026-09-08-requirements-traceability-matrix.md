@@ -1,6 +1,6 @@
 # Requirements traceability matrix and mutation testing for verification
 
-[中文](2026-09-08-requirements-traceability-matrix.zh-CN.md)
+[中文](2026-09-08-requirements-traceability-matrix.zh-CN.md) · [Terms used](2026-09-08-requirements-traceability-matrix.terms.yaml)
 
 **Status:** implemented  
 **Approved:** unrecorded

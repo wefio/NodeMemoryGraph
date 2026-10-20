@@ -1,0 +1,69 @@
+version: 2
+terms:
+  - term: selective historical admission
+    aliases: [reference/excerpt/discard, 选择性历史准入]
+    definition: >-
+      The policy that Pi remains owner of its full session history and that a Pi message body becomes durable NMG history under only three outcomes — `reference` (source/message identity only, body stays in the harness), `excerpt` (exact bounded source excerpt plus provenance) or `discard` (no history row) — and only when it supports an accepted memory, records an explicit user retention request, preserves a decision or unresolved obligation, captures a conflict/exception, or contains an irreproducible result; otherwise NMG keeps no second copy of the body.
+      策略：Pi 仍是其完整会话历史的所有者，一条 Pi 消息正文只在三种结局下成为持久 NMG 历史——`reference`（只有来源／消息身份，正文留在宿主）、`excerpt`（精确有界来源摘录加 provenance）或 `discard`（不建历史行）——且仅当它支撑一条被接受的记忆、记录显式用户保留请求、保存决策或未解决义务、捕获冲突／例外，或包含不可复现结果；否则 NMG 不保留第二份正文副本。
+    owner: docs/design/design/session-capture-and-write-path.md
+    anchor: Session capture and write path
+    status: canonical
+  - term: pi.branch.v1 projection contract
+    aliases: [branch evidence projection, Pi 分支投影契约]
+    definition: >-
+      The versioned contract under which a successful governed `nmg_remember` resolves its exact `evidence` against the recent bounded window of the current Pi branch, preserves original casing from the matching source and binds the HistoryRecord by stable source message ID; incompatible Pi message shapes fail closed to the self-contained evidence path instead of binding wrong provenance, evidence longer than the deterministic excerpt bound is not copied through this path, and an unresolvable source still falls back to the supplied self-contained evidence.
+      带版本的契约：一次成功的受治理 `nmg_remember` 在当前 Pi 分支的最近有界窗口上解析其精确 `evidence`，保留匹配来源中的原始大小写并按稳定来源消息 ID 绑定 HistoryRecord；不兼容的 Pi 消息形状 fail closed 到自包含证据路径而不是绑定错误 provenance，长于确定性摘录界限的证据不经此路径复制，无法解析的来源仍回退到所提供的自包含证据。
+    owner: docs/design/design/session-capture-and-write-path.md
+    anchor: Session capture and write path
+    status: canonical
+  - term: semantic maintenance boundary
+    aliases: [LLM versus core responsibility, 语义维护边界]
+    definition: >-
+      The deliberate LLM 介入 point between semantic judgment and deterministic storage, where the LLM/Agent extracts a self-contained statement, specifies type/actor/time/scope/importance, supplies optional short recall aliases and judges whether a returned candidate is the same meaning, a genuinely replaced older value, a related concept or a different entity, while NMG core enforces admission policy, stable IDs, exact deduplication, scope/state invariants, provenance, transactions, trigger limits, index deltas, version history and reversible graph mutations; attribution fails closed at the host boundary, so `sourceActor` defaults to `assistant` and a `user`/`tool`/`system` attribution requires an exact excerpt from that actor in the current session or explicit external provenance.
+      语义判断与确定性存储之间刻意的 LLM 介入点：LLM／Agent 抽取一条自包含陈述、指定类型／actor／时间／作用域／重要性、提供可选短召回别名，并判断返回候选是同一含义、真正被替换的旧值、相关概念还是不同实体；而 NMG core 强制准入策略、稳定 ID、精确去重、作用域／状态不变量、provenance、事务、触发器上限、索引增量、版本历史与可逆图变更。归因在宿主边界 fail-closed，因此 `sourceActor` 默认为 `assistant`，而归因为 `user`／`tool`／`system` 必须绑定当前会话中来自该 actor 的精确摘录或显式外部 provenance。
+    owner: docs/design/design/session-capture-and-write-path.md
+    anchor: "`remember` as the semantic maintenance boundary"
+    status: canonical
+  - term: two-stage supersede resolution
+    aliases: [action=supersede, 两阶段取代解析]
+    definition: >-
+      The first implemented second-stage resolution, in which the Agent names a new record and a stale record after a single-call write returns bounded ambiguous/sparse-supersede candidates, and NMG verifies both records exist in the same LTG or session-owned STG store with exactly identical scope before applying a versioned replacement; the write is idempotent, each version carries exactly one direct predecessor and one direct successor so a feedback retry cannot overwrite a link, and retrieval may use the stale wording as an anchor but resolves the whole chain and materialises the current or requested as-of version before disclosure, since similarity alone never authorises replacement.
+      首个已实现的第二阶段解析：一次调用写入返回有界歧义／稀疏取代候选后，Agent 指出新记录与陈旧记录，NMG 在应用带版本替换之前验证两条记录存在于同一 LTG 或归会话所有的 STG store 中且作用域完全相同；该写入幂等，每个版本恰好有一个直接前驱与一个直接后继，使反馈重试不能覆盖链上一环，而检索可以用陈旧措辞作为锚点，但在披露之前会解析整条链并物化当前或所请求的 as-of 版本，因为仅相似性从不授权替换。
+    owner: docs/design/design/session-capture-and-write-path.md
+    anchor: "`remember` as the semantic maintenance boundary"
+    status: canonical
+  - term: judgeDuplicates injection point
+    aliases: [DuplicateJudge, 判重注入点]
+    definition: >-
+      `RememberInput.judgeDuplicates` (`DuplicateJudge`, `src/core/types.ts`), an implemented Core injection point where exact, normalized and near candidates are computed deterministically and an embedding- or model-based caller may return a validated merge/supersede decision; the daemon and adapters deliberately do not serialize callbacks across RPC, so their governed path remains the explicit two-stage Agent resolution and a missing judge degrades to candidates, never to an implicit model call.
+      `RememberInput.judgeDuplicates`（`DuplicateJudge`，`src/core/types.ts`），一个已实现的 Core 注入点：精确、规范化与近似候选被确定性计算，随后一个基于 embedding 或模型的调用者可以返回经过验证的合并／取代决策；daemon 与适配器有意不跨 RPC 边界序列化回调，因此它们的受治理路径仍是显式两阶段 Agent 解析，而 judge 缺席时降级为候选，绝不降级为隐式模型调用。
+    owner: docs/design/design/session-capture-and-write-path.md
+    anchor: "`remember` as the semantic maintenance boundary"
+    status: canonical
+  - term: memory export bundle
+    aliases: [nmg.memory-export.v1, 记忆导出包]
+    definition: >-
+      The versioned `nmg.memory-export.v1` package produced by `nmg memory export --json`, containing every MemoryRecord, its MemoryNode and all retained HistoryRecord evidence/provenance, with a default actor filter of `user` and explicit `--all-actors`/`--include-deleted` flags that widen the range so routine Agent/tool material and tombstones are not included accidentally.
+      由 `nmg memory export --json` 产出的带版本 `nmg.memory-export.v1` 包，包含每条 MemoryRecord、其 MemoryNode，以及全部保留的 HistoryRecord 证据／provenance；默认 actor 过滤为 `user`，`--all-actors`／`--include-deleted` 显式扩大范围，使日常 Agent／工具材料与墓碑不会被意外包含。
+    owner: docs/design/design/session-capture-and-write-path.md
+    anchor: Session capture and write path
+    status: canonical
+  - term: ephemeral tool output
+    aliases: [no tool-body duplication, 临时工具输出]
+    definition: >-
+      The rule that tool outputs and logs are temporary by default: NMG does not duplicate their result bodies during session capture, routine successful output, build logs and reproducible command output stay in the host history under its retention policy, and only an explicit governed memory/evidence path may promote a bounded exact excerpt, an irreproducible result or a requested whole artifact while preserving tool-source identity; secrets and credentials are never auto-promoted.
+      规则：工具输出与日志默认是临时的。NMG 在会话捕获期间不复制其结果正文，成功的常规输出、构建日志与可复现命令输出留在宿主历史并遵循其保留策略，只有显式的受治理记忆／证据路径才能晋升一段有界精确摘录、一个不可复现的结果或一个被请求的完整产物，并保留工具来源身份；密钥与凭据永不自动晋升。
+    owner: docs/design/design/session-capture-and-write-path.md
+    anchor: Session capture and write path
+    status: canonical
+  - term: recall trigger
+    aliases: [召回触发词, recall-trigger]
+    definition: >-
+      Optional short alias or likely future query that improves routing to the same memory; it is metadata, not an additional claim.
+      可选的简短别名或可能的未来查询，用于改进到同一记忆的路由；它是元数据，不是附加声明。
+    owner: skills/nmg-memory/references/writes.md
+    anchor: Fact, preference, constraint, and strategy
+    status: canonical
+references:
+  - claim outcome
+  - same-scope supersession

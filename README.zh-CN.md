@@ -1,6 +1,6 @@
 # Node Memory Graph (NMG)
 
-[English](README.md) | 简体中文
+[English](README.md) | 简体中文 · [术语](README.terms.yaml)
 
 > **Agent 会换，记忆不必换。**
 
@@ -13,7 +13,7 @@ SQLite 文件**里——不在任何人的云上。
 不要订阅。
 不要绑定某个 agent 平台。
 
-只有一个你的 agent 能用的本地记忆层。
+只需一个本地记忆层，供你的 agent 使用。
 ```
 
 很多记忆产品需要注册账号、申请 API key、连接托管服务，或者绑定特定的
@@ -24,7 +24,7 @@ agent 平台——还有一些停留在论文阶段。NMG 走相反的方向：
   多 agent 任务黑板只传**记忆 ID** 而不传内容的原因：记忆比任何一个 agent
   的生命周期都长。
 - **本地且私有。** 所有持久记忆都在一个 SQLite 文件里，备份就是拷贝这个
-  文件。检索零配置即可用（SQLite FTS5）；可选的语义层可以使用镜像内模型、
+  文件。检索零配置即可用（SQLite FTS5）；可选的语义层可以使用随附的本地模型、
   独立部署的本地服务或免费额度的云端嵌入——只有待嵌入的文本会离开记忆
   进程，记忆库本身永远不会。
 - **免费。** 没有任何计费面：FTS5 检索内置，本地嵌入路径零成本，也没有
@@ -46,6 +46,35 @@ JSON-RPC 边界自己完成集成。
 | DeepSeek Harness | Cordis 插件（[dsh/](dsh/README.md)） |
 | 其他任意 agent | CLI + [Skill](skills/nmg-memory/SKILL.md)（[Agent 无关 CLI](#agent-无关-cli)、[Agent Skill](#agent-skill)） |
 | 自定义 harness | 基于 HTTP JSON-RPC 边界自写 adapter（[无头 Pi 控制](#无头-pi-控制)） |
+
+NMG 在不可变证据之上保存可变的语义记忆，并且只检索一个小的、可渐进加深的
+子集，而不是把所有历史压平成一份全局提示词。
+
+- 普通提示词不加载任何动态长期记忆。自动检索会先超量取回候选并按类型重排，
+  再施加最终的记录预算。
+- 稳定的 `stateKey` 标识**一个**可替换属性——不是话题、也不是分组标签——并在
+  同一作用域内自动取代此前的活跃值。
+- 类型化节点关系与多证据派生记忆支撑图感知检索，而不是把每条记忆当作孤立
+  分片。
+- 重复节点可以合并、过宽的节点可以拆分，而不删除记忆或证据；源到目标的重定向
+  保留旧地址。
+- `nmg_search` 返回紧凑结果头；`nmg_get` 只把选中的记忆 ID 展开为精确陈述与
+  来源证据。
+- 节点局部访问计数会累积，并周期性重建为 Huffman 派生的块层级，让可能的记忆
+  保持浅层，同时不删除冷历史。
+- 新增或移动的记忆进入持久 SQLite Delta，在叶子压实之前即可被检索。脏节点
+  局部重建；未变化的内容派生叶子 ID 保留其既有的外部嵌入。
+- 持久化向量使用 Float32 BLOB，并被加载进可丢弃的连续内存缓存（几何式追加
+  容量）；SQLite 始终是权威。
+- 检索轨迹累积歧义、回退、冲突与共检索信号。Lab 维护可以提出有证据支撑的
+  连接或节点拆分提案；提案需要重复观察与显式接受，语义图才会改变。
+- 作用域、有效区间、冲突与被取代状态都保持可追溯，而不是删除更早的证据。
+- 可选的时间/逻辑链复用既有记忆 ID，以保留有序历史或显式监督的依赖 DAG。
+  检索可以扩展一个有限的邻接窗口，同时不把顺序当作推断出的真值。
+- 云同步被推迟。外部嵌入是可选的，通过 OpenAI 兼容端点提供；执行隔离仍是
+  Pi 插件层面的事。
+- 一个实验性的无框架可微控制器使用小型惰性 UOp 图，学习节点、边、
+  STOP/EXPAND 与 Active Graph 预算。它是 Lab 原语，默认不替代确定性路由。
 
 ## 架构
 
@@ -88,8 +117,8 @@ NMG daemon ── NMG core ── MemoryNode 图 ── 分层 MemoryRecord
 
 ```
 claude-plugins/nmg-memory/
-├── .claude-plugin/plugin.json   # 插件元数据
-└── agents/memory-copilot.ts     # MCP server（< 130 行）
+├── .claude-plugin/plugin.json   # Plugin metadata
+└── agents/memory-copilot.ts     # MCP server (< 130 lines)
 ```
 
 **工作方式**
@@ -97,11 +126,11 @@ claude-plugins/nmg-memory/
 根目录 `.mcp.json` 把 `nmg` 注册为本地 MCP server。Claude Code 在会话启动时
 自动发现它并暴露三个工具：
 
-| 工具           | 用途                                           |
-| -------------- | ---------------------------------------------- |
-| `nmg_search`   | 返回紧凑的记忆头（mid/node/type/tier/preview） |
-| `nmg_get`      | 加载精确的记忆陈述与来源证据                   |
-| `nmg_remember` | 保存持久的事实/偏好/状态/约束/事件             |
+| 工具 | 用途 |
+|------|---------|
+| `nmg_search` | 返回紧凑的记忆头（mid/node/type/tier/preview） |
+| `nmg_get` | 加载精确的记忆陈述与来源证据 |
+| `nmg_remember` | 保存持久的事实/偏好/状态/约束/事件 |
 
 daemon 生命周期自动管理：MCP server 启动时拉起 NMG daemon，退出时安全停止。
 如果 daemon 已在运行（比如另一个 Agent 启动的），直接复用且不碰它。
@@ -126,7 +155,7 @@ npm install
 npm install
 npm test
 npm run check
-pi install <node-memory-graph 路径>
+pi install <path-to-node-memory-graph>
 pi
 ```
 
@@ -134,7 +163,7 @@ pi
 `NMG_DATA_DIR` 换目录。项目本地 `.nmg/` 数据保留给隔离 STG 会话和受控/无头
 运行。
 
-Pi 提供[显式开启的首次输出计时](docs/design/session-memory-lifecycle-hooks-2026-08-10.md#首次输出计时)，
+Pi 提供[显式开启的首次输出计时](docs/decisions/implemented/2026-10-04-first-response-timing-is-opt-in.zh-CN.md)，
 通过 `/nmg-latency on|off|status` 控制，只记录元数据，不改变召回等待策略。
 慢召回保留条件和 host 事件的解释边界由会话钩子契约定义。
 
@@ -144,11 +173,17 @@ Pi 提供[显式开启的首次输出计时](docs/design/session-memory-lifecycl
 状态是临时摘要，不是完成证明，也不是持久任务库。
 
 Pi adapter 刻意做薄：它通过 JSON-RPC/HTTP 惰性启动本地 daemon，自动回忆和
-四个稳定工具复用同一条连接，且只在本次 adapter 调用启动了 daemon 时才在
-会话关闭时停掉它。已在运行的共享 daemon 不会被碰。
+默认工具面复用同一条连接，且只在本次 adapter 调用启动了 daemon 时才在
+会话关闭时停掉它。
+Pi、Claude MCP、DSH 和 benchmark 桥共用同一个 Agent Surface，用于紧凑检索、
+精确证据、remember 后续、任务板输出、脱敏与逻辑链投影。adapter 只保留原生
+工具 schema、生命周期钩子、传输回退、真正的宿主专属动作，以及官方 benchmark
+信封或审计字段。
+已在运行的共享 daemon 不会被碰。
+
 自动召回总等待五秒，后续阶段超时仍保留及时返回的候选。Pi 用
 `/nmg recall timing` 查看最近一轮各阶段耗时；显式 `nmg_search` 不变。
-[期限与限制](docs/design/session-memory-lifecycle-hooks-2026-08-10.md#自动召回等待预算)由钩子契约说明。
+[期限与限制](docs/design/session-memory-lifecycle-hooks-2026-08-10.zh-CN.md#自动召回等待预算)由钩子契约说明。
 daemon 是对应 SQLite 数据库唯一的应用层写入者。并发 Agent 轮次可以并行等待
 embedding 或摘要；短小的同步 SQLite 阶段由 daemon 事件循环串行执行。客户端
 不应再对同一文件打开独立可写 store。
@@ -161,7 +196,8 @@ Pi 扩展把权威 LTG 放在 `NMG_DATA_DIR` 或 `~/.nmg/nmg.sqlite`，把当前
 隔离；没有会话所有者的 LTG 缓存行由项目内会话共享。
 只有当项目根目录和 Pi 工作目录不同的时候才需要设置 `NMG_PROJECT_DIR`。
 
-默认情况下，模型拿到五个工具和一套类型化写入/使用策略：
+默认情况下，模型拿到三个持久记忆工具、一个 Lab 能力入口、共享任务板，以及
+一套类型化写入/使用策略：
 
 - `nmg_remember`：保存带作用域、真值状态、事件时间、稳定状态身份、证据角色
   和来源的类型化长期记忆。
@@ -170,16 +206,26 @@ Pi 扩展把权威 LTG 放在 `NMG_DATA_DIR` 或 `~/.nmg/nmg.sqlite`，把当前
 - `nmg_get`：把选中的 ID 展开为精确记忆陈述和有界来源证据。传入 `nmg_search`
   返回的 `activeGraphId` 会把选中的 ID 记录为实际使用过；另一个会话读不到
   也更新不了那个 AG。
-- `nmg_lab`：发现、租用、调用和关闭可选的会话能力；受控或 active 执行仍需
-  原有评估门和授权回执。
-- `nmg_state`：以 read/write 和 ag/board 空间统一操作私有工作状态与共享协作状态。
-  AG writer 显式启用有界租约；board 保留 TTL、接手和独立裁定语义。
-  参见[状态空间](docs/design/state-spaces.md)。设置 `NMG_ENABLE_COORDINATION=0`
-  （也接受 `false`、`off`、`no`）拒绝模型侧 board 操作并关闭 adapter 唤醒，
-  AG 仍可用。旧 board RPC/CLI 保留管理兼容，板面不进入 LTG 或语义检索。
+- `nmg_lab`：在既有 daemon 连接上列出、租用、调用和关闭可选的会话能力。推理
+  工作区、只读图推理与控制器影子可由 Agent 选择；受控/主动执行仍受回执与
+  闸门保护。
+- `nmg_state`：通过一个按空间区分的入口读写私有 AG 工作状态或共享看板协调。
+  AG writer 显式启用有界租约；board 操作保留其 TTL、认领与独立裁定生命周期。
+  参见[状态空间](docs/design/state-spaces.md)。
 
-图维护、QPP、索引和实验性推理组件留在 core/CLI 层，不做成 Pi 工具。adapter
-从不直接打开 SQLite 或 import 那些实现。
+设置 `NMG_ENABLE_COORDINATION=0`（也接受 `false`、`off`、`no`）可拒绝模型侧的
+board 操作并关闭 adapter 唤醒轮询；AG 仍可用。daemon RPC 与 `nmg board ...`
+CLI 仍保留用于管理。看板条目是临时的、带归因的、任务作用域的协调数据；它们
+永不进入 LTG 或语义检索。
+
+图维护、QPP 与索引仍属 core/CLI 层面的事。adapter 从不直接打开 SQLite，也不
+直接 import 那些实现。
+
+Lab 是可选加入的能力通道，不是死胡同式的暂存区，也不是独立客户端。Pi、MCP、
+DSH 与 CLI adapter 都调用同一个 daemon `lab` RPC。Agent 可以为当前会话显式
+租用低风险能力；租约会过期，且在受治理的记忆写入之前输出都是临时的。
+`NMG_ENABLE_LAB_TOOLS=1` 增加 Pi 的带类型 `nmg_reason` 便捷工具，它委托给
+同一个 RPC。通过评测是默认提升的必要条件，而不是显式选择使用的条件。
 
 在仓库内做一次性开发时，禁用自动扩展发现、只加载一次 NMG：
 
@@ -212,6 +258,11 @@ npm run cli -- topology proposals
 npm run cli -- topology assess <proposal-id>
 npm run cli -- topology review <proposal-id> --decision accept
 npm run cli -- topology actuate <proposal-id>
+npm run cli -- chain create --type logical --topic "Atlas migration"
+npm run cli -- chain edge add --chain <chain-id> --from <memory-id> --to <memory-id>
+npm run cli -- chain get --chain <chain-id>
+npm run cli -- chain edge remove --chain <chain-id> --from <memory-id> --to <memory-id>
+npm run cli -- chain remove --chain <chain-id> --memory <memory-id>
 npm run cli -- graph --out memory-graph.html
 npm run cli -- stg sync --project-dir . --scope project=nmg --limit 50
 npm run cli -- daemon start
@@ -232,8 +283,14 @@ CLI `remember` 写入默认归属提交渠道 `user`；adapter/RPC 调用方默�
 `--source-lineage` 保留精确的 user/tool 摘录；即使原 harness 转录消失，事件
 仍可审计。
 
-项目 STG 也是会话私有的。Pi 自动提供会话 ID；CLI 调用方可加 `--session-id
-ID`。不给的话，CLI 使用独立的 `cli` 管理会话，不读任何 Pi 会话的 STG。
+项目 STG 也是会话私有的。Pi 自动提供会话 ID；CLI 调用方可加
+`--session-id ID`。不给的话，CLI 使用独立的 `cli` 管理会话，不读任何 Pi 会话的
+STG。
+
+记忆链是管理/harness 面，不是额外的默认 Pi 工具。`chain create/list/get`、
+成员添加/移除与边添加/移除在未提供 `--project-dir` 时作用于 LTG。项目 STG 的
+链自动由 `--session-id`（或隔离的 `cli` 会话）拥有，其他会话无法查看或变更。
+逻辑边必须显式提供；NMG 不会从相似度或对话顺序推断因果。
 
 `nmg graph` 把节点/关系投影导出为单个自包含 HTML 文件（默认
 `nmg-graph.html`，`--out FILE` 覆盖）。它只读数据库——对运行中的 daemon
@@ -278,8 +335,8 @@ L4/L5 或删除其语义解释需要显式命令。`memory delete` 保留不可�
 恢复面，不是日常用户操作。
 
 Pi 独立于 AG 内容预算，对每用户轮的 agent 主导回忆设限：最多三次 search、
-共五次 search/get 调用、连续两次没有精确证据进展就必须 get、连续两次 search
-无新候选 ID 即终止。新用户轮重置守卫。这些限制防止紧凑 AG 通过无界工具循环
+共五次 search/get 调用、不带精确证据进展的 search 不超过两次、连续两次 search
+未新增候选 ID 即终止。新用户轮重置守卫。这些限制防止紧凑 AG 通过无界工具循环
 被撑出来。
 
 ## Agent Skill
@@ -288,7 +345,8 @@ Pi 独立于 AG 内容预算，对每用户轮的 agent 主导回忆设限：最
 的 Agent 使用同样的生命周期和渐进回忆工作流。它是一张小的首用卡片加按需
 参考页：详细的写入、回忆和操作指引只在 Agent 忘了操作或遇到点名特例时才读。
 正常路径始终是
-`status → 需要则 start → search → 选中的 get → 所有权安全的 stop`。
+`status → start if needed → search → selected get → ownership-safe stop`
+（需要则 start；选中的 get；所有权安全的 stop）。
 
 从持久本地仓库首次安装时，建议将 `~/.agents/skills/nmg-memory`（或 Agent
 配置的技能位置）作为目录软链接，指向 `<CHECKOUT>/skills/nmg-memory`；Windows
@@ -298,6 +356,9 @@ Pi 独立于 AG 内容预算，对每用户轮的 agent 主导回忆设限：最
 
 文件改动会立即通过链接反映，但不会追溯替换已经读入会话的指令。在 Pi 中需要
 刷新发现结果时，于空闲边界重新加载或开启新会话。
+
+自然证据参考页描述被动真实使用收集、失败即关闭的就绪度审计、候选标定、
+匹配验证，以及可由 Agent 应用且可回滚的更新。
 
 SQLite FTS5 是零配置的 Pi 检索路径。设置 `NMG_EMBED_BASE_URL` 和
 `NMG_EMBED_MODEL` 可把外部节点/叶子语义信号加进同一个预算化 Active Graph
@@ -368,7 +429,7 @@ node --experimental-strip-types scripts/pi-control.ts prompt `
 工具调用。用 `NMG_PI_AGENT_DIR`、`NMG_PI_TIMEOUT_MS`、`NMG_PI_MAX_TOOL_CALLS`
 覆盖。这些是测试运行器安全限制，不是 NMG 检索限制。控制器默认
 `deepseek/deepseek-v4-flash` 且关闭 thinking，用 `--no-extensions`，只显式
-加载 NMG 扩展及其四个稳定工具，防止无关的全局权限扩展阻塞非交互 RPC 工具
+加载 NMG 扩展及其默认稳定工具面，避免无关的全局权限扩展阻塞非交互 RPC 工具
 调用。需要时设 `NMG_PI_MODEL` 覆盖测试模型。
 
 QPP 执行拆成三个独立控制：
@@ -388,6 +449,23 @@ QPP 执行拆成三个独立控制：
 - `NMG_SEARCH_RECOMMENDATION=off|advisory|guardrail` 控制自动回忆不足时是否
   向模型推荐一次深思熟虑的 `nmg_search`。默认 `off`；`guardrail` 只对硬失败
   （空、仅回退、极弱回忆）发推荐。
+
+这些开关只选择可以用哪种检索能力；它们本身不授权某个学习到的候选去改变产品
+检索。独立的控制器运行时通道是失败即关闭的：
+
+- `NMG_CONTROLLER_RUNTIME_MODE=off|shadow|controlled|active` 默认 `shadow`。
+  `off` 不做任何学习评分。`shadow` 记录决策，但不能分配、折叠或重排。
+- `controlled` 只用于显式标记的实验。它要求
+  `NMG_CONTROLLER_RUNTIME_STATE` 处有训练好的状态，且
+  `NMG_SHADOW_COLLECTION_ORIGIN=controlled`。
+- `active` 是生产执行边界。它要求同一份确切的训练状态，外加
+  `NMG_CONTROLLER_ACTIVATION_RECEIPT`——一份经评审的 JSON 回执，绑定候选
+  SHA-256、特征协议版本、检索、控制器与产品闸门制品——以及一份独立可加载的
+  先前控制器状态作为回滚制品。制品缺失、变更、不完整或无法加载时，控制器处于
+  惰性状态。
+
+该通道只向检索传递带类型的数值决策。候选策略、回执内容与控制器协议永不进入
+Agent 的答案上下文。
 
 NMG 报告每个模块的分数、质量和成本，但不替运营者选策略、也不搜索偏好组合。
 启用 QPP1、QPP2 或推荐——以及组合它们——是显式的用户/运营者决策。

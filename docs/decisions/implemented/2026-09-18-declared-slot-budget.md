@@ -2,8 +2,6 @@
 
 **Status:** implemented
 **Approved:** explicit
-Date: 2026-09-18
-Branch: feat/ooo-run-namespace
 **Relates to:** [task-unit semantics design](../../design/task-unit-semantics.md),
 [its obligation ledger](../../design/task-unit-semantics-obligations.md),
 [the arms get their own driver](2026-09-17-arms-get-their-own-driver.md)
@@ -11,7 +9,9 @@ Branch: feat/ooo-run-namespace
 治理 meta-rule：[self-governance meta-rule](2026-09-07-self-governance-meta-rule.md) ——
 本规则变更本身也是一次受治理的决策（决策 + 替代方案 + 一个规则一个家）。
 
-中文版: [2026-09-18-declared-slot-budget.zh-CN.md](2026-09-18-declared-slot-budget.zh-CN.md)
+中文版: [2026-09-18-declared-slot-budget.zh-CN.md](2026-09-18-declared-slot-budget.zh-CN.md) · [Terms used](2026-09-18-declared-slot-budget.terms.yaml)
+
+Later measurement: F2c's paired offline specs and the F3 paid pilot were subsequently completed. The pilot is directional only; see [the experiment-arm ledger](../../design/task-unit-semantics-obligations/experiment-arms.md) and [its recorded results](../../experiments/execution/ooo-arms-pilot-2026-09-18.md). The decision below describes the mechanism, not an outstanding measurement.
 
 ## Problem
 
@@ -20,7 +20,7 @@ The design's C arm compares the same fine plan at a different **slot count** ("C
 half. Building the arms' driver measured that the arm had no mechanism: with `slots: 4` on a plan whose
 first three units are independent, the run reported `slotsUsed: 1` and refused the rest by name
 ("no published handoff for this task"). The measurement is in
-[the ledger](../../design/task-unit-semantics-obligations.md#what-f2b-measured-a-run-can-hold-exactly-one-claim).
+[the ledger](../../design/task-unit-semantics-obligations/experiment-arms/single-claim-experiment.md#what-f2b-measured-a-run-can-hold-exactly-one-claim-1).
 
 Three rules produced it, each in its own home:
 
@@ -113,5 +113,4 @@ other than the default, so no gate or switch changed for the product path.
   licence/publication/target mutants in `src/integration/ooo-board.ts`, and the driver's declared
   budget.
 
-The measured arm comparison is still owed: the spec pair for F2c and the paid pilot for F3 (a
-separately fixed model, budget and repetitions).
+At this decision's snapshot, the measured arm comparison was still owed: the spec pair for F2c and the paid pilot for F3 (with a separately fixed model, budget and repetitions). Both were completed later as recorded above; F3 remains directional only.

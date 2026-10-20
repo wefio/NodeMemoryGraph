@@ -1,6 +1,6 @@
 # 自治理元规则：NMG 自身的规则也受治理
 
-[English](2026-09-07-self-governance-meta-rule.md)
+[English](2026-09-07-self-governance-meta-rule.md) · [术语](2026-09-07-self-governance-meta-rule.terms.yaml)
 
 **Status:** implemented  
 **Approved:** unrecorded

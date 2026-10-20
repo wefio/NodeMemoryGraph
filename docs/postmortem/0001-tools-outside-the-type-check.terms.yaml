@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: allow-list of checked files
+    aliases: [type-check allow-list, 类型检查白名单]
+    definition: >-
+      A compiler configuration that enumerates checked files instead of including a maintained source directory; new files outside the enumeration remain unchecked by default.
+      逐项枚举参与类型检查文件、而不是包含受维护源码目录的编译器配置；未列出的新文件默认不会被检查。
+    owner: docs/postmortem/0001-tools-outside-the-type-check.md
+    anchor: Root cause
+    status: canonical
+references:
+  - post-mortem
+  - guardrail

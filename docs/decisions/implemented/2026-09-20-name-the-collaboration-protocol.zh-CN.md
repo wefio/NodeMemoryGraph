@@ -1,6 +1,6 @@
 # 给协作协议与它的任务单元子协议定名
 
-[English](2026-09-20-name-the-collaboration-protocol.md)
+[English](2026-09-20-name-the-collaboration-protocol.md) · [术语](2026-09-20-name-the-collaboration-protocol.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit
@@ -42,7 +42,7 @@ entry）** 是条目被某次 run 治理之后的状态；**run** 是计划、�
 | 协议化协作         | agent 通过一份公开协议协商，机制与拍板留在程序侧                                                     | 本记录；[概念图](../../guides/concept-map.zh-CN.md)                                                                                                     |
 | 任务单元协议       | 把任务声明为单元，并规定它被收编、认领、交付、裁决的方式以及运行时拥有哪些事实                       | [task-unit-semantics.md](../../design/task-unit-semantics.md)、[义务台账](../../design/task-unit-semantics-obligations.md)                              |
 | 任务单元           | 可以交接、验证和独立作废的工作，由输入、依赖、验收、能力与预算声明                                   | [task-unit-semantics.md](../../design/task-unit-semantics.md)                                                                                           |
-| 黑板（Task Board） | 位于语义记忆之外、有归因、有过期时间的任务级协作区                                                   | [memory-graphs.md §2](../../design/memory-graphs.md#shared-task-board-cross-agent-coordination-not-a-memory-graph)                                      |
+| 黑板（Task Board） | 位于语义记忆之外、有归因、有过期时间的任务级协作区                                                   | [memory-graphs.md Shared Task Board (cross-Agent coordination, not a memory graph)](../../design/memory-graphs/session-runtime-graph-and-projection-revisions/shared-task-board.md#shared-task-board-cross-agent-coordination-not-a-memory-graph-1)                                      |
 | 条目 entry         | 一条黑板项（goal / question / handoff / blocker / result / note / decision），带认领租约、交付与裁决 | [board-find-serial-a2a-compat](../../design/board-find-serial-a2a-compat-2026-08-13.md)                                                                 |
 | 唤醒 wake          | 定向条目通知那个 agent 的会话；黑板只负责把人叫到，不决定谁干活                                      | [board-find-serial-a2a-compat](../../design/board-find-serial-a2a-compat-2026-08-13.md)                                                                 |
 | 串行通道           | 同一时刻只推送一条未定向的 actionable；它被认领或关闭时晋升下一条                                    | [board-find-serial-a2a-compat](../../design/board-find-serial-a2a-compat-2026-08-13.md)                                                                 |
@@ -62,7 +62,7 @@ entry）** 是条目被某次 run 治理之后的状态；**run** 是计划、�
 | 词               | 为什么不用                                                                         | 真实含义的 owner                                                   |
 | ---------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | 调度器 scheduler | 语义层刻意不启用：排序是合法集合上的确定性规则加声明的预算                         | [任务单元语义](2026-09-13-task-unit-semantics.zh-CN.md)            |
-| OoO、`ooo-`      | 项目给自己实现的调度模型起的名字，也是文件前缀；它指的是模型，不是“谁讨论、谁拍板” | [ooo-execution-bootstrap](../../design/ooo-execution-bootstrap.md) |
+| OoO、`ooo-`      | 项目给自己实现的调度模型起的名字，也是文件前缀；它指的是模型，不是“谁讨论、谁拍板” | [ooo-execution-bootstrap](../../design/ooo-execution-bootstrap.zh-CN.md) |
 
 ## 这些词是怎么长出来的
 
@@ -102,6 +102,6 @@ entry）** 是条目被某次 run 治理之后的状态；**run** 是计划、�
   其余部分沿用黑板、run、adopt、受管条目这些已有词。
 - 不改任何标识符。`run`、`adopt`、`managed`、`dispatch`、`ooo-` 文件前缀以及所有文件名保持原样，
   因此没有历史记录需要修补。
-- 名字住在概念图里并带别名以便检索。`docs/glossary.yaml` 不动：它负责仓库与流程词汇，而这是产品概念。
+- 名字住在概念图里并带别名以便检索。本次定名不把产品定义登记到[仓库术语 resolver](2026-09-08-repository-terminology-index.zh-CN.md)；其准入词汇覆盖仓库和流程概念。
 - 定名本身不建任何东西。子协议的机制已经在（run 面、受管写入围栏、共享派发循环），产品路径仍然没有
   收编者——那是下一步工作，不是这个名字的后果。

@@ -1,6 +1,6 @@
 # When the chain path may be entered
 
-[中文](2026-09-19-when-the-chain-path-may-be-entered.zh-CN.md)
+[中文](2026-09-19-when-the-chain-path-may-be-entered.zh-CN.md) · [Terms used](2026-09-19-when-the-chain-path-may-be-entered.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

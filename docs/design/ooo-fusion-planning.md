@@ -1,30 +1,37 @@
 # Fusion planning: repair-first online, ceiling offline
 
-How a plan's units are assigned to Agent sessions: what the host decides at a run boundary, and what
-is measured offline instead. The legality rule itself is not here - it lives in
+[中文](ooo-fusion-planning.zh-CN.md) · [Terms used](ooo-fusion-planning.terms.yaml)
+
+the shared dispatch loop and one-move function exist, and the research driver uses them; the
+product's existing `nmg_board` host path has not been shown invoking that loop. Product integration is
+deferred. The offline ceiling is a research tool, not a runtime policy; no general startup, token or cost
+model is established.
+
+How a plan's units are assigned to Agent sessions: what a shared dispatcher may decide at a run boundary,
+and what is measured offline instead. The legality rule itself is not here - it lives in
 `src/integration/ooo-execution.ts` (`sharedSessionLegal`) and this document never restates it.
 
 ## The problem this answers
 
-Fusion saves a session's startup by running several units in one session. The bound on how many
-units one session may carry is the only fusion policy the repository had, and a bound is not a
-decision: it does not say which successors to take, and it cannot say whether fusion is worth taking
-at all. The measured shape is narrow in plan terms and positive in the one quantity it measures: on the
-four-unit fine plan, cap 1 to cap 2 saves 8 451 ms of wall clock against within-cell spreads of 1 783 ms
-and 571 ms - 4.2 s per avoided session - while the ceiling's constant of 1.9 s, taken from the D arm's
-two-unit plan where the two-rep spread was as wide as the effect, under-predicts it by about a factor of
-two. What the running surface costs is still one number from that arm (about 0.7 k tokens on a chain's
-first unit), and the token side of fusion is not resolved by any of these runs. So the useful question is
-_how many sessions a plan can be compressed into_, not whether fusion is a good idea in general.
+Fusion can save session startup by carrying several units in one session, but the bound alone does not
+choose a successor or establish that fusion is worth its token or provider cost. The offline tool uses an
+explicit 1 900 ms per-session assumption from the D arm; that arm's 1 900 ms median gap is smaller than
+its 2 228 ms within-arm spread, so it is not a general startup estimate. On the four-unit fine plan,
+cap 1 to cap 2 differs by 8 451 ms in the archived medians, with within-cell spreads of 1 783 ms and
+571 ms. This is evidence about that measured shape, not a universal saving: the third cap repetition used
+a newer prompt and the reports do not preserve the instrument commit. A run-specific observation of
+about 0.7k extra tokens on a chain's first unit does not price the running surface, and the token/cost
+side of fusion remains unresolved. The useful question is therefore _how many sessions a plan can be
+compressed into_, not whether fusion is generally beneficial.
 
 ## Two clocks
 
-|          | Online (a run boundary)                    | Offline (analysis)                                                                                             |
-| -------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| Decides  | the next move of the current session       | how many sessions the plan could need at best                                                                  |
-| Facts    | the ones the run actually holds            | the optimistic projection: every unit accepted, nothing cancelled, no external wait pending, no pending branch |
-| Cost     | none (a pure function, milliseconds)       | none (no model calls)                                                                                          |
-| Fails by | closing a session it should have continued | overstating what fusion can save                                                                               |
+| | Online (a run boundary) | Offline (analysis) |
+| --- | --- | --- |
+| Decides | the next move of the current session | how many sessions the plan could need at best |
+| Facts | the ones the run actually holds | the optimistic projection: every unit accepted, nothing cancelled, no external wait pending, no pending branch |
+| Cost | none (a pure function, milliseconds) | none (no model calls) |
+| Fails by | closing a session it should have continued | overstating what fusion can save |
 
 The offline half is a **ceiling**, not a policy. Nothing in a run may read it to decide a move, because
 it is computed from facts the run does not have yet.
@@ -59,18 +66,28 @@ Three properties make that move safe to make repeatedly:
   the model call is the activity, the move is the replayable code. Without it, two runs of one plan are
   not comparable, which is what the arms need.
 
-The cost model is read-only online. It is fitted offline and frozen for a run, which is exactly how a
-query optimizer treats statistics: it re-plans at a boundary against collected statistics, and it never
-re-collects them mid-query.
+`nextSessionMove` is a deterministic rule over the plan and current facts; it does not read a numeric cost
+model. The D-arm startup value is an explicit research assumption used by the offline ceiling, not a
+fitted general model. If a cost model is introduced later, it must be fitted offline and frozen for a run;
+it must not turn future facts into an online decision.
+
+### Execution tool sets
+
+The [Pi session runner](../../.pi/extensions/nmg/ooo-execution.ts) distinguishes a
+plain execution surface, selected from the first attempt's required tools, from
+a chain execution surface that registers the tool union once for several units.
+In chain mode, an unavailable operation still refuses for the current unit. The
+artifact schema accepts a string conclusion kind, but the artifact envelope and
+host still validate the result. This capability does not authorize fusion or
+establish product-loop integration; the cost comparison below remains unpriced.
 
 ## Offline: the ceiling
 
-The legal graph is state-dependent, so the offline half prices an optimistic projection of it: the
-projection is fed to the _same_ `sharedSessionLegal`, which keeps one home for the five conditions, and
-the only condition the projection cannot answer - a successor must not need a unit that has not run yet
-
-- is added as "not reachable by the successor relation in reverse": a chain is a linear extension, so
-  `a` may not be followed by `b` when `a` transitively depends on `b`.
+The legal graph is state-dependent, so the offline half prices an optimistic projection, not a live
+schedule. `optimisticPlan` marks every unit accepted, uncancelled and externally ready, while preserving
+its declarations; it then calls the same `sharedSessionLegal` predicate. `fusionGraph` restricts edges to
+later units in plan order and excludes a successor that the current unit transitively depends on. This
+keeps the graph acyclic and prevents a chain from running a unit before what it needs.
 
 Two numbers come out of that graph:
 
@@ -82,20 +99,20 @@ Two numbers come out of that graph:
   order and append each unit to the open session that can legally take it, preferring the fullest, or
   open a new one.
 
-The gap between the two is the honest answer to "how much is fusion worth": the floor is what fusion
-could save at best, and the list-scheduling result is what the current rule actually gets. Reported
-against the measured startup, the difference is milliseconds saved.
+The gap between these numbers says how many sessions the greedy rule leaves above the structural floor;
+it is not an economic value. Multiplying sessions avoided by the explicit 1 900 ms assumption produces a
+wall-clock projection only. The fine-plan cap experiment observed 8 451 ms from cap 1 to cap 2, versus
+3 800 ms predicted by the flat assumption. Because the D-arm value is not a stable constant and the cap
+reports do not preserve the instrument commit (the third repetition used a newer prompt), the comparison
+is bounded evidence for this sample, not a calibrated per-session price.
 
-Not modelled by the ceiling, and now measured in two pieces: the union tool surface's extra turn (about
-0.7 k tokens on a chain's first unit, measured on the D arm's plan) and what the chain **surface** costs even
-when it fuses nothing. On the four-unit fine plan, the chain surface at bound 1 spends 3 607 ms more
-than the plain path does for the same plan, slots and parent check - 26 186 ms against a 22 579 ms median
-over two reps - and the token side of that difference (15 412) does not separate, because those cap reports
-predate the split; the plain cells' split shows what the extra turns cost instead (the two-slot rep spends
-3 813 input tokens where the one-slot rep spends 7 248). What is still not priced is the fused cell itself:
-its reports predate the usage split that now exists
-([the A-D cells](../experiments/execution/archive/ooo-arms-2026-09-19/README.md)), which is why the ceiling
-stays a wall-clock ceiling for now and why the cost of fusing is unmeasured rather than small.
+The ceiling does not price the union tool surface's additional turn or the chain **surface** overhead.
+About 0.7k extra tokens on the first unit is a run-specific D-arm observation, not a general surface
+price. On the four-unit plan, B vs cap1 shows a 3 607 ms wall difference (26 186 ms against a 22 579 ms
+plain-cell median), but the reports do not establish a matching instrument commit; the 15 412-token gap
+also does not separate. The cap reports predate the usage split, so fused-cell provider cost remains
+**unpriced**. The [A-D archive](../experiments/execution/archive/ooo-arms-2026-09-19/README.md) records the
+boundaries; no general token or cost benefit is claimed.
 
 ## When the chain path may be entered
 
@@ -104,92 +121,14 @@ The permission rule is a decision, not a paragraph here:
 states the three conditions (the semantics allow it, a continuable task exists, the host supports session
 reuse), that the shared runtime decides while the adapter only supplies capability, and that fusion may not
 relax per-task permission, input-version, cancellation or acceptance checks - nor the parent's joint
-acceptance. What that record does **not** declare is economics: this document measures a wall-clock effect
-and leaves the cost of fusing unpriced, and the two must not be read as one claim.
+acceptance. The record does **not** declare economics: this document reports bounded wall-clock evidence
+and leaves fusion cost unpriced. Nor does the permission rule establish that the product's existing
+`nmg_board` host path invokes the extracted programmatic loop; the dispatch decision leaves that
+integration deferred.
 
 ## What the ceiling says today
 
-Run against the fixtures and against the D arm's own spec
-(`node --experimental-strip-types evals/ooo-execution/fusion-ceiling.ts [--spec <path>]`):
-
-| plan                               | units | floor | cap 1      | cap 2         | cap 3     | cap 4     |
-| ---------------------------------- | ----- | ----- | ---------- | ------------- | --------- | --------- |
-| `fixtures/report/fine.spec.json`   | 4     | 1     | 4 sessions | 2 (3.8 s)     | 2 (3.8 s) | 1 (5.7 s) |
-| `fixtures/pipeline/fine.spec.json` | 4     | 1     | 4 sessions | 2 (3.8 s)     | 2 (3.8 s) | 1 (5.7 s) |
-| the D arm's `spec-2.json`          | 2     | 1     | 2 sessions | 1 (**1.9 s**) |           |           |
-
-The third row is an arithmetic check, not an independent prediction: the ceiling's per-session constant
-was fitted from the D arm's own runs, so re-deriving 1 900 ms for that arm's plan - which measured
-12 948 ms at bound 1 against 11 048 ms at bound 2 - shows that the tool reads a plan the way the arm ran
-it, and nothing more than that. The independent evidence is the fine plan below, where the same tool
-predicts 3 800 ms saved at cap 2 while the runs measure 8 451 ms: a disagreement of about a factor of two,
-which is the useful result, because it says the startup term is plan-dependent rather than a constant.
-Two things the table also says: the floor is 1 for both multi-unit fixtures, so a plan is fully
-fusible in principle; and cap 3 buys nothing over cap 2 on these shapes, because the fourth unit has
-to wait for the first three - the money is in reaching 4 units per session, not in raising the bound
-one notch.
-
-### The cap experiment, measured (2026-09-19)
-
-The ceiling's prediction for a four-unit plan was tested on `fixtures/pipeline/fine.spec.json` - three
-independent units and one that joins them, the shape of the report fixture - live, `--slots 1`, with
-the spec's canned answers stripped so the units really run. Cache accounting is recorded beside tokens
-because a token count is not a cost on its own.
-
-| bound | sessions | rep | wall      | tokens | cache read / tokens |
-| ----- | -------- | --- | --------- | ------ | ------------------- |
-| 1     | 4        | 1   | 26 186 ms | 45 482 | 0.847               |
-| 1     | 4        | 2   | 27 053 ms | 45 887 | 0.806               |
-| 1     | 4        | 3   | 25 270 ms | 33 941 | 0.607               |
-| 2     | 2        | 1   | 17 735 ms | 41 806 | 0.802               |
-| 2     | 2        | 2   | 17 998 ms | 37 693 | 0.798               |
-| 2     | 2        | 3   | 17 427 ms | 35 444 | 0.690               |
-| 4     | 1        | 1   | 16 480 ms | 54 834 | 0.836               |
-| 4     | 1        | 2   | 16 810 ms | 55 738 | 0.834               |
-
-One row per run, so no column has to be read positionally against another; the medians and the saving are
-recomputed from the stored reports into the archive's `aggregate-3rep.json`. Bounds 1 and 2 carry a third
-rep because the two-rep reading of this table was quoted as a policy, and the third rep is read as a later
-observation of the same spec rather than as a third point of the same instrument version - the fused
-cell's third run used a chain prompt that changed earlier the same day, and the reports record the spec,
-the worker and the envelope but not the instrument's commit. Three things, and the second replaces this
-document's earlier readings:
-
-- **Fusion saves wall clock, and more than the constant predicted.** Cap 1 to cap 2 saves 8 451 ms and to
-  cap 4 saves 9 541 ms on the medians, against 3 800 ms and 5 700 ms predicted from the D arm's 1 900 ms.
-  The within-cell spreads are 1 783 ms and 571 ms, so the saving is about five times the larger one and it
-  survives the third rep. That is 4.2 s of wall clock per avoided session at cap 2 and 3.2 s at cap 4, so
-  the term is **plan-dependent** and the ceiling's constant should be read per plan; the ceiling's primary
-  quantity stays _sessions avoided_ - exact and model-free - with milliseconds as an estimate that names
-  its constant.
-- **The token count settles nothing at three reps.** A two-rep reading had every arm spending 80-84 % of
-  its tokens on **cache reads** and the remainder nearly flat. The third rep puts that share at 0.607 in one
-  cell (0.847 in another run of the same cell), and per-cell token spreads - 11 946 in cap 1 - are wider
-  than the median gaps they would be compared across. So no token-direction claim is supported by these
-  runs: the 1.3-1.9x that an unpaired token median once suggested is not replaced by a better number, it is
-  unresolved, and the measurement phase is closed with it that way: resolving it needs either many more
-  reps or the prices recorded apart, and the second is cheaper than the first - so the reports now record
-  them: `inputTokens`, `outputTokens`, `cacheRead`, `cacheWrite` and the provider's own `cost`, per unit,
-  with the A, B and C cells the first runs to carry them (their totals decompose exactly, and the
-  provider's price comes with them). The cap cells in the table above predate that and cannot be repriced,
-  and no further fused run was bought to reprice them: one rep of the shape that failed at three would not
-  settle it. So the cost of fusing stays **unpriced**, and this document says measured where it is measured
-  and unpriced where it is unpriced. The ratio column beside them is **not** a price either:
-  `tokens` counts input and output together, so subtracting cache reads leaves the tokens not served from
-  cache - uncached input plus every output token - and the reports do not say whether the cache figure nests
-  inside the total at all.
-- **Cap 2 is still the knee in this sample, at two reps.** It takes 8 451 ms of the 9 541 ms available
-  while sending the _fewest_ tokens of the three (median 37 693), and cap 4 buys the last 1 090 ms. Two
-  runs per cell is not enough to fix a policy, and fewer sessions is not the same quantity as a shorter
-  parent task: with more than one slot, fusing units into fewer sessions removes parallelism the plan could
-  have used. Two units per session is therefore a hypothesis for the A-D comparison on one parent task to
-  settle, not a strategy this document declares.
-
-**A spread wider than a difference is not the same as no difference.** The D arm's two-rep spreads
-(2.2 s in both arms) exceed its 1.9 s median gap, and that says _that sample_ cannot resolve the effect -
-not that fusion does not save wall clock. The fine-plan cells above settle it for this shape: their two-rep
-ranges (26.2-27.1 s against 17.7-18.0 s) do not overlap, so the saving is not something the third rep's
-newer prompt introduced, and the third rep narrows both cells rather than creating the difference.
+Read the complete responsibility: [What the ceiling says today](ooo-fusion-planning/current-evidence-boundary.md).
 
 ## Why this shape, and what it is not
 

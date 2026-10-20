@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: composable test runtime
+    aliases: [TestRuntime, 可组合测试运行时]
+    definition: >-
+      A test resource composition with explicit dependencies and cleanup; choosing resources does not change assertion classification, blocking status or narrow/full verification scope.
+      具有显式依赖与回收的测试资源组合；资源选择不改变断言分类、阻塞地位或 narrow/full 验证范围。
+    owner: docs/design/ci-cd-and-quality/composable-test-runtime.md
+    anchor: Resources and cleanup
+    status: canonical
+  - term: behavior composition
+    aliases: ["行为组合"]
+    definition: >-
+      Reuse of domain actions with explicit conditions, identities, clocks, result references and visible observation seams; it does not itself increase input/sequence coverage or justify removing independent assertions. 显式保留条件、身份、时钟、结果引用与观察接缝的领域动作复用；本身不增加输入或顺序覆盖，也不授权删除独立断言。
+    owner: docs/experiments/verification/behavior-composition-and-combinatorial-testing-2026-10-12.md
+    anchor: Composition expression and composition coverage
+    status: canonical
+references: []

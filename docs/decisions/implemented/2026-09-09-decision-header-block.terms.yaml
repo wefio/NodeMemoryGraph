@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: decision header block
+    aliases: [fixed decision metadata block, 决策头字段块]
+    definition: >-
+      The closed set of decision-record metadata before the first section: status, approval tier where required, lifecycle relationships and archive date; the filename supplies the date and no separate date field is used.
+      决策记录第一个章节前的封闭元数据字段集：状态、适用时的批准层级、生命周期关系和归档日期；日期由文件名提供，不另设日期字段。
+    owner: docs/decisions/implemented/2026-09-09-decision-header-block.md
+    anchor: Decision
+    status: canonical
+references:
+  - decision record

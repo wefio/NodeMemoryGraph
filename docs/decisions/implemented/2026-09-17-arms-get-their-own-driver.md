@@ -2,9 +2,7 @@
 
 **Status:** implemented
 **Approved:** explicit
-**Superseded by:** [The dispatch loop is shared](2026-09-19-dispatch-loop-is-shared.md)
-Date: 2026-09-17
-Branch: feat/ooo-run-namespace
+**Superseded by:** [The dispatch loop is shared](2026-09-19-dispatch-loop-is-shared.md), [Retire the round instrument](2026-09-18-retire-the-round-instrument.md)
 **Relates to:** [task-unit semantics design](../../design/task-unit-semantics.md),
 [its obligation ledger](../../design/task-unit-semantics-obligations.md),
 [the F1 cost sweep experiment](../../experiments/execution/ooo-cost-model-2026-09-17.md)
@@ -12,7 +10,9 @@ Branch: feat/ooo-run-namespace
 治理 meta-rule：[self-governance meta-rule](2026-09-07-self-governance-meta-rule.md) ——
 本规则变更本身也是一次受治理的决策（决策 + 替代方案 + 一个规则一个家）。
 
-中文版: [2026-09-17-arms-get-their-own-driver.zh-CN.md](2026-09-17-arms-get-their-own-driver.zh-CN.md)
+中文版: [2026-09-17-arms-get-their-own-driver.zh-CN.md](2026-09-17-arms-get-their-own-driver.zh-CN.md) · [Terms used](2026-09-17-arms-get-their-own-driver.terms.yaml)
+
+Later disposition: The shared dispatch decision moved the execution loop out of the arm driver, and the round-retirement decision deleted `src/integration/ooo-cycle.ts` and its round-specific suites. The measurements and choices below describe their dated snapshots, not current source inventory.
 
 ## Problem
 
@@ -87,35 +87,30 @@ renamed from `C`. The legibility half alone cannot run the arms.
 
 ## Consequences
 
-- **`src/integration/ooo-cycle.ts` keeps its A/B/C roles on purpose.** They are the experiment's
-  independent variables, not an accident: A's check is outstanding while B runs, which is the
-  out-of-order decision the design is about. No further generalisation is planned.
-- **The research driver consumes the shared layer, not this function**: the same `BoardAdmission`, task
-  coordinator, run surface and round log, driven from `evals/ooo-execution/`.
+- At this decision's snapshot, `src/integration/ooo-cycle.ts` kept A/B/C roles as the experiment's
+  independent variables: A's check was outstanding while B ran. The instrument and its round-specific
+  roles were later retired; this is not a statement about current source.
+- The research arm driver consumed shared task/board rules. The later [shared-dispatch decision](2026-09-19-dispatch-loop-is-shared.md)
+  also moved the plan-dispatch loop into the shared layer; the arm-specific declarations and measurements
+  remain in `evals/ooo-execution/`.
 - **If a product path ever needs arbitrary plans**, that is a separate governed decision with its own
   slice, and it must answer what this record did not: whether a general driver belongs in `src/` at
   all, or whether the product only ever drives plans a host declared.
-- **The boundary is pinned by tests, not by a comment.** `evals/ooo-execution/round-plan.test.ts`
-  asserts both refusals, so whoever generalises the driver will see those cases flip and can change
-  them deliberately rather than discovering the coupling in a paid round.
-- **The duplication is gone for good**: any future need for the default plan reads
-  `DEFAULT_ROUND_PLAN`.
-- **Deferred by the operator, not forgotten: whether the round's roles should be split from its
-- **Resolved 2026-09-18:** the operator chose distribution plus deletion over splitting the roles from their mechanism; the question this bullet deferred is answered, with the measurements, in [the retirement decision](2026-09-18-retire-the-round-instrument.md).
-  mechanism.** Deleting `runCycle` outright would remove S4's instrument, its five regression suites,
-  the ledger's D7/D10 evidence and the only end-to-end carrier of the out-of-order dispatch — and
-  four shared types live in the file (`Requirement`, `CaseRule`, `CycleWorker`, `WorkerMetrics`). The
-  measured shape of the choice is that the **role layer** is about 54 references in ~150 lines
-  (`aInstruction`/`bInstruction`/`aEditable`/`bEditable`, the `Record<"A"|"B">` maps, `installA`,
-  `installB`, `patchVerifier`, `casesTail`, and the `let a / let b` flow), while the claim-submit-verify
-  core `runTask` is already task-id-parameterised. F2b and F3 run first; the evidence for the split is
-  then how much of that core the research driver actually had to duplicate.
+- At this decision's snapshot, `evals/ooo-execution/round-plan.test.ts` pinned the two plan refusals and
+  the default plan was centralized as `DEFAULT_ROUND_PLAN`. The round-retirement decision later removed
+  that suite and constant with the instrument; the claims here are historical, not current test coverage.
+- **Resolved 2026-09-18: role/mechanism split.** The operator chose distribution plus deletion rather
+  than splitting the roles from their mechanism; see [the retirement decision](2026-09-18-retire-the-round-instrument.md).
+  The original estimate was that deleting `runCycle` would remove S4's instrument, five regression
+  suites, D7/D10 evidence and the end-to-end out-of-order carrier, while four shared types remained in
+  the file. The measured role layer had about 54 references in ~150 lines; the core `runTask` was already
+  task-id-parameterised. These counts explain the dated choice and are not a current module inventory.
 
-## What building the driver measured: the C arm has no mechanism yet (2026-09-17)
+## What the driver measured on 2026-09-17: the C arm was blocked at that snapshot
 
-The driver was built as declared and it can run the B arm (one slot, the legal set's head, each unit to
-acceptance) and the A arm (a plan of one unit) offline. It **cannot** run the C arm, and that is a
-measurement rather than an unfinished slice:
+At that snapshot, the driver could run the B arm (one slot, the legal set's head, each unit to
+acceptance) and the A arm (a plan of one unit) offline, but it **could not** run the C arm. This was a
+measurement of the then-current claim path, not an unfinished slice:
 
 - `BoardAdmission.candidates()` returns the ordered legal set — `["first","second"]` for two
   independent units — but it returns `[]` the moment one of them is claimed, and `claim("second")`
@@ -132,27 +127,24 @@ measurement rather than an unfinished slice:
   each held a claim at once) but changes the channel and the plan; and generating a candidate without
   a claim contradicts the design's own rule that the atomic claim is what grants execution authority.
 
-So the driver reports `slotsRequested`, `slotsUsed` and `slotRefusal` on every run, and
-`comparePlanSlots` sets `comparable: false` — refusing a time verdict — whenever a requested slot count
-was not reached. A fallback run cannot be reported as the C arm, whatever the wall clock says. The
-decision that follows is the operator's and is not taken here: either relax the per-run serialization
-for a declared slot count (the comment above `selectableTasks` already describes a _neighbour_ rule,
-which is narrower than the code's "any claim blocks selection"), or run F3 as A against B and record
-that deterministic concurrency is unreachable through this seam. Until then the C arm is **blocked**,
-not "not started".
+The driver reported `slotsRequested`, `slotsUsed` and `slotRefusal`; `comparePlanSlots` set
+`comparable: false` whenever the requested count was not reached, so fallback runs could not be reported
+as the C arm. The [declared-slot-budget decision](2026-09-18-declared-slot-budget.md) later added a
+per-run multi-slot claim budget and directed handoffs, resolving this mechanism blocker. That change did
+not itself establish a paid C-arm comparison; the later F3 pilot reports the comparison, directionally
+only, in [its experiment record](../../experiments/execution/ooo-arms-pilot-2026-09-18.md).
 
-## Verification
+## Verification at the 2026-09-17 snapshot
 
-- `evals/ooo-execution/round-plan.test.ts` — 6 cases: the log names the plan it was given (checked by
-  reverting the log to the literal `["A","B","C"]`, which fails it), the two refusals above, one plan
-  value reaching both the store and the round, the spec mapping with its defaults, and the parser's
-  refusals.
-- `evals/ooo-execution/cycle.test.ts` — 23 cases, unchanged and green: the driver's behaviour is
-  preserved.
+- `evals/ooo-execution/round-plan.test.ts` — 6 cases: the log named the supplied plan, the two refusals
+  above, one plan value reached both store and round, and the spec mapping/parser cases passed.
+- `evals/ooo-execution/cycle.test.ts` — 23 cases, unchanged and green at that snapshot.
+
+Both suites were removed with the round instrument on 2026-09-18; this is historical verification, not a current test inventory.
 
 ## What the later supersession leaves standing
 
-The supersession is partial and the later record states its scope: what it moves is where the loop that
-executes a given plan lives. Everything else here stands - the arms keep their own driver, their spec
-declarations and their measurement record, the product still does not own a planning platform, and
-`src/integration/ooo-cycle.ts` stays the specific external-window experiment it is.
+Later records supersede separate parts of this decision: [the shared-dispatch decision](2026-09-19-dispatch-loop-is-shared.md)
+moved plan execution to the shared layer, and [the retirement decision](2026-09-18-retire-the-round-instrument.md)
+deleted the old `ooo-cycle` instrument and its suites. What remains is the arm-specific declaration and
+measurement record; the product still does not own a general planning platform.

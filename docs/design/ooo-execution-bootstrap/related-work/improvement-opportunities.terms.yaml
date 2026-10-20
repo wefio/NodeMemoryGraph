@@ -1,0 +1,41 @@
+version: 2
+terms:
+  - term: replay round identity
+    aliases: [round replay identity, 重放轮次身份]
+    definition: >-
+      The identity checks required before replay: each task's frozen-work digest plus the plan's recorded revision and verifier-rule digest; a mismatch is refused by name rather than reported as a reproduction.
+      重放前必须核对的身份：每个任务的冻结工作 digest，以及 plan 记录的 revision 与 verifier-rule digest；不匹配时须具名拒绝，不能报告为复现。
+    owner: docs/design/ooo-execution-bootstrap/related-work/improvement-opportunities.md
+    anchor: Improvement opportunities and recorded status
+    status: canonical
+  - term: unmeasured premise
+    aliases: [premise-unmeasured, 未测量前提]
+    definition: >-
+      A premise check that failed to produce evidence; it is neither a surviving nor a killed mutant and must terminate as unmeasured rather than being counted as detected or clean.
+      未能产出证据的前提检查；它既不表示 mutant 存活，也不表示被杀，必须以 unmeasured 终止，不能计为已检测或干净。
+    owner: docs/design/ooo-execution-bootstrap/related-work/improvement-opportunities.md
+    anchor: Improvement opportunities and recorded status
+    status: canonical
+  - term: cancellation attempt fence
+    aliases: [cancel fence, 取消尝试围栏]
+    definition: >-
+      Cancellation advances task attempt generations and revokes pending handoffs so late artifacts from the cancelled attempt cannot be accepted or unlock dependencies.
+      取消时推进任务 attempt generation 并撤销待处理 handoff，使已取消尝试的迟到 artifact 不能被接受或解锁依赖。
+    owner: docs/design/ooo-execution-bootstrap/related-work/improvement-opportunities.md
+    anchor: Improvement opportunities and recorded status
+    status: canonical
+  - term: named replay refusal
+    aliases: [replay refused, 具名重放拒绝]
+    definition: >-
+      Replay explicitly rejects a log when frozen work, plan revision, or verifier rules do not match, instead of presenting a superficially similar result as reproduction.
+      冻结工作、plan revision 或 verifier rules 不匹配时，重放明确拒绝该日志，不把表面相似结果包装成复现。
+    owner: docs/design/ooo-execution-bootstrap/related-work/improvement-opportunities.md
+    anchor: Improvement opportunities and recorded status
+    status: canonical
+references:
+  - historical round-instrument record
+  - recorded-answer replay
+  - fenced attempt identity
+  - run record
+  - product-loop activation boundary
+  - research-instrument evidence

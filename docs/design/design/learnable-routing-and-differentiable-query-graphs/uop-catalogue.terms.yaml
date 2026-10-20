@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: UOp
+    aliases: [autodiff micro-operation, 自动微分微操作]
+    definition: >-
+      The internal node representation in NMG's numerical autodiff engine, carrying an operation, two-dimensional shape, source nodes and an optional argument; it does not imply that semantic memory stores are differentiable.
+      NMG 数值 autodiff 引擎的内部节点表示，携带 operation、二维 shape、来源节点与可选参数；它不表示语义记忆 store 可微。
+    owner: docs/design/design/learnable-routing-and-differentiable-query-graphs/uop-catalogue.md
+    anchor: Source and scope
+    status: canonical
+  - term: buffer-wide normalization
+    aliases: [flat-buffer normalization, 全缓冲区归一化]
+    definition: >-
+      Reduction across the full flattened input buffer in the documented Softmax and L2Normalize kernels, rather than an independent normalization per matrix row.
+      文中 Softmax 与 L2Normalize 内核在整个展平输入缓冲区上归约，而非对矩阵每一行独立归一化。
+    owner: docs/design/design/learnable-routing-and-differentiable-query-graphs/uop-catalogue.md
+    anchor: Numerical boundaries
+    status: canonical
+  - term: positive-floor kernel
+    aliases: [正下限数值内核]
+    definition: >-
+      The documented Log/Reciprocal convention that floors finite input at 1e-7 before applying the operation; it is not a sign-preserving absolute-value clamp or a universal gradient-validity guarantee.
+      文中 Log／Reciprocal 在运算前把有限输入以下限 1e-7 处理的约定；它不是保留符号的绝对值截断，也不保证梯度普遍有效。
+    owner: docs/design/design/learnable-routing-and-differentiable-query-graphs/uop-catalogue.md
+    anchor: Numerical boundaries
+    status: canonical
+references: []

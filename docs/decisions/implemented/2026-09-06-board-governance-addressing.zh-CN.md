@@ -1,6 +1,6 @@
 # 黑板治理与能力寻址（提案）
 
-[English](2026-09-06-board-governance-addressing.md)
+[English](2026-09-06-board-governance-addressing.md) · [术语](2026-09-06-board-governance-addressing.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

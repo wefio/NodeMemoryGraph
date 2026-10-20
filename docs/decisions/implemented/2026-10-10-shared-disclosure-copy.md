@@ -1,6 +1,6 @@
 # Shorter shared disclosure copy
 
-[中文](2026-10-10-shared-disclosure-copy.zh-CN.md)
+[中文](2026-10-10-shared-disclosure-copy.zh-CN.md) · [Terms used](2026-10-10-shared-disclosure-copy.terms.yaml)
 
 **Status:** implemented
 **Approved:** auto

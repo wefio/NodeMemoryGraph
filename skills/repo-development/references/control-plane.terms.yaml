@@ -1,0 +1,23 @@
+version: 2
+terms:
+  - term: agent:verify default reconcile
+    aliases: [ordinary-change reconcile, 普通改动的默认 reconcile]
+    definition: >-
+      The default route for ordinary changes: `agent:verify` discovers the uniquely applicable contract for the current scope and runs its equivalent reconcile; the standalone `nmg-rcp` CLI is reserved for operations the route does not cover.
+      普通改动的默认路径：`agent:verify` 为当前 scope 发现唯一适用的 contract 并运行等价 reconcile；独立 `nmg-rcp` CLI 保留给该路径未覆盖的操作。
+    owner: skills/repo-development/references/control-plane.md
+    anchor: Repository Control Plane beyond agent:verify
+    status: canonical
+  - term: oversized-tree scan authorization boundary
+    aliases: [large-directory scan authorization, 超大目录扫描授权边界]
+    definition: >-
+      Repository observation should start from named files or narrow paths; a genuinely necessary large-tree scan requires explicit authorization for bounded paths. This is an Agent operating rule, not a runtime size-rejection guarantee, and does not permit silently omitting in-scope files.
+      仓库观察应从命名文件或窄路径开始；确需扫描大树时，必须先取得对明确路径范围的授权并限制扫描范围。这是 Agent 操作规则，不是运行时按大小拒绝的保证，也不允许静默省略 scope 内文件。
+    owner: skills/repo-development/references/control-plane.md
+    anchor: Repository Control Plane beyond agent:verify
+    status: canonical
+references:
+  - Repository Control Plane
+  - contract
+  - receipt
+  - gate

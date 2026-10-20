@@ -1,6 +1,6 @@
 # Graph-scoped compound retrieval references
 
-[简体中文](2026-10-11-compound-retrieval-reference.zh-CN.md)
+[简体中文](2026-10-11-compound-retrieval-reference.zh-CN.md) · [Terms used](2026-10-11-compound-retrieval-reference.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

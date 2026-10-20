@@ -1,6 +1,6 @@
 # 要求产品覆盖率运行产生非零证据
 
-[English](2026-09-23-coverage-evidence-liveness.md)
+[English](2026-09-23-coverage-evidence-liveness.md) · [术语](2026-09-23-coverage-evidence-liveness.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

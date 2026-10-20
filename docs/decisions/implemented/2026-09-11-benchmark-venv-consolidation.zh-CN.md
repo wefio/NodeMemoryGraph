@@ -1,6 +1,6 @@
 # 一个 benchmark venv，以及一条能移动的 venv 路径
 
-[English](2026-09-11-benchmark-venv-consolidation.md)
+[English](2026-09-11-benchmark-venv-consolidation.md) · [术语](2026-09-11-benchmark-venv-consolidation.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit

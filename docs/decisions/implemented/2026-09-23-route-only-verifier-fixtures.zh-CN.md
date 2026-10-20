@@ -1,6 +1,6 @@
 # 只断言路由结果的验证器测试省去无关共享检查
 
-[English](2026-09-23-route-only-verifier-fixtures.md)
+[English](2026-09-23-route-only-verifier-fixtures.md) · [术语](2026-09-23-route-only-verifier-fixtures.terms.yaml)
 
 **Status:** implemented
 **Approved:** auto

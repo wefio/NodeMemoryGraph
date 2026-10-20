@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: graph-side encoder requirement
+    aliases: [graph-side requirement, 图侧编码器需求]
+    definition: >-
+      A historical requirement in the MiniMind-NMG proposal describing how its hypothetical encoder vectors would be consumed by graph-side components; it is not a current product contract.
+      MiniMind-NMG 提案中关于假想编码器向量如何供图侧组件使用的历史要求；不是当前产品契约。
+    owner: docs/design/minimind-embedder/encoder-requirements.md
+    anchor: Encoder requirements chosen by the graph side
+    status: canonical
+references:
+  - MiniMind-NMG encoder prototype
+  - graph-space adapter

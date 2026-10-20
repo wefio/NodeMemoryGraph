@@ -1,9 +1,19 @@
 # LoCoMo QPP safe-prefix evaluation (2026-07-29)
 
+[English](locomo-qpp-safe-prefix-2026-07-29.md) | [简体中文](locomo-qpp-safe-prefix-2026-07-29.zh-CN.md) · [Terms](locomo-qpp-safe-prefix-2026-07-29.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a historical
+experiment record. The configurations, measurements, implementation descriptions
+and follow-up proposals below are scoped to that experiment. This review did not
+rerun the experiment or independently revalidate its original artifacts; these
+are not current test receipts, default-policy decisions or general guarantees.
+
 ## Question
 
 Does progressive QPP recall improve end-to-end answers when it starts from a
-safe Top-20 prefix, rather than the earlier Top-1 experiment?
+Top-20 prefix, rather than the earlier Top-1 experiment? Here, "safe prefix"
+names the starting configuration, not a guarantee of evidence retention or
+answer safety.
 
 This run is intentionally label-free at inference time. Official evidence IDs
 are used only by the post-run audit. QPP2 compression remains disabled because

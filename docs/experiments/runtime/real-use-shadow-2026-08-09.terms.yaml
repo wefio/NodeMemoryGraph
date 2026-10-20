@@ -1,0 +1,28 @@
+version: 2
+terms:
+  - term: controller-shadow smoke run
+    aliases: [控制器影子冒烟运行]
+    definition: >-
+      A bounded observation with the reported first natural-use timeout and separate controlled follow-ups. Telemetry exercises specific wiring/lifecycle paths, not task success by mere completion, statistical calibration, causal memory use or Graph-versus-Lite capability ranking.
+      有界观察，包含报告中的首次自然使用超时及分开的受控跟进。遥测仅涉及特定接线／生命周期路径，不因完成就证明任务成功，也不建立统计标定、因果记忆使用或 Graph／Lite 能力排序。
+    owner: docs/experiments/runtime/real-use-shadow-2026-08-09.md
+    anchor: Observation
+    status: canonical
+  - term: ambiguous legacy use event
+    aliases: [历史歧义 use 事件]
+    definition: >-
+      A then-named exact-use observation retained only as conservative disclosure/diagnostic attribution. Renaming it does not supply independently verified claim support or make old rows valid evidence supervision or activation evidence.
+      当时称 exact-use 的观察，仅保守保留为披露／诊断归因。改名不提供独立核验的 claim 支持，也不使旧行成为有效证据监督或启用依据。
+    owner: docs/experiments/runtime/real-use-shadow-2026-08-09.md
+    anchor: Feedback collection boundary (2026-08-11)
+    status: canonical
+  - term: historical smoke-calibration refusal
+    aliases: [smoke replay data-readiness failure, 历史冒烟标定拒绝]
+    definition: >-
+      The report's controlled legacy artifact was held non-active after insufficient training/primary-target diversity and overlapping evidence. This is that snapshot's data-readiness refusal, not a complete definition of the current quality/cost/product gates; even offline qualification would not itself grant runtime authority.
+      报告中的受控历史产物因训练／主目标多样性不足及证据重叠而保持非激活。这是该快照的数据就绪性拒绝，不是当前质量／成本／产品 gate 的完整定义；即使离线达标，也不自行授予运行时权限。
+    owner: docs/experiments/runtime/real-use-shadow-2026-08-09.md
+    anchor: Feedback collection boundary (2026-08-11)
+    status: canonical
+references:
+  - learnable controller

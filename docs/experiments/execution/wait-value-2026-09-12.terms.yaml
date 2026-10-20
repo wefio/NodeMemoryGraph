@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: task-covered wait
+    aliases: [task-covered overlap, 任务覆盖的等待]
+    definition: >-
+      The intersection of an independent task's own claim-to-return work window with the check window; it is distinct from all host-side wall-clock savings.
+      独立任务自身 claim-to-return 工作窗口与 check 窗口的交集；它不同于所有 host-side 墙钟节省。
+    owner: docs/experiments/execution/wait-value-2026-09-12.md
+    anchor: Observed
+    status: canonical
+  - term: hiddenWaitMs metric
+    aliases: [reported hidden wait, 隐藏等待指标]
+    definition: >-
+      A round-reported measurement whose validity depends on using the task's own claim-to-return window rather than a later claim-to-submission interval that includes host verification.
+      Round 报告的测量值；其有效性取决于使用任务自身 claim-to-return 窗口，而不是包含 host verification 的较晚 claim-to-submission 区间。
+    owner: docs/experiments/execution/wait-value-2026-09-12.md
+    anchor: The report's own defect
+    status: canonical

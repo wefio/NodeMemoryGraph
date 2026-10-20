@@ -1,0 +1,35 @@
+version: 2
+terms:
+  - term: safe-prefix progressive recall
+    aliases: [QPP safe prefix, safe-prefix 渐进召回]
+    definition: >-
+      The experiment's progressive QPP recall starting from Top-20 rather than Top-1; inference was label-free and official evidence IDs were used by the post-run audit. Safe-prefix is a configuration name, not an evidence-retention or answer-safety guarantee.
+      该实验从 Top-20 而非 Top-1 开始的 progressive QPP recall；推理不使用标签，官方 evidence ID 供 run 后审计使用。Safe-prefix 是配置名，不保证证据保留或答案安全。
+    owner: docs/experiments/benchmarks/locomo-qpp-safe-prefix-2026-07-29.md
+    anchor: Question
+    status: canonical
+  - term: directional latency comparison
+    aliases: [non-regenerated reference arm, 方向性延迟对比]
+    definition: >-
+      A latency comparison against a reference arm whose values were recorded by an earlier audit rather than regenerated in the same run; it indicates direction and magnitude, not a controlled microbenchmark.
+      与参照组比较延迟，而该参照组的数值来自更早的审计、并未在同一次 run 中重新生成；它指示方向与量级，不是受控 microbenchmark。
+    owner: docs/experiments/benchmarks/locomo-qpp-safe-prefix-2026-07-29.md
+    anchor: Retrieval evidence audit
+    status: canonical
+  - term: unpaired judge comparison
+    aliases: [cross-window answer comparison, 非配对 judge 对比]
+    definition: >-
+      An end-to-end answer-score comparison against a baseline whose answer and judge calls ran in a different wall-clock window; it can show a strong signal but is not a paired estimate of judge variance.
+      与一个 answer 与 judge 调用发生在不同 wall-clock 窗口的基线比较端到端答案分数；它能显示强烈信号，但不是 judge 波动的配对估计。
+    owner: docs/experiments/benchmarks/locomo-qpp-safe-prefix-2026-07-29.md
+    anchor: Official answer score
+    status: canonical
+  - term: separate quality and efficiency gates
+    aliases: [quality gate, efficiency gate, 质量与效率两道 gate]
+    definition: >-
+      Two distinct acceptance questions for a retrieval change: whether larger recall improves end-to-end answers, and whether its added cost is acceptable; a run can pass the first and fail the second.
+      针对检索变更的两个独立验收问题：更大的 recall 是否改善了端到端答案，以及其新增成本是否可接受；一次 run 可以通过前者而未能通过后者。
+    owner: docs/experiments/benchmarks/locomo-qpp-safe-prefix-2026-07-29.md
+    anchor: Decision
+    status: canonical
+references: [QPP, first-pass evidence target]

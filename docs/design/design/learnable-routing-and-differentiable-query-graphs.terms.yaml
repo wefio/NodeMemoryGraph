@@ -1,0 +1,79 @@
+version: 2
+terms:
+  - term: controller bridge
+    aliases: [typed runtime policy channel, 控制器桥]
+    definition: >-
+      The lazy Pi-side bridge behind a typed runtime policy channel: `NMG_CONTROLLER_SHADOW=1` enables bounded collection but does not set authority; `NMG_CONTROLLER_RUNTIME_MODE=off|shadow|controlled|active` (default `shadow`) determines authority — `off` performs no learned scoring, `shadow` may score and log but cannot actuate, `controlled` may actuate only inside an explicitly marked controlled evaluation, and `active` additionally requires a reviewed activation receipt binding the exact trained-state hash, feature-protocol version, gate artifacts and a distinct loadable prior state for rollback; missing, modified or unloadable artifacts fail closed, and only typed numeric `allocate`, `fold` and stable rerank decisions cross the channel.
+      带类型运行时策略通道之后的惰性 Pi 侧桥：`NMG_CONTROLLER_SHADOW=1` 启用有界收集，但不会设定权限；`NMG_CONTROLLER_RUNTIME_MODE=off|shadow|controlled|active`（默认 `shadow`）决定权限——`off` 不做任何学习打分，`shadow` 可以打分与记录但不能执行，`controlled` 只能在一个显式标记的受控评测内执行，而 `active` 还要求一份经审阅的激活回执，绑定精确训练状态哈希、特征协议版本、门禁产物，以及一个可加载的不同先前状态用于回滚；缺失、被修改或无法加载的产物 fail closed，且只有带类型的数值 `allocate`、`fold` 与稳定 rerank 决策跨越该通道。
+    owner: docs/design/design/learnable-routing-and-differentiable-query-graphs.md
+    anchor: Learnable routing and minimal differentiable query graphs
+    status: canonical
+  - term: shadow log
+    aliases: [controller shadow event log, shadow 日志]
+    definition: >-
+      The bounded log under `NMG_DATA_DIR` that records baseline and learned node order, exact records fetched from a session-owned Active Graph as disclosure, and the conservative answer-to-memory matcher as diagnostic attribution; neither trains the controller, and injection, rank position, mere exposure, answer overlap and silence are never positive labels.
+      `NMG_DATA_DIR` 下的有界日志，记录基线与学习后的节点顺序、从归会话所有 Active Graph 取回的精确记录（作为披露），以及保守的答案到记忆匹配器（作为诊断归因）；二者都不训练控制器，且注入、排名位置、单纯暴露、答案重叠与沉默永远不是正标签。
+    owner: docs/design/design/learnable-routing-and-differentiable-query-graphs.md
+    anchor: Learnable routing and minimal differentiable query graphs
+    status: canonical
+  - term: feedback reminder
+    aliases: [feedback_nudge_shown, 反馈提醒]
+    definition: >-
+      The at most one one-shot review reminder, containing the AG ID and stable query task ID, that the Pi bridge exposes on the next distinct user turn for a completed retrieval whose evidence was disclosed but whose explicit task labels are missing; internal Pi tool loops with the same prompt cannot consume it, diagnostic answer overlap does not participate in the choice, exposure is logged as non-training `tool_flow/feedback_nudge_shown`, and missing review or lack of correction is not itself a label.
+      至多一条一次性审阅提醒，含 AG ID 与稳定的查询任务 ID，由 Pi 桥在下一个不同用户 turn 上，为「证据已披露但显式任务标签缺失」的已完成检索暴露；具有相同 prompt 的内部 Pi 工具循环不能消费它，诊断性答案重叠不参与该选择，暴露被记录为非训练性的 `tool_flow/feedback_nudge_shown`，而缺失审阅或没有纠正本身不是标签。
+    owner: docs/design/design/learnable-routing-and-differentiable-query-graphs.md
+    anchor: Learnable routing and minimal differentiable query graphs
+    status: canonical
+  - term: scored-artifact contract
+    aliases: [rowScore, nullable taskSuccess, 打分产物契约]
+    definition: >-
+      The rule that every matched Pi row records prompt-to-settled and whole-answer latency, tool dispatches, tool-bearing model rounds and provider token usage from the exact Pi event stream, and that official scorers add a `rowScore` which preserves the benchmark's numeric task score while making binary `taskSuccess` nullable (PersonaMem and LongMemEval provide a binary label; BEAM partial rubric/Kendall and LoCoMo's continuous score do not); evidence sufficiency is likewise nullable and typed by provenance, and missing labels are never converted to zero.
+      规则：每条匹配的 Pi 行记录从 prompt 到结算与整答案延迟、工具派发次数、含工具的模型轮次与 provider token 用量（取自精确 Pi 事件流），而官方评分器增加一个 `rowScore`，保留 benchmark 的数值任务分数同时让二值 `taskSuccess` 可为空（PersonaMem 与 LongMemEval 提供二值标签；BEAM 部分 rubric/Kendall 与 LoCoMo 连续分数不提供）；证据充分性同样可为空并按 provenance 带类型，缺失标签永不被转换为零。
+    owner: docs/design/design/learnable-routing-and-differentiable-query-graphs.md
+    anchor: Learnable routing and minimal differentiable query graphs
+    status: canonical
+  - term: matched product metrics
+    aliases: [ControllerMatchedProductMetrics, 匹配产品指标]
+    definition: >-
+      The aggregation that accepts only complete same-case/same-repeat arm pairs and fails closed on a missing arm, missing binary task label, missing all-evidence label, mismatched evidence kind, missing token/tool/latency telemetry or a candidate that did not actually affect retrieval; the matched runner requires an explicit frozen candidate state, checks its feature protocol and non-zero training steps, hashes it into the report, copies it only into the candidate arm, and derives causal eligibility from typed runtime events rather than a report-authored boolean.
+      只接受完整同 case／同 repeat 双臂配对的聚合，并在缺少某一臂、缺少二值任务标签、缺少全证据标签、证据种类不匹配、缺少 token／工具／延迟遥测或候选并未实际影响检索时 fail closed；匹配 runner 要求显式冻结候选状态、检查其特征协议与非零训练步数、把它哈希进报告、只复制进候选臂，并从带类型运行时事件而非报告里写的布尔值派生因果资格。
+    owner: docs/design/design/learnable-routing-and-differentiable-query-graphs.md
+    anchor: Learnable routing and minimal differentiable query graphs
+    status: canonical
+  - term: primary evidence target
+    aliases: [diversity proxy, 主证据目标]
+    definition: >-
+      The conservative diversity proxy derived only from verified claim support, never from loading or answer overlap; the activation gate requires enough distinct primary targets in training without letting a multi-evidence task inflate the count, and leakage is checked against the complete verified-evidence sets so any memory used by both training and validation rejects the split even when it was not the primary record; the target does not claim one record represents a semantic task.
+      只从已验证 claim 支持派生、绝不从加载或答案重叠派生的保守多样性代理；激活门禁要求训练中具有足够多的不同主目标且不让一个多证据任务虚增计数，泄漏则对照完整的已验证证据集合检查，因此任何同时被训练与验证使用的记忆都会拒绝该划分，即使它不是主记录；该目标并不主张一条记录代表一个语义任务。
+    owner: docs/design/design/learnable-routing-and-differentiable-query-graphs.md
+    anchor: Learnable routing and minimal differentiable query graphs
+    status: canonical
+  - term: three-part activation gate
+    aliases: [retrieval/controller/product gate, 三段激活门禁]
+    definition: >-
+      The explicit later gate with three independent parts — the retrieval gate protecting upstream candidate recall, the controller gate protecting held-out ranking/control quality and inference latency, and the product gate requiring a matched baseline/candidate comparison with enough paired cases and failing closed when matched evidence is absent while requiring non-degraded task success and evidence sufficiency plus bounded mean tool rounds, tokens and end-to-end latency; these product costs are not added to the AG allocation head.
+      显式的后续门禁，含三个独立部分——检索门禁保护上游候选召回、控制器门禁保护留出排序／控制质量与推理延迟、产品门禁要求一次具有足够配对 case 的基线／候选匹配比较并在缺少匹配证据时 fail closed，同时要求任务成功与证据充分性不退化以及有界的平均工具轮次、token 与端到端延迟；这些产品成本不被加入 AG 分配 head。
+    owner: docs/design/design/learnable-routing-and-differentiable-query-graphs.md
+    anchor: Learnable routing and minimal differentiable query graphs
+    status: canonical
+  - term: progressive disclosure tool guard
+    aliases: [search_suppressed, 渐进披露工具守卫]
+    definition: >-
+      The per-turn rule that automatic recall is free but after two explicit searches without loading selected evidence the adapter folds another search into a request to call `nmg_get` or use a current-source tool, with a successful exact get reopening search for a complementary hop; the guard is keyed by Pi session plus user prompt because `before_agent_start` also fires during internal tool loops, and a suppressed third search is logged as `search_suppressed` rather than counted as retrieval, task success or a relevance label.
+      逐 turn 规则：自动召回免费，但在两次显式 search 之后仍未加载所选证据时，适配器会把再一次 search 折叠为要求调用 `nmg_get` 或使用当前来源工具的请求，而一次成功的精确 get 会为互补跳跃重新开放 search；该守卫以 Pi 会话加用户 prompt 为键，因为 `before_agent_start` 在内部工具循环中也会触发，被抑制的第三次 search 记录为 `search_suppressed`，而不计为检索、任务成功或相关性标签。
+    owner: docs/design/design/learnable-routing-and-differentiable-query-graphs.md
+    anchor: Learnable routing and minimal differentiable query graphs
+    status: canonical
+  - term: learnable controller
+    aliases: [可学习控制器]
+    definition: >-
+      An optional numeric policy over bounded allocation, folding and reranking choices; its observations do not grant authority to activate it.
+      在有界分配、折叠和重排选择上运行的可选数值策略；其观察结果不构成启用它的授权。
+    owner: docs/design/design/learnable-routing-and-differentiable-query-graphs.md
+    anchor: Learnable routing and minimal differentiable query graphs
+    status: canonical
+references:
+  - QPP
+  - Active Graph
+  - projection revision
+  - UOp

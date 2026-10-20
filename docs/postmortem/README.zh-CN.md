@@ -1,6 +1,6 @@
 # NMG 事故复盘
 
-[English](README.md)
+[English](README.md) · [术语](README.terms.yaml)
 
 事故记录。一次失误到达了它不该到达的地方——用户、`main`、已合并的 PR、已发布的数字——而值得留下的部分不是那一行修复，而是 _流程为什么让它通过_。
 

@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: prototype-verified inventory
+    aliases: [原型已验证清单]
+    definition: >-
+      The bulleted list of capabilities that exist and are verified in the current prototype; it is evidence about the prototype only and must not be read as evidence that the mutable session AG, task frames, projection identity split, or the HA/MGR runtime loop has been implemented.
+      当前原型中已存在并已验证的能力清单；它只是关于原型的证据，不得读作"可变会话 AG、任务帧、投影身份拆分或 HA/MGR 运行时回路已实现"的证据。
+    owner: docs/design/design/implementation-versus-target.md
+    anchor: Current implementation versus target
+    status: canonical
+  - term: prototype-to-target gap
+    aliases: [原型与目标的缺口]
+    definition: >-
+      A recorded difference between what the current prototype does and what the target plugin requires, kept separate from unimplemented defaults so an intentional product boundary is not mistaken for missing work; closing a wiring gap does not authorise activation, and evaluation gaps stay evaluation work.
+      当前原型所为与目标插件所需之间被记录的差异；与未实现的默认项分开陈述，以免把有意的产品边界当作缺失工作；补上接线缺口不构成启用授权，评测缺口仍属评测工作。
+    owner: docs/design/design/implementation-versus-target.md
+    anchor: Current implementation versus target
+    status: canonical
+references:
+  - Active Graph
+  - task frame
+  - projection revision
+  - QPP
+  - Lab
+  - consolidation
+  - Short-Term Graph
+  - Long-Term Graph

@@ -5,6 +5,8 @@ description: Use when a task needs a throwaway script, ad-hoc analysis, or probe
 
 # Write the one-off script, and write it right
 
+[中文](SKILL.zh-CN.md) · [Terms used](SKILL.terms.yaml)
+
 A one-off script is the normal answer to a one-off question. **Write it.** Nothing
 here is meant to talk you out of that. Two things are governed instead:
 
@@ -98,13 +100,15 @@ Write the script first. Then ask whether a second script needs the same piece. I
 it does, that is when the piece goes on the shelf — and the shelf entry states what
 it does, its signature, and a minimal call.
 
-`docs/guides/parts.md` also lists the families still duplicated locally, with the
-count. Start there.
+Use the [parts shelf](../../docs/guides/parts.md) to find callable imports that
+exist now; it is not a backlog of helpers to build. If no entry fits, apply the
+policy above.
 
 ## What is not mechanized
 
-No gate can decide "this script is correct" or "this script has a self-check" from
-the file alone. A gate can only fail a **second definition** of a part, which is why
-the duplication check is the one that got proposed and the rest is prose. Prose is
-weak by nature — the template above exists so that following it is faster than
-ignoring it.
+No gate can decide whether a script is correct or contains an effective self-check
+from the file alone. The parts-shelf check only verifies that named functions are
+still exported from `src/rcp` or `tools/parts`; it does not check signatures,
+examples, or duplicated helper bodies. The script author remains responsible for
+those properties. Prose is weak by nature — the template above exists so that
+following it is faster than ignoring it.

@@ -1,0 +1,31 @@
+version: 2
+terms:
+  - term: reasoning workspace
+    aliases: [推理工作区]
+    definition: >-
+      The Lab-only `nmg_reason` scratchpad exposed by the product adapter only when `NMG_ENABLE_LAB_TOOLS=1`; scratch nodes are stored per Pi session under `NMG_DATA_DIR/reasoning/`, ordinary turns receive no automatic workspace injection, Pi compaction creates one durable marker and the next turn receives one bounded checkpoint even if the extension process restarted, and the tool never writes scratch state to STG or LTG.
+      仅限 Lab 的 `nmg_reason` 草稿区，只有 `NMG_ENABLE_LAB_TOOLS=1` 时产品适配器才暴露它；草稿节点按 Pi 会话存放在 `NMG_DATA_DIR/reasoning/` 下，普通轮次不会收到自动注入，Pi 压缩创建一个持久标记、下一轮收到一个有界检查点（即使扩展进程重启过），且该工具从不把草稿状态写入 STG 或 LTG。
+    owner: evals/reasoning-workspace/README.md
+    anchor: Reasoning workspace benchmark
+    status: canonical
+  - term: four workspace conditions
+    aliases: [四种工作区条件]
+    definition: >-
+      The benchmark's four conditions over the same model and user prompts: full context without a workspace, full context with the workspace available, Pi compaction without a workspace, and Pi compaction with the workspace available. Tasks require the agent to retain observations, rejected hypotheses, decisions, constraints, versions and next actions, and compact trials add identical unrelated history and invoke Pi's normal compactor before the final question.
+      该 benchmark 在同一模型与同一批用户提示词上的四种条件：完整上下文无工作区、完整上下文有工作区、Pi 压缩无工作区、Pi 压缩有工作区。任务要求 agent 保留观察、被否决的假设、决策、约束、版本与下一步行动；压缩试验加入相同的无关历史，并在最后的问题之前调用 Pi 的常规压缩器。
+    owner: evals/reasoning-workspace/README.md
+    anchor: Reasoning workspace benchmark
+    status: canonical
+  - term: unsupported scratchpad claim
+    aliases: [不受支持的草稿主张]
+    definition: >-
+      A model-proposed hypothesis that persisted into scratch state without observed evidence; one of nine compacted workspace trials produced one, and the development signal therefore requires activating the workspace only when task complexity or context pressure justifies its cost and separating proposed hypotheses from observed evidence so unsupported scratch state is not automatically consolidated into LTG.
+      模型提出、却未经观察证据就持久化进草稿状态的假设；九次压缩工作区试验中出现一次，因此该开发信号要求只在任务复杂度或上下文压力足以证明其成本时激活工作区，并把提出的假设与观察证据分开，使不受支持的草稿状态不会被自动 consolidation 进 LTG。
+    owner: evals/reasoning-workspace/README.md
+    anchor: Initial development signal
+    status: canonical
+references:
+  - Lab
+  - consolidation
+  - disclosure
+  - evidence

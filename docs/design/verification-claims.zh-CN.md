@@ -1,6 +1,6 @@
 # 验证声称：定义域、假设、证据强度
 
-[English](verification-claims.md)
+[English](verification-claims.md) · [术语](verification-claims.terms.yaml)
 
 **Status:** draft  
 **Authority:** 本文描述「声称账本」的形态。它引出的规则住在决策记录里，工作流住在
@@ -11,8 +11,9 @@
 `rtm:check` 打印 `12 verified`。照字面读，是说十二条性质都成立。证据真正支撑的比这弱：
 
 ```
-bound    = 每条声明过的断言都绑定到一个在这份 commit 上通过了的命名测试
-verified = 该性质在其范围内的所有情况都成立
+bound    = every declared assertion is bound to a named test
+           that passed on this commit
+verified = the property holds for every case in scope
 ```
 
 测试通过只是一个**见证**：它说明性质在它跑过的那几个输入上成立，不覆盖断言所声称的
@@ -25,7 +26,7 @@ verified = 该性质在其范围内的所有情况都成立
 ∀ x ∈ D,  A(x) ⇒ P(x)
 ```
 
-| 符号         | 工件        | 家                 |
+| 符号         | 工件        | 归属               |
 | ------------ | ----------- | ------------------ |
 | P            | `statement` | 契约断言           |
 | D            | `domain`    | 契约断言           |
@@ -43,11 +44,11 @@ verified = 该性质在其范围内的所有情况都成立
 `documented-only` 是第三种状态，但在另一个轴上：它意味着**完全没有证据**，住在
 `documentedOnly` 里，不在 `strength` 里。两个字段说同一件事，就多了一个。
 
-本仓库里够得上 `decision` 的只有两处，都很小。**而且今天没有任何一条契约断言绑定到它们**，
+这里够得上 `decision` 的只有两处，而且都很小。**而且今天没有任何一条契约断言绑定到它们**，
 所以账本报 `0 proven` 对 12 条 `witness`——这个缺口是可见的，不是被默认掉的。`witness` 不是
 没用：它是我们手里最便宜的证伪工具，只是被误读成了证明。
 
-## 五个工件，各自一个家
+## 五个工件，各自一处归属
 
 | 工件       | 文件                           | 它回答什么                             |
 | ---------- | ------------------------------ | -------------------------------------- |
@@ -64,12 +65,13 @@ verified = 该性质在其范围内的所有情况都成立
 把 D 写下来并不会让 D 变诚实。做到这件事的仪器是变异测试，而且它属于这本账，不是旁边另一件事：
 
 ```
-账本声明 D / A / P
-  → rtm 把证据绑到声称上
-  → 变异测试测量证据有没有判别力
-  → 存活的 mutant 就是模型里的反例
-      → 语义上不可能（不在 D 内）？ → 改的是 domain 那条声明，不是测试
-      → 在 D 内？                  → 修证据，或者承认 P 不成立
+ledger declares D / A / P
+  → rtm bounds evidence to the claim
+  → mutation measures whether the evidence discriminates
+  → a surviving mutant is a counterexample inside the model
+      → semantically impossible (outside D)?  → rewrite the domain, not the test
+      → inside D?                             → fix the evidence,
+                                                or accept that P does not hold
 ```
 
 第一支就是 CEGAR 的动作：伪反例精化的是抽象模型，不是产品。这里的「模型」就是那三行声明，所以
@@ -100,11 +102,11 @@ verified = 该性质在其范围内的所有情况都成立
 ## 停止条件
 
 ```
-closed(改动) =
-    scope 内每条断言都被绑定
-      或显式 documented-only 且列入 PR 的 未验证项
-  ∧ scope 内没有 open 反例
-  ∧ 改动触及的每条假设都在册
+closed(change) =
+    every assertion in scope is bound
+      or is documented-only and listed in the PR's 未验证项
+  ∧ no counterexample in scope is open
+  ∧ every assumption the change touches is registered
 ```
 
 ## 它为什么保持很小

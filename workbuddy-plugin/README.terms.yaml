@@ -1,0 +1,22 @@
+version: 2
+terms:
+  - term: WorkBuddy hook
+    aliases: [WorkBuddy 钩子]
+    definition: >-
+      A command-based WorkBuddy event integration that performs bounded NMG recall and board-wake work without owning or starting the shared daemon.
+      基于命令的 WorkBuddy 事件集成，用于执行有界 NMG 召回和 board 唤醒操作，但不拥有或启动共享 daemon。
+    owner: workbuddy-plugin/README.md
+    anchor: Hook behavior
+    status: canonical
+  - term: detached hook session
+    aliases: [分离的 hook 会话]
+    definition: >-
+      A namespaced NMG session used by the WorkBuddy hook that is distinct from the MCP tool session; its projection handle must not be reused by the MCP-side get call.
+      WorkBuddy hook 使用的命名空间 NMG session，与 MCP 工具 session 不同；其投影句柄不得复用于 MCP 侧 get 调用。
+    owner: workbuddy-plugin/README.md
+    anchor: Hook behavior
+    status: canonical
+references:
+  - Active Graph
+  - Task Board
+  - harness adapter

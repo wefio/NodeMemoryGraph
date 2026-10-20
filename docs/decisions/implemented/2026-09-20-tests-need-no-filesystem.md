@@ -1,6 +1,6 @@
 # Tests do not need a filesystem
 
-[中文](2026-09-20-tests-need-no-filesystem.zh-CN.md)
+[中文](2026-09-20-tests-need-no-filesystem.zh-CN.md) · [Terms used](2026-09-20-tests-need-no-filesystem.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

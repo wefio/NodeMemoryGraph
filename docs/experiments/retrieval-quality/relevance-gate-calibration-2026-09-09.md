@@ -1,4 +1,6 @@
-# Why a deterministic relevance threshold cannot gate recall — literature notes
+# Relevance-gate calibration — historical samples and score-scale limits
+
+[English](relevance-gate-calibration-2026-09-09.md) | [简体中文](relevance-gate-calibration-2026-09-09.zh-CN.md) · [Terms](relevance-gate-calibration-2026-09-09.terms.yaml)
 
 **Scope.** Step 1 of the retrieval relevance gate
 (`docs/decisions/implemented/2026-09-09-retrieval-relevance-gate.md`) implemented a
@@ -8,8 +10,19 @@ literature, and what they imply for the model gate (step 2).
 
 ## The observed problem
 
+This is a historical synthesis/sequence of experiments, not current defaults,
+new measurements or an enablement decision. External sources (papers, vendor
+blogs, forums and tutorials) were not reverified. The
+[current training owner](../../design/relevance-training.md) makes memory
+benchmarks evaluation-only, unknown judgments non-negative, and runtime admission
+separate. The legacy LoCoMo fitting below is not a current training recipe.
+The 19/23 recalls and later 25-label corpus are different recorded checkpoints;
+no independent-user count or complete cohort linkage is supplied. Noise/partial
+are recall-level labels, not verified truth/falsehood for every candidate.
+
 Calibration sweep over the labeled recall corpus (19 real recalls), where a
-result is dropped when its bounded relevance is below the floor:
+result is dropped below a recorded relevance floor (originally called bounded;
+see the unresolved units below):
 
 | floor | noise dropped | partial dropped | kept precision         |
 | ----- | ------------- | --------------- | ---------------------- |
@@ -19,15 +32,22 @@ result is dropped when its bounded relevance is below the floor:
 
 No floor separates the classes: noise top1 spans 0.54–0.87 and partial 0.51–9.0,
 interleaved at every level; within one recall the candidate scores are nearly
-identical (`[0.77, 0.77, 0.77, 0.76]`). Dropping noise costs partial at the same
-rate. The first-stage score carries almost no discriminating signal.
+identical (`[0.77, 0.77, 0.77, 0.76]`). The displayed floors trade noise and partials; their unequal class denominators
+do not establish equal error rates or absence of all first-stage signal.
 
-## Why: the first-stage score is not calibrated
+## Possible causes and score-scale ambiguity
+
+The bounded-score description conflicts with partial top1 = 9.00 and gap = 2.00
+in the feature table. The 19-recall range also starts at 0.51 versus 0.55 in the
+23-recall table. Preserve the values; their scale/path/cohort mapping is unresolved,
+not a license to divide by ten or silently merge cohorts. Narrow bands alone do
+not diagnose anisotropy or hubness. These are hypotheses, not local causal tests.
+CV is invariant to positive multiplication, not arbitrary offsets/nonlinear
+compression; boundedness alone does not force every query to cv ≈0.01.
 
 - **Anisotropy compresses cosine scores.** Learned embedding spaces have a
   directional bias that squeezes cosine similarity into a narrow band; the raw
-  score becomes hard to interpret and thresholds do not transfer. The flat,
-  banded scores above are the textbook signature.
+  score becomes hard to interpret and thresholds do not transfer. The observed score band alone does not establish this mechanism.
 - **Hubness.** In the same anisotropic spaces, a few points sit falsely close to
   many queries — they surface regardless of the query and inflate the score band.
 - **Bi-encoder scores are not comparable across queries.** Dual-encoder
@@ -91,8 +111,8 @@ rate. The first-stage score carries almost no discriminating signal.
 
 ## Feature experiment: can any single program-side signal gate?
 
-Per-instance score-shape features over the 23 labeled recalls (bounded relevance
-of each candidate; `cv` = sd/mean, `gap` = top1−top2):
+Recorded score-shape features over 23 labeled recalls (score units unresolved,
+not established bounded relevance; `cv` = sd/mean, `gap` = top1−top2):
 
 | label   | n   | top1 range  | sd range      | cv range        | gap range   |
 | ------- | --- | ----------- | ------------- | --------------- | ----------- |
@@ -116,6 +136,11 @@ not defaults.
 
 ## Benchmark generalization check (LoCoMo, lexical)
 
+The reported lexical path and gold-string labels differ from the small live
+capture. A raw/bounded difference is a hypothesis, not an isolated cause across
+those different datasets, queries and labels. Zero LongMemEval gold hits here
+cannot establish dataset unanswerability or validate a gate on positive cases.
+
 Does the calibration transfer? Re-ran the retrieval path directly against the
 ingested benchmark store in lexical mode (no embedding service needed) and
 computed the same shape features per question, labelling a question `hit` when
@@ -125,7 +150,7 @@ LoCoMo: 1532 scored questions, 268 hit / 1264 miss.
 | feature | hit (median) | miss (median) | miss p75  | separates?       |
 | ------- | ------------ | ------------- | --------- | ---------------- |
 | top1    | 26           | 23            | 30        | no — overlapping |
-| cv      | 0.110        | **0.000**     | **0.024** | **yes**          |
+| cv      | 0.110        | **0.000**     | **0.024** | descriptive shift, not proven disjoint classes |
 | gap     | 4            | 0             | 0         | partially        |
 
 Flat-list abstain on `cv` (lexical), **candidate-level** definition: kept
@@ -139,22 +164,20 @@ candidates (5.9%).
 | 0.027             | 1015             | 1551 | 210       | 0.135          | 77%                      |
 | 0.109             | 1305             | 681  | 138       | 0.203          | 50%                      |
 
-The default already captures most of the available precision (5.9% → 13.1%) while
-keeping 81% of hit questions; tightening to `cv ≥ 0.109` only doubles precision
-again by giving up a third of the hit questions, so 0.002 is the loose end of the
-curve. The flat-list signal generalizes **on a raw-score path**. LongMemEval was
+The then-labelled default is the loose 0.002 point: 5.9% → 13.1% precision and
+81% hit-question retention. At `cv ≥ 0.109`, precision is 20.3% (about 1.55×
+13.1%, not double), while hit retention drops to 50% (31 percentage points).
+This is this raw-score harness comparison, not broad generalization. LongMemEval was
 uninformative here (0 gold hits in lexical mode), so it gives no separation signal
 either way.
 
-**The generalization catch.** The same feature that separates on the benchmark
-fails on the live corpus, and the difference is the score scale: LoCoMo scores
-are raw BM25 (0–65, wide dynamic range), while NMG's live path reports the
-**bounded `hybridScore`** (everything near ~0.6). Bounded compression squeezes
-`cv` to ~0.01 for every query, so the flat-vs-dispersed distinction disappears.
-Dispersion is thus a real feature, but only when computed on a score with
-dynamic range — not on the bounded combined score. This is the same
-score-compression phenomenon behind the calibration problem, reappearing in the
-feature itself.
+**The generalization catch.** The benchmark and live capture differ in data,
+queries, labels and score path. The record gives raw BM25 0–65 versus bounded
+`hybridScore` near ~0.6 and cv near ~0.01 in the small capture. This motivates a
+scale/transform hypothesis, not an isolated causal measurement. Positive scaling
+alone leaves cv unchanged; offsets/nonlinear transforms can change it. The
+observations do not prove every bounded score loses signal or only raw scores
+can support a useful gate.
 
 **Applied.** `src/core/relevance-gate.ts` therefore computes dispersion and the
 relative floor on the raw scale (`rawRelevance`), keeping the bounded score only
@@ -162,32 +185,29 @@ for the portable absolute floor, and `tools/relevance-gate-calibration.ts`
 reproduces the table above from the pinned store (`--dataset locomo`), so the
 operating point can be re-checked without an embedding service or a live corpus.
 
-## What step 2 therefore needs
+## What step 2 therefore needs (historical hypotheses)
 
-1. **A multivariate learned gate, not a threshold.** No single feature —
-   absolute or query-relative — separates the classes; only a non-linear
-   combination can.
-2. **Features beyond the score shape — and on an uncompressed scale.**
-   top1/mean/sd/cv/gap/z carry weak signal on the bounded score, but the
-   benchmark shows `cv` is strong when computed on a raw score (LoCoMo). The
-   model must therefore consume raw-scale features (lexical BM25, raw vector,
-   exact-term/entity match) plus structural evidence (node/tier/importance/
-   recency, graph position). Computing dispersion on the bounded `hybridScore`
-   is the anisotropy problem re-read.
-3. **Label volume.** 23 labeled recalls cannot train or validate a gate; the
-   `recall-instance-judge --list` / `--set` loop must keep producing labels, and
-   the corpus needs negatives that are not all auto-recall noise.
-4. **Orthogonality is a hard requirement**, not a nicety: a gate that only
-   rereads the embedding score reproduces the uncalibrated-score failure this
-   whole design exists to fix.
-5. **Threshold selection by conformal / selective-classification framing** on the
-   labeled set, targeting a risk–coverage point, rather than a guessed gap.
+1. The tested single-feature cuts did not separate these samples. That does not
+   prove a nonlinear combination is necessary or sufficient; linear and nonlinear
+   alternatives need comparison.
+2. Raw lexical/vector, exact-term/entity and structural features were proposed
+   complements to top1/mean/sd/cv/gap/z. A bounded transform alone is not a causal
+   diagnosis; normalization needs defined zero-variance/missing-value handling.
+3. The 23 labels are insufficient for the general claims made here, not a universal
+   minimum-size theorem. The old `recall-instance-judge --list` / `--set` loop was
+   a collection proposal, not authority to invent negatives or retrain benchmarks.
+4. Test signal complementarity; "orthogonality" is a modeling objective, not an
+   established statistical independence or a substitute for verified evidence.
+5. Risk/coverage targets and valid calibration are needed. Generic conformal
+   coverage ≥1−alpha is not automatically a bound on kept-item noise, especially
+   without exchangeability, the correct loss and independent data.
 
 ## Model gate (step 2) results
 
 `src/lab/relevance-model.ts` (an MLP on the shared `autodiff.ts`) trained by
 `tools/relevance-model-train.ts` on the same LoCoMo store, candidate-level gold
-labels, split by QUESTION so no candidate leaks across train/test:
+labels, split by QUESTION. This keeps one query's candidates together, but does not
+prove no shared user/conversation, repeated document or semantic-query leakage:
 
 | metric                 | value                                                      |
 | ---------------------- | ---------------------------------------------------------- |
@@ -200,6 +220,9 @@ The model gate removes candidate noise far more sharply than any deterministic
 threshold; ANDing it after the program gate is what makes the compound gate
 strict while each half stays loose.
 
+These are reported implementation observations for that configuration, not a
+universal failure of standardization or proof that every zero-initialized tensor
+network stays constant. Deterministic initialization is not independent repetition.
 Two implementation findings worth keeping:
 
 1. **Standardising the feature vector breaks training.** Normalising each feature
@@ -214,11 +237,18 @@ Two implementation findings worth keeping:
 
 ## Turning the gate on by default: what the literature prescribes
 
-The remaining decision is whether to flip `NMG_RELEVANCE_GATE` /
-`NMG_RELEVANCE_MODEL` on by default, and at which floor. The common practice is
-unanimous that this is a staged decision, not a config flip:
+This records a rollout proposal, not a deployed model, unanimous survey or
+current activation procedure. A learned score is not independent verification;
+shadow/canary/default authority is separate. Do not choose 0.5 merely because it
+is a default, but 0.5 is not intrinsically forbidden. Platt/isotonic/temperature
+calibration and low ECE do not guarantee portability under domain shift; generic
+conformal results require their sampling/loss assumptions. None of the steps
+below authorizes new collection, training, traffic or an automatic default flip.
 
-1. **Never accept the default 0.5.** Pick the operating point from a curve (PR /
+The remaining decision is whether to flip `NMG_RELEVANCE_GATE` /
+`NMG_RELEVANCE_MODEL` on by default, and at which floor. The old note proposed a staged evaluation, not a mere config flip:
+
+1. **Do not accept 0.5 solely because it is the default.** Pick the operating point from a curve (PR /
    risk–coverage) against a stated objective. For an injection gate the asymmetry
    is explicit: a false positive pushes noise into every consumer turn, a false
    negative withholds a memory that was available — so the objective is a
@@ -233,7 +263,7 @@ unanimous that this is a staged decision, not a config flip:
 4. **Stage the rollout.** Offline evaluation → **shadow** (compute the decision,
    act on nothing) → **canary** (act on a fraction) → default, with rollback
    ready. NMG already has a shadow precedent (the controller shadow log).
-5. **Guard against domain shift.** The shipped model is trained on LoCoMo; the
+5. **Guard against domain shift.** The historical experimental model is trained on LoCoMo; the
    live store and query mix are a different distribution, and a LoCoMo floor is
    therefore out of distribution. Either retrain on the live corpus once it has
    volume, or add an OOD / drift guard that abstains (falls back to the program
@@ -251,7 +281,8 @@ enablement to either a live-corpus retrain or an OOD guard.
 
 ## Raising model recall: methods, and the real ceiling
 
-The model's 55% question-level recall is not chance: candidate precision is 0.512
+The model's recorded conditional question retention is 55%; no chance test or
+independent-repeat uncertainty is supplied here: candidate precision is 0.512
 against a 5.9% base rate, and candidate AUC is 0.891. It is 55% of the gold that
 the retriever actually surfaced. And that is the point:
 
@@ -291,7 +322,7 @@ Model-side methods, in rough order of expected value:
    but the framing is standard.)
 4. **Calibration** (Platt / isotonic / temperature) so a floor is portable, then
    re-measure the AND trade-off.
-5. **More data / retrain on the target distribution** — the shipped model is
+5. **More data / retrain on the target distribution** — the historical experimental model is
    LoCoMo-specific and OOD on the live store.
 6. **Operating point** — a lower floor trades precision for recall; measure at a
    fixed recall target rather than tuning to 0.5.
@@ -315,14 +346,15 @@ the LoCoMo store with a by-question train/val/test split:
 | + pairwise (RankNet)            | 0.896    | 0.008 | 0.486 / 0.375               |
 | focal + pairwise                | 0.886    | 0.012 | 0.352 / 0.521               |
 
-**None of the model-side methods moved recall.** AUC plateaus at ≈0.89 across
-every variant; focal and pairwise trade a little recall for a little precision
-at a fixed floor. The one real gain is **calibration**: Platt scaling brings ECE
-to ≤0.012, which is what makes a fixed floor meaningful at all.
+The table does not show "no recall movement": hit recall ranges from 0.375 to
+0.521; the 0.521 point exceeds baseline 0.438 while precision falls from 0.457
+to 0.352. AUC is near 0.89, not proof of equivalence. Different calibrated
+models at floor 0.2 are not a matched-coverage comparison. ECE ≤0.012 is
+reported without baseline ECE/uncertainty here, not proof of portable calibration.
 
-The reason is the ceiling measured above: the retriever surfaces the gold for
-only 17.5% of questions, and the model already reaches ~45–55% of that. Model
-tricks cannot exceed the pool. Composition on gold questions (floor 0.5) is
+The fixed pool is a limit, but it does not by itself explain these model differences: the retriever surfaces the gold for
+only 17.5% of questions, and the model already reaches ~45–55% of that. A remove-only head cannot exceed that pool, but retaining ~45–55% still leaves
+room within it; this is not proof that only retrieval can improve outcomes. Composition on gold questions (floor 0.5) is
 `program 0.729 / learned 0.271 / AND 0.271 / OR 0.729` — the AND is bounded by the
 learned half, and the OR adds essentially nothing over the program gate alone.
 
@@ -331,6 +363,17 @@ says the embedding fix alone does not settle the gate question. Hybrid is a
 +5–6 pt move on LoCoMo, and the noise the gate addresses is a _precision_
 problem, not a pool-recall one. Restoring embeddings is worth doing on its own
 merits; it does not by itself decide whether the gate ships.
+
+## Evidence and interpretation limits
+
+The 268/1532 = 17.5% and 147/268 ≈55% are conditional question-level harness
+counts, not item recall or an oracle bound on future retrievers. Product-path
+34.3% lexical / 40.5% hybrid and +5–6 points belong to their recorded settings;
+they do not cap future embedding improvements. The reported 0.954 accuracy is
+class-imbalance-sensitive, not independent evidence of safety. Historical
+recommendations to collect labels, fit models, normalize or enable shadow do not
+replace the current training/data/privacy/activation owners. "Safe abstention"
+can still withhold needed evidence; loss and coverage must be stated.
 
 ## Sources
 

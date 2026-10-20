@@ -1,14 +1,14 @@
 # Register every entry point with one sentence
 
-[中文](2026-09-09-register-every-entry-point.zh-CN.md)
+[中文](2026-09-09-register-every-entry-point.zh-CN.md) · [Terms used](2026-09-09-register-every-entry-point.terms.yaml)
 
 **Status:** rejected  
 **Relates to:** 2026-09-09-gates-assert-results-not-tools
 
 ## Problem
 
-`package.json` declares 93 scripts and nothing says what most of them are for. Four
-partial registries exist — the root `README.md` names 12, `evals/README.md` 30,
+At the time of the 2026-09-09 inventory, `package.json` declared 93 scripts and
+nothing said what most of them were for. Four partial registries existed — the root `README.md` names 12, `evals/README.md` 30,
 `docs/design/ci-cd-and-quality.md` 22, `AGENTS.md` 6 — together covering 59, plus
 per-directory READMEs covering 16 of 28 eval directories. Nine scripts appear nowhere at
 all: `index:qwen3`, `hotspot:modules`, `perf:hotspots`, `eval:recall-compression`,
@@ -25,8 +25,8 @@ ten of its subcommands are documented (1 to 47 mentions).
 The cost is not tidiness. On 2026-09-09 an Agent asked "which scripts have no consumer?",
 wrote a throwaway script to answer it, and had to write two more because the first two
 were wrong — the second missed the scripts composed inside `verify:static`, the third
-missed the root `README.md`. It never once ran `npm run agent:context`, which `AGENTS.md`
-requires as the first step of any repository change.
+missed the root `README.md`. It did not run `npm run agent:context`, which the then-current `AGENTS.md`
+required as the first step of a repository change.
 
 ## Proposal
 
@@ -77,13 +77,14 @@ library.
 
 ## Why rejected
 
-- **The registry already exists, one level up.** `agent-context.yaml` carries
+- **The routing registry already exists at a higher level.** `agent-context.yaml` carries
   `capabilities:` (id, aliases, summary, entrypoints, supports) and `routes:` (paths,
-  owners, tests, verify); `agent:context:check` enforces it and `npm run agent:context`
-  reads it, and `AGENTS.md` already makes that the first step of a repository change. A
-  `docs/scripts.yaml` would be a **second** catalogue answering the same question at a
-  different granularity — five capabilities against ninety-three scripts. That is one
-  home too many for one fact.
+  owners, tests, verify); `agent:context:check` validates it and `npm run agent:context`
+  reads it. The current root `AGENTS.md` owns stable repository discovery, while the
+  `repo-development` Skill uses `agent:context` when ownership or checks are unclear.
+  This routing surface is not a per-script manual, but another exhaustive catalogue
+  would duplicate its higher-level ownership path rather than explain what a specific
+  script is for.
 - **The checkable form and the useful form are different sizes.** To fail on a missing
   entry, the file must enumerate _every_ script. To be useful, it should list only what
   nothing else explains. Ninety-three lines of prose bought with nine lines of value.

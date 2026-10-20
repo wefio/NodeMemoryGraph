@@ -1,6 +1,6 @@
 # 牙是"作用于符号的算子"，不是"某一行的一次拷贝"
 
-[English](2026-09-24-mutants-are-derived-not-anchored.md)
+[English](2026-09-24-mutants-are-derived-not-anchored.md) · [术语](2026-09-24-mutants-are-derived-not-anchored.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

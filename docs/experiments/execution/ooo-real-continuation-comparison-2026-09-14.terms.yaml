@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: failure attribution
+    aliases: [failure-cause classification, 失败归因]
+    definition: >-
+      Classifying a reported non-pass by evidence of whether it came from the harness, model output, a valid outcome misclassified by the harness, or an unresolved cause.
+      根据证据将报告的未通过结果归类为 harness、模型输出、被 harness 误分类的合法结果，或原因未决。
+    owner: docs/experiments/execution/ooo-real-continuation-comparison-2026-09-14.md
+    anchor: The numbers
+    status: canonical
+  - term: naive non-pass
+    aliases: [initially counted failure, 初始计为未通过]
+    definition: >-
+      A stage initially counted as not passing before its artifact and cause are reviewed; the count can include valid conclusions that a limited harness misclassified.
+      在检查 artifact 与原因之前，最初被计为未通过的阶段；该计数可能包含受限 harness 误分类的合法结论。
+    owner: docs/experiments/execution/ooo-real-continuation-comparison-2026-09-14.md
+    anchor: The numbers
+    status: canonical
+references:
+  - accepted continuation boundary
+  - stage-specific delivery
+  - fixed parent check
+  - measured research result
+  - research-instrument evidence
+  - product-runtime evidence
+  - task unit
+  - run record

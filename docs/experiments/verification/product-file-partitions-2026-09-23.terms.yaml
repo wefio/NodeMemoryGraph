@@ -1,0 +1,28 @@
+version: 2
+terms:
+  - term: duration-weighted file partition
+    aliases: [按耗时加权的文件分区]
+    definition: >-
+      The probe's one-off allocation of product test files by recorded case durations to fixed partitions, each run in a separate Node process with one test worker. This differs from the ordinary single-parent multi-worker route; it is a stage comparison, not current test:product behavior.
+      本探针用记录的用例耗时一次性分配产品测试文件到固定分区，每个分区在独立 Node 进程中用一个测试 worker 运行。这不同于普通单父进程多 worker 路由；它是阶段对比，不是当前 test:product 行为。
+    owner: docs/experiments/verification/product-file-partitions-2026-09-23.md
+    anchor: Method and result
+    status: canonical
+  - term: long-tail scheduling bubble
+    aliases: [长尾调度气泡]
+    definition: >-
+      Idle worker time caused by a few very long test files finishing late while shorter files have already been consumed; the four-worker model here reduces the longest modeled load by 15.1 s, which is consistent with but does not prove the observed stage reduction.
+      少数很长的测试文件迟迟未结束、而较短文件已被消耗完所造成的 worker 空闲时间；此处的四 worker 模型把最长模拟负载减少 15.1 秒，这与观察到的阶段缩短一致，但并不证明该缩短的原因。
+    owner: docs/experiments/verification/product-file-partitions-2026-09-23.md
+    anchor: Why partitioning may help here
+    status: canonical
+  - term: instrumentation-exempt lane
+    aliases: [插桩豁免通道]
+    definition: >-
+      The historical DSH comparison's separate uninstrumented heavy-suite lane beside instrumented coverage tests, while preserving the declared coverage decision. It is reference context, not a fresh DSH audit; the NMG report does not establish an analogous measured exemption set.
+      历史 DSH 对比中，与插桩覆盖率测试分开的不插桩重型套件通道，同时保留声明的覆盖率判定。它是参照背景，不是新的 DSH 审计；NMG 报告未建立同类的实测豁免集合。
+    owner: docs/experiments/verification/product-file-partitions-2026-09-23.md
+    anchor: Why partitioning may help here
+    status: canonical
+references:
+  - whole-run verification deadline

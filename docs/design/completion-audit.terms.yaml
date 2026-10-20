@@ -1,0 +1,25 @@
+version: 2
+terms:
+  - term: audit status vocabulary
+    aliases: [审计状态词汇]
+    definition: >-
+      The six states this ledger uses for one responsibility — verified core, opt-in Lab, designed target, calibration gate, explicitly deferred, out of scope — where "verified core" is about design, wiring and deterministic test coverage, and never about default product activation.
+      本账本为一项职责使用的六种状态——已验证核心、可选 Lab、已设计目标、标定闸门、显式推迟、范围之外；其中"已验证核心"只关涉设计、接线与确定性测试覆盖，从不代表默认产品启用。
+    owner: docs/design/completion-audit.md
+    anchor: Status vocabulary
+    status: canonical
+  - term: active blocker
+    aliases: [活跃阻塞项]
+    definition: >-
+      A work family that currently prevents evidence-backed default activation; the audit distinguishes validation blockers (missing natural evidence, unmatched gates) from missing storage mechanisms, and a deliberate breaking runtime redesign is not itself a defect.
+      当前阻碍有证据支撑的默认启用的工作族；审计区分验证型阻塞（缺少自然证据、闸门不匹配）与缺失的存储机制，有意的破坏性运行时重设计本身不是缺陷。
+    owner: docs/design/completion-audit.md
+    anchor: Actual active blockers
+    status: canonical
+references:
+  - Lab
+  - promotion gate
+  - NMG Lite
+  - Active Graph
+  - consolidation
+  - claim outcome

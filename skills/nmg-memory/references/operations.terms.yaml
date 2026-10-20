@@ -1,0 +1,16 @@
+version: 2
+terms:
+  - term: controlled code reload
+    aliases: [受控代码重载]
+    definition: >-
+      A coordinated daemon replacement that authenticates the current owner, drains accepted work, fences startup of its replacement and requires the new owner to prove readiness; it does not build code or restart an incompatible daemon implicitly.
+      协调式 daemon 替换：验证当前 owner、排空已接受工作、为替代进程启动设置 fence，并要求新 owner 证明已就绪；它不会构建代码，也不会隐式重启不兼容 daemon。
+    owner: docs/design/daemon-lifecycle-design/controlled-code-reload.md
+    anchor: Controlled code reload
+    status: canonical
+references:
+  - Active Graph
+  - Long-Term Graph
+  - Short-Term Graph
+  - Task Board
+  - state space

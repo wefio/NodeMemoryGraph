@@ -1,235 +1,58 @@
-# Tiered Disclosure Design（层级渐进披露）
+# Tiered Disclosure Design
 
-**Status:** current — calibrated SPRT remains future work
-**Updated:** 2026-08-25
-**Related:** [edge-activation-design.md](edge-activation-design.md), [fibonacci-progressive-recall.md](fibonacci-progressive-recall.md), docs/design/design.md §7.1, §11
+[English](tiered-disclosure-design.md) | [简体中文](tiered-disclosure-design.zh-CN.md) · [Terms](tiered-disclosure-design.terms.yaml)
 
-## 1. Problem
+The sequential tier-opening path is implemented and opt-in for general search; Pi automatic recall enables it. Calibrated SPRT remains future work. The original 2026-08-25 rollout table below is a historical report, not a current verification receipt.
 
-Tiering exists for **latency and focus**: the most likely memories sit shallow,
-deeper tiers are cold. Today a single `searchContext` call can pull records
-from every tier up to `budget.maxLocalTier` at once. That contradicts the
-design goal — deep tiers should be rare, deliberate, and paid for, not
-co-retrieved by default. Retrieval must **open tiers in order, one at a time**,
-and stop as soon as the opened evidence satisfies the query.
+**Updated:** 2026-10-16
 
-This is not a new budget dimension. It is a **sequential gate** over the tier
-axis, composed with the existing record/token/node budgets.
+**Related:** [Progressive recall](fibonacci-progressive-recall.md), [progressive retrieval](design/progressive-retrieval.md), [implementation lineage](implementation-lineage.md), and the [retrieval design](design.md).
 
-## 2. Design
+## Current source contract
 
-### 2.1 Principle: tier as a sequential gate, not a pool
+Without `tieredDisclosure`, direct retrieval searches through the caller/budget tier ceiling in one pass. With `tieredDisclosure: true`, retrieval starts at tier 0 and opens deeper tiers in order while deterministic QPP says the current direct evidence is insufficient, stopping at the tier ceiling. `tiersOpened` records the path. This does not claim an SPRT or calibrated probability.
 
-```
-current behavior:   candidate pool  =  Σ all tiers ≤ maxLocalTier
-new behavior:       candidate pool  =  tier 0 only
-                    → evaluate     → insufficient? → open tier 1
-                    → evaluate     → insufficient? → open tier 2
-                    → … (hard stop at maxLocalTier)
-```
+- General callers opt in through `SearchOptions.tieredDisclosure`; the CLI flag is `nmg search --tiered-disclosure`. Omitting the flag does not enable sequential tier opening.
+- Pi automatic recall sets `tieredDisclosure: true`; this caller-specific default does not make it the default for every `searchContext` caller.
+- `maxTier` / the active-graph budget bounds the available tier ceiling. The gate does not create a new tier or override that ceiling.
+- `progressiveWarmDisclosure` and `--full-warm` govern a separate presentation window within warm results. They are not the same mechanism as opening storage tiers.
+- The deterministic QPP trigger controls continuation; no calibrated likelihood ratio is used. Core selection and caller defaults are described in [Progressive recall](fibonacci-progressive-recall.md).
 
-Key rules:
+The current path is implemented in [`retrieval.ts`](../../src/core/store/retrieval.ts), with its option in [`types.ts`](../../src/core/types.ts). The CLI mapping is in [`commands.ts`](../../src/cli/commands.ts); Pi automatic recall wiring is in [`.pi/extensions/nmg/index.ts`](../../.pi/extensions/nmg/index.ts).
 
-- **Tier 0 is always searched** (hot memory; cheap, FTS-covered).
-- **A deeper tier is opened only if** the current tier's evidence is
-  insufficient (budget not exhausted but coverage weak), AND the deeper tier
-  is worth its cost.
-- **Opening is monotone**: once tier *k* is opened, tiers 0..k stay open for
-  the rest of the query. We never close a tier mid-query.
-- **Deep tiers have a per-query access counter** that feeds the maintenance
-  loop: if a deep tier is never opened in N queries, it is a candidate for
-  demotion (already exists as retention candidates); if it is opened often,
-  its content is probably too hot to sit deep and should be promoted.
+## Design rationale and proposed statistical extension
 
-### 2.2 The insufficiency signal (when to open the next tier)
+The design treats tier as a sequential gate over the existing evidence and token budgets, not as another independent budget dimension. In sequential mode, tier 0 is inspected first; deeper tiers open only when the deterministic sufficiency signal triggers, and previously opened tiers remain in the query. A shallow miss is preferable to an unbounded deep scan when the budget is exhausted.
 
-Opening is decided by a conservative, deterministic signal — no LLM call.
-The decision is a **sequential probability ratio test (SPRT)** (Wald 1947):
-after each tier opens, compute the likelihood ratio
+A calibrated sequential probability ratio test (SPRT) was proposed as a future alternative. Its likelihood ratio would compare “evidence sufficient with opened tiers” against “still insufficient”; upper and lower thresholds would stop or open another tier. The proposal requires calibrated probabilities. Current QPP components are deterministic scores, so the runtime uses the deterministic QPP decision instead. The Wald references and stopping-time formula in the earlier draft are theoretical motivation, not an implemented controller or NMG performance claim.
 
-```text
-Λ_k = L(data | evidence sufficient with tiers ≤ k)
-      / L(data | evidence still insufficient)
-```
+The design also distinguishes tier opening from warm-result presentation. The `progressiveWarmDisclosure` two-window path can expose a warm prefix and later load deferred IDs; tiered disclosure decides whether to retrieve deeper storage tiers. Both may be used in one caller, but neither implies the other.
 
-- `Λ ≥ A` (upper bound) → **stop**: the opened tiers suffice, do not open
-  further.
-- `Λ ≤ B` (lower bound) → **open the next tier**, then re-test.
-- In between → keep testing only if budget remains; otherwise stop
-  (conservative default: a shallow miss is cheaper than a deep retrieve).
+## Evaluation boundary
 
-SPRT is the optimal sequential decision rule: among all tests with the same
-type I/type II error bounds, no test has a smaller expected sample size
-(verified: Wald 1947; modern treatment in arXiv:2504.19952). The expected
-stopping time has the closed form
+Latency, deep-evidence recall, context economy, and tier dynamics were stated as falsifiable evaluation targets, not established outcomes. The 2026-08-25 rollout table recorded implementation and then-current targeted test reports, with scale/recall evaluations still pending. Those reports are historical; no tests or benchmarks were run in this documentation pass. Consult the current test/evaluation artifacts before making a new performance claim.
 
-```text
-E[τ] ≈ log(1/α) / KL(Q, P)
-```
+The dated note also proposed using access counts to inform maintenance. Tier-open frequency is a demand signal, not proof of semantic usefulness; promotion, retention, and answer evidence remain separate decisions.
 
-which quantifies directly how many evidence samples a tier open buys per
-unit of discrimination — the "is this tier open worth it" cost question.
+## Historical rollout snapshot (2026-08-25)
 
-**Calibration requirement.** SPRT needs a likelihood ratio, but the existing
-QPP components (match strength, score distribution, type coverage) produce
-deterministic scores, not probabilities. The scores must be calibrated into
-`P(evidence sufficient | opened tiers)` — the claim-level Beta posterior
-(design.md §5c) is the existing seed for this. Until calibration exists, run
-SPRT in shadow with the deterministic threshold (§2.2 original form) as
-fallback.
+The original rollout report recorded `maxTierBudget`, `tiersOpened`, and `deepEvidence`; an opt-in CLI tiered-disclosure path; Pi automatic recall wiring; and bounded headers with `nmg_get` as the exact unlock. It reported targeted unit/adapter tests as passing while scale, recall, and agent-utility evaluations remained pending. This table is retained as a dated report only; it is not a fresh test receipt and must not be used to imply current run status.
 
-### 2.3 Budget composition (tier-aware)
+Implementation history and current owners are indexed in [implementation lineage](implementation-lineage.md).
 
-At the harness boundary, L1 uses a two-window presentation policy. Retrieval
-ranks the complete L1 candidate pool once. The first response exposes the
-hotter half when the pool contains at least five records; smaller pools remain
-fully visible. When evidence is insufficient, the harness fetches the deferred
-IDs once by stable ID. This second presentation does not repeat vector search.
-Core graph operations retain full-pool semantics, and callers can disable the
-fold with `progressiveWarmDisclosure: false` (`nmg search --full-warm`).
+## Non-goals
 
-`ActiveGraphBudget.maxTierBudget` limits how many records may come from the
-cold tiers L2/L3. L0/L1 remain governed by `maxEvidence` and `maxTokens`; L1
-also uses the two-window harness presentation above. The cold tiers share one
-deep-evidence budget rather than independent per-tier quotas.
+- No additional memory tier; the gate operates within the existing tier and retention model.
+- No independent learned quota for every tier.
+- No LLM call in the deterministic insufficiency signal.
+- No change to tier assignment solely by enabling sequential disclosure.
 
-### 2.4 Interaction with existing mechanisms
+## Source references
 
-| Mechanism | Interaction |
-| --- | --- |
-| `maxLocalTier` (existing) | becomes the **hard ceiling** of the gate; the gate opens only up to it |
-| `maxTier` option (store.ts:1419) | explicit caller override: `maxTier=0` disables deep tiers entirely |
-| QPP second pass (Fibonacci) | operates **within** the currently opened tiers; never opens a new tier itself. Tier opening and Fibonacci expansion are orthogonal axes |
-| `blockTiers` (hierarchy.ts:28) | unchanged — still produces the tier assignment from access-weighted Huffman depths |
-| rebalance tiers (store.ts:1365) | now also driven by "deep tier opened count" signal (§2.1 third bullet) |
-| Active Graph ledger | records `deepestTier` (already exists) plus new `tiersOpened: number` |
-| retention (L4/L5) | unchanged: deep-tier access counters feed the same candidates |
-
-### 2.5 Progressive model exposure (beyond retrieval)
-
-The gate also applies at the model boundary: **the agent never sees all tiers
-at once**. Recall cues carry a `tiersOpened` field; when the agent calls
-`nmg_get` for a deeper tier, that is an explicit, budgeted unlock — exactly
-the "searched but not all handed over" behaviour. The existing `nmg_search →
-nmg_get` progression already provides the plumbing; this design makes the
-tier axis explicit in it.
-
-## 3. Implementation sketch
-
-### 3.1 store.ts — sequential tier open
-
-Replace the single `searchContext` pass (store.ts:1409) with a loop:
-
-```ts
-function* openTiers(maxTier: MemoryTier): Generator<MemoryTier> {
-  for (let t = 0; t <= maxTier; t++) yield t as MemoryTier;
-}
-
-// in searchContext:
-const opened: MemoryTier[] = [];
-for (const tier of openTiers(hardCeiling)) {
-  const result = searchTier(query, tier, {...options, maxTier: tier});
-  opened.push(tier);
-  if (sufficient(result, budget) || exhausted(budget)) break;
-}
-```
-
-`searchTier` keeps the existing `search`/`searchByVector` paths but constrains
-`maxTier` to the current tier, so each level is a fresh, bounded pass over a
-smaller index. The insufficiency test (`sufficient`) uses §2.2.
-
-### 3.2 types.ts — budget + ledger
-
-```ts
-// ActiveGraphBudget
-maxTierBudget: number;
-
-// ActiveGraphBudgetUsage
-tiersOpened: number;
-deepEvidence: number;
-
-// ActiveGraphBudgetDimension
-"tiersOpened" | "deepEvidence"
-```
-
-`deepEvidence` is the consumable dimension governed by `maxTierBudget`;
-`tiersOpened` records the gate path for explanation and later calibration.
-
-### 3.3 controller-runtime.ts — project the new budget
-
-Mirror the existing `projectFibonacci` for `maxTierBudget`; the learned
-controller can widen it, never beyond `maximum.maxTierBudget`.
-
-### 3.4 gate.ts — deep-tier admission
-
-A new `tierGate(record.tier, opened, budget)` predicate, called at candidate
-admission: tier 0 always passes; tier ≥1 passes only if
-`record.tier ∈ opened` and `deepBudgetRemaining > 0`.
-
-### 3.5 nmg_search — expose the gate
-
-`nmg_search(..., maxTier: 0..3)` (already accepted as `maxTier` in
-SearchOptions) becomes meaningful: `0` = hot memory only; unset = default
-progression. Tier state remains internal to retrieval and traces. The Agent
-surface exposes only whether ranked evidence remains folded and how to load it;
-it does not expose L0/L1 placement or `tiersOpened`.
-
-## 4. Evaluation
-
-Falsifiable claims (consistent with docs/design/design.md §14 discipline):
-
-1. **Latency**: mean/P95 search latency does not regress; on queries whose
-   evidence lives in tier 0, latency **drops** because deeper tiers are not
-   scanned. Measured by `eval:scale` at 100K.
-2. **Evidence recall**: does not regress for questions whose evidence lives
-   deep, because the gate opens tiers before declaring insufficiency. Measured
-   by LongMemEval full-set `benchmark:score:longmem`.
-3. **Context economy**: average returned-token estimate falls because tier-1+
-   records are no longer co-retrieved on shallow queries. Measured by
-   `nmg search --json` token estimate + QPP shadow traces.
-4. **Tier dynamics**: deep-tier open rate reflects repeated access demand (not
-   semantic usefulness); the disclosure/access counter feeds rebalance, while
-   useful evidence remains a separate verified signal.
-
-Acceptance: gate passes 1–3 with no regression in the matched no-memory
-baseline (benchmark discipline §"Always run the matched no-memory baseline").
-
-## 5. Rollout
-
-| Phase | Scope | Evidence gate |
-| --- | --- | --- |
-| 0 | **Implemented:** `maxTierBudget`, `tiersOpened`, `deepEvidence`, and ledger fields | unit tests cover the hard envelope |
-| 1 | **Implemented, opt-in:** `nmg_search --tiered-disclosure` opens L0→L3 with deterministic QPP | targeted shallow-stop/deep-open tests pass; scale/recall benchmark pending |
-| 2 | **Implemented:** Pi automatic recall enables sequential opening | adapter integration tests pass; matched LongMemEval run pending |
-| 3 | **Implemented:** search headers expose only bounded candidates and continuation availability; `nmg_get` remains the exact unlock | agent utility evaluation pending |
-
-The runtime intentionally does not claim SPRT: QPP scores are not calibrated
-likelihoods yet. It follows §2.2's required fallback and uses the deterministic
-QPP decision until calibration evidence exists.
-
-## 6. Non-goals
-
-- No new tier count (still 0..3 + L4/L5 retention).
-- No per-tier learned quotas (single `maxTierBudget` + Fibonacci scale first).
-- No LLM call in the insufficiency signal (deterministic QPP components only).
-- Tier assignment logic (`huffmanDepths`/`blockTiers`) unchanged.
-
-## 7. Implementation lineage
-
-- **Introduced — `1feb008d`**：leaf-block summary 成为细节索引，不替代原始记录。
-- **Introduced — `ecde4e45`**：增加更粗粒度 node semantic summary。
-- **Hardened — `796439ed`**：维护周期先 drain leaf summary，再有界 drain node summary；provider 失败不阻塞 daemon。
-- **Hardened — `5a0edbf5`、`20de2efc`**：记录并消费 routed-vs-recalled 信号，用于识别 summary routing gap，而不是修改事实排名。
-
-Current engineering contract (2026-08-25):
-
-- chain and summary-routed supplements share a hard 16,000-character budget;
-  candidates are admitted by activation/relevance before chronological output;
-- leaf/node summarizers may batch one bounded drain slice into one provider
-  request, preserving a stable domain prompt while serializing durable commits;
-- node semantic summaries participate in vector routing as well as FTS, and
-  semantic-summary refresh invalidates the prior node vector;
-- benchmark `@20` metrics cover only ranked candidates; appended evidence is
-  reported separately as `@full`, so disclosure mechanisms cannot inflate rank.
-
-这些提交只实现 summary 的索引、drain 和诊断边界；节点摘要的质量结论仍属于实验。完整 owner 导航见 [implementation lineage](implementation-lineage.md)。
+- [`SearchOptions` and tier budgets](../../src/core/types.ts)
+- [Sequential tier retrieval and QPP continuation](../../src/core/store/retrieval.ts)
+- [CLI option](../../src/cli/commands.ts)
+- [Pi automatic-recall caller](../../.pi/extensions/nmg/index.ts)
+- [Progressive-recall design](fibonacci-progressive-recall.md)
+- [Progressive-retrieval design](design/progressive-retrieval.md)
+- [Current implementation lineage](implementation-lineage.md)

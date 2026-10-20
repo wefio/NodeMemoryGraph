@@ -1,5 +1,13 @@
 # Graph-scoped compound retrieval reference trial
 
+[English](compound-reference-2026-10-11.md) | [简体中文](compound-reference-2026-10-11.zh-CN.md) · [Terms](compound-reference-2026-10-11.terms.yaml)
+
+**Evidence boundary (2026-10-17):** this is a historical isolated comparison at
+the named baseline. Branch states, host wiring and test/LSP/DAP readings describe
+that checkpoint, not current acceptance of this dirty documentation worktree.
+Cited experiment artifacts, external sources and run receipts were not
+independently revalidated or rerun by this documentation review.
+
 ## Frozen question and arms
 
 Frozen before implementation on 2026-10-11. Baseline revision:
@@ -15,9 +23,10 @@ by two until the combination matches one canonical ID in the graph's original
 readable candidate set. Quote is the first six Unicode code points of the
 whitespace-normalized statement, with trailing whitespace removed. Matching is
 literal, case-sensitive and not NFKC/fuzzy normalization. UUID-prefix comparison
-is case-insensitive and excludes dashes. Invalid UUIDs, withdrawn records, empty
+is case-insensitive and excludes dashes. IDs not matching the UUID text shape, withdrawn records, empty
 quotes, row delimiters, or references not shorter than UUID text fall back to
-full IDs. Deferred/folded ID-only rows retain UUIDs; they do not acquire content
+full IDs. This shortness guard uses JavaScript UTF-16 string length, not encoded
+token cost. Deferred/folded ID-only rows retain UUIDs; they do not acquire content
 that was not shown as a preview.
 
 References are graph-scoped selectors, not durable identifiers or authentication.
@@ -27,6 +36,11 @@ graph. A changed quote can invalidate a reference, while a changed suffix does
 not change record identity. Existing exact get redaction, filtering and canonical
 attribution remain authoritative. No additional tool or model decoding step,
 no independently stored alias mapping, no new environment gate.
+
+The RPC service supplies graph/session/store checks and current readable targets.
+The pure shared-library resolver relies on its caller's original scope and
+current targets; its default `currentTargets = targets` does not independently
+refresh record content or enforce graph ownership.
 
 Raw diagnostic results and compact JSON IDs remain canonical. Shared text
 rendering may consume a derived reference map; this is not a token-saving claim
@@ -74,23 +88,25 @@ semantic relevance, task quality, cache or billing gains.
 
 The normal matrix retains all preview bytes, exact output bytes, canonical DTOs
 and disclosure entries. Twenty-two displayed references across seven of twelve
-fixtures resolve to the same canonical IDs; five fixtures keep UUIDs. The shared
+fixtures resolve to the same canonical IDs. The other five are the punctuation,
+withdrawn, empty, deferred and folded controls: their canonical/fallback or empty
+pipeline remains unchanged; the empty fixture is not a successful record read. The shared
 get-description instruction grows by six tokens under each named encoding.
 
-| Fixture                          | cl100k_base baseline → candidate | o200k_base baseline → candidate |
-| -------------------------------- | -------------------------------: | ------------------------------: |
-| English single                   |                        445 → 419 |                       447 → 421 |
-| Chinese single                   |                        462 → 440 |                       460 → 438 |
-| Mixed 13 long                    |                      5669 → 5361 |                     4858 → 4550 |
-| Repeated quote                   |                        573 → 507 |                       574 → 508 |
-| Colliding prefix, distinct quote |                        563 → 507 |                       564 → 508 |
-| Colliding prefix and quote       |                        561 → 507 |                       562 → 508 |
-| Unicode                          |                        468 → 458 |                       457 → 437 |
-| Punctuation fallback             |                        446 → 452 |                       448 → 454 |
-| Withdrawn                        |                        473 → 479 |                       475 → 481 |
-| Empty                            |                        175 → 181 |                       176 → 182 |
-| Deferred                         |                        388 → 394 |                       388 → 394 |
-| Folded                           |                        484 → 490 |                       485 → 491 |
+| Fixture | cl100k_base baseline → candidate | o200k_base baseline → candidate |
+| --- | ---: | ---: |
+| English single | 445 → 419 | 447 → 421 |
+| Chinese single | 462 → 440 | 460 → 438 |
+| Mixed 13 long | 5669 → 5361 | 4858 → 4550 |
+| Repeated quote | 573 → 507 | 574 → 508 |
+| Colliding prefix, distinct quote | 563 → 507 | 564 → 508 |
+| Colliding prefix and quote | 561 → 507 | 562 → 508 |
+| Unicode | 468 → 458 | 457 → 437 |
+| Punctuation fallback | 446 → 452 | 448 → 454 |
+| Withdrawn | 473 → 479 | 475 → 481 |
+| Empty | 175 → 181 | 176 → 182 |
+| Deferred | 388 → 394 | 388 → 394 |
+| Folded | 484 → 490 | 485 → 491 |
 
 These are component counts summed across the controlled shared display/arguments/
 exact-output chain and one instruction copy, not provider message framing or
@@ -100,14 +116,17 @@ identical, but its instruction is still six tokens dearer. Repeated quote text
 inside the keys is included, not credited as new information. This measurement
 is not a raw/compact JSON optimization or a proof of improved semantic usefulness.
 
-A current-content-only resolver failed the record-movement negative control.
-The implementation retains original ID/quote witnesses in existing private AG
-projection values, and checks current content only for the originally resolved
-ID. The negative control then passes; it does not rely on immutable storage
+A current-content-only resolver failed the record-movement negative control:
+moving matching quote text to another record must not redirect a previously
+displayed selector. The reported correction retains original ID/quote witnesses
+in existing private AG projection values and checks current content only for the
+originally resolved ID. The recorded negative control then passes; this is not
+an exhaustive proof for arbitrary edits. It does not rely on immutable storage
 statements, fuzzy matching, first-match selection or a new alias store.
 A durable trace without these witnesses deliberately cannot resolve a compound
-RPC selector. Shared library callers can capture/resolve their original scope;
-Core canonical exact get is unchanged.
+RPC selector. Shared library callers can capture/resolve their original scope.
+The witnesses freeze an ID and short normalized quote, not the full record body;
+Core canonical exact get remains authoritative for current content.
 
 A controlled statement-prefix edit produced an actual local HTTP `-32602` error.
 Explicit known-UUID recovery takes two calls instead of one: the measured chain
@@ -115,7 +134,7 @@ costs 257 → 320 (+63) cl100k_base and 260 → 326 (+66) o200k_base. This is a
 failure-cost example, not a successful saving or an automatic no-extra-call
 recovery. Unknown-UUID recovery and final host error envelopes were not measured.
 
-Current-service UUID versus compound get, including lookup and bookkeeping,
+At the trial checkpoint, service UUID versus compound get, including lookup and bookkeeping,
 observed medians of 0.499 → 0.861 ms for one record and 4.736 → 8.586 ms for 13.
 Two warmups and ten alternating rounds per arm are stored. The broad repeated-term
 13-record query abstained (`guardrail_empty`); supported multi-query fusion built
@@ -140,6 +159,7 @@ had previously expired near the end of verification despite passing tests; that
 incomplete receipt is retained. The completed run used the existing explicit
 300-second watchdog option, not a changed gate or source-code timeout. A clean
 postcommit run must independently verify the committed revision before closure.
+The completed precommit count does not satisfy that separate obligation.
 
 Primary artifacts are `.nmg/verification/compound-reference/{paired-probe,
 token-probe,boundary-probe,render-parity}.json`. Probe artifacts record input/source

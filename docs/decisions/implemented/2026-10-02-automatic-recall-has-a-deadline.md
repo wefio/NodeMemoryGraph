@@ -1,6 +1,6 @@
 # Automatic recall has a deadline
 
-[中文](2026-10-02-automatic-recall-has-a-deadline.zh-CN.md)
+[中文](2026-10-02-automatic-recall-has-a-deadline.zh-CN.md) · [Terms used](2026-10-02-automatic-recall-has-a-deadline.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

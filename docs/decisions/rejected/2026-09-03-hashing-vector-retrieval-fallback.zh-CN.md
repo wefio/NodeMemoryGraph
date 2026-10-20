@@ -1,6 +1,6 @@
 # 本地哈希向量作为检索兜底
 
-[English](2026-09-03-hashing-vector-retrieval-fallback.md)
+[English](2026-09-03-hashing-vector-retrieval-fallback.md) · [术语](2026-09-03-hashing-vector-retrieval-fallback.terms.yaml)
 
 **Status:** rejected  
 

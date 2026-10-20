@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: STG row visibility rule
+    aliases: [session_id visibility filter, STG 行可见性规则]
+    definition: >-
+      A session-scoped read rule: a session query sees shared NULL rows plus rows for that session; a query without a session ID sees only shared NULL rows. It is not authentication.
+      按 session 限定的读取规则：session 查询可见共享 NULL 行和本 session 行；缺少 session ID 的查询仅读共享 NULL 行。该规则不提供身份认证。
+    owner: docs/design/stg-shared-store-v2-2026-08-12/shared-store-design.md
+    anchor: Storage layout and visibility
+    status: canonical
+references:
+  - project-shared STG

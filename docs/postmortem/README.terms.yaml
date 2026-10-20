@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: post-mortem
+    aliases: [incident review, 事故复盘]
+    definition: >-
+      A retained account of an escaped failure, its mechanism and why the safeguards did not catch it; reusable rules live at their own owners.
+      对已逃逸故障、其机制以及防护措施为何未能拦截的留存记录；可复用规则仍由各自的 owner 承载。
+    owner: docs/postmortem/README.md
+    anchor: NMG post-mortems
+    status: canonical
+  - term: failure class
+    aliases: [失败类别]
+    definition: >-
+      A short searchable noun phrase in the post-mortem index that groups a recurring failure mechanism and links it to a canonical case.
+      事故复盘索引中的简短可搜索名词短语，用于归纳可重复的故障机制并关联其规范案例。
+    owner: docs/postmortem/README.md
+    anchor: Classes and typical cases
+    status: canonical
+  - term: guardrail
+    aliases: [防护措施]
+    definition: >-
+      A mechanism, owned outside the incident narrative, that detects or prevents recurrence; a post-mortem statement alone is not a guardrail.
+      由事故叙述以外的 owner 维护、用于检测或防止故障重演的机制；复盘中的文字声明本身不是防护措施。
+    owner: docs/postmortem/README.md
+    anchor: Consumption: from record to rule
+    status: canonical
+references: []

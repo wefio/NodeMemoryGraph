@@ -1,0 +1,16 @@
+version: 2
+terms:
+  - term: Task Board
+    aliases: [Shared Task Board, 共享任务黑板, 任务黑板]
+    definition: >-
+      A temporary, attributed cross-Agent coordination surface with channel/entry lifecycles,
+      distinct from private Active Graphs and authoritative durable semantic memory.
+      带归属、具有频道／条目生命周期的临时跨 Agent 协作表面，区别于私有活动图和权威持久语义记忆。
+    owner: docs/design/memory-graphs/session-runtime-graph-and-projection-revisions/shared-task-board.md
+    anchor: Shared Task Board (cross-Agent coordination, not a memory graph)
+    status: canonical
+references:
+  - Active Graph
+  - Long-Term Graph
+  - state space
+  - task frame

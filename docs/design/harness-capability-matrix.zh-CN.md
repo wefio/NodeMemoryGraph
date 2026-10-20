@@ -1,6 +1,6 @@
 # Harness 适配器能力矩阵
 
-[English](harness-capability-matrix.md)
+[English](harness-capability-matrix.md) · [术语](harness-capability-matrix.terms.yaml)
 
 **Status:** current
 

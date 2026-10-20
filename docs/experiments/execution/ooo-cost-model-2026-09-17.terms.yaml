@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: dependency density
+    aliases: [dependency-edge density, density, 依赖密度]
+    definition: >-
+      The fraction of possible forward dependency edges present in a generated plan: 0 means independent units and 1 means a chain; the plan graph is derived from the seed.
+      生成计划中实际存在的正向依赖边占所有可能正向边的比例：0 表示 unit 相互独立，1 表示 chain；计划图由 seed 派生。
+    owner: docs/experiments/execution/ooo-cost-model-2026-09-17.md
+    anchor: The instrument
+    status: canonical
+  - term: host check queue
+    aliases: [serialized host checks, 主机检查队列]
+    definition: >-
+      The model's single serial queue for host candidate checks; no two checks run concurrently, and every unit incurs its own check.
+      模型中 host candidate check 共用的单一串行队列；任意时刻最多执行一项检查，每个 unit 都各自承担一次检查。
+    owner: docs/experiments/execution/ooo-cost-model-2026-09-17.md
+    anchor: The instrument
+    status: canonical
+references:
+  - task unit
+  - execution fusion
+  - declared slot budget
+  - bounded speculation
+  - obligation ledger
+  - product-runtime evidence
+  - research-instrument evidence

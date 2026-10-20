@@ -1,5 +1,7 @@
 # OmniMemEval research utilities
 
+[English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
+
 These files are diagnostic or hypothesis-testing utilities. They do not define
 the public benchmark execution path, official prompts, or NMG runtime defaults.
 Use the parent directory's `run.ts`, `benchmark.config.json`, `bridge.ts`, and

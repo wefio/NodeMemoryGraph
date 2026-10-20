@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: main-only chaos job
+    aliases: [push-only chaos run, 仅 main 运行的 chaos job]
+    definition: >-
+      A blocking CI chaos suite triggered by pushes to `main` but skipped on pull requests, where the aggregate accepts `skipped` for this job; the suite and its blocking local route remain unchanged.
+      由推送到 `main` 触发、在 pull request 上跳过的 blocking CI chaos 套件；聚合结果在 PR 上接受该 job 的 `skipped`，套件本身及本地 blocking 路由不变。
+    owner: docs/decisions/implemented/2026-09-09-chaos-tests-on-main-pushes.md
+    anchor: Decision
+    status: canonical
+references:
+  - gate
+  - evidence

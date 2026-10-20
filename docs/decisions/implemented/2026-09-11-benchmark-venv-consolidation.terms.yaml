@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: benchmark venv
+    aliases: [shared benchmark virtual environment, 基准虚拟环境]
+    definition: >-
+      The single `.benchmarks/bge-venv` Python environment used by the official benchmark runners and HaluMem scoring, selected through `NMG_BENCH_VENV` or its documented default rather than an assumed interpreter on PATH.
+      官方基准 runner 与 HaluMem 评分共用的 `.benchmarks/bge-venv` Python 环境，通过 `NMG_BENCH_VENV` 或文档默认值选择，而不是假定 PATH 上的解释器。
+    owner: docs/decisions/implemented/2026-09-11-benchmark-venv-consolidation.md
+    anchor: Decision
+    status: canonical
+references:
+  - evidence

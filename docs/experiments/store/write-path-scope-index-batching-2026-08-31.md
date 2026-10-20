@@ -1,5 +1,12 @@
 # Write-path scope index and batching experiment — 2026-08-31
 
+[English](write-path-scope-index-batching-2026-08-31.md) | [简体中文](write-path-scope-index-batching-2026-08-31.zh-CN.md) · [Terms](write-path-scope-index-batching-2026-08-31.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a historical
+record. Its configurations, measured results and implementation-status statements
+are not current test receipts or default-policy authorization. This review did
+not rerun the experiment or independently revalidate the original run artifacts.
+
 ## Question
 
 Can a disposable in-memory index eliminate repeated same-scope tokenisation and
@@ -47,7 +54,11 @@ still benefited: scope-index was 1.47x, batch was 1.37x, and both was 2.15x
 (1,412 records/s versus 656 baseline). The combined arm used 98.1 MiB peak RSS
 versus 91.0 MiB baseline: about 7.1 MiB additional resident memory for 969 stored
 memories, while CPU fell from 1,563 ms to 688 ms. This second run also passed the
-same persisted-output equivalence oracle.
+same persisted-output equivalence oracle. Distinguish submitted records from
+unique persisted memories: the method specifies 1,000 inputs, while both result
+descriptions report 969 stored memories. The second run's submitted count and
+per-repetition wall times are not separately tabulated here; its throughput
+must not be relabelled as unique-memory throughput.
 
 ## Interpretation and boundary
 

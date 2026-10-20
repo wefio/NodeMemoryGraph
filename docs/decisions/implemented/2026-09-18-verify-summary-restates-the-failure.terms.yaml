@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: failure-summary tail
+    aliases: [bounded failure output, 失败摘要尾部]
+    definition: >-
+      The last ten non-empty lines of a failed check's captured output, each capped at 300 characters and shown beside the verdict with a marker and evidence-file path; it supplements rather than replaces live streaming.
+      失败检查捕获输出中最后十条非空行，每行最多 300 个字符，随 verdict 一并显示，并带截断标记和证据文件路径；它补充而不取代实时流式输出。
+    owner: docs/decisions/implemented/2026-09-18-verify-summary-restates-the-failure.md
+    anchor: Decision
+    status: canonical
+references:
+  - evidence

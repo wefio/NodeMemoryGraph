@@ -1,0 +1,30 @@
+version: 2
+terms:
+  - term: cold-window pressure test
+    aliases: [冷窗口压迫测试]
+    definition: >-
+      The scale evaluation that keeps the same eight answerable queries while growing the store through 100, 1K, 10K and 100K memories and inserts the expected memories before newer distractors, deliberately pushing cold evidence outside the legacy 500-row candidate window.
+      规模评测：在把存储从 100、1K、10K 增长到 100K 条记忆的同时保持同样的八个可回答问题，并把期望记忆插入在新近干扰项之前，刻意把冷证据推出既有的 500 行候选窗口。
+    owner: evals/scale/README.md
+    anchor: NMG scale and cache-breakthrough evaluation
+    status: canonical
+  - term: retrieval baseline set
+    aliases: [检索基线集合]
+    definition: >-
+      The named baselines compared in the matrix: `legacy` (the original bounded hot-window hybrid scorer), `fts5` (SQLite full-text retrieval), `hashing` (deterministic hashing vectors over the bounded window), `qwen3` (Qwen3 vectors from the configured OpenAI-compatible endpoint) and `hybrid` (FTS candidates plus the semantic/hot working set), with vector-build time recorded separately when Qwen is enabled.
+      矩阵中比较的具名基线：`legacy`（最初的有界热窗口混合打分器）、`fts5`（SQLite 全文本检索）、`hashing`（有界窗口上的确定性哈希向量）、`qwen3`（来自所配置 OpenAI 兼容端点的 Qwen3 向量）与 `hybrid`（FTS 候选加语义/热工作集）；启用 Qwen 时单独记录向量构建时间。
+    owner: evals/scale/README.md
+    anchor: NMG scale and cache-breakthrough evaluation
+    status: canonical
+  - term: synthetic workload scope
+    aliases: [合成负载范围]
+    definition: >-
+      The stated boundary that the figures are local synthetic measurements rather than general benchmark claims, and that the workload is a systems test answering one narrower question — whether a relevant memory remains reachable after the shallow working set has been exhausted — instead of replacing LongMemEval or BEAM.
+      明确边界：这些数字是本地合成测量而非通用 benchmark 主张；该负载是系统测试，只回答一个更窄的问题 —— 浅层工作集被耗尽之后相关记忆是否仍可达 —— 而不替代 LongMemEval 或 BEAM。
+    owner: evals/scale/README.md
+    anchor: NMG scale and cache-breakthrough evaluation
+    status: canonical
+references:
+  - QPP
+  - embedding profile
+  - evidence

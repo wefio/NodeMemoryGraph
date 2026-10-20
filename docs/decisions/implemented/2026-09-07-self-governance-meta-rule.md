@@ -1,6 +1,6 @@
 # Self-governance meta-rule: NMG's own rules are governed
 
-[中文](2026-09-07-self-governance-meta-rule.zh-CN.md)
+[中文](2026-09-07-self-governance-meta-rule.zh-CN.md) · [Terms used](2026-09-07-self-governance-meta-rule.terms.yaml)
 
 **Status:** implemented  
 **Approved:** unrecorded

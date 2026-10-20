@@ -1,5 +1,7 @@
 # OmniMemEval integration
 
+[English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
+
 OmniMemEval is NMG's preferred upstream harness for public user-memory
 benchmarks. It already runs LongMemEval, LoCoMo, BEAM, PersonaMem v2 and
 HaluMem through a shared lifecycle:
@@ -620,11 +622,12 @@ On Windows, the official response runner rewrites its growing JSON checkpoint
 with `os.replace` after every answer. Reading that file during a run can lock
 the target and make the writer fail with `WinError 5`; monitoring must use
 process/log state or a copied snapshot. This checkpoint rewrite also becomes a
-substantial part of wall-clock cost at 5,000 questions. The official prompt is
-kept unchanged for comparability. Non-official NMG runners should keep rubric,
-model options, and tool schemas in a stable prefix, place per-question payloads
-after it, and schedule matched arms adjacently to improve provider prefix-cache
-reuse.
+substantial part of wall-clock cost at 5,000 questions. For the official
+PersonaMem protocol results above, the prompt remains unchanged for
+comparability. The following is advice only for non-official NMG runners: keep
+rubric, model options, and tool schemas in a stable prefix, place per-question
+payloads after it, and schedule matched arms adjacently to improve provider
+prefix-cache reuse.
 
 ### LoCoMo
 

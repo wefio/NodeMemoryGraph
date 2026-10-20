@@ -1,6 +1,6 @@
 # Widen the current-value window by a named clock grace
 
-[中文](2026-09-18-clock-grace-window.zh-CN.md)
+[中文](2026-09-18-clock-grace-window.zh-CN.md) · [Terms used](2026-09-18-clock-grace-window.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

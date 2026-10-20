@@ -1,0 +1,30 @@
+version: 2
+terms:
+  - term: daemon idle timeout
+    aliases: [idle daemon expiry, daemon 空闲超时]
+    definition: >-
+      A daemon-side timer refreshed by HTTP requests that closes an idle daemon and releases its server lease; the current implementation defaults to 300,000 ms, while the in-flight request behavior at timeout remains unverified.
+      由 HTTP 请求刷新、在空闲时关闭 daemon 并释放 server lease 的 daemon 侧计时器；当前实现默认 300,000 ms，但超时时在途请求的行为尚未验证。
+    owner: docs/design/daemon-lifecycle-design.md
+    anchor: "R1: Daemon idle timeout"
+    status: canonical
+  - term: daemon reconnect after owner exit
+    aliases: [connection-level daemon reconnect, owner 退出后重连]
+    definition: >-
+      A client rediscovers or starts a daemon for the same database only after the prior owner exits; it may retry an allowlisted read once, but it does not replay an uncertain mutation.
+      仅在原 owner 已退出后，客户端才为同一数据库重新发现或启动 daemon；允许列表中的读取最多重试一次，但结果不确定的变更操作不会重放。
+    owner: docs/design/daemon-lifecycle-design.md
+    anchor: "R2: Relaunch after timeout — conclusion: yes"
+    status: canonical
+  - term: daemon count warning scope
+    aliases: [daemon population warning, daemon 数量警告范围]
+    definition: >-
+      A non-blocking `NMG_DAEMON_LIMIT` warning based on authenticated daemons found under the resolved NMG data root; it is not a system-wide count because the current scan does not add `process.cwd()`.
+      根据解析后的 NMG data root 中通过 authenticated hello 的 daemon 发出的非阻断 `NMG_DAEMON_LIMIT` 警告；当前扫描没有加入 `process.cwd()`，因此它不是系统级总数。
+    owner: docs/design/daemon-lifecycle-design.md
+    anchor: "R3: Daemon-count warning (default 32; warning only)"
+    status: canonical
+references:
+  - controlled reload handover
+  - Active Graph
+  - working state

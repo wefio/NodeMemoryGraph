@@ -1,5 +1,7 @@
 # NMG scale and cache-breakthrough evaluation
 
+[English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
+
 This evaluation keeps the same eight answerable queries while growing the store
 through 100, 1K, 10K, and 100K memories. The expected memories are inserted
 before newer distractors, so the test deliberately pushes cold evidence outside

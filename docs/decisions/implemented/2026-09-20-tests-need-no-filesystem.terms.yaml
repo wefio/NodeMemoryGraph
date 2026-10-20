@@ -1,0 +1,22 @@
+version: 2
+terms:
+  - term: data check
+    aliases: [DataCheck, in-memory candidate check, 数据检查]
+    definition: >-
+      A check expressed as a function over candidate files and their frozen input that returns a verdict in-process; it creates no workspace or process boundary.
+      以候选文件及其冻结输入为参数、在进程内返回裁决的检查；它不创建工作区，也没有独立进程边界。
+    owner: docs/decisions/implemented/2026-09-20-tests-need-no-filesystem.md
+    anchor: Decision
+    status: canonical
+  - term: command check
+    aliases: [CandidateCheck, workspace command check, 命令检查]
+    definition: >-
+      A fixed command executed against candidate files in an existing workspace prepared by the caller; the host writes the files but does not create, isolate, or clean the workspace.
+      在调用方已准备的现有工作区中对候选文件执行的固定命令；host 写入文件，但不创建、隔离或清理工作区。
+    owner: docs/decisions/implemented/2026-09-20-tests-need-no-filesystem.md
+    anchor: Decision
+    status: canonical
+references:
+  - work order
+  - evidence
+  - verdict

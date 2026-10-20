@@ -1,0 +1,21 @@
+version: 2
+terms:
+  - term: developer-surface liveness finding
+    aliases: [advisory unused-code diagnostic, 开发面活性诊断]
+    definition: >-
+      An ESLint unused-variable or useless-assignment report on tests, evaluation, scripts, or tooling surfaces; it is advisory there because a reported binding may be an assertion or preserved error context, while the same rule remains blocking on product source.
+      在测试、评测、脚本或工具面上的 ESLint 未使用变量／无效赋值诊断；这些位置的诊断为 advisory，因为被报告的绑定可能是断言或保留的错误上下文，而同一规则在产品源码中仍为阻塞错误。
+    owner: docs/decisions/implemented/2026-09-16-ci-static-coverage.md
+    anchor: Decision
+    status: canonical
+  - term: static surface coverage guard
+    aliases: [lint configuration surface guard, 静态扫描面覆盖保护]
+    definition: >-
+      A regression test that checks lint commands and directory-anchored ESLint file patterns refer to the same scanned surface and that each configured pattern still matches a scanned file.
+      回归测试，用于检查 lint 命令与以目录为锚的 ESLint file pattern 指向相同扫描面，并确认每个配置 pattern 仍匹配扫描文件。
+    owner: docs/decisions/implemented/2026-09-16-ci-static-coverage.md
+    anchor: Decision
+    status: canonical
+references:
+  - gate
+  - evidence

@@ -1,6 +1,6 @@
 # Fusion and speculation: offline first, then a budgeted pilot
 
-[中文](2026-09-18-fusion-and-speculation-pilot.zh-CN.md)
+[中文](2026-09-18-fusion-and-speculation-pilot.zh-CN.md) · [Terms used](2026-09-18-fusion-and-speculation-pilot.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit
@@ -12,7 +12,7 @@
 [the cost model record](../../experiments/execution/ooo-cost-model-2026-09-17.md),
 [the older speculation proposal](2026-09-11-ooo-speculation.md)
 
-> **Updated 2026-09-18: F4's offline half has landed, and the live half is blocked by a measured harness fact.**
+> **Initial status when this record was drafted (2026-09-18; later superseded): F4's offline half had landed, and the live half was blocked by a measured harness fact.**
 > The rules, the accounting and the driver policy are in
 > [fusion legality is a pair predicate](../implemented/2026-09-18-fusion-legality-and-accounting.md)
 > (12 product cases / 8 mutants, 12 cost-model cases / 4 mutants, 15 driver cases / 12 mutants).
@@ -26,17 +26,17 @@ Implementation evidence, and the reason the recorded blocker is gone: the live w
 
 ## Problem
 
-The design's arm programme has five arms and only three have run. A, B and C ran in
+At this decision's snapshot, the design's arm programme had five arms and only A, B and C had run in
 [the pilot](../../experiments/execution/ooo-arms-pilot-2026-09-18.md) (n = 8, one model, one held-out family,
-cost-directional only: A 8.6 s / 11.2 k tokens per run, B 21.5 s / 31.5 k, C 16.2 s / 29.9 k). **D
-(execution fusion) and E (budgeted speculation) have never run**, and the design orders them in that
-order: "E 在确定并发与融合得到证据后独立评估".
+cost-directional only: A 8.6 s / 11.2 k tokens per run, B 21.5 s / 31.5 k, C 16.2 s / 29.9 k). D
+(execution fusion) and E (budgeted speculation) had not yet run; the later live results are summarized
+above. The design ordered D before E: "E 在确定并发与融合得到证据后独立评估".
 
 What each arm needs, measured rather than assumed:
 
 - **D** is "the same Agent session runs several logical units in a row, each still taking its own
   ticket, delivering its own artifact and crossing the host boundary" - execution fusion, explicitly
-  _not_ transaction fusion. The mechanism does not exist: `piWorker` in
+  _not_ transaction fusion. At this decision's snapshot, the mechanism did not exist: `piWorker` in
   `evals/ooo-execution/plan-driver.ts` calls `executePiPatch(frozen, provider, model)` once per unit, so
   every unit gets a fresh session. The adapter that _could_ continue a session exists in the research
   tree (`live-continuation.ts` ran a real continuation), and the cost model already carries the
@@ -48,7 +48,7 @@ version, expected}]`, the host re-checks every assumption against authoritative 
   the real path re-executes under a new ticket. The first experiment is bounded by the design: **one**
   pending fact, **one** candidate, no speculative successors, no irreversible external operation, and
   cost/waits capped. The seam for `assumptions` exists (the advisers port refuses an unmodelled `fuse`
-  or `prepare` action), but no candidate is ever prepared ahead of a fact.
+  or `prepare` action), but at that snapshot no candidate was prepared ahead of a fact.
 
 Two facts also bound what a paid pilot could show. First, the cost model has **no quality term by
 construction**, and the pilot found no quality difference to measure on the existing families (every arm
@@ -84,7 +84,7 @@ successor, and a refusal to start when the assumption could not complete a _data
 touches a permission precondition (the design's gate table). Offline proof of the lifecycle, not of the
 payoff.
 
-**F6 (paid, needs approval): a small two-arm pilot.**
+**F6 (planned paid pilot; approval was required at the time).**
 
 One family, four arms, three repetitions each: `{unfused, fused}` for D and `{no speculation,
 speculation on one fact}` for E, the same model F3 used (`deepseek/deepseek-v4-flash`, for comparability), envelope limits fixed per arm as in F3. Reported
@@ -103,7 +103,7 @@ and the result is "the mechanism is not ready".
 ## Alternatives considered
 
 - **Go straight to the paid arms.** Rejected: the design orders an advisory offline model before any paid
-  call, and today there is no fusion mechanism, no candidate-ahead-of-a-fact lifecycle and no accounting
+  call, and at the decision snapshot there was no fusion mechanism, no candidate-ahead-of-a-fact lifecycle and no accounting
   line to attribute the spend to.
 - **Stay offline and never measure the payoff.** Rejected: the arms exist to weigh a cost against a
   quality effect, and the design's own sentence asks for latency, extra cost _and_ quality together.
@@ -127,9 +127,9 @@ With the mechanism in place the paid arms ran, so the budgeted pilot this record
 3. F5's lifecycle case: a false assumption discards exactly the candidate, accounts its cost separately,
    and leaves the real path to re-execute under a new ticket; a candidate on a data input or a
    permission precondition is refused by name.
-4. F6 runs only after the operator's ceiling is recorded here (1 000 k tokens, approved 2026-09-18),
-   reports latency, extra cost and quality separately, and states which of the two refusals above fired
-   if the family or the mechanism was not ready.
+4. F6 ran after the operator's ceiling was recorded here (1 000 k tokens, approved 2026-09-18); its
+   paid results are retained in the [arm archive](../../experiments/execution/archive/ooo-arms-2026-09-19/README.md).
+   E showed no realised gain, so this record makes no gain claim.
 5. The ledger gains the arms as rows (F4, F5, F6) with the evidence each one has, and the hidden-feature
    registry gains the new research entry points in the same change.
 

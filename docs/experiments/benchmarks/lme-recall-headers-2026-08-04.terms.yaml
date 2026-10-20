@@ -1,0 +1,19 @@
+version: 2
+terms:
+  - term: format-only recall-header change
+    aliases: [header refinement, 仅格式的 recall-header 变更]
+    definition: >-
+      A historical recall-header format refinement for which the report recorded unchanged bridge retrieval metrics; because the bridge bypassed `formatSearchHeaders`, that comparison did not validate the changed Pi renderer.
+      历史 recall-header 格式精化；报告记录了不变的 bridge 检索指标，但 bridge 绕过了 `formatSearchHeaders`，因此该对比没有验证改动后的 Pi renderer。
+    owner: docs/experiments/benchmarks/lme-recall-headers-2026-08-04.md
+    anchor: "Results vs baseline (n=498 judged; baseline n=500)"
+    status: canonical
+  - term: version-keyed store pruning
+    aliases: [--prune-stores, version-keyed store cleanup, 按 version 清理 store]
+    definition: >-
+      Cleanup of version-keyed evaluation stores in the historical full-500 workflow: the report describes `sha256(userId)` keys incorporating the version label and roughly 500 new ~12 MB stores per such run, not a universal cost for every NMG caller.
+      历史完整 500 题流程中按 version 清理评测 store；报告描述的 `sha256(userId)` key 包含 version label，每次该类 run 约产生 500 个约 12 MB 的新 store，不是所有 NMG 调用方的通用成本。
+    owner: docs/experiments/benchmarks/lme-recall-headers-2026-08-04.md
+    anchor: Process hardening landed on the way
+    status: canonical
+references: []

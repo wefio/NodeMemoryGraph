@@ -1,6 +1,6 @@
 # External Repository Control Plane
 
-[中文](2026-08-29-repository-control-plane.zh-CN.md)
+[中文](2026-08-29-repository-control-plane.zh-CN.md) · [Terms used](2026-08-29-repository-control-plane.terms.yaml)
 
 **Status:** implemented  
 **Approved:** unrecorded
@@ -104,7 +104,7 @@ Delivery proceeds in six independently verifiable slices:
 
 The normative data contracts, lifecycle, security defaults, phased plan, and
 full completion criteria are owned by
-[ci-cd-and-quality.md §7](../../design/ci-cd-and-quality.md#7-repository-control-plane).
+[ci-cd-and-quality.md Repository Control Plane](../../design/ci-cd-and-quality/repository-control-plane.md#repository-control-plane-1).
 
 ### Fixed trusted baseline
 
@@ -115,7 +115,7 @@ snapshot. Rule/dependency changes require a separately reviewed new installation
 never candidate self-promotion. This extends the local workflow; it does not
 silently strengthen ordinary reconciliation or flip the lightweight default.
 Commands, supported inputs and acceptance boundaries are owned by
-[§7.13](../../design/ci-cd-and-quality.md#713-fixed-trusted-baseline-verification).
+[Fixed trusted baseline verification](../../design/ci-cd-and-quality/repository-control-plane/trusted-baseline-verification.md#fixed-trusted-baseline-verification).
 
 The choice borrows the separation of evidence production and small acceptance
 rules, not a claim of cryptographic succinctness. Its adversarial contract checks

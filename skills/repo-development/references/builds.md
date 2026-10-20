@@ -1,5 +1,7 @@
 # Builds and generated artifacts
 
+[简体中文](builds.zh-CN.md) · [Terms used](builds.terms.yaml)
+
 Configure the formatting hook once per clone: `git config core.hooksPath .githooks`.
 The pre-commit hook runs Prettier on staged `.ts` files.
 

@@ -1,0 +1,19 @@
+version: 2
+terms:
+  - term: score-scale mismatch
+    aliases: [path-dependent score scale, 分数尺度不一致]
+    definition: >-
+      The same result field has different numeric scales on different retrieval paths, so one normalization cannot be assumed to work for all producers.
+      同一结果字段在不同检索路径上具有不同数值尺度，因此不能假定一种归一化适用于所有生产路径。
+    owner: docs/experiments/qpp/engineering-notes.md
+    anchor: "Failure 1: clamping saturated the score and erased gradation"
+    status: canonical
+  - term: shadow-first audit
+    aliases: [shadow-first measurement, 先 shadow 后审计]
+    definition: >-
+      Recording a candidate decision without changing product behavior so its signals can be inspected before activation.
+      记录候选决策但不改变产品行为，以便在激活前检查其信号。
+    owner: docs/experiments/qpp/engineering-notes.md
+    anchor: Method lessons
+    status: canonical
+references: [QPP, NQC dispersion]

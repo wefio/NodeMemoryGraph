@@ -1,138 +1,186 @@
-# 统一 state 入口与状态空间
+# State spaces and one state entry
+
+[中文](state-spaces.zh-CN.md) · [Terms used](state-spaces.terms.yaml)
 
 **Status:** current
-**Related:** [接口决定](../decisions/implemented/2026-10-12-state-space-entry.zh-CN.md)
+**Updated:** 2026-10-15
+**Related:** [Interface decision](../decisions/implemented/2026-10-12-state-space-entry.md)
 
-## 范围
+## Scope
 
-AG 和 board 通过同一个 state 入口读写，但仍是不同状态空间。统一入口复用
-原 owner、类型化视图与输出准备，不增加状态库、`StateView`、副本缓存或脚本执行器。
-AG 变更针对当前 `working_state`，不是任意覆盖整个 AG。
+AG and board share one read/write state entry, but remain distinct state spaces.
+The entry reuses domain owners, typed views and output preparation. It adds no
+state database, `StateView`, copy cache or script executor. AG mutation replaces
+current `working_state`, not the whole AG.
 
-## 接口与操作
+## Interface and operations
 
 ```text
 nmg state <read|write> <ag|board> [operation] [named options]
 nmg_state(action="read"|"write", space="ag"|"board", operation?, ...)
 ```
 
-`read` 未指定操作时默认为 `read`；`write` 必须指定空间内操作。操作集合与
-参数校验由 [共享 state 接线](../../src/integration/state.ts) 和
-[CLI 命令声明](../../src/cli/commands.ts)维护。未知空间、方向或操作拒绝，不改投另一空间。
-AG 拒绝额外的黑板/寻址字段；宿主不能静默丢弃这些字段后执行写入。
+Read defaults to operation `read`; write requires a space-specific operation.
+[Shared state wiring](../../src/integration/state.ts) and
+[CLI declarations](../../src/cli/commands.ts) own operation sets and validation.
+Unknown space, direction or operation fails; it never redirects to another space.
+AG rejects extra board/addressing fields. Hosts must not silently discard those
+fields and execute a write.
+
+`SESSION`, `TASK` and `AGENT` are substitutions, not literal identities. AG calls
+require an already running compatible resident daemon, as specified below.
+Board writes explicitly publish content; do not expose private state or secrets.
+These command shapes do not report a production execution.
 
 ```text
-nmg state write ag enable --session-id SESSION --reason "维护当前状态"
-nmg state write ag replace --session-id SESSION --text "完整当前状态"
+nmg state write ag enable --session-id SESSION --reason "Maintain current state"
+nmg state write ag replace --session-id SESSION --text "Complete current state"
 nmg state read ag --session-id SESSION
 nmg state write ag disable --session-id SESSION
-nmg state write board put --task-id TASK --agent AGENT --content "协作条目"
+nmg state write board put --task-id TASK --agent AGENT --content "Coordination entry"
 nmg state read board --task-id TASK --agent AGENT
 ```
 
-AG 支持 `read/status` 和 `enable/disable/replace/clear`。board 保留领域读取、发现、
-发布、订阅、租约、交付、独立裁定和关闭操作，不退化为通用对象的 `set`。
-省略 board 的 `taskId` 使用共享 world 频道 `default`。
+AG supports `read/status` and `enable/disable/replace/clear`. Board keeps domain
+reads, discovery, publication, subscription, leases, delivery, independent verdicts
+and closure; it is not generic object `set`. Omitting board `taskId` selects shared
+world channel `default`.
 
-RPC `state` 是增量能力 `state-spaces`。返回保留 `action/space/operation`、原 owner
-的 `result`，以及适用时的 `PreparedInformationOutput`；不是另一套状态视图。
-不支持该能力的 daemon 明确拒绝，不静默回退成别的 RPC。
+The additive `state` RPC advertises capability `state-spaces`. Results preserve
+`action/space/operation`, the domain owner's `result` and, when applicable,
+`PreparedInformationOutput`; they do not define another state-view protocol.
+An incompatible daemon rejects the capability rather than silently using a
+different RPC.
 
-## 不同状态空间
+## Distinct state spaces
 
-| 空间    | 寻址与作用域                       | 状态和生命周期                                        | 写入 owner |
-| ------- | ---------------------------------- | ----------------------------------------------------- | ---------- |
-| `ag`    | 私有 session/frame；宿主绑定上下文 | 临时工作状态，受 AG 容量和 frame/session 生命周期约束 | AG runtime |
-| `board` | 共享任务频道/条目；保留参与者归属  | TTL、租约和协作状态机，不是共享 AG 或语义记忆         | 黑板 owner |
+| Space | Address and scope | State and lifecycle | Mutation owner |
+| --- | --- | --- | --- |
+| `ag` | Private session/frame; host-bound context | Temporary state constrained by AG capacity and frame/session lifetime | AG runtime |
+| `board` | Shared task channel/entry with participant attribution | TTL, leases and collaboration state machines; not shared AG or semantic memory | Board owner |
 
-统一入口不合并作用域、存储和权威。私有 AG 内容进入黑板必须是显式 board 写入，
-不因读取、租约启用或地址转换自动发布。跨空间步骤有独立结果和失败边界，不承诺
-跨 owner 原子事务，也不无条件重放非幂等的黑板操作。
+One entry does not merge scope, storage or authority. Publishing private AG
+content requires an explicit board write; reads, enablement and address conversion
+do not publish it. Cross-space steps have separate results/failure boundaries:
+there is no cross-owner atomic transaction or unconditional replay of non-idempotent
+board operations.
 
-领域条件由 [AG 写入契约](../decisions/implemented/2026-10-08-ag-working-state.md)和
-[黑板治理](../decisions/implemented/2026-09-06-board-governance-addressing.zh-CN.md)拥有。
-state 分派调用原 owner；它不授予越过拒绝条件的权限。
+[AG mutation](../decisions/implemented/2026-10-08-ag-working-state.md) and
+[board governance](../decisions/implemented/2026-09-06-board-governance-addressing.md)
+own domain preconditions. State dispatch calls those owners; it cannot bypass
+rejections.
 
-## AG writer 生命周期与 fencing
+## AG writer lifecycle and fencing
 
-`state write ag enable` 显式获取有原因、有 TTL 的 session writer lease，复用现有
-activation authority 和 AG binding owner，不建立第二授权库。`replace` 完整替换一个
-正文；`clear` 有意丢弃正文；`disable` 或到期撤销写权，不删除最终状态。
+`state write ag enable` explicitly obtains a reasoned, TTL-bound session writer
+lease, reusing existing activation authority and the AG binding owner, not a second
+authorization store. `replace` replaces one complete body; `clear` deliberately
+discards it; `disable` or expiry removes permission without deleting final text.
 
-宿主提供 session/requester，不把任意 frame、权限或 binding 暴露为模型参数。
-客户端在首次传输前捕获启用 lease 的 session/AG/frame/generation binding，重试保持
-原 fence。raw RPC 调用者须提供该捕获元数据；stale/foreign/missing binding 拒绝。
-绑定是 fencing，不是认证。拒绝、秘密检测与容量检查保留旧值，不截断或驱逐成成功。
+The host supplies session/requester. Arbitrary frame, permission or binding is
+not a model parameter. Before first transport the client captures the enabled
+lease's session/AG/frame/generation binding and retains it on retry. Raw RPC
+callers must provide that captured metadata; stale, foreign or missing binding
+fails. Binding fences writes; it does not authenticate. Rejection, secret and
+capacity checks preserve old content, without truncating or evicting it into success.
 
-AG CLI 操作要求已运行的兼容 resident daemon，不能用一次性 CLI 模拟私有 session。
-DSH state 传输要求 resident owner；失败不接管 daemon 生命周期、不改走一次性 CLI，
-也不自动重放领域拒绝。缺失 AG 从仓库或明确共享任务证据重建，不从展示缓存恢复。
+AG CLI calls require an already running compatible resident daemon; a one-shot
+CLI cannot simulate private session ownership. DSH state transport likewise needs
+the resident owner. Failure neither takes over daemon lifecycle, falls back to a
+one-shot CLI nor automatically replays a domain rejection. Rebuild missing AG
+from the repository or explicit shared-task evidence, not a display cache.
 
-## 现有视图与输入边界
+## Existing views and input boundary
 
 ```text
-read → owner 准入数据/现有领域投影 → InformationView → prepareInformationOutput
-write → 原 owner 的领域操作 → 短确认或同一视图体系准备的结果
+read -> owner-admitted data / existing domain projection -> InformationView -> prepareInformationOutput
+write -> domain operation at original owner -> short acknowledgement or prepared result in the same view system
 ```
 
-[`InformationView`](../../src/core/information-view.ts)保留来源身份；AG/board 仍是写入空间，
-召回 memory 与独立 workspace 是呈现来源，不因此成为新状态空间或 AG 权威。
-[共享输出契约](../decisions/implemented/2026-10-07-shared-information-output.md)继续拥有
-必要标签、字符预算和整项遗漏；接入不解析旧渲染字符串，不伪造写入后的状态正文。
-AG 读取使用已有 snapshot 投影；`status` 读取 writer 元数据，不搜索历史。
+[`InformationView`](../../src/core/information-view.ts) retains source identities.
+AG/board are write spaces; recalled memory and independent workspaces are display
+sources, not additional state spaces or AG authority.
+[Shared output](../decisions/implemented/2026-10-07-shared-information-output.md)
+owns required labels, character budgets and whole-item omission. Dispatch neither
+parses old rendered strings nor invents post-write state bodies. AG read uses its
+existing snapshot projection; `status` reads writer metadata, not history search.
 
-Pi 的 widget 与 `/nmg state` 读取原 owner 的 snapshot，`nmg_state` AG 写操作刷新
-视图；`/nmg state on|off` 只控制预览显示。状态仅在每用户回合的持久化
-`nmg-context` 消息内携带一次，不注册逐次推理注入或成功写入去重。
-过时/外来 snapshot 不覆盖当前展示。
+Pi's widget and `/nmg state` read the owner's snapshot; `nmg_state` AG writes refresh
+the view. `/nmg state on|off` only toggles preview. State is carried once in the
+persisted per-user-turn `nmg-context` message, not per inference or by successful-write
+deduplication. Stale/foreign snapshots do not overwrite current display.
 
-呈现与实际模型输入的边界由既有输出和
-[状态携带契约](../decisions/implemented/2026-10-08-ag-working-state-input.md)负责。
-展示、短确认和携带不是披露 ledger 写入、事实支持、协作验收或 provider-send receipt。
-Pi 最终 provider 输入确认仍 unsupported。
+Output and [state carriage](../decisions/implemented/2026-10-08-ag-working-state-input.md)
+own the boundary to actual model input. Display, short acknowledgements and
+carriage are not disclosure-ledger commits, factual support, collaboration
+acceptance or provider-send receipts. Pi final provider-input confirmation remains
+unsupported.
 
-## 统一上下文信息项
+## Unified context information items
 
-新增 state 内容复用同一个 `InformationView` 协议；AG、board 是来源域，不是另一套
-视图类型或状态库。`purpose` 是呈现职责：当前状态、任务材料、推理暂存、行动提示、
-运行诊断。来源身份与用途是不同维度，Task 组合不是此协议的前置条件。
+State content reuses the same `InformationView` protocol. AG/board are source
+domains, not new view types or stores. `purpose` is a presentation role: current
+state, task material, reasoning scratch, action guidance or runtime diagnostics.
+Source identity and purpose are distinct dimensions; task composition is not a
+prerequisite for this protocol.
 
-Pi 的 `nmg-context` 使用信息项列表，不解析旧标签或渲染行。一个候选、一条工具观察、
-一条黑板投影、一个提醒分别选取；完整 `working_state` 和自洽 workspace checkpoint
-保持整项。召回候选保留 preview 声明、检索降级条件与引用需要的 activeGraphId。
-控制提醒没有事实权威；workspace 保留独立来源与暂存声明，不假装是 AG 数据。
+Pi's `nmg-context` consumes information-item lists, not parsed labels/rendered
+lines. A candidate, tool observation, board projection or reminder is selected
+individually; a complete `working_state` and coherent workspace checkpoint stay
+whole. Recall candidates keep preview labels, retrieval-degradation conditions
+and the `activeGraphId` needed for references. Control guidance has no fact
+authority. Workspace content keeps its independent source and scratch labels;
+it does not pretend to be AG data.
 
-原 owner 负责准入、作用域和生命周期。自动上下文只投影本 session/frame 的数据；
-工具观察和黑板读取投影只自动延续到下一用户回合。无回合元数据的历史投影不自动
-补成当前材料，显式读取仍可查看。历史黑板读取不自动复制到 AG；普通读取仅将 open
-条目暂存，不改变原结果、delivery 记账或黑板状态机。语义相关性仍由 Agent 判断，
-需持续保留的进展和阻塞由 Agent 写入工作状态，不靠关键词猜测任务或错误已恢复。
+The original owner admits data and owns scope/lifetime. Automatic context uses
+only this session/frame. Tool observations and board-read projections automatically
+continue only into the next user turn. Historical projections without turn
+metadata are not silently promoted to current material; explicit reads may still
+show them. Historical board reads do not automatically copy into AG. Ordinary
+reads stage only open entries without changing the original result, delivery
+bookkeeping or board state machine. The Agent judges semantic relevance and
+writes lasting progress/blockers into maintained state; keyword matching does not
+infer tasks or error recovery.
 
-上下文准备复用 `prepareInformationOutput`：职责分组、正文、必要标签、分隔符、根标签
-和遗漏通知共享 16,000 UTF-16 单元总预算。优先容纳完整当前状态和 owner 有界的压缩
-恢复 checkpoint，再容纳当前诊断、任务材料与行动提示。普通推理项不挤掉已消费的恢复
-checkpoint；同类按稳定顺序选取。超限信息项整项遗漏，不改写或截断；空组不输出。
-遗漏说明优先从末尾可选项腾空间，不移除完整状态、恢复 checkpoint 或诊断；小预算
-被保护项占满时，遗漏数仍通过元数据保留。
-结构化 `views` 是输入快照，`included` 才是准备后纳入的来源，`omitted` 保留遗漏信息。
-普通工具沿用平铺呈现和原预算，协议与源身份不变。准备结果不确认 provider 发送，
-不提交 disclosure ledger；既有会话历史不因新选取规则删除。
+Context preparation reuses `prepareInformationOutput`. Purpose groups, bodies,
+required labels, separators, root labels and omission notice share one 16,000
+UTF-16-code-unit output budget. Complete current state and the owner's bounded
+compaction-recovery checkpoint come first, then current diagnostics, task material
+and action guidance. Ordinary reasoning items cannot displace an admitted
+recovery checkpoint; equal-priority items retain stable order. Oversized items
+are omitted whole, not rewritten/truncated; empty groups emit nothing.
+Omission notices first reclaim trailing optional items, not complete state,
+recovery checkpoints or diagnostics. If protected items fill a small budget,
+omission counts still survive as metadata.
 
-## 模型入口与兼容
+Structured `views` are input snapshots; `included` identifies admitted output
+sources and `omitted` retains omissions. Ordinary tools keep flat presentation
+and original budgets; protocol/source identity does not change. Preparation does
+not confirm provider send or commit a disclosure ledger. New selection rules do
+not delete existing session history. This output budget is not a complete
+multidimensional AG-construction budget.
 
-Pi、MCP、DSH 注册 `nmg_state`，不注册独立 `nmg_board`；模型 Lab schema/执行入口
-排除日常 `working_state`，其他实验能力保留。`NMG_ENABLE_COORDINATION` 的 false-like
-值拒绝 board 操作并关闭 adapter wake polling，不隐藏或关闭 AG state。
-唤醒和 delivery bookkeeping 继续走黑板 owner，不成为另一个模型操作入口。
+## Model entry and compatibility
 
-旧 `taskBoard` RPC、`nmg board` CLI 和 Lab working-state RPC/CLI 保留兼容与管理用途。
-兼容入口不放宽领域权限；normal state 与旧路径访问同一 owner，不复制业务逻辑。
-接口不绑定 Pi/codemode，不引入管道、任意代码执行或隐式模型调用。
+Pi, MCP and DSH register `nmg_state`, not a separate `nmg_board`. Model-facing Lab
+schema/execution excludes daily `working_state`; other experimental capabilities
+remain. False-like `NMG_ENABLE_COORDINATION` rejects board operations and disables
+adapter wake polling, without hiding/disabling AG state. Wake and delivery
+bookkeeping stay with the board owner, not another model operation entry.
 
-## 验证边界
+Legacy `taskBoard` RPC, `nmg board` CLI and Lab working-state RPC/CLI remain for
+compatibility/administration. They do not relax domain permissions; normal state
+and legacy paths call the same owner instead of duplicating behavior. The entry
+is not tied to Pi/codemode and introduces no pipeline, arbitrary code execution
+or implicit model call.
 
-契约测试覆盖空间隔离、方向/字段拒绝、binding/容量拒绝、原有视图来源与短确认、
-CLI 接线及模型注册。Pi/MCP 隔离协议整合与 DSH 真实 host contribution 在模拟 Cordis
-服务上的隔离 HTTP 测试，分别约束各自接线；后者不证明真实 DSH GUI 已启动。
-完整验证、部署和用户可见性分别归因，不以文档检查代替运行时证据。
-工具名减少不证明 token、模型连续性或自然遵循收益。
+## Verification boundary
+
+Contract tests cover space isolation, direction/field rejection, binding/capacity
+rejection, existing view sources, short acknowledgements, CLI wiring and model
+registration. Isolated Pi/MCP protocol integration and DSH real host-contribution
+HTTP tests with simulated Cordis services constrain their respective wiring;
+the latter does not prove a production DSH GUI started. Full verification,
+deployment and user-visible behavior need their own attribution; document checks
+do not replace runtime evidence. Fewer tool names do not prove token savings,
+model continuity or natural compliance.

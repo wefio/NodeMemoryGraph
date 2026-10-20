@@ -1,124 +1,46 @@
-# 记忆循环设计：未闭合结构与记忆使用
+# Memory loop: open structures and reuse
 
-> 定位：这是记忆循环（Retain → Retrieve → Reuse → Revise）本身的**使用设计**，不依赖任何外在隐喻。它回答的问题是：记忆系统在问题求解循环中如何被写入、存续、取用、修正，并再次写回。
+[English](memory-loop-design.md) | [简体中文](memory-loop-design.zh-CN.md) · [Terms](memory-loop-design.terms.yaml)
 
-## 核心命题
+Source-audited design summary. This describes the current open-memory lifecycle where implementation exists; it does not claim that every proposed memory-loop effect has been measured in product use.
 
-> **记忆循环必须能保留「未闭合」的结构，并让它在使用中被再次触达。**
+The loop is **Retain → Retrieve → Reuse → Revise**. Its central design concern is preserving unresolved structures so later work can reach and reconsider them. “Open” describes unresolved state, not low quality or low confidence; a resolved record is not thereby proven true.
 
-一条记忆在循环中可能处于两种状态之一：
+## Open and resolved
 
-- **closed（已闭合）**：已成形的结论——事实、已确认的约束、已解决的矛盾、已 supersede 的旧值。
-- **open（未闭合）**：尚未解决的结构——矛盾、未答的问题、失败路径、暂定抽象、被反驳后重新打开的旧结论。
+The API field is `resolution`, with exactly `open`, `resolved`, and `reopened`. “Closed” is explanatory prose for the `resolved` value, not a separate enum. `resolution` is distinct from `MemoryRecord.status` (`active`, `disputed`, `inactive`, `superseded`, `deleted`) and from storage state (`indexed`, `dormant`, `quarantine`, `archived`).
 
-`open` 是一等状态，与 `closed` 平级，不是次等品。它的语义是「尚未解决」，而不是「不可靠」。
+An open or reopened record needs at least one `relatedMemoryId` pointing to an existing record in the same store. The store supplies `openedAt` when needed and records resolution transitions with their prior/next values, time, related IDs, and optional reason. Examples of structures a caller might keep open include unresolved contradictions, unanswered questions, failed approaches, provisional abstractions, and conclusions reopened by new evidence; these are authoring examples, not automatically inferred categories.
 
-## 记忆循环总览
+## Retain
 
-```
-                 ┌─────────────────────────────────────────────┐
-                 │                                             │
-                 ▼                                             │
-   Retain ──► open/closed 记忆 ──► Retention（存续判据）        │
-                 │                                             │
-                 ▼                                             │
-   Retrieve（随关联实体浮现）──► Reuse（作为普通上下文使用）     │
-                 │                                             │
-                 ▼                                             │
-   Revise（确认→闭合 / 反驳→重开）─────────────────────────────┘
-```
+Open records use the ordinary memory write path, but require an existing related-memory anchor. LTG retention selection includes only `resolution='resolved'`; while a record is unresolved, the storage-state API rejects transitions away from `indexed` to dormant, archived, or quarantine storage. STG expiration likewise selects only resolved records, so an `open` or `reopened` record is not expired by its `expiresAt` while unresolved.
 
-循环由使用驱动，不由系统驱动：系统只保证「存续判据正确」与「可达性正确」，不发起注意力。
+This is an eligibility boundary, not a claim that open records are immortal: deletion, explicit state changes, session/store ownership, or other lifecycle operations remain separate. Resolve the structure before placing it in LTG archival or quarantine tiers.
 
-## 一、Retain（写入）
+## Retrieve
 
-- **写入门槛一致**：`open` 与 `closed` 记忆以同样的低成本写入。是否需要长期保留、是否值得提升，由后续使用决定，不由写入时的单次判断定夺。
-- **`open` 记忆必须携带三个字段**：
-  - `openedAt`：结构何时被打开（跨时间存活的基础）；
-  - `relatedMemoryIds`：它关联的实体——这是它将来被再次触达的路径；
-  - `resolution`：当前状态（open / resolved / reopened）。
-- **`open` 记忆的来源**：
-  - 矛盾：两个结论互相冲突且尚未裁决；
-  - 未答问题：检索过、证据不足、结论悬置；
-  - 失败路径：尝试过但失败，及其失败原因；
-  - 暂定抽象：低置信、仍不稳定的归纳；
-  - 重开的旧结论：曾被闭合、后被新证据反驳（见 Revise）。
+In the context retrieval path, NMG uses directly retrieved memory IDs as anchors and attaches at most two indexed `open`/`reopened` records whose `relatedMemoryIds` include one of those anchors. Attachment candidates must be active or disputed and must satisfy the source-actor/session visibility rules. They are ordered by importance and then `openedAt`, placed near the end of the normal result window, and remain subject to the ordinary evidence budget. They do not start an independent search cascade.
 
-## 二、Retention（存续）——机制地基
+The information surface labels an open or reopened record `[open]`. The system makes a related unresolved item reachable; it does not decide that the item is important to the answer or that it should be resolved now.
 
-记忆的存续判据必须与它的使用方式一致：
+## Reuse and revise
 
-> **一条记忆活着，是因为它还没被解决，而不是因为它最近被用过。**
+Reused open records are presented as context; the Agent or user decides whether to investigate or leave them unresolved. The explicit `resolve` and `reopen` operations change `resolution`; each non-idempotent transition appends an auditable resolution event. A non-resolved record must retain at least one existing related-memory anchor. Reopening a record outside indexed storage restores it to `indexed` storage before it can re-enter the retrieval neighborhood.
 
-- **`open` 记忆豁免基于热度（recency/frequency）的回收**。未闭合的结构可能在很长一段时间内不被触碰——它存续的理由是「未解决」，不是「被访问过」。按 idle 时长、访问次数、重要性去回收它，等于把最有潜在价值的结构当作死记忆清掉。
-- **`closed` 记忆按常规策略存续**：随使用被强化，随闲置/过期进入回收。
-- **`resolve`（模型显式闭合）后，该记忆才转入常规回收轨道**——闭合是回收资格的开始，不是结束。
+A resolved record becomes eligible for ordinary retention checks, which still apply their own residence, type, importance, access, evidence-role, and age conditions. Supersession is a separate same-scope value-replacement relation; see [supersession design](supersession-design.md). Feedback and claim evidence have separate contracts in the [feedback-loop design](feedback-loop-design.md).
 
-这一条是整个循环的机制地基：没有它，后续所有环节都无从谈起，因为开放结构在等待下一次触达之前就已经死了。
+## Implementation status from source review
 
-## 三、Retrieve（检索）
+The repository implements the following parts of this lifecycle:
 
-检索保证**可达性**，不做**显著性判断**：
+1. `remember()` and `setMemoryResolution()` validate related-memory IDs and require an anchor for `open`/`reopened` resolution.
+2. LTG retention and STG expiry select only resolved records; archival and quarantine reject unresolved records.
+3. Context retrieval attaches at most two related open structures within the regular result window and evidence budget.
+4. `resolve`/`reopen` are exposed through the CLI, daemon, and Pi memory surface; transition events retain the old/new resolution and supplied reason.
 
-- 命中一个 `closed` 实体时，它关联的 `open` 记忆以 `[open]` 标注、低占用地随附浮现。
-- 浮现有预算上限：开放结构进入上下文只作为「旧账仍在」的存在性提示，不主导检索结果、不占用主要预算。
-- 系统不决定「什么值得想」，只保证「当前正在触碰的东西附近，未闭合的旧账还够得着」。
+These are source observations, not a claim that tests were executed in this documentation pass or that the loop improves answer quality. See the [theoretical analogies](memory-loop-design/theoretical-analogies.md) for the design's cited conceptual comparisons and their evidence limits.
 
-## 四、Reuse（复用）
+## Source references
 
-`open` 与 `closed` 记忆被复用时都是普通上下文，没有特殊语义。注意到它们、决定是否处理、如何修正——都是使用方（模型）的事。系统在 Reuse 环节不做任何额外动作。
-
-## 五、Revise（闭合与重开）
-
-循环的闭合机制是双向的：
-
-- **确认 → 闭合**：新证据确认了 open 结构 → 转入 `closed`（supersede / merge / update，走既有修正机制），`resolution` 标记为 `resolved`。
-- **反驳 → 重开**：新证据反驳了一个已闭合的结论 → 从 `closed` 重开为 `open`。重开时保留原历史——旧值、闭合过程、闭合理由都可追溯，修正路径不丢失。
-
-闭合与重开都必须保留历史：即使后续理解被修正，原始思考路径仍可追溯。
-
-## 六、与既有概念的关系（这个东西实际上就是…）
-
-本设计的每个环节都不是新发明，而是既有概念/实践的工程化组合。对照如下：
-
-| 设计要素 | 对应的既有概念/实践 |
-|---|---|
-| 记忆循环 4R（Retrieve → Reuse → Revise → Retain），增量学习 | **CBR 案例推理**（Aamodt & Plaza 1994）：新问题复用相似旧案例；每个新经验被保留，供未来问题使用，即增量、持续学习 |
-| 保留失败/近似失败案例 | **CBR 的 near-miss 案例**（Aamodt & Plaza）——正是「open 案例」 |
-| 失败路径存为可检索的例外片段，再次失败时被唤起 | **Schank 动态记忆的失败驱动提醒**（Dynamic Memory, 1982；Riesbeck 1981）：规则失败时，失败及其修正存为附着在该规则上的例外片段；后续失败触发这些片段的检索 |
-| 未闭合结构比已闭合的更易存活 | **Zeigarnik 效应**（1927）：未完成/被中断的任务比已完成的任务记忆更好；**Ovsiankina 效应**（1930s）对应重启未完成任务的倾向。注：元分析显示该效应复现困难（2025），故本文把它当作显式设计策略，而非假设它符合人类记忆规律 |
-| open 矛盾状态 + 被反驳时修订信念 | **真值维护系统 TMS/ATMS**（Doyle 1979；de Kleer 1986）：记录程序信念的理由，当发现与假设矛盾时修订信念；ATMS 可同时维护多个语境。TMS 也承担「全部推理的缓存」角色 |
-| 新证据反驳 → 撤回/重开结论 | **非单调/可废止推理**（Reiter 1980；Stanford SEP）：结论是暂定的，新信息加入知识库后可被撤回；**AGM 信念修正**（Alchourrón, Gärdenfors & Makinson 1985）：收缩（移除信念）+ 修订（引入新信念），历史保留对应其中关于恢复律（recovery）的讨论 |
-| 使用中被修改（closed → 被触碰/反驳 → reopen） | **记忆再巩固 reconsolidation + 预测误差**（神经科学，Nader et al. 2000；综述 2014/2015）：记忆不是静态印迹；被检索的记忆变得可塑，预测误差是「从检索转入再巩固、再学习」的开关。NMG 的关系强度学习（Rescorla-Wagner 预测误差更新）正是这一机制 |
-| 随邻居浮现（关联可达） | **激活扩散 spreading activation**（Quillian 1967；Collins & Loftus 1975；Anderson ACT-R）：检索由工作记忆中的概念沿网络扩散激活完成，激活强度随练习增加、随时间衰减 |
-| （对比项）热度/时新度驱动的回收 | **遗忘曲线**（Ebbinghaus 1885）/ ACT-R 的时间衰减——本设计对 `open` 结构明确拒绝该策略，只对 `closed` 记忆使用 |
-
-整合说明：
-
-- 本设计的独特性不在于单个机制——TMS、AGM、非单调推理、CBR、再巩固都是成熟概念——而在于**把它们组合成一个外挂记忆循环**：把「矛盾检测与修订」（TMS/AGM/非单调）从推理器内部机制外化为持久记忆的闭环状态；把「失败驱动提醒」（Schank）和「未完成任务优势」（Zeigarnik）从人类记忆规律显式化为系统保留策略；把「预测误差驱动的更新」（reconsolidation）映射为 NMG 已有的关系强度学习。
-- 与经典推理系统的一个关键差异：TMS/AGM 处理的是**推理器自己的信念**，本设计处理的是**跨会话、跨任务的持久记忆**——闭合/重开的裁决权在使用方（模型），记忆系统只负责存续与可达。
-
-## 七、设计原则
-
-**系统负责：**
-1. 存续判据正确——按闭合度而非热度决定生死；
-2. 可达性正确——开放结构在关联实体的检索邻域内随附浮现。
-
-**系统不负责：**
-1. 决定显著性——不主动推送「你应该想想 X」；
-2. 替使用方闭合矛盾——闭合与否由使用方基于新证据裁决。
-
-循环因此自洽且无噪声负担：使用强化结构（写入痕迹、激活），使用重构结构（合并、拆分、替换），使用闭合或重开结构（修正），再写回记忆（保留）。**记忆不是预先设计好的静态库，而是在使用过程中被持续塑造的循环结构。**
-
-## 八、落地路径
-
-按依赖顺序，当前四步已经形成最小闭环：
-
-1. **[已实现] Retain 的 `open` 状态**：`openedAt`、`relatedMemoryIds`、`resolution` 已进入持久模型、协议和 Pi 写入接口；open/reopened 必须引用至少一条同库记忆。
-2. **[已实现] Retention 的 open 豁免**：open/reopened 不进入 LTG 热度回收或 STG 到期清理；`resolve` 后恢复普通留存资格。
-3. **[已实现] Retrieve 的邻域可达**：直接命中关联记忆时，最多两条开放结构进入同一 AG 预算，并以 `[open]` 呈递；它们不会触发独立搜索级联。
-4. **[已实现] Revise 的闭合与重开**：daemon、CLI 与 Pi 均支持显式 `resolve`/`reopen`，转换事件保留原因、时间和关联证据；reopen 会恢复被归档记录的索引。
-
-前三步中，第 1、2 步不依赖检索改动，是机制地基；第 3 步在此之上接入检索呈递；第 4 步完善循环的闭环。
-
-当前刻意不做自动闭合、自动重开或基于 LLM 的显著性推送。是否修订由使用记忆的 Agent/用户裁决，NMG 只提供状态、可达性、留存和审计边界。真实使用验证继续观察两项指标：开放记忆随附的命中价值，以及它占用普通证据窗口造成的噪声。
+See [`MemoryResolution`](../../src/core/types.ts), [write validation](../../src/core/store/writes.ts), [retention and resolution transitions](../../src/core/store/maintenance.ts), [context retrieval attachments](../../src/core/store/retrieval.ts), [CLI commands](../../src/cli/commands.ts), [daemon service](../../src/cli/service.ts), and [Pi information rendering](../../src/integration/agent-surface.ts). Relevant test owners include [`retention.test.ts`](../../tests/core/store/retention.test.ts), [`retrieval.test.ts`](../../tests/core/store/retrieval.test.ts), and [`stg-v2.test.ts`](../../tests/core/stg-v2.test.ts).

@@ -1,8 +1,11 @@
 # Plan: what is left of the arm programme, and the data each step needs
 
-**Status:** a plan, not a measurement. It exists because two paid runs were reported and their evidence
-was either deleted or never written: the numbers in
-[the arms record](./ooo-arms-pilot-2026-09-18.md) outlived nothing.
+[中文](ooo-arm-plan-2026-09-19.zh-CN.md) · [Terms used](ooo-arm-plan-2026-09-19.terms.yaml)
+
+**Status:** historical plan, closed on 2026-09-19; it does not authorize another run. It was written
+because some paid-run evidence behind the [arms record](./ooo-arms-pilot-2026-09-18.md) had been
+deleted or was never persisted. The later [archive](./archive/ooo-arms-2026-09-19/README.md) rescues
+D/E and cap reports; A/B/C remain summary-only.
 
 **Related:** [the arms record](./ooo-arms-pilot-2026-09-18.md) ·
 [the rescued samples](./archive/ooo-arms-2026-09-19/README.md) ·
@@ -10,16 +13,12 @@ was either deleted or never written: the numbers in
 
 ## The rule this plan exists to keep
 
-A step below may run only once its data list is fixed: which fields, where they are written, and what is
-read off them. A field a claim needs is written _before_ the claim, into
-`docs/experiments/execution/archive/<run>/`, which git tracks. No run deletes its own evidence; `.temp/`
-holds working copies only, and a result a sentence depends on is not a working copy.
-
-This is the second time on this branch that the rule had to be learned. Row G7's samples were rescued
-into [`archive/ooo-continuation-2026-09-14/`](./archive/ooo-continuation-2026-09-14/README.md), whose
-README states the failure mode exactly; the D and E arm runs repeated it, and were rescued unread into
-[`archive/ooo-arms-2026-09-19/`](./archive/ooo-arms-2026-09-19/README.md). A lesson recorded in prose
-in one directory did not survive two sessions, which is why P4 below asks for a check instead.
+A step may run only after its data list is fixed: which fields are collected, where they are written,
+and how they are interpreted. Work-in-progress files may live under `.temp/`; before a report makes a
+claim, the fields that support it must be copied into the Git-tracked
+`docs/experiments/execution/archive/<run>/`. A run must not delete its own evidence, and `.temp/` holds
+working copies only. The G7 and D/E archives record the retention failures that motivated P4's explicit
+cleanup marker.
 
 ## P1 - Why did every published candidate fail its own check? (offline; one unit, ~11 k tokens)
 
@@ -57,27 +56,14 @@ feasibility is settled by one cell in which a published candidate _is_ verified 
 latency (verification included) is below the control's post-fact work. The hit-rate threshold is the
 analysis, and no further spend is needed to state it.
 
-## P3 - landed 2026-09-19, one half of it
+## P3 - Closed: the first-run envelope diagnosis was wrong (2026-09-19)
 
-The rule that matters is now pinned in : an artifact is read
-by its kind, and the patch reader refuses a conclusion by name. The mutant half is not done - the host
-reader lives in , which is not a mutation target, and adding a target is a
-sweep of its own rather than a line in this plan. The claim that the extension was laxer than the host
-was wrong and is corrected in three places (the arms record, the ledger and the archive README).
-
-## P3 (original statement) - The envelope's two readers must agree (offline, no model)
-
-**The defect.** The extension accepted an artifact whose keys were
-`digest, kind, conclusion, summary, evidence, citations` with no `files`; `patchCandidate` refused the
-same bytes as "invalid patch structure". A submission the adapter admits and the board can never accept.
-
-**Data to collect.** An acceptance matrix in a test, no model call: artifact shapes (the refused one, a
-minimal valid one, one with extra keys, one whose digest is wrong) against the two readers' verdicts.
-
-**Analysis.** The matrix must contain no cell in which the extension accepts and the host refuses.
-
-**Decisive.** The test fails on the current code and passes after the fix, and a named mutant that
-loosens the extension's reader back is caught by it.
+The first E-run report suspected that the extension admitted a conclusion artifact while the host's
+`patchCandidate` rejected it. The evidence-backed second run corrected that reading: `artifactEnvelope`
+supports both patch and conclusion shapes, but the harness sent every artifact to the patch-only reader.
+The fix is to select the reader by artifact kind and preserve the evidence, not to reject a valid
+conclusion or loosen an envelope. The original P3 acceptance-matrix plan is therefore not applicable;
+there was no adapter/host envelope mismatch. The correction is recorded in the [arms report](./ooo-arms-pilot-2026-09-18.md), [ledger](../../design/task-unit-semantics-obligations.md) and [archive](./archive/ooo-arms-2026-09-19/README.md).
 
 ## P1 and P2: answered (2026-09-19)
 
@@ -86,7 +72,7 @@ conclusion artifact, the one patch failed on `rows` against `lines`, and no enve
 the instrument read by the wrong reader. The economics are measured: cost real, gain unrealised
 (0 of 3 holding reps published), the candidate's admissibility the binding constraint.
 
-## P5 - A measured cost model: tried with autodiff, and the data is what fails (2026-09-19)
+## P5 - Cost-model fit: tried with autodiff; not a planner (2026-09-19)
 
 The design names autodiff as the reuse target for "cost or action scoring", and the arms need a cost
 model rather than a declared bound, so the terms were fitted to the paid runs with `src/lab/autodiff.ts`:
@@ -101,8 +87,8 @@ more useful half of the finding: it says the term is _not identifiable_ from the
 D arm holds `units` at 2 (bound 1 = 2 sessions, bound 2 = 1 session), leaving `units` collinear with the
 intercept and only three runs per level.
 
-**The blocker is the data, not the optimiser.** What follows is therefore not a better fit but a better
-design matrix, and the cheap half of that is offline:
+**The blocker is the data, not the optimiser.** The proposed next step was a better design matrix, with
+a cheap offline phase:
 
 1. build the design matrix with canned workers (no model calls) over per-session unit counts 1, 2 and 3,
    so `units` varies instead of being constant - the session term only becomes estimable when both
@@ -115,7 +101,8 @@ design matrix, and the cheap half of that is offline:
 
 **Standing constraint.** Autodiff prices _legal_ options; it never decides legality. Whether two units
 may share a session stays a predicate over declared facts (`sharedSessionLegal`), and no fitted number
-may widen it.
+may widen it. The proposed follow-up matrix was not run; the arm programme closes below without a
+planner fit or a general cost model.
 
 ## P6 - The measurement plan: every cell, what it is for, and how cells are compared
 
@@ -217,8 +204,8 @@ taken from the second pair and not from a fused cell against a plain one.
 - **Coarse at two slots.** One unit is one claim, so there is nothing for a second slot to overlap: the
   cell would measure the scheduler, not the plan.
 - **Three or four slots on the fine plan.** The declared slot budget says a run holds one claim; C shows a
-  second slot works and saves 3 320 ms. Scaling the slot count is a different question with a different
-  instrument.
+  second slot works and saves 3 628 ms in the paired reading. Scaling the slot count is a different
+  question with a different instrument.
 - **A third bound (cap 3).** The bound's default needs a direction, and the direction is between one and
   two; a cell between two and four would sharpen a hypothesis nobody is acting on.
 - **A fused cell against a plain cell as the fusion reading.** That pair varies fusion _and_ surface; it is
@@ -268,7 +255,7 @@ because the driver refuses it.
 
 The user's reading, recorded here because it is the rule to follow: a run's evidence is needed _while the
 work is being done_, so it is written to a marked scratch directory (`.temp/.../CLEANABLE.md`) and may be
-deleted later - the failure was never that scratch existed, it was deleting the data before the record
-that needed it was written. The instrument now writes every artifact, candidate tree and check output,
-marks the directory cleanable, and copies the run into the tracked archive when a record quotes it. No
-`docs:check` rule: this needs a place to keep things, not a gate.
+deleted later only after its needed evidence is copied to the tracked archive. The failure was not that
+scratch existed; it was deleting data before the record that needed it was written. The instrument writes every artifact, candidate tree and check output, marks the
+directory cleanable, and copies the run into the tracked archive before a record quotes it. No
+`docs:check` rule is needed: this requires a place to keep evidence, not a gate.

@@ -1,0 +1,20 @@
+version: 2
+terms:
+  - term: atomic static check
+    aliases: [原子静态检查]
+    definition: >-
+      A named component check that the reported full plan can deduplicate against repeated aggregate work while retaining route attribution. Shared ownership or multiple declarations do not themselves require repeated execution; this report does not redefine the current route contract.
+      报告中的完整计划可对其与汇总脚本重复工作去重、同时保留路由归属的具名组件检查。共享归属或多处声明本身不要求重复执行；本报告不重新定义当前路由契约。
+    owner: docs/experiments/verification/full-gate-atomic-checks-2026-09-23.md
+    anchor: Protocol
+    status: canonical
+  - term: non-product verification time
+    aliases: [非产品验证时间]
+    definition: >-
+      This report's end-to-end time minus the product-test portion; the 22.8 s drop observed here is confounded by run-to-run variation and npm startup overhead, so it is not a measured saving of the route change alone.
+      本报告的端到端时间减去产品测试部分；此处观察到的 22.8 s 下降受运行间波动与 npm 启动开销混杂影响，因此不是路由改动本身的实测节省。
+    owner: docs/experiments/verification/full-gate-atomic-checks-2026-09-23.md
+    anchor: Observation
+    status: canonical
+references:
+  - whole-run verification deadline

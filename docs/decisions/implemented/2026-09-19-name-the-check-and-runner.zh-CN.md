@@ -1,6 +1,6 @@
 # 让"检查身份"与"检查运行器"各自叫自己的名字
 
-[English](2026-09-19-name-the-check-and-runner.md)
+[English](2026-09-19-name-the-check-and-runner.md) · [术语](2026-09-19-name-the-check-and-runner.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

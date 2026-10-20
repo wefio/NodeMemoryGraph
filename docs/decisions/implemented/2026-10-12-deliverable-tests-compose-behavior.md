@@ -1,6 +1,6 @@
 # Compose behavior on existing test objects
 
-[中文](2026-10-12-deliverable-tests-compose-behavior.zh-CN.md)
+[中文](2026-10-12-deliverable-tests-compose-behavior.zh-CN.md) · [Terms used](2026-10-12-deliverable-tests-compose-behavior.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

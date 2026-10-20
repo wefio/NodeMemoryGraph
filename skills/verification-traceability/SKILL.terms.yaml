@@ -1,0 +1,30 @@
+version: 2
+terms:
+  - term: metamorphic relation
+    aliases: [metamorphic check, 变形关系]
+    definition: >-
+      A check for behavior with no direct expected output: it asserts how outputs from related runs must compare, rather than asserting a single value.
+      对没有直接预期输出的行为进行检查：断言相关运行的输出应满足何种关系，而非断言单个值。
+    owner: skills/verification-traceability/SKILL.md
+    anchor: No oracle? Use a metamorphic relation
+    status: canonical
+  - term: negative control
+    aliases: [failure-inducing input, 负对照]
+    definition: >-
+      An input or case that must make a check fail when the protected logic is broken, showing that the check can detect the regression it claims to guard against.
+      当受保护逻辑损坏时必须能使 check 失败的输入或案例，用来证明该 check 能检测它声称防范的回归。
+    owner: skills/verification-traceability/SKILL.md
+    anchor: Every check needs a negative control
+    status: canonical
+references:
+  - assertion
+  - check
+  - check kind
+  - stage
+  - assertion domain
+  - assertion strength
+  - assertion evidence standing
+  - requirements traceability matrix
+  - counterexample
+  - evidence
+  - gate

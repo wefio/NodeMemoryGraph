@@ -1,431 +1,445 @@
-# 行为组合测试：最小契约、受限探索与 NIST 算法选型研究（2026-10-12）
+# Behavioral composition tests: minimal contracts, bounded exploration and NIST algorithm selection (2026-10-12)
 
-## 范围与证据状态
+[简体中文](behavior-composition-and-combinatorial-testing-2026-10-12.zh-CN.md) · [Terms used](behavior-composition-and-combinatorial-testing-2026-10-12.terms.yaml)
 
-本记录回答：如何从现有测试提取共同语义片段，让 LLM 在受限环境中组合、探索并提出可复现反例，而不把生成测试当成正确性的来源。
+## Scope and evidence status
 
-本记录包含文献审核、仓库观察、[第一轮局部抽取](#第一轮试点结果)、[第二轮跨测试族行为组合](#第二轮试点结果)和[第三轮状态边界组合](#第三轮边界组合结果)，以及[产品测试结构筛选](#更广的结构筛选2026-10-13)和[已有节点路径抽取](#已有节点路径实施结果2026-10-13)，不包含算法实测或全仓迁移结果。未实施部分仍是试点建议；实施选择回到设计与 decision owner，不改变产品契约、测试分类、阻塞检查或验收标准。文档归属遵循[文档权威边界](../../README.md#ownership-and-authority)。
+This record asks how to extract common semantic fragments from existing tests so an LLM can compose, explore and propose reproducible counterexamples in a bounded environment, without making generated tests the source of correctness.
 
-初始仓库观察基于 `1787310a2a9fda2f285f6be5c2138c87ebe69b04`；各轮试点另列基线与测量范围。研究没有运行 IPOG、SCA 或候选测试生成器，也没有测量本仓库的真实缺陷检出率、速度或维护成本。外部资料的版本与正文核查范围见[来源与未验证项](#来源与未验证项)。
+It contains a literature review, repository observations, the [first local extraction](#first-pilot-results), [second cross-family composition](#second-pilot-results), [third state-boundary composition](#third-boundary-composition-results), [product-test structural screen](#broader-structural-screen-2026-10-13) and [existing-node path implementation](#existing-node-path-implementation-results-2026-10-13). It does not contain algorithm measurements or a repository-wide migration result. Unimplemented portions remain pilot proposals. Implementation choices belong to design and decision owners; this research changes no product contract, test classification, blocking check or acceptance standard. Document authority follows the [ownership boundary](../../README.md#ownership-and-authority).
 
-## 选型结论
+Initial repository observations use `1787310a2a9fda2f285f6be5c2138c87ebe69b04`; each pilot states its own baseline and measurement scope. This research did not run IPOG, SCA or a candidate-test generator, or measure NMG's natural-defect detection rate, speed or maintenance cost. Source versions and text-review limits are listed under [sources and unverified items](#sources-and-unverified-items).
 
-1. 从共同语义片段开始，不要求全部测试算子化，也不追求不可分的最小粒度。普通函数、类型与断言足以承载第一轮组合。
-2. 正确性基础来自既有产品契约与独立核对的领域性质。少量稳定公约可以约束探索，但公约的合理性不由测试相互通过或模型投票产生。
-3. 保留混合套件：具名回归、可组合行为、参数组合补缺、受限状态探索与真实边界测试各有职责。
-4. ACTS Advanced 的 IPOG 是参数组合补缺的首个候选；IPOG-F 用相同模型比较后再选。基础 SCA 与 ordered t-way 只承担其定义内的顺序覆盖，不单独承担 NMG 的状态行为验收。
-5. 暂不建设通用 DSL、生成器平台或全仓形式化模型。先用一个真实测试族验证复用收益、遗漏风险与追溯兼容性，再决定是否扩大。
+## Selection conclusion
 
-## 组合表达与组合覆盖
+1. Start with common semantic fragments, not a requirement to operatorize every test or reach indivisible granularity. Ordinary functions, types and assertions suffice for the first composition.
+2. Correctness rests on existing product contracts and independently checked domain properties. A small stable set of rules can constrain exploration, but mutual test success or model votes do not establish that those rules are valid.
+3. Keep a mixed suite: named regressions, composable behaviors, parameter-combination gap filling, bounded state exploration and real-boundary tests have separate jobs.
+4. ACTS Advanced IPOG is the first candidate for parameter-combination gaps. Compare IPOG-F on the same model before selecting it. Basic SCA and ordered t-way cover order only within their definitions; neither alone accepts NMG state behavior.
+5. Do not build a general DSL, generator platform or whole-repository formal model yet. Use one real test family to examine reuse, omission risk and traceability compatibility before expanding.
 
-**组合表达**回答怎样少写重复准备和动作；**组合覆盖**回答哪些输入、状态、事件顺序及边界被实际执行。抽出函数不会自动增加覆盖；减少测试条数也不能自动保持原有缺陷发现能力。
+## Composition expression and composition coverage
 
-共同片段可以是“创建待办并由 A 领取”“提交某次尝试的产物”“由另一身份裁定”，不必把每次字段赋值或 API 调用都拆成动作。是否继续细分，取决于真实复用与观察需求，而不是预先设定的原子粒度。
+**Composition expression** asks how to avoid repeated preparation and actions. **Composition coverage** asks which inputs, states, event orders and boundaries actually execute. Extracting a function does not automatically increase coverage; fewer tests do not automatically preserve defect detection.
 
-资源组合与行为组合不同。[可组合测试运行时](../../design/ci-cd-and-quality.md#4-可组合测试运行时)负责工作区、数据库、daemon 的取得与回收；行为片段负责领域动作、结果引用和可观察状态。复用前者不等于已经实现后者。
+A fragment can mean “create work and have A claim it,” “submit this attempt's artifact” or “judge under another identity.” It need not turn every field assignment or API call into an action. Further decomposition follows actual reuse and observation needs, not a predetermined atomic granularity.
 
-### 最小组合契约
+Resource composition is different from behavior composition. The [composable test runtime](../../design/ci-cd-and-quality/composable-test-runtime.md) acquires and releases workspaces, databases and daemons; behavioral fragments own domain actions, result references and observable state. Reusing the former does not implement the latter.
 
-每个被复用的片段需要让调用者看清以下语义，不要求全部变成元数据字段或统一接口：
+### Minimal composition contract
 
-| 语义       | 调用者需要知道的内容                             | Task Board 示例                                       |
-| ---------- | ------------------------------------------------ | ----------------------------------------------------- |
-| 条件与输入 | 什么状态下运行；身份、时钟、对象及参数从哪里来   | entry 是否开放、提交者是谁、领取是否仍有效            |
-| 结果引用   | 返回结果对应哪个对象、尝试或产物，供后续动作使用 | entry ID、attempt、digest，不使用隐藏的“最后一次结果” |
-| 状态变化   | 动作可能改变哪些相关状态                         | 领取者、产物、裁定、attempt                           |
-| 受保护状态 | 哪些已有状态不能被无关动作改变                   | 有效领取的续租不丢弃已提交产物                        |
-| 观察与失败 | 何处观察中间状态；预期拒绝怎样作为结果核对       | 提交后检查裁定为空；拒绝后检查相关状态未被改写        |
+Each reused fragment must expose these semantics to callers; they need not all become metadata fields or a uniform interface:
 
-复合动作可以融合实现，但不能封死测试需要观察的中间状态。身份、引用与时钟显式传递；是否共享 helper，以实际消费者为依据。对拒绝路径使用能执行该动作的原始片段，不先套用只允许成功状态的 convenience helper。
+| Semantic concern | What the caller must know | Task Board example |
+| --- | --- | --- |
+| Conditions and inputs | Required state; source of identities, clocks, objects and parameters | Entry open; submitter identity; claim still live |
+| Result references | The object, attempt or artifact a result identifies for later actions | Entry ID, attempt and digest, not a hidden “last result” |
+| State changes | Relevant state an action can change | Claim holder, artifact, judgment and attempt |
+| Protected state | Existing state an unrelated action must not change | Renewing a live claim does not discard its submitted artifact |
+| Observation and failure | Where intermediate state is observed; how expected refusal is checked as a result | Judgment absent after submission; related state unchanged after refusal |
 
-## 正确性基础与 LLM 探索边界
+A composite may fuse implementation but must not close observation seams needed by a test. Pass identities, references and clocks explicitly; share helpers only when actual consumers justify it. Rejection paths use a raw action capable of making the attempt, not a convenience helper that admits only success.
 
-### 小内核保护什么
+## Correctness foundations and LLM exploration boundaries
 
-试点把三类内容分开：
+### What a small kernel protects
 
-- **产品公约**：被保护的行为及其定义域、假设与例外，沿用既有 owner；例如裁定必须绑定它所裁定的产物。
-- **生成与执行机制**：构造输入、维护引用、预算限制、观察、重放和反例缩减。它们可以被测试，也可以相互核对。
-- **候选性质**：LLM 提出的新关系或异常解释。先作为研究问题，不自动成为产品公约。
+The pilot separates three things:
 
-[验证追溯 workflow](../../../skills/verification-traceability/SKILL.md)拥有断言、定义域与证据强度的要求。这里不另建断言账本。首轮只保护试点需要的少量领域性质，不宣称已经找到完备公理或证明全仓正确。
+- **Product rules:** protected behavior, domain, assumptions and exceptions stay with existing owners; for example, a judgment must bind the artifact it judges.
+- **Generation and execution mechanisms:** input construction, reference management, budgets, observations, replay and counterexample shrinking. These can be tested and cross-checked.
+- **Candidate properties:** new relationships or anomaly explanations proposed by an LLM. They start as research questions, not automatically as product rules.
 
-允许自检、差分检查、性质测试和测试之间的交叉验证。需要防止的是循环接受依据：候选能同时修改公约、定义域、判定程序和证据，再用自己的绿灯批准自己。两份模型一致、收据自洽或多个模型同意，都不独立证明公约符合产品意图。
+The [verification traceability workflow](../../../skills/verification-traceability/SKILL.md) owns assertion, domain and evidence-strength requirements. This record creates no competing assertion ledger. The first pilot protects only the domain properties it needs, not a complete axiom set or whole-repository correctness proof.
 
-### 探索权限与接受权限
+Self-checks, differential checks, property tests and cross-test validation are permitted. The prohibited acceptance cycle is a candidate changing the rules, domain, judge and evidence, then approving itself with its own green result. Two matching models, self-consistent receipts or multiple model votes do not independently show that a rule matches product intent.
 
-LLM 可以提出组合、选择输入、故意制造损坏、缩减反例，以及建议新性质；新公约与验收标准的批准留给其 owner。运行前先固定候选版本、适用公约及定义域，并限制：
+### Exploration permission and acceptance permission
 
-- 独立测试数据、路径和进程；不接触共享记忆库或生产服务，不继承外部 provider 凭证。
-- 运行时间、操作步数、样本数、并发、内存、磁盘与网络权限；需要额外权限的故障注入单独声明。
-- 可修改路径；生成候选不能顺便削弱稳定公约、验收程序或基准样本。
+An LLM may propose compositions, choose inputs, inject deliberate damage, shrink counterexamples and suggest properties. Approval of new rules and acceptance standards stays with their owners. Before execution, fix the candidate version, applicable rules and domain, and bound:
 
-运行后的失败报告至少能恢复候选版本、初始状态、输入、身份、时钟设置、实际动作序列、观察结果和预期依据；随机探索保留 seed，无法靠 seed 重建的调度或外部响应另行记录。先重放再判断是产品缺陷、模型错误、测试错误还是环境问题。超时、不可重放及前提未满足不能写成通过。
+- Separate test data, paths and processes; no shared memory store or production service, and no inherited external-provider credentials.
+- Time, steps, samples, concurrency, memory, disk and network privileges. Fault injection needing extra permission is declared separately.
+- Writable paths. A generated candidate cannot also weaken stable rules, acceptance code or baseline samples.
 
-普通 `agent:verify` 不自动提供上述沙箱或可信基线隔离。[固定可信版本验证](../../design/ci-cd-and-quality.md#713-fixed-trusted-baseline-verification)是显式能力，有独立的策略、依赖与同权限威胁边界；本研究不扩大它的保证，也不把测试改动直接送入只允许产品目录变更的基线。
+A failure report must recover the candidate version, initial state, inputs, identities, clocks, actual action sequence, observations and expected-result authority. Random exploration retains its seed; schedules or external responses not reconstructible from that seed need their own records. Replay before classifying a product defect, model error, test error or environment issue. Timeout, unreplayable behavior and unmet premises are not passes.
 
-## 覆盖选择：围绕必要条件、接缝与边界
+Ordinary `agent:verify` does not automatically provide this sandbox or trusted-baseline isolation. [Fixed trusted-baseline verification](../../design/ci-cd-and-quality/repository-control-plane.md) is explicit, with separate policy, dependencies and same-permission threat boundaries. This study neither enlarges that guarantee nor submits test edits to a baseline that permits only product-directory changes.
 
-生成模型至少区分环境可构造性、产品应接受的操作、产品应拒绝的操作与待研究输入。约束可以排除无法构造的环境，不能把预期拒绝全部排除，再把剩余成功路径称为充分覆盖。
+## Coverage selection: necessary conditions, seams and boundaries
 
-先围绕具体公约寻找必要条件与边界交互：
+The generation model distinguishes constructible environments, operations the product should accept, operations it should reject and research inputs. Constraints may exclude impossible environments; they must not filter out every expected rejection and call the remaining successful paths sufficient coverage.
 
-- 身份：领取者、旁观者、提交者、独立裁定者。
-- 生命周期：有效领取、续租、释放、重领、结束；时钟边界显式建模。
-- 版本与引用：同一 entry、不同 attempt、同一或不同 digest，防止用操作名称掩盖对象差异。
-- 失败后继续：拒绝后再次执行合法动作，检查拒绝有没有污染状态。
-- 时序：重复操作、紧邻操作、允许插入的操作，以及提交前后故障。
+Start from necessary conditions and boundary interactions for a concrete rule:
 
-不能跨独立 test 的 reset 拼接顺序覆盖。结构覆盖、参数覆盖、顺序覆盖、状态转移观察和具名回归分开报告；每项写明分母、模型约束及实际执行范围，不合并成一个“行为覆盖率”。
+- Identity: claimant, bystander, submitter and independent judge.
+- Lifecycle: live claim, renewal, release, reclaim and completion, with explicit clock boundaries.
+- Versions and references: same entry, different attempts, same or different digests. Operation names must not hide object differences.
+- Continuation after failure: execute a valid action after refusal and inspect possible state contamination.
+- Timing: repetition, adjacency, permitted intervening actions and faults before or after submission.
 
-## NIST 算法评估
+Do not join order coverage across resets of independent tests. Report structural coverage, parameter coverage, order coverage, state-transition observations and named regressions separately. State each denominator, model constraints and executed scope rather than producing one “behavior coverage” percentage.
 
-### IPOG 系列：离散参数覆盖，不自带状态语义
+## NIST algorithm assessment
 
-IPOG 先构造前 `t` 个参数的测试集，再逐个加入参数：水平扩展已有测试以覆盖更多尚未覆盖的组合，垂直增长补齐剩余组合。带约束时，部分赋值必须能够扩展为满足全部约束的完整用例。
+### IPOG: discrete parameter coverage without state semantics
 
-覆盖承诺是：给定离散参数域与约束中，每个可扩展成合法完整用例的 t-way 值组合至少出现在一个测试中。它不保证最小测试集、全部实际取值、目标状态到达或缺陷检出。状态序列可以有界展开成参数列，但转移、引用和时间语义需要另行编码与验证。
+IPOG constructs tests for the first `t` parameters, then adds parameters one at a time: horizontal extension covers more uncovered combinations in existing tests; vertical growth supplies the remainder. With constraints, a partial assignment must extend to a complete assignment satisfying all constraints.
 
-下表能力限定于 ACTS Basic 1.0 / Advanced 3.3 的 2023 年指南 [S1]，不作为未核实新版本的能力声明：
+Its promise is that each t-way value combination extendible to a valid complete case in the declared discrete domains and constraints occurs in at least one test. It does not promise a minimum suite, every real-world value, target-state reachability or defect detection. Bounded state sequences can be expanded into parameter columns, but transitions, references and time require separate encoding and validation.
 
-| 算法        | 指南中的能力与限制                               | 试点选择与放弃条件                                                         |
-| ----------- | ------------------------------------------------ | -------------------------------------------------------------------------- |
-| IPOG        | Advanced 支持约束、混合强度、负向测试            | 首个参数补缺候选；满足覆盖但生成、执行或模型维护成本不可接受时比较其他路线 |
-| IPOG-F      | 同样支持上述能力，构造启发式不同                 | 与 IPOG 在同一模型和覆盖义务下比较；名字中的 F 不是实际更快的证据          |
-| IPOG-F2     | 不支持约束、混合强度或负向测试                   | 不承担本试点所需的受约束参数补缺；不是笼统宣称算法无价值                   |
-| IPOG-D      | 递归／组合构造面向较大模型，但不支持上述三项能力 | 不因参数多就默认选用；缺少必需能力即不适用，不用生成后过滤冒充同等覆盖     |
-| Base Choice | 围绕基准值逐项变化的一种 1-way 测试              | 基础冒烟辅助，不替代交互覆盖                                               |
+The following capabilities are limited to the 2023 ACTS Basic 1.0 / Advanced 3.3 guide [S1], not unverified later releases:
 
-混合强度允许对不同参数组使用不同 `t`；extend 允许从已有输入测试集增补 [S1]。可先研究总体 2-way、关键接缝组更高强度的成本，但强度来自领域风险与遗漏证据，不来自“多数缺陷只需少量参数”的普遍化假设。把已有测试映射为 seed 输入不能保留其断言或执行语义，原具名回归继续保留。
+| Algorithm | Guide capability and limit | Pilot selection and abandonment condition |
+| --- | --- | --- |
+| IPOG | Advanced supports constraints, mixed strength and negative testing | First gap-filling candidate; compare alternatives if generation, execution or model maintenance is unacceptable despite coverage |
+| IPOG-F | Same capabilities, different construction heuristics | Compare on the same model and obligations; F in its name is not measured speed evidence |
+| IPOG-F2 | No constraints, mixed strength or negative testing | Does not meet this pilot's constrained gap-filling needs; not a general claim of no value |
+| IPOG-D | Recursive/compositional construction targets larger models but lacks those three capabilities | Not a default merely because there are many parameters; missing required capabilities disqualifies it, and post-generation filtering is not equivalent coverage |
+| Base Choice | A 1-way method varying each parameter around baseline values | Smoke-test aid, not interaction coverage |
 
-生成后显式开启 `-Dcheck=on`：指南中的 CLI 默认关闭覆盖核验。该检查可以证明当前模型内的输入覆盖，不能证明模型正确；小试点另用简单枚举核对允许组合与分母，不禁止生成器自检。
+Mixed strength permits different `t` for parameter groups; extend augments existing input suites [S1]. Overall 2-way plus higher-strength critical seams is worth investigating, but strength follows domain risk and omission evidence, not a generalized “most defects involve few parameters” assumption. Mapping old tests into seed inputs does not preserve assertions or execution semantics; named regressions remain.
 
-[S4] 对 ACTS 2.92、17 个工业 PLC 程序的研究发现 IPOG 在其预算内完成更多生成任务，IPOG-D 有内存耗尽与套件膨胀问题，未支持“大模型默认优先 IPOG-D”的建议。该研究没有模型约束或混合强度，评价生成适用性、时间与套件大小，不评价找虫效果。它是反对按宣传直接选型的历史证据，不是当前 NMG 的算法排名。
+Explicitly enable `-Dcheck=on`: the guide's CLI disables coverage checking by default. The check establishes input coverage inside the current model, not model correctness. A small pilot also enumerates allowed combinations and denominators independently; generator self-checking is not prohibited.
 
-### 约束处理与负向测试：补强有效性，但会改变覆盖域
+[S4] studied ACTS 2.92 on 17 industrial PLC programs: IPOG completed more generation tasks within that study's budget, while IPOG-D had memory exhaustion and suite inflation. It did not support “prefer IPOG-D for large models.” There were no model constraints or mixed strength; outcomes concerned generation applicability, time and suite size, not bug finding. This is historical evidence against selection by promotion, not a current NMG algorithm ranking.
 
-ACTS 的两种约束处理方式 [S1, S5]：
+### Constraints and negative tests: stronger validity, different coverage domains
 
-- **最小禁止元组（MFT）**：预先生成不可成立的最小值组合，包括约束间推导出的隐含冲突；之后用它们核对部分赋值。
-- **CSP 求解器**：判断当前部分赋值与全部约束是否共同可满足。
+ACTS offers two constraint methods [S1, S5]:
 
-指南建议简单、涉及少数参数的约束先比较 MFT，生成过慢时切换求解器；实际选择仍需相同模型下测量预处理、生成、内存及执行成本。不是逐条看约束似乎满足，就可以认定部分用例能够完成。
+- **Minimum forbidden tuples (MFT):** precompute minimal impossible value combinations, including implied conflicts across constraints, then check partial assignments against them.
+- **CSP solver:** decide whether the current partial assignment and every constraint are jointly satisfiable.
 
-ACTS 原生负向测试至多放入一个被标记为无效的参数值，并把它与合法值的 `(t-1)`-way 组合配对，目的是减少无效值间的掩蔽；正负测试均须满足模型约束 [S1]。它不直接承担多重违规或动态状态拒绝。
+The guide suggests comparing MFT first for simple constraints over few parameters, then trying a solver if generation is too slow. Measure preprocessing, generation, memory and execution on the same model. Individually plausible constraints do not establish that a partial case can be completed.
 
-例如“旁观者提交”和“领取失效后提交”是 NMG 需要检查的拒绝行为，不能因为不满足成功前置条件就过滤。身份值本身合法但当前身份无权执行，也不等同于 ACTS 的单参数无效值标记。
+Native ACTS negative testing places at most one value marked invalid alongside `(t-1)`-way combinations of valid values, reducing masking among invalid values. Positive and negative tests both satisfy model constraints [S1]. It does not directly cover multiple simultaneous violations or dynamic state refusal.
 
-### 基础 SCA：允许插入的事件排列
+For NMG, bystander submission and submission after claim expiry are required rejection behaviors, not inputs to discard for failing success premises. An individually valid identity lacking present authority is also not the same as ACTS's invalid-parameter-value marker.
 
-序列覆盖数组 SCA 覆盖选定 `t` 个事件符号的各类排列，符号之间可以插入其他事件 [S2]。这一目标适合事件主要执行一次、先后比紧邻更重要、插入动作不破坏关键条件的场景。
+### Basic SCA: event permutations with intervening events
 
-基础覆盖目标不直接表达重复操作、操作参数、当前状态及动态引用。即使覆盖“领取在提交之前”，下面的说明性轨迹也不是“持有有效领取权时提交”：
+A sequence covering array covers permutations of a selected set of `t` event symbols, allowing other symbols between them [S2]. It suits events usually executed once, where relative order matters more than adjacency and intervening actions preserve critical conditions.
+
+The basic target does not express repetition, action parameters, current state or dynamic references. Covering “claim before submit” does not make this illustrative trace a submission under a live claim:
 
 ```text
-领取 A → 释放 A → 提交 A
+claim A → release A → submit A
 ```
 
-这不是已运行的缺陷复现，而是说明顺序指标的语义边界。把重复操作改名为两个符号可以构造候选输入，但仍需定义它们是否对应同一对象、什么状态下有效及允许插入什么。
+This is an explanatory boundary, not an executed defect reproduction. Renaming repeated actions as distinct symbols can produce candidate inputs, but object identity, valid state and permissible insertions still need definitions.
 
-[S2] 明示其数组最初由 2009 年粗略贪心算法生成、可能改进；页面正文与表格也有维护年代差异。官方数组可作覆盖实例，不作最小性或当前最优的证据。无法表达重复、邻接或依赖义务时，改用状态模型或专门的约束序列生成，不靠提高 SCA 的 `t` 弥补模型缺失。
+[S2] says the arrays originated from a rough 2009 greedy algorithm and might be improved; its page and tables also differ in maintenance age. Official arrays are coverage examples, not evidence of minimality or current optimality. When repetition, adjacency or dependency obligations cannot be expressed, use a state model or specialized constrained sequence generator rather than increasing SCA strength to compensate for the missing model.
 
-### Ordered t-way：输入组合的顺序，不是状态到达保证
+### Ordered t-way: input-combination order, not reachability
 
-2022 年白皮书草案 [S3] 定义 ordered combination cover（OCC）：`t` 是每一步组合中的参数数，`s` 是组合顺序长度；它覆盖参数组合之间的有序子序列，允许插入其他行，也允许同一值组合重复。
+The 2022 draft [S3] defines an ordered combination cover (OCC): `t` is the number of parameters per combination and `s` is the order length. It covers ordered subsequences of parameter combinations, permits intervening rows and permits repeated value combinations.
 
-文中的充分构造是串接 `s` 份 strength 为 `t` 的 covering array：从每段各取所需组合，即得到任意要求的 `s` 个组合的顺序。这补强了只看静态输入组合或事件名排列的覆盖。
+Its sufficient construction concatenates `s` strength-`t` covering arrays. Selecting a required combination from each segment realizes any requested sequence of `s` combinations. This strengthens coverage beyond static input combinations or event-name permutations.
 
-它保证的是该抽象定义内的组合顺序，不保证紧邻、时间间隔、身份／产物一致性、可执行状态路径或目标状态到达。中间插入的输入可能改变状态；跨 reset 串接更不形成连续状态轨迹。约束与初始状态也不能未经论证就继承这个构造的覆盖保证。
+The guarantee remains order within that abstraction, not adjacency, elapsed time, identity/artifact consistency, executable paths or target-state reachability. Intervening inputs may change state; concatenation across resets is not a continuous state trace. Constraints and initial states cannot inherit the construction's guarantee without argument.
 
-接受条件：作为有参数的执行轨迹辅助指标，明示 `s`、`t`、允许插入及实际轨迹边界，并配合状态观察。放弃条件：需求是精确邻接、状态依赖或实时边界，而模型只覆盖输入顺序；此时更换模型，不把 OCC 的满覆盖提升为行为验收。
+Accept it as an auxiliary metric for parameterized traces when `s`, `t`, permitted insertions and trace boundaries are explicit and state observations accompany it. Reject it as behavioral acceptance when requirements concern exact adjacency, dependencies or real-time boundaries but the model represents only input order. Change the model instead.
 
-### 后续发展：补强、替代与证据缺口
+### Later developments, alternatives and evidence gaps
 
-没有取得这些方法整体被淘汰的证据，也没有证明它们是当前最优路线。
+This review found neither evidence that these methods are collectively obsolete nor proof that they are currently optimal.
 
-- **替换约束处理部分**：BDD 与 IPOG 组合的研究 [S5] 在 62 个模型、2-way／3-way 实验中取得较好的生成时间；包含预构造完整／部分合法用例空间的成本，结果受模型与构造顺序影响。这是性能候选，不改写覆盖语义，不外推为所有约束模型的最优方案。
-- **补强构造性能**：CAgen 的 FIPO／mFIPOG 及并行扩展研究 [S7] 已检索到摘要；没有完整核查正文、实现与能力矩阵，不据此推荐替换 IPOG。
-- **补强序列约束**：2019 年约束序列生成研究 [S6] 已核实题名、作者与摘要，正文未取得；约束语言、重复事件支持、覆盖保证及规模边界待查，不从“支持约束”推断其已经解决 NMG 状态问题。
-- **替换输入模型或探索方式**：需要动态依赖、重复调用、对象引用时采用状态／命令模型；需要未知路径反馈时加入目标或覆盖引导探索。它们解决不同遗漏，不能仅凭年代新就视为旧方法的全面替代。
+- **Replace constraint handling:** BDD plus IPOG [S5] showed useful generation time on 62 models at 2-way/3-way strength, including the cost of preconstructing complete/partial valid-case spaces. Results depend on model and construction order. It is a performance candidate, not altered coverage semantics or a universal optimum.
+- **Improve construction:** CAgen FIPO/mFIPOG and parallel extensions [S7] were found at abstract level. Full text, implementation and capability matrix were not completely checked; they do not justify replacing IPOG here.
+- **Strengthen sequence constraints:** the 2019 constrained sequence work [S6] has verified title, authors and abstract, but no acquired full text. Constraint language, repeated-event support, coverage guarantee and scale remain unverified. “Supports constraints” does not establish NMG state semantics.
+- **Replace input models or exploration:** use state/command models for dynamic dependencies, repetition and object references, and goal/coverage-guided exploration for feedback from unknown paths. These address different omissions; newer publication alone does not make them comprehensive replacements.
 
-## 非 NIST 路线的接受与放弃条件
+## Non-NIST routes: acceptance and abandonment
 
-| 路线                            | 解决的问题                           | 代价与接受条件                                               | 不适合或需要换路线的情况                                           |
-| ------------------------------- | ------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------------ |
-| 类型化复合函数／fixture         | 共同语义片段与资源复用               | 命名贴近实际行为；输入、引用与观察边界可见；首轮不引入 DSL   | helper 隐藏关键状态、承担太多无关场景，或只换写法没有复用收益      |
-| 模型／命令式性质测试 [S8]       | 有状态、重复动作、前置条件和反例缩减 | 独立维护最小模型；把拒绝操作作为可生成命令；保存重放所需轨迹 | 模型照抄实现形成共同盲点；动态引用或调度无法重建                   |
-| Dafny 等形式化切片 [S9]         | 少量纯逻辑核心中的全称性质           | 限于稳定、值得证明的切片；计入规格维护与求解波动成本         | 为整个异步／IO 系统建模，成本超过收益；把模型证明冒充实现证明      |
-| 小证明内核＋实现差分 [S10, S11] | 限制证明接受依据，连接模型与实现     | 核查可信命题与依赖；按工具边界沙箱构建、外部重放；另测实现   | 命题被候选改写，或只证明模型却声称全部实现已证明                   |
-| 确定性模拟／故障注入 [S12]      | 可重放的复杂交错、故障与长轨迹       | 隔离环境内允许破坏；保留真实 IO／进程／持久化边界测试        | 模拟遗漏升级、运行时或真实资源行为；只靠模拟绿灯批准边界变更       |
-| LLM 提出性质与反例 [S13]        | 扩大候选输入与性质的探索范围         | 候选先核对公约、重放与人工或独立评估；权限、预算有界         | 把模型报告直接计为缺陷，把研究有效率当成本仓库保证，或允许自动降标 |
+| Route | Problem addressed | Cost and acceptance condition | When it does not fit |
+| --- | --- | --- | --- |
+| Typed composite functions/fixtures | Common semantic fragments and resource reuse | Behavior-oriented names, explicit inputs/references/observation seams; no first-round DSL | Hidden critical state, unrelated responsibilities, or rewritten syntax without reuse |
+| Model/command property tests [S8] | State, repetition, premises and shrinking | Independently maintain a minimal model; generate refusal commands; retain replay traces | Model copies implementation blind spots, or references/schedules cannot be reconstructed |
+| Dafny-style formal slices [S9] | Universal properties in small pure cores | Stable worthwhile slices; include specification maintenance and solver variability | Whole asynchronous/IO modeling costs more than it returns, or model proof is claimed as implementation proof |
+| Small proof kernel plus implementation differential [S10, S11] | Bound proof acceptance and connect model to implementation | Check trusted propositions/dependencies; sandbox builds at tool boundaries, externally replay and separately test implementation | Candidate rewrites the proposition, or proves a model but claims all implementation |
+| Deterministic simulation/fault injection [S12] | Replayable interleavings, faults and long traces | Destructive isolated environments plus real IO/process/persistence tests | Simulation omits upgrade/runtime/resource behavior, or simulated green alone approves boundary changes |
+| LLM-proposed properties/counterexamples [S13] | Broader candidate input/property exploration | Check rules, replay and human/independent evaluation first; bounded permission/budget | Count model reports directly as defects, generalize research validity to NMG, or permit automatic lowering of standards |
 
-这些路线可以组合，不要求选一个替代全部测试。Cedar 的 Lean 模型与 Rust 随机差分 [S10] 是模型证明加实现比较的实例，不是完整 Rust 实现证明；Agentic PBT [S13] 是研究证据，不是行业共识或 NMG 误报率测量。
+These routes may combine; none must replace every test. Cedar's Lean model and randomized Rust differential tests [S10] illustrate model proof plus implementation comparison, not proof of the complete Rust implementation. Agentic PBT [S13] is research evidence, not industry consensus or NMG false-positive measurement.
 
-## 小试点：Task Board 交付与裁定测试族
+## Small pilot: Task Board delivery and judgment
 
-### 范围与现有依据
+### Scope and existing authority
 
-首个候选是 [task-board-deliverable.test.ts](../../../tests/core/task-board-deliverable.test.ts)。所观察版本有八个具名测试，覆盖：
+The first candidate is [task-board-deliverable.test.ts](../../../tests/core/task-board-deliverable.test.ts). Its observed version has eight named tests covering:
 
-- 只有有效领取者能交付；提交不结束条目。
-- 提交者不能裁定自己的产物，独立裁定记录被裁定 digest。
-- 不同产物不继承旧裁定。
-- 新 attempt 清除旧产物与裁定。
-- 同一有效领取的续租不产生新 attempt，也不丢弃产物。
-- `undecidable` 保持其含义与开放状态，未列出的裁定值被拒绝。
-- 条目结束后不能再交付。
-- 没有产物时不能裁定。
+- Only a live claimant may deliver; submission does not complete the entry.
+- Submitters cannot judge their own artifact; independent judgment records the judged digest.
+- Different artifacts do not inherit old judgments.
+- A new attempt clears old artifact and judgment.
+- Renewing the same live claim neither creates an attempt nor discards its artifact.
+- `undecidable` retains its meaning and open state; unlisted judgment values are rejected.
+- No delivery after entry completion.
+- No judgment without an artifact.
 
-这些是该测试族的既有观察，不声明整个 Task Board 的完备公约。实现采用独立资源，并按[资源断言边界](../../design/ci-cd-and-quality.md#4-可组合测试运行时)选择 fixture；本研究不要求顺便迁移它的数据库资源类型。
+These are existing observations of this family, not a complete Task Board rule set. Use isolated resources and choose fixtures according to the [resource assertion boundary](../../design/ci-cd-and-quality/composable-test-runtime.md); this study does not require opportunistically migrating database resource types.
 
-### 实施顺序建议
+### Proposed implementation sequence
 
-1. 保留八个测试及其断言，手写少量复合行为，只替换重复准备与动作。先展示哪些重复确实消失，哪些观察必须留在测试中。
-2. 对每条现有性质记录它需要的身份、状态、attempt、digest 关系；核对抽取前后实际观察点与拒绝条件，不用相同测试数证明语义等价。
-3. 再添加固定的边界交互，例如重新交付后裁定、续租后交付、拒绝后合法继续。新性质须有既有依据或单独审查，不自动批准 LLM 的预期。
-4. 必要时构建小规模离散模型，核对已有输入覆盖，再比较 IPOG 与 IPOG-F 的补缺候选。保留原回归；生成器先不接入 CI 的默认接受路径。
-5. 最后才开放有预算的序列探索、缩减与重放。发现真实共享消费者后再决定 helper 归属，不从一个测试族推导全仓动作库。
+1. Keep the eight tests and assertions; handwrite a few composites replacing only repeated setup/actions. Show actual duplication removed and observations retained.
+2. Associate each property with identity, state, attempt and digest relationships. Compare observations and refusal conditions, not just test counts.
+3. Add fixed boundary interactions such as judgment after redelivery, delivery after renewal and valid continuation after refusal. New properties need existing authority or separate review, not automatic approval of LLM expectations.
+4. If needed, enumerate a small discrete model's existing input coverage, then compare IPOG/IPOG-F gap-fill candidates. Keep regressions and leave generation outside default CI acceptance initially.
+5. Only then allow budgeted sequence exploration, shrinking and replay. Put helpers with demonstrated shared consumers; do not infer a repository-wide action library from one family.
 
-当前 [RTM 源码消费者](../../../tools/rtm-check.ts)按源码字面量 `test("名字", ...)` 发现测试名；`test(c.name, ...)` 的变量名不会被该匹配器解析。因此首轮保留具名字面量声明，只组合内部行为。批量生成需要另行处理测试发现、追溯绑定和实际执行身份，不能仅生成可运行代码。
+The [RTM source consumer](../../../tools/rtm-check.ts) discovers names from literal `test("name", ...)` declarations; it does not parse the variable in `test(c.name, ...)`. The first round therefore keeps named literals and composes only their bodies. Batch generation separately needs discovery, traceability bindings and executed identity, not merely runnable code.
 
-### 试点验收与退出
+### Pilot acceptance and exit
 
-| 需要回答的问题                     | 验证方式                                                                     | 不能据此声称                               |
-| ---------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------ |
-| 是否保持既有性质与观察点           | 抽取前后具名回归重放，逐项核对拒绝、状态变化及受保护状态                     | 测试数相同就没有遗漏                       |
-| 新组合是否确实可执行并击中目标边界 | 重放轨迹，记录身份、引用、时钟、中间状态与结果                               | 生成器列出组合就已覆盖行为                 |
-| 判定机制能否发现相关错误           | 有针对性的负控制／故障替换；分别报告发现、存活、不可应用、未执行及环境失败   | 进程崩溃就是杀死目标缺陷；不可应用就是通过 |
-| 参数模型是否完整覆盖声明域         | 小模型枚举与生成器自检核对约束、可扩展组合、分母及未覆盖项                   | 当前模型满覆盖就是产品充分覆盖             |
-| 是否值得继续共享或生成             | 比较修改一个领域条件涉及的重复位置、抽取复杂度、生成时间、执行时间和重放成本 | 减少测试条数就减少总成本或保持检出能力     |
+| Question | Verification | Unsupported conclusion |
+| --- | --- | --- |
+| Existing properties and observations preserved? | Replay named regressions before/after; inspect refusals, changes and protected state | Same count means no omissions |
+| New combinations execute and reach the intended boundary? | Replay identities, references, clocks, intermediate states and results | Listed combinations equal executed coverage |
+| Judge detects relevant errors? | Targeted negative controls/fault substitutions; separately report caught, survived, inapplicable, unrun and environment failures | Crash equals target-defect detection; inapplicable equals pass |
+| Parameter model covers its declared domain? | Small-model enumeration plus generator checking of constraints, extendible combinations, denominators and gaps | Full model coverage equals sufficient product coverage |
+| Further sharing/generation worthwhile? | Compare repeated edits for one domain change, extraction complexity, generation/execution time and replay cost | Fewer tests means lower total cost or preserved detection |
 
-只有复用收益明确、原性质保留、新边界可重放、追溯身份仍有效且预算可接受时，才考虑扩大。出现隐藏状态、过滤拒绝路径、需要大规模基础设施才能表达小测试族，或维护成本超过收益时，缩小／撤回抽象；保留有价值的反例与具名回归，不靠削弱验收维持试点。
+Expand only with clear reuse, preserved properties, replayable boundaries, valid traceability and acceptable budgets. Shrink or remove abstractions hiding state, filtering refusal, requiring large infrastructure for a small family, or costing more to maintain. Keep useful counterexamples and named regressions rather than weaken acceptance to sustain the pilot.
 
-生成／探索轮的样本预算与性能容差在相应实现前固定。第一轮只抽取语义片段并保持既有回归，不把生成样本或速度收益作为接受依据；文档结构检查不是行为结论的实验验证。
+Fix generation/exploration sample budgets and performance tolerances before their implementation. Round one only extracts semantics while preserving regressions; generated samples or speed are not acceptance evidence. Documentation structure checks do not experimentally validate behavior.
 
-### 第一轮试点结果
+<a id="第一轮试点结果"></a>
 
-2026-10-12 在 Windows 工作树完成局部抽取，基线为 `1d8e479294718bb023d70f45d0017a0cfcbf3d6f` 的 `tests/core/task-board-deliverable.test.ts`。选择与替代方案由[试点决策](../../decisions/implemented/2026-10-12-deliverable-tests-compose-behavior.zh-CN.md)拥有，不把本轮收益推广为全仓策略。
+### First pilot results
 
-- `claimedWorkItem` 组合创建与领取，`deliveredWorkItem` 在其上组合交付。三项测试直接使用领取工厂，五项使用交付工厂；身份与 digest 显式传入，返回实际 entry 快照。
-- 既有八个名字、25 个 `assert.*` 调用的完整源码逐项一致。比较用 TypeScript AST 发现字面量 `test` 声明并收集其断言，对零测试、无断言或两侧不同均失败；不是只比较总数。
-- 测试文件从 263 行变为 235 行，包含新增的两个工厂，净减少 28 行。省去的是重复前缀，不是断言、拒绝路径、fixture 回收或实际操作。
-- 抽取前后各运行一次目标文件，均为 8 passed、0 failed、0 cancelled、0 skipped、0 todo。LSP 对该文件报告零诊断，目标 Prettier 与 ESLint 检查通过。
-- 两项既有负控制都由指定名字的测试检出：`stale-claim-may-deliver-again` 对应续租不启动新 attempt；`deliverer-may-judge-its-own-work` 对应提交者不能自行裁定。工具先运行干净套件，报告 2/2 caught，并确认生产目标 `src/core/store/base.ts` 逐字节恢复。没有增加或改变这两项故障定义。
+On 2026-10-12, a Windows working tree extracted local behavior from `tests/core/task-board-deliverable.test.ts` at `1d8e479294718bb023d70f45d0017a0cfcbf3d6f`. The [pilot decision](../../decisions/implemented/2026-10-12-deliverable-tests-compose-behavior.md) owns the choice and alternatives; this result is not a repository-wide policy.
 
-重放目标回归和本轮负控制：
+- `claimedWorkItem` combines creation and claiming; `deliveredWorkItem` adds delivery. Three tests use the claim factory and five the delivery factory. Identities/digests are explicit, returning actual entry snapshots.
+- Every source text for the eight names and 25 `assert.*` calls matches. A TypeScript AST comparator discovers literal tests and associates assertions, refusing zero tests, missing assertions or a mismatch, not merely comparing totals.
+- The file goes from 263 to 235 lines including the two new factories: 28 fewer lines of repeated prefix, not assertions, rejection paths, cleanup or operations.
+- One target execution before and one after each report 8 passed and zero failed, cancelled, skipped or todo. File LSP has zero diagnostics; scoped Prettier/ESLint pass.
+- Existing controls `stale-claim-may-deliver-again` and `deliverer-may-judge-its-own-work` are caught by the named renewal/no-new-attempt and no-self-judgment tests. The harness first runs clean tests, reports 2/2 caught and restores `src/core/store/base.ts` byte-identically. Fault definitions are unchanged.
+
+Replay:
 
 ```text
 node --experimental-strip-types --test tests/core/task-board-deliverable.test.ts
 npm run mutation:teeth -- --targets=src/core/store/base.ts --mutant=stale-claim-may-deliver-again,deliverer-may-judge-its-own-work
 ```
 
-目标回归每次执行上限 60 秒，负控制上限 120 秒；它们是执行预算，不是速度容差。两次目标运行不是性能实验，本轮不声称加速、保持全部未知缺陷检出能力或覆盖新的状态交互。源码断言一致与两项负控制也不构成语义等价的形式证明。
+The target budget is 60 seconds and control budget 120 seconds, not speed tolerances. Two target runs are not a performance experiment. There is no claim of acceleration, all unknown-defect detection or new state interactions. Assertion preservation plus two controls is not formal semantic equivalence.
 
-第一轮只支持“共同前缀可用普通本地函数复用，现有观察与两项指定负控制仍有效”。该轮未实施新边界组合、生成器、探索预算或跨文件共享；后续共享见下节。整轮仓库验收仍按既有 route 执行，最近执行证据由 verifier／receipt 拥有，不由这些局部结果代替。
+This round supports ordinary local functions for common prefixes, retaining observed assertions and two specified controls. It adds no boundary combinations, generator, exploration budget or cross-file sharing; later sharing follows below. Existing routes still own full acceptance, and verifier receipts—not these local outcomes—own latest execution evidence.
 
-### 第二轮试点结果
+<a id="第二轮试点结果"></a>
 
-2026-10-12 在同一 Windows 工作树验证已有对象上的复合行为。源码比较基线仍为 `1d8e479294718bb023d70f45d0017a0cfcbf3d6f`，消费者为 `tests/core/task-board-deliverable.test.ts` 与 `tests/core/task-board-retention.test.ts`；共享实现为 `tests/support/task-board-behavior.ts`，选择由[试点决策](../../decisions/implemented/2026-10-12-deliverable-tests-compose-behavior.zh-CN.md)拥有。
+### Second pilot results
 
-- 场景构造与已有 entry 上的领取／交付分离。交付族五项测试和保留期族四项测试使用共享函数；其他三项保留直接领取及单步拒绝观察。调用者提供引用、身份、digest、租期和时间，算子返回实际交付快照，不重新创建对象。
-- 交付族显式选择当前时间与 3600 秒租期；保留期族保留历史存活时刻和 600 秒租期。两个动作使用同一传入时刻；创建与最终处理的产品时钟未改造，整个场景不是完全确定性模拟。
-- TypeScript AST 按每个字面量测试关联其断言，确认交付族八个名称与 25 个 `assert.*` 调用源码、保留期族四个名称与 18 个调用源码分别逐项一致。比较器用零测试、删掉断言及修改断言三种内存负例自检，不仅比较数量。
-- 两个消费者的前置运行为 12 passed；加入四项共享函数契约测试后的目标运行为 16 passed。各次均为 0 failed、cancelled、skipped、todo；原回归没有改名或删除。
-- 新测试观察已有引用与历史时钟的准确传递、独立裁定之后在同一 entry 上续租／重新交付、竞争领取的拒绝及原持有者继续，以及交付异常不被吞并且成功领取仍可观察。裁定前后状态在组合接缝分别检查，旧交付快照不被就地改写。
-- 新测试各用独立的 `:memory:` store；原有两个文件数据库生命周期不变。交付异常由替换该测试 store 的交付方法注入，不是实际磁盘或后端故障实验，也不支持事务回滚保证。
-- 四个代码文件的 LSP 均为零诊断，目标 Prettier 和 ESLint 检查通过。两项既有负控制重新运行，仍由指定名字的测试检出，报告 2/2 caught，生产目标逐字节恢复；故障定义未改动。
+On 2026-10-12 the same Windows tree checks composition over existing objects. Comparison still uses `1d8e479294718bb023d70f45d0017a0cfcbf3d6f`; consumers are `tests/core/task-board-deliverable.test.ts` and `tests/core/task-board-retention.test.ts`, shared implementation `tests/support/task-board-behavior.ts`, with choices owned by the [pilot decision](../../decisions/implemented/2026-10-12-deliverable-tests-compose-behavior.md).
 
-重放第二轮目标测试，预算 60 秒：
+- Separate scenario creation from claiming/delivering an existing entry. Five delivery tests and four retention tests share the function; the other three keep direct claim and one-step refusal observations. Callers supply reference, identity, digest, lease and time; the operator returns the actual delivered snapshot without recreating the object.
+- Delivery tests explicitly choose current time and a 3600-second lease; retention tests keep historical live times and 600-second leases. Both actions use the same supplied instant. Creation/final handling keep the product clock; this is not complete deterministic simulation.
+- AST comparison associates assertions with each literal test: delivery's eight names/25 calls and retention's four names/18 calls match individually. In-memory zero-test, deleted-assertion and modified-assertion controls check the comparator.
+- Existing consumers first report 12 passed; adding four helper contracts yields 16 passed, with zero failed, cancelled, skipped or todo throughout. No regression is renamed or deleted.
+- New tests observe exact existing references/historical clocks, renewal/redelivery on the same independently judged entry, competing-claim refusal followed by the owner's continuation, and unswallowed delivery exceptions with successful claims still observable. State is checked on both sides of judgment seams; old snapshots are not mutated in place.
+- Each new test uses a separate `:memory:` store; original file-database lifecycles stay unchanged. Delivery failure replaces that test store's method: no disk/backend fault or transaction-rollback proof.
+- Four code files have zero LSP diagnostics; scoped Prettier/ESLint pass. Both old controls are again caught by the required named tests, 2/2, restoring production bytes with fault definitions unchanged.
+
+Replay within 60 seconds:
 
 ```text
 node --experimental-strip-types --test tests/core/task-board-deliverable.test.ts tests/core/task-board-retention.test.ts tests/support/task-board-behavior.test.ts
 ```
 
-两项负控制沿用[第一轮的限定命令](#第一轮试点结果)，预算 120 秒。本轮误启动过一次未限定的完整 mutation 扫描，该调用超时且未保全完整结果，不计入通过证据；确认无残留扫描进程、mutation 锁或产品源码改动后，另行完成上述限定运行。完整 mutation 扫描仍未验证。
+The two controls reuse the [first-round scoped command](#first-pilot-results) with 120 seconds. An accidentally unscoped full mutation invocation timed out without complete retained results; it is not passing evidence. After confirming no remaining sweep process, mutation lock or production edit, the scoped run completed. The full sweep remained unverified at this point.
 
-本轮支持一个普通函数在两个真实测试族中复用，并在具名样本中作用于已有对象和保留拒绝／部分失败语义。显式参数及辅助函数测试增加代码和维护面，本轮不以行数或提速为收益依据。没有引入 DSL、覆盖生成器、LLM 探索或全仓迁移；没有测量 t-way 覆盖、未知缺陷检出率或完整正确性。
+This supports reuse across two real families and preservation of existing-object, refusal and partial-failure semantics in named samples. Explicit parameters and helper tests add code/maintenance, so line count or speed is not the claimed gain. No DSL, generator, LLM exploration or repository-wide migration; no measured t-way coverage, unknown-defect detection or complete correctness.
 
-### 独立工作区提交前复验
+### Independent-workspace pre-commit recheck
 
-独立工作区以 `2337963637e6bbdaf1ecf237e0fc7ce6ef045ffc` 为基线，按提交版本的锁文件执行 `npm ci`，没有带入共享工作区中他人的 lockfile 改动。目标 16 项测试、四个文件的 LSP 和两项指定负控制通过。
+The independent workspace starts at `2337963637e6bbdaf1ecf237e0fc7ce6ef045ffc` and runs `npm ci` against that committed lockfile, not another contributor's shared-workspace lock changes. Its 16 target tests, four-file LSP and two specified controls pass.
 
-首轮完整 scoped 验证的 15 项静态检查通过，`test:product` 为 1724 passed、1 failed。失败是未修改的 `tests/extensions/nmg/reasoning-workspace.test.ts` 中 `clear removes only the selected session scratchpad`：`finally` 的 `rmSync` 删除测试临时目录时返回 `EPERM`。调试器单步执行删除成功；同名用例在普通独立进程中重复 20 次，失败 0/20。尚未建立可重复的原因，不将其标为“flaky”或据此关闭问题。
+The first full scoped run passes 15 static checks but reports `test:product` as 1724 passed/1 failed: unchanged `tests/extensions/nmg/reasoning-workspace.test.ts`, `clear removes only the selected session scratchpad`, gets `EPERM` in `finally` while `rmSync` removes its temporary directory. Debugger stepping removes it successfully; 20 ordinary standalone repeats reproduce 0/20 failures. No repeatable cause is established; this does not label it “flaky” or close it.
 
 ```text
 node --experimental-strip-types --test --test-name-pattern="^clear removes only the selected session scratchpad$" tests/extensions/nmg/reasoning-workspace.test.ts
 ```
 
-该失败不计通过，也不由单例重跑代替完整验收；未改动失败测试、放宽检查或更换锁文件。第二次独立工作区完整验证的 `test:product` 通过，但先执行的 `rtm:check` 读取首轮失败收据并拒绝，所以该次整轮仍失败。新收据写出后单独重跑 `rtm:check` 通过；没有删除或手改失败收据。提交前完整 scope 再次运行，执行结果仍由本工作区的 verifier 收据拥有。
+The failure is not a pass, and isolated repeats do not replace full acceptance. The failing test, gates and lockfile remain unchanged. The second full run passes product tests but its earlier `rtm:check` reads the first failed receipt and refuses, so the run still fails. After a new receipt is written, a standalone `rtm:check` passes; failed receipts are neither deleted nor hand-edited. The full pre-commit scope runs again, with execution owned by that workspace's verifier receipt.
 
-### 第三轮边界组合结果
+<a id="第三轮边界组合结果"></a>
 
-基线为独立工作区的 `d864ffb56331405a5833a6fc41df3ce8451751a7`。本轮复用 `claimAndDeliver`，不增加算子或修改其接口；新增 `tests/core/task-board-attempt-boundaries.test.ts` 的两个具名 store 契约样本，各自使用独立内存数据库并由 `node:test` 清理连接。
+### Third boundary-composition results
 
-- 同身份重新领取：60 秒租约结束前 1ms 可以修订并裁定；恰好到期不再存活，旧身份直接交付被拒绝且数据不变。同身份重新领取必须进入 attempt 2，并在再次交付之前清空旧产物、引用、摘要及裁定字段。再用共享函数交付时不得误增为 attempt 3。
-- 不同身份接手：到期前 1ms 的竞争领取被拒绝；恰好到期可以接手，并在新交付前观察旧产物与裁定被隔离。新产物交付之后，旧持有者不能交付或夺走新工作的存活租约，但可以作为当前产物的独立评审者；判断绑定的是新 digest，而不是永久身份黑名单。
-- entry TTL 固定在 2099 年，避免把条目清理与 60 秒 claim 租期混为一谈。领取、交付及裁定使用指定时刻；创建仍使用产品时钟，本轮不是全流程确定性模拟或跨进程并发实验。
-- 原先四个相关测试文件运行 38 passed；加入两个场景后五个文件运行 40 passed，均无 failed、cancelled、skipped 或 todo。Git 对比确认旧测试、共享函数及产品源码相对基线没有改动；没有退役原用例或改写既有预期。
-- 新增测试及变更的 mutation 注册文件 LSP 零诊断，目标 Prettier／ESLint 通过。三个新增故障定位均可解析，并与两个既有负控制一起运行，报告 5/5 被指定名字的测试检出，生产目标逐字节恢复。
+Baseline: independent-workspace `d864ffb56331405a5833a6fc41df3ce8451751a7`. This round reuses `claimAndDeliver` without a new operator or interface change, adding two named store contracts in `tests/core/task-board-attempt-boundaries.test.ts`, each with separate memory DB and `node:test` connection cleanup.
 
-| 新增负控制                               | 改错的语义                           | 必须失败的具名场景 |
-| ---------------------------------------- | ------------------------------------ | ------------------ |
-| `expired-self-claim-is-only-a-heartbeat` | 判断续租只看同身份，遗漏租约是否存活 | 同身份到期重新领取 |
-| `claim-is-live-at-its-expiry-boundary`   | 把存活区间的结束边界从 `>` 改为 `>=` | 同身份到期重新领取 |
-| `new-attempt-keeps-prior-deliverer`      | 新 attempt 清空产物时残留旧交付者    | 不同身份到期接手   |
+- Same-identity reclaim: revision and judgment work 1ms before the 60-second lease ends; exactly at expiry the claim is no longer live, direct old-identity delivery is refused without changing data. Reclaim enters attempt 2, clearing old artifact/reference/digest/judgment before redelivery. Shared delivery must not advance to attempt 3.
+- Different-identity takeover: a competing claim is refused 1ms before expiry and accepted exactly at expiry. Observe old artifact/judgment isolation before new delivery. Afterwards the old holder cannot deliver or steal the new live lease, but may independently judge its current artifact: judgment binds the new digest, not a permanent identity blacklist.
+- Entry TTL is fixed in 2099, separating entry cleanup from the 60-second claim lease. Claim, delivery and judgment use specified instants; creation retains product time. This is neither end-to-end deterministic simulation nor cross-process concurrency.
+- Four related files first report 38 passed; five files with the new scenarios report 40, all with zero failed/cancelled/skipped/todo. Git confirms old tests, helper and product source unchanged from baseline; no retired tests or rewritten expectations.
+- The new test and mutation registry have zero LSP diagnostics; scoped Prettier/ESLint pass. Three new fault locations resolve and, with two existing controls, are caught by required names: 5/5, production bytes restored.
 
-注册与运行沿用既有 mutation harness；没有新建故障运行器。到期比较使用函数范围内的 AST 文本定位，另外两项使用既有 initializer／literal-fragment 算子；没有修改定位器实现。
+| New negative control | Incorrect semantics | Required failing scenario |
+| --- | --- | --- |
+| `expired-self-claim-is-only-a-heartbeat` | Renewal checks identity but omits liveness | Same-identity reclaim at expiry |
+| `claim-is-live-at-its-expiry-boundary` | Changes interval end from `>` to `>=` | Same-identity reclaim at expiry |
+| `new-attempt-keeps-prior-deliverer` | New attempt clears artifact but keeps old submitter | Different-identity takeover at expiry |
+
+Registration/execution reuse the existing mutation harness. Expiry uses function-scoped AST text location; the others use existing initializer/literal-fragment operators. No new runner or locator implementation.
 
 ```text
 node --experimental-strip-types --test tests/core/task-board.test.ts tests/core/task-board-deliverable.test.ts tests/core/task-board-retention.test.ts tests/support/task-board-behavior.test.ts tests/core/task-board-attempt-boundaries.test.ts
 npm run mutation:teeth -- --targets=src/core/store/base.ts --mutant=expired-self-claim-is-only-a-heartbeat,claim-is-live-at-its-expiry-boundary,new-attempt-keeps-prior-deliverer,stale-claim-may-deliver-again,deliverer-may-judge-its-own-work
 ```
 
-目标测试预算 60 秒，限定负控制预算 120 秒。正常实现通过新场景，未发现产品缺陷；人为变体被检出不等于发现三个真实缺陷，也不等于新增三个检出能力。没有单独对旧套件运行这些新变体来测量前后检出增益；旧的主动释放用例已观察交付者清空，本轮增加的是到期上下文和组合接缝，不能据此判其重复。
+Budgets are 60 seconds for targets and 120 for scoped controls. Normal implementation passes; no product defect is found. Catching deliberate variants is not finding three natural defects or establishing three new detection abilities. The old suite was not separately tested against new variants to measure incremental detection. Old active-release cases already observe submitter clearing; these add expiry context and seams, which does not by itself make them redundant.
 
-这组样本支持保留必要的中间观察：错误残留的旧交付者可能在后续交付时被覆盖，只检查组合末态不能代替领取后的观察。它不证明全部序列覆盖、退役等价、维护收益或完整正确性；参数生成器、受限 LLM 探索及保留标记与租约的交互仍未验证。
+Intermediate observations matter: a wrongly retained old submitter could be overwritten by later delivery, so final state cannot replace post-claim checks. These samples do not prove full sequence coverage, retirement equivalence, maintenance savings or complete correctness. Parameter generation, bounded LLM exploration and retention-marker/lease interactions remain unverified.
 
-### 更广的结构筛选（2026-10-13）
+<a id="更广的结构筛选2026-10-13"></a>
 
-此前只检查三个范围，并以“同一文件、片段很短”支持不新增的结论，证据不足。该结论由本节替代：短片段和局部复用不能否定语义集中维护的价值；本次已经找到可直接实施的首选，而不是继续等待整体找虫收益的证明。
+### Broader structural screen (2026-10-13)
 
-#### 输入与方法
+The previous three-scope inspection used “same file, short fragment” to argue against another extraction, without sufficient evidence. This section supersedes that conclusion: short fragments and local reuse do not negate centralized semantic maintenance. A directly implementable first choice was found, rather than deferring until whole-system defect-detection gains are proved.
 
-观察状态为 `d864ffb56331405a5833a6fc41df3ce8451751a7` 加未提交的第三轮改动。输入由 `package.json` 的 `test:product` 十四组 glob 决定，含新边界文件，不含 research／chaos／evals 或生产数据。一次性 AST 探针解析 199 个文件，识别 1,716 个静态 test／it 声明、15,666 个非直接断言调用点和 3,967 个同一词法块内的动作对。这些是静态位置，不是执行次数；1,716 也不等于上一轮产品执行报告的 1,727 个用例。
+#### Inputs and method
 
-[结构筛选快照](behavior-structure-screen-2026-10-13.json)保存时刻、Node／TypeScript 版本、HEAD、输入与探针 SHA256、全部输入文件以及明确选择的 16 个方法族和 14 个动作对。每族最多保留四个跨文件例子；这是历史测量，不是当前源码目录或语义等价证明。另行核对 manifest 与全部 199 个输入文件的哈希、16／14 个保留族，以及 13 段路径对应 5 文件／9 场景的数据一致性，检查通过。
+Observed state: `d864ffb56331405a5833a6fc41df3ce8451751a7` plus uncommitted third-round edits. Inputs come from the fourteen `test:product` glob groups in `package.json`, including the new boundary file, excluding research/chaos/evals and production data. A one-off AST probe parses 199 files, finding 1,716 static test/it declarations, 15,666 non-direct-assertion call sites and 3,967 same-lexical-block action pairs. These are source locations, not executions; 1,716 is not the previous product report's 1,727 cases.
 
-探针复用既有 `resolveRouteTestFiles` 和 `writeJsonAtomic`，没有增加 npm 命令、框架或运行期接口。方法名聚类保留 receiver 与参数字段，动作对保留中间语句和直接断言数，不把跨断言的两个调用伪装成连续组合。自检覆盖连续调用、断言屏障、不同回调隔离、空 AST、闭合路径，以及附带额外元数据的片段不能混入基本路径。探针运行通过且 LSP 零诊断；一次性脚本不进入交付源码，复算方法与具体引用保留在快照中。
+The [screen snapshot](behavior-structure-screen-2026-10-13.json) stores timestamp, Node/TypeScript versions, HEAD, input/probe SHA256, all inputs and the explicitly selected 16 method families/14 action-pair families, with at most four cross-file examples per family. This is historical measurement, not a live source inventory or semantic-equivalence proof. Separate checks pass for manifest/all 199 input hashes, retained 16/14 families and the 13-path/5-file/9-scenario relationships.
 
-#### 候选排序
+The probe reuses `resolveRouteTestFiles` and `writeJsonAtomic`, adding no npm command, framework or runtime interface. Method clusters retain receivers/argument fields; pairs retain intervening statements/direct assertion counts, not falsely treating calls across assertions as adjacent. Self-checks cover adjacent calls, assertion barriers, distinct callbacks, empty AST, closed paths and rejection of extra-metadata fragments from basic paths. Execution/LSP pass; the one-off script is not delivered, with recomputation method and references retained in the snapshot.
 
-此排序依据实际共同结构、消费者差异和副作用边界，而不是把频次、行数或文件修改次数换算为收益。
+#### Candidate ranking
 
-| 候选                             | 跨文件发现                                                                               | 语义核对与主要风险                                                                                                                 | 本次判断                                                                                                 |
-| -------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| 已有节点上的路径／回路连边       | `linkNodes` 共 47 个位置、9 个文件；其中确认 13 段基本路径，属于 5 个文件的 9 个具名场景 | 同一 store、同一关系类型、前边 target 接后边 source；不夹断言。闭合路径、方向和调用顺序有真实意义，不能去重、排序或强加无环条件    | 新增行为算子的首选：以普通类型化函数集中路径构建，不创建节点或接管场景判定                               |
-| 已有 memory chain 上建立明确边集 | `addMemoryChainEdge` 20 个位置、4 个文件；连续边对 9 处、3 个文件                        | 有合流而非只有直线路径；必须区别 node ID 与 memory ID、DAG 拒绝路径，以及 LTG／STG 不同 store。20 个位置不是 20 个已证明可替换位置 | 备用候选：只共享已有 chain 引用上的明确边写入，不与节点关系路径合成通用“图算子”                          |
-| 批量记忆写入                     | remember→remember 172 处、25 个文件，160 处语句连续                                      | 自动去重、状态替代、scope、sourceActor、STG／LTG 会影响每步结果；既有 service `rememberBatch` 还限制单一物理 store                 | 复用机会大，但不能凭两个 remember 连续就判成相同准备。先复用已有能力，不为统计上的同名调用新建统一写入器 |
-| 写入后重建叶块／注入外部向量     | remember→rebuildLeafBlocks 16 处、6 个文件；upsertExternalEmbeddings 9 个位置、5 个文件  | 全库与指定节点重建不同，membersKey／Delta 前后状态可能是测试对象；向量、模型命名空间和就绪状态也属于场景输入                       | 有价值的第二梯队，不把准备与待测变化一起收进去                                                           |
-| working-state 绑定后写入         | bindWorkingState→replaceWorkingState 12 处、4 个文件                                     | 绑定涉及可信 host 上下文，写入涉及隐私、预算和拒绝后保留旧内容；简单拼接不能证明授权与观察可合并                                   | 风险较高，不作为第一项实施；不能让共享片段替调用者选权威身份                                             |
-| close 后清理目录                 | 78 处、45 个文件                                                                         | 这是资源生命周期，不是行为覆盖；内存／文件／daemon 资源需要匹配                                                                    | 最广的机械复用信号，回到既有 test-runtime owner 评估迁移，不另造行为算子库                               |
+Ranking uses real common structure, consumer differences and side-effect boundaries, not frequencies, lines or edit counts converted into savings.
 
-已有 `claimAndDeliver` 保留：它确实跨场景复用，但本次发现说明它不是唯一值得算子化的行为，也不能由前三个小范围得出全仓没有新机会。保留／清理流程的中间观察和不同 embedding 测试替身仍需区别处理；这不是对这些领域所有片段的否定。
+| Candidate | Cross-file findings | Semantic checks and principal risks | Judgment |
+| --- | --- | --- | --- |
+| Path/cycle links over existing nodes | `linkNodes`: 47 sites/9 files; 13 confirmed basic paths in 9 named scenarios/5 files | Same store/type; previous target becomes next source, no intervening assertion. Closed paths, direction and call order matter: no deduplication, sorting or imposed acyclicity | First choice: ordinary typed path builder; no node creation or scenario judgment |
+| Explicit edge sets on an existing memory chain | `addMemoryChainEdge`: 20 sites/4 files; 9 adjacent pairs/3 files | Includes convergence, not just lines; distinguish node/memory IDs, DAG refusals and LTG/STG stores. Twenty sites are not twenty proved replacements | Reserve: explicit writes on existing chain references, not one generic graph operator with node relations |
+| Batch memory writes | remember→remember: 172 pairs/25 files, 160 statement-adjacent | Deduplication, supersession, scope, sourceActor and STG/LTG affect each result; service `rememberBatch` is already single-physical-store | Large opportunity, but adjacency alone is not identical setup. Reuse existing capability before inventing a universal writer from name counts |
+| Rebuild leaves/inject external vectors after writing | remember→rebuildLeafBlocks: 16/6 files; upsertExternalEmbeddings: 9 sites/5 files | Whole-store versus specified nodes; membersKey/Delta transitions may be the subject. Vectors, model namespaces and readiness are inputs | Valuable second tier; do not swallow the change under test into setup |
+| Write after working-state binding | bindWorkingState→replaceWorkingState: 12/4 files | Trusted host context versus privacy/budget/refusal-preserved state; concatenation does not establish mergeable authorization/observations | Higher risk, not first implementation; helper must not choose authority for callers |
+| Directory cleanup after close | 78 sites/45 files | Resource lifecycle, not behavioral coverage; memory/file/daemon resources must match | Broadest mechanical reuse signal; return to test-runtime owner, not a competing behavior library |
 
-#### 首选的具体范围
+Keep `claimAndDeliver`: it has real cross-scenario reuse, but it is not the only worthwhile operator. Three earlier small scopes do not show no repository-wide opportunities. Retention/cleanup observations and distinct embedding doubles still require separate treatment; this is not a blanket rejection of fragments in those domains.
 
-十三段路径全部保留在快照的 `basicNodePaths`，包括以下消费者：
+#### Concrete first-choice scope
 
-- `tests/core/analogy.test.ts`：矛盾双向关系、依赖路径与因果回路。
-- `tests/core/community.test.ts`：连通结构、依赖社区、矛盾社区与反馈回路。
-- `tests/core/graph-cycles.test.ts`：有向回路、无环路径，以及同一对象在 symmetric／directed 关系下的不同观察。
-- `tests/core/multi-hop-path.test.ts`：已有节点上的两跳路径。
-- `tests/core/store/graph.test.ts`：两跳邻域。
+All thirteen paths appear in snapshot `basicNodePaths`:
 
-基本路径的结构选择条件为：连续至少两个 `linkNodes` 调用，参数恰为 sourceNodeId／targetNodeId／type，同 receiver、同字面关系类型，前一步 target 表达式与后一步 source 表达式一致；其他语句终止片段。逐项核对了上述五个文件，确认 store 为 NmgStore、引用来自已有真实节点。测试调用处的动态 mixin 类型未提供可用定义位置，因而继续读取 owning 源码 `src/core/store/graph.ts`，并通过 LSP 核对其实际输入与 NodeRelation 返回类型；没有把纯文本匹配冒充类型等价。
+- `tests/core/analogy.test.ts`: bidirectional contradiction, dependency path and causal cycle.
+- `tests/core/community.test.ts`: connectivity, dependency/contradiction communities and feedback cycle.
+- `tests/core/graph-cycles.test.ts`: directed cycle, acyclic path and observations between symmetric/directed relations on the same objects.
+- `tests/core/multi-hop-path.test.ts`: two-hop existing-node path.
+- `tests/core/store/graph.test.ts`: two-hop neighborhood.
 
-可实施的表达是 `linkNodePath(store, existingNodeIds, relationType)` 一类普通函数。例如 A→B→C 与 A→B→A 由调用者显式给出节点顺序；函数保持逐边写入、既有失败传播和产品时钟，返回真实关系观察，不增加事务、自动闭环或前置过滤。只有消费同一基本语义的片段进入它；重连幂等、evidence 合并、关系强度或带中间断言的片段仍可直接调用。这里是首选接口与范围建议，不是已实施代码或新的验收门禁。
+Basic-path selection requires at least two consecutive `linkNodes` calls with exactly sourceNodeId/targetNodeId/type, same receiver/literal relation type, and previous target expression equal to next source. Any other statement ends the fragment. Each of the five files was inspected: NmgStore and real existing-node references. Dynamic mixin types at test call sites provided no usable definition location, so owning `src/core/store/graph.ts` and LSP were used to check actual inputs and NodeRelation outputs; textual matches were not represented as type equivalence.
 
-Git 定位包含 `cb4a858a` 的 cycle 功能、`ed8e9797` 的 community 功能、`294cd18e` 的 analogy 功能和 `e093eb6c` 的 multi-hop 功能。这说明不同功能使用同一图结构意图，不说明曾经发生同一字段的反复同步修复，也不是节省维护工时的实测。
+A feasible interface is ordinary `linkNodePath(store, existingNodeIds, relationType)`. Callers explicitly supply A→B→C or A→B→A. Preserve sequential writes, existing failure propagation and product clocks, returning real relation observations: no transaction, automatic closure or prefilter. Only identical basic semantics enter it; idempotent relinking, evidence merging, strength and intermediate assertions may stay direct. This is an interface/scope proposal at this stage, not delivered code or an acceptance gate.
 
-#### 最大风险与决策终点
+Git locations include cycle `cb4a858a`, community `ed8e9797`, analogy `294cd18e` and multi-hop `e093eb6c`. They show shared structural intent across features, not repeated synchronized fixes to a field or measured maintenance time saved.
 
-最大的风险不是函数短或长，而是共同表达把关键差异抹平：
+#### Principal risks and decision endpoint
 
-- 普通 node relation 可以用于回路诊断；memory-chain edge 的写入拒绝 DAG 回路。不能共用“默认无环”前置条件或互借接受依据。
-- `tests/core/stg-isolated.test.ts` 中连续的 create／edge 调用跨 LTG 和 STG；相邻方法名相同不是同一个执行对象。
-- 两次同端点 linkNodes 可能是在验证幂等或合并 evidence，并不是长度为二的路径。
-- 跨断言拼成一个动作会隐藏观察；remember、binding、资源清理的高频也不能直接转换成统一行为契约。
+The main risk is erasing distinctions, not function length:
 
-本次以明确的首选、备用候选和排除理由结束，撤回此前“当前没有值得新增的候选”的判断。下一项可以直接实施上述已有节点路径片段，并以现有具名场景和必要的局部契约／负控制完成验证；不要求先证明整体缺陷检出增益，也不自动退役测试。本轮仅完成结构筛选：没有实现新算子、执行新生成序列或改动产品／原测试，未测量维护时间、自然缺陷检出或完整语义覆盖。
+- Ordinary node relations permit cycle diagnosis; memory-chain writes reject DAG cycles. They cannot share default-acyclic premises or borrow acceptance evidence.
+- Adjacent create/edge calls in `tests/core/stg-isolated.test.ts` cross LTG/STG; same method names do not mean the same execution object.
+- Repeated same-endpoint `linkNodes` can test idempotence/evidence merging, not a two-edge path.
+- Composition across assertions hides observations. Frequent remember/bind/cleanup calls do not directly define one contract.
 
-### 已有节点路径实施结果（2026-10-13）
+The screen ends with an implementable first choice, reserves and exclusions, withdrawing “no worthwhile new candidate.” Implement the existing-node fragment with existing named scenarios and necessary local contracts/controls, without first proving overall detection gains or retiring tests automatically. This phase screens structure only: no new operator, generated sequence, product/original-test edit, maintenance-time measurement, natural-defect detection or complete semantic coverage.
 
-用户认可首选后，实施范围固定为筛选中的 13 段，不再继续选型。`tests/support/node-graph-behavior.ts` 的 `linkNodePath` 是普通类型化函数：只持有 `linkNodes` 写入能力，逐对连接调用者已有的 ID 序列和关系类型，返回真实关系结果。资源、节点创建和判定仍由消费者负责；具体边界回到[测试设计](../../design/ci-cd-and-quality.md#41-行为片段与资源-fixture)。没有产品源码、依赖、验证 route、DSL 或生成器变化。
+<a id="已有节点路径实施结果2026-10-13"></a>
 
-#### 保留对比
+### Existing-node path implementation results (2026-10-13)
 
-基线为 `d864ffb56331405a5833a6fc41df3ce8451751a7`。五个消费者的原 49 个字面量测试名称和 158 个 `assert` 调用源码逐项一致；这些是静态声明／调用点，不是断言执行次数。将新函数调用按相邻 ID 展开为原三字段 `store.linkNodes` 调用、删除仅引入该函数的 import，再用 TypeScript printer 去注释后比较整个消费者 AST，五文件均与基线一致。比较保留 receiver、端点、关系类型、逐边顺序、场景创建和观察位置；它不是一般语义等价或完整正确性的证明。
+After user approval, scope is fixed to the thirteen screened fragments. `linkNodePath` in `tests/support/node-graph-behavior.ts` is an ordinary typed function holding only `linkNodes` write capability: pairwise connect caller-owned IDs/type and return actual relation results. Resources, creation and judgments remain consumer-owned; [test design](../../design/ci-cd-and-quality/composable-test-runtime.md) owns the boundaries. No product source, dependency, verification route, DSL or generator changes.
 
-| 消费者         | 原名称 | 原断言调用 | 迁移片段 |
-| -------------- | -----: | ---------: | -------: |
-| analogy        |      4 |         12 |        3 |
-| community      |      3 |         12 |        4 |
-| graph-cycles   |      8 |         21 |        4 |
-| multi-hop-path |      3 |         18 |        1 |
-| store/graph    |     31 |         95 |        1 |
-| 合计           |     49 |        158 |       13 |
+#### Preservation comparison
 
-一次性比较器复用 `writeJsonAtomic`，参数显式指定基线、五路径和预期 13 段。自检包括可保留的展开，以及空输入、改名、缺失／改变断言、错误端点／receiver／类型和新增观察的拒绝；运行与 LSP 检查通过。Node `v24.19.0`、TypeScript `5.9.3`，格式化后测量时刻 `2026-10-13T04:16:02.786Z`，探针 SHA256 `bb4123e205a993e5fb3a494cdf14c48c29df3cd67f9754bb42c04363d8d620ed`。本地完整结果为 `.nmg/verification/node-path-comparison.json`；脚本不交付。复核可从上述基线读取五个 blob，以 `ts.createSourceFile` 收集字面量名称和断言文本，再按上述展开与 printer 方法比较当前消费者；限定测试命令见下文。
+Baseline: `d864ffb56331405a5833a6fc41df3ce8451751a7`. All original 49 literal test names and 158 `assert` source calls in five consumers match individually. These are declarations/call sites, not assertion execution counts. Expand helper calls into adjacent-ID three-field `store.linkNodes` calls, remove only the newly introduced import, then compare whole consumer ASTs through TypeScript's comment-free printer: all five equal baseline. Receiver, endpoints, relation type, write order, creation and observations remain. This is not general semantic equivalence or complete correctness.
 
-筛选快照保留实施前的输入哈希，不用修改后的五文件重写历史测量。幂等重连、evidence 合并、附加元数据、独立边，以及 symmetric 与 directed 关系之间的观察仍在原位置；没有自动退役用例。产品源码和已有 Task Board helper／原交付与保留期测试相对基线未改变。
+| Consumer | Original names | Original assertion calls | Migrated fragments |
+| --- | ---: | ---: | ---: |
+| analogy | 4 | 12 | 3 |
+| community | 3 | 12 | 4 |
+| graph-cycles | 8 | 21 | 4 |
+| multi-hop-path | 3 | 18 | 1 |
+| store/graph | 31 | 95 | 1 |
+| Total | 49 | 158 | 13 |
 
-#### 契约与限定负控制
+The one-off comparator reuses `writeJsonAtomic`, with explicit baseline, five paths and expected thirteen fragments. Controls accept valid expansion and reject empty input, renames, missing/changed assertions, wrong endpoints/receiver/type and extra observations. Execution/LSP pass. Environment: Node `v24.19.0`, TypeScript `5.9.3`; post-format measurement `2026-10-13T04:16:02.786Z`; probe SHA256 `bb4123e205a993e5fb3a494cdf14c48c29df3cd67f9754bb42c04363d8d620ed`. Full local result: `.nmg/verification/node-path-comparison.json`; script not delivered. Recompute by reading the five baseline blobs, collecting literal names/assertions with `ts.createSourceFile` and using the expansion/printer method above; scoped execution follows below.
 
-新增四项具名契约测试，分别检查方向与顺序／实际快照，重复端点与重复边的逐次结果，空／单节点输入不写入，以及后续失败原样传播、停止执行且真实 SQLite 中保留成功前缀。三个场景使用独立 `:memory:` store，空／单点场景只需一个调用即抛错的写入能力；失败场景在第二次调用注入同一 Error，不声称复现了产品自然缺陷或数据库底层错误。原消费者的文件数据库生命周期不变。
+Screen hashes remain pre-implementation measurements, not rewritten using changed consumers. Idempotence, evidence merging, extra metadata, independent edges and symmetric/directed observations stay in place. No automatic retirement. Product source, existing Task Board helper and original delivery/retention tests remain baseline-identical.
 
-迁移前五文件 49/49；迁移后加四项契约共 53/53。限定命令：
+#### Contracts and scoped controls
+
+Four named contracts check direction/order/actual snapshots; repeated endpoints/edges and per-call results; no writes for empty/single-node input; and unchanged later-error propagation with execution stopped and a successful prefix retained in real SQLite. Three scenarios use independent `:memory:` stores; the empty/single case needs only a write capability that throws on any call. Failure injects the same Error at call two, not a natural product defect or underlying database failure. Original consumer file-database lifecycles stay unchanged.
+
+Five files pass 49/49 before migration; adding four contracts yields 53/53:
 
 ```text
 node --experimental-strip-types --test tests/core/analogy.test.ts tests/core/community.test.ts tests/core/graph-cycles.test.ts tests/core/multi-hop-path.test.ts tests/core/store/graph.test.ts tests/support/node-graph-behavior.test.ts
 npm run mutation:teeth -- --targets=tests/support/node-graph-behavior.ts --mutant=node-path-skips-the-first-edge,node-path-counts-only-unique-endpoints,node-path-swallows-a-later-link-failure
 ```
 
-既有 harness 注册三项函数内限定故障，不增加 mutation operator 或 runner：跳过第一边由顺序／快照测试检出；以唯一端点数作为长度由重复端点测试检出；吞掉后续 link 失败由失败／成功前缀测试检出。3/3 均可定位并被指定真实名称检出，目标文件逐字节恢复，结果时刻 `2026-10-13T04:14:39.671Z`（本地 `.nmg/verification/node-path-teeth.json`）。这不是完整 mutation 扫描、三个真实缺陷，或三个新增检出能力的证明。
+Existing harness registers three function-scoped faults without a new operator/runner: skip first edge is caught by order/snapshot checks; unique-endpoint length by repetition checks; swallowed later failure by failure/successful-prefix checks. All 3/3 locate and are caught by required real names, with target bytes restored. Result time: `2026-10-13T04:14:39.671Z`, local `.nmg/verification/node-path-teeth.json`. This is not a full sweep, three natural defects or proof of three additional detection abilities.
 
-#### 完整检查与未解决复现
+#### Full checks and unresolved reproduction
 
-首轮完整 scoped run `c6c1ca85-f912-4606-be6d-fbfdbf246018` 在 `2026-10-13T04:22:28.657Z` 写出失败收据：15 项阻塞检查通过，`test:product` 为 1,730 passed／1 failed；未修改的 `tests/cli/process.test.ts` 中 `daemon idle timer is refreshed by requests` 在第二次 status 读取后得到 `running=false`。外层 task 调用另行返回 `[TIMED OUT]`；收据失败与外层超时是两项不同观察，不能互相解释。失败日志和收据保留于本地 `.nmg/verification/node-path-final-verify.log` 与 `node-path-first-full-failure.json`，未删除或手改。
+First full scoped run `c6c1ca85-f912-4606-be6d-fbfdbf246018` writes a failed receipt at `2026-10-13T04:22:28.657Z`: 15 blocking checks pass, product 1,730 passed/1 failed. Unchanged `tests/cli/process.test.ts`, `daemon idle timer is refreshed by requests`, receives `running=false` after its second status read. Outer task separately returns `[TIMED OUT]`. Receipt failure and outer timeout are distinct observations, not explanations for each other. Local `.nmg/verification/node-path-final-verify.log` and `node-path-first-full-failure.json` retain both, without deletion/manual edits.
 
-第二轮完整 run `5337bab5-255a-4776-8a0b-e4e4f10d577a` 于 `2026-10-13T04:38:27.895Z` 写出收据，`test:product` 通过，但先执行的 `rtm:check` 读取上一轮产品失败证据而失败，因此整轮仍不是绿灯。`--json` 模式的外层 task 也超时；不修改失败收据，后续只依据 verifier 正常写出的新证据复核。
+Second full run `5337bab5-255a-4776-8a0b-e4e4f10d577a` writes at `2026-10-13T04:38:27.895Z`: product passes, but earlier `rtm:check` reads the previous product failure and fails, so the whole run is not green. Its outer `--json` task also times out. Preserve failure receipts and review only normally emitted new verifier evidence.
 
-第三轮 run `a5db74d7-d0cb-4ee4-81e8-4c38b4131323` 于 `2026-10-13T04:48:37.414Z` 写出成功收据，14 个 owned 路径的 16 项阻塞检查全部通过，包括 `rtm:check` 与 `test:product`。一次性独立 launcher 在运行前记录 HEAD 和这 14 个输入的 SHA256，执行同一个 watchdog 而不修改 route 或验收标准；原生子进程退出码为 0，状态于 `2026-10-13T04:48:37.447Z` 写出。launcher 的缺失输入负控制、LSP 与全量 lint 通过，不进入交付源码。该结果证明此轮正常结束，不证明前两次外层超时的根因已解决。
+Third run `a5db74d7-d0cb-4ee4-81e8-4c38b4131323` writes success at `2026-10-13T04:48:37.414Z`: all sixteen blocking checks for fourteen owned paths pass, including RTM/product. A one-off independent launcher records HEAD and fourteen input SHA256 values before invoking the same watchdog without route/standard changes. Native child exit is zero; status written at `2026-10-13T04:48:37.447Z`. Launcher missing-input control, LSP and full lint pass; it is not delivered. This establishes that run's normal completion, not the first two outer timeouts' cause.
 
-精确名称独立重跑四次，4/4 通过（该条件下 0/4 复现）；调试器在原文件第二次断言处观察到 `first.running=true`、`second.running=true`，继续至结束后临时资源已移除。未修改该 CLI 用例、daemon 或验收标准，检查时没有残留 verifier 进程。未建立原全量失败或外层超时的根因；后续绿灯不将它们标成已解决，也不以“flaky”代替未解决复现。
+Four exact-name standalone repeats pass 4/4 (0/4 reproduced under those conditions). At the original second assertion the debugger observes `first.running=true` and `second.running=true`, then confirms temporary cleanup after continuing. No changes to the CLI case, daemon or standards, and no verifier process remains at inspection. Neither original full-run failure nor outer-timeout root cause is established. Later green results do not mark them resolved or replace investigation with “flaky.”
 
 ```text
 node --experimental-strip-types --test --test-name-pattern="^daemon idle timer is refreshed by requests$" tests/cli/process.test.ts
 ```
 
-#### 决定与边界
+#### Decision and limits
 
-保留该函数和这 13 个消费者片段，本块在验证后收尾，不自动进入 memory-chain、批量写入或其他候选。尚未测量维护时间、自然缺陷检出增益或全仓迁移收益。AST 保留、实际目标执行与指定故障检出分别提供证据，不互相替代；最终完整 scoped 检查由既有 `agent:verify` 的收据记录，不用本节的局部结果冒充。该路径验证阶段尚未 stage 或 commit；后续本地提交与集成结果见下一节，历史失败与未确认的根因仍保留。
+Keep the function and thirteen fragments, closing this implementation block after verification, not automatically moving to chain/batch/other candidates. No maintenance-time, natural-detection gain or whole-repository migration benefit is measured. AST preservation, actual execution and specified fault detection provide separate evidence. Existing `agent:verify` receipts own final full scoped checks; local results do not substitute. At this historical stage the path work was not staged/committed. Later delivery/integration follows; failed observations and unconfirmed causes remain.
 
-## 本地集成交付（2026-10-13）
+## Local integration delivery (2026-10-13)
 
-本轮收尾只交付已决定保留的 `claimAndDeliver`、`linkNodePath` 及其消费者，不扩展算子库、DSL 或生成器。行为分支的 14 个待提交路径以 `164f0bb08c923e410ee980e28a9ee4bf9f17e34f` 提交，父提交为 `d864ffb5`；14 个输入 SHA256 在提交和 hook 后一致，工作区干净。新提交前复验：目标 93/93、九文件 LSP 零诊断，scoped run `4aef3730-5754-45ee-baf2-dc18296bcf86` 于 `2026-10-13T14:06:40.477Z` 完成 16 项阻塞检查，原生退出 0。该旧基线复验不是集成证明。
+Closeout delivers only the chosen `claimAndDeliver`, `linkNodePath` and consumers, without expanding the operator library, DSL or generator. Fourteen behavior paths commit as `164f0bb08c923e410ee980e28a9ee4bf9f17e34f`, parent `d864ffb5`; fourteen input SHA256 values match after commit/hook and workspace is clean. Pre-commit recheck: targets 93/93, nine-file zero LSP diagnostics, scoped run `4aef3730-5754-45ee-baf2-dc18296bcf86` completes sixteen blocking checks at `2026-10-13T14:06:40.477Z`, native exit zero. That old-baseline recheck is not integration proof.
 
-独立分支 `test/behavior-and-reporting-integration` 以共享区的提交快照 `a964fa3af2baddf12e1e625a9bfd907d8266095f` 为基线，依次重放执行报告修复 `66238c2`、恢复测试修复 `432c0e8`、行为组合 `d864ffb5` 和 `164f0bb`，得到 `cc34153e059101333466be0f303175cdfb1632b5`。只解决 CI owning design 的更新时间冲突，保留较新的日期。31 个差异路径中其余 30 个 Git blob 与对应源提交一致；设计正文精确等于恢复修复版加算子的 §4.1，因此类型入口、按需清单、GC skip 与行为合同均未丢失。基线的其他代码及共享工作树的未提交文件未被带入或改写。
+Independent `test/behavior-and-reporting-integration` starts from shared committed snapshot `a964fa3af2baddf12e1e625a9bfd907d8266095f`, replaying execution reporting `66238c2`, recovery tests `432c0e8`, composition `d864ffb5`, then `164f0bb`, producing `cc34153e059101333466be0f303175cdfb1632b5`. Only the CI owning design's updated date conflicts; retain the newer date. Thirty of thirty-one differing paths are blob-identical to their source commits. Design body equals the recovery-fix version plus operator §4.1, retaining type entry points, on-demand inventory, GC skips and behavior contracts. Other baseline code and uncommitted shared files are neither imported nor overwritten.
 
-该集成代码快照的实测结果：
+Measured on that integrated code snapshot:
 
-- 15 个目标文件：128 项，126 passed、0 failed、2 个正式 GC skip；显式 GC robustness 16/16，无 skip。
-- 从真实 `tools/ci-uncovered-tests.ts --list` 派生的十个离线 harness：91/91，无失败或 skip；未过滤恢复场景。
-- 19 个受影响 TypeScript 文件：LSP 零诊断。
-- 既有 mutation harness 的节点路径三项、Task Board 五项限定负控制：8/8 由指定名字检出，两个目标均逐字节恢复。不是完整 mutation sweep。
-- clean `npm run verify:product-ci`：于 `2026-10-13T14:29:25.477Z` 取得原生退出 0；1781 项，1779 passed、0 failed、2 个正式 GC skip，31 个输入 SHA256 前后一致。
+- Fifteen target files: 128 cases, 126 passed, zero failed, two explicit GC skips; explicit-GC robustness 16/16 with no skip.
+- Ten offline harnesses derived from real `tools/ci-uncovered-tests.ts --list`: 91/91, no failures/skips and no filtered recovery scenarios.
+- Nineteen affected TypeScript files: zero LSP diagnostics.
+- Existing harness's three node-path and five Task Board controls: 8/8 caught by required names, both targets byte-restored. Not a full sweep.
+- Clean `npm run verify:product-ci`: native exit zero at `2026-10-13T14:29:25.477Z`; 1781 cases, 1779 passed, zero failed, two explicit GC skips. All thirty-one input SHA256 values match before/after.
 
-本节是在上述代码快照之后补入的证据记录，CI 结果不声称已经覆盖后续文档字节。最终清洁 scoped 检查由 owner 生成收据；复验范围可在 PowerShell 中用 `$scope = git diff --name-only a964fa3af2baddf12e1e625a9bfd907d8266095f HEAD` 取得，再执行 `node --experimental-strip-types tools/agent-verify-watchdog.ts --require-clean @scope`。目标测试、显式 GC、限定 mutation 和完整 CI 使用本记录及两个修复决策已有的入口，不新增 runner。
+This evidence section was added after that code snapshot; CI does not claim to cover later documentation bytes. The owner emits final clean scoped receipts. In PowerShell, recover scope with `$scope = git diff --name-only a964fa3af2baddf12e1e625a9bfd907d8266095f HEAD`, then run `node --experimental-strip-types tools/agent-verify-watchdog.ts --require-clean @scope`. Target tests, explicit GC, scoped mutation and full CI use the existing entry points here and in the two repair decisions, not a new runner.
 
-这完成了本地分支的算子提交与功能集成，不表示共享分支已合并或已 push。没有 Linux、GitHub workflow dispatch、独立外部验收、live provider、完整 benchmark、生成器实测或自然缺陷检出增益证明；历史 daemon 与外层超时的根因也不由本次成功关闭。
+This completes local operator commits and functional integration, not a claim that the shared branch is merged or pushed. No Linux, GitHub workflow dispatch, independent external acceptance, live provider, full benchmark, measured generator or natural-defect gain proof. Success does not close historical daemon or outer-timeout causes.
 
-## 来源与未验证项
+<a id="来源与未验证项"></a>
 
-豆包搜索用于发现来源；正文用于核对具体定义、条件与局限。NIST 原站部分页面未能直连，下列标注镜像的正文来自第三方 `csrc.nist.rip`，不能当作原站最新发布状态的验证。OpenReview 的 Last Modified 日期不作为论文发表日期。
+## Sources and unverified items
 
-| 编号 | 来源与已核查范围                                                                                                                                                                                                                                                         | 本记录采用的证据边界                                                               |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| S1   | [ACTS User Guide：Basic 1.0 / Advanced 3.3，文件标注 Nov 2023，镜像 PDF](https://csrc.nist.rip/csrc/media/Projects/automated-combinatorial-testing-for-software/documents/acts_user_guide_for_basic1.0_and_advanced3.3_versions_nov23.pdf)，正文 §§1–3                   | 算法能力、约束处理、混合强度、负向测试、extend 与覆盖核验；未验证新发布版          |
-| S2   | [NIST Event Sequence Testing，镜像正文](https://csrc.nist.rip/Projects/automated-combinatorial-testing-for-software/combinatorial-methods-in-testing/event-sequence-testing)，页面标注更新 2021-10-12                                                                    | SCA 定义、允许插入、实例及原数组生成说明；未核验最优性                             |
-| S3   | [Ordered t-way Combinations for Testing State-based Systems，2022-04-14 草案，镜像 PDF](https://csrc.nist.rip/csrc/media/Projects/automated-combinatorial-testing-for-software/documents/seqWP-4.pdf)，全文；[2023 会议记录](https://openreview.net/forum?id=vyfw4ngjAt) | 以取得的 2022 草案核对 OCC 定义与串接构造；2023 PDF 被验证页面阻挡，未核查修订差异 |
-| S4   | [Combinatorial Modeling and Test Case Generation for Industrial Control Software using ACTS，2018 v2](https://arxiv.org/pdf/1803.09006v2)，全文                                                                                                                          | ACTS 2.92、17 个 PLC 程序的生成效率与适用性；不是缺陷检出研究或当前版本排名        |
-| S5   | [Using binary decision diagrams for constraint handling in combinatorial interaction testing，2019 v1](https://arxiv.org/html/1907.01779v1)，约束定义、IPOG、BDD 方法、实验与有效性威胁                                                                                  | 62 模型、2-way／3-way 的约束处理性能证据；不是所有模型最优性的证明                 |
-| S6   | Duan、Lei、Kacker、Kuhn：[An Approach to T-Way Test Sequence Generation With Constraints，2019 ICSTW 检索入口](https://csrc.nist.gov/Projects/automated-combinatorial-testing-for-software/acts-library/workshop-papers)                                                 | 题名、作者与摘要级证据；算法正文、能力与覆盖保证未核实                             |
-| S7   | [Developing multithreaded techniques and improved constraint handling for the tool CAgen，2022](https://openreview.net/forum?id=7JEW3ZNrXb)                                                                                                                              | 摘要级证据；不采用其性能作为 NMG 选型结论                                          |
-| S8   | [fast-check model-based testing](https://fast-check.dev/docs/advanced/model-based-testing/)                                                                                                                                                                              | 命令、模型、前置条件与执行的工作方式；未在 NMG 接入或实测                          |
-| S9   | [Dafny Quick Reference](https://dafny.org/dafny/QuickReference) 与 [Verification Optimization](https://dafny.org/dafny/VerificationOptimization/VerificationOptimization)                                                                                                | 规格与证明机制、求解稳定性成本；不是全仓适用性证明                                 |
-| S10  | [Lean into verified software development：Cedar](https://aws.amazon.com/blogs/opensource/lean-into-verified-software-development/)                                                                                                                                       | 可执行 Lean 模型、性质证明与 Rust 随机差分的组合实例                               |
-| S11  | [Lean：Validating Proofs](https://lean-lang.org/doc/reference/latest/ValidatingProofs/)                                                                                                                                                                                  | 可信命题、依赖与验证工具边界；latest 链接会变化，不推断全部编译器／运行时信任消失  |
-| S12  | [FoundationDB testing](https://apple.github.io/foundationdb/testing.html)                                                                                                                                                                                                | 确定性模拟与故障测试经验；不是对 NMG 真实边界的验证                                |
-| S13  | [Agentic PBT，2025 v1](https://arxiv.org/html/2510.09907v1)                                                                                                                                                                                                              | 研究中的性质与缺陷报告评估；样本有效率不外推为 NMG 误报率或行业共识                |
+Doubao search discovered sources; text review checked definitions, conditions and limits. Some NIST originals were unreachable; marked mirrors below are third-party `csrc.nist.rip` text, not verification of the original site's latest release. OpenReview Last Modified is not a publication date.
 
-尚未验证：跨测试复用的维护收益、全面缺陷检出能力、未覆盖的状态边界、生成器及依赖的实际运行、最新 ACTS 发布版、S6／S7 正文、2023 OCC 论文相对草案的变化，以及受限探索执行环境的隔离强度。第一轮证据只覆盖其结果节明确测量的局部切片。后续结果回到本记录补充；正式规则或行为变化回到其既有 owner，不由研究文档自行晋升。
+| ID | Source and reviewed scope | Evidence boundary |
+| --- | --- | --- |
+| S1 | [ACTS User Guide, Basic 1.0 / Advanced 3.3; file marked Nov 2023, mirrored PDF](https://csrc.nist.rip/csrc/media/Projects/automated-combinatorial-testing-for-software/documents/acts_user_guide_for_basic1.0_and_advanced3.3_versions_nov23.pdf), §§1–3 | Algorithm capability, constraints, mixed strength, negative testing, extend and coverage checks; no later-release verification |
+| S2 | [NIST Event Sequence Testing, mirrored text](https://csrc.nist.rip/Projects/automated-combinatorial-testing-for-software/combinatorial-methods-in-testing/event-sequence-testing), page marked updated 2021-10-12 | SCA, insertions, examples and original construction; not optimality |
+| S3 | [Ordered t-way Combinations for Testing State-based Systems, 2022-04-14 draft, mirrored PDF](https://csrc.nist.rip/csrc/media/Projects/automated-combinatorial-testing-for-software/documents/seqWP-4.pdf), full text; [2023 conference record](https://openreview.net/forum?id=vyfw4ngjAt) | OCC/construction checked against acquired 2022 draft; verification wall blocked 2023 PDF, so revisions unchecked |
+| S4 | [Combinatorial Modeling and Test Case Generation for Industrial Control Software using ACTS, 2018 v2](https://arxiv.org/pdf/1803.09006v2), full text | ACTS 2.92, seventeen PLC programs, generation efficiency/applicability; not defect detection or current ranking |
+| S5 | [Using binary decision diagrams for constraint handling in combinatorial interaction testing, 2019 v1](https://arxiv.org/html/1907.01779v1), constraint/IPOG/BDD definitions, experiments and validity threats | Constraint performance on 62 models, 2-way/3-way; not universal optimality |
+| S6 | Duan, Lei, Kacker, Kuhn: [An Approach to T-Way Test Sequence Generation With Constraints, 2019 ICSTW discovery entry](https://csrc.nist.gov/Projects/automated-combinatorial-testing-for-software/acts-library/workshop-papers) | Title/authors/abstract only; algorithm text, capability and coverage guarantee unverified |
+| S7 | [Developing multithreaded techniques and improved constraint handling for the tool CAgen, 2022](https://openreview.net/forum?id=7JEW3ZNrXb) | Abstract only; performance not adopted as NMG selection evidence |
+| S8 | [fast-check model-based testing](https://fast-check.dev/docs/advanced/model-based-testing/) | Commands, models, premises and execution; not integrated/measured in NMG |
+| S9 | [Dafny Quick Reference](https://dafny.org/dafny/QuickReference), [Verification Optimization](https://dafny.org/dafny/VerificationOptimization/VerificationOptimization) | Specification/proof mechanisms and solver-stability costs; not whole-repository applicability |
+| S10 | [Lean into verified software development: Cedar](https://aws.amazon.com/blogs/opensource/lean-into-verified-software-development/) | Executable Lean model, property proofs and randomized Rust differential combination |
+| S11 | [Lean: Validating Proofs](https://lean-lang.org/doc/reference/latest/ValidatingProofs/) | Trusted propositions, dependencies and verification boundaries; mutable latest URL does not eliminate compiler/runtime trust |
+| S12 | [FoundationDB testing](https://apple.github.io/foundationdb/testing.html) | Deterministic simulation/fault experience, not validation of NMG real boundaries |
+| S13 | [Agentic PBT, 2025 v1](https://arxiv.org/html/2510.09907v1) | Research evaluation of properties/defect reports; sample validity is not NMG false-positive rate or industry consensus |
+
+Still unverified: cross-test maintenance gains, comprehensive defect detection, uncovered state boundaries, real generator/dependency execution, latest ACTS release, S6/S7 full text, 2023 OCC changes from the draft, and isolation strength of a bounded exploration environment. First-round evidence covers only its explicitly measured local slice. Later results return to this record; formal rules/behavior changes return to their existing owners, not self-promotion by a research document.

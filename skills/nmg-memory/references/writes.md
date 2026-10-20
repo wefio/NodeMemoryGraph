@@ -1,5 +1,7 @@
 # Durable writes
 
+[中文](writes.zh-CN.md) · [Terms used](writes.terms.yaml)
+
 ## Fact, preference, constraint, and strategy
 
 ```text

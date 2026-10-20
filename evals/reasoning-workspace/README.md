@@ -1,5 +1,7 @@
 # Reasoning workspace benchmark
 
+[English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
+
 This development benchmark measures whether the Lab-only `nmg_reason` workspace
 helps an agent maintain explicit task state. It is separate from LongMemEval,
 LoCoMo, PersonaMem, and BEAM because those suites do not call the reasoning

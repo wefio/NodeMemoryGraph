@@ -1,0 +1,50 @@
+version: 2
+namespace: docs.governance
+terms:
+  - term: terminology index
+    aliases: [glossary, 术语索引, 术语表]
+    definition: >-
+      A scoped query view over registered topic definitions, locating canonical terms, aliases, namespaces and behavior owners without another maintained full dictionary. It covers registered material only; local misses do not prove global absence, and cross-scope homonyms remain candidates.
+      从登记的主题定义中按范围发现规范词形、别名、作用域和行为 owner 的查询视图，
+      不另维护一份全量词义。索引只覆盖登记语料；局部未命中不证明全仓不存在，
+      跨作用域同名返回候选，不任意合并概念。
+    owner: docs/decisions/implemented/2026-09-08-repository-terminology-index.md
+    anchor: "Decision"
+    status: canonical
+  - term: terminology definition
+    aliases: [术语定义, canonical term definition]
+    definition: >-
+      One authoritative topic-owned word meaning explaining a concept's name, semantics and scope. The canonical word identifies it, with namespace qualification for homonyms; the design or interface owner separately owns the complete behavior contract.
+      由所属主题维护的一份权威词义，解释概念的名称、语义和适用范围。
+      规范词形标识词义，同名异义时以作用域区分；完整行为合同另由设计或接口 owner 负责。
+    owner: docs/design/documentation-governance.md
+    anchor: "Distributed terminology definitions and discovery"
+    status: canonical
+  - term: terminology reference
+    aliases: [术语引用]
+    definition: >-
+      A use-site pointer to an existing definition, not another complete authoritative word meaning. Lookup and use retain its identity and scope; homonyms must not be merged arbitrarily.
+      使用处对既有术语定义的指向，不在使用处建立另一份完整权威词义。
+      查找或引用需保留定义的标识与适用范围，同词异义时不能任意合并。
+    owner: docs/design/documentation-governance.md
+    anchor: "Distributed terminology definitions and discovery"
+    status: canonical
+  - term: section confirmation record
+    aliases: [小节确认记录]
+    definition: >-
+      A record identifying the exact paired contents last jointly confirmed at one section. Changes can trigger review, but the record does not prove equivalence, accuracy or natural expression. Registering this concept does not enable section-hash checks.
+      标识两份配对材料在一个小节上次被共同确认的确切内容的记录。
+      内容变化可以触发复核，但记录不证明两侧同义、准确或自然。
+      本概念的登记不启用小节哈希检查。
+    owner: docs/design/documentation-governance.md
+    anchor: "Distinct consistency obligations"
+    status: proposed
+  - term: "doc-maintenance"
+    aliases: ["文档维护工作流"]
+    definition: >-
+      The repository Skill that routes documentation changes to their authority and reader-review owners without duplicating project facts.
+      将文档修改路由到权威与读者审稿 owner、而不复制项目事实的仓库 Skill。
+    owner: skills/doc-maintenance/SKILL.md
+    anchor: "Documentation maintenance"
+    status: canonical
+references: []

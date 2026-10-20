@@ -1,5 +1,7 @@
 # Shared task blackboard
 
+[中文](board.zh-CN.md) · [Terms used](board.terms.yaml)
+
 Read this for temporary cross-Agent coordination or a repository in-flight
 registry. Ordinary single-Agent memory use does not require the board.
 

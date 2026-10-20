@@ -1,0 +1,16 @@
+version: 2
+terms:
+  - term: reusable script part
+    aliases: [script part, 可复用脚本部件]
+    definition: >-
+      An exported callable library function in `src/rcp` or `tools/parts` that a one-off script can import; it is not a new command-line entry point.
+      可由一次性脚本导入的 `src/rcp` 或 `tools/parts` 导出函数；它不是新的命令行入口。
+    owner: docs/guides/parts.md
+    anchor: The parts shelf
+    status: canonical
+references:
+  - Repository Control Plane
+  - receipt
+  - trusted baseline
+  - gate
+  - work order

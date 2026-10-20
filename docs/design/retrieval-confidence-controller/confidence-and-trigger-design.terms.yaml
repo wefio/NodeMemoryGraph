@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: NQC dispersion
+    aliases: [normalized score dispersion, NQC, 归一化分数离散度]
+    definition: >-
+      The clamped standard-deviation-to-mean ratio of direct candidate strengths used by the current QPP score; it is not a prediction of evidence count.
+      当前 QPP 分数使用的 direct candidate strength 标准差与均值之比，并限制在 [0,1]；它不预测 evidence 数量。
+    owner: docs/design/retrieval-confidence-controller/confidence-and-trigger-design.md
+    anchor: Current score and trigger
+    status: canonical
+  - term: QPP trigger guardrail
+    aliases: [QPP guardrail, QPP 触发保护条件]
+    definition: >-
+      A deterministic trigger floor for an empty result set, all direct candidates being hybrid-match fallbacks, or Top1 below 0.2, independent of the learned or fixed threshold.
+      不依赖学习或固定阈值的确定性触发底线：结果集为空、所有 direct 候选都是 hybrid-match fallback，或 Top1 低于 0.2。
+    owner: docs/design/retrieval-confidence-controller/confidence-and-trigger-design.md
+    anchor: Current score and trigger
+    status: canonical
+  - term: first-pass evidence target
+    aliases: [initialEvidenceTarget, 初始 evidence 目标]
+    definition: >-
+      The requested first cumulative evidence count for a progressive walk; the current default is 13, but the caller limit and available Fibonacci rungs can prevent that tier from being visited.
+      渐进遍历请求的首个累计 evidence 数量；当前默认值为 13，但调用方 limit 和可用 Fibonacci 档位可能使该档位无法访问。
+    owner: docs/design/retrieval-confidence-controller/confidence-and-trigger-design.md
+    anchor: Progressive re-selection
+    status: canonical
+references: [QPP, cumulative Fibonacci evidence tier, same-pool progressive re-selection, QPP expansion trace, learnable controller]

@@ -1,5 +1,13 @@
 # Retrieval-quality activation-gated chain expansion — 2026-08-25
 
+[English](chain-activation-2026-08-25.md) | [简体中文](chain-activation-2026-08-25.zh-CN.md) · [Terms](chain-activation-2026-08-25.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a historical
+experiment record. The configurations, measurements, implementation descriptions
+and follow-up proposals below are scoped to that experiment. This review did not
+rerun the experiment or independently revalidate its original artifacts; these
+are not current test receipts, default-policy decisions or general guarantees.
+
 Follow-up to
 [retrieval-quality-chains-2026-08-24.md](chains-2026-08-24.md).
 That run showed whole-chain `expandChains` is a coverage win but the context
@@ -38,14 +46,18 @@ LLM calls). Baselines from the 08-24 runs listed above.
 | + chains, activation-gated | **28.9%** | 68.9% | 30.2% | 34.6% | **93,915** |
 
 Event_ordering slice (n=40), whole-chain → gated: R@20 17.4% → 15.6% (back to
-the no-chain level), any@20 90.0% → 57.5%. p50 latency 41ms → 25ms.
+the no-chain level), any@20 90.0% → 57.5%. The report also lists p50 latency
+41ms → 25ms without identifying a matched latency workload or baseline;
+that pair is not a controlled speedup measurement.
 
 ## Reading
 
-- The gate keeps roughly **40% of the coverage gain at 40% of the context
-  cost** (any@20: +14.9 → +3.8 pts over no-chains; ctx: 3.1× → 1.8× of
-  stacked+node). R@20 is unmoved or slightly better (28.9% vs 27.7% — ~10
-  golds, noise-level), confirming chain expansion was never a ranking lever.
+- Relative to no-chains, the gate retains about **25.5% of the any@20 gain**
+  (+3.8 / +14.9 points), using about **39.5% of the additional context**
+  (42,805 / 108,254 characters). Total context is 93,915 / 159,364 ≈ 58.9%
+  of whole-chain context. The earlier "40% of the coverage gain at 40% of
+  the context cost" wording conflated these denominators. R@20 is 28.9%
+  versus 27.7%; these single-run tables do not establish significance.
 - **Event_ordering loses everything the chains gave it.** Its evidence sits
   several positions away from the hit and shares no query terms — exactly the
   members a proximity-decayed gate drops. Coverage there needs either a wider
@@ -61,7 +73,8 @@ the no-chain level), any@20 90.0% → 57.5%. p50 latency 41ms → 25ms.
 ## Caveats
 
 - Single dataset (BEAM), single run per arm; ±1 pt differences are not
-  significant at n=235 scored questions.
+  accompanied here by an uncertainty estimate or significance test at n=235
+  scored questions.
 - The gate constants (θ=0.5, importance weight 0.5, cap = ranked count) are
   principled defaults, deliberately not tuned on this benchmark; production
   chains (small, topical, edged) may shift the trade-off versus BEAM's
@@ -79,27 +92,33 @@ session (= eval chain) and position; a "ranked hit" is a gold at rank ≤ 20.
   golds in one session; same-session golds span a median of 50 messages.
 - The density trigger fires on **10%** of questions (≥2 ranked golds in one
   session). Multi_session_reasoning 25%, summarization 20–25%.
-- The dominant miss pool is unreachable by any within-chain mechanism:
-  170/216 missed golds sit in sessions with **no ranked gold at all** — the
-  chain is never triggered there, at any window size. (Whole-chain expansion
-  confirms the ceiling: it reduced same-session misses to 2 but left 145/216
-  in untriggered sessions, and all@20 stayed 2.5%.)
+- Gold-hit coverage was incomplete under the report's diagnostic:
+  170/216 missed golds sit in sessions with **no ranked gold at all** in this
+  diagnostic. That does not exclude a non-gold ranked member as a chain seed.
+  The whole-chain report reduced same-session misses to 2, left 145/216 in
+  sessions it described as untriggered, and kept all@20 at 2.5%; those counts
+  do not establish a universal upper bound for all chain seeds.
 
 **LoCoMo (no chains in store; prospective):** category 2 (temporal) is 91%
 single-session with span 2 but only 1.2 golds/question — expansion adds
 little. Category 1 (multi-hop, 3.1 golds/question): 5% single-session, 585
-missed golds in unranked sessions. Chains would not move LoCoMo either; its
-headroom is cross-session first-hit recall (which the summary tiers already
-address: 48.6% R@20 without chains).
+missed golds in sessions without ranked golds. These prospective counts
+motivate testing cross-session first-hit recall (the summary report recorded
+48.6% R@20 without chains); they are not a direct LoCoMo chain-arm evaluation.
 
 **LongMemEval:** golds are whole sessions (avg 12 turns) and matching is
 candidate-in-gold — one retrieved member of the gold session already counts.
-Chains can't pull from sessions with no hit, so they are structurally
-near-useless for this metric.
+With within-session chains, adding more members from an already-hit gold
+session does not create a new session-level hit under this metric. That
+argument does not cover other chain constructions or evidence metrics.
 
-**Conclusion:** density escalation is dead on arrival (trigger fires on
-10–25% of the target questions), and chains are a BEAM-specific,
-message-level-multi-evidence tool. The binding constraint everywhere is
-**first-hit recall per relevant session**, not within-chain expansion — the
-activation gate is the right deployable default, and further chain work has
-poor expected value compared to routing/base-recall improvements.
+**Interpretation boundary:** this diagnostic counted ranked **gold** hits, not
+all ranked chain members. A non-gold member could still seed expansion, so
+"no ranked gold" does not prove an untriggered chain or a mechanism-wide
+upper bound. The reported 10–25% gold-hit trigger rates motivated prioritizing
+session first-hit routing over this density proposal in the sampled workloads;
+they do not establish that density escalation is universally ineffective,
+that chains only help BEAM, or that a production default is authorized.
+Current bounds and caller behavior belong to the
+[chain design](../../design/temporal-logical-chains-design-2026-08-13/converged-design.md),
+not this dated experiment.

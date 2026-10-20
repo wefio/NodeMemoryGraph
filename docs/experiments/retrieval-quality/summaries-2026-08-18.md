@@ -1,5 +1,13 @@
 # Retrieval-quality leaf-summary arm + stacked arm — 2026-08-18
 
+[English](summaries-2026-08-18.md) | [简体中文](summaries-2026-08-18.zh-CN.md) · [Terms](summaries-2026-08-18.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a historical
+experiment record. The configurations, measurements, implementation descriptions
+and follow-up proposals below are scoped to that experiment. This review did not
+rerun the experiment or independently revalidate its original artifacts; these
+are not current test receipts, default-policy decisions or general guarantees.
+
 Third formal run series of the pinned retrieval-quality protocol
 (`evals/retrieval/`). Adds the leaf-block summary arm (`--summaries`) and the
 stacked arm (`--hybrid --summaries`). Companions:
@@ -92,7 +100,7 @@ protocol constant, not dataset-dependent.
 ## Reading
 
 - The summary arm's win concentrates exactly where the hybrid arm's miss mode
-  was "wording shares nothing with the question": LoCoMo cat-4 (multi-hop,
+  was "wording shares nothing with the question": LoCoMo cat-4 (
   35.1% → 70.7% stacked) and BEAM summarization (5.3% → 15.9%). The block
   summary bridges the phrasing gap at index time instead of at query time.
 - Summaries and embeddings are complementary, not substitutes: stacked beats
@@ -108,8 +116,9 @@ protocol constant, not dataset-dependent.
 ## Caveats
 
 - The BEAM/LoCoMo summaries-only runs used member selection v1 (blind ordinal
-  fill); stacked and all later runs use v2. Direction of the v1→v2 change is
-  noise reduction, so the summaries-only numbers are conservative.
+  fill); stacked and all later reported runs use v2. Noise reduction was the
+  intended direction, not proof that v1 scores form a conservative bound.
+  The selector change confounds a pure comparison of the summary and stacked arms.
 - Summary generation for these runs used the DeepSeek official endpoint
   (`deepseek-chat`). The endpoint is just a provider behind `NMG_SUMMARY_*`;
   the prompt version pinned in each manifest is what makes runs comparable.

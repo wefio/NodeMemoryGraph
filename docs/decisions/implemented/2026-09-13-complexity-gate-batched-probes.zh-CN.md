@@ -1,6 +1,6 @@
 # 复杂度门用两次 linter 运行测量一个 diff，并保留源码扩展名
 
-[English](2026-09-13-complexity-gate-batched-probes.md)
+[English](2026-09-13-complexity-gate-batched-probes.md) · [术语](2026-09-13-complexity-gate-batched-probes.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit

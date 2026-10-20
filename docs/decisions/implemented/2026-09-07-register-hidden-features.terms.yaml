@@ -1,0 +1,12 @@
+version: 2
+terms:
+  - term: hidden feature
+    aliases: [non-default capability, 隐藏功能]
+    definition: >-
+      A capability that is not active by default, especially one gated by an environment variable or mode flag; the registry records its gate, default, owner and lifecycle state, including planned or dormant gaps.
+      默认不激活的能力，尤其是受环境变量或模式标志门控的能力；注册表记录其 gate、默认值、owner 与生命周期状态，也包括 planned 或 dormant 的缺口。
+    owner: docs/decisions/implemented/2026-09-07-register-hidden-features.md
+    anchor: Decision
+    status: canonical
+references:
+  - gate

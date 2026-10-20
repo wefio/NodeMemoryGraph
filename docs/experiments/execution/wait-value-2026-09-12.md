@@ -1,4 +1,6 @@
-# What the wait is actually worth (restricted OoO)
+# What the Wait Is Actually Worth (Restricted OoO)
+
+[English](wait-value-2026-09-12.md) | [简体中文](wait-value-2026-09-12.zh-CN.md) · [Terms](wait-value-2026-09-12.terms.yaml)
 
 **Related:** [design](../../design/ooo-execution-bootstrap.md) ·
 [admission run](../ooo-admission-2026-09-08.md) ·

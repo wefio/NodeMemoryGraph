@@ -1,6 +1,6 @@
 # 决策记录的固定头部字段块
 
-[English](2026-09-09-decision-header-block.md)
+[English](2026-09-09-decision-header-block.md) · [术语](2026-09-09-decision-header-block.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit
@@ -12,7 +12,7 @@
 这个缺口：第二条冲突的 `**Status:**` 被忽略、`**Date:** 1900-13-99` 被接受、放在
 第一个章节之后的 `**Status:**` 也能通过。
 
-字段词汇**已经在漂移**——这正是「头部无规则」的产物：
+在 2026-09-09 审阅时，字段词汇**已经在漂移**——这正是「头部无规则」的产物：
 
 | 在用字段 | 数量 | 问题 |
 |---|---|---|
@@ -34,16 +34,19 @@
 [<对照语言>](<slug>.<lang>.md)
 
 **Status:** <proposed|implemented|rejected|archived>
+[**Approved:** <explicit|auto|unrecorded>]
 [**Supersedes:** [..](..)]
 [**Superseded by:** [..](..)]
 [**Relates to:** [..](..)]
 [**Archived:** YYYY-MM-DD]
 ```
 
-该块是封闭的：只有 `**Status:**`、`**Supersedes:**`、`**Superseded by:**`、
-`**Relates to:**`、`**Archived:**` 五个字段。第一个章节之前的任何其它
+该块是封闭的：只有 `**Status:**`、`**Approved:**`、`**Supersedes:**`、
+`**Superseded by:**`、`**Relates to:**`、`**Archived:**` 六个字段。第一个章节之前的任何其它
 `**字段：**` 行都会让检查失败，散文式说明因此移到块下方。每个字段最多出现一次。
-`**Status:**` 必填且必须等于生命周期目录名；`**Archived:**` 只在 `archived/`
+`**Status:**` 必填且必须等于生命周期目录名；`implemented/` 下必须有
+`**Approved:**`，值为 `explicit`、`auto` 或 `unrecorded`（见
+[approval tiers](2026-09-09-approval-tiers.zh-CN.md)）；`**Archived:**` 只在 `archived/`
 下有效。
 
 `**Date:**` 被删除。文件名已经携带 `YYYY-MM-DD`，这个字段是同一事实的第二份副本；
@@ -64,9 +67,8 @@ NMG 两者都有。
 散文干净地分开，并让生成器无需解析 Markdown 就能读取。在 21 条决策的规模上，它为
 每条决策多出一个文件，外加两者之间的一致性问题。
 
-**连块内的裸 `Word:` 行也拒绝。** 那能堵住最后一个缺口，但有一条未提交的决策仍然
-带着没有粗体标记的 `Date:` 与 `Branch:` 行，拒绝它会让并发 agent 的在途文件失败。
-记入 Deferred。
+**连块内的裸 `Word:` 行也拒绝。** 这可以堵住剩余的类头部散文缺口。触发原例外的旧记录
+现已提交；其中过时的 `Date:` 与 `Branch:` 头部行也已删除。本决定不扩大语法变更范围。
 
 **保留 `**Date:**` 并要求它。** 渲染后的文档能看到日期，代价是给一个文件名已拥有
 的事实再添一个家，并要编辑 8 条决策补上它。
@@ -75,8 +77,9 @@ NMG 两者都有。
 
 ## Deferred
 
-头部块里的裸 `Word:` 行目前仍被当作散文接受，因为有一条未提交的决策带着没有粗体
-标记的 `Date:` 与 `Branch:`；拒绝它会让该 agent 的在途文件失败。等它落地后再议。
+没有粗体标记的 `Word:` 行仍被当作散文，因此检查只识别文档规定的粗体字段语法。原先
+针对在途文件的例外已不再适用，已知旧记录中的 `Date:`／`Branch:` 行也已删除。是否要
+更广泛地禁止类头部散文，不属于本决定的范围。
 
 ## 验证
 
@@ -89,6 +92,8 @@ NMG 两者都有。
 - `npm run docs:check` 报 0 错误、且不新增警告。
 
 ## 后果
+
+**关系解释。** 头部关系字段中的每个链接目标都参加反向核对，第二个目标不能使整个字段消失。将此解释限定在头部，也防止正文示例取得决策权威。代价是逐目标核对，而不是另一种元数据格式或放宽告警。
 
 **裸 `Word:` 行仍被接受。** 没有粗体标记的字段会被当作散文，因此门禁只覆盖文档化
 的语法。

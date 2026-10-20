@@ -1,5 +1,7 @@
 # A Skill that outgrows its byte budget routes detail into `references/`
 
+[中文](2026-09-18-skill-grows-by-routing.zh-CN.md) · [Terms used](2026-09-18-skill-grows-by-routing.terms.yaml)
+
 **Status:** implemented
 **Approved:** explicit
 **Relates to:** [repository development skill](../../../skills/repo-development/SKILL.md),

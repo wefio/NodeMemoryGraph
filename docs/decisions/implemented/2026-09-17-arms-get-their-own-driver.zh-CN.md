@@ -2,9 +2,7 @@
 
 **Status:** implemented
 **Approved:** explicit
-**Superseded by:** [派发循环是共享的](2026-09-19-dispatch-loop-is-shared.zh-CN.md)
-Date: 2026-09-17
-Branch: feat/ooo-run-namespace
+**Superseded by:** [派发循环是共享的](2026-09-19-dispatch-loop-is-shared.zh-CN.md)、[退役轮次仪器](2026-09-18-retire-the-round-instrument.zh-CN.md)
 **Relates to:** [task-unit 语义设计](../../design/task-unit-semantics.md)、
 [义务台账](../../design/task-unit-semantics-obligations.md)、
 [F1 成本扫描实验](../../experiments/execution/ooo-cost-model-2026-09-17.md)
@@ -12,7 +10,9 @@ Branch: feat/ooo-run-namespace
 治理 meta-rule：[self-governance meta-rule](2026-09-07-self-governance-meta-rule.md) ——
 本规则变更本身也是一次受治理的决策（决策 + 替代方案 + 一个规则一个家）。
 
-English: [2026-09-17-arms-get-their-own-driver.md](2026-09-17-arms-get-their-own-driver.md)
+English: [2026-09-17-arms-get-their-own-driver.md](2026-09-17-arms-get-their-own-driver.md) · [术语](2026-09-17-arms-get-their-own-driver.terms.yaml)
+
+后续处置：共享派发决策把执行循环从实验臂驱动器移入共享层；退役决策删除了 `src/integration/ooo-cycle.ts` 与其轮次专属测试。下文测量和选择属于各自日期的历史快照，不代表当前源码清单。
 
 ## 问题
 
@@ -74,22 +74,21 @@ in the plan` 失败；把汇合点从 `C` 改名也同样失败。可读性那�
 
 ## 后果
 
-- **`src/integration/ooo-cycle.ts` 故意保留 A/B/C 角色。** 它们是实验的自变量而非偶然：A 的检查悬空时
-  跑 B，正是设计所说的乱序决策。不再计划进一步泛化。
-- **研究驱动器消费共享层，而不是这个函数**：同一个 `BoardAdmission`、任务协调器、运行面与轮次日志，由
-  `evals/ooo-execution/` 驱动。
+- 在本决策的快照中，`src/integration/ooo-cycle.ts` 有意保留 A/B/C 角色作为实验自变量：A 的检查悬空时
+  跑 B。该仪器及其轮次角色后来已退役；这里不是对当前源码的描述。
+- 研究实验臂驱动器消费共享任务／黑板规则。后续[共享派发决策](2026-09-19-dispatch-loop-is-shared.zh-CN.md)
+  也把计划派发循环移入共享层；实验臂自己的声明与测量仍留在 `evals/ooo-execution/`。
 - **如果将来产品路径确实需要任意计划**，那是一次单独的受治理决策，并有自己的切片；它必须回答本记录没有
   回答的问题：通用驱动器是否该进 `src/`，还是产品永远只驱动宿主声明过的计划。
-- **边界由测试钉住，而不是注释。** `evals/ooo-execution/round-plan.test.ts` 断言了上述两种拒绝，所以将来
-  泛化驱动器的人会看到这两条用例翻转，并有意识地修改它们，而不是在一次付费轮次里才发现这层耦合。
-- **重复永久消除**：任何将来需要默认计划的地方都读 `DEFAULT_ROUND_PLAN`。
-- **操作者决定推迟、而不是忘掉：轮次的“角色”与“机制”是否该剥开。** 直接删掉 `runCycle` 会同时删掉 S4 的仪器、它的五个回归套件、账本 D7/D10 的证据、乱序派发唯一的端到端载体，而且四个共享类型就住在这个文件里（`Requirement`、`CaseRule`、`CycleWorker`、`WorkerMetrics`）。这个选择的实测形状是：**角色层**约 54 处引用、~150 行（`aInstruction`/`bInstruction`/`aEditable`/`bEditable`、`Record<"A"|"B">` 各表、`installA`、`installB`、`patchVerifier`、`casesTail`，以及 `let a / let b` 的流程），而“认领—提交—验证”的核心 `runTask` 已经是按 task id 参数化的。先做 F2b 与 F3；判断是否剥开的证据，就是研究驱动器实际不得不复制多少那段核心。
+- 在本决策的快照中，`evals/ooo-execution/round-plan.test.ts` 钉住了两种计划拒绝，默认计划集中为
+  `DEFAULT_ROUND_PLAN`。退役决策后来随仪器删除了该测试与常量；这里记的是历史，不是当前测试覆盖。
+- **当时，操作者决定推迟、而不是忘掉：轮次的“角色”与“机制”是否该剥开。** 直接删掉 `runCycle` 会同时删掉 S4 的仪器、它的五个回归套件、账本 D7/D10 的证据、乱序派发唯一的端到端载体，而且四个共享类型就住在这个文件里（`Requirement`、`CaseRule`、`CycleWorker`、`WorkerMetrics`）。这个选择的实测形状是：**角色层**约 54 处引用、~150 行（`aInstruction`/`bInstruction`/`aEditable`/`bEditable`、`Record<"A"|"B">` 各表、`installA`、`installB`、`patchVerifier`、`casesTail`，以及 `let a / let b` 的流程），而“认领—提交—验证”的核心 `runTask` 已经是按 task id 参数化的。当时计划先做 F2b 与 F3；判断是否剥开的证据，就是研究驱动器实际不得不复制多少那段核心。
 - **2026-09-18 已解决：** 操作者选择分发 + 删除，而不是把角色与机制剥开；本条目推迟的问题已在[退役决策](2026-09-18-retire-the-round-instrument.zh-CN.md)中带测量结果回答。
 
-## 建造驱动器时实测到的：C 臂目前没有机制（2026-09-17）
+## 2026-09-17 测量：当时的 C 臂接缝受阻
 
-驱动器已按声明建好，离线可跑 B 臂（单槽、取合法集合的队首、逐单元跑到验收）与 A 臂（单单元计划）。它
-**跑不了** C 臂，而这是实测结论，不是未完成的切片：
+在该快照中，驱动器可离线运行 B 臂（单槽、取合法集合的队首、逐单元跑到验收）与 A 臂（单单元计划），但
+**无法运行** C 臂。这是对当时认领路径的测量，不是未完成的切片：
 
 - `BoardAdmission.candidates()` 返回有序合法集合——两个独立单元时是 `["first","second"]`——但其中
   一个被认领的瞬间它就返回 `[]`，此后 `claim("second")` 抛 `no published handoff for this task`。第一个
@@ -104,18 +103,17 @@ in the plan` 失败；把汇合点从 `C` 改名也同样失败。可读性那�
   规则直接矛盾——原子认领才是授予执行权的东西。
 
 因此驱动器每次运行都报告 `slotsRequested`、`slotsUsed` 与 `slotRefusal`；只要请求的槽数没达成，
-`comparePlanSlots` 就把 `comparable` 置为 `false`，拒绝给出时间结论。回退运行无论墙钟多快都不能被当作 C
-臂。由此产生的决策属于操作者，本记录不做：要么为声明的槽数放宽“单 run 串行化”（`selectableTasks` 上方
-的注释已经描述的是一条**邻居**规则，比代码里“任一认领即阻塞选择”更窄），要么把 F3 做成 A 对 B，并记录
-“确定并发在该接缝上不可达”。在此之前 C 臂的状态是**受阻**，不是“未开始”。
+`comparePlanSlots` 就把 `comparable` 置为 `false`，拒绝给出时间结论，回退运行不能被当作 C 臂。
+后续[自声明槽预算决策](2026-09-18-declared-slot-budget.zh-CN.md)增加了单 run 多槽认领预算与定向 handoff，
+解决了这个机制阻塞；该变更本身并未证明已完成付费 C 臂比较，后续 F3 试点仅提供方向性比较，见[试点记录](../../experiments/execution/ooo-arms-pilot-2026-09-18.md)。
 
-## 验证
+## 2026-09-17 快照的验证记录
 
-- `evals/ooo-execution/round-plan.test.ts` —— 6 条：日志记录它被赋予的计划（把日志改回字面量
-  `["A","B","C"]` 会令其失败）、上述两种拒绝、一个计划值同时到达 store 与轮次、spec 映射及其默认值、
-  以及解析器的拒绝。
-- `evals/ooo-execution/cycle.test.ts` —— 23 条，未改动且全绿：驱动器行为被保留。
+- `evals/ooo-execution/round-plan.test.ts` —— 6 条：日志记录传入计划、上述两种拒绝、计划值同时到达 store 与轮次，以及 spec 映射／解析器用例。
+- `evals/ooo-execution/cycle.test.ts` —— 当时 23 条，未改动且全绿。
 
-## 这次部分取代之后仍然成立的
+两套测试于 2026-09-18 随轮次仪器一并删除；这是历史验证记录，不是当前测试清单。
 
-取代是部分的，范围写在后一条记录里：被搬动的是**执行一份给定计划的循环住在哪**。本记录其余内容全部成立——臂保留自己的驱动、spec 声明与测量记录；产品仍不拥有规划平台；`src/integration/ooo-cycle.ts` 仍是它那个特定的外部等待窗口实验。
+## 后续取代与仍保留的内容
+
+后续记录分别取代了本决策的不同部分：[共享派发决策](2026-09-19-dispatch-loop-is-shared.zh-CN.md)把计划执行循环移入共享层；[退役决策](2026-09-18-retire-the-round-instrument.zh-CN.md)删除了旧 `ooo-cycle` 仪器与其测试。仍保留的是实验臂专属声明和测量记录；产品仍不拥有通用规划平台。

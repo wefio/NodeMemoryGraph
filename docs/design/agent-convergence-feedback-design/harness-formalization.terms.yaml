@@ -1,0 +1,33 @@
+version: 2
+terms:
+  - term: Harness orchestration policy
+    aliases: [上下文编排策略, H_φ]
+    definition: >-
+      The trainable context-orchestration policy H_φ over a frozen solver π_θ, whose loss is quest completion plus orchestration cost and whose parameters are the only thing the gradient moves; it is the learning object in this design, not the RCP execution adapter that carries bounded work, and neither its utility nor its default activation is established here.
+      在冻结求解器 π_θ 之上的可训练上下文编排策略 H_φ，损失为 quest 完成加上编排成本，且其参数是梯度唯一推动的对象；它是本设计中的学习对象，而不是承载有界工作的 RCP 执行适配边界，其效用与默认启用在此均未确立。
+    owner: docs/design/agent-convergence-feedback-design/harness-formalization.md
+    anchor: Harness formalization
+    status: canonical
+  - term: marginal disclosure value
+    aliases: [边际呈现价值, u(d, p)]
+    definition: >-
+      u(d, p | τ, C): the causal contribution of inserting fragment d at position p to the current quest's completion probability, as opposed to relevance Rel(q, d); it is a counterfactual that cannot be observed on one trajectory, so estimation requires deliberate randomized exploration.
+      u(d, p | τ, C)：在位置 p 插入片段 d 对当前 quest 完成概率的因果贡献，而非相关性 Rel(q, d)；它是无法在单一轨迹上观察到的反事实量，因此估计需要刻意的随机化探索。
+    owner: docs/design/agent-convergence-feedback-design/harness-formalization.md
+    anchor: The gradient is real, and it lives in φ
+    status: canonical
+  - term: always-random probe arm
+    aliases: [始终随机探针臂]
+    definition: >-
+      A production shadow arm that keeps sampling actions at random so the orchestration policy cannot become self-fulfilling; its cost is charged to `λ·C(h)` rather than being free budget, and its worst case is bounded by one cue or one redundant retrieval.
+      一条在生产影子中持续随机采样动作的臂，使编排策略无法自我实现；其成本计入 `λ·C(h)` 而不是免费预算，最坏情况被一次 cue 或一次冗余检索所界定。
+    owner: docs/design/agent-convergence-feedback-design/harness-formalization.md
+    anchor: Exploration is part of the objective
+    status: canonical
+references:
+  - learnable controller
+  - Lab
+  - task frame
+  - Active Graph
+  - projection revision
+  - tessera

@@ -1,0 +1,16 @@
+version: 2
+terms:
+  - term: execution placement
+    aliases: [placement recommendation, 执行放置]
+    definition: >-
+      A transient fusion or assignment suggestion from shared scheduling policy; it is not a task-ticket field and does not affect acceptance.
+      共享调度策略提出的临时融合或分配建议；它不是任务票据字段，也不影响验收。
+    owner: docs/design/task-unit-semantics/task-ir-vocabulary.md
+    anchor: Task IR and existing vocabulary
+    status: proposed
+references:
+  - task unit
+  - Task IR
+  - bounded speculation
+  - Task Board
+  - execution fusion

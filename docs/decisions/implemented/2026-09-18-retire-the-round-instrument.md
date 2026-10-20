@@ -1,9 +1,10 @@
 # Retire the round instrument: distribute what has a home, delete the rest
 
-[中文](2026-09-18-retire-the-round-instrument.zh-CN.md)
+[中文](2026-09-18-retire-the-round-instrument.zh-CN.md) · [Terms used](2026-09-18-retire-the-round-instrument.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit
+**Supersedes:** [The arms get their own driver](2026-09-17-arms-get-their-own-driver.md)
 **Relates to:** [task-unit-semantics design](../../design/task-unit-semantics.md),
 [its obligations ledger](../../design/task-unit-semantics-obligations.md),
 [the arms get their own driver](../implemented/2026-09-17-arms-get-their-own-driver.md),

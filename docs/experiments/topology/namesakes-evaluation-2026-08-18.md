@@ -1,5 +1,12 @@
 # Namesakes alias/homonym topology evaluation
 
+[English](namesakes-evaluation-2026-08-18.md) | [简体中文](namesakes-evaluation-2026-08-18.zh-CN.md) · [Terms](namesakes-evaluation-2026-08-18.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this is a historical
+record. Its configurations, measured results and implementation-status statements
+are not current test receipts or default-policy authorization. This review did
+not rerun the experiment or independently revalidate the original run artifacts.
+
 ## Purpose
 
 The LoCoMo topology audit measures natural conversation candidate noise, and
@@ -38,8 +45,10 @@ npm run eval:topology:namesakes
 The adapter streams JSONL and therefore does not retain the complete release in
 memory. For every entity with at least two positive mentions, the first `Same`
 mention context is a deterministic local prototype. The remaining `Same` and
-`Other` contexts are scored using NMG's local hashing embedder. Gold labels are
-consulted only after scoring.
+`Other` contexts are scored using NMG's local hashing embedder. Gold labels select prototype eligibility and the first `Same` prototype;
+candidate-context scores do not use the candidate's label, which is used for
+evaluation afterwards. Thus prototype construction is gold-seeded, not entirely
+label-free.
 
 The report includes:
 
@@ -87,6 +96,9 @@ cache reuse.
 
 ## Full official-data result (2026-08-11)
 
+The result sections carry 2026-08-11 dates; the 2026-08-18 filename does not
+establish a new execution on that later date.
+
 The official file was downloaded from Figshare file `31463402`. It contains
 4,148 JSONL rows and its MD5 is
 `6224c849f67c8f591e6f7a2f0f02dddf`, matching the Figshare API metadata. The
@@ -101,7 +113,8 @@ hard negatives.
 | 0.6 | 0.675 | 0.694 | 0.672 | 0.395 |
 | 0.7 | 0.304 | 0.636 | 0.302 | 0.684 |
 
-The threshold curve has no useful operating point: increasing the threshold
+None of the four reported thresholds establishes an automatic-acceptance
+precision/recall operating point in this sample: increasing the threshold
 does not improve precision and rejects hard same-name negatives only by losing
 most true aliases. The hashing context score is therefore suitable only for
 broad blocking/candidate generation. It must not be interpreted as calibrated
@@ -135,15 +148,17 @@ errors:
 Five paired observations changed from correct to wrong after the foreign record
 was added, while seven changed from wrong to correct. The exact two-sided
 McNemar p-value is 0.774, and per-repeat deltas were +10, 0, +10, -20, and +20
-percentage points. The Agent rejected the foreign record in all 50 contaminated
+percentage points. These intervals and the p-value describe the 50 repeated
+observations over ten fixed entities, not 50 independent entities or a
+population-level uncertainty estimate. The Agent rejected the foreign record in all 50 contaminated
 observations. Across the original live calls the provider reported 6,670
 uncached input tokens, 71,040 cache-read tokens, 1,383 output tokens, and 79,093
 total tokens under Pi's usage convention. An identical rerun used all 100 local
 response-cache entries and made no provider calls.
 
 This repeated run detects neither false attribution nor a stable accuracy
-effect. The earlier one-repeat ten-point decline was model variance, not durable
-evidence of distraction. The structural audit still justifies proposal-only
+effect. The earlier one-repeat ten-point decline is not stable evidence of distraction;
+these repetitions do not identify the cause of that earlier decline. The structural audit still justifies proposal-only
 similarity, but this Agent probe does not prove downstream false-merge damage,
 correction frequency, or end-to-end answer impact.
 

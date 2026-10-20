@@ -1,246 +1,197 @@
-# QPP2 局部探针实验（2026-07-29）
+# QPP2 local-probe experiment (2026-07-29)
 
-## 目标定义
+[English](qpp2-local-probe-experiment-2026-07-29.md) | [简体中文](qpp2-local-probe-experiment-2026-07-29.zh-CN.md) · [Terms](qpp2-local-probe-experiment-2026-07-29.terms.yaml)
 
-NMG 将两个 QPP 阶段分开：
+> **Status:** Historical research record. The experiment-specific `QPP1`/`QPP2` names below do not define the current runtime switches or prove that today's adapters execute these experimental models. All three named result directories are absent from this checkout; the figures below are retained report values, not independently reproduced here. See the [current QPP design](../../design/retrieval-confidence-controller.md).
 
-- QPP1 预测应从全局记忆池取回多宽的候选集，并选择 Fibonacci 展开档位。
-- QPP2 不重新寻找 Top-1，而是在 QPP1 的候选集中区分必要证据与噪声，控制实际交给 Agent 的上下文。
+## Experimental role definitions
 
-QPP2 的评价目标不是单纯提高候选数量，而是在固定输出条数或 token 预算下提高官方证据召回率。
+For this experiment only:
 
-## 第一性原理约束
+- `QPP1` predicted the width of a candidate pool from global memory and chose a Fibonacci expansion tier.
+- `QPP2` did not search for another Top-1. It ranked necessary evidence versus noise within the QPP1 candidate set and controlled the context shown to the Agent.
 
-如果第二轮仍使用完全相同的文档向量和余弦函数，那么把全集缩小为 Top-K 并不会改变
-`cos(query, document)`，也不会改变排序。局部 softmax 或 z-score 只能改变分数尺度，不能凭空产生新信息。
+The target was not simply to retrieve more candidates. It was to improve official-evidence recall under a fixed output count or token budget.
 
-因此真正的列表级局部探针必须至少加入一种候选集合条件：
+## First-principles constraint
 
-1. 候选之间的语义相似度；
-2. 候选节点之间的图连接；
-3. 独立 reranker 或 cross-encoder；
-4. 局部统计模型（例如局部 IDF、中心化或白化）；
-5. 候选集合上的二阶相关传播。
+If a second stage uses exactly the same document vectors and cosine function, restricting the set to Top-K cannot change `cos(query, document)` or the ranking. Local softmax or z-score normalization only changes score scale; it creates no new information.
 
-当前原型采用二阶相关传播：
+A listwise local probe therefore needs at least one candidate-set-conditioned signal:
+
+1. semantic similarity between candidates;
+2. graph connectivity between candidate nodes;
+3. an independent reranker or cross-encoder;
+4. local statistics such as local IDF, centering, or whitening; or
+5. second-order correlation propagation over the candidate set.
+
+The prototype used second-order propagation:
 
 \[
-r_i^{(2)}
-=
-\alpha r_i^{(1)}
-+
-(1-\alpha)
-\sum_j
-\operatorname{softmax}_j
-\left(
-\frac{\cos(d_i,d_j)}{T}
-\right)
-r_j^{(1)}
+r_i^{(2)} = \alpha r_i^{(1)} + (1-\alpha)\sum_j \operatorname{softmax}_j\left(\frac{\cos(d_i,d_j)}{T}\right)r_j^{(1)}
 \]
 
-可微控制器将直接相关度、候选内相似度、二阶支持、图连接和查询意图作为特征，学习候选是否属于必要证据。
-为了避免未成熟的 QPP2 破坏高置信结果，输出保留 15 条第一阶段安全锚点，只允许 QPP2 从扩展区选择其余 5 条。
+The differentiable controller used direct relevance, within-set similarity, second-order support, graph connectivity, and query intent as features. To protect high-confidence results, it kept 15 first-stage safety anchors and let QPP2 select only the remaining five from the expanded region.
 
-## 实验协议
+## Initial experiment protocol
 
-- 数据：LoCoMo，每类 30 条，共 150 条。
-- 多跳定义：官方 category 1。
-- 证据标签：LoCoMo 官方 evidence IDs。
-- 向量：`BAAI/bge-small-en-v1.5`。
-- 训练/验证：5-fold 分层交叉验证。
-- 无 LLM 调用。
-- 候选上限：50。
-- 比较输出：固定 Top-20、QPP1 动态档位、QPP1 + QPP2、50 条全量候选。
+- Data: 150 LoCoMo questions, 30 per category.
+- Multi-hop: official category 1.
+- Evidence labels: official LoCoMo evidence IDs.
+- Vectors: `BAAI/bge-small-en-v1.5`.
+- Train/validation: five-fold stratified cross-validation.
+- LLM calls: none.
+- Candidate ceiling: 50.
+- Compared outputs: fixed Top-20, dynamic QPP1 tiers, QPP1 + QPP2, and all 50 candidates.
 
-结果目录：
+The report named the result directory `evals/controller/results/2026-07-29T09-28-10.616Z`.
 
-`evals/controller/results/2026-07-29T09-28-10.616Z`
+### Results: all 150 questions
 
-## 结果
+| Strategy | Evidence recall | Mean records | Mean estimated tokens |
+| --- | ---: | ---: | ---: |
+| Fixed Top-20 | 0.2567 | 20.0 | 9,145 |
+| Dynamic QPP1 tiers | 0.4439 | 34.2 | 15,618 |
+| QPP1 + differentiable QPP2 | 0.2639 | 20.0 | 9,126 |
+| Diversity-based local selection | 0.3183 | 20.0 | 9,132 |
+| Full Top-50 | 0.5911 | 50.0 | 22,779 |
 
-### 全部 150 条
+### Results: official multi-hop category
 
-| 策略 | Evidence recall | 平均记录 | 平均估算 token |
-|---|---:|---:|---:|
-| 固定 Top-20 | 0.2567 | 20.0 | 9,145 |
-| QPP1 动态档位 | 0.4439 | 34.2 | 15,618 |
-| QPP1 + 可微 QPP2 | 0.2639 | 20.0 | 9,126 |
-| 多样性局部选择 | 0.3183 | 20.0 | 9,132 |
-| 全量 Top-50 | 0.5911 | 50.0 | 22,779 |
+| Strategy | Evidence recall | Mean estimated tokens |
+| --- | ---: | ---: |
+| Fixed Top-20 | 0.1167 | 9,124 |
+| Dynamic QPP1 tiers | 0.2444 | 15,493 |
+| QPP1 + differentiable QPP2 | 0.1361 | 9,109 |
+| Diversity-based local selection | 0.1417 | 9,009 |
+| Full Top-50 | 0.3389 | 22,752 |
 
-### 官方多跳类别
+At the same 20-record output budget, QPP2 showed only a small positive signal. The learned strategy underperformed simple node-diversity selection and failed to retain most of the recall benefit from QPP1's expanded candidate pool. The experiment therefore kept it in shadow/research rather than the Pi default path.
 
-| 策略 | Evidence recall | 平均估算 token |
-|---|---:|---:|
-| 固定 Top-20 | 0.1167 | 9,124 |
-| QPP1 动态档位 | 0.2444 | 15,493 |
-| QPP1 + 可微 QPP2 | 0.1361 | 9,109 |
-| 多样性局部选择 | 0.1417 | 9,009 |
-| 全量 Top-50 | 0.3389 | 22,752 |
+## Intra-list hypothesis check
 
-QPP2 在相同 20 条输出预算下有很小的正向信号，但当前学习策略不如简单的节点多样性选择，也不能保留
-QPP1 扩大候选后获得的大部分召回收益。因此它只能保持在 shadow/实验状态，不能进入 Pi 默认检索路径。
+For 27 queries with at least two official multi-hop evidence items, the report compared BGE vectors directly:
 
-## Intra-list 假设检查
+- evidence-to-evidence pairs: 64;
+- evidence-to-noise pairs: 3,354;
+- mean evidence-to-evidence similarity: 0.8699;
+- mean evidence-to-noise similarity: 0.8495;
+- mean gap: 0.0204.
 
-对 27 条具有至少两条官方多跳证据的查询，直接比较 BGE 向量：
+The evidence items were slightly more coherent on average, but the signal was weak and distributions overlapped substantially; a single threshold could not reliably denoise the list. Bridge evidence may also be semantically complementary rather than textually similar, so graph paths, entity coverage, and diversity cannot be replaced by pure similarity.
 
-- 证据—证据 pair：64；
-- 证据—噪声 pair：3,354；
-- 证据—证据平均相似度：0.8699；
-- 证据—噪声平均相似度：0.8495；
-- 均值间隔：0.0204。
+## Literature notes recorded by the report
 
-这支持“必要证据在列表内略有更高一致性”，但信号很弱，分布高度重叠，不能用单一阈值可靠去噪。
-桥接证据还可能语义互补而非文本近邻，因此图路径、实体覆盖和多样性不能被纯相似度取代。
+The report identified related work on post-retrieval/listwise/groupwise QPP, retrieval coherency, context-aware reranking, score magnitude and variance, and query-specific reranking depth. It cited *Groupwise Query Performance Prediction with BERT* as jointly modelling Top-K ranking context with under 1% additional compute over its corresponding BERT predictor.
 
-## 文献定位
+The report could not verify the specific attribution “Second-order Relevance as local QPP, improving 15–20%” in the official SIGIR 2023 list. It found a same-named 2021 e-commerce search paper using a query-product behavior graph and reporting 4.3% average offline gain. That paper may motivate neighborhood propagation, but is not experimental evidence for NMG QPP2. These external citations are preserved as recorded; they were not rechecked in this documentation pass.
 
-可核实的相近方向包括：
+## Decisions recorded at the time
 
-- post-retrieval / listwise / groupwise QPP；
-- retrieval coherency；
-- context-aware reranking；
-- score magnitude and variance；
-- query-specific reranking depth。
+1. Keep QPP1 candidate-width learning because it showed a recall gain for the measured multi-hop subset.
+2. Define experimental QPP2 as candidate-set-conditioned necessary-evidence selection, not “searching for Top-1 again.”
+3. Keep the then-current differentiable QPP2 in shadow; it did not change Pi's formal context.
+4. Preserve high-confidence safety anchors unless cross-validation shows full reranking does not regress.
+5. Compare simpler, interpretable set strategies first: query relevance plus node coverage; second-order propagation; graph paths; and a small cross-encoder reranker.
+6. Connect a QPP2 selector to Pi only if it reliably beats fixed Top-K at the same token budget.
 
-`Groupwise Query Performance Prediction with BERT` 会联合建模 Top-K 文档的排名上下文，并报告相对于
-对应 BERT 预测器低于 1% 的额外计算成本。
+These are historical experiment decisions, not the current runtime contract.
 
-目前没有在 SIGIR 2023 官方论文列表中核实到“Second-order Relevance 作为局部 QPP、提升 15%–20%”
-这一具体归因。可检索到的同名工作是 2021 年电商搜索论文，使用查询—商品行为网络并报告 4.3%
-平均离线增益；它可以作为二阶邻域传播的参考，但不能直接作为 NMG QPP2 的实验依据。
+## Pairwise QPP2 and dynamic compression: 150-question follow-up
 
-## 决策
+The follow-up trained QPP2 with pairwise hard negatives: for each official evidence item, its necessity score should exceed that of highly ranked noise in the first-stage list. This learns within-list order, not calibrated absolute probabilities.
 
-1. 保留 QPP1 的候选宽度学习，因为它在多跳类别中有明确召回收益。
-2. QPP2 定义为集合条件下的必要证据选择，不再描述为“重新找 Top-1”。
-3. 当前可微 QPP2 只记录 shadow 决策，不改变 Pi 正式上下文。
-4. 继续保留高置信安全锚点，除非交叉验证证明全量重排不退化。
-5. 下一轮优先比较简单且可解释的集合策略：
-   - query relevance + 节点覆盖；
-   - query relevance + 二阶传播；
-   - query relevance + 图路径；
-   - 小型 cross-encoder reranker。
-6. 只有当 QPP2 在相同 token 预算下稳定优于固定 Top-K，才接入 Pi。
+Under the same 150-question LoCoMo protocol, full QPP1 expansion averaged 34.11 records and 15,584 estimated tokens, with evidence recall 0.4556. Dynamic truncation by QPP2 local probability mass produced:
 
-## Pairwise QPP2 与动态压缩复测
-
-QPP2 后续改为 pairwise hard-negative 训练：对每条官方证据，要求其必要性分数高于第一轮列表中的高排位噪声。该目标只学习列表内次序，不把未校准分数当作绝对概率。
-
-在同一 LoCoMo 150 条协议下，QPP1 完整展开平均为 34.11 条记录、15,584 estimated tokens，evidence recall 为 0.4556。按 QPP2 分数的局部概率质量动态截断得到：
-
-| 保留局部质量 | Evidence recall | 相对 QPP1 evidence retention | 记录压缩 | Token 压缩 |
-|---:|---:|---:|---:|---:|
+| Retained local mass | Evidence recall | Evidence retention vs full QPP1 | Record compression | Token compression |
+| ---: | ---: | ---: | ---: | ---: |
 | 90% | 0.3406 | 87.33% | 21.07% | 21.27% |
 | 95% | 0.3672 | 90.67% | 11.70% | 11.83% |
 | 98% | 0.4472 | 99.00% | 4.51% | 4.57% |
 
-结果目录：
+The report named `evals/controller/results/2026-07-29T09-37-15.222Z`. The 98% tier was nearly lossless but compressed little; the 90–95% tiers saved more context while losing a meaningful amount of evidence. The report therefore proposed query-level confidence calibration rather than one fixed tier.
 
-`evals/controller/results/2026-07-29T09-37-15.222Z`
+## Full LoCoMo evidence test
 
-该结果验证了 QPP2 的第二个作用：减少 QPP1 已经展开、但最终需要完整注入 Agent 的推荐内容。98% 质量档接近无损，但压缩收益较小；90%—95% 档有更明显的上下文节省，同时带来不可忽略的证据损失。因此默认路径暂不采用单一固定档位，下一步应校准查询级置信度，让系统依据风险在这些档位间选择。
+The full run used 1,982 LoCoMo questions with official evidence IDs and 2,814 labelled evidence items; BGE, five-fold cross-validation, 80 epochs, and no LLM calls were retained. The report named `evals/controller/results/2026-07-29T09-49-23.691Z`.
 
-## 完整 LoCoMo evidence 测试
+### Overall results
 
-完整测试使用所有带官方 evidence IDs 的 LoCoMo 问题，共 1,982 条、2,814 条标注证据，保持 BGE、五折交叉验证、80 epoch 和无 LLM 调用的协议不变。
-
-结果目录：
-
-`evals/controller/results/2026-07-29T09-49-23.691Z`
-
-### 总体
-
-| 策略 | Macro evidence recall | 平均记录 | 平均 estimated tokens |
-|---|---:|---:|---:|
-| 固定 Top-20 | 0.3441 | 20.0 | 9,005 |
-| QPP1 动态搜索池 | **0.5204** | 34.0 | 15,282 |
+| Strategy | Macro evidence recall | Mean records | Mean estimated tokens |
+| --- | ---: | ---: | ---: |
+| Fixed Top-20 | 0.3441 | 20.0 | 9,005 |
+| Dynamic QPP1 search pool | **0.5204** | 34.0 | 15,282 |
 | QPP1 + QPP2 90% | 0.4294 | 25.1 | 11,278 |
 | QPP1 + QPP2 95% | 0.4511 | 27.3 | 12,274 |
 | QPP1 + QPP2 98% | 0.4887 | 29.5 | 13,283 |
-| Top-50 候选上限 | 0.7010 | 50.0 | 22,474 |
+| Top-50 candidate ceiling | 0.7010 | 50.0 | 22,474 |
 | Oracle Fibonacci | 0.7010 | 20.4 | 9,205 |
 
-QPP1 相对 Top-20 提升 17.63 个百分点，逐题 400 胜、0 负、1,582 平。由于当前 QPP1 基本只扩大而不缩小池子，这证明扩大候选池能找回更多证据，但尚不能单独证明控制器学会了准确的查询级预算分配。
+QPP1 was 17.63 percentage points above Top-20, with 400 per-question wins, zero losses, and 1,582 ties. Because the then-current QPP1 mostly expanded rather than shrank the pool, this shows that a larger pool recovered evidence in this run; it does not show that the controller learned accurate query-specific budgets.
 
-严格按“一条官方证据”划分的 1,559 个问题中，Top-20、QPP1 和 QPP2 98% 的召回分别为 39.13%、58.50% 和 55.04%。在 423 个多证据问题中，macro recall 分别为 17.01%、28.23% 和 26.14%。官方 category 1 多跳问题中分别为 14.29%、23.89% 和 21.50%。
+For 1,559 questions with exactly one official evidence item, recall was 39.13% for Top-20, 58.50% for QPP1, and 55.04% for QPP2 98%. For 423 multi-evidence questions, macro recall was 17.01%, 28.23%, and 26.14%, respectively. In official category-1 multi-hop questions, the corresponding values were 14.29%, 23.89%, and 21.50%.
 
-### QPP2 压缩
+### QPP2 compression
 
-相对 QPP1 完整可见集：
+Relative to the complete QPP1 visible set:
 
-| QPP2 档位 | Evidence retention | 记录压缩 | Token 压缩 |
-|---:|---:|---:|---:|
+| QPP2 tier | Evidence retention | Record compression | Token compression |
+| ---: | ---: | ---: | ---: |
 | 90% | 89.88% | 26.06% | 26.07% |
 | 95% | 92.27% | 19.56% | 19.56% |
 | 98% | 96.31% | 12.96% | 12.97% |
 
-98% 档在 1,982 个问题中有 77 个问题损失至少一部分 QPP1 已召回证据，其余 1,905 个持平；因此仍不应成为默认路径。它证明了列表级压缩能力，但还没有达到安全启用所需的近无损程度。
+At the 98% tier, 77 of 1,982 questions lost at least some evidence already recovered by QPP1; the other 1,905 tied. The report therefore did not recommend this as a default path: the experiment showed listwise compression, not the near-lossless safety needed for default activation.
 
-### 置信度诊断
+### Budget-confidence diagnostic
 
-当前 QPP1 预算与 oracle Fibonacci 预算的 Pearson 相关仅为 0.0205，平均绝对档位误差为 20.33 条：
+The reported correlation between QPP1's predicted budget and the oracle Fibonacci budget was only `0.0205`; mean absolute tier error was `20.33` records:
 
-- 420 个问题分配不足；
-- 1,205 个问题分配过多；
-- 357 个问题与 oracle 一致。
+- 420 questions were under-allocated;
+- 1,205 were over-allocated;
+- 357 matched the oracle.
 
-Oracle 仅需平均 20.4 条记录即可达到 Top-50 的 0.7010 recall，而当前 QPP1 使用平均 34.0 条只达到 0.5204。这是完整测试最重要的结论：**固定 Top-K 确实应该由置信度驱动的可变池替代，但当前置信度尚未学会可靠分配池大小。**
+The oracle reached the Top-50 recall of `0.7010` using a mean of 20.4 records; QPP1 used 34.0 records and reached 0.5204. The report's central conclusion was that fixed Top-K should be replaced by variable budgets in principle, but the measured confidence signal had not learned reliable per-query allocation.
 
-下一阶段不应继续盲目增大池子，而应直接优化并校准“证据是否完整”的查询级概率，使用 calibration error、预算与 oracle 的相关性、召回—token 曲线共同验收。QPP2 则继续作为 shadow 压缩器，直到 evidence retention 达到预定安全阈值。
+It proposed calibrating query-level evidence-completeness probabilities and evaluating calibration error, budget/oracle correlation, and the recall-token curve. QPP2 was to remain a shadow compressor until evidence retention reached a chosen safety threshold.
 
-### 运行成本
+### Recorded training and runtime costs
 
-- corpus preparation：8.4 秒；
-- query preparation：284.2 秒；
-- QPP1 最终训练：21.8 秒；
-- 五折 QPP1/QPP2 预算训练：1,021.1 秒；
-- 训练步数：956,160；
-- embedding requests：3,984；
-- embedded texts：104,457；
-- LLM calls：0。
+- corpus preparation: 8.4 s;
+- query preparation: 284.2 s;
+- final QPP1 training: 21.8 s;
+- five-fold QPP1/QPP2 budget training: 1,021.1 s;
+- training steps: 956,160;
+- embedding requests: 3,984;
+- embedded texts: 104,457;
+- LLM calls: 0.
 
-全量离线训练耗时主要来自未批处理的 pairwise QPP2 小计算图，而不是在线推理。QPP2 在线评分平均约 2.06 ms；如继续进行大规模训练，应先批量化 pairwise loss 或增加可恢复的阶段检查点。
-# 补充：置信度驱动的可变检索池
+The report attributed offline training time mainly to unbatched pairwise QPP2 computation, not online inference. It reported mean QPP2 online scoring of about 2.06 ms and recommended batching pairwise loss or adding resumable checkpoints before another large training run.
 
-固定 `Top-K` 不是 NMG 的最终检索语义，只是在检索置信度尚未可靠时的容量保护。更完整的职责分工是：
+## Historical proposal: variable retrieval and visible sets
+
+The original supplement proposed a division of labour:
 
 ```text
-QPP1：判断当前候选池是否已经覆盖回答所需信息
-  └── 不足时按 Fibonacci 档位继续扩大搜索池
+QPP1: predict whether the current candidate pool covers the needed information
+  └── expand the search pool through Fibonacci tiers when insufficient
 
-QPP2：判断候选池中的各条内容是否值得完整交给 Agent
-  └── 保留必要证据，压缩已经展开但更像噪声的推荐内容
+QPP2: estimate which candidates are worth showing in full
+  └── retain necessary evidence and compress expanded noise
 ```
 
-因此，候选池和最终上下文都应是可变长度，而不是固定 `Top-20`：
+It proposed variable search and visible set sizes instead of fixed Top-20:
 
 \[
-K_{\mathrm{search}}
-=
-\min\{k:\Pr(\text{evidence complete}\mid q,R_{1:k})\ge\tau_s\}
+K_{search} = \min\{k : \Pr(\text{evidence complete}\mid q,R_{1:k}) \geq \tau_s\}
 \]
 
 \[
-R_{\mathrm{visible}}
-=
-\{r_i\in R_{1:K_{\mathrm{search}}}:
-\Pr(\text{necessary}_i\mid q,R_{1:K_{\mathrm{search}}})\ge\tau_v\}
+R_{visible} = \{r_i \in R_{1:K_{search}} : \Pr(\text{necessary}_i\mid q,R_{1:K_{search}}) \geq \tau_v\}
 \]
 
-其中仍保留：
+The proposal retained a minimum safety prefix, record/token/latency ceilings, protections for conflicts and fixed user constraints, and progressive expansion rather than jumping to a fixed large pool. It also warned that pairwise QPP2 scores were rankings, not calibrated probabilities; cancelling fixed Top-K would require held-out calibration and reporting evidence retention, compression, calibration error, and worst-case recall loss by query category.
 
-- 最小安全前缀，防止控制器尚未成熟时删掉高排位结果；
-- record/token/latency 总上限，防止低置信度查询无限展开；
-- 冲突、关键约束和用户固定记忆的保护通道；
-- 置信度不足时的渐进扩展，而不是一次跳到固定大池。
+This proposal and its equations are historical research, not the current product semantics. Consult the [current QPP design](../../design/retrieval-confidence-controller.md) and [progressive-recall contract](../../design/fibonacci-progressive-recall.md).
 
-当前 pairwise QPP2 训练得到的是**列表内必要性排序分数**。它能用于概率质量截断，但 sigmoid 输出尚未经过跨查询校准，不能直接解释为绝对的 `P(necessary)`。在取消固定 Top-K 前，需要在留出集上做 Platt scaling、isotonic regression 或等价校准，并报告：
-
-- evidence retention；
-- record/token compression；
-- calibration error（ECE/Brier score）；
-- 不同查询类别下的最坏召回损失。
-
-所以现阶段的 `Top-20` 只保留为 benchmark 基线；实际原型采用“QPP1 动态搜索池 + QPP2 动态可见集 + 硬预算上限”。
+All three referenced result directories are absent from this checkout: `2026-07-29T09-28-10.616Z`, `2026-07-29T09-37-15.222Z`, and `2026-07-29T09-49-23.691Z`. The measurements above are the preserved report values, not a fresh verification.

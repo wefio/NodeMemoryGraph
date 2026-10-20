@@ -1,6 +1,6 @@
 # 首次输出计时显式开启
 
-[English](2026-10-04-first-response-timing-is-opt-in.md)
+[English](2026-10-04-first-response-timing-is-opt-in.md) · [术语](2026-10-04-first-response-timing-is-opt-in.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit
@@ -14,7 +14,7 @@
 
 用户允许在共享 checkout 只接入计时，不部署召回期限，不中断运行中的 Premiere 会话。`/nmg-latency on|off|status` 显式控制记录，默认关闭，会话替换、分支导航或重载不继承开启状态。共享计时原语负责身份、单调累计时间、每阶段首次标记、排除、结局及安全存储失败；Pi 绑定只观察原生生命周期事件，把纯元数据追加为不进入模型上下文的自定义条目。
 
-用户选择只持久化慢的输入到召回区间，而不是每个被观测输入。过滤放在持久化 sink，不改变首次阶段时钟；保留的 trace 包括较短的早期边界。保留阈值、事件、隐私和解释口径由[会话钩子契约](../../design/session-memory-lifecycle-hooks-2026-08-10.md#首次输出计时)统一定义。观测包裹现有准备 handler，原异步返回值或错误原样传递；不增加召回期限，不改变模型参数、daemon 生命周期或供应商请求数量，不把 host 事件时间声称为客户端可见 TTFT。
+用户选择只持久化慢的输入到召回区间，而不是每个被观测输入。过滤放在持久化 sink，不改变首次阶段时钟；保留的 trace 包括较短的早期边界，并且仅当输入到召回的间隔超过 `SLOW_RECALL_THRESHOLD_MS`（1,000 ms）时才持久化。共享的[计时原语](../../../src/integration/first-response-timing.ts)定义带版本的元数据事件与保留过滤；[Pi 绑定](../../../.pi/extensions/nmg/first-response-timing.ts)负责映射宿主事件。历史性的[会话钩子索引](../../design/session-memory-lifecycle-hooks-2026-08-10.zh-CN.md#当前-owner-索引)指向当前责任归属。观测包裹现有准备 handler，原异步返回值或错误原样传递；不增加召回期限，不改变模型参数、daemon 生命周期或供应商请求数量，不把 host 事件时间声称为客户端可见 TTFT。
 
 ## 考虑过的替代方案
 

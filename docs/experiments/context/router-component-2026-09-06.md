@@ -1,5 +1,12 @@
 # Context router component probe — 2026-09-06
 
+[English](router-component-2026-09-06.md) | [简体中文](router-component-2026-09-06.zh-CN.md) · [Terms](router-component-2026-09-06.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this dated record is
+historical research material, not a current runtime contract or authorization
+to run provider experiments. No cited experiment or original run artifact was
+rerun or independently revalidated in this review.
+
 Status: measured custom component experiment; no default activation.
 
 ## Protocol
@@ -21,7 +28,9 @@ No embedding provider, main LLM, or LLM judge is invoked.
 - Reward: gold-evidence coverage, no main-model answer or downstream success metric.
 - 132-parameter linear head, learning rate 0.01; 1/5/20 epochs selected on validation.
 - Cost penalty fixed at zero; token count is character/4 estimate, not provider usage.
-- History features missing because these are independent question snapshots.
+- History features are missing because these are separate, non-sequential
+  question snapshots, not because questions sharing an owner are statistically
+  independent.
 
 ## Result
 
@@ -63,7 +72,8 @@ subtracts cost once, avoiding double charging the learning target.
 | 0.1 | 331 retrieve | 0.3456493654 | 268.4592 |
 | 1 | 331 none | 0 | 0 |
 
-This demonstrates cost sensitivity, **not improved utility**. Synthetic regression
+This shows a discrete retrieve-to-none switch on the chosen illustrative grid,
+not a measured optimal price, general response curve or improved utility. Synthetic regression
 tests separately verify a small retrieval marginal gain switches to resurface
 under token or latency prices, without changing permissions or model Q values.
 The already-inspected test set is not reused to tune lambda or claim a fresh

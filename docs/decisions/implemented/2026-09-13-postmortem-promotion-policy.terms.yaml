@@ -1,0 +1,14 @@
+version: 2
+terms:
+  - term: failure-class promotion
+    aliases: [post-mortem promotion, 故障类别提升]
+    definition: >-
+      A reconciliation that checks an incident's failure class against existing guardrails and assigns a reusable rule to the first suitable existing owner; the incident record itself is not the guardrail.
+      将事故记录的 failure class 与现有防护措施核对，并把可复用规则交给第一个适用的既有 owner 的对账过程；事故记录本身不是防护措施。
+    owner: docs/decisions/implemented/2026-09-13-postmortem-promotion-policy.md
+    anchor: Decision
+    status: canonical
+references:
+  - post-mortem
+  - failure class
+  - guardrail

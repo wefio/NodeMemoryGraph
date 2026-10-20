@@ -1,6 +1,6 @@
 # Board governance and capability addressing (proposal)
 
-[中文](2026-09-06-board-governance-addressing.zh-CN.md)
+[中文](2026-09-06-board-governance-addressing.zh-CN.md) · [Terms used](2026-09-06-board-governance-addressing.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

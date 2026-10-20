@@ -1,6 +1,6 @@
 # AG 与 board 状态空间的统一 state 入口
 
-[English](2026-10-12-state-space-entry.md)
+[English](2026-10-12-state-space-entry.md) · [术语](2026-10-12-state-space-entry.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

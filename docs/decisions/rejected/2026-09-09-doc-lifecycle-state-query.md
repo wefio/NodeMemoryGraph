@@ -1,6 +1,6 @@
 # Query the derived state of a decision record
 
-[中文](2026-09-09-doc-lifecycle-state-query.zh-CN.md)
+[中文](2026-09-09-doc-lifecycle-state-query.zh-CN.md) · [Terms used](2026-09-09-doc-lifecycle-state-query.terms.yaml)
 
 **Status:** rejected
 

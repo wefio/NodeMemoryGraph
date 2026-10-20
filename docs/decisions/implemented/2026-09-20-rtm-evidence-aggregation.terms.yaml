@@ -1,0 +1,14 @@
+version: 2
+terms:
+  - term: assertion evidence standing
+    aliases: [RTM standing, 断言证据状态]
+    definition: >-
+      A per-assertion report of what the recorded evidence establishes: `executed`, `historical`, `not-run`, or `not-recorded`, with `documented-only` and `uncovered` retaining their distinct meanings; inventory totals are not a verdict.
+      逐条断言报告记录证据实际支持的状态：`executed`、`historical`、`not-run` 或 `not-recorded`；`documented-only` 与 `uncovered` 保持各自含义。清单总数不是结论。
+    owner: docs/decisions/implemented/2026-09-20-rtm-evidence-aggregation.md
+    anchor: Decision
+    status: canonical
+references:
+  - contract
+  - evidence
+  - counterexample

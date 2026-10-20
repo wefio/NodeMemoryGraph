@@ -1,9 +1,10 @@
 # 断言记录它的定义域、假设与证据强度
 
-[English](2026-09-09-assertion-domain-and-strength.md)
+[English](2026-09-09-assertion-domain-and-strength.md) · [术语](2026-09-09-assertion-domain-and-strength.terms.yaml)
 
 **Status:** implemented  
 **Approved:** explicit
+**Relates to:** [追溯报告是证据，不是计数](2026-09-20-rtm-evidence-aggregation.zh-CN.md)
 
 ## Problem
 
@@ -44,8 +45,8 @@ interface ContractAssertion {
 
 - 非 `documented-only` 的断言缺 `domain` → 失败；
 - `assumes` 的 id 不在登记册里 → 失败；
-- 分别报告 `bound` 与 `proven`，并给出强度分布，例如
-  `12 bound (0 proven / decision, 12 witness), 1 documented-only`；
+- 报告 `bound` 检查计数，并单独列出 `decision`／`witness` 强度分布，例如
+  `12 bound checks (0 decision / 12 witness), 1 documented-only`；
 - `documented-only` 仍不计入 bound。
 
 `strength` 缺省视为 `witness`，所以回填没做完时报告也不会夸大。
@@ -69,17 +70,15 @@ interface ContractAssertion {
 - `assumes` 指向登记册中不存在的 id 会让 `rtm:check` 失败；
 - 输出里的强度分布与契约中的计数一致；
 - 现有 13 条断言都有 `domain`，且都有显式 `assumes`（可以是 `[]`）；
-- `proven` 只统计证据是决策过程的断言。**今天是 0 条**——代码里那两个决策过程没有被绑到任何断言
-  上——报告会这么说，而不是默认掉。
+- `decision` 强度只统计证据为决策过程的断言。**本记录写作时为 0 条**——代码里那两个决策过程没有被绑到任何断言上。当前报告的 standing 由[追溯聚合决策](2026-09-20-rtm-evidence-aggregation.zh-CN.md)拥有。
 
 ## Consequences
 
 - `ContractAssertion` 新增 `domain`、`assumes`、`strength`；前两个由编译器强制，因此任何能编译
   通过的契约都会写明证据覆盖什么、依赖什么。
 - 现有 13 条断言全部带 `domain` 与显式 `assumes`。
-- `tools/rtm-check.ts` 报 `12 bound (0 proven / decision, 12 witness), 1 documented-only`，并把
-  `assumes` 解析到 `docs/design/assumptions.yaml`（5 条）。
-- `proven` 是 0：代码里两个决策过程都没有绑到任何断言。这个缺口现在是可见的，不是被默认掉的。
+- 本记录写作时，`tools/rtm-check.ts` 报 `12 bound checks (0 decision / 12 witness), 1 documented-only`，并把
+  `assumes` 解析到 `docs/design/assumptions.yaml`（5 条）。decision 强度为零，使未绑定的决策过程可见，而不是被默认掉。
 - 代价：共享契约上多了两种失败模式；而 `domain` 过期没有任何东西能发现。
 
 ## Risks

@@ -1,0 +1,11 @@
+version: 2
+terms:
+  - term: progressive disclosure probe
+    aliases: [eval:disclosure, 渐进披露探针]
+    definition: >-
+      The deterministic mechanism probe run by `npm run eval:disclosure` that compares full versus folded L1 disclosure and measures how the session injection window replaces repeated headers with compact memory references; it is not an answer-quality benchmark and not a substitute for provider-reported token metrics.
+      由 `npm run eval:disclosure` 运行的确定性机制探针，比较完整与折叠的 L1 披露并测量会话注入窗口如何用紧凑记忆引用替换重复 header；它不是答案质量 benchmark，也不能替代 provider 报告的 token 指标。
+    owner: evals/disclosure/README.md
+    anchor: Progressive disclosure probe
+    status: canonical
+references: []

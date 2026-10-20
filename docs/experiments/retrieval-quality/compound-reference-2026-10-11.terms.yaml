@@ -1,0 +1,52 @@
+version: 2
+terms:
+  - term: frozen comparison arm
+    aliases: [baseline and isolated candidate, 冻结对照臂]
+    definition: >-
+      This record's baseline/candidate plan, tied to its named baseline and unchanged ranking, preview, body, identity, provider and deployment scope. Recording a freeze constrains the comparison; it does not by itself prove that the later execution complied.
+      本记录以具名基线及不变的排序、预览、正文、身份、provider 和部署范围约束基线／候选计划。记录冻结约束比较，但本身不证明后续执行遵守了它。
+    owner: docs/experiments/retrieval-quality/compound-reference-2026-10-11.md
+    anchor: Frozen question and arms
+    status: canonical
+  - term: reference key format
+    aliases: ["ref:<hex-prefix>|<quote>", 引用键格式]
+    definition: >-
+      The historical text trial's NMG-generated ref:<hex-prefix>|<quote> serialization, copied whole with its graph. The generator grows the hexadecimal prefix from four digits by two until prefix AND quote select one original canonical ID; the quote uses six normalized Unicode code points. Quote matching is case-sensitive, UUID-prefix matching is not, and the shorter-than-UUID rendering guard uses UTF-16 length rather than token cost.
+      历史文本试验中由 NMG 生成、连同图整段复制的 ref:<hex-prefix>|<quote> 序列化。生成器从四位十六进制前缀起每次加两位，直到前缀与引文的组合选择一个原始规范 ID；引文取六个归一化 Unicode 码点。引文区分大小写，UUID 前缀不区分；渲染的短于 UUID 守卫使用 UTF-16 长度而非 token 成本。
+    owner: docs/experiments/retrieval-quality/compound-reference-2026-10-11.md
+    anchor: Frozen question and arms
+    status: canonical
+  - term: fail-closed resolution
+    aliases: ["no latest-graph inference", fail closed 解析]
+    definition: >-
+      The trial's RPC refusal behavior for missing/foreign/expired graphs, absent witnesses and zero/ambiguous matches, without latest-graph inference or automatic retry. The pure helper instead requires caller-supplied original scope and current targets; its default does not refresh content or enforce ownership. These selectors are not authentication and do not replace canonical exact-read filtering.
+      本试验 RPC 对缺失／外来／过期图、缺见证及零／歧义匹配的拒绝行为，不做 latest-graph 推断或自动重试。纯 helper 则要求调用者提供原始作用域与当前目标，默认不刷新内容或强制归属。选择器不是认证，也不取代规范精确读取过滤。
+    owner: docs/experiments/retrieval-quality/compound-reference-2026-10-11.md
+    anchor: Frozen question and arms
+    status: canonical
+  - term: negative-cell reporting
+    aliases: [failure cost reported separately, 负例单元报告]
+    definition: >-
+      Reporting fallback, empty, withdrawn, deferred and folded cells as their own costs — never as successful-read savings — including the measured cost and extra call of an explicit canonical-ID recovery after a failed reference.
+      把回退、空、已撤回、deferred 与 folded 单元作为自身成本报告——绝不作为成功读取的节省——包括失败引用后显式恢复规范 ID 的实测成本与额外调用。
+    owner: docs/experiments/retrieval-quality/compound-reference-2026-10-11.md
+    anchor: Fixed verification and measurement cells
+    status: canonical
+  - term: record-movement negative control
+    aliases: [current-content-only resolver, 记录移动负向对照]
+    definition: >-
+      The recorded quote-retargeting case: moving matching text to another record must not redirect a previously displayed selector. The reported fix binds resolution to original ID/short-quote witnesses before checking that same ID's current quote; its passing fixture is not an exhaustive edit/lifecycle proof or a frozen full record body.
+      记录中的引文转移用例：把匹配文本移到另一记录，不得让已显示的选择器转向另一 ID。报告的修正先按原始 ID／短引文见证绑定，再检查同一 ID 的当前引文；单个 fixture 通过不证明任意编辑／生命周期，也不冻结整条记录正文。
+    owner: docs/experiments/retrieval-quality/compound-reference-2026-10-11.md
+    anchor: Results
+    status: canonical
+  - term: compound-reference clean-revision requirement
+    aliases: [clean-revision closure prerequisite, 组合引用干净修订前置要求]
+    definition: >-
+      The report's closure requirement for targeted/LSP/blocking checks and an independent clean-revision exit. A completed 300-second precommit run is distinct from that clean-revision obligation; the earlier 150-second expiry and a shell-timed-out 43-pass run remain incomplete receipts. This term does not assert that the required postcommit receipt was supplied.
+      报告的收尾前置要求：定向／LSP／阻塞检查及独立的干净修订退出。已完成的 300 秒 precommit 运行不同于干净修订义务；早先的 150 秒到期与 shell 超时的 43-pass 运行仍是不完整回执。本术语不主张所需后提交回执已提供。
+    owner: docs/experiments/retrieval-quality/compound-reference-2026-10-11.md
+    anchor: Exit rule
+    status: canonical
+references:
+  - compound retrieval reference

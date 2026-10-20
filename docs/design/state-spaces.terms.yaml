@@ -1,0 +1,39 @@
+version: 2
+terms:
+  - term: state space
+    aliases: [状态空间]
+    definition: >-
+      An existing domain-owned read/write scope with its own addressing, authority and lifetime;
+      the common state entry exposes ag and board without merging their owners or stores.
+      由既有领域 owner 管理、具有自身寻址／权限／生命周期的读写作用域；统一 state 入口暴露 ag 与 board，但不合并 owner 或存储。
+    owner: docs/design/state-spaces.md
+    anchor: State spaces and one state entry
+    status: canonical
+  - term: working state
+    aliases: [工作状态, working_state]
+    definition: >-
+      One provisional current-state text in a session-owned Active Graph frame, maintained by explicit replace or clear operations; it is not durable semantic memory or proof of model disclosure.
+      会话所属 Active Graph frame 中的一份临时当前状态文本，由显式 replace 或 clear 操作维护；它不是持久语义记忆，也不能证明内容已披露给模型。
+    owner: docs/design/state-spaces.md
+    anchor: AG writer lifecycle and fencing
+    status: canonical
+  - term: prepared information output
+    aliases: [information output preparation, 信息输出准备]
+    definition: >-
+      A bounded output snapshot containing rendered text, included source fingerprints and omitted views; it preserves complete bodies and required labels but does not prove host visibility, authorization or provider send.
+      有界输出快照，包含渲染文本、已包含来源指纹和省略视图；它保留完整正文及必要标签，但不证明宿主可见性、授权或 provider 已发送。
+    owner: docs/decisions/implemented/2026-10-07-shared-information-output.md
+    anchor: Decision
+    status: canonical
+  - term: coordination frame
+    aliases: [board-entry frame, 协作 frame]
+    definition: >-
+      The proposed board entry viewed as a state record rather than a message, with typed coordination headers and protocol-owned data kept separate from the board's actions.
+      将拟议黑板条目视作状态记录而非消息，其中类型化协作头字段与协议拥有的数据同黑板动作分离。
+    owner: docs/decisions/proposed/2026-09-21-the-frame-and-its-storage.md
+    anchor: Proposal
+    status: proposed
+references:
+  - Active Graph
+  - Task Board
+  - task frame

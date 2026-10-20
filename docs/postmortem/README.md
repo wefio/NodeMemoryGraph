@@ -1,6 +1,6 @@
 # NMG post-mortems
 
-[中文](README.zh-CN.md)
+[中文](README.zh-CN.md) · [Terms used](README.terms.yaml)
 
 Incident write-ups. A failure reached a place it should not have — a user, `main`,
 a merged pull request, a published number — and the part worth keeping is _why the

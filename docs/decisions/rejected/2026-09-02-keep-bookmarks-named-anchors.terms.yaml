@@ -1,0 +1,11 @@
+version: 2
+terms:
+  - term: anchor name collision
+    aliases: [overloaded anchor name, anchor 命名冲突]
+    definition: >-
+      The ambiguity caused by using `anchor` for distinct file bookmarks, explicit retrieval phrases/paths/IDs, Pi task context and reasoning references; the bookmark feature was renamed to `tesserae` rather than preserving the collision.
+      将 `anchor` 同时用于文件书签、显式检索短语／路径／ID、Pi 任务上下文和推理引用所造成的歧义；文件书签功能后来改名为 `tesserae`，而非保留冲突。
+    owner: docs/decisions/rejected/2026-09-02-keep-bookmarks-named-anchors.md
+    anchor: Why rejected
+    status: canonical
+references: []

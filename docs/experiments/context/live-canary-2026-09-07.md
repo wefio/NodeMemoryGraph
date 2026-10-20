@@ -1,5 +1,12 @@
 # Context live canary: wiring real main-model exposure through the official grader
 
+[English](live-canary-2026-09-07.md) | [简体中文](live-canary-2026-09-07.zh-CN.md) · [Terms](live-canary-2026-09-07.terms.yaml)
+
+Evidence boundary (2026-10-17 documentation review): this dated record is
+historical research material, not a current runtime contract or authorization
+to run provider experiments. No cited experiment or original run artifact was
+rerun or independently revalidated in this review.
+
 **Date:** 2026-09-07
 **Status:** exploratory wiring canary — **not** an effectiveness claim, not a benchmark.
 **Owner context:** agent-convergence-feedback-design (§9), phase after #25.
@@ -51,8 +58,9 @@ then call the model.
 ### Model and grading
 
 - Model: official `create_async_openai_client("ANSWER")` → `deepseek-chat`
-  (same provider/model is used for answer and judge here; in this env
-  `ANSWER_MODEL == EVAL_MODEL == deepseek-chat`, so no deviation is material).
+  (the configured answer and judge route was the same:
+  `ANSWER_MODEL == EVAL_MODEL == deepseek-chat`). This records configuration,
+  not independent judging: same-model self-judging remains a validity limitation.
 - Judging: official `locomo_grader`, not a custom scorer.
 - Capture: a client-side proxy around `chat.completions.create` records the real
   `messages`, `messagesHash`, `usage`, and per-call duration; one record per answer
@@ -84,14 +92,17 @@ Judge outcome: none 0/3, cue 0/3, retrieve-replay 2/3.
 
 An earlier run failed with 401 (expired key in a stale `snapshot_eval.env`); it
 was retried with a current key from `.env`. The failure was recorded, not
-zero-filled, and confirmed the error path behaves as designed.
+zero-filled, exercising that authentication-error recording path; it does not
+validate every failure or recovery branch.
 
 ## What this does and does not establish
 
-**Establishes:** the "decision → real model exposure → official grading → usage"
-path is wired end to end and auditable; three context regimes produce distinct,
-internally consistent behavior on a real model (no memory → hallucinate a fixed
-date or honestly refuse; retrieval present → answer the factual date).
+**Establishes within the recorded calls:** the "decision → real model exposure
+→ official grading → usage" path was exercised. The table records the same
+wrong date in three `none` answers, three `cue` refusals, and two correct dates
+plus one wrong date with retrieval. The repeated wrong date is an observation,
+not an explained mechanism; this canary did not diagnose whether prompt/date
+anchoring or another cause produced it.
 
 **Does NOT establish:** that `retrieve` is better than `none`/`cue`. n=3, single
 model, temporal-only questions, and non-live retrieval are insufficient for any
@@ -99,7 +110,8 @@ statistical or activation claim. No default activation, no strategy conclusion.
 
 ## Why this is recorded but not submitted
 
-The user's guidance: this result has no standalone value yet and should not be
+The record reports contemporaneous user guidance that the result had no standalone
+value yet and should not be
 rushed into a commit/PR. It is wiring scaffolding, not a feature milestone. The
 canary source and test remain uncommitted on the working branch until they carry
 real value (e.g. a pre-registered, larger, same-model matched comparison, or when

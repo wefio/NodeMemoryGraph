@@ -1,0 +1,21 @@
+version: 2
+terms:
+  - term: tiered disclosure
+    aliases: [sequential tier opening, 层级披露]
+    definition: >-
+      An opt-in retrieval mode that opens memory tiers in order when deterministic QPP signals that evidence remains insufficient, bounded by the caller's tier ceiling; it is distinct from progressive presentation within warm results.
+      一种 opt-in 检索模式：当确定性 QPP 表明证据仍不足时，按顺序开放 memory tier，并受调用方 tier 上限约束；它不同于 warm results 内的渐进呈现。
+    owner: docs/design/tiered-disclosure-design.md
+    anchor: Current source contract
+    status: canonical
+  - term: "progressive warm disclosure"
+    aliases: ["progressiveWarmDisclosure","渐进热结果披露"]
+    definition: >-
+      A two-window presentation path exposing a warm prefix before deferred memory IDs are loaded; separate from opening deeper storage tiers and not an implication of tiered retrieval.
+      先披露 warm 前缀、再加载延后 memory ID 的双窗口呈现路径；它与打开更深存储 tier 分离，不意味着分层检索。
+    owner: docs/design/tiered-disclosure-design.md
+    anchor: "Current source contract"
+    status: canonical
+references:
+  - progressive warm disclosure
+  - QPP

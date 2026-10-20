@@ -1,0 +1,11 @@
+version: 2
+terms:
+  - term: NmgStore method cluster
+    aliases: [store method cluster, Store 方法簇]
+    definition: >-
+      A source module and ownership boundary for a group of NmgStore methods; current membership and composition are defined by the current source and structural guard, not by a dated inventory.
+      NmgStore 一组方法的源码模块与 ownership 边界；当前成员和组装方式以现行源码及结构 guard 为准，不以有日期的旧清单为准。
+    owner: docs/design/store-cluster-split.md
+    anchor: Current source boundary
+    status: canonical
+references: []

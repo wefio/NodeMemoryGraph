@@ -1,6 +1,6 @@
 # Controlled daemon code reload
 
-[中文](2026-10-13-daemon-controlled-reload.zh-CN.md)
+[中文](2026-10-13-daemon-controlled-reload.zh-CN.md) · [Terms used](2026-10-13-daemon-controlled-reload.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit
@@ -15,6 +15,9 @@ response can duplicate work.
 
 ## Decision
 
+Scope: this record retains the reviewed source branch's implementation decision and evidence. Its `implemented` status describes that source revision, not availability in this target checkout. Current commands and capabilities remain owned by the CLI and authenticated discovery; this documentation PR does not deliver that runtime implementation.
+
+
 The user accepts explicit process replacement with volatile AG state and writer
 leases cleared. `nmg daemon reload` acquires an exclusive handover gate, requires
 the live owner's `controlled-reload` capability, drains accepted calls and waits
@@ -27,7 +30,7 @@ dispatch retry reads only; uncertain mutations report an error without replay.
 Legacy administrative restart remains distinct.
 
 The normative boundary, recovery conditions and verification are owned by
-[daemon lifecycle](../../design/daemon-lifecycle-design.md#controlled-code-reload).
+[daemon lifecycle](../../design/daemon-lifecycle-design/controlled-code-reload.md#controlled-code-reload-1).
 
 ## Alternatives considered
 

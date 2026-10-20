@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: FTS5 lexical tie-break
+    aliases: [lexical coverage tie-break, FTS5 词法同分排序]
+    definition: >-
+      Ordering already-generated candidates that share a score by lexical coverage before a result budget truncates them; this does not add candidates or establish semantic relevance.
+      在结果预算截断前，按词法覆盖度排列已生成且分数相同的候选；它不会新增候选，也不代表语义相关性。
+    owner: docs/experiments/retrieval-quality/lexical-budget-2026-10-10.md
+    anchor: Frozen protocol
+    status: canonical
+  - term: controlled contract validation
+    aliases: [fixture-bounded validation, 受控契约验证]
+    definition: >-
+      A check of explicitly fixed interface and fixture behavior; it does not substitute for production deployment, natural-data quality evaluation, or a full benchmark.
+      对明确固定的接口与夹具行为进行检查；它不能替代生产部署、自然数据质量评估或完整 benchmark。
+    owner: docs/experiments/retrieval-quality/lexical-budget-2026-10-10.md
+    anchor: Frozen protocol
+    status: canonical

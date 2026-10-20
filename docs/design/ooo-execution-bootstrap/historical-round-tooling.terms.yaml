@@ -1,0 +1,34 @@
+version: 2
+terms:
+  - term: recorded-answer replay
+    aliases: [default replay, 已记录答案重放]
+    definition: >-
+      Re-running the round with recorded worker answers instead of a live model call; it measures orchestration/scheduling and host overhead without spending model tokens.
+      使用已记录的 worker 答案重跑轮次，而不是调用 live model；它测量编排/调度及 host 开销，不花模型 tokens。
+    owner: docs/design/ooo-execution-bootstrap/historical-round-tooling.md
+    anchor: "S3: usable entry point (historical record, completed 2026-09-12)"
+    status: canonical
+  - term: retired `ooo_round` product tool
+    aliases: [ooo_round removal, 退役的 ooo_round 产品工具]
+    definition: >-
+      The dedicated Pi `ooo_round` tool left the product tool directory on 2026-09-14 because ordinary collaboration did not require a separate entry point; this does not prove that the programmatic dispatch loop is integrated with the existing nmg_board host path.
+      专用 Pi `ooo_round` 工具于 2026-09-14 离开产品工具目录，因为普通协作不需要独立入口；这不能证明程序化 dispatch loop 已接入现有 nmg_board host path。
+    owner: docs/design/ooo-execution-bootstrap/historical-round-tooling.md
+    anchor: "S3: usable entry point (historical record, completed 2026-09-12)"
+    status: canonical
+  - term: offline comparison arm
+    aliases: [offline arm, 离线对照臂]
+    definition: >-
+      A sequential or out-of-order comparison that replays recorded answers with zero model tokens and therefore measures scheduling/host overhead, not live-model quality or economics.
+      通过重放已记录答案、模型 tokens 为零的顺序或 OoO 对比；因此它测量调度/host 开销，不测 live-model 质量或经济性。
+    owner: docs/design/ooo-execution-bootstrap/historical-round-tooling.md
+    anchor: "S4: comparative evaluation (historical record, tools and offline arms completed 2026-09-12)"
+    status: canonical
+references:
+  - historical round-instrument record
+  - constrained OoO bootstrap
+  - product-loop activation boundary
+  - research-instrument evidence
+  - plan-driver
+  - session move
+  - run record

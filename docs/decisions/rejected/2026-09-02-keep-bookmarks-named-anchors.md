@@ -1,6 +1,6 @@
 # Keep the bookmark feature named "anchors"
 
-[中文](2026-09-02-keep-bookmarks-named-anchors.zh-CN.md)
+[中文](2026-09-02-keep-bookmarks-named-anchors.zh-CN.md) · [Terms used](2026-09-02-keep-bookmarks-named-anchors.terms.yaml)
 
 **Status:** rejected  
 

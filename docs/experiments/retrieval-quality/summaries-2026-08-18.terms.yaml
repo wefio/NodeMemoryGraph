@@ -1,0 +1,26 @@
+version: 2
+terms:
+  - term: leaf-block summary
+    aliases: [叶子块摘要, 块摘要]
+    definition: >-
+      One compact LLM-written text per leaf block, stored as index metadata that is matched against queries and never surfaced as a candidate; a hit appends the block's verbatim members after ranking.
+      每个叶子块一条由 LLM 编写的紧凑文本，作为索引元数据存放，用于与查询匹配，从不作为候选呈现；命中后会在排序之后追加该块的逐字成员。
+    owner: docs/experiments/retrieval-quality/summaries-2026-08-18.md
+    anchor: Mechanism (what is being measured)
+    status: canonical
+  - term: stacked arm
+    aliases: [堆叠臂]
+    definition: >-
+      The retrieval arm that enables the hybrid arm and the leaf-summary arm together (`--hybrid --summaries`), paying both their context costs.
+      同时启用混合臂与叶子摘要臂（`--hybrid --summaries`）的检索臂，需同时承担两者的上下文成本。
+    owner: docs/experiments/retrieval-quality/summaries-2026-08-18.md
+    anchor: Overall (R@20, ctx chars)
+    status: canonical
+  - term: context inflation
+    aliases: [上下文膨胀]
+    definition: >-
+      The growth in rendered context caused by appending verbatim expanded members; this report measures it in characters, not billed tokens or provider cost. A supplement bound does not by itself establish acceptable total context cost.
+      因追加逐字扩展成员而导致的渲染上下文增长；本报告按字符而非计费 token 或 provider 成本衡量。仅约束补充部分不能证明总上下文成本可接受。
+    owner: docs/experiments/retrieval-quality/summaries-2026-08-18.md
+    anchor: "Cost: context inflation"
+    status: canonical

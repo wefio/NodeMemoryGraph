@@ -1,0 +1,17 @@
+version: 2
+terms:
+  - term: adapter capability coverage
+    aliases: ["适配器能力覆盖"]
+    definition: >-
+      The full/partial/none account of an adapter's wiring to shared logic and daemon RPC; it compares integration coverage, not implementation quality. 以 full/partial/none 记录适配器接入共享逻辑与 daemon RPC 的范围；比较接入覆盖而非实现质量。
+    owner: docs/design/harness-capability-matrix.md
+    anchor: Rows and columns
+    status: canonical
+  - term: shared session flow
+    aliases: ["共享会话流程"]
+    definition: >-
+      Host-neutral integration-layer recall, task-window, observation, attribution, identity and board-wake logic whose host transport/emission seams remain adapter-owned; this move is not a new daemon workflow engine. 宿主无关的 integration-layer 召回、任务窗口、观察、归因、身份与黑板唤醒逻辑；宿主传输与发出接缝仍归适配器，不是新 daemon 工作流引擎。
+    owner: docs/decisions/implemented/2026-10-16-shared-session-flows.md
+    anchor: Decision
+    status: canonical
+references: []

@@ -1,0 +1,27 @@
+version: 2
+terms:
+  - term: blocking/candidate-generation signal
+    aliases: [BPID blocking score, blocking／candidate 生成信号]
+    definition: >-
+      An uncalibrated similarity score used only to nominate a bounded set of pairs for semantic review; it is neither a probability nor a product threshold, and a high value must not be read as calibrated identity confidence.
+      未校准的相似度分数，只用于提名一小组待语义审阅的节点对；它既不是概率也不是产品阈值，高值也不得被读作已校准的身份置信度。
+    owner: docs/experiments/topology/bpid-evaluation-2026-08-09.md
+    anchor: Interpretation
+    status: canonical
+  - term: journaled merge recovery probe
+    aliases: [bounded merge/rollback probe, journal 化合并恢复探针]
+    definition: >-
+      Materializing labelled pairs as separate NMG entity nodes, giving each pair five constructed proposal observations, physically merging and immediately rolling back from the journal; it measures recoverability, not independent natural confirmations or whether knowingly merging a negative pair is acceptable.
+      把标注好的节点对物化为独立的 NMG entity 节点，各给五次构造 proposal observation，执行物理合并并立即从 journal 回滚；它测量可恢复性，不证明独立自然确认，也不证明明知是负样本仍去合并可接受。
+    owner: docs/experiments/topology/bpid-evaluation-2026-08-09.md
+    anchor: Dataset and protocol
+    status: canonical
+  - term: selected-pair non-match fraction
+    aliases: [BPID selected-candidate error fraction, 入选节点对的非匹配比例]
+    definition: >-
+      The non-match share among pairs surviving the reported threshold (19 of 241 at `0.98`). Most selected pairs were not actuated, so this is not an observed false-merge rate or an estimate of production precision.
+      在报告阈值下存活的节点对中非匹配的比例（`0.98` 处为 241 个中的 19 个）。大多数入选节点对未执行合并，因此它不是实测错误合并率或生产精度估计。
+    owner: docs/experiments/topology/bpid-evaluation-2026-08-09.md
+    anchor: Interpretation
+    status: canonical
+references: []

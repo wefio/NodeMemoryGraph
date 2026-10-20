@@ -1,6 +1,6 @@
 # 恢复测试使用冻结声明
 
-[English](2026-10-13-recovery-tests-use-frozen-declarations.md)
+[English](2026-10-13-recovery-tests-use-frozen-declarations.md) · [术语](2026-10-13-recovery-tests-use-frozen-declarations.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

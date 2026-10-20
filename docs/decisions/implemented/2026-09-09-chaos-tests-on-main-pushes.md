@@ -1,6 +1,6 @@
 # Run the Windows chaos job on main pushes only
 
-[中文](2026-09-09-chaos-tests-on-main-pushes.zh-CN.md)
+[中文](2026-09-09-chaos-tests-on-main-pushes.zh-CN.md) · [Terms used](2026-09-09-chaos-tests-on-main-pushes.terms.yaml)
 
 **Status:** implemented  
 **Approved:** unrecorded

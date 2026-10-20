@@ -1,6 +1,6 @@
 # Name the check identity and the check runner by what they are
 
-[中文](2026-09-19-name-the-check-and-runner.zh-CN.md)
+[中文](2026-09-19-name-the-check-and-runner.zh-CN.md) · [Terms used](2026-09-19-name-the-check-and-runner.terms.yaml)
 
 **Status:** implemented
 **Approved:** explicit

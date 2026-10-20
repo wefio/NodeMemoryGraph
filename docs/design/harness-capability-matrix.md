@@ -1,6 +1,6 @@
 # Harness adapter capability matrix
 
-[中文](harness-capability-matrix.zh-CN.md)
+[中文](harness-capability-matrix.zh-CN.md) · [Terms used](harness-capability-matrix.terms.yaml)
 
 **Status:** current
 

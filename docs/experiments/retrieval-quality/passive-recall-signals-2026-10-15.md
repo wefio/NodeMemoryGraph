@@ -1,5 +1,7 @@
 # Reusing existing search events as a low-cost recall signal
 
+[English](passive-recall-signals-2026-10-15.md) | [简体中文](passive-recall-signals-2026-10-15.zh-CN.md) · [Terms](passive-recall-signals-2026-10-15.terms.yaml)
+
 ## Question
 
 Can a session trial obtain weak search-action observations without adding a
@@ -84,7 +86,7 @@ merged: it duplicated observations before a demonstrated data gap required the
 extra runtime and maintenance. That prototype's passing tests do not validate
 this signal's usefulness. No new Lab mode or operation is delivered.
 
-The existing [recall cue capability](../../design/design.md#session-only-recall-cues)
+The existing [recall cue capability](../../design/design/progressive-retrieval.md#progressive-retrieval)
 remains paused for this session. No trigger is learned or promoted from these
 19 explicit events, and no feedback, claim outcome, classifier, shared-service
 change, or paid model evaluation is performed. Reuse feasibility is established;

@@ -1,6 +1,6 @@
 # 共享披露文案瘦身
 
-[English](2026-10-10-shared-disclosure-copy.md)
+[English](2026-10-10-shared-disclosure-copy.md) · [术语](2026-10-10-shared-disclosure-copy.terms.yaml)
 
 **Status:** implemented
 **Approved:** auto

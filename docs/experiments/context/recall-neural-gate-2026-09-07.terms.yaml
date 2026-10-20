@@ -1,0 +1,18 @@
+version: 2
+terms:
+  - term: recall pre-probe
+    aliases: [lexical pre-probe, 召回预探针]
+    definition: >-
+      A proposed inexpensive lexical top-k check performed before choosing whether to disclose more context; it is a research proposal, not a claim that every current auto-recall turn searches first.
+      在决定是否披露更多上下文前提出的低成本词法 top-k 检查；这是研究提案，不表示当前每个 auto-recall 回合都会先搜索。
+    owner: docs/experiments/context/recall-neural-gate-2026-09-07.md
+    anchor: Proposal: decide whether a cheap probe merits disclosure
+    status: canonical
+  - term: turn-level injection decision
+    aliases: [per-turn recall gate, 回合级注入决策]
+    definition: >-
+      A decision whether a turn receives any memory context, distinct from ranking or selecting individual memory items within a candidate pool.
+      决定某个回合是否获得任何记忆上下文；区别于在候选池内排序或选择单条 memory。
+    owner: docs/experiments/context/recall-neural-gate-2026-09-07.md
+    anchor: Proposal: decide whether a cheap probe merits disclosure
+    status: canonical
