@@ -1041,6 +1041,8 @@ export function apply(ctx: Context): () => void {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Focused recall query.' },
+        recallCue: { type: 'string', description: nmgPrompts.search_recall_cue_parameter_description },
+        recallRevision: { type: 'integer', minimum: 1, description: nmgPrompts.search_recall_revision_parameter_description },
         limit: { type: 'integer', description: 'Return 1..50 records (default 8).' },
         maxTier: { type: 'integer', description: 'Deepest memory tier 0..3.' },
         graphHops: { type: 'integer', description: 'Graph expansion 0..3.' },
@@ -1054,7 +1056,7 @@ export function apply(ctx: Context): () => void {
     output: textOutput,
     async execute(args, exec) {
       const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-      const params: Record<string, unknown> = { query: args.query, projectDir: workspaceRoot, sessionId }
+      const params: Record<string, unknown> = { query: args.query, projectDir: workspaceRoot, sessionId, recallCue: args.recallCue, recallRevision: args.recallRevision }
       if (args.limit != null) params.limit = args.limit
       if (args.maxTier != null) params.maxTier = args.maxTier
       if (args.graphHops != null) params.graphHops = args.graphHops
@@ -1459,7 +1461,7 @@ export function apply(ctx: Context): () => void {
       type: 'object',
       properties: {
         action: { type: 'string', enum: ['list', 'status', 'enable', 'disable', 'invoke'] },
-        capability: { type: 'string', enum: ['reasoning_workspace', 'memory_graph_reasoner', 'controller_shadow', 'controller_controlled', 'controller_active'] },
+        capability: { type: 'string', enum: ['reasoning_workspace', 'recall_gate', 'memory_graph_reasoner', 'controller_shadow', 'controller_controlled', 'controller_active'] },
         reason: { type: 'string' },
         ttlSeconds: { type: 'integer' },
         operation: { type: 'string' },

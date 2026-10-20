@@ -18,12 +18,30 @@ from both storage tiers and the STG/LTG lifecycle:
    calculations, formatting, and other self-contained turns therefore remain
    memory-free. Explicit Chinese temporal recall cues include both `之前` and
    `先前`; equivalent past-state questions use the same retrieval decision.
+   Chinese recollection questions also include `你记得` / `您记得` carrying an
+   interrogative marker and the question form `来着？`. A bare reminder or a
+   `用来着色`-style construction is not a recall request.
    The gate may retain bounded task anchors so a terse continuation
    can recall the immediately preceding task without treating every substantive
    prompt as a history query.
 3. **Agent-directed recall layer:** compact headers/cues that let the model call
    `nmg_search`, inspect costs, and expand the AG with exact details through
    `nmg_get`.
+
+The experimental `recall_gate` capability is a default-off, session-leased pilot on
+the automatic layer. It caches assistant-proposed intent hints rather than
+memories, relevance judgments or claim outcomes, and a main-model supplemental
+search may include a literal cue from the current input. Admission requires an
+otherwise skipped entry plus a current session/project generation and proposal
+fence. Native Pi captures that observation outside model parameters; explicit
+clients supply a preparation revision. Invalid, stale or disabled proposals do
+not fail or alter the ordinary search, and a consumed fence certifies neither
+intent nor search success. Only an otherwise skipped query reuses a hint: static
+and task-anchor recalls win, and a hit still takes the ordinary `cue` decision,
+bounded by host configuration, retrieval filters and output budgets. Confidence
+constants remain heuristics, not calibrated probabilities. The
+[recall cue decision](../../decisions/implemented/2026-10-15-session-recall-cues.md)
+owns the protocol.
 
 Automatic recall and Agent-directed recall share the same indexed records.
 Explicit recall triggers may improve candidate nomination in either layer, but
@@ -74,7 +92,7 @@ Search signals are separated by purpose:
 
 Structured scope conjunctions and inclusive event-time bounds constrain the SQL candidate pool before scoring and limiting. A missing event time fails a supplied bound. Hybrid lexical priority does not exempt candidates: repeated `ORDER BY` memory IDs bind after every `WHERE` value and before `LIMIT`, in placeholder order. Forced candidates and no-FTS-hit vector fallback retain the same filtering contract.
 
-On the FTS5-only path, after the Active Graph budget selects ranked evidence, adjacent candidates with exactly equal `combinedScore` are ordered by IDF-weighted query-term coverage in their statements and bounded evidence excerpts. It changes neither candidate membership, QPP expansion nor hybrid retrieval. Evaluation and the rejected neural arm are recorded in [lexical tie ranking](../../decisions/implemented/2026-09-30-lexical-tie-ranking.md).
+On the FTS5-only path, adjacent candidates with exactly equal `combinedScore` are ordered by IDF-weighted query-term coverage in their statements and first 500 evidence characters before the direct result cap and the Active Graph budget select evidence. The rule changes neither candidate membership, QPP expansion nor hybrid retrieval; non-tied order and scores stay unchanged, while the selected prefix and QPP observations may change because the budget sees the resolved order. Open attachments retain their reserved positions, and semantic retrieval or forced surface-anchor supplements do not use this rule. Scope, evaluation and the rejected neural arm are recorded in [lexical tie ranking](../../decisions/implemented/2026-09-30-lexical-tie-ranking.md).
 
 Arbitrary model-generated regex is not a relevance ranker and must not scan the
 entire store by default. Surface anchors are admitted beside semantic candidates

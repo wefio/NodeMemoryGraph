@@ -1129,7 +1129,9 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       const rows = this.db
         .prepare(
           `SELECT node_id, SUM(pending_access_count) AS pending
-         FROM memory_records GROUP BY node_id HAVING pending >= ?`,
+         FROM memory_records
+         WHERE storage_state = 'indexed' AND status IN ('active', 'disputed')
+         GROUP BY node_id HAVING pending >= ?`,
         )
         .all(Math.max(1, threshold)) as Row[];
       return rows.map((row) => this.rebalanceNode(String(row.node_id), capacities));
@@ -1163,13 +1165,17 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
                  WHERE d.compacted = 0 AND active_write_node.status = 'active') AS total_pending_writes,
                (SELECT COALESCE(SUM(m.pending_access_count), 0) FROM memory_records m
                   JOIN memory_nodes active_access_node ON active_access_node.id = m.node_id
-                 WHERE active_access_node.status = 'active') AS total_pending_accesses
+                 WHERE active_access_node.status = 'active'
+                   AND m.storage_state = 'indexed'
+                   AND m.status IN ('active', 'disputed')) AS total_pending_accesses
            ), candidates AS (
              SELECT n.id AS node_id,
                     (SELECT COUNT(*) FROM memory_index_delta d
                       WHERE d.node_id = n.id AND d.compacted = 0) AS pending_writes,
                     (SELECT COALESCE(SUM(m.pending_access_count), 0)
-                       FROM memory_records m WHERE m.node_id = n.id) AS pending_accesses,
+                       FROM memory_records m
+                      WHERE m.node_id = n.id AND m.storage_state = 'indexed'
+                        AND m.status IN ('active', 'disputed')) AS pending_accesses,
                     COALESCE((SELECT MIN(d.created_at) FROM memory_index_delta d
                       WHERE d.node_id = n.id AND d.compacted = 0), n.updated_at) AS oldest
                FROM memory_nodes n WHERE n.status = 'active'
@@ -1242,6 +1248,8 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         durationMs: timer.totalMs,
         createdAt: new Date().toISOString(),
       };
+      // Empty checks retain latency aggregates, not an ever-growing run journal.
+      if (result.consideredNodes === 0) return result;
       this.db
         .prepare(
           `INSERT INTO maintenance_runs

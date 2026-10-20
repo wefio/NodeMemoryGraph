@@ -1275,7 +1275,7 @@ export type MemoryLoadMode = "none" | "cue" | "retrieve";
 export interface MemoryGateDecision {
   mode: MemoryLoadMode;
   confidence: number;
-  reason: "explicit_recall" | "memory_may_help" | "memory_not_needed";
+  reason: "explicit_recall" | "memory_may_help" | "memory_not_needed" | "session_recall_hint";
   maxTier: MemoryTier;
   limit: number;
   graphHops: number;

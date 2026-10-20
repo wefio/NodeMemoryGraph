@@ -102,6 +102,7 @@ import {
 } from "../core/relevance-gate.ts";
 import { readRelevanceModel } from "../lab/relevance-model.ts";
 import { normalizeRecallTriggers } from "../core/recall-triggers.ts";
+import { SessionRecallTrial, type SessionRecallPreparation } from "../core/session-recall.ts";
 import {
   bindRunEntry,
   cancelRun,
@@ -220,6 +221,7 @@ export class NmgService {
   readonly #dataDirectory: string;
   readonly #environment: NodeJS.ProcessEnv;
   readonly #labAuthority = new LabActivationAuthority();
+  readonly #sessionRecall = new SessionRecallTrial();
   readonly #reasoningWorkspaces: ReasoningWorkspaces;
   #labShadowController: ControllerPolicyChannel | undefined;
   /** Daemon-owned online learner for the context-use feedback loop (shared
@@ -372,6 +374,19 @@ export class NmgService {
         "DRAINING",
         `${this.#inFlight} calls were still in flight after ${timeoutMs}ms`,
       );
+    }
+  }
+
+  /** Reload admission is reversible only when draining fails; no accepted call is cancelled. */
+  async prepareReload(timeoutMs = 5_000): Promise<void> {
+    if (this.#closing) throw new NmgProtocolError("SHUTTING_DOWN", "the service takes no new work");
+    this.#closing = true;
+    try {
+      await this.drain(timeoutMs);
+    } catch (error) {
+      this.#closing = false;
+      this.#shutdownRequested = false;
+      throw error;
     }
   }
 
@@ -744,9 +759,11 @@ export class NmgService {
       return { action: "list", capabilities: this.#labAuthority.list() };
     }
     if (params.action === "status") {
+      const activation = this.#labAuthority.status(params.capability, params.sessionId);
+      if (!activation) this.#resetRecallGate(params.capability, params.sessionId);
       return {
         action: "status",
-        activation: this.#labAuthority.status(params.capability, params.sessionId),
+        activation,
       };
     }
     if (params.action === "enable") {
@@ -757,17 +774,19 @@ export class NmgService {
         params.capability === "working_state"
           ? this.#sessionActiveGraphs.bindWorkingState(params.sessionId)
           : undefined;
+      const activation = this.#labAuthority.enable({
+        capability: params.capability,
+        scope: params.scope ?? "session",
+        sessionId: params.sessionId,
+        requester: params.requester,
+        reason: params.reason,
+        ttlSeconds: params.ttlSeconds,
+        workingStateBinding,
+      });
+      this.#resetRecallGate(params.capability, params.sessionId);
       return {
         action: "enable",
-        activation: this.#labAuthority.enable({
-          capability: params.capability,
-          scope: params.scope ?? "session",
-          sessionId: params.sessionId,
-          requester: params.requester,
-          reason: params.reason,
-          ttlSeconds: params.ttlSeconds,
-          workingStateBinding,
-        }),
+        activation,
       };
     }
     if (params.action === "disable") {
@@ -776,6 +795,7 @@ export class NmgService {
         params.sessionId,
       )?.workingStateBinding;
       if (binding) this.#sessionActiveGraphs.unbindWorkingState(binding);
+      this.#resetRecallGate(params.capability, params.sessionId);
       return {
         action: "disable",
         activation: this.#labAuthority.disable(params.capability, params.sessionId),
@@ -792,12 +812,15 @@ export class NmgService {
         output,
       };
     }
-    const output = this.#invokeLabCapability(
-      params.capability,
-      params.sessionId,
-      params.operation,
-      params.input,
-    );
+    const output =
+      params.capability === "recall_gate"
+        ? this.#invokeRecallGate(params.sessionId, params.operation, params.input)
+        : this.#invokeLabCapability(
+            params.capability,
+            params.sessionId,
+            params.operation,
+            params.input,
+          );
     return {
       action: "invoke",
       capability: params.capability,
@@ -1050,6 +1073,80 @@ export class NmgService {
     );
   }
 
+  #resetRecallGate(capability: LabCapability, sessionId: string): void {
+    if (capability === "recall_gate") this.#sessionRecall.clear(sessionId);
+  }
+
+  #invokeRecallGate(sessionId: string, operation: string, input: unknown): unknown {
+    const values = objectParams(input ?? {});
+    if (operation === "prepare") {
+      return this.#sessionRecall.prepare(
+        sessionId,
+        resolve(optionalString(values, "projectDir") ?? process.cwd()),
+        requiredString(values, "prompt"),
+        optionalBoolean(values, "scheduled") ?? false,
+      );
+    }
+    if (operation === "correct") {
+      return this.#sessionRecall.correct(
+        sessionId,
+        requiredNumber(values, "revision", 1, Number.MAX_SAFE_INTEGER),
+        requiredString(values, "phrase"),
+        requiredString(values, "reason"),
+      );
+    }
+    if (operation === "list") return this.#sessionRecall.list(sessionId);
+    if (operation === "events") return this.#sessionRecall.events(sessionId);
+    if (operation === "remove")
+      return { removed: this.#sessionRecall.remove(sessionId, requiredString(values, "phrase")) };
+    if (operation === "clear") return { cleared: this.#sessionRecall.clear(sessionId) };
+    throw new NmgProtocolError("INVALID_PARAMS", `unknown recall gate operation: ${operation}`);
+  }
+
+  #prepareRecallGate(
+    sessionId: string,
+    recall: Extract<NmgSessionActiveGraphParams, { action: "beginDisclosureTurn" }>["recall"],
+  ): SessionRecallPreparation | undefined {
+    if (!this.#labAuthority.isEnabled("recall_gate", sessionId)) {
+      this.#sessionRecall.clear(sessionId);
+      return undefined;
+    }
+    if (!recall) return undefined;
+    return this.#sessionRecall.prepare(
+      sessionId,
+      resolve(recall.projectDir),
+      recall.prompt,
+      recall.scheduled,
+    );
+  }
+
+  #recallTurnMetadata(
+    params: Extract<NmgSessionActiveGraphParams, { action: "beginDisclosureTurn" }>,
+  ) {
+    const lease = this.#labAuthority.status("recall_gate", params.sessionId);
+    if (!lease) {
+      this.#sessionRecall.clear(params.sessionId);
+      return {};
+    }
+    const projectDir = params.projectDir ? resolve(params.projectDir) : undefined;
+    if (projectDir) this.#sessionRecall.snapshot(params.sessionId, projectDir);
+    this.#sessionRecall.beginTurn(params.sessionId);
+    return {
+      recallGateActive: true as const,
+      ...(projectDir
+        ? {
+            recallGate: {
+              ...this.#sessionRecall.snapshot(params.sessionId, projectDir),
+              expiresAt: lease.expiresAt,
+            },
+          }
+        : {}),
+      ...(params.recall
+        ? { sessionRecall: this.#prepareRecallGate(params.sessionId, params.recall) }
+        : {}),
+    };
+  }
+
   #sessionActiveGraph(params: NmgSessionActiveGraphParams): NmgMethodResult["sessionActiveGraph"] {
     if (params.action === "observe") {
       return {
@@ -1073,6 +1170,7 @@ export class NmgService {
       return {
         action: "beginDisclosureTurn",
         turn: this.#sessionActiveGraphs.beginDisclosureTurn(params.sessionId),
+        ...this.#recallTurnMetadata(params),
       };
     }
     if (params.action === "disclose") {
@@ -1089,6 +1187,8 @@ export class NmgService {
     }
     const released = this.#sessionActiveGraphs.release(params.sessionId);
     this.#labAuthority.disable("working_state", params.sessionId);
+    this.#labAuthority.disable("recall_gate", params.sessionId);
+    this.#sessionRecall.clear(params.sessionId);
     this.#store?.clearSessionActivation(params.sessionId);
     for (const store of this.#stgStores.values()) store.clearSessionActivation(params.sessionId);
     return { action: "release", released };
@@ -1697,12 +1797,44 @@ export class NmgService {
    *  exact graph the feedback names. Both host adapters (pi, dsh) just forward
    *  — no adapter holds learner logic. */
   async #search(params: NmgSearchParams): Promise<NmgMethodResult["search"]> {
-    const context = await this.#searchImpl(params);
-    if (params.persistTrace !== false) {
-      this.#stageOnlineDecision(params, context);
-      this.#recordRecallInstance(params, context);
+    this.#offerSearchCue(params);
+    const retrieval = { ...params };
+    delete retrieval.recallCue;
+    delete retrieval.recallRevision;
+    delete retrieval.recallSource;
+    const context = await this.#searchImpl(retrieval);
+    if (retrieval.persistTrace !== false) {
+      this.#stageOnlineDecision(retrieval, context);
+      this.#recordRecallInstance(retrieval, context);
     }
     return context;
+  }
+
+  #offerSearchCue(params: NmgSearchParams): void {
+    const { sessionId, recallCue, recallSource, recallRevision } = params;
+    if (!sessionId || !recallCue || params.autoRecall || params.persistTrace === false) return;
+    if (!this.#labAuthority.isEnabled("recall_gate", sessionId)) {
+      this.#sessionRecall.clear(sessionId);
+      return;
+    }
+    if (recallSource) {
+      const snapshot = this.#sessionRecall.snapshot(
+        sessionId,
+        resolve(params.projectDir ?? process.cwd()),
+      );
+      if (snapshot.generation !== recallSource.generation || snapshot.turn !== recallSource.turn)
+        return;
+      this.#sessionRecall.offerFromSearch(
+        sessionId,
+        resolve(params.projectDir ?? process.cwd()),
+        recallSource.prompt,
+        recallCue,
+        recallSource.turn,
+      );
+    } else if (recallRevision !== undefined) {
+      if (params.projectDir) this.#sessionRecall.snapshot(sessionId, resolve(params.projectDir));
+      this.#sessionRecall.offerPrepared(sessionId, recallRevision, recallCue);
+    }
   }
 
   /** Append one self-contained recall instance to the benchmark corpus for any
@@ -2729,11 +2861,30 @@ function parseRecordFeedbackParams(value: unknown): NmgRecordFeedbackParams {
   };
 }
 
+function recallSearchSource(value: unknown): NmgSearchParams["recallSource"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  if (typeof source.prompt !== "string" || source.prompt.length > 4096) return undefined;
+  if (!Number.isSafeInteger(source.generation) || Number(source.generation) < 1) return undefined;
+  if (!Number.isSafeInteger(source.turn) || Number(source.turn) < 1) return undefined;
+  return {
+    prompt: source.prompt,
+    generation: Number(source.generation),
+    turn: Number(source.turn),
+  };
+}
+
 function parseSearchParams(value: unknown): NmgSearchParams {
   const params = objectParams(value);
   return {
     query: requiredString(params, "query"),
     queries: optionalStringArray(params, "queries"),
+    recallCue: typeof params.recallCue === "string" ? params.recallCue : undefined,
+    recallRevision:
+      Number.isSafeInteger(params.recallRevision) && Number(params.recallRevision) > 0
+        ? Number(params.recallRevision)
+        : undefined,
+    recallSource: recallSearchSource(params.recallSource),
     nodeName: optionalString(params, "nodeName"),
     scope: optionalScope(params, "scope"),
     sourceActor: optionalEnum(params, "sourceActor", MEMORY_ACTORS),
@@ -2860,8 +3011,22 @@ function parseSessionActiveGraphParams(value: unknown): NmgSessionActiveGraphPar
     "clearDisclosures",
   ] as const);
   const sessionId = requiredString(params, "sessionId");
+  if (action === "beginDisclosureTurn") {
+    const recall = params.recall === undefined ? undefined : objectParams(params.recall);
+    return {
+      action,
+      sessionId,
+      projectDir: optionalString(params, "projectDir"),
+      recall: recall
+        ? {
+            prompt: requiredString(recall, "prompt"),
+            scheduled: optionalBoolean(recall, "scheduled") ?? false,
+            projectDir: requiredString(recall, "projectDir"),
+          }
+        : undefined,
+    };
+  }
   if (
-    action === "beginDisclosureTurn" ||
     action === "snapshot" ||
     action === "activate" ||
     action === "release" ||

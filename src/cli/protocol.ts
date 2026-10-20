@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { SessionRecallHints, SessionRecallPreparation } from "../core/session-recall.ts";
 
 import type {
   ActiveGraphBudget,
@@ -106,6 +107,7 @@ export const NMG_CAPABILITIES = [
   "lab-capabilities",
   "session-active-graph",
   "state-spaces",
+  "controlled-reload",
 ] as const;
 
 export type NmgCapability = (typeof NMG_CAPABILITIES)[number];
@@ -161,7 +163,7 @@ const RPC_DESCRIPTOR_SOURCE = {
 
 for (const descriptor of Object.values(RPC_DESCRIPTOR_SOURCE)) Object.freeze(descriptor);
 
-/** Process-lifetime catalog. Runtime registration and hot reload are intentionally unsupported. */
+/** Process-lifetime catalog. Controlled reload replaces the process, never mutates its catalog. */
 export const NMG_RPC_DESCRIPTORS = Object.freeze(RPC_DESCRIPTOR_SOURCE);
 
 export type NmgMethod = keyof typeof NMG_RPC_DESCRIPTORS;
@@ -359,6 +361,12 @@ export interface NmgSearchParams {
   query: string;
   /** Extra retrieval clauses fused with the primary query (union of results). */
   queries?: string[];
+  /** Optional literal proposal piggybacked on an independently chosen search. */
+  recallCue?: string;
+  /** Explicit prepare revision for clients without a native turn observation. */
+  recallRevision?: number;
+  /** Host-only native observation; stripped before retrieval, providers and traces. */
+  recallSource?: { prompt: string; generation: number; turn: number };
   nodeName?: string;
   scope?: MemoryScope;
   sourceActor?: MemoryActor;
@@ -423,7 +431,12 @@ export type NmgSessionActiveGraphParams =
       action: "snapshot" | "activate" | "release" | "clearDisclosures";
       sessionId: string;
     }
-  | { action: "beginDisclosureTurn"; sessionId: string }
+  | {
+      action: "beginDisclosureTurn";
+      sessionId: string;
+      projectDir?: string;
+      recall?: { prompt: string; scheduled: boolean; projectDir: string };
+    }
   | {
       action: "disclose";
       sessionId: string;
@@ -440,7 +453,13 @@ export type NmgSessionActiveGraphResult =
     }
   | { action: "release"; released: boolean }
   | { action: "clearDisclosures"; cleared: boolean }
-  | { action: "beginDisclosureTurn"; turn: number }
+  | {
+      action: "beginDisclosureTurn";
+      turn: number;
+      recallGateActive?: boolean;
+      recallGate?: SessionRecallHints & { expiresAt: string };
+      sessionRecall?: SessionRecallPreparation;
+    }
   | { action: "disclose"; freshMemoryIds: string[]; foldedMemoryIds: string[] };
 
 export interface NmgChainCreateParams {
@@ -911,6 +930,15 @@ export type NmgLabResult =
       operation: string;
       output: unknown;
     };
+
+/** State dispatch preserves domain results; presentation reuses the existing output protocol. */
+export interface NmgStateResult {
+  action: "read" | "write";
+  space: "ag" | "board";
+  operation: string;
+  result: NmgLabResult | NmgSessionActiveGraphResult | NmgMethodResult["taskBoard"];
+  information?: PreparedInformationOutput;
+}
 
 /** State dispatch preserves domain results; presentation reuses the existing output protocol. */
 export interface NmgStateResult {

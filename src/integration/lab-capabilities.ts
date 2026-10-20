@@ -3,6 +3,7 @@ import type { WorkingStateBinding } from "../core/session-active-graph.ts";
 export const LAB_CAPABILITIES = [
   "working_state",
   "reasoning_workspace",
+  "recall_gate",
   "memory_graph_reasoner",
   "controller_shadow",
   "controller_controlled",
@@ -61,6 +62,14 @@ const DESCRIPTORS: readonly LabCapabilityDescriptor[] = [
       "consume_checkpoint",
       "clear",
     ],
+  },
+  {
+    id: "recall_gate",
+    summary:
+      "Session-only weak intent cues, no facts/training/persistence. Normal search can propose recallCue; explicit clients can prepare a revision. list/events inspect the bounded pool; remove/clear retire it.",
+    agentMayEnable: true,
+    supportedScopes: ["session"],
+    operations: ["prepare", "correct", "list", "events", "remove", "clear"],
   },
   {
     id: "memory_graph_reasoner",

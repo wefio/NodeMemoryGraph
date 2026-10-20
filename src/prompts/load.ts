@@ -52,6 +52,8 @@ export interface NmgPrompts {
   claim_indexes_parameter_description: string;
   search_query_parameter_description: string;
   search_queries_parameter_description: string;
+  search_recall_cue_parameter_description: string;
+  search_recall_revision_parameter_description: string;
   search_progression_required: string;
   search_recommendation: string;
   completion_nudge: string;

@@ -1689,6 +1689,63 @@ test("service maintenance bounds a write backlog distributed across small nodes"
   }
 });
 
+test("service does not reschedule maintenance for superseded access pressure", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-historical-pressure-"));
+  const databasePath = join(directory, "nmg.sqlite");
+  const seed = new NmgStore(databasePath);
+  let historicalId: string;
+  try {
+    const old = seed.remember({
+      statement: "The historical backend is SQLite",
+      nodeName: "Service backend",
+      memoryType: "state",
+      stateKey: "service.backend",
+    });
+    historicalId = old.memory.id;
+    seed.recordUsage([historicalId]);
+    seed.remember({
+      statement: "The current backend is PostgreSQL",
+      nodeName: "Service backend",
+      memoryType: "state",
+      stateKey: "service.backend",
+    });
+  } finally {
+    seed.close();
+  }
+  const service = new NmgService({
+    databasePath,
+    environment: {
+      NMG_MAINTENANCE_WRITE_THRESHOLD: "100",
+      NMG_MAINTENANCE_ACCESS_THRESHOLD: "1",
+      NMG_MAINTENANCE_NODE_LIMIT: "1",
+    },
+  });
+  try {
+    const written = await service.invoke("remember", {
+      statement: "A new service write triggers the backlog check",
+      nodeName: "Backlog trigger",
+    });
+    assert.ok(written.memory.id);
+    for (let slice = 0; slice < 3; slice++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  } finally {
+    service.close();
+  }
+  const reader = new NmgStore(databasePath);
+  try {
+    assert.deepEqual(reader.maintenanceRuns(), []);
+    assert.equal(reader.getMemory(historicalId)?.status, "superseded");
+    assert.equal(
+      reader.perfAggregates().find((item) => item.section === "maintenance.batch")?.count,
+      1,
+    );
+  } finally {
+    reader.close();
+    removeTempDirectory(directory);
+  }
+});
+
 test("service validates method parameters", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-errors-"));
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });

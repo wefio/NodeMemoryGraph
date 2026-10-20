@@ -20,7 +20,16 @@ import {
   renderStateOutput,
   STATE_BOARD_READ_OPERATIONS,
 } from "../../../src/integration/state.ts";
-import type { NmgStateResult } from "../../../src/cli/protocol.ts";
+import type {
+  NmgStateResult,
+  NmgSessionActiveGraphResult,
+  NmgSearchParams,
+} from "../../../src/cli/protocol.ts";
+import {
+  canProposeSessionRecallCue,
+  matchSessionRecallCue,
+} from "../../../src/core/session-recall.ts";
+import { decideMemoryLoad } from "../../../src/core/gate.ts";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
@@ -71,7 +80,10 @@ import {
   extractPromptText,
 } from "../../../src/integration/agent-attribution.ts";
 import { SessionRecallFlow } from "../../../src/integration/session-recall-flow.ts";
-import { SessionTaskWindow } from "../../../src/integration/session-task-window.ts";
+import {
+  type SessionRecallRequest,
+  SessionTaskWindow,
+} from "../../../src/integration/session-task-window.ts";
 import {
   isMemorableToolResult,
   isSuccessfulCommit,
@@ -248,6 +260,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       | "sessionActiveGraph"
       | "taskBoard"
       | "state"
+      | "lab"
       | "recordActiveGraphAttribution"
       | "recordClaimOutcomes"
       | "recordFeedback",
@@ -314,20 +327,58 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       return disclosure === "header" ? formatSearchHeaders(context) : formatMemoryContext(context);
     }
   };
+  type RecallHandshake = Extract<NmgSessionActiveGraphResult, { action: "beginDisclosureTurn" }>;
+  let recallTurn:
+    | {
+        sessionId: string;
+        projectDir: string;
+        prompt: string;
+        skipped: boolean;
+        gate: NonNullable<RecallHandshake["recallGate"]>;
+      }
+    | undefined;
   const beginDisclosureTurn = async (
     sessionId: string,
     enabled: boolean,
     options: HttpCallOptions = {},
-  ): Promise<void> => {
-    if (!enabled) return;
-    await invoke(
+  ): Promise<RecallHandshake | undefined> => {
+    if (!enabled) return undefined;
+    recallTurn = undefined;
+    const result = (await invoke(
       "sessionActiveGraph",
-      {
-        action: "beginDisclosureTurn",
-        sessionId,
-      },
+      { action: "beginDisclosureTurn", sessionId, projectDir: projectDirectory() },
       options,
-    ).catch(() => undefined);
+    ).catch(() => undefined)) as NmgSessionActiveGraphResult | undefined;
+    return result?.action === "beginDisclosureTurn" ? result : undefined;
+  };
+  const searchCueParams = (
+    sessionId: string,
+    phrase?: string,
+    revision?: number,
+  ): Pick<NmgSearchParams, "recallCue" | "recallRevision" | "recallSource"> => {
+    if (!phrase) return {};
+    if (revision !== undefined) return { recallCue: phrase, recallRevision: revision };
+    const current = recallTurn;
+    if (
+      !current?.skipped ||
+      current.sessionId !== sessionId ||
+      current.projectDir !== projectDirectory()
+    )
+      return {};
+    if (
+      Date.parse(current.gate.expiresAt) <= Date.now() ||
+      !canProposeSessionRecallCue(current.prompt, phrase)
+    )
+      return {};
+    current.skipped = false; // At most one native proposal attempt per user turn.
+    return {
+      recallCue: phrase,
+      recallSource: {
+        prompt: current.prompt,
+        generation: current.gate.generation,
+        turn: current.gate.turn,
+      },
+    };
   };
 
   // git commit via the bash tool is the strongest "milestone" signal available
@@ -494,15 +545,33 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       }
       return persistedContextResult(output, event.systemPrompt);
     };
+    let recallRequest: SessionRecallRequest | null = null;
     const prepare = async () => {
       const isNewUserTurn = recallFlow.beginTurn(
         sessionId,
         piUserTurnKey(ctx.sessionManager, event.prompt),
       );
       await budget.run("connection", () => connection());
-      await budget.run("disclosure.begin", (signal) =>
+      recallRequest = taskWindow.prepare(sessionId, event.prompt);
+      const handshake = await budget.run("disclosure.begin", (signal) =>
         beginDisclosureTurn(sessionId, isNewUserTurn, { signal }),
       );
+      if (handshake?.recallGate && event.prompt.length <= 4096) {
+        recallTurn = {
+          sessionId,
+          projectDir: projectDirectory(),
+          prompt: event.prompt,
+          skipped: !recallRequest,
+          gate: handshake.recallGate,
+        };
+        if (!recallRequest && matchSessionRecallCue(event.prompt, handshake.recallGate.phrases)) {
+          const decision = decideMemoryLoad(event.prompt, { sessionCue: true });
+          if (decision.mode === "cue") {
+            recallRequest = { ...decision, mode: "cue", query: event.prompt };
+            recallTurn.skipped = false;
+          }
+        }
+      }
       partial.base.push(...(await recallNudges(budget, sessionId, isNewUserTurn, event.prompt)));
       // Each completed typed stage survives later optional work or a deadline.
       partial.base.unshift(...(await reasoningCheckpointFor(budget, sessionId)));
@@ -510,20 +579,20 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     };
     const automatic = async () => {
       await prepare();
-      const recallRequest = taskWindow.prepare(sessionId, event.prompt);
-      if (!recallRequest) return surfaceResult(currentOutput());
+      const demand = recallRequest;
+      if (!demand) return surfaceResult(currentOutput());
       let context = (await automaticInvoke("search", {
-        query: recallRequest.query,
+        query: demand.query,
         autoRecallBudgetMs: Math.max(1, Math.floor(Math.min(4_500, budget.remainingMs - 100))),
         projectDir: projectDirectory(),
         sessionId,
-        maxTier: Math.min(configuredAutoRecallTier(), recallRequest.maxTier) as MemoryTier,
-        limit: Math.min(configuredAutoRecallLimit(), recallRequest.limit),
+        maxTier: Math.min(configuredAutoRecallTier(), demand.maxTier) as MemoryTier,
+        limit: Math.min(configuredAutoRecallLimit(), demand.limit),
         initialEvidenceTarget: configuredInitialTarget(),
         strongHitTopGap: configuredStrongHitTopGap(),
         strongHitInitialTarget: configuredStrongHitInitialTarget(),
         secondPass: qpp2Mode === "active",
-        graphHops: Math.min(1, recallRequest.graphHops),
+        graphHops: Math.min(1, demand.graphHops),
         tieredDisclosure: true,
         autoRecall: true,
       })) as MemoryContext;
@@ -1081,6 +1150,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     const sessionId = ctx.sessionManager.getSessionId();
     taskWindow.clear(sessionId);
     recallFlow.clear(sessionId);
+    recallTurn = undefined;
     agentAttributionFlow.clear(sessionId);
     controllerShadow.clear(sessionId);
     if (!connectionPromise) return;
@@ -1312,6 +1382,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       capability: Type.Optional(
         Type.Union([
           Type.Literal("reasoning_workspace"),
+          Type.Literal("recall_gate"),
           Type.Literal("memory_graph_reasoner"),
           Type.Literal("controller_shadow"),
           Type.Literal("controller_controlled"),
@@ -1333,6 +1404,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       if (params.action === "enable" && !params.reason) throw new Error("enable requires reason");
       if (params.action === "invoke" && !params.operation)
         throw new Error("invoke requires operation");
+      if (
+        params.capability === "recall_gate" &&
+        ["enable", "disable", "clear", "correct", "remove"].includes(
+          params.action === "invoke" ? (params.operation ?? "") : params.action,
+        )
+      )
+        recallTurn = undefined;
       const active = await connection();
       const result = await invokeDaemon(active, "lab", {
         action: params.action,
@@ -1941,6 +2019,15 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           description: nmgPrompts.search_queries_parameter_description,
         }),
       ),
+      recallCue: Type.Optional(
+        Type.String({ description: nmgPrompts.search_recall_cue_parameter_description }),
+      ),
+      recallRevision: Type.Optional(
+        Type.Integer({
+          minimum: 1,
+          description: nmgPrompts.search_recall_revision_parameter_description,
+        }),
+      ),
       nodeName: Type.Optional(Type.String()),
       maxTier: Type.Optional(
         Type.Union([Type.Literal(0), Type.Literal(1), Type.Literal(2), Type.Literal(3)]),
@@ -1965,8 +2052,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           nmgPrompts.search_progression_required,
         );
       }
+      const { recallCue, recallRevision, ...searchParams } = params;
       const baseParams = {
-        ...params,
+        ...searchParams,
+        // Unknown model-supplied properties cannot impersonate a native observation.
+        recallSource: undefined,
         // Automatic recall remains shallow. An explicit search is the agent's
         // request to look beyond that cache, so expose all tiers by default;
         // result/token budgets still bound what is returned.
@@ -1994,6 +2084,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       }
       let result = (await invoke("search", {
         ...baseParams,
+        ...searchCueParams(sessionId, recallCue, recallRevision),
         secondPass: params.secondPass ?? qpp2Mode === "active",
         ...(activeGraphBudget ? { activeGraphBudget, limit: activeGraphBudget.maxEvidence } : {}),
       })) as MemoryContext;

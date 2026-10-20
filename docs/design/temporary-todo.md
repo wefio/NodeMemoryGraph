@@ -234,6 +234,12 @@ observed:
   capability withdrawal, and cache invalidation. The current process-lifetime
   catalog is frozen and additive discovery uses its deterministic fingerprint.
 
+## Implement the accepted event-record and Agent-status extension
+
+- [ ] Implement the [approved event-record contract](board-event-records.md) without
+  replacing ordinary world/channel communication. Runtime scope and remaining
+  verification belong to the [completion ledger](completion-audit.md).
+
 ## Completion rule
 
 Delete this file when every active item above is completed or explicitly closed.

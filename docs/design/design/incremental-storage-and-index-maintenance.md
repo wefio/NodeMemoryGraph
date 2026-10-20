@@ -49,7 +49,16 @@ proposals. Failed slices leave durable counters intact for a later retry and
 never turn a successful `remember` into a failed write.
 
 The due check is deliberately a dual trigger. A single hot node is selected as
-soon as its own write or access counter reaches the corresponding threshold. If
+soon as its own write or eligible access counter reaches the corresponding
+threshold. Access pressure counts only indexed, active or disputed records,
+which are the records whose pending access counters tier rebalancing consumes;
+both per-node and global access totals use that eligibility rule. Ineligible
+records keep their counters and history without triggering or prolonging a
+maintenance loop, and a reactivated indexed record can contribute pressure
+again. An empty local check still returns its result and updates performance
+aggregates without appending a `maintenance_runs` row, and productive local runs
+keep a separate journal from semantic runs, so a semantic result with zero
+`rowsTouched` can still drain trace signals. If
 many sparse nodes keep every local counter below the threshold but their global
 pending total reaches it, the same bounded slice selects the largest then oldest
 non-empty node backlogs. The resident service schedules another bounded slice

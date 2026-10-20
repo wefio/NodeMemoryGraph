@@ -2,6 +2,9 @@ import type { MemoryGateDecision } from "./types.ts";
 
 const EXPLICIT_RECALL_PATTERNS = [
   /(?:之前|先前|以前|上次|曾经|当时|还记得|回忆|记忆中)/u,
+  // Question forms only: bare reminders and 用来着色 are not recall requests.
+  /[你您]记得[^。！？?\n]*(?:吗|什么|哪|谁|多少|几|[？?])/u,
+  /来着\s*[？?]/u,
   /(?:我|我们).{0,16}(?:用过|说过|提过|决定过|选择过|讨论过|告诉过)/u,
   /(?:我|我们).{0,12}(?:现在|当前|最近|最新).{0,12}(?:什么|哪个|多少|是谁|用|使用|喜欢|偏好|决定|选择)/u,
   /(?:根据|按照)我的(?:偏好|习惯|要求|历史)/u,
@@ -29,7 +32,10 @@ const OPTIONAL_RECALL_PATTERNS = [
  * Chooses how much long-term memory to expose before a model turn.
  * It deliberately does not choose memories or decide whether they are true.
  */
-export function decideMemoryLoad(query: string): MemoryGateDecision {
+export function decideMemoryLoad(
+  query: string,
+  options: { sessionCue?: boolean } = {},
+): MemoryGateDecision {
   const normalized = query.trim();
   if (normalized && EXPLICIT_RECALL_PATTERNS.some((pattern) => pattern.test(normalized))) {
     return {
@@ -41,11 +47,12 @@ export function decideMemoryLoad(query: string): MemoryGateDecision {
       graphHops: 1,
     };
   }
-  if (normalized && OPTIONAL_RECALL_PATTERNS.some((pattern) => pattern.test(normalized))) {
+  const optional = OPTIONAL_RECALL_PATTERNS.some((pattern) => pattern.test(normalized));
+  if (normalized && (optional || options.sessionCue)) {
     return {
       mode: "cue",
       confidence: 0.75,
-      reason: "memory_may_help",
+      reason: optional ? "memory_may_help" : "session_recall_hint",
       maxTier: 3,
       limit: 5,
       graphHops: 0,

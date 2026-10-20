@@ -704,6 +704,55 @@ test("rebalanceDueNodes: returns results for nodes above threshold", () => {
   });
 });
 
+test("maintenance access pressure excludes superseded and dormant records", () => {
+  withMemoryStore((store) => {
+    const historical = store.remember({
+      statement: "The backend uses SQLite",
+      nodeName: "Backend state",
+      memoryType: "state",
+      stateKey: "backend.engine",
+    });
+    for (let index = 0; index < 3; index++) store.recordUsage([historical.memory.id]);
+    store.remember({
+      statement: "The backend uses PostgreSQL",
+      nodeName: "Backend state",
+      memoryType: "state",
+      stateKey: "backend.engine",
+    });
+    assert.equal(store.getMemory(historical.memory.id)?.status, "superseded");
+    const dormant = store.remember({ statement: "An archived setting", nodeName: "Archive" });
+    for (let index = 0; index < 3; index++) store.recordUsage([dormant.memory.id]);
+    store.setMemoryStorageState(dormant.memory.id, "dormant");
+    const active = store.remember({ statement: "A current setting", nodeName: "Current" });
+    store.recordUsage([active.memory.id]);
+
+    const options = { writeThreshold: 100, accessThreshold: 4, nodeLimit: 1 };
+    assert.equal(store.runDueMaintenance(options).consideredNodes, 0);
+    assert.deepEqual(store.rebalanceDueNodes(3), []);
+    for (let index = 0; index < 3; index++) store.recordUsage([active.memory.id]);
+    const productive = store.runDueMaintenance(options);
+    assert.deepEqual(productive.rebalancedNodeIds, [active.memory.nodeId]);
+    assert.equal(store.runDueMaintenance(options).consideredNodes, 0);
+    assert.equal(store.getMemory(historical.memory.id)?.status, "superseded");
+    assert.equal(store.getMemory(dormant.memory.id)?.statement, "An archived setting");
+    store.setMemoryStorageState(dormant.memory.id, "indexed");
+    const restored = store.runDueMaintenance({ ...options, accessThreshold: 3 });
+    assert.deepEqual(restored.rebalancedNodeIds, [dormant.memory.nodeId]);
+  });
+});
+
+test("empty local maintenance keeps performance aggregates without persisting a run", () => {
+  withMemoryStore((store) => {
+    const first = store.runDueMaintenance();
+    const second = store.runDueMaintenance();
+    assert.equal(first.consideredNodes, 0);
+    assert.equal(second.rowsTouched, 0);
+    assert.deepEqual(store.maintenanceRuns(), []);
+    const aggregate = store.perfAggregates().find((item) => item.section === "maintenance.batch");
+    assert.equal(aggregate?.count, 2);
+  });
+});
+
 test("runDueMaintenance compacts write deltas and rebalances access changes within a node budget", () => {
   withMemoryStore((store) => {
     const writeDue = store.remember({

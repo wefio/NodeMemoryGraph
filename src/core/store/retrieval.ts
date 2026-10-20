@@ -191,13 +191,13 @@ function markDuplicateResults(results: MemorySearchResult[]): void {
   }
 }
 
-function rankSelectedEvidence(
+function rankLexicalCandidates(
   query: string,
   results: MemorySearchResult[],
   retrievalMode: SearchOptions["retrievalMode"],
-  hasSemanticQuery: boolean,
+  preserveOrder: boolean,
 ): MemorySearchResult[] {
-  if (retrievalMode !== "fts5" || hasSemanticQuery) return results;
+  if (retrievalMode !== "fts5" || preserveOrder) return results;
   return rerankEqualScoresByQueryCoverage(
     query,
     results,
@@ -435,7 +435,13 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           combinedScore: hybridScore(result.lexicalScore, result.vectorScore, edgeScore),
         };
       });
-      const rankedMain = rankMainCandidates(query, direct, related, edgeProjection);
+      const mainCandidates = rankMainCandidates(query, direct, related, edgeProjection);
+      const rankedMain = rankLexicalCandidates(
+        query,
+        mainCandidates,
+        options.retrievalMode,
+        semantic !== undefined,
+      );
       const anchorMemoryIds = [
         ...new Set(direct.slice(0, limit).map((result) => result.memory.id)),
       ];
@@ -603,14 +609,9 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         perf?.stop(SECTION.secondPass);
       }
       const { selectedNodes, estimatedTokens, exhausted } = selection;
-      // Reorder the evidence already selected by the budget, so lexical ties
-      // cannot change candidate membership or the second-pass decision.
-      const results = rankSelectedEvidence(
-        query,
-        selection.results,
-        options.retrievalMode,
-        semantic !== undefined,
-      );
+      // The budget consumes the ranked pool; do not rerank a shortened prefix
+      // or displace the separately reserved open attachments afterwards.
+      const results = selection.results;
       selections = buildSelections(results);
       const projectedEdges = new Map(
         edgeProjection.edges.map((edge) => [edge.relationId, edge] as const),
@@ -2316,7 +2317,15 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             right.memory.importance - left.memory.importance,
         );
       }
-      const results = applyRelevanceGates(query, surfacedResults, limit, options);
+      // Resolve lexical ties before the direct cap. Forced FTS candidates are
+      // semantic/surface supplements and retain their existing order.
+      const rankedResults = rankLexicalCandidates(
+        query,
+        surfacedResults,
+        retrievalMode,
+        forcedCandidateIds.length > 0,
+      );
+      const results = applyRelevanceGates(query, rankedResults, limit, options);
       for (const result of results) {
         result.memory.evidenceIds = this.evidenceIds(result.memory.id);
         result.evidenceRecords = this.evidenceRecords(result.memory.evidenceIds);

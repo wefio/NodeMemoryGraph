@@ -115,7 +115,13 @@ compatibility, gate optional calls locally, and report a feature-unavailable
 error only when the caller invokes a missing capability. Clients fail closed
 only when a live daemon uses a different compatibility epoch and then require an
 explicit `nmg daemon restart` at a safe coordination point; they never replace a
-shared daemon automatically.
+shared daemon automatically. An explicit `nmg daemon reload` replaces a capable
+owner through the [controlled lifecycle handover](../../daemon-lifecycle-design/controlled-code-reload.md):
+admission closes, accepted calls drain, only a ticketed replacement can acquire
+the lease, and clients refresh discovery. Durable memory and board data survive
+while volatile AG and writer leases are cleared. A missing capability is refused
+rather than upgraded implicitly, and an uncertain mutation outcome is not
+replayed after an owner change; read-only calls keep the bounded reconnect retry.
 `NMG_RPC_DESCRIPTORS` is the runtime declaration source for method existence and
 same-epoch optional capability gates. It derives the server whitelist, the
 TypeScript method union, the client gate table, and the optional `hello.methods`

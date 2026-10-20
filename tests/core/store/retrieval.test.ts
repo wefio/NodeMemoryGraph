@@ -85,6 +85,160 @@ test("lexical tie-break keeps Active Graph selection order aligned with returned
   });
 });
 
+test("FTS5 resolves lexical ties before a one-record search budget", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "The store uses WAL",
+      nodeName: "Atlas SQLite",
+      importance: 1,
+    });
+    const target = store.remember({
+      statement: "Atlas SQLite stores project data",
+      nodeName: "Database choice",
+      importance: 0.5,
+    });
+    const query = "Atlas SQLite";
+    for (const limit of [1, 2]) {
+      const options = { retrievalMode: "fts5" as const, limit };
+      assert.equal(store.search(query, options)[0]?.memory.id, target.memory.id);
+      assert.equal(store.searchContext(query, options).results[0]?.memory.id, target.memory.id);
+    }
+  });
+});
+
+test("FTS5 tie ranking retains the target across the direct candidate cap", () => {
+  withStore((store) => {
+    for (let index = 0; index < 24; index++) {
+      store.remember({
+        statement: `WAL maintenance note ${index}`,
+        nodeName: "Atlas SQLite",
+        importance: 1,
+      });
+    }
+    const target = store.remember({
+      statement: "Atlas SQLite stores project data",
+      nodeName: "Database choice",
+      importance: 0.1,
+    });
+    const options = { retrievalMode: "fts5" as const, limit: 1 };
+    assert.equal(store.search("Atlas SQLite", options)[0]?.memory.id, target.memory.id);
+    const context = store.searchContext("Atlas SQLite", options);
+    assert.deepEqual(
+      context.results.map((result) => result.memory.id),
+      [target.memory.id],
+    );
+    assert.deepEqual(context.activeGraph?.memoryIds, [target.memory.id]);
+  });
+});
+
+test("FTS5 resolves Chinese lexical ties before the evidence budget", () => {
+  withStore((store) => {
+    store.remember({ statement: "开启 WAL", nodeName: "项目 数据库", importance: 1 });
+    const target = store.remember({
+      statement: "项目 数据库采用 SQLite",
+      nodeName: "存储选择",
+      importance: 0.5,
+    });
+    const options = { retrievalMode: "fts5" as const, limit: 1 };
+    assert.equal(store.search("项目 数据库", options)[0]?.memory.id, target.memory.id);
+    assert.equal(
+      store.searchContext("项目 数据库", options).results[0]?.memory.id,
+      target.memory.id,
+    );
+  });
+});
+
+test("FTS5 tie ranking preserves score boundaries and empty results", () => {
+  withStore((store) => {
+    const higher = store.remember({ statement: "Atlas SQLite", nodeName: "Storage" });
+    const lower = store.remember({ statement: "Atlas uses SQLite", nodeName: "Database" });
+    const options = { retrievalMode: "fts5" as const, limit: 2 };
+    for (const results of [
+      store.search("Atlas SQLite", options),
+      store.searchContext("Atlas SQLite", options).results,
+    ]) {
+      assert.deepEqual(
+        results.map((result) => result.memory.id),
+        [higher.memory.id, lower.memory.id],
+      );
+      assert.ok(results[0]!.combinedScore > results[1]!.combinedScore);
+    }
+    assert.deepEqual(store.search("zeppelin cobalt", options), []);
+    assert.deepEqual(store.searchContext("zeppelin cobalt", options).results, []);
+  });
+});
+
+test("FTS5 tie ranking preserves scope, expiry and historical filters", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "Atlas SQLite uses a different database",
+      nodeName: "Other project",
+      scope: { project: "Other" },
+      importance: 1,
+      eventTime: "2026-08-01T00:00:00.000Z",
+    });
+    store.remember({
+      statement: "Atlas SQLite expired setting",
+      nodeName: "Expired storage",
+      scope: { project: "Atlas" },
+      expiresAt: "2000-01-01T00:00:00.000Z",
+      eventTime: "2026-08-01T00:00:00.000Z",
+    });
+    const target = store.remember({
+      statement: "Atlas SQLite stores project data",
+      nodeName: "Storage decision",
+      scope: { project: "Atlas" },
+      eventTime: "2026-08-01T00:00:00.000Z",
+    });
+    store.remember({
+      statement: "Atlas SQLite future setting",
+      nodeName: "Future storage",
+      scope: { project: "Atlas" },
+      importance: 1,
+      eventTime: "2026-09-01T00:00:00.000Z",
+    });
+    const options = {
+      retrievalMode: "fts5" as const,
+      limit: 1,
+      scope: { project: "Atlas" },
+      eventTimeTo: "2026-08-31T23:59:59.999Z",
+    };
+    assert.equal(store.search("Atlas SQLite", options)[0]?.memory.id, target.memory.id);
+    assert.equal(
+      store.searchContext("Atlas SQLite", options).results[0]?.memory.id,
+      target.memory.id,
+    );
+  });
+});
+
+test("semantic retrieval does not apply the FTS5 tie rule", () => {
+  withStore((store) => {
+    const decoy = store.remember({
+      statement: "The store uses WAL",
+      nodeName: "Atlas SQLite",
+      importance: 1,
+    });
+    const target = store.remember({
+      statement: "Atlas SQLite stores project data",
+      nodeName: "Database choice",
+      importance: 0.5,
+    });
+    store.upsertExternalEmbeddings("qwen-budget-control", [
+      { memoryId: decoy.memory.id, vector: [1, 0] },
+      { memoryId: target.memory.id, vector: [1, 0] },
+    ]);
+    const context = store.searchContext(
+      "Atlas SQLite",
+      { limit: 2, vectorGranularity: "records", graphHops: 0 },
+      { queryVector: [1, 0], model: "qwen-budget-control" },
+    );
+    assert.deepEqual(
+      context.results.map((result) => result.memory.id),
+      [decoy.memory.id, target.memory.id],
+    );
+  });
+});
+
 test("relevanceFloor gates disclosed results and may abstain", () => {
   withStore((store) => {
     store.remember({

@@ -37,7 +37,9 @@ import {
   readServerState,
   serverStatePath,
   stopServer,
+  waitForReload,
 } from "./lifecycle.ts";
+import { reloadDaemon } from "./daemon-reload.ts";
 import { NmgService } from "./service.ts";
 import { histogramQuantile } from "../core/perf.ts";
 import type { MemoryContext } from "../core/types.ts";
@@ -50,7 +52,7 @@ import { assertDaemonCapability, assertDaemonProtocol, parseDaemonHello } from "
 // assembled from the command registry in commands.ts; only the daemon
 // synopsis line is local because daemon commands are not RPC methods.
 const USAGE = cliUsage([
-  "nmg daemon start|restart|status|stop [--data-dir DIR | --db FILE] [--json]",
+  "nmg daemon start|restart|reload|status|stop [--data-dir DIR | --db FILE] [--json]",
 ]);
 
 export async function runCli(
@@ -82,7 +84,7 @@ export async function runCli(
   });
   if (isDaemonCommand(parsed.command)) {
     try {
-      const result = await runDaemonCommand(parsed.command, service);
+      const result = await runDaemonAction(parsed.command, service, parsed.reloadTicket);
       io.stdout.write(
         parsed.json ? `${JSON.stringify(result, null, 2)}\n` : humanDaemonResult(result),
       );
@@ -141,6 +143,7 @@ async function invokeCliMethod(
   method: NmgMethod,
   parsed: ParsedArguments,
 ): Promise<unknown> {
+  await waitForReload(service.databasePath);
   const state = readServerState(serverStatePath(service.databasePath));
   if (state?.transport === "http" && isProcessAlive(state.pid)) {
     if (parsed.requiresResident) {
@@ -178,9 +181,18 @@ async function invokeCliMethod(
   return service.invoke(method, parsed.params);
 }
 
+async function runDaemonAction(command: DaemonCommand, service: NmgService, ticket?: string) {
+  if (command === "daemon-reload") {
+    return reloadDaemon(service.databasePath, resolve(import.meta.dirname, "../../bin/nmg.mjs"));
+  }
+  if (command !== "daemon-run") await waitForReload(service.databasePath);
+  return runDaemonCommand(command, service, ticket);
+}
+
 async function runDaemonCommand(
   command: DaemonCommand,
   service: NmgService,
+  reloadTicket?: string,
 ): Promise<Record<string, unknown>> {
   const statePath = serverStatePath(service.databasePath);
   const existing = readServerState(statePath);
@@ -270,7 +282,7 @@ async function runDaemonCommand(
     };
   }
 
-  const lease = acquireServerLease(service.databasePath);
+  const lease = acquireServerLease(service.databasePath, reloadTicket);
   const stopOnSignal = () => {
     lease.release();
     service.close();
@@ -314,7 +326,12 @@ async function waitForProcessExit(pid: number): Promise<void> {
 }
 
 type DaemonCommand =
-  "daemon-run" | "daemon-start" | "daemon-restart" | "daemon-status" | "daemon-stop";
+  | "daemon-run"
+  | "daemon-start"
+  | "daemon-restart"
+  | "daemon-reload"
+  | "daemon-status"
+  | "daemon-stop";
 
 function isDaemonCommand(command: ParsedArguments["command"]): command is DaemonCommand {
   return command.startsWith("daemon-");
@@ -338,6 +355,7 @@ interface ParsedArguments {
   json: boolean;
   compactJson?: boolean;
   requiresResident?: boolean;
+  reloadTicket?: string;
   dataDirectory?: string;
   databasePath?: string;
   /** Local `graph` command: output HTML path. */
@@ -408,13 +426,13 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
 
 function daemonArguments(rest: readonly string[]): ParsedArguments {
   const action = rest[0];
-  if (!["run", "start", "restart", "status", "stop"].includes(action ?? "")) {
-    throw new Error("daemon requires start, restart, status, or stop");
+  if (!["run", "start", "restart", "reload", "status", "stop"].includes(action ?? "")) {
+    throw new Error("daemon requires start, restart, reload, status, or stop");
   }
   const values = parseOptions(rest.slice(1));
   const allowedFlags = new Set(action === "run" ? [] : ["json"]);
   for (const name of values.options.keys()) {
-    if (name !== "data-dir" && name !== "db") throw new Error(`unknown option: --${name}`);
+    if (!daemonOptionAllowed(action, name)) throw new Error(`unknown option: --${name}`);
   }
   for (const name of values.flags) {
     if (!allowedFlags.has(name)) throw new Error(`unknown option: --${name}`);
@@ -422,10 +440,15 @@ function daemonArguments(rest: readonly string[]): ParsedArguments {
   rejectPositionals(values, "daemon");
   return {
     command: `daemon-${action}` as DaemonCommand,
+    reloadTicket: firstOption(values, "reload-ticket"),
     json: values.flags.has("json"),
     dataDirectory: firstOption(values, "data-dir"),
     databasePath: optionalResolvedPath(firstOption(values, "db")),
   };
+}
+
+function daemonOptionAllowed(action: string | undefined, name: string): boolean {
+  return ["data-dir", "db"].includes(name) || (action === "run" && name === "reload-ticket");
 }
 
 /** "a" / "a or b" / "a, b, or c" — matches the historical error messages. */
@@ -433,6 +456,10 @@ function oxfordJoin(words: readonly string[]): string {
   if (words.length === 1) return words[0]!;
   if (words.length === 2) return `${words[0]} or ${words[1]}`;
   return `${words.slice(0, -1).join(", ")}, or ${words.at(-1)}`;
+}
+
+function isKnownCliOption(name: string): boolean {
+  return CLI_KNOWN_FLAGS.has(name) || CLI_KNOWN_OPTIONS.has(name) || name === "reload-ticket";
 }
 
 function parseOptions(args: readonly string[]): OptionValues {
@@ -448,7 +475,7 @@ function parseOptions(args: readonly string[]): OptionValues {
     }
     const [rawName, inlineValue] = argument.slice(2).split("=", 2);
     if (!rawName) throw new Error("empty option name");
-    if (!CLI_KNOWN_FLAGS.has(rawName) && !CLI_KNOWN_OPTIONS.has(rawName)) {
+    if (!isKnownCliOption(rawName)) {
       throw new Error(`unknown option: --${rawName}`);
     }
     if (CLI_KNOWN_FLAGS.has(rawName)) {
@@ -671,6 +698,8 @@ function humanResult(value: unknown): string {
 }
 
 function humanDaemonResult(result: Record<string, unknown>): string {
+  if (result.reloaded)
+    return `Reloaded NMG daemon from pid ${String(result.reloadedFrom)} to pid ${String(result.pid)} at ${String(result.endpoint)}; transient AG and leases cleared.\n`;
   if (result.restarted)
     return `Restarted NMG daemon from pid ${String(result.restartedFrom)} to pid ${String(result.pid)} at ${String(result.endpoint)}.\n`;
   if (result.started)

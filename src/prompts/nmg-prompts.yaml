@@ -323,6 +323,15 @@ search_queries_parameter_description: >-
   generate these clauses; it searches them, removes duplicate records, and
   appends unique results after the primary query's ranking.
 
+search_recall_cue_parameter_description: >-
+  Optional 3-80 character literal phrase from the current user input, proposed
+  while already making a supplemental memory search. Weak session cue only;
+  ignored unless the pilot accepts it. Do not add a separate check or call.
+
+search_recall_revision_parameter_description: >-
+  Optional current recall_gate prepare revision for clients without a native
+  user-turn observation. Omit in native Pi; not needed for an ordinary search.
+
 search_progression_required: >-
   NMG paused another search because two searches were already completed without
   loading selected evidence. Use nmg_get on relevant returned memory IDs, or use
