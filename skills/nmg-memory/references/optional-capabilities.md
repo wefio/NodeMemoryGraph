@@ -171,12 +171,20 @@ native turn or lifecycle change. DSH CLI fallback does not learn cues.
   the current skipped revision. Use literal words from that query and a brief
   intent explanation, not hidden reasoning. No user annotation is required;
   search success, truth and retrieval quality remain separate questions.
-- `list`: returns current hints with normalized source excerpts.
+- `list`: returns the pool — seed entries and learned phrases together, each with its
+  origin, mode and whether it currently holds protection.
 - `events`: inspects the bounded recent admission/removal/eviction ring. A
   `reintroduced` event is another weak proposal, not evidence of genuine need.
   Reading events is optional, not part of the per-turn loop.
-- `remove`: input `{phrase}` retires one cue and fences late proposals; `clear`
+- `remove`: input `{phrase}` retires one pool entry — a learned phrase or a seed
+  trigger — and fences late proposals; `clear`
   drops the session cache and event ring.
+
+Adding, changing or retiring a built-in trigger edits
+`src/core/recall-vocabulary.ts`; no regular expression is involved. One pool holds
+seed and learned terms with the same capacity, and distinct user turns decide which
+entries stay. The [decision](../../../docs/decisions/implemented/2026-10-20-unified-recall-vocabulary.md)
+owns that policy; the retrieval owner above owns its bounds.
 
 Use ordinary `nmg_search`/`nmg_get` for missed-memory recovery; correction does not
 perform that search or update relevance/claim feedback. Disable when finished.

@@ -20,7 +20,12 @@ async function nativeTurn(service: NmgService, projectDir: string, sessionId = "
   return result.recallGate;
 }
 
-async function inspectPool(service: NmgService, operation: "list" | "events" = "list") {
+// Admission-fence tests inspect learned entries; seed membership is checked separately below.
+async function inspectPool(
+  service: NmgService,
+  operation: "list" | "events" = "list",
+  includeSeeds = false,
+) {
   const result = await service.invoke("lab", {
     action: "invoke",
     capability: "recall_gate",
@@ -28,7 +33,13 @@ async function inspectPool(service: NmgService, operation: "list" | "events" = "
     operation,
   });
   assert.ok(result.action === "invoke");
-  return result.output as Array<{ phrase: string; kind?: string; sourceTurn?: number }>;
+  const rows = result.output as Array<{
+    phrase: string;
+    kind?: string;
+    sourceTurn?: number;
+    origin?: string;
+  }>;
+  return includeSeeds ? rows : rows.filter((row) => row.origin !== "seed");
 }
 
 // Contract/safety: admission is a weak proposal on an actual search, not an outcome label.
@@ -339,7 +350,12 @@ test("explicit lexical rescue and intent correction affect only later trial entr
       operation: "list",
     });
     assert.equal(learned.action, "invoke");
-    if (learned.action === "invoke") assert.equal((learned.output as unknown[]).length, 1);
+    if (learned.action === "invoke")
+      assert.equal(
+        (learned.output as Array<{ origin: string }>).filter((entry) => entry.origin === "learned")
+          .length,
+        1,
+      );
     await service.invoke("lab", {
       action: "invoke",
       capability: "recall_gate",

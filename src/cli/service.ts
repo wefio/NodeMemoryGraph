@@ -1117,6 +1117,7 @@ export class NmgService {
       resolve(recall.projectDir),
       recall.prompt,
       recall.scheduled,
+      this.#sessionRecall.snapshot(sessionId, resolve(recall.projectDir)).turn,
     );
   }
 

@@ -30,6 +30,7 @@ import {
   matchSessionRecallCue,
 } from "../../../src/core/session-recall.ts";
 import { decideMemoryLoad } from "../../../src/core/gate.ts";
+import { recallInput } from "../../../src/core/recall-matcher.ts";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
@@ -337,19 +338,42 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         gate: NonNullable<RecallHandshake["recallGate"]>;
       }
     | undefined;
+  let retainedHandshake:
+    { sessionId: string; prompt?: string; result?: RecallHandshake } | undefined;
   const beginDisclosureTurn = async (
     sessionId: string,
     enabled: boolean,
     options: HttpCallOptions = {},
+    prompt?: string,
   ): Promise<RecallHandshake | undefined> => {
-    if (!enabled) return undefined;
+    if (
+      !enabled &&
+      retainedHandshake?.sessionId === sessionId &&
+      retainedHandshake.prompt === prompt
+    )
+      return retainedHandshake.result;
     recallTurn = undefined;
     const result = (await invoke(
       "sessionActiveGraph",
-      { action: "beginDisclosureTurn", sessionId, projectDir: projectDirectory() },
+      {
+        action: "beginDisclosureTurn",
+        sessionId,
+        projectDir: projectDirectory(),
+        ...(prompt !== undefined
+          ? {
+              recall: {
+                prompt: recallInput(prompt),
+                projectDir: projectDirectory(),
+                scheduled: false,
+              },
+            }
+          : {}),
+      },
       options,
     ).catch(() => undefined)) as NmgSessionActiveGraphResult | undefined;
-    return result?.action === "beginDisclosureTurn" ? result : undefined;
+    const handshake = result?.action === "beginDisclosureTurn" ? result : undefined;
+    retainedHandshake = { sessionId, prompt, result: handshake };
+    return handshake;
   };
   const searchCueParams = (
     sessionId: string,
@@ -552,9 +576,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         piUserTurnKey(ctx.sessionManager, event.prompt),
       );
       await budget.run("connection", () => connection());
-      recallRequest = taskWindow.prepare(sessionId, event.prompt);
       const handshake = await budget.run("disclosure.begin", (signal) =>
-        beginDisclosureTurn(sessionId, isNewUserTurn, { signal }),
+        beginDisclosureTurn(sessionId, isNewUserTurn, { signal }, event.prompt),
+      );
+      recallRequest = taskWindow.prepare(
+        sessionId,
+        event.prompt,
+        handshake?.sessionRecall?.decision,
       );
       if (handshake?.recallGate && event.prompt.length <= 4096) {
         recallTurn = {
@@ -564,7 +592,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           skipped: !recallRequest,
           gate: handshake.recallGate,
         };
-        if (!recallRequest && matchSessionRecallCue(event.prompt, handshake.recallGate.phrases)) {
+        if (
+          !handshake.sessionRecall &&
+          !recallRequest &&
+          matchSessionRecallCue(event.prompt, handshake.recallGate.phrases)
+        ) {
           const decision = decideMemoryLoad(event.prompt, { sessionCue: true });
           if (decision.mode === "cue") {
             recallRequest = { ...decision, mode: "cue", query: event.prompt };
@@ -1151,6 +1183,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     taskWindow.clear(sessionId);
     recallFlow.clear(sessionId);
     recallTurn = undefined;
+    retainedHandshake = undefined;
     agentAttributionFlow.clear(sessionId);
     controllerShadow.clear(sessionId);
     if (!connectionPromise) return;
@@ -1409,8 +1442,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         ["enable", "disable", "clear", "correct", "remove"].includes(
           params.action === "invoke" ? (params.operation ?? "") : params.action,
         )
-      )
+      ) {
         recallTurn = undefined;
+        retainedHandshake = undefined;
+      }
       const active = await connection();
       const result = await invokeDaemon(active, "lab", {
         action: params.action,

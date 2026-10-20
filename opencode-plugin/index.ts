@@ -77,7 +77,8 @@ import {
 import type { MemoryContext, MemoryTier, RememberResult } from "../src/core/types.ts";
 import { TASK_BOARD_VERDICTS, WORLD_BOARD_ID } from "../src/core/types.ts";
 import { deriveAnswerOverlapMemoryIds } from "../src/core/feedback.ts";
-import type { NmgStateResult } from "../src/cli/protocol.ts";
+import type { NmgStateResult, NmgSessionActiveGraphResult } from "../src/cli/protocol.ts";
+import { recallInput } from "../src/core/recall-matcher.ts";
 import { resolveNmgDataDir } from "../src/cli/data-path.ts";
 import { loadPrompts, renderDisclosure } from "../src/prompts/load.ts";
 import { invokeDaemon } from "./rpc.ts";
@@ -276,11 +277,6 @@ export default {
       request: NonNullable<ReturnType<SessionTaskWindow["prepare"]>>,
     ): Promise<string> => {
       const projectDir = projectDirectory(sessionId);
-      await invoke("sessionActiveGraph", {
-        action: "beginDisclosureTurn",
-        sessionId,
-        projectDir,
-      }).catch(() => undefined);
       const context = (await invoke("search", {
         query: request.query,
         maxTier: Math.min(configuredAutoRecallTier(), request.maxTier) as MemoryTier,
@@ -334,7 +330,16 @@ export default {
         ? renderDisclosure(prompts.completion_nudge, {})
         : "";
       commitNudges.delete(sessionId);
-      const request = taskWindow.prepare(sessionId, prompt);
+      const projectDir = projectDirectory(sessionId);
+      const handshake = (await invoke("sessionActiveGraph", {
+        action: "beginDisclosureTurn",
+        sessionId,
+        projectDir,
+        recall: { prompt: recallInput(prompt), projectDir, scheduled: false },
+      }).catch(() => undefined)) as NmgSessionActiveGraphResult | undefined;
+      const decision =
+        handshake?.action === "beginDisclosureTurn" ? handshake.sessionRecall?.decision : undefined;
+      const request = taskWindow.prepare(sessionId, prompt, decision);
       const surface = request ? await recallHeaders(sessionId, request).catch(() => "") : "";
       const body = [surface, nudge].filter(Boolean).join("\n\n");
       if (!body) return;
