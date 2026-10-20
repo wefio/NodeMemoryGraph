@@ -1,4 +1,5 @@
 import type { PerfSnapshot } from "./perf.ts";
+import type { BoardNoticeMetadata } from "./board-notifications.ts";
 
 export type { PerfSnapshot } from "./perf.ts";
 
@@ -1161,7 +1162,11 @@ export const TASK_BOARD_VERDICTS = ["accepted", "rejected", "undecidable"] as co
 export type TaskBoardVerdict = (typeof TASK_BOARD_VERDICTS)[number];
 
 /** Temporary, task-scoped coordination state. It is never an LTG memory. */
-export interface TaskBoardEntry {
+export interface TaskBoardEntry extends BoardNoticeMetadata {
+  /** Optional coordination association. Notice metadata is daemon-created, never a claim of task ownership. */
+  eventId?: string;
+  eventRevision?: number;
+  eventNotice?: boolean;
   /** Opaque time-sortable stable identity. The id is derived from the
    * authoritative per-channel ordering position (createdAtMs + counter) and
    * is never parsed by clients; it doubles as the continuation cursor for
@@ -1233,6 +1238,9 @@ export interface TaskBoardEntry {
  * (board-governance F1). Omits the full body; ordering/cursor match the full
  * read so an incremental sync can page over the compact view. */
 export interface TaskBoardPreview {
+  eventId?: string;
+  eventRevision?: number;
+  eventNotice?: boolean;
   id: string;
   taskId: string;
   kind: TaskBoardKind;

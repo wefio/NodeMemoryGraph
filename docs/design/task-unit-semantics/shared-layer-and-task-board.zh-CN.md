@@ -15,6 +15,8 @@
 | 共享 Agent Surface | 同一工具目录、参数/结果语义与可发现入口 |
 | harness 薄适配 | 原生工具 schema 编码、会话启动/恢复/终止、模型调用、能力与用量回报 |
 
+关联事件与显式订阅组通知是两件事；[通知与自主协作边界](../board-event-records/event-subscription-and-notification.zh-CN.md#事件订阅与更新通知)由该主题契约拥有。
+
 黑板是工具和载体，不凭自然语言条目推导依赖，也不充当裁判。共享运行时通过 board 的租约、attempt 与 deliver/judge 操作执行状态转移，具体持久化和写入权按下节固定。
 
 共享协议不意味着每个 harness 都有同等执行能力。适配器报告 capability；缺少会话复用或隔离能力时降级为独立执行，不能把正确性规则留给适配器自行解释。

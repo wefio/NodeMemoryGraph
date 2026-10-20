@@ -69,6 +69,8 @@ export const COMMON_FLAGS = ["json"] as const;
 
 const STATE_BOARD_OPTIONS = {
   "task-id": "taskId",
+  "event-id": "eventId",
+  text: "text",
   agent: "agentId",
   "agent-name": "agentName",
   content: "content",
@@ -121,13 +123,26 @@ function stateBoardCommand(action: "read" | "write"): CliCommandSpec {
     method: "state",
     words: ["state", action, "board"],
     usageLine: `nmg state ${action} board [OPERATION] --agent ID [options] [--json]`,
-    options: [...Object.keys(STATE_BOARD_OPTIONS), "limit", "ttl-seconds", "lease-seconds"],
+    options: [
+      ...Object.keys(STATE_BOARD_OPTIONS),
+      "event-json",
+      "notification-json",
+      "limit",
+      "ttl-seconds",
+      "lease-seconds",
+    ],
     flags: ["include-resolved"],
     buildParams: (values) =>
       compactObject({
         action,
         space: "board",
         operation: stateOperation(values, action),
+        ...(firstOption(values, "event-json") === undefined
+          ? {}
+          : { event: JSON.parse(firstOption(values, "event-json")!) as unknown }),
+        ...(firstOption(values, "notification-json") === undefined
+          ? {}
+          : { notification: JSON.parse(firstOption(values, "notification-json")!) as unknown }),
         ...Object.fromEntries(
           Object.entries(STATE_BOARD_OPTIONS).map(([key, name]) => [
             name,

@@ -28,6 +28,23 @@ test("schema-shaped calls pass the concrete operation through and derive directi
   assert.equal(put.action, "write");
 });
 
+test("dual-direction status preserves explicit writes and event payload identity", () => {
+  const status = assembleBoardStateParams(
+    { action: "write", operation: "agentStatus", text: "Waiting" },
+    "session-1",
+    identity,
+  );
+  assert.equal(status.action, "write");
+  const event = { expectedRevision: 1, kind: "close", text: "Ended" };
+  const params = assembleBoardStateParams(
+    { action: "write", operation: "eventUpdate", eventId: "e", event, agentId: "spoofed" },
+    "session-1",
+    identity,
+  );
+  assert.equal(params.event, event);
+  assert.equal(params.agentId, identity.id);
+});
+
 test("channel resolution keeps an explicit taskId and defaults to the world board", () => {
   const explicit = assembleBoardStateParams(
     { action: "write", operation: "put", taskId: "  board-event-opencode-integration  " },

@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import {
   captureStateInvocation,
+  COORDINATION_OPERATIONS,
   stateOperation,
   renderStateOutput,
   STATE_BOARD_READ_OPERATIONS,
@@ -2403,6 +2404,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       action: Type.Union([Type.Literal("read"), Type.Literal("write")]),
       space: Type.Union([Type.Literal("ag"), Type.Literal("board")]),
       operation: Type.Optional(Type.String()),
+      notification: Type.Optional(
+        Type.Record(Type.String(), Type.Unknown(), {
+          description:
+            "Explicit notice: key, scopes [direct|channel|event], optional recipients (stable IDs), invite:true to subscribe invitees and sender to taskId. Reuse key on retries.",
+        }),
+      ),
+      eventId: Type.Optional(Type.String()),
+      event: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
       text: Type.Optional(Type.String()),
     }),
     async execute(id, args, signal, onUpdate, ctx) {
@@ -2438,6 +2447,18 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         return toolResult(details, renderStateOutput(result));
       }
       if (!coordinationToolsEnabled) throw new Error("Board coordination is disabled");
+      if (COORDINATION_OPERATIONS.has(operation)) {
+        const sessionId = ctx.sessionManager.getSessionId();
+        const identity = loadOrCreateAgentIdentity(sessionId);
+        const result = (await invoke("state", {
+          ...args,
+          operation,
+          agentId: identity.id,
+          sessionId,
+          sourceSessionId: sessionId,
+        })) as NmgStateResult;
+        return toolResult(result, renderStateOutput(result));
+      }
       return boardTool.execute(
         id,
         {

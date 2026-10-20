@@ -1,3 +1,9 @@
+/** Shared shape only: the concrete Store still issues and validates port identity. */
+export interface TransactionPort {
+  /** Which transition this port belongs to; the store matches it against the open one. */
+  readonly generation: number;
+}
+
 /**
  * Constructor constraint for the method-cluster mixins (DAG split, see
  * cluster-dag.test.ts and docs/design/store-cluster-split.md).

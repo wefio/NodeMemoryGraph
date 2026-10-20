@@ -1,5 +1,20 @@
 import type { NmgStateResult } from "../cli/protocol.ts";
 import { renderLabOutput } from "./lab-capabilities.ts";
+import {
+  COORDINATION_OPERATIONS,
+  COORDINATION_READ_OPERATIONS,
+  COORDINATION_WRITE_OPERATIONS,
+} from "./coordination-state.ts";
+export { COORDINATION_OPERATIONS } from "./coordination-state.ts";
+
+export function stateRequiresBoardEvents(params: Record<string, unknown>): boolean {
+  return (
+    params.space === "board" &&
+    (params.eventId !== undefined ||
+      params.notification !== undefined ||
+      COORDINATION_OPERATIONS.has(String(params.operation)))
+  );
+}
 
 export const STATE_AG_FIELDS = [
   "action",
@@ -16,6 +31,7 @@ export const STATE_AG_FIELDS = [
 export const STATE_AG_READ_OPERATIONS = ["read", "status"] as const;
 export const STATE_AG_WRITE_OPERATIONS = ["enable", "disable", "replace", "clear"] as const;
 export const STATE_BOARD_READ_OPERATIONS = [
+  ...COORDINATION_READ_OPERATIONS,
   "read",
   "readInbox",
   "readPreviews",
@@ -23,6 +39,7 @@ export const STATE_BOARD_READ_OPERATIONS = [
   "list",
 ] as const;
 export const STATE_BOARD_WRITE_OPERATIONS = [
+  ...COORDINATION_WRITE_OPERATIONS,
   "put",
   "resolve",
   "acknowledge",
@@ -34,6 +51,25 @@ export const STATE_BOARD_WRITE_OPERATIONS = [
   "subscribe",
   "rename",
 ] as const;
+
+/** A verb normally decides direction; dual-direction verbs retain the requested direction. */
+export function boardStateDirection(operation: string, requested: unknown): "read" | "write" {
+  const read = (STATE_BOARD_READ_OPERATIONS as readonly string[]).includes(operation);
+  const write = (STATE_BOARD_WRITE_OPERATIONS as readonly string[]).includes(operation);
+  if (read && write && (requested === "read" || requested === "write")) return requested;
+  return read ? "read" : "write";
+}
+
+/** Lease-only hosts check additive event fields before a resident older owner can ignore them. */
+export async function requireBoardEventCapability(
+  params: Record<string, unknown>,
+  readHello: () => Promise<unknown>,
+): Promise<void> {
+  if (!stateRequiresBoardEvents(params)) return;
+  const hello = (await readHello()) as { capabilities?: string[] } | null;
+  if (!hello?.capabilities?.includes("board-events"))
+    throw new Error("NMG daemon does not advertise board-events");
+}
 
 export const STATE_OPERATIONS = [
   ...new Set<string>([

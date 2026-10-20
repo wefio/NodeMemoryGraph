@@ -195,8 +195,41 @@ test("DSH registers one state tool, keeps AG usable without coordination, and re
   });
 });
 
+test("DSH forwards event objects and pins mutation identity to its registered actor", async () => {
+  await withHost(true, async ({ tools, service, requests, subprocessCalls }) => {
+    const tool = tools.get("nmg_state")!;
+    const context = { agent: { id: "host-session" }, signal: new AbortController().signal };
+    const created = await tool.execute(
+      {
+        action: "write",
+        space: "board",
+        operation: "eventCreate",
+        agentId: "spoofed",
+        event: { title: "DSH event" },
+      },
+      context,
+    );
+    assert.match(String(created), /DSH event/u);
+    const request = requests.find(
+      (r) => r.method === "state" && r.params.operation === "eventCreate",
+    )!;
+    assert.notEqual(request.params.agentId, "spoofed");
+    const listed = await service.invoke("state", {
+      action: "read",
+      space: "board",
+      operation: "eventRead",
+      agentId: "reader",
+    });
+    assert.ok(
+      "events" in listed.result &&
+        listed.result.events?.some((event) => event.title === "DSH event"),
+    );
+    assert.equal(subprocessCalls(), 0);
+  });
+});
+
 test("DSH uses the board owner and does not retry or CLI-fallback a refused AG write", async () => {
-  await withHost(true, async ({ tools, requests, subprocessCalls }) => {
+  await withHost(true, async ({ tools, service, requests, subprocessCalls }) => {
     const state = tools.get("nmg_state")!;
     await state.execute(
       {
@@ -229,6 +262,32 @@ test("DSH uses the board owner and does not retry or CLI-fallback a refused AG w
         text: "Preserve this state.",
       },
       context,
+    );
+    await state.execute(
+      {
+        action: "write",
+        space: "board",
+        operation: "put",
+        taskId: "dsh-invitation",
+        content: "Discuss options",
+        agentId: "forged-author",
+        notification: {
+          key: "dsh-invite",
+          scopes: ["direct"],
+          recipients: ["dsh-invitee"],
+          invite: true,
+        },
+      },
+      context,
+    );
+    const invited = await service.invoke("taskBoard", {
+      action: "readInbox",
+      agentId: "dsh-invitee",
+      agentName: "dsh-invitee",
+    });
+    assert.ok(
+      invited.action === "readInbox" &&
+        invited.entries.some((entry) => entry.invitation && entry.agentId !== "forged-author"),
     );
     const before = requests.length;
     const denied = await state.execute(

@@ -96,6 +96,33 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     assert.match(JSON.stringify(search.inputSchema), /recallCue/u);
     assert.match(JSON.stringify(search.inputSchema), /recallRevision/u);
     assert.doesNotMatch(JSON.stringify(search.inputSchema), /recallSource/u);
+    assert.match(JSON.stringify(board.inputSchema), /eventId/u);
+    const event = await client.callTool({
+      name: "nmg_state",
+      arguments: {
+        action: "write",
+        space: "board",
+        operation: "eventCreate",
+        event: { title: "MCP cross-channel discussion" },
+      },
+    });
+    assert.match(textOf(event), /MCP cross-channel discussion/u);
+    const world = await client.callTool({
+      name: "nmg_state",
+      arguments: { action: "read", space: "board" },
+    });
+    assert.match(textOf(world), /MCP cross-channel discussion/u);
+    const note = await client.callTool({
+      name: "nmg_state",
+      arguments: {
+        action: "write",
+        space: "board",
+        operation: "agentStatus",
+        text: "Waiting for review",
+      },
+    });
+    assert.match(textOf(note), /Waiting for review/u);
+    assert.match(textOf(note), /\[idle\]/u);
     assert.match(JSON.stringify(get.inputSchema), /activeGraphId/u);
     assert.match(JSON.stringify(remember.inputSchema), /claim_outcome/u);
 

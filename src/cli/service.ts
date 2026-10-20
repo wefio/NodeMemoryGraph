@@ -28,6 +28,13 @@ import type {
   RelevanceModelLike,
 } from "../core/types.ts";
 import { NmgStore } from "../core/store.ts";
+import { parseBoardNotification } from "../core/board-notifications.ts";
+import {
+  COORDINATION_OPERATIONS,
+  executeCoordinationState,
+  prepareCoordinationSurface,
+  coordinationSummary,
+} from "../integration/coordination-state.ts";
 import {
   prepareSessionActiveGraphSurface,
   prepareTaskBoardSurface,
@@ -679,6 +686,19 @@ export class NmgService {
         `unsupported ${space} ${action} operation: ${operation}`,
       );
     if (space === "ag") return this.#stateAg(action, operation, params);
+    return this.#stateBoard(action, operation, params);
+  }
+
+  #stateBoard(
+    action: "read" | "write",
+    operation: string,
+    params: Record<string, unknown>,
+  ): NmgMethodResult["state"] {
+    const space = "board";
+    if (COORDINATION_OPERATIONS.has(operation)) {
+      const result = executeCoordinationState(this.#getStore(), operation, params);
+      return { action, space, operation, result, information: prepareCoordinationSurface(result) };
+    }
     const parsed = parseTaskBoardParams({
       ...params,
       action: operation,
@@ -3200,6 +3220,13 @@ const TASK_BOARD_READ_STYLE = new Set<string>(["read", "readPreviews"]);
 const TASK_BOARD_DIRECTED_STYLE = new Set<string>(["readDirected", "readInbox"]);
 const TASK_BOARD_ACK_STYLE = new Set<string>(["acknowledge", "veto"]);
 
+function parseBoardNotificationParams(value: unknown) {
+  try {
+    return parseBoardNotification(value);
+  } catch (error) {
+    throw new NmgProtocolError("INVALID_PARAMS", (error as Error).message);
+  }
+}
 function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
   const params = objectParams(value);
   const action = requiredEnum(params, "action", [
@@ -3323,6 +3350,8 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
       content: requiredString(params, "content"),
       kind: optionalEnum(params, "kind", TASK_BOARD_KINDS),
       sourceSessionId: optionalString(params, "sourceSessionId"),
+      eventId: optionalString(params, "eventId"),
+      notification: parseBoardNotificationParams(params.notification),
       to: optionalString(params, "to"),
       ttlSeconds,
       expiresAt,
@@ -3525,16 +3554,33 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
       content: p.content,
       expiresAt,
       to: p.to,
+      eventId: p.eventId,
+      notification: p.notification,
     };
     // Adoption is part of creating the entry, not a second call after it: an entry that exists
     // without its binding is exactly the unmanaged hole the run fence exists to close, and a crash
     // between two calls would leave one. An unadopted put takes the path it always took.
-    if (!p.adopt) return { action: "put", entry: store.putTaskBoardEntry(entry) };
+    if (!p.adopt) return { action: "put", entry: store.postBoardMessage(entry) };
+    if (p.notification)
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        "notification cannot be combined with run adoption",
+      );
     return { action: "put", ...createBoundEntry(store, { entry, ...p.adopt }) };
   },
   read: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"read">;
-    return { action: "read", ...store.readTaskBoard(p) };
+    return {
+      action: "read",
+      ...store.readTaskBoard(p),
+      ...(p.taskId === "default"
+        ? {
+            events: store
+              .listCoordinationEvents({ includeEnded: true, limit: Math.min(p.limit ?? 5, 5) })
+              .map(coordinationSummary),
+          }
+        : {}),
+    };
   },
   readDirected: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"readDirected">;
@@ -3581,6 +3627,7 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
         store.hasTaskBoardDelivery({ entryId, sessionId: p.sessionId }),
       ),
       acked: [...store.taskBoardAckedIds(p.entryIds, [p.sessionId, p.agentId])],
+      inactive: store.inactiveTaskBoardEntries(p.entryIds),
       suppressed: store.isTaskBoardSuppressed({
         sessionId: p.sessionId,
         taskId: p.taskId,
@@ -3652,14 +3699,12 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
   },
   unsubscribe: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"unsubscribe">;
-    store.unsubscribeTaskBoard({ sessionId: p.sessionId, taskId: p.taskId });
-    store.suppressTaskBoard({ sessionId: p.sessionId, taskId: p.taskId });
+    store.setBoardChannelSubscription({ ...p, subscribed: false });
     return { action: "unsubscribe", taskId: p.taskId };
   },
   subscribe: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"subscribe">;
-    store.subscribeTaskBoard({ sessionId: p.sessionId, taskId: p.taskId });
-    store.unsuppressTaskBoard({ sessionId: p.sessionId, taskId: p.taskId });
+    store.setBoardChannelSubscription({ ...p, subscribed: true });
     return { action: "subscribe", taskId: p.taskId };
   },
   registerAgent: (store, parsed) => {
@@ -3690,14 +3735,16 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
     const p = parsed as TaskBoardParamsOf<"discover">;
     return {
       action: "discover",
-      agents: store.discoverTaskBoardAgents({ capabilities: p.capabilities }),
+      agents: store
+        .discoverTaskBoardAgents({ capabilities: p.capabilities })
+        .map((agent) => ({ ...agent, ...store.getAgentWorkStatus(agent.id) })),
     };
   },
   listSubscriptions: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"listSubscriptions">;
     return {
       action: "listSubscriptions",
-      subscriptions: store.listTaskBoardSubscriptions(p.sessionId),
+      subscriptions: store.listBoardChannelSubscriptions(p),
     };
   },
   resolve: (store, parsed) => {

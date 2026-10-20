@@ -223,6 +223,15 @@ function copySource(source: InformationSource): InformationSource {
         sessionId: source.sessionId,
         generatedAt: source.generatedAt,
       });
+    case "event":
+      return Object.freeze({
+        kind: source.kind,
+        eventId: source.eventId,
+        revision: source.revision,
+        part: source.part,
+      });
+    case "agent":
+      return Object.freeze({ kind: source.kind, agentId: source.agentId });
     default:
       throw new RangeError("Unsupported information source");
   }
@@ -238,6 +247,10 @@ function sourceIdentity(source: InformationSource): string {
       return JSON.stringify([source.kind, source.memoryId, source.activeGraphId ?? null]);
     case "workspace":
       return JSON.stringify([source.kind, source.sessionId, source.generatedAt]);
+    case "event":
+      return JSON.stringify([source.kind, source.eventId, source.revision, source.part]);
+    case "agent":
+      return JSON.stringify([source.kind, source.agentId]);
   }
 }
 

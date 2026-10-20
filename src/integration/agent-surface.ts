@@ -1,4 +1,11 @@
+import type { BoardNoticeMetadata } from "../core/board-notifications.ts";
 import type { MemoryContext, RememberResult } from "../core/types.ts";
+import type { AgentWorkStatus } from "../core/coordination-events.ts";
+import {
+  coordinationDirectoryViews,
+  agentStatusViews,
+  type CoordinationEventSummary,
+} from "./coordination-state.ts";
 import {
   DEFAULT_INFORMATION_OUTPUT_CHARACTERS,
   TEMPORARY_INFORMATION_LABEL,
@@ -43,6 +50,10 @@ export interface TaskBoardAgentEntry {
   description?: string | null;
   capabilities?: string | null;
   lastSeenAt: string;
+  activity?: AgentWorkStatus["activity"];
+  statusNote?: string;
+  tasks?: AgentWorkStatus["tasks"];
+  taskCount?: number;
 }
 
 export interface TaskBoardSurfaceResult {
@@ -52,9 +63,10 @@ export interface TaskBoardSurfaceResult {
   previews?: TaskBoardSurfacePreview[];
   nextCursor?: string | null;
   agents?: TaskBoardAgentEntry[];
+  events?: CoordinationEventSummary[];
 }
 
-export interface TaskBoardSurfaceEntry {
+export interface TaskBoardSurfaceEntry extends BoardNoticeMetadata {
   id?: string;
   taskId?: string;
   to?: string | null;
@@ -63,6 +75,9 @@ export interface TaskBoardSurfaceEntry {
   status?: string;
   agentId?: string;
   content?: string;
+  eventId?: string;
+  eventRevision?: number;
+  eventNotice?: boolean;
   claimedBy?: string | null;
   ackedBy?: string[];
   deliveredBy?: string | null;
@@ -401,6 +416,7 @@ export function prepareTaskBoardSurface(
   }
   const views = [
     ...boardDirectoryViews(options.directory ?? []),
+    ...coordinationDirectoryViews(result.events ?? []),
     ...boardItemViews(result, options),
   ];
   const cursor =
@@ -434,9 +450,20 @@ function discoveryViews(agents: readonly TaskBoardAgentEntry[]): InformationView
     return [{ body: "No online NMG agents match the requested capability." }];
   return [
     { body: "Online NMG agents:" },
-    ...agents.map((agent) => ({
-      body: `- ${agent.agentName}${agent.description ? ` — ${agent.description}` : ""}${agent.capabilities ? ` capabilities=${agent.capabilities}` : ""} (id=${agent.id ?? agent.agentName}; lastSeen=${agent.lastSeenAt})`,
-    })),
+    ...agents.flatMap((agent) => [
+      {
+        body: `- ${agent.agentName}${agent.description ? ` — ${agent.description}` : ""}${agent.capabilities ? ` capabilities=${agent.capabilities}` : ""} (id=${agent.id ?? agent.agentName}; lastSeen=${agent.lastSeenAt})`,
+      },
+      ...(agent.id && agent.activity
+        ? agentStatusViews({
+            agentId: agent.id,
+            activity: agent.activity,
+            statusNote: agent.statusNote ?? "",
+            tasks: agent.tasks ?? [],
+            taskCount: agent.taskCount ?? 0,
+          })
+        : []),
+    ]),
     {
       body: "Use nmg_board action=put with to=<agent name> for directed delivery.",
     },
@@ -498,11 +525,24 @@ function boardEntryView(
   };
 }
 
+function boardNotificationLabels(entry: TaskBoardSurfaceEntry): string {
+  if (entry.notificationSourceId)
+    return ` [${entry.invitation ? "invitation; subscribed" : "discussion"}; source=#${entry.notificationSourceId}; channel=${entry.notificationChannelId}; no claim required]`;
+  return entry.notificationOrigin ? " [source; notification routed separately]" : "";
+}
+
+function boardEventLabels(entry: TaskBoardSurfaceEntry): string {
+  return entry.eventId
+    ? ` event=${entry.eventId}${entry.eventRevision ? ` r${entry.eventRevision}` : ""}${entry.eventNotice ? " [update; no claim required]" : ""}`
+    : "";
+}
+
 function boardEntryLabels(
   entry: TaskBoardSurfaceEntry & TaskBoardSurfacePreview,
   taskId: string,
 ): string {
   const claim = entry.claimedBy ? ` [claimed by ${entry.claimedBy}]` : "";
+  const event = boardEventLabels(entry) + boardNotificationLabels(entry);
   const ack = entry.ackedBy?.length
     ? ` (✅ acked by ${entry.ackedBy.join(", ")})`
     : entry.ackCount
@@ -511,7 +551,7 @@ function boardEntryLabels(
   const channel = entry.taskId && entry.taskId !== taskId ? ` channel=${entry.taskId}` : "";
   const to = entry.to ? ` to=${entry.to}` : "";
   const serial = entry.serialState ? ` [${entry.serialState}]` : "";
-  return `- ${String(entry.id ?? "?")} [${String(entry.kind ?? "entry")}/${String(entry.status ?? "open")}]${channel}${to}${serial}${claim}${ack}${renderJudgement(entry)} ${String(entry.agentId ?? "unknown")}:`;
+  return `- ${String(entry.id ?? "?")} [${String(entry.kind ?? "entry")}/${String(entry.status ?? "open")}]${channel}${event}${to}${serial}${claim}${ack}${renderJudgement(entry)} ${String(entry.agentId ?? "unknown")}:`;
 }
 
 /** Artifact identity and independent verdict remain protected display content. */

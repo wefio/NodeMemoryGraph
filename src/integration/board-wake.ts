@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { boardEntryView } from "../core/board-entry-view.ts";
 import { WORLD_BOARD_ID } from "../core/types.ts";
 import type { TaskBoardToolEntry, TaskBoardToolResult } from "./tool-contract.ts";
+import { isBoardDiscussionNotice } from "../core/board-notifications.ts";
+import { isCoordinationEventNotice } from "../core/coordination-events.ts";
+import { renderEventNotice, renderDiscussionNotice } from "./coordination-state.ts";
+import { canDeliverBoardEntry, type BoardDeliveryCheck } from "./board-delivery.ts";
 
 /** Board wake plumbing shared by every harness adapter: configuration/state
  * persistence under the data directory, the daily budget gate, the pure
@@ -143,7 +147,9 @@ export function kindLabel(kind: string): string {
  * testing). An entry wakes a session when it is open, is not an echo of the
  * receiving session, has NO live claim, is not a broadcast pull announcement,
  * AND its kind asks for a response/action — the same set as BROADCAST_KINDS
- * (question/blocker/handoff). Notify-only kinds (note/result/decision/goal)
+ * (question/blocker/handoff). Versioned directed event notices are the explicit
+ * exception: they report a committed change without asking for a claim or reply.
+ * Ordinary notify-only kinds (note/result/decision/goal)
  * are SILENT: they record a fact and owe no reply, so waking on them is the
  * acknowledgement storm — N agents confirming one fact each emit a note, and
  * every note wakes every subscriber (observed live: #36/#37/#38/#39 were four
@@ -152,6 +158,14 @@ export function kindLabel(kind: string): string {
  * crashed or stopped, no sweeper clears the column) returns the entry to the
  * pool, so it must wake again rather than be permanently hidden from its
  * former holder (audit finding 2026-08-13). */
+function asksAttention(entry: TaskBoardToolEntry): boolean {
+  return (
+    BROADCAST_KINDS.has(entry.kind) ||
+    isCoordinationEventNotice(entry) ||
+    isBoardDiscussionNotice(entry)
+  );
+}
+
 export function isBoardWakeCandidate(
   entry: TaskBoardToolEntry,
   input: { sessionId: string; agentId: string; agentName?: string; now?: Date },
@@ -175,7 +189,8 @@ export function isBoardWakeCandidate(
   const serialQueued = entry.serialState === "pending";
   return (
     entry.status === "open" &&
-    BROADCAST_KINDS.has(entry.kind) &&
+    !entry.notificationOrigin &&
+    asksAttention(entry) &&
     !ownEcho &&
     !liveClaim &&
     !addressedToOther &&
@@ -261,12 +276,10 @@ export async function filterUndelivered(
       entryIds: candidates
         .filter((candidate) => candidate.taskId === taskId)
         .map((candidate) => candidate.id),
-    })) as { delivered: string[]; acked: string[]; suppressed: boolean };
+    })) as BoardDeliveryCheck;
     if (check.suppressed) continue; // unsubscribed channel — skip entirely
-    const delivered = new Set(check.delivered);
-    const acked = new Set(check.acked ?? []);
     for (const candidate of candidates) {
-      if (candidate.taskId === taskId && !delivered.has(candidate.id) && !acked.has(candidate.id)) {
+      if (candidate.taskId === taskId && canDeliverBoardEntry(check, candidate.id)) {
         fresh.push(candidate);
       }
     }
@@ -291,7 +304,12 @@ export async function maybeBroadcastToWorld(input: {
   // A broadcast entry is meta — it announces another entry. Re-broadcasting it
   // is how broadcast storms start (broadcast → wake → broadcast → …). The
   // original entry gets one pull broadcast; the broadcast itself never does.
-  if (entry.content.startsWith(BROADCAST_PREFIX)) return false;
+  if (
+    isBoardDiscussionNotice(entry) ||
+    isCoordinationEventNotice(entry) ||
+    entry.content.startsWith(BROADCAST_PREFIX)
+  )
+    return false;
   const worldCheck = (await invoke("taskBoard", {
     action: "deliveryCheck",
     taskId: WORLD_BOARD_ID,
@@ -330,7 +348,7 @@ export async function maybeBroadcastToWorld(input: {
  * ctx.session.prompt, …); `dataDir` locates the wake state file. */
 export async function deliverBoardWake(input: {
   invoke: (method: string, params: unknown) => Promise<unknown>;
-  sendWake: (message: string) => void;
+  sendWake: (message: string) => void | Promise<unknown>;
   config: BoardWakeConfig;
   state: BoardWakeState;
   dataDir: string;
@@ -342,8 +360,12 @@ export async function deliverBoardWake(input: {
   const { invoke, sendWake, config, state, dataDir, now, agentId, sessionId, entry } = input;
   const preview = entry.content.length > 140 ? `${entry.content.slice(0, 140)}…` : entry.content;
   const label = kindLabel(entry.kind);
-  sendWake(
-    `[NMG board] 你订阅的频道 ${entry.taskId} 有新${label}：#${entry.id} — ${preview}（open，可认领）。需要的话用 nmg_state space=board action=read 查看详情、action=write operation=claim 认领处理。`,
+  await sendWake(
+    isBoardDiscussionNotice(entry)
+      ? renderDiscussionNotice(entry)
+      : isCoordinationEventNotice(entry)
+        ? renderEventNotice(entry)
+        : `[NMG board] 你订阅的频道 ${entry.taskId} 有新${label}：#${entry.id} — ${preview}（open，可认领）。需要的话用 nmg_state space=board action=read 查看详情、action=write operation=claim 认领处理。`,
   );
   // Delivery receipt: this session has been reached for this entry, so the
   // wake loop will not re-notify it (idempotent in the store).

@@ -10,7 +10,7 @@
 // session-scoped agent identity is attached deterministically instead of
 // trusting caller-supplied fields.
 
-import { STATE_BOARD_READ_OPERATIONS } from "../src/integration/state.ts";
+import { boardStateDirection } from "../src/integration/state.ts";
 import { WORLD_BOARD_ID } from "../src/core/types.ts";
 
 /** Resolve the concrete board operation from tool arguments. Returns null when
@@ -36,9 +36,7 @@ export function assembleBoardStateParams(
     throw new Error(
       "nmg_state board requires a concrete operation (put/read/claim/...), not a bare direction",
     );
-  const direction = (STATE_BOARD_READ_OPERATIONS as readonly string[]).includes(operation)
-    ? "read"
-    : "write";
+  const direction = boardStateDirection(operation, args.action);
   return {
     ...args,
     action: direction,
