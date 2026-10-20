@@ -216,12 +216,33 @@ export function readServerState(statePath: string): ServerState | undefined {
 }
 
 export function isProcessAlive(pid: number): boolean {
+  if (isZombie(pid)) return false;
   try {
     process.kill(pid, 0);
     return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
+}
+
+/**
+ * An exited process stays visible to `kill(pid, 0)` until its parent reaps it.
+ * A zombie runs no code, so treating it as alive makes reload and stale-lease
+ * recovery wait for an owner that has already stopped.
+ */
+function isZombie(pid: number): boolean {
+  if (process.platform !== "linux") return false;
+  try {
+    return procStatIsZombie(readFileSync(`/proc/${pid}/stat`, "utf8"));
+  } catch {
+    return false;
+  }
+}
+
+/** `/proc/<pid>/stat` state letter; the command name is parenthesized and may contain spaces. */
+export function procStatIsZombie(stat: string): boolean {
+  const close = stat.lastIndexOf(")");
+  return close !== -1 && stat.slice(close + 2, close + 3) === "Z";
 }
 
 function isAlreadyExists(error: unknown): boolean {

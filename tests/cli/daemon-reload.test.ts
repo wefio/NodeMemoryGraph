@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { NmgService } from "../../src/cli/service.ts";
 import { runCli } from "../../src/cli/main.ts";
+import { procStatIsZombie } from "../../src/cli/lifecycle.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
@@ -33,6 +34,15 @@ test("reload fences new work, drains accepted requests and reports drain failure
     service.close();
     removeTempDirectory(directory);
   }
+});
+
+test("a zombie is not a live owner, so reload does not wait for a process that already stopped", () => {
+  // Linux keeps an exited child visible to kill(pid, 0) until its parent reaps it.
+  assert.equal(procStatIsZombie("4242 (node) Z 1 4242 4242 0 -1 4194560"), true);
+  assert.equal(procStatIsZombie("4242 (node) S 1 4242 4242 0 -1 4194560"), false);
+  assert.equal(procStatIsZombie("4242 (nmg daemon run) R 1 4242"), false);
+  assert.equal(procStatIsZombie("4242 (node) Z"), true);
+  assert.equal(procStatIsZombie("garbage"), false);
 });
 
 test("daemon reload is an explicit command and refuses to start a stopped daemon", async () => {
