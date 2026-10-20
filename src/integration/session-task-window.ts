@@ -1,9 +1,12 @@
-import { decideMemoryLoad } from "../core/gate.ts";
-import type { MemoryTier } from "../core/types.ts";
+import { recallTermDecision } from "../core/gate.ts";
+import { RecallPool } from "../core/recall-pool.ts";
+import type { MemoryTier, MemoryGateDecision } from "../core/types.ts";
 import { excerpt } from "./tool-observation.ts";
 
 interface SessionTaskState {
   anchors: string[];
+  pool: RecallPool;
+  turn: number;
 }
 
 export interface SessionRecallRequest {
@@ -31,32 +34,27 @@ export class SessionTaskWindow {
     this.maxAnchorCharacters = Math.max(80, maxAnchorCharacters);
   }
 
-  prepare(sessionId: string, prompt: string): SessionRecallRequest | null {
+  prepare(
+    sessionId: string,
+    prompt: string,
+    retainedDecision?: MemoryGateDecision,
+  ): SessionRecallRequest | null {
     const normalized = normalizeTaskPrompt(prompt);
     if (!normalized) return null;
     const state = this.#state(sessionId);
-    const gate = decideMemoryLoad(normalized);
-    const substantive = isSubstantiveTaskPrompt(normalized);
-    const continuation = isTaskContinuation(normalized);
+    // A daemon decision, including `none`, is authoritative: never resurrect an evicted seed.
+    const gate =
+      retainedDecision ?? recallTermDecision(state.pool.observe(prompt, ++state.turn)?.mode);
     const prior = state.anchors.join("\n");
-    const continuePriorTask = continuation && prior.length > 0;
-    const usePriorContext = prior.length > 0 && (gate.mode === "retrieve" || continuePriorTask);
-
-    if (substantive) {
-      const anchor = excerpt(normalized, this.maxAnchorCharacters);
-      if (state.anchors.at(-1) !== anchor) state.anchors.push(anchor);
-      while (state.anchors.length > this.maxAnchors) state.anchors.shift();
-    }
-    if (gate.mode === "none" && !continuePriorTask) return null;
+    rememberAnchor(state, normalized, this.maxAnchors, this.maxAnchorCharacters);
+    const continued = isTaskContinuation(normalized) && prior.length > 0;
+    if (gate.mode === "none" && !continued) return null;
+    const withPrior = prior.length > 0 && (gate.mode === "retrieve" || continued);
     return {
-      query: [normalized, usePriorContext ? `Recent task context:\n${prior}` : ""]
+      query: [normalized, withPrior ? `Recent task context:\n${prior}` : ""]
         .filter(Boolean)
         .join("\n"),
-      mode: gate.mode === "none" ? "cue" : gate.mode,
-      reason: gate.mode === "none" ? "task_continuation" : gate.reason,
-      maxTier: (gate.mode === "none" ? 1 : gate.maxTier) as MemoryTier,
-      limit: gate.mode === "none" ? 5 : gate.limit,
-      graphHops: gate.mode === "none" ? 0 : gate.graphHops,
+      ...gateBudget(gate),
     };
   }
 
@@ -67,7 +65,7 @@ export class SessionTaskWindow {
   #state(sessionId: string): SessionTaskState {
     let state = this.#sessions.get(sessionId);
     if (!state) {
-      state = { anchors: [] };
+      state = { anchors: [], pool: new RecallPool(), turn: 0 };
       this.#sessions.set(sessionId, state);
     }
     return state;
@@ -76,6 +74,40 @@ export class SessionTaskWindow {
 
 function normalizeTaskPrompt(prompt: string): string {
   return prompt.replace(/\s+/gu, " ").trim();
+}
+
+function rememberAnchor(
+  state: SessionTaskState,
+  normalized: string,
+  maxAnchors: number,
+  maxCharacters: number,
+): void {
+  if (!isSubstantiveTaskPrompt(normalized)) return;
+  const anchor = excerpt(normalized, maxCharacters);
+  if (state.anchors.at(-1) === anchor) return;
+  state.anchors.push(anchor);
+  while (state.anchors.length > maxAnchors) state.anchors.shift();
+}
+
+/** A terse continuation keeps its shallow budget so task context is not an unbounded search. */
+function gateBudget(
+  gate: MemoryGateDecision,
+): Pick<SessionRecallRequest, "mode" | "reason" | "maxTier" | "limit" | "graphHops"> {
+  if (gate.mode === "none")
+    return {
+      mode: "cue",
+      reason: "task_continuation",
+      maxTier: 1 as MemoryTier,
+      limit: 5,
+      graphHops: 0,
+    };
+  return {
+    mode: gate.mode,
+    reason: gate.reason,
+    maxTier: gate.maxTier as MemoryTier,
+    limit: gate.limit,
+    graphHops: gate.graphHops,
+  };
 }
 
 function isSubstantiveTaskPrompt(prompt: string): boolean {

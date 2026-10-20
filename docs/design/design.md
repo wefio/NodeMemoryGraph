@@ -2143,14 +2143,32 @@ No per-turn skip/hint notice or event history is injected. Quotes/code,
 translation/no-memory forms and Latin word boundaries have
 conservative exclusions; they are not a semantic intent or permission model.
 
-The service owns at most 32 session entries with eight cues each: phrases are
-3–80 UTF-16 units, reasons at most 240, source excerpts at most 320, and query
-capture/matching at most 4,096. The shared high-confidence secret boundary rejects
-secret-bearing query capture and reasons; it is not a general privacy classifier.
-Capacity eviction is FIFO by admission, not by automatic match count. Matching
-neither renews a cue nor extends the lease. A project change drops the session's
-cues; remove/clear, disable, lease expiry or renewal, session release, and daemon
-replacement prevent their reuse. No cross-session or permanent promotion is defined.
+Entry vocabulary is data rather than code. Each term states its phrase, whether
+it selects `retrieve` or `cue`, and its optional intent bounds — words before or
+after inside a gap, sentence scope, query start, or a following name — so adding
+or retiring a trigger edits `src/core/recall-vocabulary.ts` and writes no regular
+expression. A `retrieve` term outranks a `cue` term when both match, and a learned
+phrase always enters at `cue`, so it cannot downgrade an explicit recollection
+question. Without the Lab lease, classification stays stateless against that
+vocabulary.
+
+The service owns at most 32 session entries. Each session owns one pool seeded
+from the vocabulary and limited to 128 entries; at most 64 of them are protected.
+Learned phrases compete for the same capacity, so there is no separate cue cache
+and no seed immunity. Retention is a segmented LRU driven only by original user
+input: a match in a distinct user turn is a use, the second distinct turn promotes
+the entry, and repeated matches inside one turn are not further uses. Protected
+overflow demotes the least recently used protected entry; capacity pressure evicts
+the least recently used unprotected entry. Automatic recall, injected context,
+answers and tool output never update recency. Phrases are 3–80 UTF-16 units,
+reasons at most 240, source excerpts at most 320, and query capture/matching at
+most 4,096. The shared high-confidence secret boundary rejects secret-bearing
+query capture and reasons; it is not a general privacy classifier. When the lease
+is active the session pool is authoritative, including `none`: an evicted or
+removed term is never reseeded from disk, and matching neither extends the lease
+nor survives a project change; remove/clear, disable, lease expiry or renewal,
+session release and daemon replacement prevent reuse. No cross-session or
+permanent promotion is defined.
 A read-on-request ring retains at most 16 admission/removal/eviction events per
 session. Reintroduction means only that a recent retirement is still in that ring,
 not independently verified need or a complete relearning history. Clear/lifecycle
