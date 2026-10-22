@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- deliberate test/diagnostic output */
 import { build } from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';

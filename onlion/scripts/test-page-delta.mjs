@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- deliberate test/diagnostic output */
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {applyPageDelta,makePageDelta,PART_DELTA_LIMIT} from '../backend/page-delta.mjs';

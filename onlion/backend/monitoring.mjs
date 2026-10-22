@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- deliberate test/diagnostic output */
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {createHash} from 'node:crypto';
 const requests=new AsyncLocalStorage(),stages=new WeakMap();

@@ -1,3 +1,4 @@
+/* global __NMG_SOURCE_REVISION__ */
 import {withRequest,requestIdentity,queueAccepted,queueStarted,queueFinished,queueStatus,reportFailure,embeddingOperation,embeddingObservation,recentFailures,check,classifyError} from './monitoring.mjs';
 import {memoryBucket,reclaimAll,reclamationStatus} from './reclamation.mjs';
 import {measure, profileSearch, runtimeStatus, statisticsEnabled, setStatistics, requestAccepted, requestStarted, requestFinished} from './diagnostics.mjs';

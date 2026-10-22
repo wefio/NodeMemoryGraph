@@ -70,7 +70,8 @@ async function openPart(bucket,part,sqlite,operation,options){
 export async function stagePart(bucket,userKey,part,snapshot){
   const key=`users/${userKey}/parts/${crypto.randomUUID()}.sqlite`;
   await measure('partition_save',()=>bucket.put(key,snapshot,{httpMetadata:{contentType:'application/vnd.sqlite3'},customMetadata:{format:'nmg-part-v2'}}));
-  const {delta,...base}=part;
+  const base={...part};
+  delete base.delta;
   return {...base,key,bytes:snapshot.byteLength};
 }
 export async function stageSearchPart(bucket,userKey,part,result,userBudget,fullSnapshot=false){

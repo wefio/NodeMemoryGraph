@@ -37,16 +37,16 @@ export class DatabaseSync {
   }
   exec(sql) { this.db.exec(sql); }
   prepare(sql) {
-    const owner = this;
+    const db = this.db;
     function statement(args, operation) {
-      const st = owner.db.prepare(sql);
+      const st = db.prepare(sql);
       try { if (args.length) st.bind(args.map(x => Buffer.isBuffer(x) ? new Uint8Array(x) : x)); return operation(st); }
       finally { st.finalize(); }
     }
     return {
       all(...args) { return statement(args, st => { const rows=[]; while(st.step()) rows.push(st.get({})); return rows; }); },
       get(...args) { return statement(args, st => st.step() ? st.get({}) : undefined); },
-      run(...args) { return statement(args, st => { while(st.step()) {} return { changes: sqlite.capi.sqlite3_changes(owner.db.pointer), lastInsertRowid: sqlite.capi.sqlite3_last_insert_rowid(owner.db.pointer) }; }); }
+      run(...args) { return statement(args, st => { while(st.step()) { /* run() discards row data */ } return { changes: sqlite.capi.sqlite3_changes(db.pointer), lastInsertRowid: sqlite.capi.sqlite3_last_insert_rowid(db.pointer) }; }); }
     };
   }
   close() { if (this.db.pointer) this.db.close(); }
