@@ -235,6 +235,9 @@ routes:
   - id: agent-surface
     paths:
       - src/integration/agent-surface.ts
+      - src/integration/aml-projection.ts
+      - src/integration/temporal-evidence.ts
+      - src/integration/temporal-evidence-policy.json
       - src/integration/chain-projection.ts
       - src/integration/config.ts
       - src/integration/controller-channel.ts
@@ -258,6 +261,7 @@ routes:
     tests:
       [
         tests/integration/agent-surface.test.ts,
+        tests/integration/temporal-evidence.test.ts,
         tests/integration/chain-projection.test.ts,
         tests/integration/config.test.ts,
         tests/integration/controller-channel.test.ts,

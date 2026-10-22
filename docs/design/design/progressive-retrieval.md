@@ -133,6 +133,31 @@ Offline learned relevance uses the source and evaluation boundaries in
 [relevance-training.md](../relevance-training.md). Its artifacts remain candidates;
 cross-corpus measurements do not grant runtime admission.
 
+### Temporal evidence presentation
+
+[Historical, write and validity times](core-data-model.md#core-data-model) remain
+separate. The shared Agent Surface retains `eventTime` in compact search and
+exact-evidence metadata; the local OmniMemEval bridge uses that same surface.
+Plain-text protocols can call
+[`renderTemporalEvidence`](../../../src/integration/temporal-evidence.ts)
+after selection. It labels every valid dated row for a recognized temporal
+query; otherwise it labels only rows with recognized relative-time expressions.
+Unknown or invalid time does not produce a label, and an existing timestamp
+prefix is not duplicated. ISO dates and timestamps retain their full precision
+and supplied offset rather than being truncated to a calendar day.
+
+The English/Chinese recognition patterns live in one
+[product-owned policy](../../../src/integration/temporal-evidence-policy.json),
+consumed by the TypeScript renderer and copied by the Python adapter installer.
+This is a deterministic display heuristic, not complete temporal reasoning or a
+recall gate. It reads no dataset categories or gold answers and changes neither
+stored text, embeddings, candidate membership, scores, order nor budgets.
+Structured metadata survives regardless of whether a label is displayed.
+Protocol-specific field aliases belong at the
+[AML boundary](../../../evals/omnimemeval/README.md#integration-boundary), not in
+storage. The [decision](../../decisions/implemented/2026-10-22-shared-temporal-evidence.md)
+records the reuse and compatibility rationale.
+
 ### Query formation and route fusion boundary
 
 NMG accepts a primary query plus optional caller-generated `queries[]`. The

@@ -40,7 +40,7 @@ uv pip install --python .benchmarks/bge-venv/Scripts/python.exe `
 两个 requirements 文件都把 `torch` 与 `torchvision` 列为**未锁版本**。因此一次普通的
 `-r` 安装可能把 CUDA 构建替换成默认 PyPI 构建，从而静默丢掉 GPU 加速，所以不要让它们进 `-r`，而应从 CUDA 索引安装 torch。
 
-`benchmark:omni` 会把该 venv 前置到 `PATH`（`NMG_BENCH_VENV` 覆盖目录名）。`eval:halumem:score` 默认使用该 venv 的 `python.exe`，并接受 `--python` 或
+`benchmark:omni` 保留继承的可执行文件搜索路径，将 Windows `Path`／`PATH` 规范为一个键，并把该 venv 前置（`NMG_BENCH_VENV` 覆盖目录名）。`eval:halumem:score` 默认使用该 venv 的 `python.exe`，并接受 `--python` 或
 `NMG_HALUMEM_PYTHON`。
 
 ## 反向检索召回探针
@@ -97,12 +97,30 @@ NMG 应在 OmniMemEval 的 `scripts/client_factory` 注册表里贡献一个薄�
 - `search(...)` 到有预算的 NMG 召回，并返回纯文本上下文；
 - 清理到删除该 benchmark 用户的隔离 namespace。
 
-适配器应调用稳定的本地 NMG HTTP 或 CLI 边界。它不得伸进 SQLite 表、在 Python 里复制图逻辑，或把 benchmark 语义变成 NMG core 的一部分。
+适配器调用本地 NMG 桥或已部署的 AML Add/Search 边界。它不得伸进 SQLite 表、在 Python 里复制图逻辑，或把 benchmark 语义变成 NMG core 的一部分。
 
-对用户记忆问题，桥默认请求归因于用户的证据，以免冗长未经核验的 assistant 回复挤掉用户历史。明确询问 assistant 或先前对话的查询会使用两个 actor，保留 LongMemEval 的 assistant-memory 类别。这使用通用
+对用户记忆问题，本地桥默认请求归因于用户的证据，以免冗长未经核验的 assistant 回复挤掉用户历史。明确询问 assistant 或先前对话的查询会使用两个 actor，保留 LongMemEval 的 assistant-memory 类别。这使用通用
 `SearchOptions.sourceActor` 边界而不是 SQL 访问。这种感知 actor 的选择是适配器声明的检索画像，不是 OmniMemEval 的答案或 judge prompt。官方 benchmark prompt 仍归上游所有，并按原样运行以获得可比的答案阶段结果。
 
-当前适配器使用持久 NDJSON 子进程而不是 HTTP 服务。把它安装进锁定的忽略检出目录：
+默认传输方式是持久 NDJSON 子进程。测试已部署的 AML 服务时，在所选 benchmark 环境中设置：
+
+```text
+NMG_OMNI_API_URL=https://your-memory-service.example
+NMG_OMNI_API_NAMESPACE=omni-your-unique-experiment
+# NMG_OMNI_API_TOKEN 经进程环境提供，不写入已跟踪文件。
+```
+
+HTTP 模式不启动本地桥，也不探测本地 embedding provider；抽取、检索和 embedding 就绪状态由已部署服务负责。客户端为每个 benchmark `user_id` 添加显式 namespace 前缀。独立实验使用新 namespace，续跑保留原值。Add 使用内容派生的 `request_id`，要求同步 HTTP 200 和身份字段精确回显；Search 按原排序保留不超过 `top_k` 的文本记忆。客户端标识为 `NodeMemoryGraph-OmniMemEval/0.1`，除回环测试外必须使用 HTTPS，并拒绝重定向，避免凭据跨源。
+
+时间展示使用共享的 [NMG 读取边界策略](../../docs/design/design/progressive-retrieval.zh-CN.md#时间证据展示)，而不是套件专属检测。Add 原样转发消息的 `chat_time`／`timestamp`，并把它们纳入原有请求身份。云端导入把经过校验的来源／会话时间映射为原始话语的 `eventTime`，不论该文本是否需要展示日期；缺失的来源时间保持未知。
+
+服务端适配器可以对已排序记录调用 [`projectAmlMemory`](../../src/integration/aml-projection.ts)。返回行保留 `id`、分数、历史 `event_time`、实际写入时间 `stored_at` 和未渲染的 `raw_content`（保留撤回保护），`content` 应用共享展示策略。为兼容既有 NMG AML 服务，可选的 `created_at` 仍是历史时间别名，而不是存储创建时间。Python 原样保留返回候选，并用 `event_time` 渲染纯文本；只有缺少 `event_time` 字段时才使用旧 `created_at` 别名，显式 null 表示未知。已经渲染的前缀不重复添加。安装器把产品层 JSON 策略复制到 `nmg_client.py` 旁，只复制 Python 文件不够。原生富 Agent Surface 渲染不变。
+
+HTTP 与连接失败抛出兼容 `RuntimeError` 的 `NmgRemoteError`。其 `diagnostic` 对象包含在异常文本中，使上游错误日志保留请求关联字段、UTC 时间、耗时、HTTP 状态与解码后的响应体（最多 16 KiB，并标记截断）。有效 JSON 保留其中的 `error.code`；文本／HTML 响应和传输失败不虚构 API 错误码。响应头白名单包含 `Content-Type`、`Retry-After`、`CF-Ray`、`Server`、`Date`、请求／关联标识和 `Traceparent`。当前服务 token 在全部采集字段中脱敏；诊断上下文不额外加入请求 messages/query 或白名单外响应头。取证不增加重试，也不把失败改为成功。未保留响应体的历史错误仍无法归因；后续回放属于另一份证据。
+
+HTTP 模式拒绝删除和操作级 `add_with_result`，因为 AML 回执不提供实际物化的记忆记录。使用非 streaming 的 Add/Search 套件并设置 `--clear 0`；本传输方式不支持 HaluMem 操作评分及带删除的 streaming 生命周期。后续远程数据回收是另行授权的操作。两种模式的回答／评分设置、prompt 和评分逻辑仍归上游所有。
+
+把共享适配器安装进锁定的忽略检出目录：
 
 ```powershell
 npm run benchmark:setup

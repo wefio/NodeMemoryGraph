@@ -42,6 +42,8 @@ ProjectionRevision (immutable exposure and feedback boundary)
 
 `MemoryRecord` 是一条可检索的语义陈述，带 provenance 与 STG 或 LTG 生命周期。`MemoryNode` 是记录中一个连贯分组的稳定语义地址。为每条新记忆创建一个永久节点，等于重现一个扁平存储并额外付出图开销，不是目标模型。
 
+`MemoryRecord.eventTime` 是陈述所表示事件的历史时间，可以未知。`MemoryRecord.createdAt` 与 `HistoryRecord.createdAt` 记录保留／写入时间，均不能替代缺失的历史时间。`validFrom`／`validUntil` 描述有效期，而不是发生时间。原始导入话语可以用经过校验的消息／会话时间作为 `eventTime`：这标记话语时间，不一定是话语所提事件的发生时间。已知历史时间的保留独立于展示策略，存储的陈述与证据保持原样。读取边界上的标签遵循[时间证据展示](progressive-retrieval.zh-CN.md#时间证据展示)。
+
 未解决的结构在记录本身上表示，而不是作为一种新的记忆类型。`resolution` 默认是 `resolved`，可以是 `open` 或 `reopened`；open 记录携带 `openedAt` 与一个或多个 `relatedMemoryIds`。这些相关 ID 是可归因锚点，不是推断出的图边。Open 记录保持被索引，并被同时排除在 LTG 基于热度的保留候选与 STG 过期之外。显式 `resolve` 把它们恢复正常保留；显式 `reopen` 把已归档记录恢复到可检索索引。每次转换都追加到 `memory_resolution_events`，保留原因与锚点，且不重写来源历史。
 
 检索给这一状态有界的可达性。当直接检索取回一个锚点，最多两条相关 open 记录会被插入到普通首个证据窗口的末尾附近。它们与其他任何 AG 记录一样消耗相同的节点、证据、层级与 token 预算，且不启动第二次检索级联。Pi 以 `[open]` 渲染它们。因此 harness 保证的只是可达性，而 Agent 决定该未解决项是否要紧，并且必须显式调用 `nmg_remember` 并带 `action=resolve` 或 `action=reopen` 才能修订它。

@@ -53,6 +53,12 @@ Inbox/Delta + surface anchors + fine-grained record semantics
 
 离线学习相关性使用 [relevance-training.md](../relevance-training.md) 中的来源与评测边界。其产物仍是候选；跨语料测量不授予运行时准入。
 
+### 时间证据展示
+
+[历史时间、写入时间与有效期](core-data-model.zh-CN.md#核心数据模型)保持分离。共享 Agent Surface 在精简检索与精确证据元数据中保留 `eventTime`，本地 OmniMemEval 桥使用同一界面。纯文本协议可以在选出结果后调用 [`renderTemporalEvidence`](../../../src/integration/temporal-evidence.ts)：识别到时间查询时，为每条具有有效时间的记录加标签；否则只为含已识别相对时间表达的记录加标签。未知或无效时间不产生标签，已有时间戳前缀不重复添加。ISO 日期和时间戳保留完整精度与原始时区偏移，不截断为日历日期。
+
+中英文识别模式只有一份[产品层策略](../../../src/integration/temporal-evidence-policy.json)，由 TypeScript 渲染器消费，并由 Python 适配器安装器复制。这是确定性的展示启发式，不是完整时间推理或召回门；它不读取数据集类别或金标答案，不改变存储文本、embedding、候选成员、分数、排序或预算。结构化元数据不因是否展示标签而丢失。协议字段别名属于 [AML 边界](../../../evals/omnimemeval/README.zh-CN.md#集成边界)，不属于存储层。[决策记录](../../decisions/implemented/2026-10-22-shared-temporal-evidence.zh-CN.md)说明复用与兼容性的理由。
+
 ### 查询构造与路由融合边界
 
 NMG 接受一个主查询加上可选的调用方生成的 `queries[]`。调用方可以通过查询分解、替换措辞、领域知识或假设答案（HyDE）产生这些子句。因此 HyDE 不是 NMG 的子系统：由 Agent 或另一种面向 LLM 的宿主方法来生成假设文本，NMG 只检索所提供的子句。

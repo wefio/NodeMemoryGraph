@@ -182,6 +182,8 @@ export async function preflightEmbeddingProvider(
   createClient: EmbeddingClientFactory = (current) =>
     createEmbeddingClientFromEnv(current, { required: false }),
 ): Promise<void> {
+  // In HTTP mode the deployed Add/Search service owns embedding readiness.
+  if (environment.NMG_OMNI_API_URL?.trim()) return;
   if (enabled(environment.NMG_EMBED_CACHE_ONLY)) return;
   if (!configuredProvider(environment)) return;
   const client = createClient(environment);
@@ -296,12 +298,18 @@ function resolveResumePlan(
 
 /** Build the runner environment: NMG roots, concurrency alignment, UTF-8, and
  * the optional benchmark venv on PATH. */
-function buildRunEnvironment(
+export function buildRunEnvironment(
   repoRoot: string,
   configuredArgs: readonly string[],
   base: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   const environment = { ...base };
+  // Windows commonly supplies `Path`; duplicate casing makes spawn select the
+  // truncated venv-only value instead of the inherited system search path.
+  const pathKeys = Object.keys(environment).filter((key) => key.toLowerCase() === "path");
+  const inheritedPath = environment.PATH ?? environment[pathKeys[0] ?? "PATH"] ?? "";
+  for (const key of pathKeys) delete environment[key];
+  environment.PATH = inheritedPath;
   environment.NMG_ROOT = repoRoot;
   environment.NMG_NODE ??= process.execPath;
   // The official runners already expose --llm-workers as their public

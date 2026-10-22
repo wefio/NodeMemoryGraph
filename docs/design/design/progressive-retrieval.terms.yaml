@@ -95,6 +95,15 @@ terms:
     owner: docs/design/design/progressive-retrieval.md
     anchor: Progressive retrieval
     status: canonical
+  - term: temporal evidence presentation
+    aliases: [conditional timestamp rendering, 时间证据展示, 条件时间戳渲染]
+    definition: >-
+      Read-boundary labels for known historical times, selected by a shared temporal-query/relative-evidence heuristic independently of metadata preservation; this does not rewrite stored text, rank candidates or infer unknown times.
+      读取边界上针对已知历史时间的标签，由共享的时间查询／相对时间证据启发式选择，独立于元数据保留；它不改写存储文本、不排序候选，也不推断未知时间。
+    owner: docs/design/design/progressive-retrieval.md
+    anchor: Temporal evidence presentation
+    status: canonical
 references:
+  - MemoryRecord
   - Active Graph
   - memory chain

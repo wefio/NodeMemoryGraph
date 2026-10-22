@@ -82,6 +82,9 @@ export type { WorkingStateInput } from "./integration/working-state-input.ts";
 export { retainEvidence } from "./integration/evidence.ts";
 export type { AgentHistoryMessage, AgentHistorySnapshot } from "./integration/evidence.ts";
 export { searchMemoryContext } from "./integration/search.ts";
+export { renderTemporalEvidence } from "./integration/temporal-evidence.ts";
+export { projectAmlMemory } from "./integration/aml-projection.ts";
+export type { AmlMemoryRow } from "./integration/aml-projection.ts";
 export {
   captureMemoryReferenceTargets,
   createMemoryReferences,

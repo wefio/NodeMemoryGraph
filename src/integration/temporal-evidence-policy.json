@@ -1,0 +1,18 @@
+{
+  "temporalQuery": [
+    "\\bwhen\\b",
+    "\\b(?:what|which)\\s+(?:date|time|day|week|month|year|season)\\b",
+    "\\bhow\\s+(?:long|old|many\\s+(?:hours?|days?|weeks?|months?|years?))\\b",
+    "\\b(?:before|after|since|until|earlier|later|timeline|chronolog\\w*)\\b",
+    "什么时候|何时|哪(?:一)?(?:年|月|天)|多久|多长时间|几(?:年|月|周|天|小时)|时间顺序"
+  ],
+  "relativeEvidence": [
+    "\\b(?:yesterday|today|tomorrow|tonight|recently)\\b",
+    "\\b(?:last|next|this|previous|following)\\s+(?:hour|day|week|weekend|month|year|night|morning|afternoon|evening|spring|summer|autumn|fall|winter|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\b",
+    "\\b(?:\\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|few|several|couple\\s+of)\\s+(?:hours?|days?|weeks?|months?|years?)\\s+(?:ago|earlier|later)\\b",
+    "\\bin\\s+(?:\\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|few|several|couple\\s+of)\\s+(?:hours?|days?|weeks?|months?|years?)\\b",
+    "昨天|今天|明天|昨晚|今晚|前天|后天|(?:上|下|这|本)(?:周|星期|个月|月|年)|(?:\\d+|[一二三四五六七八九十几两]+)(?:天|周|个月|月|年|小时)(?:前|后)"
+  ],
+  "isoTime": "^(?!0000)\\d{4}-\\d{2}-\\d{2}(?:T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|[+-](?:[01]\\d|2[0-3]):[0-5]\\d)?)?$",
+  "timestampPrefix": "^\\[Timestamp: [^\\]\\r\\n]+\\] "
+}

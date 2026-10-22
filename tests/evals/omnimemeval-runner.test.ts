@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
   SUITES,
+  buildRunEnvironment,
   createRunPlan,
   loadBenchmarkEnvironment,
   parseRunOptions,
@@ -181,6 +182,24 @@ test("benchmark environment loads embedding settings without exposing them in ru
   assert.ok(!plan.args.some((argument) => argument.includes("NMG_EMBED")));
 });
 
+test("benchmark venv preserves a Windows-style Path without duplicate casing", () => {
+  const root = fixtureRepo("locomo");
+  const venv = join(
+    root,
+    ".benchmarks",
+    "bge-venv",
+    process.platform === "win32" ? "Scripts" : "bin",
+  );
+  mkdirSync(venv, { recursive: true });
+  const environment = buildRunEnvironment(root, [], { Path: "kept-system-path" });
+  assert.deepEqual(
+    Object.keys(environment).filter((key) => key.toLowerCase() === "path"),
+    ["PATH"],
+  );
+  assert.ok(environment.PATH?.startsWith(venv));
+  assert.ok(environment.PATH?.endsWith("kept-system-path"));
+});
+
 test("embedding preflight probes the configured provider before a benchmark starts", async () => {
   let calls = 0;
   const environment = {
@@ -217,6 +236,18 @@ test("embedding preflight fails before execution when the provider is unavailabl
   );
 });
 
+test("remote HTTP runs do not probe an unrelated local embedding provider", async () => {
+  let factoryCalls = 0;
+  await preflightEmbeddingProvider(
+    { NMG_OMNI_API_URL: "https://memory.invalid", NMG_EMBED_PROVIDER: "openai" },
+    () => {
+      factoryCalls += 1;
+      throw new Error("remote ingestion owns embedding readiness");
+    },
+  );
+  assert.equal(factoryCalls, 0);
+});
+
 test("explicit cache-only mode skips the provider preflight", async () => {
   let factoryCalls = 0;
   await preflightEmbeddingProvider(
@@ -229,7 +260,10 @@ test("explicit cache-only mode skips the provider preflight", async () => {
   assert.equal(factoryCalls, 0);
 });
 
-test("runPlan writes a bounded resource report and propagates the exit code", async () => {
+test("runPlan writes a bounded resource report and propagates the exit code", async (t) => {
+  const fetch = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("resource-report fixture must not use a live provider");
+  });
   const repoRoot = fixtureRepo("locomo");
   const omniRoot = join(repoRoot, ".benchmarks", "official", "OmniMemEval");
   // Point the runner at a real quick command instead of the shell stub: sleep
@@ -239,8 +273,13 @@ test("runPlan writes a bounded resource report and propagates the exit code", as
   const plan = createRunPlan(parseRunOptions(["locomo", "--config", "benchmark.json"]), {
     repoRoot,
   });
+  // This subprocess fixture measures resources, not a local model or AML API.
+  delete plan.environment.NMG_EMBED_PROVIDER;
+  delete plan.environment.NMG_EMBED_BASE_URL;
+  delete plan.environment.NMG_OMNI_API_URL;
   const code = await runPlan(plan);
   assert.equal(code, 0);
+  assert.equal(fetch.mock.calls.length, 0);
 
   const reportPath = join(
     omniRoot,

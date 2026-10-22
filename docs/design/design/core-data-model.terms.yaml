@@ -89,6 +89,7 @@ terms:
     anchor: Core data model
     status: canonical
 references:
+  - temporal evidence presentation
   - Active Graph
   - claim outcome
   - same-scope supersession
