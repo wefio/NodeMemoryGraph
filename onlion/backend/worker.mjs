@@ -358,7 +358,7 @@ async function reclaimAllRoute(request, env, path) {
   }
   throw new HttpError(405, 'method_not_allowed', 'Use GET or POST');
 }
-async function runSelfTestContract(request, env, url) {
+async function runSelfTestContract(request, env) {
   // Fixed synthetic fixture only; cannot access caller-selected users or data.
   const uid = '__nmg_contract_' + crypto.randomUUID(), session = 'contract-session';
   const checks = [];
@@ -395,14 +395,14 @@ function assertSelfTestAccess(request, env) {
     !timingSafeEqual(Buffer.from(hash(token)), Buffer.from(hash(env.NMG_SELFTEST_TOKEN))))
     throw new HttpError(401, 'selftest_unauthorized', 'Self-test access is unavailable or expired');
 }
-async function selfTestRoute(request, env, url, path) {
+async function selfTestRoute(request, env, _url, path) {
   if (path !== '/diagnostics/self-test' || request.method !== 'POST') return undefined;
   assertSelfTestAccess(request, env);
   env = { ...env, MEMORY: await memoryBucket(env.MEMORY) };
   const input = await readJson(request);
   if (Object.keys(input).some(k => !['op', 'persistence', 'repetitions'].includes(k)))
     throw new HttpError(400, 'invalid_request', 'Self-test accepts only op, persistence and repetitions');
-  if (input.op === 'contract') return runSelfTestContract(request, env, url);
+  if (input.op === 'contract') return runSelfTestContract(request, env);
   const userId = '__nmg_selftest_v1';
   if (input.op === 'seed') return json(await add(env, { user_id: userId, session_id: 'selftest', request_id: 'selftest-seed-v1', messages: [
     { role: 'user', content: '我最喜欢的机器人是 Atlas，我正在学习机器人控制。' },
@@ -468,7 +468,7 @@ async function adminDiagnosticsRoute(request, env, path) {
   }
   return undefined;
 }
-async function searchRoute(request, env, url, path) {
+async function searchRoute(request, env, _url, path) {
   if (path !== '/search' || request.method !== 'POST') return undefined;
   const input = await readJson(request);
   if (request.headers.get('x-nmg-profile') === '1') {
@@ -504,14 +504,6 @@ async function memoryApiRoute(request, env, url, path) {
   const status = await addStatusRoute(request, env, url, path);
   if (status !== undefined) return status;
   throw new HttpError(404, 'not_found', 'Unknown API route');
-}
-function reclaimUserRoute(request, env, path) {
-  if ((path !== '/reclaim' && path !== '/reclaim/user') || request.method !== 'POST') return undefined;
-  return readJson(request).then(async input => {
-    const userId = textField(input.user_id, 'user_id'), requestId = textField(input.request_id, 'request_id', 128);
-    const result = await reset(env, { user_id: userId, confirm_user_id: userId, reset_id: requestId });
-    return json({ ...result, request_id: requestId, scope: 'user' });
-  });
 }
 async function resetRoute(request, env, path) {
   if (path !== '/reset' || request.method !== 'POST') return undefined;
