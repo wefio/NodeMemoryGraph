@@ -15,7 +15,7 @@ await build({
   entryPoints: ['backend/worker.mjs'], outfile: 'dist/server/index.js',
   bundle: true, format: 'esm', platform: 'node', target: 'es2022',
   define: { 'import.meta.url': JSON.stringify('file:///tmp/nmg-worker.mjs'), '__NMG_SOURCE_REVISION__': JSON.stringify(sourceRevision) },
-  alias: { 'node:sqlite': path.join(root, 'backend/sqlite.mjs'), 'search-query-parser': path.join(root, 'vendor/search-query-parser/index.js') },
+  alias: { 'node:sqlite': path.join(root, 'backend/sqlite.mjs') },
   external: ['node:*'],
   plugins: [{ name: 'sqlite-worker-modules', setup(b) {
     b.onResolve({ filter: /vendor\/sqlite-wasm\/worker-loader\.mjs$/ }, () => ({path:'./sqlite/worker-loader.mjs',external:true}));

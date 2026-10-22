@@ -5,12 +5,11 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { Miniflare } = createRequire(require.resolve('wrangler/package.json'))('miniflare');
 const root = path.resolve(import.meta.dirname, '..');
-const callbacks = JSON.parse(fs.readFileSync(path.join(root, 'vendor/sqlite-wasm/callback-list.json')));
 const modules = [
   { type: 'ESModule', path: path.join(root, 'dist/server/index.js') },
   { type: 'ESModule', path: path.join(root, 'dist/server/sqlite/worker-loader.mjs') },
   { type: 'CompiledWasm', path: path.join(root, 'dist/server/sqlite/sqlite3.wasm') },
-  ...callbacks.map(callback => ({ type: 'CompiledWasm', path: path.join(root, 'dist/server/sqlite', callback.name) })),
+    { type: 'CompiledWasm', path: path.join(root, 'dist/server/sqlite/callbacks.wasm') },
 ];
 
 /** Same built Worker, WASM modules and compatibility target for every API test. */

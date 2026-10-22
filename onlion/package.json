@@ -21,5 +21,8 @@
     "esbuild": "0.28.0",
     "typescript": "5.9.3",
     "wrangler": "4.92.0"
+  },
+  "dependencies": {
+    "search-query-parser": "1.6.0"
   }
 }
