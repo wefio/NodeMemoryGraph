@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- build progress output */
 // Reproducible one-way generation for the SQLite callback trampolines.
 //
 //   callbacks.manifest.json (the only generation input)
