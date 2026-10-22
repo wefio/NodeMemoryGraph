@@ -210,6 +210,21 @@ are not duplicated. The installer copies the product-owned JSON policy beside
 `nmg_client.py`; copying the Python file alone is insufficient. Native rich
 Agent Surface rendering is unchanged.
 
+### Multimodal Add/Search (cloud service)
+
+The deployed [onlion service](../../onlion/README.md) accepts ordered
+`text`/`image_url` parts for Add messages and Search queries. Only inline
+Base64 data URLs (JPEG/PNG/WebP/GIF) are accepted, with bounded per-image,
+per-content and per-request limits. The retrieval view is the supplied caption
+text plus an opaque per-image SHA-256 reference: no image-description model is
+required or invoked, and there is no multimodal embedding. Search returns the
+original ordered parts in `content`; `raw_content` is the original evidence
+JSON; attribution follows the message role, and the structured-content marker
+carries format, source role and content hash. Service responses include fields
+beyond the AML required minimum, and multimodal `content` may carry the
+conditional temporal prefix — a deliberate presentation deviation recorded in
+[the owning decision](../../docs/decisions/implemented/2026-10-22-onlion-aml-cloud-service.md).
+
 HTTP and connection failures raise a `RuntimeError`-compatible `NmgRemoteError`.
 Its `diagnostic` object is included in the exception text so upstream error logs
 retain request correlation, UTC time, elapsed time, HTTP status, and the decoded

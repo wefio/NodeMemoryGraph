@@ -1,0 +1,33 @@
+{
+  "name": "search-query-parser",
+  "version": "1.6.0",
+  "description": "Parser for advanced search query syntax",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha -R spec"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/nepsilon/search-query-parser"
+  },
+  "keywords": [
+    "search syntax parser",
+    "query syntax parser",
+    "query",
+    "parser",
+    "search query",
+    "search"
+  ],
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/nepsilon/search-query-parser/issues"
+  },
+  "homepage": "https://github.com/nepsilon/search-query-parser",
+  "devDependencies": {
+    "mocha": "^8.4.0",
+    "should": "^13.2.3",
+    "typedoc": "^0.20.36",
+    "typedoc-plugin-markdown": "^3.9.0",
+    "typescript": "^4.2.2"
+  }
+}

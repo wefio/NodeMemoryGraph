@@ -236,6 +236,7 @@ routes:
     paths:
       - src/integration/agent-surface.ts
       - src/integration/aml-projection.ts
+      - src/integration/multimodal-content.ts
       - src/integration/temporal-evidence.ts
       - src/integration/temporal-evidence-policy.json
       - src/integration/chain-projection.ts
@@ -261,6 +262,7 @@ routes:
     tests:
       [
         tests/integration/agent-surface.test.ts,
+        tests/integration/multimodal-content.test.ts,
         tests/integration/temporal-evidence.test.ts,
         tests/integration/chain-projection.test.ts,
         tests/integration/config.test.ts,
@@ -341,6 +343,25 @@ routes:
       ]
     verify:
       blocking: [check, test:product, build]
+      advisory: []
+
+  # The supplied cloud memory application for AML runs as one package under
+  # onlion/ and imports the canonical root src. It owns HTTP, R2 snapshot and
+  # receipt wiring plus adapter-level retrieval compensation; it never carries
+  # a second NMG source tree, policy file or prompt set.
+  - id: aml-cloud-service
+    paths:
+      - onlion/backend/**
+      - onlion/scripts/**
+      - onlion/vendor/**
+      - onlion/package.json
+      - onlion/tsconfig.json
+      - onlion/.gitignore
+    owners:
+      - docs/decisions/implemented/2026-10-22-onlion-aml-cloud-service.md
+    tests: []
+    verify:
+      blocking: [check, build]
       advisory: []
 
   # The third thing under this layer: retrieval-index text that an external LLM writes and the

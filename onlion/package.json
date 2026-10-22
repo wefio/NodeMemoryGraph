@@ -1,0 +1,25 @@
+{
+  "name": "@node-memory-graph/onlion",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build": "node scripts/build-backend.mjs",
+    "check": "tsc --noEmit",
+    "start": "node node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .runtime/wrangler --ip 127.0.0.1 --inspector-port 0",
+    "test:backend": "node scripts/test-backend.mjs",
+    "test:temporal": "node --experimental-transform-types scripts/test-temporal-evidence.mjs",
+    "test:media": "node --experimental-transform-types scripts/test-multimodal-service.mjs",
+    "test:worker-media": "node scripts/test-multimodal-worker.mjs",
+    "verify": "npm run build && npm run check && npm run test:temporal && npm run test:media && npm run test:backend && npm run test:worker-media"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "esbuild": "0.28.0",
+    "typescript": "5.9.3",
+    "wrangler": "4.92.0"
+  }
+}

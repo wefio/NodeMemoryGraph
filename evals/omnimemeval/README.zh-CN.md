@@ -116,6 +116,10 @@ HTTP 模式不启动本地桥，也不探测本地 embedding provider；抽取�
 
 服务端适配器可以对已排序记录调用 [`projectAmlMemory`](../../src/integration/aml-projection.ts)。返回行保留 `id`、分数、历史 `event_time`、实际写入时间 `stored_at` 和未渲染的 `raw_content`（保留撤回保护），`content` 应用共享展示策略。为兼容既有 NMG AML 服务，可选的 `created_at` 仍是历史时间别名，而不是存储创建时间。Python 原样保留返回候选，并用 `event_time` 渲染纯文本；只有缺少 `event_time` 字段时才使用旧 `created_at` 别名，显式 null 表示未知。已经渲染的前缀不重复添加。安装器把产品层 JSON 策略复制到 `nmg_client.py` 旁，只复制 Python 文件不够。原生富 Agent Surface 渲染不变。
 
+### 多模态 Add/Search（云端服务）
+
+已部署的 [onlion 服务](../../onlion/README.md) 在 Add 消息与 Search 查询中接受有序 `text`/`image_url` parts。仅接受内联 Base64 data URL（JPEG/PNG/WebP/GIF），单图、单条内容与单请求均有上限。检索视图由随附描述文字加不透明的单图 SHA-256 引用构成：不要求、也不会调用任何图片描述模型，也没有多模态向量。Search 在 `content` 返回原始有序 parts；`raw_content` 是原始证据 JSON；归因跟随消息角色，结构化内容标记携带格式、来源角色与内容哈希。服务响应包含超出 AML 必填范围的字段，且多模态 `content` 可能携带条件式时间前缀——这是[所属决策记录](../../docs/decisions/implemented/2026-10-22-onlion-aml-cloud-service.zh-CN.md)中登记的有意展示偏差。
+
 HTTP 与连接失败抛出兼容 `RuntimeError` 的 `NmgRemoteError`。其 `diagnostic` 对象包含在异常文本中，使上游错误日志保留请求关联字段、UTC 时间、耗时、HTTP 状态与解码后的响应体（最多 16 KiB，并标记截断）。有效 JSON 保留其中的 `error.code`；文本／HTML 响应和传输失败不虚构 API 错误码。响应头白名单包含 `Content-Type`、`Retry-After`、`CF-Ray`、`Server`、`Date`、请求／关联标识和 `Traceparent`。当前服务 token 在全部采集字段中脱敏；诊断上下文不额外加入请求 messages/query 或白名单外响应头。取证不增加重试，也不把失败改为成功。未保留响应体的历史错误仍无法归因；后续回放属于另一份证据。
 
 HTTP 模式拒绝删除和操作级 `add_with_result`，因为 AML 回执不提供实际物化的记忆记录。使用非 streaming 的 Add/Search 套件并设置 `--clear 0`；本传输方式不支持 HaluMem 操作评分及带删除的 streaming 生命周期。后续远程数据回收是另行授权的操作。两种模式的回答／评分设置、prompt 和评分逻辑仍归上游所有。
