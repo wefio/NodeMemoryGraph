@@ -54,6 +54,32 @@ export async function memoryBucket(bucket){
 // A caller repeats this bounded operation until complete=true. New requests are
 // fenced first, then old generation objects (including orphans) are swept twice.
 // Application assets, secrets and non-memory bucket keys are outside ROOTS.
+async function reclaimOnePage(bucket,object,state,id){
+  if(state.completed?.[fingerprint(id)])return {object,state,done:view(state,id)};
+  if(state.active?.operation_id!==id)throw new StorageError('reclamation_conflict','Reclamation ownership changed',409);
+  const job=state.active,epoch=state.epoch;
+  const result=await bucket.list({prefix:ROOTS[job.root_index],limit:256,...(job.cursor?{cursor:job.cursor}:{})});
+  const keep=prefixFor(epoch);
+  const obsolete=result.objects.filter(o=>!keep||!o.key.startsWith(keep));
+  const latest=(await control(bucket)).state;
+  if(latest.epoch!==epoch||latest.active?.operation_id!==id)throw new StorageError('reclamation_conflict','Reclamation generation changed; retry the same operation_id',409);
+  if(obsolete.length)await bucket.delete(obsolete.map(o=>o.key));
+  job.removed_objects+=obsolete.length;
+  job.removed_bytes+=obsolete.reduce((sum,o)=>sum+o.size,0);
+  if(result.truncated){job.cursor=result.cursor;}
+  else{
+    job.cursor=null;job.root_index++;
+    if(job.root_index===ROOTS.length){job.root_index=0;job.pass++;}
+  }
+  if(job.pass===2){
+    const receipt={finished_at:new Date().toISOString(),removed_objects:job.removed_objects,removed_bytes:job.removed_bytes};
+    state={...state,active:null,completed:{...state.completed,[fingerprint(id)]:receipt}};
+  }
+  // Concurrent calls with this same ID may repeat a page, but cannot advance
+  // stale progress or erase a later generation. Failed calls can be resumed.
+  if(!await save(bucket,object,state))return {object,state,done:view((await control(bucket)).state,id)};
+  return {object,state,done:state.active?null:view(state,id)};
+}
 export async function reclaimAll(bucket,id){
   let {object,state}=await control(bucket);
   if(state.completed?.[fingerprint(id)])return view(state,id);
@@ -64,31 +90,9 @@ export async function reclaimAll(bucket,id){
   }
   // Four pages per call bound request duration and memory even for a full bucket.
   for(let page=0;page<4;page++){
-    ({object,state}=await control(bucket));
-    if(state.completed?.[fingerprint(id)])return view(state,id);
-    if(state.active?.operation_id!==id)throw new StorageError('reclamation_conflict','Reclamation ownership changed',409);
-    const job=state.active,epoch=state.epoch;
-    const result=await bucket.list({prefix:ROOTS[job.root_index],limit:256,...(job.cursor?{cursor:job.cursor}:{})});
-    const keep=prefixFor(epoch);
-    const obsolete=result.objects.filter(o=>!keep||!o.key.startsWith(keep));
-    const latest=(await control(bucket)).state;
-    if(latest.epoch!==epoch||latest.active?.operation_id!==id)throw new StorageError('reclamation_conflict','Reclamation generation changed; retry the same operation_id',409);
-    if(obsolete.length)await bucket.delete(obsolete.map(o=>o.key));
-    job.removed_objects+=obsolete.length;
-    job.removed_bytes+=obsolete.reduce((sum,o)=>sum+o.size,0);
-    if(result.truncated){job.cursor=result.cursor;}
-    else{
-      job.cursor=null;job.root_index++;
-      if(job.root_index===ROOTS.length){job.root_index=0;job.pass++;}
-    }
-    if(job.pass===2){
-      const receipt={finished_at:new Date().toISOString(),removed_objects:job.removed_objects,removed_bytes:job.removed_bytes};
-      state={...state,active:null,completed:{...state.completed,[fingerprint(id)]:receipt}};
-    }
-    // Concurrent calls with this same ID may repeat a page, but cannot advance
-    // stale progress or erase a later generation. Failed calls can be resumed.
-    if(!await save(bucket,object,state))return view((await control(bucket)).state,id);
-    if(!state.active)return view(state,id);
+    const advanced=await reclaimOnePage(bucket,object,state,id);
+    object=advanced.object;state=advanced.state;
+    if(advanced.done)return advanced.done;
   }
   return view(state,id);
 }

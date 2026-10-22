@@ -122,6 +122,62 @@ function embeddingClient(env){
 function copyLegacyReceipts(manifest,rows){
   for(const row of rows||[])manifest.receipts[row.request_hash]??={fingerprint:row.fingerprint,response:JSON.parse(row.response),completed_at:row.completed_at};
 }
+function normalizeAddMessage(m){
+  if(!m||typeof m!=='object')throw new HttpError(400,'invalid_request','Invalid message');
+  const content=contentField(m.content);
+  const role=textField(m.role,'message.role',64);
+  if(!['user','assistant'].includes(role))throw new HttpError(400,'invalid_request','message.role must be user or assistant');
+  let chat_time=m.chat_time;
+  if(chat_time===undefined&&m.timestamp!==undefined) {
+    if(typeof m.timestamp!=='number'||!Number.isFinite(m.timestamp)||!Number.isFinite(new Date(m.timestamp).getTime()))
+      throw new HttpError(400,'invalid_request','timestamp must be Unix milliseconds');
+    chat_time=new Date(m.timestamp).toISOString();
+  }
+  if(chat_time!==undefined&&(typeof chat_time!=='string'||!Number.isFinite(Date.parse(chat_time))))
+    throw new HttpError(400,'invalid_request','chat_time must be a valid date string');
+  return {role,content,...(chat_time?{chat_time}: {})};
+}
+async function existingReceipt(env,ctx,requestHash,fingerprint){
+  const previous=ctx.manifest.receipts[requestHash];
+  if(previous){
+    if(previous.fingerprint!==fingerprint)throw new HttpError(409,'request_id_reused','request_id was already used for different content');
+    return {readOnly:true,response:previous.response};
+  }
+  // A v1 receipt remains authoritative when retrying a pre-upgrade request.
+  const legacy=ctx.manifest.parts.find(p=>p.key===objectKey(ctx.key));
+  if(!legacy)return undefined;
+  const old=await runPart(env.MEMORY,legacy,ctx.sqlite,async({connection})=>{
+    const exists=connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='cloud_receipts'").get();
+    return {readOnly:true,response:exists?connection.prepare('SELECT fingerprint,response FROM cloud_receipts WHERE request_hash=?').get(requestHash):undefined};
+  });
+  if(old.response){
+    if(old.response.fingerprint!==fingerprint)throw new HttpError(409,'request_id_reused','request_id was already used for different content');
+    return {readOnly:true,response:JSON.parse(old.response.response)};
+  }
+  return undefined;
+}
+async function addOneBatch(env,ctx,requestId,batch,manifest,staged){
+  const reserve=batch.reduce((sum,m)=>sum+new TextEncoder().encode(typeof m.content === 'string'?m.content:JSON.stringify(m.content)).length*6+12*1024,0);
+  let index=manifest.parts.length-1;
+  if(index<0||manifest.parts[index].bytes+reserve>PART_TARGET){
+    if(manifest.parts.length>=MAX_PARTS)throw new StorageError('user_storage_limit','User exceeds 128 storage partitions');
+    index=manifest.parts.length;manifest.parts.push(newPart(ctx.userId));
+  }
+  const compute=part=>runPart(env.MEMORY,part,ctx.sqlite,async({key:partKey})=>{
+    const service=new AmlMemoryService(partKey,ctx.client);
+    return {response:await measure('nmg_write',()=>service.rememberBatch(ctx.userId,ctx.sessionId,requestId,batch))};
+  });
+  let result=await compute(manifest.parts[index]);
+  if(result.snapshot.byteLength>PART_LIMIT&&manifest.parts[index].bytes){
+    if(manifest.parts.length>=MAX_PARTS)throw new StorageError('user_storage_limit','User exceeds 128 storage partitions');
+    index=manifest.parts.length;manifest.parts.push(newPart(ctx.userId));result=await compute(manifest.parts[index]);
+  }
+  if(result.snapshot.byteLength>PART_LIMIT)throw new StorageError('part_storage_limit','One Add batch exceeds 8 MiB; submit fewer messages');
+  copyLegacyReceipts(manifest,result.legacyReceipts);
+  const part=await stagePart(env.MEMORY,ctx.key,manifest.parts[index],result.snapshot);
+  manifest.parts[index]=part;staged.push(part.key);
+  return result.response.added;
+}
 async function add(env,input) {
   const userId=textField(input.user_id ?? input.userId,'user_id');
   requestIdentity(userId,input.request_id);
@@ -131,40 +187,20 @@ async function add(env,input) {
     throw new HttpError(400,'invalid_request','messages must contain between 1 and 512 messages');
   let chars=0;
   const messages=input.messages.map(m=>{
-    if(!m||typeof m!=='object')throw new HttpError(400,'invalid_request','Invalid message');
-    const content=contentField(m.content);chars+=contentText(content).length;
-    const role=textField(m.role,'message.role',64);
-    if(!['user','assistant'].includes(role))throw new HttpError(400,'invalid_request','message.role must be user or assistant');
-    let chat_time=m.chat_time;
-    if(chat_time===undefined&&m.timestamp!==undefined) {
-      if(typeof m.timestamp!=='number'||!Number.isFinite(m.timestamp)||!Number.isFinite(new Date(m.timestamp).getTime()))
-        throw new HttpError(400,'invalid_request','timestamp must be Unix milliseconds');
-      chat_time=new Date(m.timestamp).toISOString();
-    }
-    if(chat_time!==undefined&&(typeof chat_time!=='string'||!Number.isFinite(Date.parse(chat_time))))
-      throw new HttpError(400,'invalid_request','chat_time must be a valid date string');
-    return {role,content,...(chat_time?{chat_time}: {})};
+    const message=normalizeAddMessage(m);
+    chars+=contentText(message.content).length;
+    return message;
   });
   if(chars>128000)throw new HttpError(413,'request_too_large','Combined message content limit is 128000 characters');
   const fingerprint=hash(JSON.stringify({sessionId,messages}));
   const client=embeddingClient(env);
   const contentView=createContentView();
   const requestHash=hash(requestId);
-  return mutateUser(env,userId,async({sqlite,key,manifest,staged})=>{
-    const previous=manifest.receipts[requestHash];
-    if(previous){
-      if(previous.fingerprint!==fingerprint)throw new HttpError(409,'request_id_reused','request_id was already used for different content');
-      return {readOnly:true,response:previous.response};
-    }
-    // A v1 receipt remains authoritative when retrying a pre-upgrade request.
-    const legacy=manifest.parts.find(p=>p.key===objectKey(key));
-    if(legacy){
-      const old=await runPart(env.MEMORY,legacy,sqlite,async({connection})=>{
-        const exists=connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='cloud_receipts'").get();
-        return {readOnly:true,response:exists?connection.prepare('SELECT fingerprint,response FROM cloud_receipts WHERE request_hash=?').get(requestHash):undefined};
-      });
-      if(old.response){if(old.response.fingerprint!==fingerprint)throw new HttpError(409,'request_id_reused','request_id was already used for different content');return {readOnly:true,response:JSON.parse(old.response.response)};}
-    }
+  const serviceContext={userId,sessionId,client};
+  return mutateUser(env,userId,async(ctx)=>{
+    const {key,manifest,staged}=ctx;
+    const reused=await existingReceipt(env,ctx,requestHash,fingerprint);
+    if(reused)return reused;
     // Prepare supplied text and optional captions outside SQLite, after receipts.
     // This request-scoped cache also survives manifest CAS recomputation.
     const prepared=[];
@@ -176,25 +212,7 @@ async function add(env,input) {
       // stable message IDs. Local per-batch index 0 is not a conversation ID.
       // Keep these internal IDs out of the existing receipt fingerprint.
       const batch=prepared.slice(offset,offset+batchSize).map((m,i)=>({...m,source_message_id:`aml:${requestHash}:${offset+i}`}));
-      const reserve=batch.reduce((sum,m)=>sum+new TextEncoder().encode(typeof m.content === 'string'?m.content:JSON.stringify(m.content)).length*6+12*1024,0);
-      let index=manifest.parts.length-1;
-      if(index<0||manifest.parts[index].bytes+reserve>PART_TARGET){
-        if(manifest.parts.length>=MAX_PARTS)throw new StorageError('user_storage_limit','User exceeds 128 storage partitions');
-        index=manifest.parts.length;manifest.parts.push(newPart(userId));
-      }
-      const compute=part=>runPart(env.MEMORY,part,sqlite,async({key:partKey})=>{
-        const service=new AmlMemoryService(partKey,client);
-        return {response:await measure('nmg_write',()=>service.rememberBatch(userId,sessionId,requestId,batch))};
-      });
-      let result=await compute(manifest.parts[index]);
-      if(result.snapshot.byteLength>PART_LIMIT&&manifest.parts[index].bytes){
-        if(manifest.parts.length>=MAX_PARTS)throw new StorageError('user_storage_limit','User exceeds 128 storage partitions');
-        index=manifest.parts.length;manifest.parts.push(newPart(userId));result=await compute(manifest.parts[index]);
-      }
-      if(result.snapshot.byteLength>PART_LIMIT)throw new StorageError('part_storage_limit','One Add batch exceeds 8 MiB; submit fewer messages');
-      copyLegacyReceipts(manifest,result.legacyReceipts);
-      const part=await stagePart(env.MEMORY,key,manifest.parts[index],result.snapshot);
-      manifest.parts[index]=part;staged.push(part.key);added+=result.response.added;
+      added+=await addOneBatch(env,{...ctx,...serviceContext},requestId,batch,manifest,staged);
     }
     const response={success:true,request_id:requestId,user_id:userId,session_id:sessionId,
       task_id:`${key}.${requestHash}`,status:'completed',added};
@@ -308,149 +326,220 @@ function requireOwner(request,env) {
   if(request.method!=='GET'&&request.headers.get('origin')!==new URL(request.url).origin)
     throw new HttpError(403,'invalid_origin','Admin operations require a same-origin request');
 }
-async function handle(request,env) {
-  const url=new URL(request.url);const path=url.pathname.replace(/^\/api(?=\/)/,'').replace(/\/$/,'')||'/';
-  if(path==='/'&&request.method==='GET')return new Response(isOwner(request,env)?page.replace('id="diagnostics" hidden','id="diagnostics"'):page,{headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','content-security-policy':"default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'self' https://chatgpt.com"}});
-  if(path==='/health'&&request.method==='GET'){
-    if(!env.MEMORY)throw new HttpError(503,'storage_unavailable','Persistent storage binding missing');
-    const sqlite=await sqliteReady();await env.MEMORY.head('health/probe');
-    return json({status:'ok',service:'NodeMemoryGraph',storage:'R2',sqlite:sqlite.version.libVersion,
-      retrieval:env.NMG_EMBED_PROVIDER||env.NMG_EMBED_BASE_URL?'hybrid':'lexical',max_user_database_bytes:MAX_DATABASE_BYTES,
-      storage_format:'nmg-shards-v3',supported_storage_formats:['nmg-shards-v2','nmg-shards-v3'],search_page_deltas:env.NMG_SEARCH_DELTAS!=='0',max_partition_bytes:16*1024*1024,max_add_partition_bytes:PART_LIMIT,max_partitions:MAX_PARTS,graph_scope:'partition',max_request_bytes:MAX_BODY_BYTES,add_mode:'synchronous',upstream_commit:SOURCE_REVISION.split('+')[0],source_revision:SOURCE_REVISION,core_source:CORE_SOURCE,multimodal:{format:'ordered-text-base64-image-parts',index_view:'supplied-text-plus-image-hash'},query_terms_prepared:true,memory_service:'daemon-core-aml-v1',request_lifecycle:'independent-v2',search_request_profile:true,harness:false,search_profile:AML_SEARCH_PROFILE,reclamation:{user:'/reclaim/user',all:'/reclaim/all',automatic:false}});
+function normalizePath(url) {
+  return url.pathname.replace(/^\/api(?=\/)/, '').replace(/\/$/, '') || '/';
+}
+const MEMORY_ROUTES = ['/add', '/remember', '/search', '/reset', '/reclaim', '/reclaim/user', '/capacity', '/add/status', '/admin/reset', '/admin/capacity', '/admin/diagnostics/search', '/admin/diagnostics/seed'];
+function isMemoryRoute(path) {
+  return MEMORY_ROUTES.includes(path) || path.startsWith('/add/status/');
+}
+function pageResponse(request, env, path) {
+  if (path !== '/' || request.method !== 'GET') return undefined;
+  return new Response(isOwner(request, env) ? page.replace('id="diagnostics" hidden', 'id="diagnostics"') : page, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'self' https://chatgpt.com" } });
+}
+async function healthResponse(env, path) {
+  if (path !== '/health') return undefined;
+  if (!env.MEMORY) throw new HttpError(503, 'storage_unavailable', 'Persistent storage binding missing');
+  const sqlite = await sqliteReady(); await env.MEMORY.head('health/probe');
+  return json({ status: 'ok', service: 'NodeMemoryGraph', storage: 'R2', sqlite: sqlite.version.libVersion,
+    retrieval: env.NMG_EMBED_PROVIDER || env.NMG_EMBED_BASE_URL ? 'hybrid' : 'lexical', max_user_database_bytes: MAX_DATABASE_BYTES,
+    storage_format: 'nmg-shards-v3', supported_storage_formats: ['nmg-shards-v2', 'nmg-shards-v3'], search_page_deltas: env.NMG_SEARCH_DELTAS !== '0', max_partition_bytes: 16 * 1024 * 1024, max_add_partition_bytes: PART_LIMIT, max_partitions: MAX_PARTS, graph_scope: 'partition', max_request_bytes: MAX_BODY_BYTES, add_mode: 'synchronous', upstream_commit: SOURCE_REVISION.split('+')[0], source_revision: SOURCE_REVISION, core_source: CORE_SOURCE, multimodal: { format: 'ordered-text-base64-image-parts', index_view: 'supplied-text-plus-image-hash' }, query_terms_prepared: true, memory_service: 'daemon-core-aml-v1', request_lifecycle: 'independent-v2', search_request_profile: true, harness: false, search_profile: AML_SEARCH_PROFILE, reclamation: { user: '/reclaim/user', all: '/reclaim/all', automatic: false } });
+}
+async function reclaimAllRoute(request, env, path) {
+  if (path !== '/admin/reclaim-all' && path !== '/reclaim/all') return undefined;
+  if (path.startsWith('/admin/')) requireOwner(request, env); else authenticate(request, env);
+  if (!env.MEMORY) throw new HttpError(503, 'storage_unavailable', 'Persistent storage binding missing');
+  if (request.method === 'GET') return json(await reclamationStatus(env.MEMORY));
+  if (request.method === 'POST') {
+    const input = await readJson(request);
+    if (input.confirm !== 'ALL_MEMORY') throw new HttpError(400, 'confirmation_required', 'confirm must be ALL_MEMORY; all users and their memory will be permanently removed');
+    const result = await reclaimAll(env.MEMORY, textField(input.operation_id, 'operation_id', 128));
+    return json(result, result.complete ? 200 : 202);
   }
-  if(path==='/admin/reclaim-all'||path==='/reclaim/all'){
-    if(path.startsWith('/admin/'))requireOwner(request,env);else authenticate(request,env);
-    if(!env.MEMORY)throw new HttpError(503,'storage_unavailable','Persistent storage binding missing');
-    if(request.method==='GET')return json(await reclamationStatus(env.MEMORY));
-    if(request.method==='POST'){
-      const input=await readJson(request);
-      if(input.confirm!=='ALL_MEMORY')throw new HttpError(400,'confirmation_required','confirm must be ALL_MEMORY; all users and their memory will be permanently removed');
-      const result=await reclaimAll(env.MEMORY,textField(input.operation_id,'operation_id',128));
-      return json(result,result.complete?200:202);
-    }
-    throw new HttpError(405,'method_not_allowed','Use GET or POST');
+  throw new HttpError(405, 'method_not_allowed', 'Use GET or POST');
+}
+async function runSelfTestContract(request, env, url) {
+  // Fixed synthetic fixture only; cannot access caller-selected users or data.
+  const uid = '__nmg_contract_' + crypto.randomUUID(), session = 'contract-session';
+  const checks = [];
+  const probe = async (route, body, expected = 200) => {
+    let response;
+    try { response = await handle(new Request(new URL(route, request.url), { method: 'POST', headers: { authorization: 'Bearer ' + env.NMG_API_KEY, 'content-type': 'application/json' }, body: JSON.stringify(body) }), env); }
+    catch (error) { response = json({ success: false, error: { code: error.code || 'service_unavailable' } }, error.status || 503); }
+    const value = await response.json();
+    if (response.status !== expected) throw new HttpError(503, 'contract_probe_failed', route + ' returned ' + response.status + ' instead of ' + expected);
+    checks.push({ route, status: response.status }); return value;
+  };
+  const message = i => ({ user_id: uid, session_id: session, request_id: 'c' + i, messages: [{ role: i % 2 ? 'assistant' : 'user', timestamp: 1704067200000 + i * 1000, content: 'Contract probe favorite robot ' + ['Atlas', 'Spot', 'Digit'][i] }] });
+  const first = await probe('/add', message(0));
+  for (let i = 1; i <= 2; i++) {
+    await probe('/search', { user_id: uid, query: 'favorite robot', top_k: 10 });
+    await probe('/add', message(i));
   }
-  const memoryRoute=['/add','/remember','/search','/reset','/reclaim','/reclaim/user','/capacity','/add/status','/admin/reset','/admin/capacity','/admin/diagnostics/search','/admin/diagnostics/seed'].includes(path)||path.startsWith('/add/status/');
-  if(memoryRoute){
-    if(path.startsWith('/admin/'))requireOwner(request,env);else authenticate(request,env);
-    if(!env.MEMORY)throw new HttpError(503,'storage_unavailable','Persistent storage binding missing');
-    env={...env,MEMORY:await memoryBucket(env.MEMORY)};
+  const found = await probe('/search', { user_id: uid, query: 'favorite robot', top_k: 10 });
+  if (found.data.length !== 3) throw new HttpError(503, 'contract_probe_failed', 'Expected three memories');
+  for (let i = 0; i < 3; i++) {
+    const retry = await probe('/add', message(0));
+    if (JSON.stringify(retry) !== JSON.stringify(first)) throw new HttpError(503, 'contract_probe_failed', 'Retry receipt differs');
   }
-  if(path==='/diagnostics/self-test'&&request.method==='POST'){
-    const token=request.headers.get('authorization')?.replace(/^Bearer\s+/i,'')||'';
-    const expires=Number(env.NMG_SELFTEST_EXPIRES_AT);
-    if(!env.NMG_SELFTEST_TOKEN||!expires||Date.now()>=expires||!token||
-      !timingSafeEqual(Buffer.from(hash(token)),Buffer.from(hash(env.NMG_SELFTEST_TOKEN))))
-      throw new HttpError(401,'selftest_unauthorized','Self-test access is unavailable or expired');
-    env={...env,MEMORY:await memoryBucket(env.MEMORY)};
-    const input=await readJson(request);
-    if(Object.keys(input).some(k=>!['op','persistence','repetitions'].includes(k)))
-      throw new HttpError(400,'invalid_request','Self-test accepts only op, persistence and repetitions');
-    if(input.op==='contract'){
-      // Fixed synthetic fixture only; cannot access caller-selected users or data.
-      const uid='__nmg_contract_'+crypto.randomUUID(),session='contract-session';
-      const checks=[];
-      const probe=async(route,body,expected=200)=>{
-        let response;
-        try{response=await handle(new Request(new URL(route,request.url),{method:'POST',headers:{authorization:'Bearer '+env.NMG_API_KEY,'content-type':'application/json'},body:JSON.stringify(body)}),env);}
-        catch(error){response=json({success:false,error:{code:error.code||'service_unavailable'}},error.status||503);}
-        const value=await response.json();
-        if(response.status!==expected)throw new HttpError(503,'contract_probe_failed',route+' returned '+response.status+' instead of '+expected);
-        checks.push({route,status:response.status});return value;
-      };
-      const message=i=>({user_id:uid,session_id:session,request_id:'c'+i,messages:[{role:i%2?'assistant':'user',timestamp:1704067200000+i*1000,content:'Contract probe favorite robot '+['Atlas','Spot','Digit'][i]}]});
-      const first=await probe('/add',message(0));
-      for(let i=1;i<=2;i++){
-        await probe('/search',{user_id:uid,query:'favorite robot',top_k:10});
-        await probe('/add',message(i));
-      }
-      const found=await probe('/search',{user_id:uid,query:'favorite robot',top_k:10});
-      if(found.data.length!==3)throw new HttpError(503,'contract_probe_failed','Expected three memories');
-      for(let i=0;i<3;i++){
-        const retry=await probe('/add',message(0));
-        if(JSON.stringify(retry)!==JSON.stringify(first))throw new HttpError(503,'contract_probe_failed','Retry receipt differs');
-      }
-      const invalid=message(0);delete invalid.request_id;await probe('/add',invalid,400);
-      await probe('/search',{user_id:uid,query:'favorite robot'},400);
-      const isolated=await probe('/search',{user_id:uid+'-other',query:'favorite robot',top_k:10});
-      if(isolated.data.length)throw new HttpError(503,'contract_probe_failed','Isolation failed');
-      return json({success:true,fixture_user_id:uid,result_count:found.data.length,checks});
-    }
-    const userId='__nmg_selftest_v1';
-    if(input.op==='seed')return json(await add(env,{user_id:userId,session_id:'selftest',request_id:'selftest-seed-v1',messages:[
-      {role:'user',content:'我最喜欢的机器人是 Atlas，我正在学习机器人控制。'},
-      {role:'user',content:'这台测试笔记本有 64 GB 内存，测试项目使用 Python。'},
-      {role:'user',content:'测试项目计划使用 ROS 2 和激光雷达完成室内建图。'}]}));
-    if(input.op!=='query')throw new HttpError(400,'invalid_request','op must be seed, query or contract');
-    return json(await diagnosticSearch(env,{user_id:userId,query:'我最喜欢的机器人是什么？',top_k:10,
-      repetitions:input.repetitions??1,persistence:input.persistence??'delta'}));
+  const invalid = message(0); delete invalid.request_id; await probe('/add', invalid, 400);
+  await probe('/search', { user_id: uid, query: 'favorite robot' }, 400);
+  const isolated = await probe('/search', { user_id: uid + '-other', query: 'favorite robot', top_k: 10 });
+  if (isolated.data.length) throw new HttpError(503, 'contract_probe_failed', 'Isolation failed');
+  return json({ success: true, fixture_user_id: uid, result_count: found.data.length, checks });
+}
+function assertSelfTestAccess(request, env) {
+  const token = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || '';
+  const expires = Number(env.NMG_SELFTEST_EXPIRES_AT);
+  if (!env.NMG_SELFTEST_TOKEN || !expires || Date.now() >= expires || !token ||
+    !timingSafeEqual(Buffer.from(hash(token)), Buffer.from(hash(env.NMG_SELFTEST_TOKEN))))
+    throw new HttpError(401, 'selftest_unauthorized', 'Self-test access is unavailable or expired');
+}
+async function selfTestRoute(request, env, url, path) {
+  if (path !== '/diagnostics/self-test' || request.method !== 'POST') return undefined;
+  assertSelfTestAccess(request, env);
+  env = { ...env, MEMORY: await memoryBucket(env.MEMORY) };
+  const input = await readJson(request);
+  if (Object.keys(input).some(k => !['op', 'persistence', 'repetitions'].includes(k)))
+    throw new HttpError(400, 'invalid_request', 'Self-test accepts only op, persistence and repetitions');
+  if (input.op === 'contract') return runSelfTestContract(request, env, url);
+  const userId = '__nmg_selftest_v1';
+  if (input.op === 'seed') return json(await add(env, { user_id: userId, session_id: 'selftest', request_id: 'selftest-seed-v1', messages: [
+    { role: 'user', content: '我最喜欢的机器人是 Atlas，我正在学习机器人控制。' },
+    { role: 'user', content: '这台测试笔记本有 64 GB 内存，测试项目使用 Python。' },
+    { role: 'user', content: '测试项目计划使用 ROS 2 和激光雷达完成室内建图。' }] }));
+  if (input.op !== 'query') throw new HttpError(400, 'invalid_request', 'op must be seed, query or contract');
+  return json(await diagnosticSearch(env, { user_id: userId, query: '我最喜欢的机器人是什么？', top_k: 10,
+    repetitions: input.repetitions ?? 1, persistence: input.persistence ?? 'delta' }));
+}
+function overallServiceStatus({ blocked, maintenance, recent, history, queueState }) {
+  if (blocked) return 'unavailable';
+  if (maintenance) return 'maintenance';
+  return recent || history.status !== 'ok' || queueState.waiting > 0 || queueState.active?.elapsed_ms > 30000 ? 'degraded' : 'ok';
+}
+async function adminStatusResponse(env) {
+  const [sqlite, r2, reclaim, history] = await Promise.all([
+    check(() => sqliteReady().then(() => true)),
+    check(() => env.MEMORY.head('health/probe').then(() => true)),
+    check(() => reclamationStatus(env.MEMORY)), check(() => recentFailures(env.MEMORY))]);
+  const failures = history.value ?? [], load = runtimeStatus(), queueState = queueStatus();
+  const recent = failures.some(e => Date.now() - Date.parse(e.at) < 5 * 60000);
+  const blocked = sqlite.status !== 'ok' || r2.status !== 'ok' || reclaim.status !== 'ok' || !env.NMG_API_KEY;
+  const status = overallServiceStatus({ blocked, maintenance: !!reclaim.value?.maintenance, recent, history, queueState });
+  return json({ status, checked_at: new Date().toISOString(), sqlite: sqlite.status, r2: r2.status,
+    checks: { sqlite, r2: { status: r2.status, ms: r2.ms, code: r2.code }, reclamation: { status: reclaim.status, code: reclaim.code }, error_history: { status: history.status, code: history.code } },
+    authentication: { configured: !!env.NMG_API_KEY }, maintenance: reclaim.value ?? null,
+    embedding: { configured: !!(env.NMG_EMBED_PROVIDER || env.NMG_EMBED_BASE_URL), model: env.NMG_EMBED_MODEL || null,
+      status: 'not_probed', last_observation: embeddingObservation() },
+    checks_ms: { sqlite: sqlite.ms, r2: r2.ms }, load, queue: queueState,
+    failures: { scope: 'shared_best_effort', retention_hours: 24, maximum: 20, entries: failures },
+    limitations: ['Basic probes do not guarantee model availability.', 'Queue and last embedding observation describe only this isolate.', 'Platform cancellations or memory termination may bypass application logging.'] });
+}
+async function adminRoute(request, env, url, path) {
+  if (!path.startsWith('/admin/')) return undefined;
+  requireOwner(request, env);
+  const handled = await adminRouteDispatcher(request, env, url, path);
+  if (handled !== undefined) return handled;
+  throw new HttpError(404, 'not_found', 'Unknown admin route');
+}
+async function adminRouteDispatcher(request, env, url, path) {
+  if (path === '/admin/statistics' && request.method === 'POST') {
+    const input = await readJson(request);
+    if (typeof input.enabled !== 'boolean') throw new HttpError(400, 'invalid_request', 'enabled must be boolean');
+    return json({ load: setStatistics(input.enabled) });
   }
-  if(path.startsWith('/admin/')) {
-    requireOwner(request,env);
-    if(path==='/admin/statistics'&&request.method==='POST'){
-      const input=await readJson(request);
-      if(typeof input.enabled!=='boolean')throw new HttpError(400,'invalid_request','enabled must be boolean');
-      return json({load:setStatistics(input.enabled)});
-    }
-    if(path==='/admin/capacity'&&request.method==='GET')return json(await userCapacity(env.MEMORY,textField(url.searchParams.get('user_id'),'user_id')));
-    if(path==='/admin/reset'&&request.method==='POST')return json(await reset(env,await readJson(request)));
-    if(path==='/admin/key'&&request.method==='GET')return json({api_key:env.NMG_API_KEY});
-    if(path==='/admin/status'&&request.method==='GET'){
-      const [sqlite,r2,reclaim,history]=await Promise.all([
-        check(()=>sqliteReady().then(()=>true)),
-        check(()=>env.MEMORY.head('health/probe').then(()=>true)),
-        check(()=>reclamationStatus(env.MEMORY)),check(()=>recentFailures(env.MEMORY))]);
-      const failures=history.value??[],load=runtimeStatus(),queueState=queueStatus();
-      const recent=failures.some(e=>Date.now()-Date.parse(e.at)<5*60000);
-      const blocked=sqlite.status!=='ok'||r2.status!=='ok'||reclaim.status!=='ok'||!env.NMG_API_KEY;
-      const maintenance=!!reclaim.value?.maintenance;
-      const status=blocked?'unavailable':maintenance?'maintenance':recent||history.status!=='ok'||queueState.waiting>0||queueState.active?.elapsed_ms>30000?'degraded':'ok';
-      return json({status,checked_at:new Date().toISOString(),sqlite:sqlite.status,r2:r2.status,
-        checks:{sqlite,r2:{status:r2.status,ms:r2.ms,code:r2.code},reclamation:{status:reclaim.status,code:reclaim.code},error_history:{status:history.status,code:history.code}},
-        authentication:{configured:!!env.NMG_API_KEY},maintenance:reclaim.value??null,
-        embedding:{configured:!!(env.NMG_EMBED_PROVIDER||env.NMG_EMBED_BASE_URL),model:env.NMG_EMBED_MODEL||null,
-          status:'not_probed',last_observation:embeddingObservation()},
-        checks_ms:{sqlite:sqlite.ms,r2:r2.ms},load,queue:queueState,
-        failures:{scope:'shared_best_effort',retention_hours:24,maximum:20,entries:failures},
-        limitations:['Basic probes do not guarantee model availability.','Queue and last embedding observation describe only this isolate.','Platform cancellations or memory termination may bypass application logging.']});
-    }
-    if(path==='/admin/diagnostics/search'&&request.method==='POST'){
-      const input=await readJson(request);
-      return json(await diagnosticSearch(env,input));
-    }
-    if(path==='/admin/diagnostics/seed'&&request.method==='POST'){
-      // A fixed small fixture, separate from all client user IDs. No arbitrary writes here.
-      return json(await add(env,{user_id:'__nmg_diagnostics_v1',session_id:'diagnostics',request_id:'diagnostics-seed-v1',messages:[
-        {role:'user',content:'我最喜欢的机器人是 Atlas，我正在学习机器人控制。'},
-        {role:'user',content:'我的笔记本有 64 GB 内存，我使用 Python 开发机器人程序。'},
-        {role:'user',content:'我计划学习 ROS 2，并用激光雷达完成室内建图。'}]}));
-    }
-    throw new HttpError(404,'not_found','Unknown admin route');
+  if (path === '/admin/capacity' && request.method === 'GET') return json(await userCapacity(env.MEMORY, textField(url.searchParams.get('user_id'), 'user_id')));
+  if (path === '/admin/reset' && request.method === 'POST') return json(await reset(env, await readJson(request)));
+  if (path === '/admin/key' && request.method === 'GET') return json({ api_key: env.NMG_API_KEY });
+  if (path === '/admin/status' && request.method === 'GET') return adminStatusResponse(env);
+  return adminDiagnosticsRoute(request, env, path);
+}
+async function adminDiagnosticsRoute(request, env, path) {
+  if (path === '/admin/diagnostics/search' && request.method === 'POST') {
+    const input = await readJson(request);
+    return json(await diagnosticSearch(env, input));
   }
-  authenticate(request,env);
-  if(!env.MEMORY)throw new HttpError(503,'storage_unavailable','Persistent storage binding missing');
-  if((path==='/reclaim'||path==='/reclaim/user')&&request.method==='POST'){
-    const input=await readJson(request),userId=textField(input.user_id,'user_id'),requestId=textField(input.request_id,'request_id',128);
-    const result=await reset(env,{user_id:userId,confirm_user_id:userId,reset_id:requestId});
-    return json({...result,request_id:requestId,scope:'user'});
+  if (path === '/admin/diagnostics/seed' && request.method === 'POST') {
+    // A fixed small fixture, separate from all client user IDs. No arbitrary writes here.
+    return json(await add(env, { user_id: '__nmg_diagnostics_v1', session_id: 'diagnostics', request_id: 'diagnostics-seed-v1', messages: [
+      { role: 'user', content: '我最喜欢的机器人是 Atlas，我正在学习机器人控制。' },
+      { role: 'user', content: '我的笔记本有 64 GB 内存，我使用 Python 开发机器人程序。' },
+      { role: 'user', content: '我计划学习 ROS 2，并用激光雷达完成室内建图。' }] }));
   }
-  if(path==='/reset'&&request.method==='POST')return json(await reset(env,await readJson(request)));
-  if(path==='/capacity'&&request.method==='GET')return json(await userCapacity(env.MEMORY,textField(url.searchParams.get('user_id'),'user_id')));
-  if((path==='/add'||path==='/remember')&&request.method==='POST')return json(await add(env,await readJson(request)));
-  if(path==='/search'&&request.method==='POST'){
-    const input=await readJson(request);
-    if(request.headers.get('x-nmg-profile')==='1'){
-      const {result,...diagnostics}=await profileSearch(()=>search(env,input));
-      return json({...result,diagnostics});
-    }
-    return json(await search(env,input));
+  return undefined;
+}
+async function searchRoute(request, env, url, path) {
+  if (path !== '/search' || request.method !== 'POST') return undefined;
+  const input = await readJson(request);
+  if (request.headers.get('x-nmg-profile') === '1') {
+    const { result, ...diagnostics } = await profileSearch(() => search(env, input));
+    return json({ ...result, diagnostics });
   }
-  if(path.startsWith('/add/status/')&&request.method==='GET')return json(await status(env,path.slice('/add/status/'.length)));
-  if(path==='/add/status'&&request.method==='GET'){
-    const taskId=url.searchParams.get('task_id') ?? (hash(textField(url.searchParams.get('user_id'),'user_id')).slice(0,24)+'.'+hash(textField(url.searchParams.get('request_id'),'request_id')));
-    return json(await status(env,taskId));
+  return json(await search(env, input));
+}
+async function addStatusRoute(request, env, url, path) {
+  if (path.startsWith('/add/status/') && request.method === 'GET') return json(await status(env, path.slice('/add/status/'.length)));
+  if (path === '/add/status' && request.method === 'GET') {
+    const taskId = url.searchParams.get('task_id') ?? (hash(textField(url.searchParams.get('user_id'), 'user_id')).slice(0, 24) + '.' + hash(textField(url.searchParams.get('request_id'), 'request_id')));
+    return json(await status(env, taskId));
   }
-  throw new HttpError(404,'not_found','Unknown API route');
+  return undefined;
+}
+async function memoryApiRoute(request, env, url, path) {
+  authenticate(request, env);
+  if (!env.MEMORY) throw new HttpError(503, 'storage_unavailable', 'Persistent storage binding missing');
+  if ((path === '/reclaim' || path === '/reclaim/user') && request.method === 'POST') {
+    const input = await readJson(request), userId = textField(input.user_id, 'user_id'), requestId = textField(input.request_id, 'request_id', 128);
+    const result = await reset(env, { user_id: userId, confirm_user_id: userId, reset_id: requestId });
+    return json({ ...result, request_id: requestId, scope: 'user' });
+  }
+  const reset = await resetRoute(request, env, path);
+  if (reset !== undefined) return reset;
+  const capacity = await capacityRoute(request, env, url, path);
+  if (capacity !== undefined) return capacity;
+  const add = await addRoute(request, env, path);
+  if (add !== undefined) return add;
+  const search = await searchRoute(request, env, url, path);
+  if (search !== undefined) return search;
+  const status = await addStatusRoute(request, env, url, path);
+  if (status !== undefined) return status;
+  throw new HttpError(404, 'not_found', 'Unknown API route');
+}
+function reclaimUserRoute(request, env, path) {
+  if ((path !== '/reclaim' && path !== '/reclaim/user') || request.method !== 'POST') return undefined;
+  return readJson(request).then(async input => {
+    const userId = textField(input.user_id, 'user_id'), requestId = textField(input.request_id, 'request_id', 128);
+    const result = await reset(env, { user_id: userId, confirm_user_id: userId, reset_id: requestId });
+    return json({ ...result, request_id: requestId, scope: 'user' });
+  });
+}
+async function resetRoute(request, env, path) {
+  if (path !== '/reset' || request.method !== 'POST') return undefined;
+  return json(await reset(env, await readJson(request)));
+}
+async function capacityRoute(request, env, url, path) {
+  if (path !== '/capacity' || request.method !== 'GET') return undefined;
+  return json(await userCapacity(env.MEMORY, textField(url.searchParams.get('user_id'), 'user_id')));
+}
+async function addRoute(request, env, path) {
+  if ((path !== '/add' && path !== '/remember') || request.method !== 'POST') return undefined;
+  return json(await add(env, await readJson(request)));
+}
+async function handle(request, env) {
+  const url = new URL(request.url);
+  const path = normalizePath(url);
+  const early = pageResponse(request, env, path) ?? await healthResponse(env, path) ?? await reclaimAllRoute(request, env, path);
+  if (early) return early;
+  if (isMemoryRoute(path)) {
+    if (path.startsWith('/admin/')) requireOwner(request, env); else authenticate(request, env);
+    if (!env.MEMORY) throw new HttpError(503, 'storage_unavailable', 'Persistent storage binding missing');
+    env = { ...env, MEMORY: await memoryBucket(env.MEMORY) };
+  }
+  const selfTest = await selfTestRoute(request, env, url, path);
+  if (selfTest) return selfTest;
+  const admin = await adminRoute(request, env, url, path);
+  if (admin) return admin;
+  return memoryApiRoute(request, env, url, path);
 }
 export default {fetch(request,env,execution) {
   const rawRay=request.headers.get('cf-ray')??'';

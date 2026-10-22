@@ -131,20 +131,15 @@ export async function userCapacity(bucket,userId){
 
 // Emergency per-user reset. The empty manifest remains as a generation barrier:
 // stale writers cannot restore old pointers, and a legacy image cannot reappear.
-export async function resetUser(bucket,userId,resetId){
-  const key=keyFor(userId);
-  let current;
-  for(let attempt=0;attempt<4;attempt++){
-    const {object,manifest}=await loadManifest(bucket,key,userId);
-    const receiptKey=createHash('sha256').update(resetId).digest('hex');
-    if(manifest.reset?.id===resetId||manifest.reset_receipts?.[receiptKey]){current=manifest;break;}
-    const keys=[...new Set([...(manifest.reset?.pending_keys??[]),...manifest.parts.map(p=>p.key).filter(Boolean),`users/${key}.sqlite`])];
-    const empty={format:'nmg-shards-v2',generation:crypto.randomUUID(),parts:[],receipts:{},
-      reset:{id:resetId,at:new Date().toISOString(),pending_keys:keys},
-      reset_receipts:{...manifest.reset_receipts,[receiptKey]:new Date().toISOString()}};
-    if(await commitManifest(bucket,key,object,empty)){current=empty;break;}
-  }
-  if(!current)throw new StorageError('reset_conflict','Concurrent changes detected; pause writes and retry the same reset_id',409);
+function resetManifestState(manifest,resetId,key){
+  const receiptKey=createHash('sha256').update(resetId).digest('hex');
+  const keys=[...new Set([...(manifest.reset?.pending_keys??[]),...manifest.parts.map(p=>p.key).filter(Boolean),`users/${key}.sqlite`])];
+  const empty={format:'nmg-shards-v2',generation:crypto.randomUUID(),parts:[],receipts:{},
+    reset:{id:resetId,at:new Date().toISOString(),pending_keys:keys},
+    reset_receipts:{...manifest.reset_receipts,[receiptKey]:new Date().toISOString()}};
+  return {receiptKey,empty};
+}
+async function clearResetPendingKeys(bucket,key,userId,current){
   const pending=current.reset.pending_keys??[];
   let cleanupComplete=true;
   try{for(let i=0;i<pending.length;i+=1000)await bucket.delete(pending.slice(i,i+1000));}
@@ -160,6 +155,19 @@ export async function resetUser(bucket,userId,resetId){
       }
     }catch{/* A repeat of the same reset_id can safely retry old-object cleanup. */}
   }
+  return cleanupComplete;
+}
+export async function resetUser(bucket,userId,resetId){
+  const key=keyFor(userId);
+  let current;
+  for(let attempt=0;attempt<4;attempt++){
+    const {object,manifest}=await loadManifest(bucket,key,userId);
+    const {receiptKey,empty}=resetManifestState(manifest,resetId,key);
+    if(manifest.reset?.id===resetId||manifest.reset_receipts?.[receiptKey]){current=manifest;break;}
+    if(await commitManifest(bucket,key,object,empty)){current=empty;break;}
+  }
+  if(!current)throw new StorageError('reset_conflict','Concurrent changes detected; pause writes and retry the same reset_id',409);
+  const cleanupComplete=await clearResetPendingKeys(bucket,key,userId,current);
   return {success:true,user_id:userId,reset_id:resetId,reset_at:current.reset_receipts?.[createHash('sha256').update(resetId).digest('hex')]??current.reset.at,
     cleanup_complete:cleanupComplete,
     message:cleanupComplete?'User memory and Add receipts reset; previous referenced snapshots removed.':'User memory and Add receipts reset; retry the same reset_id to finish snapshot cleanup.'};
