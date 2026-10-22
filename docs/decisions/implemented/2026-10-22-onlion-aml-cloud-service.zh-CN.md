@@ -26,6 +26,7 @@
 - 每张图片 Add 都要求视觉模型：阻塞随附描述契约，并为输入已覆盖的信息花费 token。
 - 按实体派生节点身份名：随词频漂移，把一个会话分裂成退化的单块节点。
 - Durable Objects SQLite 存储：不支持 `BEGIN`/`SAVEPOINT` 语句且有 2 MB 行上限；核心需要文件式 SQLite 事务与 FTS5。
+- 请求时编译回调桩：Workers 禁止运行时 Wasm 代码生成（`Wasm code generation disallowed by embedder`），预编译静态模块是强制路径，生成器保留为工具链的一部分。配对实验同时证实仅 SQLite 初始化就会触发 24 次回调适配，普通 SQL 套件已部分覆盖该机制。
 - 把结构化内容归因为 `assistant`/`inferred`：把从未经过模型的用户随附描述错误归因。
 
 ## 后果

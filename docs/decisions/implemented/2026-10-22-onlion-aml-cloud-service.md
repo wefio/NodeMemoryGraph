@@ -60,6 +60,11 @@ hosting configuration.
   one session into degenerate single-block nodes.
 - Durable Objects SQLite storage: no `BEGIN`/`SAVEPOINT` statements and a 2 MB
   row limit; the core needs file-style SQLite transactions and FTS5.
+- Compile callback stubs at request time: Workers disallow runtime Wasm code
+  generation (`Wasm code generation disallowed by embedder`), so pre-compiled
+  static modules are mandatory and the generator stays part of the toolchain.
+  Matched-pair testing also confirmed SQLite initialization alone exercises 24
+  callback adaptations, so ordinary SQL suites partially cover the machinery.
 - Attribute structured content as `assistant`/`inferred`: misattributes
   user-supplied captions that never involved a model.
 
@@ -67,8 +72,13 @@ hosting configuration.
 
 One NMG implementation serves the CLI/daemon and the cloud application;
 `onlion/` cannot build without the workspace checkout, and `dist/` output is
-the deployable artifact. Contract tests run in Miniflare with simulated R2 and
-no external model. A real image-description path is deliberately absent, and a
+the deployable artifact. The vendor transform is auditable end to end: the
+pre-merge stub tree, its byte manifest and the loader remain in Git history,
+an independently derived signature manifest of all 382 stubs matched the
+merged module's type entries 1:1, and every merged export was forward-checked
+at runtime (the original generation script is lost, so the generator script
+plus that history is the provenance). Contract tests run in Miniflare with
+simulated R2 and no external model. A real image-description path is deliberately absent, and a
 real provider, production deployment, official evaluation, and a full
 benchmark score remain unexercised. Service responses include fields beyond
 the AML required minimum (`task_id`, `status`, `added`, `stored_at`,
