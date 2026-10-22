@@ -13,6 +13,9 @@ coverage/
 # Scratch and experiment output for a session; never a home for a necessary file (AGENTS.md).
 /.temp/
 graph.html
+# The onlion service source is tracked; datasets, checkpoints and history are not.
+/onlion/.runtime/
+# Guard against legacy scratch scripts recreating the former output path.
 /output/
 /design/
 /.temp/
