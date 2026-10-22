@@ -8,6 +8,7 @@
 
 | 功能 | Gate／开关 | 默认值 | 含义摘要 | 状态／owner |
 |---|---|---|---|---|
+| OmniMemEval deployed HTTP transport | `NMG_OMNI_API_URL`、`NMG_OMNI_API_TOKEN`、`NMG_OMNI_API_NAMESPACE` | OFF；默认本地 NDJSON 桥 | 带鉴权和显式 namespace 的同步 AML Add/Search；不做本地 embedding 预检，不支持重定向、删除或操作级物化记录 | 显式启用，验证范围由各实验限定；[Benchmark 集成](../../../evals/omnimemeval/README.zh-CN.md#集成边界) |
 | Board event records and Agent task status | `board-events`；`nmg_state space=board`；沿用既有协调 gate | 跟随共享黑板 gate；记录创建是显式动作 | 带版本粗粒度历史、直投／频道／事件通知、邀请驱动的频道订阅（可退出）、由任务 owner 派生的公开状态；无链长上限，不新增模型或轮询器 | 源码验证与部署分开 |
 | Automatic recall deadline and timing | 无 env gate；Pi `/nmg recall timing` 查看诊断 | ON | [五秒绝对等待预算](../session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.zh-CN.md)；显式搜索不受自动期限约束；实现位于 `src/integration/recall-budget.ts` 与 Pi／WorkBuddy adapters | 默认开启；共享 integration owner |
 | Maintained AG working state | `nmg_state space=ag action=write operation=enable`／`nmg state write ag enable` | writer OFF | 有界 session lease；`replace(text)`／`clear()`；拒绝过期、secret、超预算写入；disable／过期撤销 writer 但保留文本；Pi 每个用户回合通过共享 InformationView 原子携带状态 | opt-in writer；仅确定性机制；[state spaces](../state-spaces.zh-CN.md) |

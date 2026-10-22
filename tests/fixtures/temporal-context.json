@@ -1,0 +1,177 @@
+[
+  {
+    "query": "When was the appointment announced?",
+    "content": "The appointment was announced.",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  {
+    "query": "What year was the permit issued?",
+    "content": "The permit was issued.",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  {
+    "query": "Which month was the permit issued?",
+    "content": "The permit was issued.",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  {
+    "query": "How long has the clinic been open?",
+    "content": "The clinic opened.",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  {
+    "query": "Which museum did I visit?",
+    "content": "I visited the museum yesterday.",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  {
+    "query": "Which museum did I visit?",
+    "content": "I visited the museum a week ago.",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  {
+    "query": "What is the travel plan?",
+    "content": "We leave in a week.",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  {
+    "query": "Where did we move?",
+    "content": "We moved last summer.",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  {
+    "query": "What is the clinic called?",
+    "content": "The clinic is called Cedar.",
+    "time": "2023-01-20",
+    "dated": false
+  },
+  {
+    "query": "Was the deadline met?",
+    "content": "The review was completed.",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  {
+    "query": "How often did they meet?",
+    "content": "They met at the cafe.",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  {
+    "query": "What is the monthly budget?",
+    "content": "The budget was approved.",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  {
+    "query": "Did they reschedule the interview?",
+    "content": "The interview was held.",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  {
+    "query": "Who opened the shop at dawn?",
+    "content": "The shop opened.",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  {
+    "query": "Did they meet yesterday?",
+    "content": "They met at the cafe.",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  {
+    "query": "他们经常去哪里？",
+    "content": "他们去了公园。",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  {
+    "query": "活动延期了吗？",
+    "content": "活动已举办。",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  {
+    "query": "What is momentum?",
+    "content": "The review was completed.",
+    "time": "2023-01-20",
+    "dated": false
+  },
+  {
+    "query": "Is the daydream realistic?",
+    "content": "The review was completed.",
+    "time": "2023-01-20",
+    "dated": false
+  },
+  {
+    "query": "Did he yearn for home?",
+    "content": "The review was completed.",
+    "time": "2023-01-20",
+    "dated": false
+  },
+  {
+    "query": "What is their favorite sundae?",
+    "content": "The review was completed.",
+    "time": "2023-01-20",
+    "dated": false
+  },
+  {
+    "query": "诊所什么时候开业？",
+    "content": "诊所已经开业。",
+    "time": "2023-01-20",
+    "dated": true
+  },
+  { "query": "去了哪里？", "content": "昨天去了博物馆。", "time": "2023-01-20", "dated": true },
+  {
+    "query": "When was it announced?",
+    "content": "It was announced.",
+    "time": null,
+    "dated": false
+  },
+  {
+    "query": "When was it announced?",
+    "content": "It was announced.",
+    "time": "not-a-date",
+    "dated": false
+  },
+  {
+    "query": "When was it announced?",
+    "content": "It was announced.",
+    "time": "2023-02-31",
+    "dated": false
+  },
+  {
+    "query": "What time was it announced?",
+    "content": "It was announced.",
+    "time": "2023-01-20T23:30:00-05:00",
+    "dated": true
+  },
+  {
+    "query": "When was it announced?",
+    "content": "It was announced.",
+    "time": "2023-01-20\n",
+    "dated": false
+  },
+  {
+    "query": "When was it announced?",
+    "content": "It was announced.",
+    "time": "2023-01-20t23:30:00z",
+    "dated": false
+  },
+  {
+    "query": "When was it announced?",
+    "content": "It was announced.",
+    "time": "2023-01-20T24:00:00Z",
+    "dated": false
+  }
+]

@@ -1,0 +1,4224 @@
+[
+  {
+    "name": "callback_i_iiii",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iii",
+    "params": [
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ii",
+    "params": [
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iiiii",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_i",
+    "params": [
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_v_",
+    "params": [],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_i",
+    "params": [
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iiiij",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iiiiijj",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iii",
+    "params": [
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_i_",
+    "params": [],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_j",
+    "params": [
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ji",
+    "params": [
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ij",
+    "params": [
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jj",
+    "params": [
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jii",
+    "params": [
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iji",
+    "params": [
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jji",
+    "params": [
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iij",
+    "params": [
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jij",
+    "params": [
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijj",
+    "params": [
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjj",
+    "params": [
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jiii",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijii",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjii",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iiji",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jiji",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijji",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjji",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iiij",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jiij",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijij",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjij",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iijj",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jijj",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijjj",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjjj",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jiiii",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijiii",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjiii",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iijii",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jijii",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijjii",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjjii",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iiiji",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jiiji",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijiji",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjiji",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iijji",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jijji",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijjji",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjjji",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iiiij",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jiiij",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijiij",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjiij",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iijij",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jijij",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijjij",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjjij",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iiijj",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jiijj",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijijj",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjijj",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iijjj",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jijjj",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijjjj",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjjjj",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iiiiii",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jiiiii",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijiiii",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjiiii",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iijiii",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jijiii",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijjiii",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjjiii",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iiijii",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jiijii",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijijii",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjijii",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iijjii",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jijjii",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijjjii",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjjjii",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iiiiji",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jiiiji",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijiiji",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjiiji",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iijiji",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jijiji",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijjiji",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjjiji",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iiijji",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jiijji",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijijji",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjijji",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iijjji",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jijjji",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijjjji",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjjjji",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iiiiij",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jiiiij",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijiiij",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjiiij",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iijiij",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jijiij",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijjiij",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjjiij",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iiijij",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jiijij",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijijij",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjijij",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iijjij",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jijjij",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijjjij",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjjjij",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iiiijj",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jiiijj",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijiijj",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjiijj",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iijijj",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jijijj",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijjijj",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjjijj",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iiijjj",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jiijjj",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijijjj",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjijjj",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_iijjjj",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jijjjj",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_ijjjjj",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_i_jjjjjj",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i32"
+  },
+  {
+    "name": "callback_v_j",
+    "params": [
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ii",
+    "params": [
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ji",
+    "params": [
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ij",
+    "params": [
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jj",
+    "params": [
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jii",
+    "params": [
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iji",
+    "params": [
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jji",
+    "params": [
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iij",
+    "params": [
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jij",
+    "params": [
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijj",
+    "params": [
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjj",
+    "params": [
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iiii",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jiii",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijii",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjii",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iiji",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jiji",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijji",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjji",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iiij",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jiij",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijij",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjij",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iijj",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jijj",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijjj",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjjj",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iiiii",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jiiii",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijiii",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjiii",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iijii",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jijii",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijjii",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjjii",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iiiji",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jiiji",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijiji",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjiji",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iijji",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jijji",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijjji",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjjji",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jiiij",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijiij",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjiij",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iijij",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jijij",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijjij",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjjij",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iiijj",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jiijj",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijijj",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjijj",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iijjj",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jijjj",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijjjj",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjjjj",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iiiiii",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jiiiii",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijiiii",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjiiii",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iijiii",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jijiii",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijjiii",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjjiii",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iiijii",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jiijii",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijijii",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjijii",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iijjii",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jijjii",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijjjii",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjjjii",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iiiiji",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jiiiji",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijiiji",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjiiji",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iijiji",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jijiji",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijjiji",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjjiji",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iiijji",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jiijji",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijijji",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjijji",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iijjji",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jijjji",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijjjji",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjjjji",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iiiiij",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jiiiij",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijiiij",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjiiij",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iijiij",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jijiij",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijjiij",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjjiij",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iiijij",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jiijij",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijijij",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjijij",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iijjij",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jijjij",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijjjij",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjjjij",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iiiijj",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jiiijj",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijiijj",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjiijj",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iijijj",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jijijj",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijjijj",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjjijj",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iiijjj",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jiijjj",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijijjj",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjijjj",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_iijjjj",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jijjjj",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_ijjjjj",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_v_jjjjjj",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "void"
+  },
+  {
+    "name": "callback_j_",
+    "params": [],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_i",
+    "params": [
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_j",
+    "params": [
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ii",
+    "params": [
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ji",
+    "params": [
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ij",
+    "params": [
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jj",
+    "params": [
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iii",
+    "params": [
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jii",
+    "params": [
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iji",
+    "params": [
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jji",
+    "params": [
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iij",
+    "params": [
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jij",
+    "params": [
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijj",
+    "params": [
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjj",
+    "params": [
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iiii",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jiii",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijii",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjii",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iiji",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jiji",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijji",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjji",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iiij",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jiij",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijij",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjij",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iijj",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jijj",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijjj",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjjj",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iiiii",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jiiii",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijiii",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjiii",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iijii",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jijii",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijjii",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjjii",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iiiji",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jiiji",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijiji",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjiji",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iijji",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jijji",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijjji",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjjji",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iiiij",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jiiij",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijiij",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjiij",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iijij",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jijij",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijjij",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjjij",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iiijj",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jiijj",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijijj",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjijj",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iijjj",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jijjj",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijjjj",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjjjj",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iiiiii",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jiiiii",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijiiii",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjiiii",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iijiii",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jijiii",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijjiii",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjjiii",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iiijii",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jiijii",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijijii",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjijii",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iijjii",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jijjii",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijjjii",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjjjii",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iiiiji",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jiiiji",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijiiji",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjiiji",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iijiji",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jijiji",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijjiji",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjjiji",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iiijji",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jiijji",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijijji",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjijji",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iijjji",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jijjji",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijjjji",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjjjji",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i32"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iiiiij",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jiiiij",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijiiij",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjiiij",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iijiij",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jijiij",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijjiij",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjjiij",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iiijij",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jiijij",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijijij",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjijij",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iijjij",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jijjij",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijjjij",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjjjij",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iiiijj",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jiiijj",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijiijj",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjiijj",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iijijj",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jijijj",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijjijj",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjjijj",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iiijjj",
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jiijjj",
+    "params": [
+      "i64",
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijijjj",
+    "params": [
+      "i32",
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjijjj",
+    "params": [
+      "i64",
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_iijjjj",
+    "params": [
+      "i32",
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jijjjj",
+    "params": [
+      "i64",
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_ijjjjj",
+    "params": [
+      "i32",
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  },
+  {
+    "name": "callback_j_jjjjjj",
+    "params": [
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i64",
+      "i64"
+    ],
+    "result": "i64"
+  }
+]

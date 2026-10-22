@@ -10,6 +10,10 @@ export function installOmniMemEvalAdapter(checkout: string): void {
   const adapter = resolve(import.meta.dirname, "nmg_client.py");
 
   copyFileSync(adapter, resolve(target, "nmg_client.py"));
+  copyFileSync(
+    resolve(import.meta.dirname, "../../src/integration/temporal-evidence-policy.json"),
+    resolve(target, "nmg_temporal_evidence_policy.json"),
+  );
   insertAfter(
     registry,
     "_LIB_CLIENT_REGISTRY = {",

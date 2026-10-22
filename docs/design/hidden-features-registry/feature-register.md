@@ -8,6 +8,7 @@
 
 | Feature | Gate(s) | Default | Values / meaning | Location | Owner | Status |
 | --- | --- | --- | --- | --- | --- | --- |
+| Omni HTTP | `NMG_OMNI_API_URL` | off | Add/Search | client | evals | opt-in |
 | Board event records, Agent status | `board-events` | Shared board gate | Event history, direct/channel/event notices, invitations, opt-out, task-derived status | Store, CLI/hosts | [Contract](../board-event-records.md) | source verification ≠ deployment |
 | Automatic recall deadline and timing | No env gate; Pi `/nmg recall timing` reads diagnostics | ON | [Absolute waiting-budget contract](../session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.md); explicit search is not bounded by this automatic deadline | `src/integration/recall-budget.ts`, Pi and WorkBuddy adapters | shared integration | default-on |
 | Maintained AG working state | `nmg_state space=ag action=write operation=enable` / `nmg state write ag enable`; bounded session lease | OFF (writer) | Session working-frame fallback; replace(text)/clear(); stale/secret/over-budget writes refused; disable/expiry revokes writer but retains text; Pi carries atomic state once per user turn through shared InformationView preparation; preview switch affects only the widget; final provider confirmation unsupported; no model-cost claim | AG runtime, Lab authority/service, daemon/CLI and Pi/MCP/DSH state adapters | [State-space owner](../state-spaces.md) | opt-in writer; deterministic mechanics only |

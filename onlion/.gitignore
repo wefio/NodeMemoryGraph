@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.runtime/
+.sites-runtime/
+.wrangler/
+.env*
+!.env.example
+*.tsbuildinfo
+# Generated from callbacks.manifest.json at build time
+/sqlite-wasm/callbacks.wasm

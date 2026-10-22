@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: onlion
+    definition: The single Git-managed source package of the AML cloud memory application; it imports the canonical root src and never carries a second NMG source tree.
+  - term: retrieval view
+    definition: The model-free text used for indexing an ordered content part array; supplied captions plus opaque per-image SHA-256 references.
+  - term: node summary compensation
+    definition: Adapter-supplied non-identity node summary text that compensates for the absent LLM writer without touching the canonical_name identity key.
+references:
+  - temporal evidence presentation
+  - LeafSummaryProvider
+  - pendingLeafSummaries
+  - AML

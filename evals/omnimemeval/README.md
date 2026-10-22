@@ -50,8 +50,9 @@ Both requirement files list `torch` and `torchvision` **unpinned**. A plain
 and silently drop GPU acceleration, so keep them out of `-r` and install torch
 from the CUDA index instead.
 
-`benchmark:omni` prepends the venv to `PATH` (`NMG_BENCH_VENV` overrides the
-directory name). `eval:halumem:score` uses the venv's `python.exe` by default and
+`benchmark:omni` preserves the inherited executable search path, normalizes
+Windows `Path`/`PATH` to one key, and prepends the venv (`NMG_BENCH_VENV`
+overrides the directory name). `eval:halumem:score` uses the venv's `python.exe` by default and
 accepts `--python` or `NMG_HALUMEM_PYTHON`.
 
 ## Reverse-retrieval recall probe
@@ -158,11 +159,11 @@ implementation. It forwards:
 - `search(...)` to budgeted NMG recall and returns plain-text context;
 - cleanup to deletion of the benchmark user's isolated namespace.
 
-The adapter should call a stable local NMG HTTP or CLI boundary. It must not
+The adapter calls the local NMG bridge or the deployed AML Add/Search boundary. It must not
 reach into SQLite tables, duplicate graph logic in Python, or make benchmark
 semantics part of NMG core.
 
-For user-memory questions, the bridge requests user-attributed evidence by
+For user-memory questions, the local bridge requests user-attributed evidence by
 default so long unverified assistant replies do not crowd out the user's
 history. Queries that explicitly ask about the assistant or a previous chat
 use both actors, preserving LongMemEval's assistant-memory category. This uses
@@ -171,8 +172,79 @@ This actor-aware selection is the adapter's declared retrieval profile, not an
 OmniMemEval answer or judge prompt. Official benchmark prompts remain upstream
 owned and are run unchanged for comparable answer-stage results.
 
-The current adapter uses a persistent NDJSON subprocess rather than an HTTP
-service. Install it into the pinned ignored checkout with:
+The default transport is a persistent NDJSON subprocess. To test a deployed
+AML service instead, set these variables in the selected benchmark environment:
+
+```text
+NMG_OMNI_API_URL=https://your-memory-service.example
+NMG_OMNI_API_NAMESPACE=omni-your-unique-experiment
+# Supply NMG_OMNI_API_TOKEN through the process environment, not checked-in files.
+```
+
+HTTP mode does not launch the local bridge or probe its embedding provider;
+the deployed service owns extraction, retrieval, and embedding readiness. It
+prefixes every benchmark `user_id` with the explicit namespace. Use a fresh
+namespace for an independent experiment and retain it for resume. Add uses a
+content-derived `request_id`, requires synchronous HTTP 200 and exact identity
+echoes, and Search preserves ranked textual memories within `top_k`. The client
+identifies itself as `NodeMemoryGraph-OmniMemEval/0.1`, requires HTTPS except for
+loopback tests, and refuses redirects so credentials cannot cross origins.
+
+Temporal presentation uses the shared
+[NMG read-boundary policy](../../docs/design/design/progressive-retrieval.md#temporal-evidence-presentation),
+not suite-specific detection. Add forwards message `chat_time`/`timestamp`
+unchanged and includes them in its existing request identity. The cloud import
+maps validated source/session time to the raw utterance's `eventTime` regardless
+of whether its text needs a visible date. Missing source time stays unknown.
+
+The service adapter can use
+[`projectAmlMemory`](../../src/integration/aml-projection.ts) on already-ranked
+records. Its rows retain `id`, score, historical `event_time`, actual write time
+`stored_at`, and unrendered `raw_content` (with withdrawal protection), while
+`content` applies the shared presentation policy. For compatibility with the
+existing NMG AML service, optional `created_at` remains a historical-time alias,
+not storage creation. Python retains returned candidates unchanged and uses
+`event_time` for plain-text rendering; only an absent `event_time` permits the
+legacy `created_at` alias. Explicit null is unknown. Already-rendered prefixes
+are not duplicated. The installer copies the product-owned JSON policy beside
+`nmg_client.py`; copying the Python file alone is insufficient. Native rich
+Agent Surface rendering is unchanged.
+
+### Multimodal Add/Search (cloud service)
+
+The deployed [onlion service](../../onlion/README.md) accepts ordered
+`text`/`image_url` parts for Add messages and Search queries. Only inline
+Base64 data URLs (JPEG/PNG/WebP/GIF) are accepted, with bounded per-image,
+per-content and per-request limits. The retrieval view is the supplied caption
+text plus an opaque per-image SHA-256 reference: no image-description model is
+required or invoked, and there is no multimodal embedding. Search returns the
+original ordered parts in `content`; `raw_content` is the original evidence
+JSON; attribution follows the message role, and the structured-content marker
+carries format, source role and content hash. Service responses include fields
+beyond the AML required minimum, and multimodal `content` may carry the
+conditional temporal prefix — a deliberate presentation deviation recorded in
+[the owning decision](../../docs/decisions/implemented/2026-10-22-onlion-aml-cloud-service.md).
+
+HTTP and connection failures raise a `RuntimeError`-compatible `NmgRemoteError`.
+Its `diagnostic` object is included in the exception text so upstream error logs
+retain request correlation, UTC time, elapsed time, HTTP status, and the decoded
+response body (at most 16 KiB, with truncation marked). Valid JSON preserves its
+`error.code`; text/HTML and transport failures do not invent an API error code.
+Allowlisted response headers include `Content-Type`, `Retry-After`, `CF-Ray`,
+`Server`, `Date`, request/correlation identifiers, and `Traceparent`. The current
+service token is redacted from every captured field; request messages/query and
+non-allowlisted headers are not added to diagnostic context. Capture does not
+add retries or turn a failure into a success. Historical errors without saved
+bodies remain unattributed; a later replay is separate evidence.
+
+HTTP mode refuses deletion and operation-level `add_with_result`: AML receipts
+do not expose materialized memory records. Use non-streaming Add/Search suites
+with `--clear 0`; HaluMem operation scoring and destructive streaming lifecycles
+are not supported by this transport. Any later remote data reclamation is a
+separate authorized operation. Answer/judge settings, prompts, and scoring stay
+upstream-owned in either mode.
+
+Install the shared adapter into the pinned ignored checkout with:
 
 ```powershell
 npm run benchmark:setup

@@ -1,7 +1,10 @@
-# Normalize line endings: LF in the repo, platform-native in the working copy.
+# Normalize text to LF in the repository and working copy; Windows scripts use CRLF.
 # (Don't use Git LFS for this project — it caused 1.3GB of stale objects.
 #  All large binary files (*.sqlite, *.safetensors, *.onnx, *.pt) are gitignored.)
-* text=auto
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.wasm binary
 *.ts text eol=lf
 *.py text eol=lf
 *.sh text eol=lf

@@ -37,6 +37,13 @@ test("OmniMemEval adapter installer patches the registry idempotently", () => {
     const source = readFileSync(registry, "utf8");
     assert.equal(source.match(/"nmg": \("nmg_client", "NmgClient"\)/g)?.length, 1);
     assert.equal(existsSync(join(factory, "nmg_client.py")), true);
+    assert.equal(
+      readFileSync(join(factory, "nmg_temporal_evidence_policy.json"), "utf8"),
+      readFileSync(
+        new URL("../../src/integration/temporal-evidence-policy.json", import.meta.url),
+        "utf8",
+      ),
+    );
     assert.match(readFileSync(join(factory, "nmg_client.py"), "utf8"), /ensure_ascii=True/);
     assert.equal(
       readFileSync(searchHelpers, "utf8").match(/"nmg": generic_text_search/g)?.length,

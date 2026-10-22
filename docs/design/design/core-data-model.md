@@ -45,6 +45,16 @@ or LTG lifecycle. A `MemoryNode` is a stable semantic address for a coherent
 group of records. Creating one permanent node for every new memory would
 reproduce a flat store with extra graph overhead and is not the target model.
 
+`MemoryRecord.eventTime` is the historical time of the event represented by the
+statement and may be unknown. `MemoryRecord.createdAt` and
+`HistoryRecord.createdAt` record retention/write time; neither substitutes for
+missing historical time. `validFrom`/`validUntil` describe validity rather than
+occurrence. A raw imported utterance can use its validated message/session time
+as `eventTime`: this dates the utterance, not necessarily an event mentioned
+inside it. Preserve known historical time independently of display policy and
+keep stored statements/evidence unmodified. Read-boundary labels follow
+[temporal evidence presentation](progressive-retrieval.md#temporal-evidence-presentation).
+
 An unresolved structure is represented on the record itself, not as a new
 memory type. `resolution` is `resolved` by default and may be `open` or
 `reopened`; open records carry `openedAt` and one or more

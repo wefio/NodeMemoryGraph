@@ -11,8 +11,8 @@ terms:
   - term: benchmark bridge
     aliases: [NMG adapter, NDJSON subprocess, benchmark 桥]
     definition: >-
-      The thin Python client NMG contributes to OmniMemEval's `scripts/client_factory` registry: it forwards `add(...)` to session ingestion and extraction, `search(...)` to budgeted NMG recall returning plain-text context, and cleanup to deletion of the benchmark user's isolated namespace, through a stable local NMG HTTP or CLI boundary; it must not read SQLite tables, duplicate graph logic in Python, or make benchmark semantics part of NMG core. The current implementation is a persistent NDJSON subprocess rather than an HTTP service.
-      NMG 在 OmniMemEval 的 `scripts/client_factory` 注册表里贡献的薄 Python 客户端：经稳定的本地 NMG HTTP 或 CLI 边界把 `add(...)` 转发到会话摄取与抽取、把 `search(...)` 转发到有预算并返回纯文本上下文的 NMG 召回、把清理转发到删除该 benchmark 用户的隔离 namespace；它不得读取 SQLite 表、在 Python 里复制图逻辑，或把 benchmark 语义变成 NMG core 的一部分。当前实现是持久 NDJSON 子进程而不是 HTTP 服务。
+      The thin Python client NMG contributes to OmniMemEval's `scripts/client_factory` registry: it forwards `add(...)` to session ingestion and extraction, `search(...)` to budgeted NMG recall returning plain-text context, and cleanup to deletion of the benchmark user's isolated namespace, through the local NDJSON bridge or an opt-in deployed AML HTTP boundary; it must not read SQLite tables, duplicate graph logic in Python, or make benchmark semantics part of NMG core. The HTTP transport refuses deletion and operation-level materialized-record APIs.
+      NMG 在 OmniMemEval 的 `scripts/client_factory` 注册表里贡献的薄 Python 客户端：经本地 NDJSON 桥或显式启用的已部署 AML HTTP 边界把 `add(...)` 转发到会话摄取与抽取、把 `search(...)` 转发到有预算并返回纯文本上下文的 NMG 召回、把清理转发到删除该 benchmark 用户的隔离 namespace；它不得读取 SQLite 表、在 Python 里复制图逻辑，或把 benchmark 语义变成 NMG core 的一部分。HTTP 传输拒绝删除与操作级物化记录 API。
     owner: evals/omnimemeval/README.md
     anchor: Integration boundary
     status: canonical
@@ -81,4 +81,5 @@ terms:
     anchor: Current-code BGE full rerun (2026-08-01)
     status: canonical
 references:
+  - temporal evidence presentation
   - Active Graph

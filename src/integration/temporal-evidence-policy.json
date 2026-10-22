@@ -1,0 +1,27 @@
+{
+  "temporalQuery": [
+    "\\bwhen\\b",
+    "\\b(?:what|which)\\s+(?:date|time|day|week|month|year|season)\\b",
+    "\\bhow\\s+(?:long|old|many\\s+(?:hours?|days?|weeks?|months?|years?))\\b",
+    "\\b(?:before|after|since|until|earlier|later|timeline|chronolog\\w*)\\b",
+    "\\b(?:hours?|days?|weeks?|months?|quarters?|years?|decades?|centuries|millenni(?:a|ums?))\\b",
+    "\\b(?:hourly|daily|weekly|monthly|quarterly|yearly)\\b",
+    "\\b(?:morning|afternoon|evening|night|midnight|noon|dawn|dusk|overnight|daytime)(?:s)?\\b",
+    "\\b(?:mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|january|february|march|april|june|july|august|september|october|november|december)s?\\b",
+    "\\b(?:times?|dates?|moments?|instants?|periods?|durations?|eras?|epochs?|timelines?|timeframes?|deadlines?|(?:re)?schedul\\w*|anniversaries|anniversary|birthdays?|holidays?|vacations?|weekends?|weekdays?|seasons?|timezones?|lifetime|meanwhile|meantime)\\b",
+    "\\b(?:always|often|usually|sometimes|never|rarely|seldom|frequently|occasionally|regularly|temporar\\w*|permanent\\w*|chronological\\w*|temporal|simultaneous\\w*|intermittent\\w*|sporadic\\w*|ongoing|upcoming|former|latter|prior|subsequent\\w*|previous|previously|following)\\b",
+    "\\b(?:now|then|soon|later|earlier|currently|formerly|recently|immediately|eventually|finally|initially|originally|afterwards?|thereafter|hereafter|nowadays|today|tomorrow|tonight|yesterday)\\b",
+    "\\b(?:during|whenever|anytime|contemporary|ancient|modern|historical|historic|future|past|present)\\b",
+    "经常|总是|从未|偶尔|暂时|永久|延期|推迟|期限|截止|日程|纪念日|生日|假期|周末|凌晨|上午|下午|傍晚|中午|世纪|年代|持续|随后|当时|今后|将来|以往|近年来|最近|之前|之后|以前|以后|期间",
+    "什么时候|何时|哪(?:一)?(?:年|月|天)|多久|多长时间|几(?:年|月|周|天|小时)|时间顺序"
+  ],
+  "relativeEvidence": [
+    "\\b(?:yesterday|today|tomorrow|tonight|recently)\\b",
+    "\\b(?:last|next|this|previous|following)\\s+(?:hour|day|week|weekend|month|year|night|morning|afternoon|evening|spring|summer|autumn|fall|winter|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\b",
+    "\\b(?:\\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|few|several|couple\\s+of)\\s+(?:hours?|days?|weeks?|months?|years?)\\s+(?:ago|earlier|later)\\b",
+    "\\bin\\s+(?:\\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|few|several|couple\\s+of)\\s+(?:hours?|days?|weeks?|months?|years?)\\b",
+    "昨天|今天|明天|昨晚|今晚|前天|后天|(?:上|下|这|本)(?:周|星期|个月|月|年)|(?:\\d+|[一二三四五六七八九十几两]+)(?:天|周|个月|月|年|小时)(?:前|后)"
+  ],
+  "isoTime": "^(?!0000)\\d{4}-\\d{2}-\\d{2}(?:T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|[+-](?:[01]\\d|2[0-3]):[0-5]\\d)?)?$",
+  "timestampPrefix": "^\\[Timestamp: [^\\]\\r\\n]+\\] "
+}
