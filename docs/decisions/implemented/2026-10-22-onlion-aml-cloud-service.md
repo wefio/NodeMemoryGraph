@@ -50,6 +50,17 @@ datasets, checkpoints and history and remains untracked. The build accepts
 `NMG_WORKER_NAME` and `NMG_R2_BUCKET` overrides instead of inheriting one
 hosting configuration.
 
+The 382 SQLite callback signatures are carried over as a readable coverage
+manifest (`sqlite-wasm/callbacks.manifest.json`) that is the generator's only
+input: each build emits the merged trampoline module (untracked) and
+regenerates the loader's signature-keyed export-name map, so the committed
+loader cannot drift from the manifest. The manifest is the v19 compatibility
+coverage set, not a measured list of what SQLite uses; Workers disallow
+runtime Wasm code generation, so this pre-compiled set is mandatory. The
+historical stub tree stays in Git history solely as one-time verification
+provenance: its runtime lookup keys and the independent signature parse match
+the manifest-derived module 382/382.
+
 ## Alternatives considered
 
 - Keep the vendored tree: preserves deployment drift and a second policy and

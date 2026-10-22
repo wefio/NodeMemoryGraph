@@ -20,6 +20,8 @@
 
 仓库文本文件在仓库与工作副本中统一为 LF；Windows 脚本保持 CRLF，`.wasm` 保持二进制。`onlion/.runtime/` 存放数据集、checkpoint 与历史，保持不跟踪。构建支持 `NMG_WORKER_NAME` 与 `NMG_R2_BUCKET` 覆盖，不再继承单一托管配置。
 
+382 个 SQLite 回调签名以可读覆盖集清单（`sqlite-wasm/callbacks.manifest.json`）的形式保留，它是生成器的唯一输入：每次构建产出合并桥接模块（不跟踪）并重新生成加载器的签名键导出名映射，使已提交的加载器不可能偏离清单。该清单是 v19 的兼容覆盖集，不是实测的 SQLite 使用量；由于 Workers 禁止运行时 Wasm 代码生成，这份预编译集合是强制路径。历史桩树仅作为一次性验证出处保留在 Git 历史中：其运行时查找键与独立签名解析均与清单派生的模块 382/382 相符。
+
 ## 考虑过的替代方案
 
 - 保留 vendored 树：延续部署漂移和第二份策略、prompt 来源。
@@ -31,4 +33,4 @@
 
 ## 后果
 
-一份 NMG 实现同时服务 CLI/daemon 与云端应用；`onlion/` 无法脱离工作区检出构建，`dist/` 产物才是可部署工件。契约测试在 Miniflare 与模拟 R2 中运行，不调用外部模型。真实图片描述路径被有意移除；真实 provider、生产部署、官方评测与完整 benchmark 分数均未执行。服务响应包含超出 AML 必填范围的字段（`task_id`、`status`、`added`、`stored_at`、`event_time`、`raw_content`），多模态 `content` 携带时间前缀——这是此处记录的、由撤回安全投影约束的有意展示偏差。
+一份 NMG 实现同时服务 CLI/daemon 与云端应用；`onlion/` 无法脱离工作区检出构建，`dist/` 产物才是可部署工件。vendor 变换可端到端审计：合并前的桩树、字节清单与加载器保留在 Git 历史中，独立解析的 382 桩签名清单与合并模块的类型条目逐一相符；原始生成脚本已失传，生成脚本与该历史即为出处。契约测试在 Miniflare 与模拟 R2 中运行，不调用外部模型。真实图片描述路径被有意移除；真实 provider、生产部署、官方评测与完整 benchmark 分数均未执行。服务响应包含超出 AML 必填范围的字段（`task_id`、`status`、`added`、`stored_at`、`event_time`、`raw_content`），多模态 `content` 携带时间前缀——这是此处记录的、由撤回安全投影约束的有意展示偏差。
