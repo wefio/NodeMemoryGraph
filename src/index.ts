@@ -83,8 +83,21 @@ export { retainEvidence } from "./integration/evidence.ts";
 export type { AgentHistoryMessage, AgentHistorySnapshot } from "./integration/evidence.ts";
 export { searchMemoryContext } from "./integration/search.ts";
 export { renderTemporalEvidence } from "./integration/temporal-evidence.ts";
-export { projectAmlMemory } from "./integration/aml-projection.ts";
-export type { AmlMemoryRow } from "./integration/aml-projection.ts";
+export { projectAmlMemory, projectAmlMultimodalMemory } from "./integration/aml-projection.ts";
+export type { AmlMemoryRow, AmlMultimodalMemoryRow } from "./integration/aml-projection.ts";
+export {
+  normalizeContent,
+  describeContent,
+  contentText,
+  contentHasImages,
+  ContentValidationError,
+} from "./integration/multimodal-content.ts";
+export type {
+  AmlContent,
+  ContentPart,
+  ContentLimits,
+  ImageDescriber,
+} from "./integration/multimodal-content.ts";
 export {
   captureMemoryReferenceTargets,
   createMemoryReferences,
