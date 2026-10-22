@@ -40,6 +40,7 @@ import {
   ftsExpression,
   hybridScore,
   lexicalScore,
+  searchTerms,
   mergeSemanticCandidates,
   normalize,
   normalizeStatement,
@@ -2167,9 +2168,10 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         retrievalMode === "fts5" || retrievalMode === "hashing" || retrievalMode === "qwen3"
           ? new Map<string, number>()
           : new Map(this.routeNodes(query, 20).map((route) => [route.node.id, route.score]));
+      const preparedQueryTerms = searchTerms(normalizedQuery);
       const filtered = rows
         .map((row) => {
-          const lexical = lexicalScore(normalizedQuery, row);
+          const lexical = lexicalScore(normalizedQuery, row, preparedQueryTerms);
           const vector =
             retrievalMode === "fts5" ? 0 : cosineSimilarity(queryVector, scoringVector(row, "ve_"));
           const route = routes.get(String(row.m_node_id)) ?? 0;
