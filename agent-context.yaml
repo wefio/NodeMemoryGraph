@@ -353,7 +353,7 @@ routes:
     paths:
       - onlion/backend/**
       - onlion/scripts/**
-      - onlion/vendor/**
+      - onlion/sqlite-wasm/**
       - onlion/package.json
       - onlion/tsconfig.json
       - onlion/.gitignore

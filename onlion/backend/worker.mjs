@@ -1,8 +1,8 @@
 import {withRequest,requestIdentity,queueAccepted,queueStarted,queueFinished,queueStatus,reportFailure,embeddingOperation,embeddingObservation,recentFailures,check,classifyError} from './monitoring.mjs';
 import {memoryBucket,reclaimAll,reclamationStatus} from './reclamation.mjs';
 import {measure, profileSearch, runtimeStatus, statisticsEnabled, setStatistics, requestAccepted, requestStarted, requestFinished} from './diagnostics.mjs';
-import init from '../vendor/sqlite-wasm/worker-loader.mjs';
-import compiledSqlite from '../vendor/sqlite-wasm/sqlite3.wasm';
+import init from '../sqlite-wasm/worker-loader.mjs';
+import compiledSqlite from '../sqlite-wasm/sqlite3.wasm';
 import { configure, DatabaseSync, withDatabases } from './sqlite.mjs';
 import { AmlMemoryService, AML_SEARCH_PROFILE, CORE_SOURCE } from './memory-service.ts';
 import { createEmbeddingClientFromEnv } from '../../src/core/embedding-provider.ts';

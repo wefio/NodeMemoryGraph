@@ -14,7 +14,8 @@
     "test:temporal": "node --experimental-transform-types scripts/test-temporal-evidence.mjs",
     "test:media": "node --experimental-transform-types scripts/test-multimodal-service.mjs",
     "test:worker-media": "node scripts/test-multimodal-worker.mjs",
-    "verify": "npm run build && npm run check && npm run test:temporal && npm run test:media && npm run test:backend && npm run test:worker-media"
+    "verify": "npm run build && npm run check && npm run test:temporal && npm run test:media && npm run test:backend && npm run test:worker-media",
+    "generate:callbacks": "node scripts/generate-callbacks.mjs"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

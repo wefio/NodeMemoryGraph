@@ -17,9 +17,10 @@ Rationale and boundaries: [the owning decision](../docs/decisions/implemented/20
   summaries through the store's provider mechanism.
 - `backend/storage.mjs`, `sqlite.mjs`, `page-delta.mjs` — R2 manifest
   transactions, SQLite WASM request contexts, snapshot page deltas.
-- `vendor/` — SQLite WASM runtime glue only (the official 3.53.4 build plus
-  a merged callback module); never application source. search-query-parser is a
-  normal npm dependency.
+- `vendor/` — SQLite WASM runtime glue only (the official 3.53.4 build plus a
+  callback module generated at build time from
+  `callbacks.manifest.json`, the readable coverage-set manifest; the generated
+  wasm is untracked). search-query-parser is a normal npm dependency.
 - `.runtime/` — untracked datasets, checkpoints, test persistence, receipts.
 
 ## Commands

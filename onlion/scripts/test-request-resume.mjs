@@ -9,7 +9,7 @@ fs.rmSync(storage,{recursive:true,force:true});
 const modules=[{type:'ESModule',path:root+'/dist/server/index.js'},
   {type:'ESModule',path:root+'/dist/server/sqlite/worker-loader.mjs'},
   {type:'CompiledWasm',path:root+'/dist/server/sqlite/sqlite3.wasm'},
-  ...JSON.parse(fs.readFileSync('vendor/sqlite-wasm/callback-list.json')).map(c=>({type:'CompiledWasm',path:root+'/dist/server/sqlite/'+c.name}))];
+  {type:'CompiledWasm',path:root+'/dist/server/sqlite/callbacks.wasm'}];
 let queryBlock, documentBlock;
 const requestsByText=new Map();
 function start(){return new Miniflare({r2Persist:storage,modules,modulesRoot:root+'/dist/server',

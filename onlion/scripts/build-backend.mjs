@@ -5,12 +5,13 @@ import { execFileSync } from 'node:child_process';
 const root = process.cwd();
 const workspace = path.resolve(root, '..');
 execFileSync(process.execPath, [path.join(workspace, 'scripts/generate-prompts.ts')], { cwd: workspace, stdio: 'inherit' });
-const revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace, encoding: 'utf8' }).trim();
+const revision = execFileSync(process.execPath, [path.join(root, 'scripts/generate-callbacks.mjs')], { cwd: root, stdio: 'inherit' });
+execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace, encoding: 'utf8' }).trim();
 const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: workspace, encoding: 'utf8' }).trim().length > 0;
 const sourceRevision = revision + (dirty ? '+dirty' : '');
 fs.rmSync('dist', { recursive: true, force: true });
 fs.mkdirSync('dist/server', { recursive: true });
-fs.cpSync('vendor/sqlite-wasm', 'dist/server/sqlite', { recursive: true });
+fs.cpSync('sqlite-wasm', 'dist/server/sqlite', { recursive: true, filter: (source) => !source.endsWith('callbacks.manifest.json') });
 await build({
   entryPoints: ['backend/worker.mjs'], outfile: 'dist/server/index.js',
   bundle: true, format: 'esm', platform: 'node', target: 'es2022',
@@ -18,8 +19,8 @@ await build({
   alias: { 'node:sqlite': path.join(root, 'backend/sqlite.mjs') },
   external: ['node:*'],
   plugins: [{ name: 'sqlite-worker-modules', setup(b) {
-    b.onResolve({ filter: /vendor\/sqlite-wasm\/worker-loader\.mjs$/ }, () => ({path:'./sqlite/worker-loader.mjs',external:true}));
-    b.onResolve({ filter: /vendor\/sqlite-wasm\/sqlite3\.wasm$/ }, () => ({path:'./sqlite/sqlite3.wasm',external:true}));
+    b.onResolve({ filter: /sqlite-wasm\/worker-loader\.mjs$/ }, () => ({path:'./sqlite/worker-loader.mjs',external:true}));
+    b.onResolve({ filter: /sqlite-wasm\/sqlite3\.wasm$/ }, () => ({path:'./sqlite/sqlite3.wasm',external:true}));
   }}]
 });
 const hosting = fs.existsSync('.openai/hosting.json') ? JSON.parse(fs.readFileSync('.openai/hosting.json')) : {};

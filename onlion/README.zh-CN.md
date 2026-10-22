@@ -10,7 +10,7 @@ NMG AML Add/Search 边界背后云端记忆应用的 Git 管理源码。它导�
 - `backend/memory-service.ts` — daemon 核心之上的薄 AML 适配层：消息映射、固定搜索档案、投影。
 - `backend/extractive-summaries.mjs` — 确定性、无 LLM 的检索索引摘要，经 store 的 provider 机制写入。
 - `backend/storage.mjs`、`sqlite.mjs`、`page-delta.mjs` — R2 manifest 事务、SQLite WASM 请求上下文、快照页增量。
-- `vendor/` — 仅 SQLite WASM 运行时胶水（官方 3.53.4 构建加合并后的回调模块）；不放应用源码。search-query-parser 是普通 npm 依赖。
+- `vendor/` — 仅 SQLite WASM 运行时胶水（官方 3.53.4 构建加构建时由可读覆盖集清单 `callbacks.manifest.json` 生成的回调模块；生成的 wasm 不跟踪）。search-query-parser 是普通 npm 依赖。
 - `.runtime/` — 不跟踪的数据集、checkpoint、测试持久化与回执。
 
 ## 命令
