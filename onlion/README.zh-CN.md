@@ -50,7 +50,7 @@ node node_modules/wrangler/bin/wrangler.js deploy --config dist/server/wrangler.
 
 ## 多子句检索
 
-Search 接受两种形状：旧形态的单 `query`（可带 `options`，每条变成 `query + ' ' + option` 子句），或 `queries` 列表（1–8 条独立子句，每条为字符串或 `{text, name}`）。**服务端不发明检索维度**，由调用方给出。所有子句按同一规则融合——同一 memory id 取最高分、排序、按 `top_k` 截断——响应为每条子句附一行，含在返回页上统计的 `contributed` 与 `exclusive`。`queries[0]` 是呈现子句。`queries` 与 `query` 或 `options` 同时出现会被拒绝。见[决策记录](../docs/decisions/implemented/2026-10-23-onlion-multi-clause-search.zh-CN.md)。
+Search 接受两种形状：旧形态的单 `query`（可带 `options`，每条变成 `query + ' ' + option` 子句），或 `queries` 列表（1–8 条独立子句，每条为字符串或 `{text, name}`）。**服务端不发明检索维度**，由调用方给出。所有子句按同一规则融合——同一 memory id 取最高分、排序、按 `top_k` 截断——响应为每条子句附一行，含在返回页上统计的 `contributed` 与 `exclusive`。`queries[0]` 是呈现子句。`queries` 与 `query` 或 `options` 同时出现会被拒绝。子句可带 `appendOnly: true`：其结果跳过页面、单独以 `appended` 字段返回，与页面去重并按 `top_k` 封顶。见[多子句检索决策](../docs/decisions/implemented/2026-10-23-onlion-multi-clause-search.zh-CN.md)与[只进追加段决策](../docs/decisions/implemented/2026-10-23-onlion-append-only-clauses.zh-CN.md)。
 
 ## 非目标
 

@@ -472,7 +472,8 @@ async function readClauses(input, optionTexts) {
   if (input.query !== undefined)
     throw new HttpError(400, "invalid_request", "queries and query cannot be combined");
   const clauses = nodes.map((node) => {
-    if (typeof node === "string") return { text: textField(node, "query", 4096), name: null };
+    if (typeof node === "string")
+      return { text: textField(node, "query", 4096), name: null, appendOnly: false };
     if (!node || typeof node !== "object")
       throw new HttpError(
         400,
@@ -480,8 +481,19 @@ async function readClauses(input, optionTexts) {
         "each query clause must be a string or an object with text",
       );
     const name = node.name === undefined ? null : textField(node.name, "name", 64);
-    return { text: textField(node.text ?? node.query, "query", 4096), name };
+    // appendOnly clause results never compete for the page; they are returned as
+    // a supplement, so a broad dimension cannot crowd out ranked evidence.
+    const appendOnly = node.appendOnly === true || node.mode === "append";
+    return { text: textField(node.text ?? node.query, "query", 4096), name, appendOnly };
   });
+  if (clauses[0].appendOnly)
+    throw new HttpError(
+      400,
+      "invalid_request",
+      "the first clause carries the presentation and cannot be appendOnly",
+    );
+  if (clauses.every((clause) => clause.appendOnly))
+    throw new HttpError(400, "invalid_request", "at least one clause must be ranked");
   return dedupeClauses(clauses);
 }
 /** Identical clause text is collapsed before retrieval, keeping the first label,
@@ -495,6 +507,34 @@ function dedupeClauses(clauses) {
     kept.push(clause);
   }
   return kept;
+}
+/** Merge a partition's append-only results, keeping the highest score per id. */
+function addAppended(appended, memories) {
+  for (const memory of memories ?? []) {
+    const prior = appended.get(memory.id);
+    if (!prior || (memory.score ?? 0) >= (prior.score ?? 0)) appended.set(memory.id, memory);
+  }
+}
+/** Resolve every clause vector once, before SQLite is opened: the per-request
+ * cache then supplies every partition without holding a DB during remote I/O. */
+async function warmClauseVectors(client, queries, parts) {
+  if (!client || parts.length === 0) return;
+  for (const clause of queries) await client.embedQueries([clause]).catch(() => undefined);
+}
+/** Fold one partition's persistence mode into the request totals. */
+function tallyPartPersistence(persistence, saved) {
+  if (saved.mode === "inline_page_delta") persistence.inline_delta_saves++;
+  if (saved.mode === "full_snapshot") persistence.full_snapshot_saves++;
+  persistence.changed_pages += saved.changedPages;
+}
+/** The supplement returned to the caller: deduplicated against the page and
+ * bounded by the same top_k, so a response never doubles unexpectedly. */
+function collectAppended(appended, page, topK) {
+  const pageIds = new Set(page.map((memory) => memory.id));
+  return [...appended.values()]
+    .filter((memory) => !pageIds.has(memory.id))
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.id.localeCompare(b.id))
+    .slice(0, topK);
 }
 /** Sum a partition's per-clause attribution into the request totals. */
 function addClauseContributions(contributions, clauses) {
@@ -517,6 +557,9 @@ async function search(env, input, options = {}) {
   const optionTexts = choices.map((choice) => textField(choice, "option", 4096));
   const clauses = await readClauses(input, optionTexts);
   const queries = clauses.map((clause) => clause.text);
+  const appendOnly = clauses.map((clause) => clause.appendOnly === true);
+  const hasAppendOnly = appendOnly.some(Boolean);
+  const appendedById = new Map();
   const contributions = clauses.map((_clause, index) => ({ index, contributed: 0, exclusive: 0 }));
   const client = embeddingClient(env),
     started = Date.now();
@@ -524,11 +567,7 @@ async function search(env, input, options = {}) {
     let candidates = [];
     const modes = new Set();
     let changed = false;
-    // Resolve query vectors before opening SQLite. The per-request cache
-    // supplies every partition without holding a DB during remote I/O.
-    if (client && manifest.parts.length) {
-      for (const clause of queries) await client.embedQueries([clause]).catch(() => undefined);
-    }
+    await warmClauseVectors(client, queries, manifest.parts);
     const persistence = { inline_delta_saves: 0, full_snapshot_saves: 0, changed_pages: 0 };
     for (let i = 0; i < manifest.parts.length; i++) {
       const result = await runPart(
@@ -539,7 +578,7 @@ async function search(env, input, options = {}) {
           const service = new AmlMemoryService(partKey, client);
           return {
             response: await measure("retrieval_including_embedding", () =>
-              service.search(queries, topK),
+              service.search(queries, topK, appendOnly),
             ),
           };
         },
@@ -569,17 +608,17 @@ async function search(env, input, options = {}) {
       manifest.parts[i] = saved.part;
       if (saved.stagedKey) staged.push(saved.stagedKey);
       changed ||= saved.changed || result.legacyReceipts.length > 0;
-      if (saved.mode === "inline_page_delta") persistence.inline_delta_saves++;
-      if (saved.mode === "full_snapshot") persistence.full_snapshot_saves++;
-      persistence.changed_pages += saved.changedPages;
+      tallyPartPersistence(persistence, saved);
       modes.add(result.response.retrievalMode);
       addClauseContributions(contributions, result.response.clauses);
+      addAppended(appendedById, result.response.appended);
       candidates.push(...result.response.memories);
       // Bounded global Top K; never retain every shard's candidates in RAM.
       candidates.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
       candidates = candidates.slice(0, topK);
     }
     persistence.inline_bytes = manifest.parts.reduce((sum, p) => sum + deltaBytes(p), 0);
+    const appended = collectAppended(appendedById, candidates, topK);
     return {
       readOnly: !changed,
       response: {
@@ -593,9 +632,11 @@ async function search(env, input, options = {}) {
         clauses: clauses.map((clause, index) => ({
           name: clause.name,
           index,
+          appendOnly: clause.appendOnly === true,
           contributed: contributions[index].contributed,
           exclusive: contributions[index].exclusive,
         })),
+        ...(hasAppendOnly ? { appended } : {}),
         persistence,
         storage_format: manifest.parts.some((p) => p.delta) ? "nmg-shards-v3" : "nmg-shards-v2",
       },

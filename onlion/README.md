@@ -82,8 +82,11 @@ retrieval dimension: the caller supplies them. All clauses are fused the same
 way — highest score per memory id, sorted, capped at `top_k` — and the response
 adds one row per clause with `contributed` and `exclusive` counts over the
 returned page. `queries[0]` is the presentation clause. Sending `queries`
-together with `query` or `options` is rejected. See
-[the decision](../docs/decisions/implemented/2026-10-23-onlion-multi-clause-search.md).
+together with `query` or `options` is rejected. A clause may carry
+`appendOnly: true`: its results skip the page and come back in a separate
+`appended` field, deduplicated against the page and capped at `top_k`. See
+[the multi-clause decision](../docs/decisions/implemented/2026-10-23-onlion-multi-clause-search.md)
+and [the append-only decision](../docs/decisions/implemented/2026-10-23-onlion-append-only-clauses.md).
 
 ## Non-goals
 

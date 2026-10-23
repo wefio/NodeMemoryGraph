@@ -399,6 +399,87 @@ print(json.dumps(r))`,
       .status,
     400,
   );
+  // An append-only clause must not compete for the page: it is returned as a
+  // separate supplement, deduplicated against the page. Two records with no
+  // shared vocabulary keep the two clauses on different results, so a non-empty
+  // supplement proves the mechanism rather than a lucky ranking.
+  const supplement = await call("a", "/add", {
+    user_id: "append-supplement",
+    request_id: "supplement-1",
+    messages: [
+      { role: "user", content: "Zebra note: the striped herd grazes on the savanna." },
+      { role: "user", content: "Quasar note: a luminous galactic nucleus outshines its host." },
+    ],
+  });
+  assert.equal(supplement.status, 200, JSON.stringify(supplement));
+  const mix = await call("a", "/search", {
+    user_id: "append-supplement",
+    top_k: 1,
+    queries: [
+      { name: "original", text: "striped herd savanna" },
+      { name: "broad", text: "luminous galactic nucleus", appendOnly: true },
+    ],
+  });
+  assert.equal(mix.status, 200, JSON.stringify(mix));
+  assert.equal(mix.body.data.length, 1, "the page keeps the ranked clause only");
+  assert.match(mix.body.data[0].content, /striped herd/u);
+  assert.ok(Array.isArray(mix.body.appended), "append-only results arrive separately");
+  assert.equal(mix.body.appended.length, 1, JSON.stringify(mix.body.appended));
+  assert.match(mix.body.appended[0].content, /luminous galactic/u);
+  for (const memory of mix.body.appended)
+    assert.ok(
+      !mix.body.data.some((page) => page.id === memory.id),
+      "appended never repeats a page record",
+    );
+  assert.equal(mix.body.clauses.find((c) => c.name === "broad").appendOnly, true);
+  // A supplement that resolves to the same record as the page is dropped, so the
+  // two fields never repeat a record however the clauses overlap.
+  const overlap = await call("a", "/search", {
+    user_id: "append-supplement",
+    top_k: 1,
+    queries: [
+      { name: "original", text: "striped herd savanna" },
+      { name: "broad", text: "zebra striped grazing", appendOnly: true },
+    ],
+  });
+  assert.equal(overlap.status, 200, JSON.stringify(overlap));
+  assert.equal(overlap.body.data.length, 1);
+  // The contract is no shared record, whichever record the overlapping clause
+  // happens to rank first.
+  for (const memory of overlap.body.appended)
+    assert.ok(
+      !overlap.body.data.some((page) => page.id === memory.id),
+      "a supplement never repeats the page",
+    );
+  // A request with no ranked clause, or an append-only presentation clause, is rejected.
+  assert.equal(
+    (await raw("/search", { user_id: "alice", queries: [{ text: "robot", appendOnly: true }] }))
+      .status,
+    400,
+  );
+  assert.equal(
+    (
+      await raw("/search", {
+        user_id: "alice",
+        queries: [{ text: "robot", appendOnly: true }, { text: "Atlas" }],
+      })
+    ).status,
+    400,
+  );
+  // Without an append-only clause the response keeps its original shape.
+  const plainAgain = await call("a", "/search", {
+    user_id: "alice",
+    queries: ["favorite robot Atlas", "Atlas robotics study"],
+    top_k: 5,
+  });
+  assert.equal(
+    plainAgain.body.appended,
+    undefined,
+    "no appended field without an append-only clause",
+  );
+  console.log(
+    "PASS: append-only clauses return a separate supplement that never repeats the page.",
+  );
   console.log(
     "PASS: multi-clause search fuses in one request and reports per-clause contribution.",
   );

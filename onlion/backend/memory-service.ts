@@ -7,10 +7,7 @@ import {
   projectAmlMultimodalMemory,
 } from "../../src/integration/aml-projection.ts";
 import { normalizeContent, type AmlContent } from "../../src/integration/multimodal-content.ts";
-import {
-  extractiveNodeSummary,
-  runExtractiveLeafSummaries,
-} from "./extractive-summaries.mjs";
+import { extractiveNodeSummary, runExtractiveLeafSummaries } from "./extractive-summaries.mjs";
 import type { EmbeddingClient } from "../../src/core/embedding-provider.ts";
 import type { RememberInput, MemorySearchResult } from "../../src/core/types.ts";
 
@@ -119,7 +116,10 @@ export class AmlMemoryService {
     // summary face so later batches can never split the node.
     const sessionDate = messages.find((message) => message.chat_time)?.chat_time?.slice(0, 10);
     const nodeSummary = extractiveNodeSummary(
-      messages.map((message) => message.indexText ?? (typeof message.content === "string" ? message.content : "")),
+      messages.map(
+        (message) =>
+          message.indexText ?? (typeof message.content === "string" ? message.content : ""),
+      ),
       sessionDate,
     );
     const inputs: RememberInput[] = messages.map((message): RememberInput => {
@@ -194,7 +194,11 @@ export class AmlMemoryService {
     this.store.close();
   }
 
-  async search(queries: string[], limit: number) {
+  /** Search the ranked clauses into one page and the append-only clauses into a
+   * separate supplement. Append-only results never compete for the page slots:
+   * they are returned as `appended`, deduplicated against the page, so a
+   * retrieval dimension that is broad but imprecise cannot crowd out evidence. */
+  async search(queries: string[], limit: number, appendOnly: readonly boolean[] = []) {
     if (this.client) {
       const health = this.store.embeddingIndexHealth(this.client.indexId);
       if (!health || health.pending.records || !health.targets.includes("records")) {
@@ -206,6 +210,7 @@ export class AmlMemoryService {
     // Track which clauses surfaced each memory, so a caller can see whether the
     // retrieval dimension it added actually contributed to the page.
     const byId = new Map<string, FusedCandidate>();
+    const appendedById = new Map<string, MemorySearchResult>();
     let records = false;
     for (const [index, query] of queries.entries()) {
       // User isolation is the physical manifest/partition boundary, including
@@ -221,6 +226,15 @@ export class AmlMemoryService {
         },
       });
       records ||= context.retrieval?.mode === "hybrid";
+      if (appendOnly[index]) {
+        for (const result of context.results) {
+          const prior = appendedById.get(result.memory.id);
+          if (!prior || result.combinedScore > prior.combinedScore) {
+            appendedById.set(result.memory.id, result);
+          }
+        }
+        continue;
+      }
       for (const result of context.results) trackCandidate(byId, index, result);
     }
     // Fuse clauses by identity, keep native scores, apply the AML hard cap.
@@ -231,10 +245,16 @@ export class AmlMemoryService {
           a.result.memory.id.localeCompare(b.result.memory.id),
       )
       .slice(0, limit);
+    const page = new Set(selected.map((entry) => entry.result.memory.id));
+    const appended = [...appendedById.values()]
+      .filter((result) => !page.has(result.memory.id))
+      .sort((a, b) => b.combinedScore - a.combinedScore || a.memory.id.localeCompare(b.memory.id))
+      .slice(0, limit);
     return {
       retrievalMode: records ? "records" : "lexical",
       memories: selected.map((entry) => projectResult(entry.result, queries[0] ?? "")),
       clauses: summariseClauses(selected, queries.length),
+      appended: appended.map((result) => projectResult(result, queries[0] ?? "")),
     };
   }
 }
