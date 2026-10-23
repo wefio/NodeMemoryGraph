@@ -556,13 +556,39 @@ transfer to a wider radius.
 
 ## Conclusion and decisions
 
+The gap splits into three layers, each with its own lever; every reading below
+belongs to one of them.
+
+1. **Candidate missing.** 198 questions (71.0%) miss at least one gold label from
+   every recorded query path, and the candidate union ceiling is 29.0%. Those
+   71.0pp can only move by changing the query expression or the representation
+   (including a decomposer, cancelled on cost), so this round ends here.
+2. **Cut page.** The candidate is in hand but not among the twenty records. The
+   adjacency pool's ceiling is 36.9% (radius 2, first 5 anchors) while its own
+   page reaches 19.4% — **17.5pp is decided by who makes the page**. The lever
+   there is allocation (supplement, budget, selection), and it measures: five
+   appended neighbour records take multi-hop 20.8% -> 23.7% and
+   temporal+single-hop 76.6% -> 84.1%; twenty reach 28.3% / 92.4%.
+3. **Final allocation.** The content is already in the page; what remains is its
+   position and form in the answer context. At the reader stage the page scores
+   61.4% and a tail append reaches 84.1%, while an anchored arrangement reaches
+   79.3% (3W/6L, p=0.51) and explicit relation markers 76.8% (2W/7L) — neither
+   beats a plain append. **Placement is not the variable; content is.**
+
+Two earlier generalisations are therefore withdrawn: (a) "multi-hop is not a
+ranking problem" — ranking among retrieved hops is indeed not the bottleneck
+(62% of hits sit in the top 5), but allocation among candidates into the page is
+not neutral, and layer 2's 17.5pp is decided by it; (b) "raising the ceiling
+requires changing the query expression or representation" — true only for layer
+1, since layer 2's ceiling was raised by allocation in measurement.
+
 - The online nmgremote full run and the timestamp-injection baseline are at
   aggregate parity; no regression claim is supported (summary-level audit of
   the provided artifacts).
-- Multi-hop retrieval is the binding weakness, and it is a per-hop recall
-  constraint inside one shared top-20, not a ranking problem: the isolated
-  depth arm (B) and the multi-path fused arms (D) both improve all@20 with
-  paired wins exceeding losses (16/3 at D100max). The old-口径 "a larger budget
+- Multi-hop retrieval is the binding weakness, constrained both by candidate
+  missing (71.0pp) and by page allocation (17.5pp inside the reachable band);
+  the layering is above. The isolated depth arm (B) and the multi-path fused arms
+  (D) both improve all@20 with paired wins exceeding losses (16/3 at D100max). The old-口径 "a larger budget
   recovers zero fully-covered questions" reading is withdrawn.
 - Static multi-path recall, measured on the P0-corrected v4 paired arms
   (coordinator-verified): D100max delivers **+4.7pp all@20 (16W/3L, p=0.0044)**
@@ -608,8 +634,11 @@ transfer to a wider radius.
   20.8%, while **71.0pp** of the gap is query/representation. Adjacency lifts the
   ceiling to 36.9% (radius 2, first 5 anchors; not measured wider) yet its page
   came in at 19.4%, so its binding constraint is allocation, not availability.
-  This is the quantitative reason every fusion-side variant stalled near 20%:
-  moving the ceiling requires changing query expression or representation.
+  Fusion-side variants stall near 20% because they all compete inside layer 2 for
+  the same twenty slots while layer 1's 71.0pp stays untouched; moving adjacency
+  outside the page instead of into the contest takes the same candidates to 23.7%
+  (five records) / 28.3% (twenty). "Changing the query expression or
+  representation" holds only for layer 1.
 - Open-domain is dropped from this effort by decision: most of its gap needs
   world knowledge beyond the stored conversation. (Captured note: 54.2% of
   open-domain questions retrieved zero evidence, so a retrieval-shaped slice
