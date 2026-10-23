@@ -476,6 +476,10 @@ memory_policy: >-
   updates; search first when duplication is plausible. Ask instead of saving when attribution, scope, or
   durability is materially ambiguous. Save only attributable, durable information; do not save secrets,
   transient content, unconfirmed assistant proposals, unsupported guesses, or information already stored.
+  The live position of an ongoing process — unpushed commits, a pending review, which PR must land first,
+  the next step — is transient content: it is superseded by the next ordinary event and duplicates a live
+  source, so it belongs in working_state rather than durable memory. The write boundary rejects exactly
+  those positions unless the caller states an expiry.
   For ongoing multi-step work, maintain one compact session working_state through nmg_state:
   select space=ag, explicitly enable its writer with action=write operation=enable and a reason,
   then use action=write operation=replace with text=<complete current state> after meaningful progress,

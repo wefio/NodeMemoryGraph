@@ -1855,6 +1855,24 @@ test("CLI writes pass through the governed memory admission policy", async () =>
       }),
       { code: "WRITE_REJECTED" },
     );
+    // A live process position is refused for a different reason than wording: it
+    // is a well-formed claim with no stable truth value.
+    await assert.rejects(
+      service.invoke("remember", {
+        statement: "Local main is 16 commits ahead of origin/main and unpushed.",
+        nodeName: "Release flow",
+        memoryType: "constraint",
+      }),
+      { code: "WRITE_REJECTED", message: /coordination_state/u },
+    );
+    // Stating when the position stops being true is what makes it recordable.
+    const bounded = await service.invoke("remember", {
+      statement: "Local main is 16 commits ahead of origin/main and unpushed.",
+      nodeName: "Release flow",
+      memoryType: "constraint",
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    assert.equal(bounded.memory.statement.includes("unpushed"), true);
     // ...but the explicit escape hatch (unsafe) admits it and tags the audit marker.
     const admitted = await service.invoke("remember", {
       statement: "用户偏好：持久化文档不带临时时间标注。",

@@ -147,3 +147,66 @@ test("evidence is exempt from intent filters but not from secret detection", () 
     false,
   );
 });
+
+test("refuses a live process position that no event bounds", () => {
+  // The failure this rule exists for: a true-today, false-tomorrow snapshot of
+  // a workflow, written as if it were durable knowledge.
+  const snapshot =
+    "Local main is 16 commits ahead of origin/main and unpushed; wait for the audit PR before pushing.";
+  assert.deepEqual(assessMemoryWrite({ statement: snapshot, memoryType: "constraint" }), {
+    allowed: false,
+    reason: "coordination_state",
+  });
+  assert.deepEqual(
+    assessMemoryWrite({
+      statement: "本地 main 领先 origin/main 16 个提交，未推送，等 PR 落地再说。",
+      memoryType: "constraint",
+    }),
+    { allowed: false, reason: "coordination_state" },
+  );
+});
+
+test("a stated expiry is what makes a process position recordable", () => {
+  // The escape hatch for this rule is expiresAt, not bypass: naming when the
+  // claim stops being true is the information an unbounded record lacks.
+  const snapshot = "Local main is 16 commits ahead of origin/main and unpushed.";
+  assert.equal(
+    assessMemoryWrite({
+      statement: snapshot,
+      memoryType: "constraint",
+      expiresAt: "2026-10-30T00:00:00.000Z",
+    }).allowed,
+    true,
+  );
+  assert.equal(
+    assessMemoryWrite({ statement: snapshot, memoryType: "constraint", bypass: true }).allowed,
+    true,
+  );
+});
+
+test("an event is exempt because it records an occurrence, not a position", () => {
+  assert.equal(
+    assessMemoryWrite({
+      statement: "The audit PR merged while 16 commits were still unpushed.",
+      memoryType: "event",
+    }).allowed,
+    true,
+  );
+});
+
+test("durable rules that merely touch process words stay allowed", () => {
+  const durable = [
+    "Merges require a green gate; the release order is staging then production.",
+    "The user decided that benchmark scrapers never enter the product tree.",
+    "合并必须通过门禁；发布顺序是暂存再生产。",
+    "用户决定：基准抓取脚本不进入产品目录。",
+    "The 状态 vocabulary is defined in docs/decisions/implemented/2026-09-20-name-the-collaboration-protocol.md.",
+  ];
+  for (const statement of durable) {
+    assert.deepEqual(
+      assessMemoryWrite({ statement, memoryType: "constraint" }),
+      { allowed: true, reason: "allowed" },
+      statement,
+    );
+  }
+});

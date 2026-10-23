@@ -2,7 +2,7 @@ import type { MemoryType } from "./types.ts";
 
 export interface MemoryWriteAssessment {
   allowed: boolean;
-  reason: "allowed" | "secret" | "non_persistent_instruction";
+  reason: "allowed" | "secret" | "non_persistent_instruction" | "coordination_state";
 }
 
 const SECRET_PATTERNS = [
@@ -32,6 +32,36 @@ const TRANSIENT_PATTERNS = [
 ];
 
 /**
+ * Coordination state: the current position of an ongoing process — a queue, a
+ * branch, a handoff — which the next ordinary event silently invalidates.
+ *
+ * The distinction from the transient wording above is not the word "temporary":
+ * it is whether the claim keeps its meaning once the work moves. "Pushed 16
+ * commits, waiting for the PR" is true today and false tomorrow, with nothing in
+ * the record saying so. A caller may still record such a position by stating
+ * when it stops being true (`expiresAt`); the harness will not invent an
+ * unbounded lifetime for it.
+ *
+ * Kept deliberately narrow: process nouns that are unambiguous in the present
+ * tense (pending, unpushed, next step) and their Chinese counterparts. Statements
+ * about durable rules — "merges require a green gate", "the release order is X
+ * then Y" — must stay allowed, so no pattern keys on a bare verb.
+ */
+const COORDINATION_STATE_PATTERNS = [
+  /\b(?:unpushed|unmerged|uncommitted|not yet (?:pushed|committed|merged|deployed))\b/i,
+  /\b(?:still )?pending (?:review|merge|push|approval|confirmation)\b/i,
+  /\b(?:the )?next step\b/i,
+  /\b\d+ commits? ahead (?:of )?(?:origin|upstream|main|the remote)\b/i,
+  /\b(?:waiting|blocked) (?:on|for) [^.]{0,40}\b(?:to land|to merge|to push|to confirm|to review)\b/i,
+  /(?:尚未|还没有|还没)(?:推送|提交|合并|部署|落地)/u,
+  /未(?:推送|提交|合并|部署)/u,
+  /待(?:办|定|审|确认|复核)/u,
+  /下一步/u,
+  /领先\s{0,2}(?:origin|远端|main)/iu,
+  /(?:等|待)[^。；;.]{0,20}(?:落地|合入|合并|再)(?:后|之)/u,
+];
+
+/**
  * A small deterministic safety boundary around model-proposed writes.
  *
  * It intentionally rejects only high-confidence secrets and explicitly
@@ -45,12 +75,20 @@ const TRANSIENT_PATTERNS = [
  * never bypassable: the memory-safety invariant takes precedence over the
  * caller's explicit request, exactly as Rust's unsafe cannot break the
  * borrow-checker's guarantees it does not fully control.
+ *
+ * Coordination state is refused for a different reason than the wording
+ * filters: the claim is well formed, it just has no stable truth value. Its
+ * escape hatch is `expiresAt`, not `bypass` — a caller that names when the
+ * position stops being true has told the harness how to age it, which is the
+ * information an unbounded record lacks. `bypass` still overrides, because the
+ * unconditional escape hatch must stay unconditional to remain auditable.
  */
 export function assessMemoryWrite(input: {
   statement: string;
   evidence?: string;
   memoryType?: MemoryType;
   bypass?: boolean;
+  expiresAt?: string;
 }): MemoryWriteAssessment {
   const statementText = `${input.statement}`;
   const evidenceText = `${input.evidence ?? ""}`;
@@ -78,6 +116,17 @@ export function assessMemoryWrite(input: {
     TRANSIENT_PATTERNS.some((pattern) => pattern.test(statementText))
   ) {
     return { allowed: false, reason: "non_persistent_instruction" };
+  }
+  // Coordination state: allowed only when the caller says when it expires. An
+  // event is exempt because it records a dated occurrence rather than a live
+  // position; the transient rules above already treat events the same way.
+  if (
+    !input.bypass &&
+    input.memoryType !== "event" &&
+    !input.expiresAt &&
+    COORDINATION_STATE_PATTERNS.some((pattern) => pattern.test(statementText))
+  ) {
+    return { allowed: false, reason: "coordination_state" };
   }
   return { allowed: true, reason: "allowed" };
 }

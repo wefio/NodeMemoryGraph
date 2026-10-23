@@ -1358,6 +1358,7 @@ export class NmgService {
       evidence: params.evidence,
       memoryType: params.memoryType,
       bypass: params.unsafe,
+      expiresAt: params.expiresAt,
     });
     if (!assessment.allowed) {
       this.#getStore().recordRejectedWrite({
