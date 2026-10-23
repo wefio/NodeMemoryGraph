@@ -508,7 +508,8 @@ async function main(): Promise<void> {
     process.stderr.write(
       `complexity gate FAILED (max ${maxComplexity}, ${describeBasis(basis)}):\n${violations
         .map((violation) => `  - ${violation}`)
-        .join("\n")}\n${notes}`,
+        .join("\n")}\n${notes}` +
+        "\nRemediation guide: skills/complexity-reduction/SKILL.md (CodeFactor enforces the same cap on PR diffs).\n",
     );
     process.exitCode = 1;
     return;

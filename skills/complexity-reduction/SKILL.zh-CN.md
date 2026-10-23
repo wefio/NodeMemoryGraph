@@ -20,10 +20,30 @@ description: 降低 NMG 代码的圈复杂度（CodeFactor Complex Method，或�
 找出哪些方法超过阈值，以及它们是否由本次改动引入：
 
 ```text
-npx eslint --rule '{"complexity": ["error", 15]}' <file>       # per-method complexity
-git show <base>:<file> | npx eslint --stdin --stdin-filename <file> \
-  --rule '{"complexity": ["error", 15]}'                       # baseline (was it already complex?)
+npx eslint --no-config-lookup --format json \
+  --rule '{"complexity": ["error", 15]}' <file>                 # 每方法复杂度
+
+git show <base>:<file> | npx eslint --no-config-lookup --format json \
+  --stdin --stdin-filename <file> --rule '{"complexity": ["error", 15]}'   # 基线（此前是否已超限？）
 ```
+
+仅加规则的运行必须传 `--no-config-lookup`（ESLint 9 否则会把仓库配置合并进
+来），并用 `--format json`（文本格式不稳定、难以解析）。
+
+### 基线陷阱：在 main 上 gate 是自引用的
+
+`complexity:gate` 的基线默认取与 `origin/main` 的 merge base。在功能分支上
+这是正确的，但**在 main 本身 merge base 就是 HEAD**，于是每个超限都读作
+"unchanged from baseline"，gate 永远报 ok。在 main 上审计或在合并之后，要
+对照实际已落地的状态度量：
+
+```text
+git fetch origin
+npm run complexity:gate -- --base origin/main
+```
+
+gate 失败时会点名本 skill；当文件进入 diff 时，CodeFactor 对与基线相比未变
+化的方法也执行同样阈值——仍应降低。
 
 如果被标记的方法与基线相比**没有变化**，它是既有债务；但当该文件进入 diff 时，CodeFactor 仍要求它低于阈值——仍应降低复杂度（这是可审查的改进，不是无效改动）。
 
