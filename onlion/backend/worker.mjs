@@ -1,497 +1,1119 @@
 /* global __NMG_SOURCE_REVISION__ */
-import {withRequest,requestIdentity,queueAccepted,queueStarted,queueFinished,queueStatus,reportFailure,embeddingOperation,embeddingObservation,recentFailures,check,classifyError} from './monitoring.mjs';
-import {memoryBucket,reclaimAll,reclamationStatus} from './reclamation.mjs';
-import {measure, profileSearch, runtimeStatus, statisticsEnabled, setStatistics, requestAccepted, requestStarted, requestFinished} from './diagnostics.mjs';
-import init from '../sqlite-wasm/worker-loader.mjs';
-import compiledSqlite from '../sqlite-wasm/sqlite3.wasm';
-import { configure, DatabaseSync, withDatabases } from './sqlite.mjs';
-import { AmlMemoryService, AML_SEARCH_PROFILE, CORE_SOURCE } from './memory-service.ts';
-import { createEmbeddingClientFromEnv } from '../../src/core/embedding-provider.ts';
-import { normalizeContent, contentText, describeContent, ContentValidationError } from '../../src/integration/multimodal-content.ts';
-import { createHash, timingSafeEqual } from 'node:crypto';
-import { page } from './page.mjs';
-import {USER_LIMIT,PART_LIMIT,PART_TARGET,MAX_PARTS,keyFor,StorageError,loadManifest,newPart,runPart,stagePart,stageSearchPart,commitManifest,removeStaged,retireParts,userCapacity,resetUser} from './storage.mjs';
-import {deltaBytes, USER_DELTA_LIMIT} from './page-delta.mjs';
-import {deferredDocuments} from './embedding-session.mjs';
-import {queryVector,rememberQueryVector} from './query-cache.mjs';
+import {
+  withRequest,
+  requestIdentity,
+  queueAccepted,
+  queueStarted,
+  queueFinished,
+  queueStatus,
+  reportFailure,
+  embeddingOperation,
+  embeddingObservation,
+  recentFailures,
+  check,
+  classifyError,
+} from "./monitoring.mjs";
+import { memoryBucket, reclaimAll, reclamationStatus } from "./reclamation.mjs";
+import {
+  measure,
+  profileSearch,
+  runtimeStatus,
+  statisticsEnabled,
+  setStatistics,
+  requestAccepted,
+  requestStarted,
+  requestFinished,
+} from "./diagnostics.mjs";
+import init from "../sqlite-wasm/worker-loader.mjs";
+import compiledSqlite from "../sqlite-wasm/sqlite3.wasm";
+import { configure, DatabaseSync, withDatabases } from "./sqlite.mjs";
+import { AmlMemoryService, AML_SEARCH_PROFILE, CORE_SOURCE } from "./memory-service.ts";
+import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
+import {
+  normalizeContent,
+  contentText,
+  describeContent,
+  ContentValidationError,
+} from "../../src/integration/multimodal-content.ts";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { page } from "./page.mjs";
+import {
+  USER_LIMIT,
+  PART_LIMIT,
+  PART_TARGET,
+  MAX_PARTS,
+  keyFor,
+  StorageError,
+  loadManifest,
+  newPart,
+  runPart,
+  stagePart,
+  stageSearchPart,
+  commitManifest,
+  removeStaged,
+  retireParts,
+  userCapacity,
+  resetUser,
+} from "./storage.mjs";
+import { deltaBytes, USER_DELTA_LIMIT } from "./page-delta.mjs";
+import { deferredDocuments } from "./embedding-session.mjs";
+import { queryVector, rememberQueryVector } from "./query-cache.mjs";
 
 const MAX_DATABASE_BYTES = USER_LIMIT;
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
-const SOURCE_REVISION = typeof __NMG_SOURCE_REVISION__ === 'undefined' ? 'development' : __NMG_SOURCE_REVISION__;
+const SOURCE_REVISION =
+  typeof __NMG_SOURCE_REVISION__ === "undefined" ? "development" : __NMG_SOURCE_REVISION__;
 // Cache only the completed, I/O-free WASM instance. Pending operations belong
 // to their originating request and must never be chained across invocations.
 let ready;
-const hash = text => createHash('sha256').update(text).digest('hex');
-const objectKey = key => `users/${key}.sqlite`;
-const json = (body, status=200, headers={}) => Response.json(body, {status,headers:{'cache-control':'no-store',...headers}});
-class HttpError extends Error { constructor(status, code, message) { super(message);this.status=status;this.code=code; } }
-function textField(value, label, max=512) {
-  if (typeof value !== 'string' || !value.trim() || value.length>max)
-    throw new HttpError(400,'invalid_request',`${label} must be a nonempty string of at most ${max} characters`);
+const hash = (text) => createHash("sha256").update(text).digest("hex");
+const objectKey = (key) => `users/${key}.sqlite`;
+const json = (body, status = 200, headers = {}) =>
+  Response.json(body, { status, headers: { "cache-control": "no-store", ...headers } });
+class HttpError extends Error {
+  constructor(status, code, message) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+function textField(value, label, max = 512) {
+  if (typeof value !== "string" || !value.trim() || value.length > max)
+    throw new HttpError(
+      400,
+      "invalid_request",
+      `${label} must be a nonempty string of at most ${max} characters`,
+    );
   return value;
 }
 function contentField(value, maxTextChars = 128000) {
   try {
     const content = normalizeContent(value, { maxTextChars });
-    if (typeof content !== 'string' && new TextEncoder().encode(JSON.stringify(content)).length > 2 * 1024 * 1024) {
-      throw new HttpError(413, 'content_too_large', 'Ordered source content limit is 2 MiB');
+    if (
+      typeof content !== "string" &&
+      new TextEncoder().encode(JSON.stringify(content)).length > 2 * 1024 * 1024
+    ) {
+      throw new HttpError(413, "content_too_large", "Ordered source content limit is 2 MiB");
     }
     return content;
   } catch (error) {
-    if (error instanceof ContentValidationError) throw new HttpError(error.code === 'content_too_large' ? 413 : 400, error.code, error.message);
+    if (error instanceof ContentValidationError)
+      throw new HttpError(
+        error.code === "content_too_large" ? 413 : 400,
+        error.code,
+        error.message,
+      );
     throw error;
   }
 }
 function createContentView() {
   // Supplied captions are the retrieval view; no model is invoked.
-  return content => describeContent(content);
+  return (content) => describeContent(content);
 }
 async function sqliteReady() {
   if (ready) return ready;
-  const instance = await init({instantiateWasm(imports, receive) {
-    const instance = new WebAssembly.Instance(compiledSqlite, imports);
-    receive(instance, compiledSqlite);return instance.exports;
-  },print:()=>{},printErr:()=>{}});
-  if (!ready) { ready=instance; configure(ready); }
+  const instance = await init({
+    instantiateWasm(imports, receive) {
+      const instance = new WebAssembly.Instance(compiledSqlite, imports);
+      receive(instance, compiledSqlite);
+      return instance.exports;
+    },
+    print: () => {},
+    printErr: () => {},
+  });
+  if (!ready) {
+    ready = instance;
+    configure(ready);
+  }
   return ready;
 }
 function authenticate(request, env) {
-  const authorization = request.headers.get('authorization') || '';
-  const authorizationToken = authorization.match(/^(?:Bearer|Token)\s+(.+)$/i)?.[1] || '';
-  const supplied = request.headers.get('x-api-key') || authorizationToken;
-  if (!env.NMG_API_KEY) throw new HttpError(503,'not_configured','API authentication is not configured');
-  if (!supplied || !timingSafeEqual(Buffer.from(hash(supplied)),Buffer.from(hash(env.NMG_API_KEY))))
-    throw new HttpError(401,'unauthorized','A valid Token, Bearer, or X-API-Key credential is required');
+  const authorization = request.headers.get("authorization") || "";
+  const authorizationToken = authorization.match(/^(?:Bearer|Token)\s+(.+)$/i)?.[1] || "";
+  const supplied = request.headers.get("x-api-key") || authorizationToken;
+  if (!env.NMG_API_KEY)
+    throw new HttpError(503, "not_configured", "API authentication is not configured");
+  if (
+    !supplied ||
+    !timingSafeEqual(Buffer.from(hash(supplied)), Buffer.from(hash(env.NMG_API_KEY)))
+  )
+    throw new HttpError(
+      401,
+      "unauthorized",
+      "A valid Token, Bearer, or X-API-Key credential is required",
+    );
 }
 async function readJson(request) {
-  if (Number(request.headers.get('content-length')) > MAX_BODY_BYTES) throw new HttpError(413,'request_too_large','Request limit is 6 MiB');
-  if (!request.body) throw new HttpError(400,'invalid_json','JSON body required');
-  const reader=request.body.getReader();const chunks=[];let length=0;
-  try { while(true) { const {done,value}=await reader.read();if(done)break;length+=value.length;
-    if(length>MAX_BODY_BYTES){await reader.cancel();throw new HttpError(413,'request_too_large','Request limit is 6 MiB');}chunks.push(value);
-  }} finally { reader.releaseLock(); }
-  const body=new Uint8Array(length);let offset=0;for(const c of chunks){body.set(c,offset);offset+=c.length;}
-  try { const v=JSON.parse(new TextDecoder().decode(body));if(!v||typeof v!=='object'||Array.isArray(v))throw 0;return v; }
-  catch { throw new HttpError(400,'invalid_json','Body must be a JSON object'); }
+  if (Number(request.headers.get("content-length")) > MAX_BODY_BYTES)
+    throw new HttpError(413, "request_too_large", "Request limit is 6 MiB");
+  if (!request.body) throw new HttpError(400, "invalid_json", "JSON body required");
+  const reader = request.body.getReader();
+  const chunks = [];
+  let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.length;
+      if (length > MAX_BODY_BYTES) {
+        await reader.cancel();
+        throw new HttpError(413, "request_too_large", "Request limit is 6 MiB");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const body = new Uint8Array(length);
+  let offset = 0;
+  for (const c of chunks) {
+    body.set(c, offset);
+    offset += c.length;
+  }
+  try {
+    const v = JSON.parse(new TextDecoder().decode(body));
+    if (!v || typeof v !== "object" || Array.isArray(v)) throw 0;
+    return v;
+  } catch {
+    throw new HttpError(400, "invalid_json", "Body must be a JSON object");
+  }
 }
 // Atomic manifest commits preserve request idempotency across all partitions.
-async function mutateUser(env,userId,operation) {
-  const sqlite=await measure('sqlite_init',()=>sqliteReady()), key=keyFor(userId);
+async function mutateUser(env, userId, operation) {
+  const sqlite = await measure("sqlite_init", () => sqliteReady()),
+    key = keyFor(userId);
   let generation;
-  for(let attempt=0;attempt<4;attempt++) {
-    const {object,manifest:before}=await measure('manifest_read',()=>loadManifest(env.MEMORY,key,userId));
-    const observed=before.generation??null;
-    if(attempt===0)generation=observed;
-    else if(observed!==generation)throw new HttpError(409,'user_reset','User memory was reset during this operation; submit only the new dataset');
-    const manifest=structuredClone(before), staged=[];
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const { object, manifest: before } = await measure("manifest_read", () =>
+      loadManifest(env.MEMORY, key, userId),
+    );
+    const observed = before.generation ?? null;
+    if (attempt === 0) generation = observed;
+    else if (observed !== generation)
+      throw new HttpError(
+        409,
+        "user_reset",
+        "User memory was reset during this operation; submit only the new dataset",
+      );
+    const manifest = structuredClone(before),
+      staged = [];
     try {
-      const result=await operation({sqlite,key,manifest,staged});
-      if(result.readOnly)return result.response;
-      const saved=await measure('manifest_commit',()=>commitManifest(env.MEMORY,key,object,manifest));
-      if(saved){
-        const live=new Set(manifest.parts.map(p=>p.key));
-        await removeStaged(env.MEMORY,staged.filter(k=>!live.has(k))).catch(()=>{});
-        await measure('retired_cleanup',()=>retireParts(env.MEMORY,before,manifest));
+      const result = await operation({ sqlite, key, manifest, staged });
+      if (result.readOnly) return result.response;
+      const saved = await measure("manifest_commit", () =>
+        commitManifest(env.MEMORY, key, object, manifest),
+      );
+      if (saved) {
+        const live = new Set(manifest.parts.map((p) => p.key));
+        await removeStaged(
+          env.MEMORY,
+          staged.filter((k) => !live.has(k)),
+        ).catch(() => {});
+        await measure("retired_cleanup", () => retireParts(env.MEMORY, before, manifest));
         return result.response;
       }
-    } catch(error) {
-      await removeStaged(env.MEMORY,staged).catch(()=>{});
-      if(error.code==='snapshot_changed')continue;
+    } catch (error) {
+      await removeStaged(env.MEMORY, staged).catch(() => {});
+      if (error.code === "snapshot_changed") continue;
       throw error;
     }
-    await removeStaged(env.MEMORY,staged).catch(()=>{});
+    await removeStaged(env.MEMORY, staged).catch(() => {});
   }
-  throw new HttpError(503,'write_conflict','Concurrent changes detected; retry the same request_id');
+  throw new HttpError(
+    503,
+    "write_conflict",
+    "Concurrent changes detected; retry the same request_id",
+  );
 }
-function embeddingClient(env){
-  const client=createEmbeddingClientFromEnv({...env,NMG_EMBED_TIMEOUT_MS:env.NMG_EMBED_TIMEOUT_MS??'90000'});
-  if(!client)return undefined;
-  const queries=new Map();
-  const provider=hash(JSON.stringify([client.indexId,client.baseUrl,client.apiKey]));
-  return {indexId:client.indexId,model:client.model,profile:client.profile,embed:inputs=>embeddingOperation(()=>client.embed(inputs)),embedDocuments:deferredDocuments(inputs=>embeddingOperation(()=>client.embedDocuments(inputs))),
-    embedQueries(inputs){
-      const key=hash(JSON.stringify([provider,inputs]));
-      if(!queries.has(key))queries.set(key,measure('embedding',async()=>{
-        const cached=queryVector(key);if(cached)return cached;
-        const vectors=await embeddingOperation(()=>client.embedQueries(inputs));
-        rememberQueryVector(key,vectors);return vectors;
-      }));
+function embeddingClient(env) {
+  const client = createEmbeddingClientFromEnv({
+    ...env,
+    NMG_EMBED_TIMEOUT_MS: env.NMG_EMBED_TIMEOUT_MS ?? "90000",
+  });
+  if (!client) return undefined;
+  const queries = new Map();
+  const provider = hash(JSON.stringify([client.indexId, client.baseUrl, client.apiKey]));
+  return {
+    indexId: client.indexId,
+    model: client.model,
+    profile: client.profile,
+    embed: (inputs) => embeddingOperation(() => client.embed(inputs)),
+    embedDocuments: deferredDocuments((inputs) =>
+      embeddingOperation(() => client.embedDocuments(inputs)),
+    ),
+    embedQueries(inputs) {
+      const key = hash(JSON.stringify([provider, inputs]));
+      if (!queries.has(key))
+        queries.set(
+          key,
+          measure("embedding", async () => {
+            const cached = queryVector(key);
+            if (cached) return cached;
+            const vectors = await embeddingOperation(() => client.embedQueries(inputs));
+            rememberQueryVector(key, vectors);
+            return vectors;
+          }),
+        );
       return queries.get(key);
-    }};
+    },
+  };
 }
-function copyLegacyReceipts(manifest,rows){
-  for(const row of rows||[])manifest.receipts[row.request_hash]??={fingerprint:row.fingerprint,response:JSON.parse(row.response),completed_at:row.completed_at};
+function copyLegacyReceipts(manifest, rows) {
+  for (const row of rows || [])
+    manifest.receipts[row.request_hash] ??= {
+      fingerprint: row.fingerprint,
+      response: JSON.parse(row.response),
+      completed_at: row.completed_at,
+    };
 }
-function normalizeAddMessage(m){
-  if(!m||typeof m!=='object')throw new HttpError(400,'invalid_request','Invalid message');
-  const content=contentField(m.content);
-  const role=textField(m.role,'message.role',64);
-  if(!['user','assistant'].includes(role))throw new HttpError(400,'invalid_request','message.role must be user or assistant');
-  let chat_time=m.chat_time;
-  if(chat_time===undefined&&m.timestamp!==undefined) {
-    if(typeof m.timestamp!=='number'||!Number.isFinite(m.timestamp)||!Number.isFinite(new Date(m.timestamp).getTime()))
-      throw new HttpError(400,'invalid_request','timestamp must be Unix milliseconds');
-    chat_time=new Date(m.timestamp).toISOString();
+function normalizeAddMessage(m) {
+  if (!m || typeof m !== "object") throw new HttpError(400, "invalid_request", "Invalid message");
+  const content = contentField(m.content);
+  const role = textField(m.role, "message.role", 64);
+  if (!["user", "assistant"].includes(role))
+    throw new HttpError(400, "invalid_request", "message.role must be user or assistant");
+  let chat_time = m.chat_time;
+  if (chat_time === undefined && m.timestamp !== undefined) {
+    if (
+      typeof m.timestamp !== "number" ||
+      !Number.isFinite(m.timestamp) ||
+      !Number.isFinite(new Date(m.timestamp).getTime())
+    )
+      throw new HttpError(400, "invalid_request", "timestamp must be Unix milliseconds");
+    chat_time = new Date(m.timestamp).toISOString();
   }
-  if(chat_time!==undefined&&(typeof chat_time!=='string'||!Number.isFinite(Date.parse(chat_time))))
-    throw new HttpError(400,'invalid_request','chat_time must be a valid date string');
-  return {role,content,...(chat_time?{chat_time}: {})};
+  if (
+    chat_time !== undefined &&
+    (typeof chat_time !== "string" || !Number.isFinite(Date.parse(chat_time)))
+  )
+    throw new HttpError(400, "invalid_request", "chat_time must be a valid date string");
+  return { role, content, ...(chat_time ? { chat_time } : {}) };
 }
-async function existingReceipt(env,ctx,requestHash,fingerprint){
-  const previous=ctx.manifest.receipts[requestHash];
-  if(previous){
-    if(previous.fingerprint!==fingerprint)throw new HttpError(409,'request_id_reused','request_id was already used for different content');
-    return {readOnly:true,response:previous.response};
+async function existingReceipt(env, ctx, requestHash, fingerprint) {
+  const previous = ctx.manifest.receipts[requestHash];
+  if (previous) {
+    if (previous.fingerprint !== fingerprint)
+      throw new HttpError(
+        409,
+        "request_id_reused",
+        "request_id was already used for different content",
+      );
+    return { readOnly: true, response: previous.response };
   }
   // A v1 receipt remains authoritative when retrying a pre-upgrade request.
-  const legacy=ctx.manifest.parts.find(p=>p.key===objectKey(ctx.key));
-  if(!legacy)return undefined;
-  const old=await runPart(env.MEMORY,legacy,ctx.sqlite,async({connection})=>{
-    const exists=connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='cloud_receipts'").get();
-    return {readOnly:true,response:exists?connection.prepare('SELECT fingerprint,response FROM cloud_receipts WHERE request_hash=?').get(requestHash):undefined};
+  const legacy = ctx.manifest.parts.find((p) => p.key === objectKey(ctx.key));
+  if (!legacy) return undefined;
+  const old = await runPart(env.MEMORY, legacy, ctx.sqlite, async ({ connection }) => {
+    const exists = connection
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='cloud_receipts'")
+      .get();
+    return {
+      readOnly: true,
+      response: exists
+        ? connection
+            .prepare("SELECT fingerprint,response FROM cloud_receipts WHERE request_hash=?")
+            .get(requestHash)
+        : undefined,
+    };
   });
-  if(old.response){
-    if(old.response.fingerprint!==fingerprint)throw new HttpError(409,'request_id_reused','request_id was already used for different content');
-    return {readOnly:true,response:JSON.parse(old.response.response)};
+  if (old.response) {
+    if (old.response.fingerprint !== fingerprint)
+      throw new HttpError(
+        409,
+        "request_id_reused",
+        "request_id was already used for different content",
+      );
+    return { readOnly: true, response: JSON.parse(old.response.response) };
   }
   return undefined;
 }
-async function addOneBatch(env,ctx,requestId,batch,manifest,staged){
-  const reserve=batch.reduce((sum,m)=>sum+new TextEncoder().encode(typeof m.content === 'string'?m.content:JSON.stringify(m.content)).length*6+12*1024,0);
-  let index=manifest.parts.length-1;
-  if(index<0||manifest.parts[index].bytes+reserve>PART_TARGET){
-    if(manifest.parts.length>=MAX_PARTS)throw new StorageError('user_storage_limit','User exceeds 128 storage partitions');
-    index=manifest.parts.length;manifest.parts.push(newPart(ctx.userId));
+async function addOneBatch(env, ctx, requestId, batch, manifest, staged) {
+  const reserve = batch.reduce(
+    (sum, m) =>
+      sum +
+      new TextEncoder().encode(
+        typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+      ).length *
+        6 +
+      12 * 1024,
+    0,
+  );
+  let index = manifest.parts.length - 1;
+  if (index < 0 || manifest.parts[index].bytes + reserve > PART_TARGET) {
+    if (manifest.parts.length >= MAX_PARTS)
+      throw new StorageError("user_storage_limit", "User exceeds 128 storage partitions");
+    index = manifest.parts.length;
+    manifest.parts.push(newPart(ctx.userId));
   }
-  const compute=part=>runPart(env.MEMORY,part,ctx.sqlite,async({key:partKey})=>{
-    const service=new AmlMemoryService(partKey,ctx.client);
-    return {response:await measure('nmg_write',()=>service.rememberBatch(ctx.userId,ctx.sessionId,requestId,batch))};
-  });
-  let result=await compute(manifest.parts[index]);
-  if(result.snapshot.byteLength>PART_LIMIT&&manifest.parts[index].bytes){
-    if(manifest.parts.length>=MAX_PARTS)throw new StorageError('user_storage_limit','User exceeds 128 storage partitions');
-    index=manifest.parts.length;manifest.parts.push(newPart(ctx.userId));result=await compute(manifest.parts[index]);
+  const compute = (part) =>
+    runPart(env.MEMORY, part, ctx.sqlite, async ({ key: partKey }) => {
+      const service = new AmlMemoryService(partKey, ctx.client);
+      return {
+        response: await measure("nmg_write", () =>
+          service.rememberBatch(ctx.userId, ctx.sessionId, requestId, batch),
+        ),
+      };
+    });
+  let result = await compute(manifest.parts[index]);
+  if (result.snapshot.byteLength > PART_LIMIT && manifest.parts[index].bytes) {
+    if (manifest.parts.length >= MAX_PARTS)
+      throw new StorageError("user_storage_limit", "User exceeds 128 storage partitions");
+    index = manifest.parts.length;
+    manifest.parts.push(newPart(ctx.userId));
+    result = await compute(manifest.parts[index]);
   }
-  if(result.snapshot.byteLength>PART_LIMIT)throw new StorageError('part_storage_limit','One Add batch exceeds 8 MiB; submit fewer messages');
-  copyLegacyReceipts(manifest,result.legacyReceipts);
-  const part=await stagePart(env.MEMORY,ctx.key,manifest.parts[index],result.snapshot);
-  manifest.parts[index]=part;staged.push(part.key);
+  if (result.snapshot.byteLength > PART_LIMIT)
+    throw new StorageError(
+      "part_storage_limit",
+      "One Add batch exceeds 8 MiB; submit fewer messages",
+    );
+  copyLegacyReceipts(manifest, result.legacyReceipts);
+  const part = await stagePart(env.MEMORY, ctx.key, manifest.parts[index], result.snapshot);
+  manifest.parts[index] = part;
+  staged.push(part.key);
   return result.response.added;
 }
-async function add(env,input) {
-  const userId=textField(input.user_id ?? input.userId,'user_id');
-  requestIdentity(userId,input.request_id);
-  const requestId=textField(input.request_id,'request_id');
-  const sessionId=textField(input.session_id ?? input.conversationId,'session_id');
-  if(!Array.isArray(input.messages)||!input.messages.length||input.messages.length>512)
-    throw new HttpError(400,'invalid_request','messages must contain between 1 and 512 messages');
-  let chars=0;
-  const messages=input.messages.map(m=>{
-    const message=normalizeAddMessage(m);
-    chars+=contentText(message.content).length;
+async function add(env, input) {
+  const userId = textField(input.user_id ?? input.userId, "user_id");
+  requestIdentity(userId, input.request_id);
+  const requestId = textField(input.request_id, "request_id");
+  const sessionId = textField(input.session_id ?? input.conversationId, "session_id");
+  if (!Array.isArray(input.messages) || !input.messages.length || input.messages.length > 512)
+    throw new HttpError(400, "invalid_request", "messages must contain between 1 and 512 messages");
+  let chars = 0;
+  const messages = input.messages.map((m) => {
+    const message = normalizeAddMessage(m);
+    chars += contentText(message.content).length;
     return message;
   });
-  if(chars>128000)throw new HttpError(413,'request_too_large','Combined message content limit is 128000 characters');
-  const fingerprint=hash(JSON.stringify({sessionId,messages}));
-  const client=embeddingClient(env);
-  const contentView=createContentView();
-  const requestHash=hash(requestId);
-  const serviceContext={userId,sessionId,client};
-  return mutateUser(env,userId,async(ctx)=>{
-    const {key,manifest,staged}=ctx;
-    const reused=await existingReceipt(env,ctx,requestHash,fingerprint);
-    if(reused)return reused;
+  if (chars > 128000)
+    throw new HttpError(
+      413,
+      "request_too_large",
+      "Combined message content limit is 128000 characters",
+    );
+  const fingerprint = hash(JSON.stringify({ sessionId, messages }));
+  const client = embeddingClient(env);
+  const contentView = createContentView();
+  const requestHash = hash(requestId);
+  const serviceContext = { userId, sessionId, client };
+  return mutateUser(env, userId, async (ctx) => {
+    const { key, manifest, staged } = ctx;
+    const reused = await existingReceipt(env, ctx, requestHash, fingerprint);
+    if (reused) return reused;
     // Prepare supplied text and optional captions outside SQLite, after receipts.
     // This request-scoped cache also survives manifest CAS recomputation.
-    const prepared=[];
-    for(const message of messages) prepared.push(typeof message.content === 'string' ? message : {...message,indexText:await contentView(message.content)});
-    const batchSize=prepared.some(message=>Array.isArray(message.content))?1:32;
-    let added=0;
-    for(let offset=0;offset<prepared.length;offset+=batchSize){
+    const prepared = [];
+    for (const message of messages)
+      prepared.push(
+        typeof message.content === "string"
+          ? message
+          : { ...message, indexText: await contentView(message.content) },
+      );
+    const batchSize = prepared.some((message) => Array.isArray(message.content)) ? 1 : 32;
+    let added = 0;
+    for (let offset = 0; offset < prepared.length; offset += batchSize) {
       // Preserve the source session while giving each logical Add its own
       // stable message IDs. Local per-batch index 0 is not a conversation ID.
       // Keep these internal IDs out of the existing receipt fingerprint.
-      const batch=prepared.slice(offset,offset+batchSize).map((m,i)=>({...m,source_message_id:`aml:${requestHash}:${offset+i}`}));
-      added+=await addOneBatch(env,{...ctx,...serviceContext},requestId,batch,manifest,staged);
+      const batch = prepared
+        .slice(offset, offset + batchSize)
+        .map((m, i) => ({ ...m, source_message_id: `aml:${requestHash}:${offset + i}` }));
+      added += await addOneBatch(
+        env,
+        { ...ctx, ...serviceContext },
+        requestId,
+        batch,
+        manifest,
+        staged,
+      );
     }
-    const response={success:true,request_id:requestId,user_id:userId,session_id:sessionId,
-      task_id:`${key}.${requestHash}`,status:'completed',added};
-    manifest.receipts[requestHash]={fingerprint,response,completed_at:new Date().toISOString()};
-    return {response};
+    const response = {
+      success: true,
+      request_id: requestId,
+      user_id: userId,
+      session_id: sessionId,
+      task_id: `${key}.${requestHash}`,
+      status: "completed",
+      added,
+    };
+    manifest.receipts[requestHash] = {
+      fingerprint,
+      response,
+      completed_at: new Date().toISOString(),
+    };
+    return { response };
   });
 }
 
-async function search(env,input,options={}) {
-  const userId=textField(input.user_id ?? input.userId,'user_id');
-  requestIdentity(userId,input.request_id);
-  // Preserve query text; use opaque image references or optional pixel descriptions.
-  // Options never enter the vision request and are not used to infer an answer.
-  const queryContent=contentField(input.query,4096);
-  const topK=input.top_k ?? input.topK;
-  if(!Number.isInteger(topK)||topK<1||topK>100)throw new HttpError(400,'invalid_request','top_k must be an integer between 1 and 100');
-  const choices=input.options??[];
-  if(!Array.isArray(choices)||choices.length>16)throw new HttpError(400,'invalid_request','options must be an array of at most 16 strings');
-  const optionTexts=choices.map(choice=>textField(choice,'option',4096));
-  const query=await createContentView()(queryContent);
-  const queries=[...new Set([query,...optionTexts.map(choice=>query+' '+choice)])];
-  const client=embeddingClient(env),started=Date.now();
-  return mutateUser(env,userId,async({sqlite,key,manifest,staged})=>{
-    let candidates=[];const modes=new Set();let changed=false;
-    // Resolve query vectors before opening SQLite. The per-request cache
-    // supplies every partition without holding a DB during remote I/O.
-    if (client && manifest.parts.length) {
-      for (const clause of queries) await client.embedQueries([clause]).catch(()=>undefined);
-    }
-    const persistence={inline_delta_saves:0,full_snapshot_saves:0,changed_pages:0};
-    for(let i=0;i<manifest.parts.length;i++){
-      const result=await runPart(env.MEMORY,manifest.parts[i],sqlite,async({key:partKey})=>{
-        const service=new AmlMemoryService(partKey,client);
-        return {response:await measure('retrieval_including_embedding',()=>service.search(queries,topK))};
-      },{readOnlyIfUnchanged:!options.fullSnapshot&&env.NMG_SEARCH_DELTAS!=='0'});
-      const otherBytes=manifest.parts.reduce((sum,p,j)=>sum+(j===i?0:deltaBytes(p)),0);
-      const saved=result.readOnly?{part:manifest.parts[i],mode:'unchanged',changed:false,stagedKey:null,changedPages:0}:
-        await stageSearchPart(env.MEMORY,key,manifest.parts[i],result,USER_DELTA_LIMIT-otherBytes,
-          options.fullSnapshot||env.NMG_SEARCH_DELTAS==='0');
-      copyLegacyReceipts(manifest,result.legacyReceipts);
-      manifest.parts[i]=saved.part;if(saved.stagedKey)staged.push(saved.stagedKey);
-      changed ||= saved.changed||result.legacyReceipts.length>0;
-      if(saved.mode==='inline_page_delta')persistence.inline_delta_saves++;
-      if(saved.mode==='full_snapshot')persistence.full_snapshot_saves++;
-      persistence.changed_pages+=saved.changedPages;
+/** Neighbourhood budget: measured on LoCoMo, five appended records carry 40-47%
+ * of the coverage gain of twenty at roughly a third of the text. */
+const APPENDED_MAX_RECORDS = 5;
+const MAX_SEARCH_CLAUSES = 8;
+/** One request may carry independent retrieval clauses: each is plain text plus
+ * an optional label. The legacy `query`(+`options`) shape is one clause. */
+async function readClauses(input, optionTexts) {
+  const nodes = input.queries;
+  if (nodes === undefined) {
+    // Preserve query text; use opaque image references or optional pixel descriptions.
+    // Options never enter the vision request and are not used to infer an answer.
+    const queryContent = contentField(input.query, 4096);
+    const query = await createContentView()(queryContent);
+    return dedupeClauses([
+      { text: query, name: null },
+      ...optionTexts.map((choice) => ({ text: query + " " + choice, name: null })),
+    ]);
+  }
+  if (!Array.isArray(nodes) || nodes.length < 1 || nodes.length > MAX_SEARCH_CLAUSES)
+    throw new HttpError(
+      400,
+      "invalid_request",
+      `queries must be an array of 1 to ${MAX_SEARCH_CLAUSES} clauses`,
+    );
+  if (optionTexts.length > 0)
+    throw new HttpError(400, "invalid_request", "queries and options cannot be combined");
+  if (input.query !== undefined)
+    throw new HttpError(400, "invalid_request", "queries and query cannot be combined");
+  const clauses = nodes.map((node) => {
+    if (typeof node === "string")
+      return { text: textField(node, "query", 4096), name: null, appendOnly: false };
+    if (!node || typeof node !== "object")
+      throw new HttpError(
+        400,
+        "invalid_request",
+        "each query clause must be a string or an object with text",
+      );
+    const name = node.name === undefined ? null : textField(node.name, "name", 64);
+    // appendOnly clause results never compete for the page; they are returned as
+    // a supplement, so a broad dimension cannot crowd out ranked evidence.
+    const appendOnly = node.appendOnly === true || node.mode === "append";
+    return { text: textField(node.text ?? node.query, "query", 4096), name, appendOnly };
+  });
+  if (clauses[0].appendOnly)
+    throw new HttpError(
+      400,
+      "invalid_request",
+      "the first clause carries the presentation and cannot be appendOnly",
+    );
+  if (clauses.every((clause) => clause.appendOnly))
+    throw new HttpError(400, "invalid_request", "at least one clause must be ranked");
+  return dedupeClauses(clauses);
+}
+/** Identical clause text is collapsed before retrieval, keeping the first label,
+ * so a fusion index always refers to one clause. */
+function dedupeClauses(clauses) {
+  const seen = new Set(),
+    kept = [];
+  for (const clause of clauses) {
+    if (seen.has(clause.text)) continue;
+    seen.add(clause.text);
+    kept.push(clause);
+  }
+  return kept;
+}
+/** Merge a partition's append-only results, keeping the highest score per id. */
+function addAppended(appended, memories) {
+  for (const memory of memories ?? []) {
+    const prior = appended.get(memory.id);
+    if (!prior || (memory.score ?? 0) >= (prior.score ?? 0)) appended.set(memory.id, memory);
+  }
+}
+/** Resolve every clause vector once, before SQLite is opened: the per-request
+ * cache then supplies every partition without holding a DB during remote I/O. */
+async function warmClauseVectors(client, queries, parts) {
+  if (!client || parts.length === 0) return;
+  for (const clause of queries) await client.embedQueries([clause]).catch(() => undefined);
+}
+/** Fold one partition's persistence mode into the request totals. */
+function tallyPartPersistence(persistence, saved) {
+  if (saved.mode === "inline_page_delta") persistence.inline_delta_saves++;
+  if (saved.mode === "full_snapshot") persistence.full_snapshot_saves++;
+  persistence.changed_pages += saved.changedPages;
+}
+/** The supplement returned to the caller: deduplicated against the page and
+ * bounded by the same top_k, so a response never doubles unexpectedly. */
+function collectAppended(appended, page, topK) {
+  const pageIds = new Set(page.map((memory) => memory.id));
+  return [...appended.values()]
+    .filter((memory) => !pageIds.has(memory.id))
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.id.localeCompare(b.id))
+    .slice(0, topK);
+}
+/** Sum a partition's per-clause attribution into the request totals. */
+function addClauseContributions(contributions, clauses) {
+  for (const clause of clauses ?? []) {
+    const total = contributions[clause.index];
+    if (!total) continue;
+    total.contributed += clause.contributed;
+    total.exclusive += clause.exclusive;
+  }
+}
+async function search(env, input, options = {}) {
+  const userId = textField(input.user_id ?? input.userId, "user_id");
+  requestIdentity(userId, input.request_id);
+  const topK = input.top_k ?? input.topK;
+  if (!Number.isInteger(topK) || topK < 1 || topK > 100)
+    throw new HttpError(400, "invalid_request", "top_k must be an integer between 1 and 100");
+  const choices = input.options ?? [];
+  if (!Array.isArray(choices) || choices.length > 16)
+    throw new HttpError(400, "invalid_request", "options must be an array of at most 16 strings");
+  const optionTexts = choices.map((choice) => textField(choice, "option", 4096));
+  const clauses = await readClauses(input, optionTexts);
+  const queries = clauses.map((clause) => clause.text);
+  const appendOnly = clauses.map((clause) => clause.appendOnly === true);
+  const hasAppendOnly = appendOnly.some(Boolean);
+  const appendedById = new Map();
+  const contributions = clauses.map((_clause, index) => ({ index, contributed: 0, exclusive: 0 }));
+  const client = embeddingClient(env),
+    started = Date.now();
+  return mutateUser(env, userId, async ({ sqlite, key, manifest, staged }) => {
+    let candidates = [];
+    const modes = new Set();
+    let changed = false;
+    await warmClauseVectors(client, queries, manifest.parts);
+    const persistence = { inline_delta_saves: 0, full_snapshot_saves: 0, changed_pages: 0 };
+    for (let i = 0; i < manifest.parts.length; i++) {
+      const result = await runPart(
+        env.MEMORY,
+        manifest.parts[i],
+        sqlite,
+        async ({ key: partKey }) => {
+          const service = new AmlMemoryService(partKey, client);
+          return {
+            response: await measure("retrieval_including_embedding", () =>
+              service.search(queries, topK, appendOnly),
+            ),
+          };
+        },
+        { readOnlyIfUnchanged: !options.fullSnapshot && env.NMG_SEARCH_DELTAS !== "0" },
+      );
+      const otherBytes = manifest.parts.reduce(
+        (sum, p, j) => sum + (j === i ? 0 : deltaBytes(p)),
+        0,
+      );
+      const saved = result.readOnly
+        ? {
+            part: manifest.parts[i],
+            mode: "unchanged",
+            changed: false,
+            stagedKey: null,
+            changedPages: 0,
+          }
+        : await stageSearchPart(
+            env.MEMORY,
+            key,
+            manifest.parts[i],
+            result,
+            USER_DELTA_LIMIT - otherBytes,
+            options.fullSnapshot || env.NMG_SEARCH_DELTAS === "0",
+          );
+      copyLegacyReceipts(manifest, result.legacyReceipts);
+      manifest.parts[i] = saved.part;
+      if (saved.stagedKey) staged.push(saved.stagedKey);
+      changed ||= saved.changed || result.legacyReceipts.length > 0;
+      tallyPartPersistence(persistence, saved);
       modes.add(result.response.retrievalMode);
+      addClauseContributions(contributions, result.response.clauses);
+      addAppended(appendedById, result.response.appended);
       candidates.push(...result.response.memories);
       // Bounded global Top K; never retain every shard's candidates in RAM.
-      candidates.sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id));candidates=candidates.slice(0,topK);
+      candidates.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+      candidates = candidates.slice(0, topK);
     }
-    persistence.inline_bytes=manifest.parts.reduce((sum,p)=>sum+deltaBytes(p),0);
-    return {readOnly:!changed,response:{data:candidates,retrieval_mode:modes.has('records')?'records':'lexical',
-      timings:{totalMs:Date.now()-started,partitions:manifest.parts.length},persistence,
-      storage_format:manifest.parts.some(p=>p.delta)?'nmg-shards-v3':'nmg-shards-v2'}};
+    persistence.inline_bytes = manifest.parts.reduce((sum, p) => sum + deltaBytes(p), 0);
+    const appended = collectAppended(
+      appendedById,
+      candidates,
+      Math.min(topK, APPENDED_MAX_RECORDS),
+    );
+    return {
+      readOnly: !changed,
+      response: {
+        data: candidates,
+        retrieval_mode: modes.has("records") ? "records" : "lexical",
+        timings: {
+          totalMs: Date.now() - started,
+          partitions: manifest.parts.length,
+          clauses: clauses.length,
+        },
+        clauses: clauses.map((clause, index) => ({
+          name: clause.name,
+          index,
+          appendOnly: clause.appendOnly === true,
+          contributed: contributions[index].contributed,
+          exclusive: contributions[index].exclusive,
+        })),
+        ...(hasAppendOnly ? { appended } : {}),
+        persistence,
+        storage_format: manifest.parts.some((p) => p.delta) ? "nmg-shards-v3" : "nmg-shards-v2",
+      },
+    };
   });
 }
-async function reset(env,input){
-  const userId=textField(input.user_id,'user_id');
-  if(input.confirm_user_id!==userId)throw new HttpError(400,'confirmation_required','confirm_user_id must exactly match user_id; reset permanently removes all user memories and Add receipts');
-  const resetId=textField(input.reset_id,'reset_id',128);
-  if(!env.MEMORY)throw new HttpError(503,'storage_unavailable','Persistent storage binding missing');
-  return resetUser(env.MEMORY,userId,resetId);
+async function reset(env, input) {
+  const userId = textField(input.user_id, "user_id");
+  if (input.confirm_user_id !== userId)
+    throw new HttpError(
+      400,
+      "confirmation_required",
+      "confirm_user_id must exactly match user_id; reset permanently removes all user memories and Add receipts",
+    );
+  const resetId = textField(input.reset_id, "reset_id", 128);
+  if (!env.MEMORY)
+    throw new HttpError(503, "storage_unavailable", "Persistent storage binding missing");
+  return resetUser(env.MEMORY, userId, resetId);
 }
-async function status(env,taskId) {
-  if(!/^[a-f0-9]{24}\.[a-f0-9]{64}$/.test(taskId))throw new HttpError(400,'invalid_task_id','Invalid task_id');
-  const [key,requestHash]=taskId.split('.');
-  const {manifest}=await loadManifest(env.MEMORY,key,'');
-  const receipt=manifest.receipts[requestHash];
-  if(receipt)return {...receipt.response,completed_at:receipt.completed_at};
-  const legacy=manifest.parts.find(p=>p.key===objectKey(key));
-  if(legacy){
+async function status(env, taskId) {
+  if (!/^[a-f0-9]{24}\.[a-f0-9]{64}$/.test(taskId))
+    throw new HttpError(400, "invalid_task_id", "Invalid task_id");
+  const [key, requestHash] = taskId.split(".");
+  const { manifest } = await loadManifest(env.MEMORY, key, "");
+  const receipt = manifest.receipts[requestHash];
+  if (receipt) return { ...receipt.response, completed_at: receipt.completed_at };
+  const legacy = manifest.parts.find((p) => p.key === objectKey(key));
+  if (legacy) {
     // Status uses the original file name and never needs the original user_id.
-    const object=await env.MEMORY.get(legacy.key),sqlite=await sqliteReady();void sqlite;
-    if(object)return withDatabases(new Map([[`${key}.sqlite`,new Uint8Array(await object.arrayBuffer())]]),async()=>{
-      const db=new DatabaseSync(`/tmp/nmg/${key}.sqlite`);
-      const exists=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='cloud_receipts'").get();
-      const row=exists?db.prepare('SELECT response,completed_at FROM cloud_receipts WHERE request_hash=?').get(requestHash):undefined;
-      if(!row)throw new HttpError(404,'task_not_found','No completed write for this task_id');
-      return {...JSON.parse(row.response),completed_at:row.completed_at};
-    });
+    const object = await env.MEMORY.get(legacy.key),
+      sqlite = await sqliteReady();
+    void sqlite;
+    if (object)
+      return withDatabases(
+        new Map([[`${key}.sqlite`, new Uint8Array(await object.arrayBuffer())]]),
+        async () => {
+          const db = new DatabaseSync(`/tmp/nmg/${key}.sqlite`);
+          const exists = db
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='cloud_receipts'")
+            .get();
+          const row = exists
+            ? db
+                .prepare("SELECT response,completed_at FROM cloud_receipts WHERE request_hash=?")
+                .get(requestHash)
+            : undefined;
+          if (!row)
+            throw new HttpError(404, "task_not_found", "No completed write for this task_id");
+          return { ...JSON.parse(row.response), completed_at: row.completed_at };
+        },
+      );
   }
-  throw new HttpError(404,'task_not_found','No completed write for this task_id');
+  throw new HttpError(404, "task_not_found", "No completed write for this task_id");
 }
 
-async function diagnosticSearch(env,input) {
-  const count=input.repetitions??3;
-  if(!Number.isInteger(count)||count<1||count>10)throw new HttpError(400,'invalid_request','repetitions must be between 1 and 10');
-  if(input.persistence!==undefined&&!['delta','snapshot'].includes(input.persistence))throw new HttpError(400,'invalid_request','persistence must be delta or snapshot');
-  const runs=[];
-  for(let i=0;i<count;i++){
-    const measured=await profileSearch(()=>search(env,{...input,top_k:input.top_k??10},{fullSnapshot:input.persistence==='snapshot'}));
-    runs.push({server_ms:measured.server_ms,stages_ms:measured.stages_ms,
-      partitions:measured.result.timings.partitions,result_count:measured.result.data.length,
-      retrieval_mode:measured.result.retrieval_mode,persistence:measured.result.persistence,
-      result_digest:hash(JSON.stringify(measured.result.data))});
+async function diagnosticSearch(env, input) {
+  const count = input.repetitions ?? 3;
+  if (!Number.isInteger(count) || count < 1 || count > 10)
+    throw new HttpError(400, "invalid_request", "repetitions must be between 1 and 10");
+  if (input.persistence !== undefined && !["delta", "snapshot"].includes(input.persistence))
+    throw new HttpError(400, "invalid_request", "persistence must be delta or snapshot");
+  const runs = [];
+  for (let i = 0; i < count; i++) {
+    const measured = await profileSearch(() =>
+      search(
+        env,
+        { ...input, top_k: input.top_k ?? 10 },
+        { fullSnapshot: input.persistence === "snapshot" },
+      ),
+    );
+    runs.push({
+      server_ms: measured.server_ms,
+      stages_ms: measured.stages_ms,
+      partitions: measured.result.timings.partitions,
+      result_count: measured.result.data.length,
+      retrieval_mode: measured.result.retrieval_mode,
+      persistence: measured.result.persistence,
+      result_digest: hash(JSON.stringify(measured.result.data)),
+    });
   }
-  const times=runs.map(r=>r.server_ms).sort((a,b)=>a-b);
-  return {scope:'server_processing',query:input.query,runs,
-    summary:{count,median_ms:(times[Math.floor((count-1)/2)]+times[Math.floor(count/2)])/2,p95_ms:times[Math.ceil(count*.95)-1]},
-    notes:['Includes snapshot writes and manifest commit; excludes network and request queue.',
-      'retrieval_including_embedding contains embedding; do not sum these fields.',
-      'Workers clock resolution can show zero for synchronous work; these are elapsed times, not CPU times.',
-      'AML searches do not record usage or feedback traces; unchanged images skip persistence. The configured embedding provider is used.']};
+  const times = runs.map((r) => r.server_ms).sort((a, b) => a - b);
+  return {
+    scope: "server_processing",
+    query: input.query,
+    runs,
+    summary: {
+      count,
+      median_ms: (times[Math.floor((count - 1) / 2)] + times[Math.floor(count / 2)]) / 2,
+      p95_ms: times[Math.ceil(count * 0.95) - 1],
+    },
+    notes: [
+      "Includes snapshot writes and manifest commit; excludes network and request queue.",
+      "retrieval_including_embedding contains embedding; do not sum these fields.",
+      "Workers clock resolution can show zero for synchronous work; these are elapsed times, not CPU times.",
+      "AML searches do not record usage or feedback traces; unchanged images skip persistence. The configured embedding provider is used.",
+    ],
+  };
 }
-function isOwner(request,env) {
-  return !!env.NMG_OWNER_EMAIL && request.headers.get('oai-authenticated-user-email')?.toLowerCase()===env.NMG_OWNER_EMAIL.toLowerCase();
+function isOwner(request, env) {
+  return (
+    !!env.NMG_OWNER_EMAIL &&
+    request.headers.get("oai-authenticated-user-email")?.toLowerCase() ===
+      env.NMG_OWNER_EMAIL.toLowerCase()
+  );
 }
-function requireOwner(request,env) {
-  if(!isOwner(request,env))
-    throw new HttpError(401,'owner_sign_in_required','Sign in as the Site owner to use diagnostics');
-  if(request.method!=='GET'&&request.headers.get('origin')!==new URL(request.url).origin)
-    throw new HttpError(403,'invalid_origin','Admin operations require a same-origin request');
+function requireOwner(request, env) {
+  if (!isOwner(request, env))
+    throw new HttpError(
+      401,
+      "owner_sign_in_required",
+      "Sign in as the Site owner to use diagnostics",
+    );
+  if (request.method !== "GET" && request.headers.get("origin") !== new URL(request.url).origin)
+    throw new HttpError(403, "invalid_origin", "Admin operations require a same-origin request");
 }
 function normalizePath(url) {
-  return url.pathname.replace(/^\/api(?=\/)/, '').replace(/\/$/, '') || '/';
+  return url.pathname.replace(/^\/api(?=\/)/, "").replace(/\/$/, "") || "/";
 }
-const MEMORY_ROUTES = ['/add', '/remember', '/search', '/reset', '/reclaim', '/reclaim/user', '/capacity', '/add/status', '/admin/reset', '/admin/capacity', '/admin/diagnostics/search', '/admin/diagnostics/seed'];
+const MEMORY_ROUTES = [
+  "/add",
+  "/remember",
+  "/search",
+  "/reset",
+  "/reclaim",
+  "/reclaim/user",
+  "/capacity",
+  "/add/status",
+  "/admin/reset",
+  "/admin/capacity",
+  "/admin/diagnostics/search",
+  "/admin/diagnostics/seed",
+];
 function isMemoryRoute(path) {
-  return MEMORY_ROUTES.includes(path) || path.startsWith('/add/status/');
+  return MEMORY_ROUTES.includes(path) || path.startsWith("/add/status/");
 }
 function pageResponse(request, env, path) {
-  if (path !== '/' || request.method !== 'GET') return undefined;
-  return new Response(isOwner(request, env) ? page.replace('id="diagnostics" hidden', 'id="diagnostics"') : page, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'self' https://chatgpt.com" } });
+  if (path !== "/" || request.method !== "GET") return undefined;
+  return new Response(
+    isOwner(request, env) ? page.replace('id="diagnostics" hidden', 'id="diagnostics"') : page,
+    {
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+        "content-security-policy":
+          "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'self' https://chatgpt.com",
+      },
+    },
+  );
 }
 async function healthResponse(env, path) {
-  if (path !== '/health') return undefined;
-  if (!env.MEMORY) throw new HttpError(503, 'storage_unavailable', 'Persistent storage binding missing');
-  const sqlite = await sqliteReady(); await env.MEMORY.head('health/probe');
-  return json({ status: 'ok', service: 'NodeMemoryGraph', storage: 'R2', sqlite: sqlite.version.libVersion,
-    retrieval: env.NMG_EMBED_PROVIDER || env.NMG_EMBED_BASE_URL ? 'hybrid' : 'lexical', max_user_database_bytes: MAX_DATABASE_BYTES,
-    storage_format: 'nmg-shards-v3', supported_storage_formats: ['nmg-shards-v2', 'nmg-shards-v3'], search_page_deltas: env.NMG_SEARCH_DELTAS !== '0', max_partition_bytes: 16 * 1024 * 1024, max_add_partition_bytes: PART_LIMIT, max_partitions: MAX_PARTS, graph_scope: 'partition', max_request_bytes: MAX_BODY_BYTES, add_mode: 'synchronous', upstream_commit: SOURCE_REVISION.split('+')[0], source_revision: SOURCE_REVISION, core_source: CORE_SOURCE, multimodal: { format: 'ordered-text-base64-image-parts', index_view: 'supplied-text-plus-image-hash' }, query_terms_prepared: true, memory_service: 'daemon-core-aml-v1', request_lifecycle: 'independent-v2', search_request_profile: true, harness: false, search_profile: AML_SEARCH_PROFILE, reclamation: { user: '/reclaim/user', all: '/reclaim/all', automatic: false } });
+  if (path !== "/health") return undefined;
+  if (!env.MEMORY)
+    throw new HttpError(503, "storage_unavailable", "Persistent storage binding missing");
+  const sqlite = await sqliteReady();
+  await env.MEMORY.head("health/probe");
+  return json({
+    status: "ok",
+    service: "NodeMemoryGraph",
+    storage: "R2",
+    sqlite: sqlite.version.libVersion,
+    retrieval: env.NMG_EMBED_PROVIDER || env.NMG_EMBED_BASE_URL ? "hybrid" : "lexical",
+    max_user_database_bytes: MAX_DATABASE_BYTES,
+    storage_format: "nmg-shards-v3",
+    supported_storage_formats: ["nmg-shards-v2", "nmg-shards-v3"],
+    search_page_deltas: env.NMG_SEARCH_DELTAS !== "0",
+    max_partition_bytes: 16 * 1024 * 1024,
+    max_add_partition_bytes: PART_LIMIT,
+    max_partitions: MAX_PARTS,
+    graph_scope: "partition",
+    max_request_bytes: MAX_BODY_BYTES,
+    add_mode: "synchronous",
+    upstream_commit: SOURCE_REVISION.split("+")[0],
+    source_revision: SOURCE_REVISION,
+    core_source: CORE_SOURCE,
+    multimodal: {
+      format: "ordered-text-base64-image-parts",
+      index_view: "supplied-text-plus-image-hash",
+    },
+    query_terms_prepared: true,
+    memory_service: "daemon-core-aml-v1",
+    request_lifecycle: "independent-v2",
+    search_request_profile: true,
+    harness: false,
+    search_profile: AML_SEARCH_PROFILE,
+    reclamation: { user: "/reclaim/user", all: "/reclaim/all", automatic: false },
+  });
 }
 async function reclaimAllRoute(request, env, path) {
-  if (path !== '/admin/reclaim-all' && path !== '/reclaim/all') return undefined;
-  if (path.startsWith('/admin/')) requireOwner(request, env); else authenticate(request, env);
-  if (!env.MEMORY) throw new HttpError(503, 'storage_unavailable', 'Persistent storage binding missing');
-  if (request.method === 'GET') return json(await reclamationStatus(env.MEMORY));
-  if (request.method === 'POST') {
+  if (path !== "/admin/reclaim-all" && path !== "/reclaim/all") return undefined;
+  if (path.startsWith("/admin/")) requireOwner(request, env);
+  else authenticate(request, env);
+  if (!env.MEMORY)
+    throw new HttpError(503, "storage_unavailable", "Persistent storage binding missing");
+  if (request.method === "GET") return json(await reclamationStatus(env.MEMORY));
+  if (request.method === "POST") {
     const input = await readJson(request);
-    if (input.confirm !== 'ALL_MEMORY') throw new HttpError(400, 'confirmation_required', 'confirm must be ALL_MEMORY; all users and their memory will be permanently removed');
-    const result = await reclaimAll(env.MEMORY, textField(input.operation_id, 'operation_id', 128));
+    if (input.confirm !== "ALL_MEMORY")
+      throw new HttpError(
+        400,
+        "confirmation_required",
+        "confirm must be ALL_MEMORY; all users and their memory will be permanently removed",
+      );
+    const result = await reclaimAll(env.MEMORY, textField(input.operation_id, "operation_id", 128));
     return json(result, result.complete ? 200 : 202);
   }
-  throw new HttpError(405, 'method_not_allowed', 'Use GET or POST');
+  throw new HttpError(405, "method_not_allowed", "Use GET or POST");
 }
 async function runSelfTestContract(request, env) {
   // Fixed synthetic fixture only; cannot access caller-selected users or data.
-  const uid = '__nmg_contract_' + crypto.randomUUID(), session = 'contract-session';
+  const uid = "__nmg_contract_" + crypto.randomUUID(),
+    session = "contract-session";
   const checks = [];
   const probe = async (route, body, expected = 200) => {
     let response;
-    try { response = await handle(new Request(new URL(route, request.url), { method: 'POST', headers: { authorization: 'Bearer ' + env.NMG_API_KEY, 'content-type': 'application/json' }, body: JSON.stringify(body) }), env); }
-    catch (error) { response = json({ success: false, error: { code: error.code || 'service_unavailable' } }, error.status || 503); }
+    try {
+      response = await handle(
+        new Request(new URL(route, request.url), {
+          method: "POST",
+          headers: {
+            authorization: "Bearer " + env.NMG_API_KEY,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(body),
+        }),
+        env,
+      );
+    } catch (error) {
+      response = json(
+        { success: false, error: { code: error.code || "service_unavailable" } },
+        error.status || 503,
+      );
+    }
     const value = await response.json();
-    if (response.status !== expected) throw new HttpError(503, 'contract_probe_failed', route + ' returned ' + response.status + ' instead of ' + expected);
-    checks.push({ route, status: response.status }); return value;
+    if (response.status !== expected)
+      throw new HttpError(
+        503,
+        "contract_probe_failed",
+        route + " returned " + response.status + " instead of " + expected,
+      );
+    checks.push({ route, status: response.status });
+    return value;
   };
-  const message = i => ({ user_id: uid, session_id: session, request_id: 'c' + i, messages: [{ role: i % 2 ? 'assistant' : 'user', timestamp: 1704067200000 + i * 1000, content: 'Contract probe favorite robot ' + ['Atlas', 'Spot', 'Digit'][i] }] });
-  const first = await probe('/add', message(0));
+  const message = (i) => ({
+    user_id: uid,
+    session_id: session,
+    request_id: "c" + i,
+    messages: [
+      {
+        role: i % 2 ? "assistant" : "user",
+        timestamp: 1704067200000 + i * 1000,
+        content: "Contract probe favorite robot " + ["Atlas", "Spot", "Digit"][i],
+      },
+    ],
+  });
+  const first = await probe("/add", message(0));
   for (let i = 1; i <= 2; i++) {
-    await probe('/search', { user_id: uid, query: 'favorite robot', top_k: 10 });
-    await probe('/add', message(i));
+    await probe("/search", { user_id: uid, query: "favorite robot", top_k: 10 });
+    await probe("/add", message(i));
   }
-  const found = await probe('/search', { user_id: uid, query: 'favorite robot', top_k: 10 });
-  if (found.data.length !== 3) throw new HttpError(503, 'contract_probe_failed', 'Expected three memories');
+  const found = await probe("/search", { user_id: uid, query: "favorite robot", top_k: 10 });
+  if (found.data.length !== 3)
+    throw new HttpError(503, "contract_probe_failed", "Expected three memories");
   for (let i = 0; i < 3; i++) {
-    const retry = await probe('/add', message(0));
-    if (JSON.stringify(retry) !== JSON.stringify(first)) throw new HttpError(503, 'contract_probe_failed', 'Retry receipt differs');
+    const retry = await probe("/add", message(0));
+    if (JSON.stringify(retry) !== JSON.stringify(first))
+      throw new HttpError(503, "contract_probe_failed", "Retry receipt differs");
   }
-  const invalid = message(0); delete invalid.request_id; await probe('/add', invalid, 400);
-  await probe('/search', { user_id: uid, query: 'favorite robot' }, 400);
-  const isolated = await probe('/search', { user_id: uid + '-other', query: 'favorite robot', top_k: 10 });
-  if (isolated.data.length) throw new HttpError(503, 'contract_probe_failed', 'Isolation failed');
+  const invalid = message(0);
+  delete invalid.request_id;
+  await probe("/add", invalid, 400);
+  await probe("/search", { user_id: uid, query: "favorite robot" }, 400);
+  const isolated = await probe("/search", {
+    user_id: uid + "-other",
+    query: "favorite robot",
+    top_k: 10,
+  });
+  if (isolated.data.length) throw new HttpError(503, "contract_probe_failed", "Isolation failed");
   return json({ success: true, fixture_user_id: uid, result_count: found.data.length, checks });
 }
 function assertSelfTestAccess(request, env) {
-  const token = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || '';
+  const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
   const expires = Number(env.NMG_SELFTEST_EXPIRES_AT);
-  if (!env.NMG_SELFTEST_TOKEN || !expires || Date.now() >= expires || !token ||
-    !timingSafeEqual(Buffer.from(hash(token)), Buffer.from(hash(env.NMG_SELFTEST_TOKEN))))
-    throw new HttpError(401, 'selftest_unauthorized', 'Self-test access is unavailable or expired');
+  if (
+    !env.NMG_SELFTEST_TOKEN ||
+    !expires ||
+    Date.now() >= expires ||
+    !token ||
+    !timingSafeEqual(Buffer.from(hash(token)), Buffer.from(hash(env.NMG_SELFTEST_TOKEN)))
+  )
+    throw new HttpError(401, "selftest_unauthorized", "Self-test access is unavailable or expired");
 }
 async function selfTestRoute(request, env, _url, path) {
-  if (path !== '/diagnostics/self-test' || request.method !== 'POST') return undefined;
+  if (path !== "/diagnostics/self-test" || request.method !== "POST") return undefined;
   assertSelfTestAccess(request, env);
   env = { ...env, MEMORY: await memoryBucket(env.MEMORY) };
   const input = await readJson(request);
-  if (Object.keys(input).some(k => !['op', 'persistence', 'repetitions'].includes(k)))
-    throw new HttpError(400, 'invalid_request', 'Self-test accepts only op, persistence and repetitions');
-  if (input.op === 'contract') return runSelfTestContract(request, env);
-  const userId = '__nmg_selftest_v1';
-  if (input.op === 'seed') return json(await add(env, { user_id: userId, session_id: 'selftest', request_id: 'selftest-seed-v1', messages: [
-    { role: 'user', content: '我最喜欢的机器人是 Atlas，我正在学习机器人控制。' },
-    { role: 'user', content: '这台测试笔记本有 64 GB 内存，测试项目使用 Python。' },
-    { role: 'user', content: '测试项目计划使用 ROS 2 和激光雷达完成室内建图。' }] }));
-  if (input.op !== 'query') throw new HttpError(400, 'invalid_request', 'op must be seed, query or contract');
-  return json(await diagnosticSearch(env, { user_id: userId, query: '我最喜欢的机器人是什么？', top_k: 10,
-    repetitions: input.repetitions ?? 1, persistence: input.persistence ?? 'delta' }));
+  if (Object.keys(input).some((k) => !["op", "persistence", "repetitions"].includes(k)))
+    throw new HttpError(
+      400,
+      "invalid_request",
+      "Self-test accepts only op, persistence and repetitions",
+    );
+  if (input.op === "contract") return runSelfTestContract(request, env);
+  const userId = "__nmg_selftest_v1";
+  if (input.op === "seed")
+    return json(
+      await add(env, {
+        user_id: userId,
+        session_id: "selftest",
+        request_id: "selftest-seed-v1",
+        messages: [
+          { role: "user", content: "我最喜欢的机器人是 Atlas，我正在学习机器人控制。" },
+          { role: "user", content: "这台测试笔记本有 64 GB 内存，测试项目使用 Python。" },
+          { role: "user", content: "测试项目计划使用 ROS 2 和激光雷达完成室内建图。" },
+        ],
+      }),
+    );
+  if (input.op !== "query")
+    throw new HttpError(400, "invalid_request", "op must be seed, query or contract");
+  return json(
+    await diagnosticSearch(env, {
+      user_id: userId,
+      query: "我最喜欢的机器人是什么？",
+      top_k: 10,
+      repetitions: input.repetitions ?? 1,
+      persistence: input.persistence ?? "delta",
+    }),
+  );
 }
 function overallServiceStatus({ blocked, maintenance, recent, history, queueState }) {
-  if (blocked) return 'unavailable';
-  if (maintenance) return 'maintenance';
-  return recent || history.status !== 'ok' || queueState.waiting > 0 || queueState.active?.elapsed_ms > 30000 ? 'degraded' : 'ok';
+  if (blocked) return "unavailable";
+  if (maintenance) return "maintenance";
+  return recent ||
+    history.status !== "ok" ||
+    queueState.waiting > 0 ||
+    queueState.active?.elapsed_ms > 30000
+    ? "degraded"
+    : "ok";
 }
 async function adminStatusResponse(env) {
   const [sqlite, r2, reclaim, history] = await Promise.all([
     check(() => sqliteReady().then(() => true)),
-    check(() => env.MEMORY.head('health/probe').then(() => true)),
-    check(() => reclamationStatus(env.MEMORY)), check(() => recentFailures(env.MEMORY))]);
-  const failures = history.value ?? [], load = runtimeStatus(), queueState = queueStatus();
-  const recent = failures.some(e => Date.now() - Date.parse(e.at) < 5 * 60000);
-  const blocked = sqlite.status !== 'ok' || r2.status !== 'ok' || reclaim.status !== 'ok' || !env.NMG_API_KEY;
-  const status = overallServiceStatus({ blocked, maintenance: !!reclaim.value?.maintenance, recent, history, queueState });
-  return json({ status, checked_at: new Date().toISOString(), sqlite: sqlite.status, r2: r2.status,
-    checks: { sqlite, r2: { status: r2.status, ms: r2.ms, code: r2.code }, reclamation: { status: reclaim.status, code: reclaim.code }, error_history: { status: history.status, code: history.code } },
-    authentication: { configured: !!env.NMG_API_KEY }, maintenance: reclaim.value ?? null,
-    embedding: { configured: !!(env.NMG_EMBED_PROVIDER || env.NMG_EMBED_BASE_URL), model: env.NMG_EMBED_MODEL || null,
-      status: 'not_probed', last_observation: embeddingObservation() },
-    checks_ms: { sqlite: sqlite.ms, r2: r2.ms }, load, queue: queueState,
-    failures: { scope: 'shared_best_effort', retention_hours: 24, maximum: 20, entries: failures },
-    limitations: ['Basic probes do not guarantee model availability.', 'Queue and last embedding observation describe only this isolate.', 'Platform cancellations or memory termination may bypass application logging.'] });
+    check(() => env.MEMORY.head("health/probe").then(() => true)),
+    check(() => reclamationStatus(env.MEMORY)),
+    check(() => recentFailures(env.MEMORY)),
+  ]);
+  const failures = history.value ?? [],
+    load = runtimeStatus(),
+    queueState = queueStatus();
+  const recent = failures.some((e) => Date.now() - Date.parse(e.at) < 5 * 60000);
+  const blocked =
+    sqlite.status !== "ok" || r2.status !== "ok" || reclaim.status !== "ok" || !env.NMG_API_KEY;
+  const status = overallServiceStatus({
+    blocked,
+    maintenance: !!reclaim.value?.maintenance,
+    recent,
+    history,
+    queueState,
+  });
+  return json({
+    status,
+    checked_at: new Date().toISOString(),
+    sqlite: sqlite.status,
+    r2: r2.status,
+    checks: {
+      sqlite,
+      r2: { status: r2.status, ms: r2.ms, code: r2.code },
+      reclamation: { status: reclaim.status, code: reclaim.code },
+      error_history: { status: history.status, code: history.code },
+    },
+    authentication: { configured: !!env.NMG_API_KEY },
+    maintenance: reclaim.value ?? null,
+    embedding: {
+      configured: !!(env.NMG_EMBED_PROVIDER || env.NMG_EMBED_BASE_URL),
+      model: env.NMG_EMBED_MODEL || null,
+      status: "not_probed",
+      last_observation: embeddingObservation(),
+    },
+    checks_ms: { sqlite: sqlite.ms, r2: r2.ms },
+    load,
+    queue: queueState,
+    failures: { scope: "shared_best_effort", retention_hours: 24, maximum: 20, entries: failures },
+    limitations: [
+      "Basic probes do not guarantee model availability.",
+      "Queue and last embedding observation describe only this isolate.",
+      "Platform cancellations or memory termination may bypass application logging.",
+    ],
+  });
 }
 async function adminRoute(request, env, url, path) {
-  if (!path.startsWith('/admin/')) return undefined;
+  if (!path.startsWith("/admin/")) return undefined;
   requireOwner(request, env);
   const handled = await adminRouteDispatcher(request, env, url, path);
   if (handled !== undefined) return handled;
-  throw new HttpError(404, 'not_found', 'Unknown admin route');
+  throw new HttpError(404, "not_found", "Unknown admin route");
 }
 async function adminRouteDispatcher(request, env, url, path) {
-  if (path === '/admin/statistics' && request.method === 'POST') {
+  if (path === "/admin/statistics" && request.method === "POST") {
     const input = await readJson(request);
-    if (typeof input.enabled !== 'boolean') throw new HttpError(400, 'invalid_request', 'enabled must be boolean');
+    if (typeof input.enabled !== "boolean")
+      throw new HttpError(400, "invalid_request", "enabled must be boolean");
     return json({ load: setStatistics(input.enabled) });
   }
-  if (path === '/admin/capacity' && request.method === 'GET') return json(await userCapacity(env.MEMORY, textField(url.searchParams.get('user_id'), 'user_id')));
-  if (path === '/admin/reset' && request.method === 'POST') return json(await reset(env, await readJson(request)));
-  if (path === '/admin/key' && request.method === 'GET') return json({ api_key: env.NMG_API_KEY });
-  if (path === '/admin/status' && request.method === 'GET') return adminStatusResponse(env);
+  if (path === "/admin/capacity" && request.method === "GET")
+    return json(
+      await userCapacity(env.MEMORY, textField(url.searchParams.get("user_id"), "user_id")),
+    );
+  if (path === "/admin/reset" && request.method === "POST")
+    return json(await reset(env, await readJson(request)));
+  if (path === "/admin/key" && request.method === "GET") return json({ api_key: env.NMG_API_KEY });
+  if (path === "/admin/status" && request.method === "GET") return adminStatusResponse(env);
   return adminDiagnosticsRoute(request, env, path);
 }
 async function adminDiagnosticsRoute(request, env, path) {
-  if (path === '/admin/diagnostics/search' && request.method === 'POST') {
+  if (path === "/admin/diagnostics/search" && request.method === "POST") {
     const input = await readJson(request);
     return json(await diagnosticSearch(env, input));
   }
-  if (path === '/admin/diagnostics/seed' && request.method === 'POST') {
+  if (path === "/admin/diagnostics/seed" && request.method === "POST") {
     // A fixed small fixture, separate from all client user IDs. No arbitrary writes here.
-    return json(await add(env, { user_id: '__nmg_diagnostics_v1', session_id: 'diagnostics', request_id: 'diagnostics-seed-v1', messages: [
-      { role: 'user', content: '我最喜欢的机器人是 Atlas，我正在学习机器人控制。' },
-      { role: 'user', content: '我的笔记本有 64 GB 内存，我使用 Python 开发机器人程序。' },
-      { role: 'user', content: '我计划学习 ROS 2，并用激光雷达完成室内建图。' }] }));
+    return json(
+      await add(env, {
+        user_id: "__nmg_diagnostics_v1",
+        session_id: "diagnostics",
+        request_id: "diagnostics-seed-v1",
+        messages: [
+          { role: "user", content: "我最喜欢的机器人是 Atlas，我正在学习机器人控制。" },
+          { role: "user", content: "我的笔记本有 64 GB 内存，我使用 Python 开发机器人程序。" },
+          { role: "user", content: "我计划学习 ROS 2，并用激光雷达完成室内建图。" },
+        ],
+      }),
+    );
   }
   return undefined;
 }
 async function searchRoute(request, env, _url, path) {
-  if (path !== '/search' || request.method !== 'POST') return undefined;
+  if (path !== "/search" || request.method !== "POST") return undefined;
   const input = await readJson(request);
-  if (request.headers.get('x-nmg-profile') === '1') {
+  if (request.headers.get("x-nmg-profile") === "1") {
     const { result, ...diagnostics } = await profileSearch(() => search(env, input));
     return json({ ...result, diagnostics });
   }
   return json(await search(env, input));
 }
 async function addStatusRoute(request, env, url, path) {
-  if (path.startsWith('/add/status/') && request.method === 'GET') return json(await status(env, path.slice('/add/status/'.length)));
-  if (path === '/add/status' && request.method === 'GET') {
-    const taskId = url.searchParams.get('task_id') ?? (hash(textField(url.searchParams.get('user_id'), 'user_id')).slice(0, 24) + '.' + hash(textField(url.searchParams.get('request_id'), 'request_id')));
+  if (path.startsWith("/add/status/") && request.method === "GET")
+    return json(await status(env, path.slice("/add/status/".length)));
+  if (path === "/add/status" && request.method === "GET") {
+    const taskId =
+      url.searchParams.get("task_id") ??
+      hash(textField(url.searchParams.get("user_id"), "user_id")).slice(0, 24) +
+        "." +
+        hash(textField(url.searchParams.get("request_id"), "request_id"));
     return json(await status(env, taskId));
   }
   return undefined;
 }
 async function memoryApiRoute(request, env, url, path) {
   authenticate(request, env);
-  if (!env.MEMORY) throw new HttpError(503, 'storage_unavailable', 'Persistent storage binding missing');
-  if ((path === '/reclaim' || path === '/reclaim/user') && request.method === 'POST') {
-    const input = await readJson(request), userId = textField(input.user_id, 'user_id'), requestId = textField(input.request_id, 'request_id', 128);
-    const result = await reset(env, { user_id: userId, confirm_user_id: userId, reset_id: requestId });
-    return json({ ...result, request_id: requestId, scope: 'user' });
+  if (!env.MEMORY)
+    throw new HttpError(503, "storage_unavailable", "Persistent storage binding missing");
+  if ((path === "/reclaim" || path === "/reclaim/user") && request.method === "POST") {
+    const input = await readJson(request),
+      userId = textField(input.user_id, "user_id"),
+      requestId = textField(input.request_id, "request_id", 128);
+    const result = await reset(env, {
+      user_id: userId,
+      confirm_user_id: userId,
+      reset_id: requestId,
+    });
+    return json({ ...result, request_id: requestId, scope: "user" });
   }
   const reset = await resetRoute(request, env, path);
   if (reset !== undefined) return reset;
@@ -503,28 +1125,35 @@ async function memoryApiRoute(request, env, url, path) {
   if (search !== undefined) return search;
   const status = await addStatusRoute(request, env, url, path);
   if (status !== undefined) return status;
-  throw new HttpError(404, 'not_found', 'Unknown API route');
+  throw new HttpError(404, "not_found", "Unknown API route");
 }
 async function resetRoute(request, env, path) {
-  if (path !== '/reset' || request.method !== 'POST') return undefined;
+  if (path !== "/reset" || request.method !== "POST") return undefined;
   return json(await reset(env, await readJson(request)));
 }
 async function capacityRoute(request, env, url, path) {
-  if (path !== '/capacity' || request.method !== 'GET') return undefined;
-  return json(await userCapacity(env.MEMORY, textField(url.searchParams.get('user_id'), 'user_id')));
+  if (path !== "/capacity" || request.method !== "GET") return undefined;
+  return json(
+    await userCapacity(env.MEMORY, textField(url.searchParams.get("user_id"), "user_id")),
+  );
 }
 async function addRoute(request, env, path) {
-  if ((path !== '/add' && path !== '/remember') || request.method !== 'POST') return undefined;
+  if ((path !== "/add" && path !== "/remember") || request.method !== "POST") return undefined;
   return json(await add(env, await readJson(request)));
 }
 async function handle(request, env) {
   const url = new URL(request.url);
   const path = normalizePath(url);
-  const early = pageResponse(request, env, path) ?? await healthResponse(env, path) ?? await reclaimAllRoute(request, env, path);
+  const early =
+    pageResponse(request, env, path) ??
+    (await healthResponse(env, path)) ??
+    (await reclaimAllRoute(request, env, path));
   if (early) return early;
   if (isMemoryRoute(path)) {
-    if (path.startsWith('/admin/')) requireOwner(request, env); else authenticate(request, env);
-    if (!env.MEMORY) throw new HttpError(503, 'storage_unavailable', 'Persistent storage binding missing');
+    if (path.startsWith("/admin/")) requireOwner(request, env);
+    else authenticate(request, env);
+    if (!env.MEMORY)
+      throw new HttpError(503, "storage_unavailable", "Persistent storage binding missing");
     env = { ...env, MEMORY: await memoryBucket(env.MEMORY) };
   }
   const selfTest = await selfTestRoute(request, env, url, path);
@@ -533,32 +1162,77 @@ async function handle(request, env) {
   if (admin) return admin;
   return memoryApiRoute(request, env, url, path);
 }
-export default {fetch(request,env,execution) {
-  const rawRay=request.headers.get('cf-ray')??'';
-  const traceId=/^[a-zA-Z0-9-]{1,80}$/.test(rawRay)?rawRay:crypto.randomUUID();
-  const pathname=new URL(request.url).pathname;
-  const normalized=pathname.replace(/^\/api(?=\/)/,'').replace(/\/$/,'')||'/';
-  const route=normalized.startsWith('/add/status/')?'/add/status/:task_id':/^\/(?:add|remember|search|health|capacity|reset|reclaim(?:\/(?:user|all))?|admin\/(?:status|key|statistics|capacity|reset|reclaim-all|diagnostics\/(?:search|seed)))$/.test(normalized)||normalized==='/'?normalized:'/unknown';
-  const context={trace_id:traceId,route,env,execution};
-  return withRequest(context,()=>{
-    const track=statisticsEnabled();if(track)requestAccepted();
-    const received=track?performance.now():0;let begun;
-    const metadataRequest=(request.method==='GET'&&pathname==='/')||(request.method==='GET'&&/^\/(?:api\/)?(?:health|admin\/status|admin\/key|admin\/capacity|capacity)\/?$/.test(pathname))||/^\/(?:api\/)?(?:admin\/reclaim-all|reclaim\/all)\/?$/.test(pathname);
-    if(!metadataRequest)queueAccepted();
-    const invoke=async()=>{
-      if(!metadataRequest)queueStarted(context);
-      if(track){begun=performance.now();requestStarted();}
-      try{return await handle(request,env);}
-      finally{if(!metadataRequest)queueFinished();}
-    };
-    const job=Promise.resolve().then(invoke).catch(error=>{
-      const full=String(error.message).includes('SQLITE_FULL');
-      const status=error.status||(full?413:503);
-      if(status>=500||status===413||status===409)reportFailure(error,status);
-      const code=error.code||(full?'user_storage_limit':classifyError(error).code);
-      return json({success:false,trace_id:traceId,error:{code,message:error instanceof HttpError||error instanceof StorageError?error.message:(full?'Storage partition reached its working-memory limit':'Operation failed; check the trace_id in service diagnostics')}},status,{'retry-after':'2','x-nmg-trace-id':traceId});
+export default {
+  fetch(request, env, execution) {
+    const rawRay = request.headers.get("cf-ray") ?? "";
+    const traceId = /^[a-zA-Z0-9-]{1,80}$/.test(rawRay) ? rawRay : crypto.randomUUID();
+    const pathname = new URL(request.url).pathname;
+    const normalized = pathname.replace(/^\/api(?=\/)/, "").replace(/\/$/, "") || "/";
+    const route = normalized.startsWith("/add/status/")
+      ? "/add/status/:task_id"
+      : /^\/(?:add|remember|search|health|capacity|reset|reclaim(?:\/(?:user|all))?|admin\/(?:status|key|statistics|capacity|reset|reclaim-all|diagnostics\/(?:search|seed)))$/.test(
+            normalized,
+          ) || normalized === "/"
+        ? normalized
+        : "/unknown";
+    const context = { trace_id: traceId, route, env, execution };
+    return withRequest(context, () => {
+      const track = statisticsEnabled();
+      if (track) requestAccepted();
+      const received = track ? performance.now() : 0;
+      let begun;
+      const metadataRequest =
+        (request.method === "GET" && pathname === "/") ||
+        (request.method === "GET" &&
+          /^\/(?:api\/)?(?:health|admin\/status|admin\/key|admin\/capacity|capacity)\/?$/.test(
+            pathname,
+          )) ||
+        /^\/(?:api\/)?(?:admin\/reclaim-all|reclaim\/all)\/?$/.test(pathname);
+      if (!metadataRequest) queueAccepted();
+      const invoke = async () => {
+        if (!metadataRequest) queueStarted(context);
+        if (track) {
+          begun = performance.now();
+          requestStarted();
+        }
+        try {
+          return await handle(request, env);
+        } finally {
+          if (!metadataRequest) queueFinished();
+        }
+      };
+      const job = Promise.resolve()
+        .then(invoke)
+        .catch((error) => {
+          const full = String(error.message).includes("SQLITE_FULL");
+          const status = error.status || (full ? 413 : 503);
+          if (status >= 500 || status === 413 || status === 409) reportFailure(error, status);
+          const code = error.code || (full ? "user_storage_limit" : classifyError(error).code);
+          return json(
+            {
+              success: false,
+              trace_id: traceId,
+              error: {
+                code,
+                message:
+                  error instanceof HttpError || error instanceof StorageError
+                    ? error.message
+                    : full
+                      ? "Storage partition reached its working-memory limit"
+                      : "Operation failed; check the trace_id in service diagnostics",
+              },
+            },
+            status,
+            { "retry-after": "2", "x-nmg-trace-id": traceId },
+          );
+        });
+      const tracked = track
+        ? job.then((response) => {
+            requestFinished(response.status, performance.now() - begun, begun - received);
+            return response;
+          })
+        : job;
+      return tracked;
     });
-    const tracked=track?job.then(response=>{requestFinished(response.status,performance.now()-begun,begun-received);return response;}):job;
-    return tracked;
-  });
-}};
+  },
+};

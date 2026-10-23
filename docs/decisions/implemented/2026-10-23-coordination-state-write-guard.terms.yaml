@@ -1,0 +1,6 @@
+version: 2
+terms: []
+references:
+  - assessMemoryWrite
+  - coordination_state
+  - expiresAt

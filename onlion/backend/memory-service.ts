@@ -7,12 +7,59 @@ import {
   projectAmlMultimodalMemory,
 } from "../../src/integration/aml-projection.ts";
 import { normalizeContent, type AmlContent } from "../../src/integration/multimodal-content.ts";
-import {
-  extractiveNodeSummary,
-  runExtractiveLeafSummaries,
-} from "./extractive-summaries.mjs";
+import { extractiveNodeSummary, runExtractiveLeafSummaries } from "./extractive-summaries.mjs";
 import type { EmbeddingClient } from "../../src/core/embedding-provider.ts";
 import type { RememberInput, MemorySearchResult } from "../../src/core/types.ts";
+
+type ClauseContribution = {
+  /** Position of the clause in the request's clause list. */
+  index: number;
+  /** Returned memories this clause surfaced (it may have surfaced more). */
+  contributed: number;
+  /** Returned memories that no other clause surfaced. */
+  exclusive: number;
+};
+
+type FusedCandidate = { result: MemorySearchResult; sources: Set<number> };
+
+/** Keep the highest-scoring occurrence of a memory, remembering every clause
+ * that surfaced it. */
+function trackCandidate(
+  byId: Map<string, FusedCandidate>,
+  index: number,
+  result: MemorySearchResult,
+): void {
+  const prior = byId.get(result.memory.id);
+  if (!prior) {
+    byId.set(result.memory.id, { result, sources: new Set([index]) });
+    return;
+  }
+  prior.sources.add(index);
+  if (result.combinedScore > prior.result.combinedScore) prior.result = result;
+}
+
+/** Per-clause attribution over the returned page. */
+function summariseClauses(
+  selected: readonly FusedCandidate[],
+  clauseCount: number,
+): ClauseContribution[] {
+  const clauses: ClauseContribution[] = Array.from({ length: clauseCount }, (_unused, index) => ({
+    index,
+    contributed: 0,
+    exclusive: 0,
+  }));
+  for (const entry of selected) {
+    for (const source of entry.sources) {
+      const clause = clauses[source];
+      if (clause) clause.contributed += 1;
+    }
+    if (entry.sources.size !== 1) continue;
+    const [only] = [...entry.sources];
+    const clause = only === undefined ? undefined : clauses[only];
+    if (clause) clause.exclusive += 1;
+  }
+  return clauses;
+}
 
 export const CORE_SOURCE = "workspace:src";
 // Fixed service profile, independent of agent sessions, online feedback and AG
@@ -21,6 +68,9 @@ export const AML_SEARCH_PROFILE = Object.freeze({
   maxTier: 3 as const,
   graphHops: 1,
   expandChains: true,
+  // Neighbourhood budget for chain expansion; five members measured as the
+  // useful point (see the append-only decision record).
+  chainExpansionMaxMembers: 5,
   secondPass: true,
   vectorGranularity: "records" as const,
   leafBlockRouting: true,
@@ -69,7 +119,10 @@ export class AmlMemoryService {
     // summary face so later batches can never split the node.
     const sessionDate = messages.find((message) => message.chat_time)?.chat_time?.slice(0, 10);
     const nodeSummary = extractiveNodeSummary(
-      messages.map((message) => message.indexText ?? (typeof message.content === "string" ? message.content : "")),
+      messages.map(
+        (message) =>
+          message.indexText ?? (typeof message.content === "string" ? message.content : ""),
+      ),
       sessionDate,
     );
     const inputs: RememberInput[] = messages.map((message): RememberInput => {
@@ -144,7 +197,11 @@ export class AmlMemoryService {
     this.store.close();
   }
 
-  async search(queries: string[], limit: number) {
+  /** Search the ranked clauses into one page and the append-only clauses into a
+   * separate supplement. Append-only results never compete for the page slots:
+   * they are returned as `appended`, deduplicated against the page, so a
+   * retrieval dimension that is broad but imprecise cannot crowd out evidence. */
+  async search(queries: string[], limit: number, appendOnly: readonly boolean[] = []) {
     if (this.client) {
       const health = this.store.embeddingIndexHealth(this.client.indexId);
       if (!health || health.pending.records || !health.targets.includes("records")) {
@@ -153,9 +210,12 @@ export class AmlMemoryService {
         await syncRecordEmbeddings(this.store, this.client, 32, { maxBatches: 1 });
       }
     }
-    const byId = new Map<string, MemorySearchResult>();
+    // Track which clauses surfaced each memory, so a caller can see whether the
+    // retrieval dimension it added actually contributed to the page.
+    const byId = new Map<string, FusedCandidate>();
+    const appendedById = new Map<string, MemorySearchResult>();
     let records = false;
-    for (const query of queries) {
+    for (const [index, query] of queries.entries()) {
       // User isolation is the physical manifest/partition boundary, including
       // legacy rows whose pre-upgrade scope differs. No session filter.
       const context = await searchMemoryContext(this.store, this.client, query, {
@@ -169,19 +229,35 @@ export class AmlMemoryService {
         },
       });
       records ||= context.retrieval?.mode === "hybrid";
-      for (const result of context.results) {
-        const prior = byId.get(result.memory.id);
-        if (!prior || result.combinedScore > prior.combinedScore)
-          byId.set(result.memory.id, result);
+      if (appendOnly[index]) {
+        for (const result of context.results) {
+          const prior = appendedById.get(result.memory.id);
+          if (!prior || result.combinedScore > prior.combinedScore) {
+            appendedById.set(result.memory.id, result);
+          }
+        }
+        continue;
       }
+      for (const result of context.results) trackCandidate(byId, index, result);
     }
     // Fuse clauses by identity, keep native scores, apply the AML hard cap.
     const selected = [...byId.values()]
+      .sort(
+        (a, b) =>
+          b.result.combinedScore - a.result.combinedScore ||
+          a.result.memory.id.localeCompare(b.result.memory.id),
+      )
+      .slice(0, limit);
+    const page = new Set(selected.map((entry) => entry.result.memory.id));
+    const appended = [...appendedById.values()]
+      .filter((result) => !page.has(result.memory.id))
       .sort((a, b) => b.combinedScore - a.combinedScore || a.memory.id.localeCompare(b.memory.id))
       .slice(0, limit);
     return {
       retrievalMode: records ? "records" : "lexical",
-      memories: selected.map((result) => projectResult(result, queries[0] ?? "")),
+      memories: selected.map((entry) => projectResult(entry.result, queries[0] ?? "")),
+      clauses: summariseClauses(selected, queries.length),
+      appended: appended.map((result) => projectResult(result, queries[0] ?? "")),
     };
   }
 }

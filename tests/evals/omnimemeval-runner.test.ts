@@ -296,4 +296,56 @@ test("runPlan writes a bounded resource report and propagates the exit code", as
   assert.equal(report.label, `locomo@${plan.version}`);
   assert.ok(report.ticks.length >= 1, "captured at least one tick");
   assert.ok(report.summary.processCountMax >= 1);
+
+  // Retry accounting lands beside it and must survive an otherwise clean run.
+  const retryPath = join(
+    omniRoot,
+    "results",
+    SUITES.locomo.resultFolder,
+    plan.version,
+    "retry_report.json",
+  );
+  const retry = JSON.parse(readFileSync(retryPath, "utf8")) as { totalRetries: number };
+  assert.equal(retry.totalRetries, 0);
+});
+
+test("runPlan counts the retries the official client prints", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("retry-report fixture must not use a live provider");
+  });
+  const repoRoot = fixtureRepo("locomo");
+  const omniRoot = join(repoRoot, ".benchmarks", "official", "OmniMemEval");
+  const scriptPath = join(omniRoot, "scripts", SUITES.locomo.runner);
+  // Two ANSWER retries and one EVAL retry, as the official client prints them.
+  writeFileSync(
+    scriptPath,
+    "#!/usr/bin/env bash\n" +
+      "echo '  ⚠ [ANSWER] LLM retry 1/4: APITimeoutError: timed out'\n" +
+      "echo '  ⚠ [ANSWER] LLM retry 2/4: InternalServerError: upstream 502'\n" +
+      "echo '  ⚠ [EVAL] LLM retry 1/4: APITimeoutError: timed out' >&2\n" +
+      "exit 0\n",
+    "utf8",
+  );
+  const plan = createRunPlan(parseRunOptions(["locomo", "--config", "benchmark.json"]), {
+    repoRoot,
+  });
+  delete plan.environment.NMG_EMBED_PROVIDER;
+  delete plan.environment.NMG_EMBED_BASE_URL;
+  delete plan.environment.NMG_OMNI_API_URL;
+  assert.equal(await runPlan(plan), 0);
+
+  const retry = JSON.parse(
+    readFileSync(
+      join(omniRoot, "results", SUITES.locomo.resultFolder, plan.version, "retry_report.json"),
+      "utf8",
+    ),
+  ) as {
+    totalRetries: number;
+    byModule: Record<string, { retries: number; maxAttemptSeen: number }>;
+  };
+  assert.equal(retry.totalRetries, 3);
+  assert.equal(retry.byModule.ANSWER.retries, 2);
+  assert.equal(retry.byModule.ANSWER.maxAttemptSeen, 2);
+  // stderr is counted too: a retry warning must not be lost by stream choice.
+  assert.equal(retry.byModule.EVAL.retries, 1);
 });

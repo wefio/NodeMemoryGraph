@@ -32,3 +32,11 @@ terms:
     owner: docs/experiments/benchmarks/locomo-local-audit-2026-10-23.md
     anchor: Multi-hop top-100 probe (same capture corpus, multihop-miss-anatomy-2026-10-23T08-47-39)
     status: canonical
+  - term: retrieval gap layer
+    aliases: [缺口分层, 候选缺失, 提前裁页, 最终分配, candidate missing, cut page, final allocation]
+    definition: >-
+      The three places a labeled evidence turn can be lost, each with a different lever: candidate missing (no recorded query path retrieves it — only a different query expression or representation can), cut page (it is in the candidate pool but outside the twenty-record page — allocation decides), and final allocation (it is in the page and what remains is its position and form in the answer context). Naming the layer is what makes a reading falsifiable: a fusion-side gain belongs to the second layer and cannot move the first.
+      标注证据话轮可能在三个不同的地方丢失，各自的杠杆不同：候选缺失（没有任何已记录查询路径能取到，只能换查询表达或表示）、提前裁页（已在候选池内但没进 20 条页，由分配决定）、最终分配（已在页内，剩下的是它在回答上下文里的位置与形式）。命名层次正是让读数可证伪的原因：融合侧的增益属于第二层，动不了第一层。
+    owner: docs/experiments/benchmarks/locomo-local-audit-2026-10-23.md
+    anchor: Conclusion and decisions
+    status: canonical

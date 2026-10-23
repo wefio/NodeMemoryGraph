@@ -8,6 +8,7 @@ import {
   type EmbeddingClient,
 } from "../../src/core/embedding-provider.ts";
 import { loadEnvironmentFile } from "../local-env.ts";
+import { createRetryCapture, writeRetryReport } from "./retry-observability.ts";
 
 export type BenchmarkSuite = "longmemeval" | "locomo" | "beam" | "personamem-v2" | "halumem";
 
@@ -408,8 +409,23 @@ export async function runPlan(plan: RunPlan): Promise<number> {
   const child = spawn(plan.bash, plan.args, {
     cwd: plan.omniRoot,
     env: plan.environment,
-    stdio: "inherit",
+    stdio: ["inherit", "pipe", "pipe"],
   });
+
+  // Retry observability: the official client retries up to `max_retries` times
+  // and only the successful attempt reaches its token tracker, so billed
+  // retries would otherwise be invisible. Tee the output instead of changing
+  // the official code, and keep streaming it to the operator unchanged.
+  const retryCapture = createRetryCapture();
+  for (const [stream, out] of [
+    [child.stdout, process.stdout],
+    [child.stderr, process.stderr],
+  ] as const) {
+    stream?.on("data", (chunk: Buffer) => {
+      retryCapture.push(chunk.toString("utf8"));
+      out.write(chunk);
+    });
+  }
 
   // Full-run resource observability: sample the spawned process tree at a low
   // fixed cadence. Purely observational — scheduling and arguments untouched.
@@ -427,6 +443,7 @@ export async function runPlan(plan: RunPlan): Promise<number> {
     });
   });
   await sampler.stop();
+  retryCapture.flush();
 
   // Write one bounded report beside the run's result directory.
   try {
@@ -434,6 +451,12 @@ export async function runPlan(plan: RunPlan): Promise<number> {
     writeResourceReport(sampler.report, resultDir);
   } catch {
     // A missing/unwritable result dir must not fail the run itself.
+  }
+  try {
+    const resultDir = join(plan.omniRoot, "results", SUITES[plan.suite].resultFolder, plan.version);
+    writeRetryReport(retryCapture.report(), resultDir);
+  } catch {
+    // Retry accounting is diagnostic; losing it must not fail a completed run.
   }
   return exitCode;
 }

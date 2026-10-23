@@ -1855,6 +1855,24 @@ test("CLI writes pass through the governed memory admission policy", async () =>
       }),
       { code: "WRITE_REJECTED" },
     );
+    // A live process position is refused for a different reason than wording: it
+    // is a well-formed claim with no stable truth value.
+    await assert.rejects(
+      service.invoke("remember", {
+        statement: "Local main is 16 commits ahead of origin/main and unpushed.",
+        nodeName: "Release flow",
+        memoryType: "constraint",
+      }),
+      { code: "WRITE_REJECTED", message: /coordination_state/u },
+    );
+    // Stating when the position stops being true is what makes it recordable.
+    const bounded = await service.invoke("remember", {
+      statement: "Local main is 16 commits ahead of origin/main and unpushed.",
+      nodeName: "Release flow",
+      memoryType: "constraint",
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    assert.equal(bounded.memory.statement.includes("unpushed"), true);
     // ...but the explicit escape hatch (unsafe) admits it and tags the audit marker.
     const admitted = await service.invoke("remember", {
       statement: "用户偏好：持久化文档不带临时时间标注。",
@@ -1895,7 +1913,15 @@ test("a configured-but-unreachable embedding provider degrades search to lexical
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-degraded-"));
   const service = new NmgService({
     databasePath: join(directory, "nmg.sqlite"),
-    environment: { NMG_EMBED_PROVIDER: "openai" },
+    // Pin the endpoint instead of relying on the client's default
+    // http://127.0.0.1:8000/v1: a developer machine that runs the benchmark BGE
+    // server there makes the "unreachable" provider reachable and this test
+    // then observes hybrid retrieval. Port 1 refuses immediately, so the drain
+    // fails fast on any machine and the assertions below stay about degradation.
+    environment: {
+      NMG_EMBED_PROVIDER: "openai",
+      NMG_EMBED_BASE_URL: "http://127.0.0.1:1/v1",
+    },
   });
   try {
     await service.invoke("remember", {

@@ -148,6 +148,8 @@ npm run benchmark:omni -- <longmemeval|locomo|beam|personamem-v2|halumem>
 `--llm-workers` 值同步到 OmniMemEval 的共享自适应客户端上限，因此公开的 worker 设置不会被第二个默认值静默封顶。在官方 DeepSeek 端点上，LongMemEval 与 LoCoMo 还会在答案批次之前发一次尽力而为的单 token 前缀预热。它们稳定的 prompt 前缀约占平均输入 token 的 10.5% 与 12.9%。设
 `ANSWER_PREFIX_WARMUP=0` 可禁用它。真实答案 prompt 保持不变，报告在 provider 返回时记录 DeepSeek 的顶层缓存命中与未命中 token 数。
 
+重试会计费，但在这份统计里不可见。官方客户端会重试失败的调用最多 `max_retries` 次（默认 4，即最多五次尝试），而只有成功那次进入它的 token 追踪器；因此发生在响应路径上的超时或上游 502 不会在 token 总量里留下任何痕迹。NMG 启动器因此转发官方 runner 的输出，并在 `resource_report.json` 旁写出 `<结果目录>/retry_report.json`：总重试次数、按模块的重试次数与见过的最高重试序号，以及前几条告警原文。该采集是文本级、观测性的——不改变任何请求、重试策略或调度。在信任一轮运行的 token 总量前先看 `totalRetries`；若慢端点是在产生重试而不是答案，应下调 `ANSWER_`/`EVAL_` 的 `MAX_RETRIES` 或 `TIMEOUT_SECONDS`。
+
 PersonaMem v2 是 prompt 顺序会造成巨大可避免影响的例外。它的上游 prompt 把检索上下文放在 176 token 的固定指令之前，因此受维护的 NMG 画像显式传入
 `--prompt-layout static-first`。上游 runner 仍默认 `official`；该替代只把那些固定指令移到上下文之前，保留同样的文本、问题、选项与输出契约。在一次均匀抽样的 500 题匹配探针上（直连 DeepSeek、temperature 为零、关闭 thinking、`max_tokens=24`、32 个 worker），官方布局得到 0% 报告的缓存命中、33.70 请求/秒、1240 ms P95 与 28.8% 答案准确率。static-first 得到 10.11% 缓存命中、44.83 请求/秒、1090 ms P95 与 28.0% 准确率；配对选择在 448/500 题上一致（22 题仅官方布局正确，18 题仅 static-first 正确）。这是执行画像优化，不是官方 prompt 顺序的排行榜行；有意改变画像会使对旧 PersonaMem 结果目录的续跑失效。
 
