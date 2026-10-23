@@ -1895,7 +1895,15 @@ test("a configured-but-unreachable embedding provider degrades search to lexical
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-degraded-"));
   const service = new NmgService({
     databasePath: join(directory, "nmg.sqlite"),
-    environment: { NMG_EMBED_PROVIDER: "openai" },
+    // Pin the endpoint instead of relying on the client's default
+    // http://127.0.0.1:8000/v1: a developer machine that runs the benchmark BGE
+    // server there makes the "unreachable" provider reachable and this test
+    // then observes hybrid retrieval. Port 1 refuses immediately, so the drain
+    // fails fast on any machine and the assertions below stay about degradation.
+    environment: {
+      NMG_EMBED_PROVIDER: "openai",
+      NMG_EMBED_BASE_URL: "http://127.0.0.1:1/v1",
+    },
   });
   try {
     await service.invoke("remember", {
