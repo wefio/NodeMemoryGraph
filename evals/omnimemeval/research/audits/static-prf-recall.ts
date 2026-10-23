@@ -9,7 +9,7 @@
 // Usage: node --experimental-strip-types evals/omnimemeval/research/audits/static-prf-recall.ts
 
 import { spawn, execSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { loadEnvironmentFile } from "../../../local-env.ts";
 import { loadLocomo } from "../../../benchmarks/loaders.ts";

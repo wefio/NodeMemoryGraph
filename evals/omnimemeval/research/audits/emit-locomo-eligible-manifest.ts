@@ -8,7 +8,7 @@
 //
 // Usage: node --experimental-strip-types evals/omnimemeval/research/audits/emit-locomo-eligible-manifest.ts
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { loadEnvironmentFile } from "../../../local-env.ts";
 import { loadLocomo } from "../../../benchmarks/loaders.ts";

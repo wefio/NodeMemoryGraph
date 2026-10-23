@@ -113,9 +113,6 @@ await Promise.all(
         signal: AbortSignal.timeout(180_000),
       });
       const body = await response.json();
-      const memories = (body.data ?? []).map((memory) =>
-        normalize(memory.content ?? memory.statement ?? ""),
-      );
       const evidenceText = new Map();
       for (const session of item.sessions) {
         for (const turn of session.turns) {

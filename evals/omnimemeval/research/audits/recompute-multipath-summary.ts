@@ -5,7 +5,7 @@
 //
 // Usage: node --experimental-strip-types evals/omnimemeval/research/audits/recompute-multipath-summary.ts <rows-or-run-dir>
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pairedComparison } from "./locomo-audit-shared.ts";
 
