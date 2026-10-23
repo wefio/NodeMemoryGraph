@@ -1,0 +1,34 @@
+version: 2
+terms:
+  - term: onlion-entry retrieval capture
+    aliases: [onlion 入口检索采集, onlion-entry capture]
+    definition: >-
+      Measuring retrieval by driving the built onlion worker's /add and /search HTTP surface under wrangler dev with local simulated R2, instead of calling store internals directly; the audited behavior is the deployed product path.
+      通过 wrangler dev + 本地模拟 R2 驱动构建出的 onlion worker 的 /add 与 /search HTTP 面来度量检索，而非直连存储内部；被审计的是部署产品路径的行为。
+    owner: docs/experiments/benchmarks/locomo-local-audit-2026-10-23.md
+    anchor: Method notes and deltas
+    status: canonical
+  - term: query-unreachable hop
+    aliases: [查询够不着的跳, unreachable evidence hop]
+    definition: >-
+      A labeled evidence hop that no search variant of the original question retrieves, even at top-100 — its text shares no surface with the question's vocabulary, so only a different query expression (attribute-style sub-queries or a decomposer) can reach it.
+      原问题的任何检索变体（即使在 top-100）都取不到的标注证据跳——其文本与问题词表零共享，只有换查询表达（属性式子查询或分解器）才能企及。
+    owner: docs/experiments/benchmarks/locomo-local-audit-2026-10-23.md
+    anchor: Multi-hop top-100 probe (same capture corpus, multihop-miss-anatomy-2026-10-23T08-47-39)
+    status: canonical
+  - term: static multi-path recall
+    aliases: [静态多路召回, static decomposition multi-path]
+    definition: >-
+      Deterministic recall paths derived from the question text alone (content-words query, Wh-type aspect probe) or from the retrieval itself (pseudo-relevance feedback), fused under one final top-20 budget; no LLM, no evidence-label access, fully auditable.
+      仅由问题文本确定性派生的召回路径（内容词查询、Wh 类型 aspect 探针）或由检索自身派生（伪相关反馈），在统一最终 top-20 预算下融合；无 LLM、不接触证据标签、完全可审计。
+    owner: docs/experiments/benchmarks/locomo-local-audit-2026-10-23.md
+    anchor: Static multi-path probes: both levers flat (static-multipath-2026-10-23T09-00-28, static-prf-2026-10-23T09-06-35)
+    status: canonical
+  - term: answer-detail hop
+    aliases: [答案细节话轮, answer-detail turn]
+    definition: >-
+      The recurring shape of unreachable multi-hop hops: a turn stating the specific fact (place name, status, concrete activity) while the retrieved turns merely discuss the asked topic, so the question's framing words occur in neither the missing hop nor the found turns.
+      不可达多跳跳的反复出现的形状：某话轮陈述具体事实（地名、状态、具体活动），而取回的话轮只在谈论被问主题，因此问题的措辞既不在缺失话轮也不在已命中话轮中出现。
+    owner: docs/experiments/benchmarks/locomo-local-audit-2026-10-23.md
+    anchor: Multi-hop top-100 probe (same capture corpus, multihop-miss-anatomy-2026-10-23T08-47-39)
+    status: canonical
