@@ -3,8 +3,8 @@ terms:
   - term: one-off script
     aliases: [一次性脚本, ad-hoc script]
     definition: >-
-      A task-specific script entry point intended to answer one question or run one analysis; a reusable helper belongs in a shared part only when another script needs it.
-      为回答一个问题或执行一次分析而编写的任务专用脚本入口；只有其他脚本也需要时，可复用辅助函数才应放入共享部件。
+      A disposable task-specific entry point for one question or analysis. An entry point that other work depends on rerunning is maintained at its owner instead; a shared helper requires an actual second consumer.
+      用于一个问题或一次分析的可丢弃任务入口。其他工作依赖重跑的入口由其 owner 维护；共享辅助函数需要实际的第二个调用方。
     owner: skills/script-reuse/SKILL.md
     anchor: Write the one-off script, and write it right
     status: canonical

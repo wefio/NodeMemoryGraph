@@ -23,7 +23,7 @@ description: 安全地修改、测试并提交本仓库。用于任何 NMG 代�
 
 1. 根据[发现协议](../../AGENTS.md#find-the-context-for-the-next-action)定位目标及其 owning contract。所有权或检查不清时，使用 `npm run agent:context -- <target-path>`。其 owner paths 是查询候选，不要求通读整个文件。位置参数用于指定明确范围；`--changed` 会加入 Git dirty paths。Reconciliation `unknown` 表示缺少适用证据；`drifted` 表示应检查报告中的不一致。两种状态都不是架构结论。
 2. 检查 `git status --short`；保留无关改动，只提交自己负责的文件。
-3. 阅读适用的 owning design 部分和将要修改的准确代码。文档或流程改动遵循 [doc-maintenance](../doc-maintenance/SKILL.zh-CN.md)；一次性脚本或临时分析遵循 [script-reuse](../script-reuse/SKILL.zh-CN.md)。
+3. 阅读适用的 owning design 部分和将要修改的准确代码。文档或流程改动遵循 [doc-maintenance](../doc-maintenance/SKILL.zh-CN.md)；脚本、分析工具、探针或维护自动化（包括保留入口和可续跑作业）遵循 [script-reuse](../script-reuse/SKILL.zh-CN.md)。
 4. 说明可测试的结果。修复缺陷和生命周期问题时，先写失败行为测试。
 5. 在第一次实质性文件写入之前，必须在 `repo-development` Task Board channel 登记一个开放的 in-flight goal。内容只能包含 `goal`、`approach` 和 `scope`；一个连贯任务只用一个条目，不按文件或步骤拆分。遵循 [`nmg-memory`](../nmg-memory/SKILL.zh-CN.md) 的 daemon 所有权规则，并保留返回的 entry ID：
 
