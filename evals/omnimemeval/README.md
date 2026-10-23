@@ -281,6 +281,18 @@ prefixes account for roughly 10.5% and 12.9% of average input tokens. Set
 and reports record DeepSeek's top-level cache-hit and cache-miss token counts
 when the provider returns them.
 
+Retries are billed but invisible in that accounting. The official client retries
+a failed call up to `max_retries` times (default 4, so five attempts) and only
+the successful attempt reaches its token tracker, so a timeout or upstream 502
+on the response path leaves no trace in the token totals. The NMG launcher
+therefore tees the official runner's output and writes
+`<result dir>/retry_report.json` next to `resource_report.json`: total retries,
+per-module retries and the highest retry index seen, plus the first few warning
+lines. The capture is textual and observational — it changes no request, no
+retry policy and no scheduling. Read `totalRetries` before trusting a run's
+token totals, and lower `ANSWER_`/`EVAL_` `MAX_RETRIES` or `TIMEOUT_SECONDS`
+when a slow endpoint is producing retries rather than answers.
+
 PersonaMem v2 is the exception where prompt ordering has a large avoidable
 effect. Its upstream prompt places retrieved context before 176 tokens of fixed
 instructions, so the maintained NMG profile explicitly passes
