@@ -105,6 +105,31 @@ Stating the relation explicitly changes nothing: one loss and 59 ties across 63
 paired questions. The multi-hop scope stopped at 40 of 84 questions because the
 remaining questions could not change an exactly-tied comparison.
 
+## Acknowledgement arm (keep the chitchat, add the line after it)
+
+A pure acknowledgement is identified as: after the speaker prefix, at most five
+words, no digits, and no entity after the first word. That rule flags only
+1.1–2.6% of appended turns — short answer-bearing turns such as "I bought it a
+year ago in Paris" are not caught, which is why the wider "short or starts with
+thanks" filter was rejected earlier. This arm keeps each such turn **and** adds
+the line that follows it, so a slot spent on "Yeah!" does not hide the sentence it
+was answering.
+
+| scope | tail | ack-plus | ack-plus vs tail |
+| --- | ---: | ---: | --- |
+| temporal + single-hop, n=23 | 91.3% (21/23) | 95.7% (22/23) | 1W / 0L / 22 ties, p=1 |
+| multi-hop, n=84 | 84.1% (69/82) | 76.8% (63/82) | 2W / 7L / 72 ties, p=0.18 |
+
+Regression is a wash and multi-hop trends worse: the added sentence carries no
+new evidence and lengthens the context by one to three records per question.
+
+## Decision
+
+Adopt the content channel only: append the neighbours the chain rules select,
+deduplicated by memory id, bounded. No anchoring, no braces, no acknowledgement
+padding. That is the shape `expandChains` already has — appended members after
+the ranked page, capped — so the product needs no rendering change.
+
 ## Caveats
 
 - Absolute accuracies come from one run per arm. Repeating the page arm on
@@ -117,13 +142,15 @@ remaining questions could not change an exactly-tied comparison.
   accuracies are not the suite's accuracy.
 - Token use: 234,862 prompt tokens (regression) and 854,287 (multi-hop), with no
   provider cache hits reported.
+- `deepseek-v4-flash` and `deepseek-v4.1-flash` are aliases for the same model,
+  so arms filled under either name are comparable.
 
 ## Artifacts
 
 `evals/locomo/results/adjacency-rendering-reg23b/` and
-`adjacency-rendering-multi84/` hold per-question answers and labels; the
-bracketed arm is in `adjacency-rendering-reg23-v41/` and
-`adjacency-rendering-multi84-v41/`. The probe is
+`adjacency-rendering-multi84/` hold per-question answers and labels for six arms;
+`adjacency-rendering-reg23-v41/` and `adjacency-rendering-multi84-v41/` hold the
+earlier five-arm runs. The probe is
 `evals/omnimemeval/research/probes/adjacency-rendering-ablation.ts`; rendering
 tests are in `tests/evals/adjacency-rendering.test.ts`.
 

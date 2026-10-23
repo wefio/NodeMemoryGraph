@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  isPureAcknowledgement,
   renderArm,
   type Turn,
 } from "../../evals/omnimemeval/research/probes/adjacency-rendering-ablation.ts";
@@ -104,4 +105,29 @@ test("a page record without neighbours is not wrapped", () => {
   assert.deepEqual(renderArm("anchored-bracketed", solo, [], placebo), [
     "[2023-05-04] solo anchor",
   ]);
+});
+
+test("pure acknowledgements are recognised without catching short facts", () => {
+  assert.equal(isPureAcknowledgement("Melanie: Yeah!"), true);
+  assert.equal(isPureAcknowledgement("Caroline: Thanks!"), true);
+  // A capitalised name after the first word is an entity, so this is not pure.
+  assert.equal(isPureAcknowledgement("Caroline: Thanks, Mel!"), false);
+  assert.equal(isPureAcknowledgement("Melanie: Sounds good to me."), true);
+  // Short turns that carry the answer must not be treated as chitchat.
+  assert.equal(isPureAcknowledgement("Jolene: I bought it a year ago in Paris."), false);
+  assert.equal(isPureAcknowledgement("Deborah: It happened at yoga in the park."), false);
+  assert.equal(isPureAcknowledgement("Melanie: I have 2 cats."), false);
+});
+
+test("ack-plus keeps the acknowledgement and adds the line that follows it", () => {
+  const anchor = turn("A1", 1, 0, "anchor one");
+  const ack = turn("A2", 1, 1, "Melanie: Yeah!");
+  const follow = turn("A3", 1, 2, "Melanie: We camped in June.");
+  const appended = [{ turn: ack, anchor, score: 0.75 }];
+  const tail = renderArm("tail", [anchor], appended);
+  const plus = renderArm("ack-plus", [anchor], appended, [], [follow]);
+  assert.deepEqual(tail.length, 2);
+  assert.deepEqual(plus.length, 3);
+  assert.deepEqual(plus.slice(0, 2), tail);
+  assert.equal(plus[2], "[2023-05-01] Melanie: We camped in June.");
 });

@@ -39,7 +39,19 @@ export type Turn = {
   text: string;
   date?: string;
 };
-export type Arm = "page" | "tail" | "anchored" | "anchored-bracketed" | "placebo";
+export type Arm = "page" | "tail" | "anchored" | "anchored-bracketed" | "ack-plus" | "placebo";
+
+/** A pure acknowledgement carries no fact of its own: after the speaker prefix it
+ * is at most five words, holds no digits and names no entity. Short turns are
+ * deliberately not included, because a short turn is often the answer. */
+export function isPureAcknowledgement(raw: string): boolean {
+  const body = raw.replace(/^[^:]{1,20}:\s*/u, "");
+  const words = body.split(/\s+/u).filter(Boolean);
+  if (words.length === 0 || words.length > 5) return false;
+  if (/\d/u.test(body)) return false;
+  // The first word is skipped: sentence-initial capitalisation is not an entity.
+  return words.slice(1).every((word) => !/^[A-Z]/u.test(word));
+}
 
 const STOPWORDS = new Set([
   "a",
@@ -142,11 +154,20 @@ export function renderArm(
   page: readonly Turn[],
   appended: ReadonlyArray<{ turn: Turn; anchor: Turn; score: number }>,
   placebo: readonly Turn[] = [],
+  ackExtras: readonly Turn[] = [],
 ): string[] {
   // Every arm carries the same date prefix; only placement differs between tail and anchored.
   const line = (turn: Turn) => (turn.date ? `[${turn.date}] ${turn.raw}` : turn.raw);
   if (arm === "page") return page.map(line);
   if (arm === "tail") return [...page.map(line), ...appended.map((entry) => line(entry.turn))];
+  // Pure acknowledgements stay, and each one brings the line that follows it, so a
+  // slot spent on "yeah!" does not hide the sentence it was answering.
+  if (arm === "ack-plus")
+    return [
+      ...page.map(line),
+      ...appended.map((entry) => line(entry.turn)),
+      ...ackExtras.map(line),
+    ];
   // Control: the same number of extra records, drawn from sessions the page did
   // not touch, so "more context" is separated from "these neighbours".
   if (arm === "placebo") return [...page.map(line), ...placebo.map(line)];
@@ -518,7 +539,7 @@ function exactPairedP(wins: number, losses: number): number | null {
 }
 
 export function summarise(rows: ReadonlyArray<Record<string, unknown>>): Record<string, unknown> {
-  const arms = ["page", "tail", "anchored", "anchored-bracketed", "placebo"] as const;
+  const arms = ["page", "tail", "anchored", "anchored-bracketed", "ack-plus", "placebo"] as const;
   const accuracy = Object.fromEntries(
     arms.map((arm) => [
       arm,
@@ -560,6 +581,8 @@ export function summarise(rows: ReadonlyArray<Record<string, unknown>>): Record<
     anchoredVsPage: pair("anchored", "page"),
     anchoredVsTail: pair("anchored", "tail"),
     bracketedVsAnchored: pair("anchored-bracketed", "anchored"),
+    ackPlusVsTail: pair("ack-plus", "tail"),
+    ackPlusVsPage: pair("ack-plus", "page"),
     bracketedVsTail: pair("anchored-bracketed", "tail"),
     placeboVsPage: pair("placebo", "page"),
   };
@@ -589,6 +612,7 @@ export function prepareTurns(
   pageTurns: Turn[];
   appended: Array<{ turn: Turn; anchor: Turn; score: number }>;
   placebo: Turn[];
+  ackExtras: Turn[];
 } {
   const turns: Turn[] = [];
   for (const session of item.sessions) {
@@ -624,7 +648,20 @@ export function prepareTurns(
     .filter((turn) => !touched.has(turn.si))
     .sort((a, b) => a.si - b.si || a.i - b.i)
     .slice(0, appended.length);
-  return { pageTurns, appended, placebo };
+  // For every appended pure acknowledgement, the line that follows it, so the
+  // sentence being acknowledged is not left out of the context.
+  const present = new Set(
+    [...pageTurns, ...appended.map((entry) => entry.turn)].map((turn) => turn.sid),
+  );
+  const ackExtras: Turn[] = [];
+  for (const entry of appended) {
+    if (!isPureAcknowledgement(entry.turn.raw)) continue;
+    const next = (bySession.get(entry.turn.si) ?? []).find((turn) => turn.i === entry.turn.i + 1);
+    if (!next || present.has(next.sid)) continue;
+    present.add(next.sid);
+    ackExtras.push(next);
+  }
+  return { pageTurns, appended, placebo, ackExtras };
 }
 
 function prepare(
@@ -632,17 +669,19 @@ function prepare(
   page: Candidate[],
   answerPrompt: string,
 ): Prepared {
-  const { pageTurns, appended, placebo } = prepareTurns(item, page);
+  const { pageTurns, appended, placebo, ackExtras } = prepareTurns(item, page);
   return {
     id: item.id,
-    arms: (["page", "tail", "anchored", "anchored-bracketed", "placebo"] as const).map((arm) => {
-      const lines = renderArm(arm, pageTurns, appended, placebo);
-      return {
-        arm,
-        lines,
-        render: `${answerPrompt.replace("{context}", lines.join("\n\n")).replace("{question}", item.question)}`,
-      };
-    }),
+    arms: (["page", "tail", "anchored", "anchored-bracketed", "ack-plus", "placebo"] as const).map(
+      (arm) => {
+        const lines = renderArm(arm, pageTurns, appended, placebo, ackExtras);
+        return {
+          arm,
+          lines,
+          render: `${answerPrompt.replace("{context}", lines.join("\n\n")).replace("{question}", item.question)}`,
+        };
+      },
+    ),
   };
 }
 

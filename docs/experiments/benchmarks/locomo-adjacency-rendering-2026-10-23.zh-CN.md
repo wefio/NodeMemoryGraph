@@ -78,15 +78,31 @@
 
 显式写出关系没有改变任何东西：63 道配对题上 1 负 59 平。多跳范围停在 84 题中的 40 题，因为余下题目无法改变一个恰好全平的比较结果。
 
+## 纯应答臂（保留寒暄，补上它后面那句）
+
+纯应答的判定：去掉说话人前缀后不超过 5 词、无数字、且第一个词之后没有实体词。该规则只命中追加轮的 1.1–2.6%——像 “I bought it a year ago in Paris” 这种短句不会被误判，这也是之前更宽的“短或以致谢开头”判定被否掉的原因。这一臂**保留**这些轮，并补上紧跟其后的一句，使花在 “Yeah!” 上的槽位不至于埋掉它所回应的那句话。
+
+| 范围 | tail | ack-plus | ack-plus 对 tail |
+| --- | ---: | ---: | --- |
+| 时间＋单跳，n=23 | 91.3%（21/23） | 95.7%（22/23） | 1胜 / 0负 / 22平，p=1 |
+| 多跳，n=84 | 84.1%（69/82） | 76.8%（63/82） | 2胜 / 7负 / 72平，p=0.18 |
+
+回归类持平，多跳略有变差：补进来的句子没有新证据，却让每题上下文多了一到三条记录。
+
+## 决定
+
+**只采用内容通道**：追加链规则选出的邻轮，按 memory id 去重、有界。不做贴着 anchor 的排布、不做花括号、不做寒暄补齐。这正是 `expandChains` 现有的形状——在排序结果之后追加成员并设上限——所以产品侧不需要改渲染。
+
 ## 注意
 
 - 绝对准确率来自每臂单次运行。同一批 prompt 重跑 page 臂得到 12/23 与 10/23（temperature 0），所以单次运行的绝对差有几道题的噪声；**同一轮内的配对比较才是承重证据**。
 - 单一裁判、与读者同模型家族、无人工抽查。多跳侧每臂有 1–2 条 judge 输出无法解析而被丢弃。
 - "informative" 子集是按机制起作用的位置挑的，因此这些准确率不等于整套题的准确率。
 - token 用量：回归 234,862 prompt tokens，多跳 854,287，服务商未报告缓存命中。
+- `deepseek-v4-flash` 与 `deepseek-v4.1-flash` 是同一模型的别名，因此用任一名字补齐的臂可直接对比。
 
 ## 产物
 
-`evals/locomo/results/adjacency-rendering-reg23b/` 与 `adjacency-rendering-multi84/` 保存四臂的逐题答案与标签；花括号臂在 `adjacency-rendering-reg23-v41/` 与 `adjacency-rendering-multi84-v41/`。探针为 `evals/omnimemeval/research/probes/adjacency-rendering-ablation.ts`，渲染测试在 `tests/evals/adjacency-rendering.test.ts`。
+`evals/locomo/results/adjacency-rendering-reg23b/` 与 `adjacency-rendering-multi84/` 保存六臂的逐题答案与标签；`adjacency-rendering-reg23-v41/` 与 `adjacency-rendering-multi84-v41/` 是更早五臂的运行。探针为 `evals/omnimemeval/research/probes/adjacency-rendering-ablation.ts`，渲染测试在 `tests/evals/adjacency-rendering.test.ts`。
 
 探针现在只补齐已存行缺失的臂，因此增加一种渲染只付一个臂的代价。最初的几次花括号运行把五个臂全重跑了一遍——那是探针设计缺陷，不是测量需要。
