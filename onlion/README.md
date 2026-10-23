@@ -73,6 +73,18 @@ against `wrangler dev`.
 - Attribution follows the message role; the structured-content marker carries
   format, source role and content hash.
 
+## Multi-clause search
+
+Search accepts either the legacy single `query` (optionally with `options`, which
+become `query + ' ' + option` clauses) or a `queries` list of one to eight
+independent clauses, each a string or `{text, name}`. The server never invents a
+retrieval dimension: the caller supplies them. All clauses are fused the same
+way — highest score per memory id, sorted, capped at `top_k` — and the response
+adds one row per clause with `contributed` and `exclusive` counts over the
+returned page. `queries[0]` is the presentation clause. Sending `queries`
+together with `query` or `options` is rejected. See
+[the decision](../docs/decisions/implemented/2026-10-23-onlion-multi-clause-search.md).
+
 ## Non-goals
 
 No official AML evaluation, production deployment or full benchmark score is

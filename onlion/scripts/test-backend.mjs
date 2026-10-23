@@ -100,6 +100,31 @@ print(json.dumps(r))`],{input:batchImage});
  assert.equal(found.status,200,JSON.stringify(found));assert.equal(found.body.data.length,1);assert.match(found.body.data[0].content,/Atlas/);
  assert.equal(found.body.data[0].created_at,'2024-01-01T00:00:00.000Z');
  assert.equal((await call('b','/search',{user_id:'bob',query:'favorite robot Atlas'})).body.data.length,0);
+ // One request may carry independent retrieval clauses. The response fuses them
+ // into one pool and reports what each clause put on the page.
+ const multi=await call('a','/search',{user_id:'alice',queries:[{name:'original',text:'favorite robot Atlas'},{name:'content',text:'Atlas robotics study'}],top_k:10});
+ assert.equal(multi.status,200,JSON.stringify(multi));assert.ok(multi.body.data.length>0);
+ assert.equal(multi.body.timings.clauses,2);assert.equal(multi.body.clauses.length,2);
+ assert.deepEqual(multi.body.clauses.map(c=>c.name),['original','content']);
+ for(const clause of multi.body.clauses){assert.ok(Number.isInteger(clause.contributed)&&clause.contributed>=0);assert.ok(Number.isInteger(clause.exclusive)&&clause.exclusive>=0);}
+ assert.ok(multi.body.clauses.reduce((sum,c)=>sum+c.contributed,0)>=multi.body.data.length,
+   'every returned memory is attributed to at least one clause');
+ const plain=await call('a','/search',{user_id:'alice',queries:['favorite robot Atlas','Atlas robotics study'],top_k:10});
+ assert.equal(plain.status,200,JSON.stringify(plain));assert.deepEqual(plain.body.clauses.map(c=>c.name),[null,null]);
+ // The legacy single-clause shape keeps its response and gains one clause row.
+ const legacy=await call('a','/search',{user_id:'alice',query:'favorite robot Atlas',top_k:5});
+ assert.equal(legacy.status,200,JSON.stringify(legacy));assert.equal(legacy.body.clauses.length,1);assert.equal(legacy.body.clauses[0].index,0);
+ // Duplicate clause text collapses before retrieval, keeping the first label.
+ const deduped=await call('a','/search',{user_id:'alice',queries:['favorite robot Atlas',{name:'dup',text:'favorite robot Atlas'}],top_k:5});
+ assert.equal(deduped.status,200,JSON.stringify(deduped));assert.equal(deduped.body.clauses.length,1);assert.equal(deduped.body.clauses[0].name,null);
+ // Ambiguous or unbounded clause input is rejected rather than guessed.
+ for(const queries of ['nope',[],Array.from({length:9},(_,i)=>'clause '+i),[{name:'no-text'}],[[ 'nested' ]],null]){
+   assert.equal((await raw('/search',{user_id:'alice',queries})).status,400,'queries '+JSON.stringify(queries));
+ }
+ assert.equal((await raw('/search',{user_id:'alice',query:'robot',queries:['robot']})).status,400);
+ assert.equal((await raw('/search',{user_id:'alice',queries:['robot'],options:['a']})).status,400);
+ assert.equal((await raw('/search',{user_id:'alice',queries:[{text:'robot',name:'x'.repeat(65)}]})).status,400);
+ console.log('PASS: multi-clause search fuses in one request and reports per-clause contribution.');
  assert.equal((await call('a','/add/status/'+added.body.task_id)).body.status,'completed');
  // Two independent isolates update the same object; conditional writes must retain both.
  const simultaneous=await Promise.all(['a','b'].map((name,i)=>call(name,'/add',{

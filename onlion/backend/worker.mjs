@@ -221,19 +221,56 @@ async function add(env,input) {
   });
 }
 
+const MAX_SEARCH_CLAUSES=8;
+/** One request may carry independent retrieval clauses: each is plain text plus
+ * an optional label. The legacy `query`(+`options`) shape is one clause. */
+async function readClauses(input,optionTexts){
+  const nodes=input.queries;
+  if(nodes===undefined){
+    // Preserve query text; use opaque image references or optional pixel descriptions.
+    // Options never enter the vision request and are not used to infer an answer.
+    const queryContent=contentField(input.query,4096);
+    const query=await createContentView()(queryContent);
+    return dedupeClauses([{text:query,name:null},...optionTexts.map(choice=>({text:query+' '+choice,name:null}))]);
+  }
+  if(!Array.isArray(nodes)||nodes.length<1||nodes.length>MAX_SEARCH_CLAUSES)throw new HttpError(400,'invalid_request',`queries must be an array of 1 to ${MAX_SEARCH_CLAUSES} clauses`);
+  if(optionTexts.length>0)throw new HttpError(400,'invalid_request','queries and options cannot be combined');
+  if(input.query!==undefined)throw new HttpError(400,'invalid_request','queries and query cannot be combined');
+  const clauses=nodes.map(node=>{
+    if(typeof node==='string')return {text:textField(node,'query',4096),name:null};
+    if(!node||typeof node!=='object')throw new HttpError(400,'invalid_request','each query clause must be a string or an object with text');
+    const name=node.name===undefined?null:textField(node.name,'name',64);
+    return {text:textField(node.text??node.query,'query',4096),name};
+  });
+  return dedupeClauses(clauses);
+}
+/** Identical clause text is collapsed before retrieval, keeping the first label,
+ * so a fusion index always refers to one clause. */
+function dedupeClauses(clauses){
+  const seen=new Set(),kept=[];
+  for(const clause of clauses){if(seen.has(clause.text))continue;seen.add(clause.text);kept.push(clause);}
+  return kept;
+}
+/** Sum a partition's per-clause attribution into the request totals. */
+function addClauseContributions(contributions,clauses){
+  for(const clause of clauses??[]){
+    const total=contributions[clause.index];
+    if(!total)continue;
+    total.contributed+=clause.contributed;
+    total.exclusive+=clause.exclusive;
+  }
+}
 async function search(env,input,options={}) {
   const userId=textField(input.user_id ?? input.userId,'user_id');
   requestIdentity(userId,input.request_id);
-  // Preserve query text; use opaque image references or optional pixel descriptions.
-  // Options never enter the vision request and are not used to infer an answer.
-  const queryContent=contentField(input.query,4096);
   const topK=input.top_k ?? input.topK;
   if(!Number.isInteger(topK)||topK<1||topK>100)throw new HttpError(400,'invalid_request','top_k must be an integer between 1 and 100');
   const choices=input.options??[];
   if(!Array.isArray(choices)||choices.length>16)throw new HttpError(400,'invalid_request','options must be an array of at most 16 strings');
   const optionTexts=choices.map(choice=>textField(choice,'option',4096));
-  const query=await createContentView()(queryContent);
-  const queries=[...new Set([query,...optionTexts.map(choice=>query+' '+choice)])];
+  const clauses=await readClauses(input,optionTexts);
+  const queries=clauses.map(clause=>clause.text);
+  const contributions=clauses.map((_clause,index)=>({index,contributed:0,exclusive:0}));
   const client=embeddingClient(env),started=Date.now();
   return mutateUser(env,userId,async({sqlite,key,manifest,staged})=>{
     let candidates=[];const modes=new Set();let changed=false;
@@ -259,13 +296,16 @@ async function search(env,input,options={}) {
       if(saved.mode==='full_snapshot')persistence.full_snapshot_saves++;
       persistence.changed_pages+=saved.changedPages;
       modes.add(result.response.retrievalMode);
+      addClauseContributions(contributions,result.response.clauses);
       candidates.push(...result.response.memories);
       // Bounded global Top K; never retain every shard's candidates in RAM.
       candidates.sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id));candidates=candidates.slice(0,topK);
     }
     persistence.inline_bytes=manifest.parts.reduce((sum,p)=>sum+deltaBytes(p),0);
     return {readOnly:!changed,response:{data:candidates,retrieval_mode:modes.has('records')?'records':'lexical',
-      timings:{totalMs:Date.now()-started,partitions:manifest.parts.length},persistence,
+      timings:{totalMs:Date.now()-started,partitions:manifest.parts.length,clauses:clauses.length},
+      clauses:clauses.map((clause,index)=>({name:clause.name,index,contributed:contributions[index].contributed,exclusive:contributions[index].exclusive})),
+      persistence,
       storage_format:manifest.parts.some(p=>p.delta)?'nmg-shards-v3':'nmg-shards-v2'}};
   });
 }
