@@ -1,5 +1,13 @@
 version: 2
 terms:
+  - term: self-referential complexity baseline
+    aliases: [自引用复杂度基线, gate baseline on main]
+    definition: >-
+      On main itself, complexity:gate's default baseline (the merge base with origin/main) equals HEAD, so every violation reads "unchanged from baseline" and the gate always reports ok. Auditing on main or after a merge requires --base origin/main after a fetch.
+      在 main 本身上，complexity:gate 的默认基线（与 origin/main 的 merge base）等于 HEAD，于是每个超限都读作 "unchanged from baseline"，gate 永远报 ok。在 main 上审计或合并之后必须先 fetch 再用 --base origin/main 度量。
+    owner: skills/complexity-reduction/SKILL.md
+    anchor: Baseline gotcha: the gate is self-referential on main
+    status: canonical
   - term: cyclomatic complexity
     aliases: [complexity score, 圈复杂度]
     definition: >-

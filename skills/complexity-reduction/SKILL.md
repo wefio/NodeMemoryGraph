@@ -25,10 +25,33 @@ threshold on the PR diff; the local
 Identify which methods are over the threshold and whether you introduced them:
 
 ```text
-npx eslint --rule '{"complexity": ["error", 15]}' <file>       # per-method complexity
-git show <base>:<file> | npx eslint --stdin --stdin-filename <file> \
-  --rule '{"complexity": ["error", 15]}'                       # baseline (was it already complex?)
+npx eslint --no-config-lookup --format json \
+  --rule '{"complexity": ["error", 15]}' <file>                 # per-method complexity
+
+git show <base>:<file> | npx eslint --no-config-lookup --format json \
+  --stdin --stdin-filename <file> --rule '{"complexity": ["error", 15]}'   # baseline (was it already complex?)
 ```
+
+Rule-only runs must pass `--no-config-lookup` (ESLint 9 otherwise merges the
+repo config into the run) and `--format json` (the text formatters are not
+stable to parse).
+
+### Baseline gotcha: the gate is self-referential on main
+
+`complexity:gate` defaults its baseline to the merge base with `origin/main`.
+That is correct on a feature branch, but **on main itself the merge base is
+HEAD**, so every violation reads "unchanged from baseline" and the gate always
+reports ok. When auditing on main, or after a merge, measure against the
+actually landed state:
+
+```text
+git fetch origin
+npm run complexity:gate -- --base origin/main
+```
+
+A failed gate names the skill to consult (this file); CodeFactor enforces the
+same cap on PR diffs even for methods unchanged from the baseline when their
+file is in the diff — reduce them anyway.
 
 If a flagged method is **unchanged from the baseline** it is pre-existing debt,
 but CodeFactor still requires it under the threshold when the file is in the
