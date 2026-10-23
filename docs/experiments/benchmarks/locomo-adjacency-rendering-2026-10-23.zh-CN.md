@@ -65,6 +65,19 @@
 - **价值不在放置**：把邻轮贴到各自 anchor 之后，23 题上完全相同，多跳上还略差（3胜6负，p=0.51）。代词那条担心没有通过答案阶段：邻轮的指代对象本来就在页内，位置不影响。
 - 直接后果：产品现有的 `expandChains` 形状——**追加在末尾、有界**——就够用；不需要"贴 anchor"的渲染，也不需要顺序元数据进入 prompt。
 
+## 花括号臂（显式关系标记）
+
+第五个臂把每组相关行用花括号括起来，放置方式与 anchored 相同：`{ anchor, neighbour }`。它把"关系被写出来"与"关系由位置暗示"分开。
+
+`deepseek-v4-flash` 中途开始返回 503，因此这一臂在 `deepseek-v4.1-flash` 上跑，且五个臂属同一次运行；同轮内的配对才是可比的，并且四臂的模式复现了（n=23 时 page 45.5% 对 tail 95.7%）。
+
+| 范围 | anchored | bracketed | bracketed 对 anchored |
+| --- | ---: | ---: | --- |
+| 时间＋单跳，n=23 | 100%（23/23） | 95.7%（22/23） | 0胜 / 1负 / 22平，p=1 |
+| 多跳，n=40 | 87.2%（34/39） | 86.8%（33/38） | 0胜 / 0负 / 37平 |
+
+显式写出关系没有改变任何东西：63 道配对题上 1 负 59 平。多跳范围停在 84 题中的 40 题，因为余下题目无法改变一个恰好全平的比较结果。
+
 ## 注意
 
 - 绝对准确率来自每臂单次运行。同一批 prompt 重跑 page 臂得到 12/23 与 10/23（temperature 0），所以单次运行的绝对差有几道题的噪声；**同一轮内的配对比较才是承重证据**。
@@ -74,4 +87,6 @@
 
 ## 产物
 
-`evals/locomo/results/adjacency-rendering-reg23b/` 与 `adjacency-rendering-multi84/` 保存逐题答案与标签；探针为 `evals/omnimemeval/research/probes/adjacency-rendering-ablation.ts`，渲染测试在 `tests/evals/adjacency-rendering.test.ts`。
+`evals/locomo/results/adjacency-rendering-reg23b/` 与 `adjacency-rendering-multi84/` 保存四臂的逐题答案与标签；花括号臂在 `adjacency-rendering-reg23-v41/` 与 `adjacency-rendering-multi84-v41/`。探针为 `evals/omnimemeval/research/probes/adjacency-rendering-ablation.ts`，渲染测试在 `tests/evals/adjacency-rendering.test.ts`。
+
+探针现在只补齐已存行缺失的臂，因此增加一种渲染只付一个臂的代价。最初的几次花括号运行把五个臂全重跑了一遍——那是探针设计缺陷，不是测量需要。

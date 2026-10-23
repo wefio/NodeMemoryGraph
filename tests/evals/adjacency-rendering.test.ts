@@ -77,3 +77,31 @@ test("a turn without a date renders without a prefix", () => {
   const undated: Turn[] = [{ sid: "X", si: 1, i: 0, raw: "no date", text: "no date" }];
   assert.deepEqual(renderArm("page", undated, [], []), ["no date"]);
 });
+
+test("bracketed keeps the anchored placement and marks each related group", () => {
+  const anchored = renderArm("anchored", page, appended, placebo);
+  const bracketed = renderArm("anchored-bracketed", page, appended, placebo);
+  // Same records, same order; only brace markers are added around groups.
+  assert.deepEqual(
+    bracketed.filter((line) => line !== "{" && line !== "}"),
+    anchored,
+  );
+  assert.deepEqual(bracketed, [
+    "{",
+    "[2023-05-01] anchor one",
+    "[2023-05-01] neighbour before A1",
+    "[2023-05-01] neighbour after A1",
+    "}",
+    "{",
+    "[2023-05-02] anchor two",
+    "[2023-05-02] neighbour after B1",
+    "}",
+  ]);
+});
+
+test("a page record without neighbours is not wrapped", () => {
+  const solo: Turn[] = [turn("S1", 4, 0, "solo anchor")];
+  assert.deepEqual(renderArm("anchored-bracketed", solo, [], placebo), [
+    "[2023-05-04] solo anchor",
+  ]);
+});

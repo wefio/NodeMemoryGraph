@@ -39,7 +39,7 @@ export type Turn = {
   text: string;
   date?: string;
 };
-export type Arm = "page" | "tail" | "anchored" | "placebo";
+export type Arm = "page" | "tail" | "anchored" | "anchored-bracketed" | "placebo";
 
 const STOPWORDS = new Set([
   "a",
@@ -156,13 +156,16 @@ export function renderArm(
     list.push(entry.turn);
     byAnchor.set(entry.anchor.sid, list);
   }
-  const rendered: string[] = [];
+  const groups: string[][] = [];
   for (const turn of page) {
-    rendered.push(line(turn));
     const attached = (byAnchor.get(turn.sid) ?? []).sort((a, b) => a.si - b.si || a.i - b.i);
-    for (const neighbour of attached) rendered.push(line(neighbour));
+    groups.push([line(turn), ...attached.map((neighbour) => line(neighbour))]);
   }
-  return rendered;
+  if (arm === "anchored") return groups.flat();
+  // Explicit relation marker: the same placement, with each group of related
+  // lines wrapped in braces so a reader can see which records belong together.
+  // A page record without neighbours stays a single line.
+  return groups.flatMap((group) => (group.length > 1 ? ["{", ...group, "}"] : group));
 }
 
 function readJudgeSystem(path: string): string {
@@ -276,7 +279,7 @@ async function main(): Promise<void> {
       {
         scope: args.scope,
         questions: selected.length,
-        arms: ["page", "tail", "anchored"],
+        arms: ["page", "tail", "anchored", "anchored-bracketed", "placebo"],
         out: outDir,
       },
       null,
@@ -294,16 +297,28 @@ async function main(): Promise<void> {
   const judgePrompt = readPrompt(promptsPath, "JUDGE_PROMPT");
   const judgeSystem = readJudgeSystem(promptsPath);
   const rowsPath = resolve(outDir, "rows.jsonl");
+  const rows: Array<Record<string, unknown>> = [];
   const existing = new Set<string>();
   try {
+    // Resume: previous answers stay in the summary, not just in the skip set.
     for (const line of readFileSync(rowsPath, "utf8").trim().split("\n")) {
-      if (line) existing.add((JSON.parse(line) as { id: string }).id);
+      if (!line) continue;
+      const row = JSON.parse(line) as Record<string, unknown>;
+      rows.push(row);
+      existing.add(String(row.id));
     }
   } catch {
     // first run
   }
-  const rows: Array<Record<string, unknown>> = [];
-  const queue = selected.filter((item) => !existing.has(item.id));
+  const queue = selected.filter((item) => {
+    const prior = rows.find((row) => row.id === item.id);
+    if (!prior) return true;
+    // Revisit a row only when an arm it should carry is still absent.
+    const answers = (prior.answers as Record<string, string>) ?? {};
+    return ["page", "tail", "anchored", "anchored-bracketed", "placebo"].some(
+      (arm) => answers[arm] === undefined,
+    );
+  });
   const totals = { calls: 0, promptTokens: 0, completionTokens: 0, cacheHitTokens: 0 };
   let done = 0;
   await Promise.all(
@@ -312,27 +327,43 @@ async function main(): Promise<void> {
         const item = queue.shift();
         if (!item) return;
         const prepared = prepare(item, recorded.get(item.id)!, answerPrompt);
-        const answers: Record<string, string> = {};
-        const labels: Record<string, string> = {};
-        for (const arm of prepared.arms) {
-          answers[arm.arm] = await answerOnce(env, arm.render, totals);
-          labels[arm.arm] = await judgeOnce(
-            env,
-            judgeSystem,
-            judgePrompt,
-            item,
-            answers[arm.arm]!,
-            totals,
-          );
-        }
-        rows.push({
+        // Incremental arms: an existing row keeps its answers, and only the arms
+        // it does not carry are requested. Adding one rendering therefore costs
+        // one arm instead of re-running all five.
+        const prior = rows.find((row) => row.id === item.id);
+        const answers: Record<string, string> = {
+          ...((prior?.answers as Record<string, string> | undefined) ?? {}),
+        };
+        const labels: Record<string, string> = {
+          ...((prior?.labels as Record<string, string> | undefined) ?? {}),
+        };
+        const missing = prepared.arms.filter((arm) => answers[arm.arm] === undefined);
+        const answered = await Promise.all(
+          missing.map(async (arm) => ({
+            arm: arm.arm,
+            answer: await answerOnce(env, arm.render, totals),
+          })),
+        );
+        for (const row of answered) answers[row.arm] = row.answer;
+        const unjudged = Object.keys(answers).filter((arm) => labels[arm] === undefined);
+        const judged = await Promise.all(
+          unjudged.map(async (arm) => ({
+            arm,
+            label: await judgeOnce(env, judgeSystem, judgePrompt, item, answers[arm] ?? "", totals),
+          })),
+        );
+        for (const row of judged) labels[row.arm] = row.label;
+        const record = {
           id: item.id,
           category: Number(item.officialMetadata.category),
           pageRecords: prepared.arms[0]!.lines.length,
           appendedRecords: prepared.arms[1]!.lines.length - prepared.arms[0]!.lines.length,
           answers,
           labels,
-        });
+        };
+        const at = rows.findIndex((row) => row.id === item.id);
+        if (at >= 0) rows[at] = record;
+        else rows.push(record);
         writeFileSync(rowsPath, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`, "utf8");
         done += 1;
         if (done % 10 === 0) process.stderr.write(`answered ${done}/${done + queue.length}\n`);
@@ -358,6 +389,46 @@ type Totals = {
 
 const isRetryableStatus = (status: number): boolean => status === 429 || status >= 500;
 
+type ChatPayload = {
+  choices?: Array<{ message?: { content?: string } }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_cache_hit_tokens?: number };
+};
+
+/** One attempt: returns the content, or the status when the caller should retry. */
+async function chatAttempt(
+  key: string,
+  baseUrl: string,
+  model: string,
+  body: Record<string, unknown>,
+): Promise<{ status: number; content?: string; payload?: ChatPayload; retryAfter?: string }> {
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${key}`,
+      "x-opencode-session": `locomo-reader-${process.pid}`,
+    },
+    body: JSON.stringify({ model, ...body, thinking: { type: "disabled" } }),
+    signal: AbortSignal.timeout(180_000),
+  });
+  if (isRetryableStatus(response.status)) {
+    return {
+      status: response.status,
+      retryAfter: response.headers.get("retry-after") ?? undefined,
+    };
+  }
+  if (!response.ok) {
+    const bodyText = (await response.text()).slice(0, 300);
+    throw new Error(`chat ${response.status}: ${bodyText}`);
+  }
+  const payload = (await response.json()) as ChatPayload;
+  return {
+    status: response.status,
+    content: (payload.choices?.[0]?.message?.content ?? "").trim(),
+    payload,
+  };
+}
+
 async function callChat(
   env: Record<string, string | undefined>,
   baseUrl: string,
@@ -367,36 +438,19 @@ async function callChat(
 ): Promise<string> {
   const key = env.ANSWER_API_KEY;
   if (!key) throw new Error("ANSWER_API_KEY missing");
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${key}`,
-        "x-opencode-session": `locomo-reader-${process.pid}`,
-      },
-      body: JSON.stringify({ model, ...body, thinking: { type: "disabled" } }),
-      signal: AbortSignal.timeout(180_000),
-    });
-    if (isRetryableStatus(response.status)) {
-      await new Promise((wait) => setTimeout(wait, 1_000 * 2 ** attempt));
-      continue;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const result = await chatAttempt(key, baseUrl, model, body);
+    if (result.payload) {
+      totals.calls += 1;
+      totals.promptTokens += result.payload.usage?.prompt_tokens ?? 0;
+      totals.completionTokens += result.payload.usage?.completion_tokens ?? 0;
+      totals.cacheHitTokens += result.payload.usage?.prompt_cache_hit_tokens ?? 0;
+      return result.content ?? "";
     }
-    if (!response.ok)
-      throw new Error(`chat ${response.status}: ${(await response.text()).slice(0, 300)}`);
-    const payload = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-      usage?: {
-        prompt_tokens?: number;
-        completion_tokens?: number;
-        prompt_cache_hit_tokens?: number;
-      };
-    };
-    totals.calls += 1;
-    totals.promptTokens += payload.usage?.prompt_tokens ?? 0;
-    totals.completionTokens += payload.usage?.completion_tokens ?? 0;
-    totals.cacheHitTokens += payload.usage?.prompt_cache_hit_tokens ?? 0;
-    return (payload.choices?.[0]?.message?.content ?? "").trim();
+    const hint = Number(result.retryAfter ?? "0");
+    const delay =
+      Number.isFinite(hint) && hint > 0 ? hint * 1_000 : Math.min(30_000, 1_000 * 2 ** attempt);
+    await new Promise((wait) => setTimeout(wait, delay));
   }
   throw new Error("chat retries exhausted");
 }
@@ -464,14 +518,16 @@ function exactPairedP(wins: number, losses: number): number | null {
 }
 
 export function summarise(rows: ReadonlyArray<Record<string, unknown>>): Record<string, unknown> {
-  const arms = ["page", "tail", "anchored", "placebo"] as const;
+  const arms = ["page", "tail", "anchored", "anchored-bracketed", "placebo"] as const;
   const accuracy = Object.fromEntries(
     arms.map((arm) => [
       arm,
       (() => {
-        const labelled = rows.filter(
-          (row) => (row.labels as Record<string, string>)[arm] !== "UNPARSED",
-        );
+        // A row that does not carry this arm is excluded, not counted as wrong.
+        const labelled = rows.filter((row) => {
+          const label = (row.labels as Record<string, string | undefined>)[arm];
+          return label !== undefined && label !== "UNPARSED";
+        });
         const correct = labelled.filter(
           (row) => (row.labels as Record<string, string>)[arm] === "CORRECT",
         );
@@ -488,10 +544,12 @@ export function summarise(rows: ReadonlyArray<Record<string, unknown>>): Record<
     let losses = 0;
     let ties = 0;
     for (const row of rows) {
-      const labels = row.labels as Record<string, string>;
-      if (labels[left] === "UNPARSED" || labels[right] === "UNPARSED") continue;
-      if (labels[left] === labels[right]) ties += 1;
-      else if (labels[left] === "CORRECT") wins += 1;
+      const labels = row.labels as Record<string, string | undefined>;
+      const a = labels[left];
+      const b = labels[right];
+      if (a === undefined || b === undefined || a === "UNPARSED" || b === "UNPARSED") continue;
+      if (a === b) ties += 1;
+      else if (a === "CORRECT") wins += 1;
       else losses += 1;
     }
     return { wins, losses, ties, p: exactPairedP(wins, losses) };
@@ -501,6 +559,8 @@ export function summarise(rows: ReadonlyArray<Record<string, unknown>>): Record<
     tailVsPage: pair("tail", "page"),
     anchoredVsPage: pair("anchored", "page"),
     anchoredVsTail: pair("anchored", "tail"),
+    bracketedVsAnchored: pair("anchored-bracketed", "anchored"),
+    bracketedVsTail: pair("anchored-bracketed", "tail"),
     placeboVsPage: pair("placebo", "page"),
   };
 }
@@ -575,7 +635,7 @@ function prepare(
   const { pageTurns, appended, placebo } = prepareTurns(item, page);
   return {
     id: item.id,
-    arms: (["page", "tail", "anchored", "placebo"] as const).map((arm) => {
+    arms: (["page", "tail", "anchored", "anchored-bracketed", "placebo"] as const).map((arm) => {
       const lines = renderArm(arm, pageTurns, appended, placebo);
       return {
         arm,

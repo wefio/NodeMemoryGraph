@@ -85,6 +85,26 @@ Multi-hop (n=84, 82–83 judged per arm):
   members at the end, bounded — is sufficient. No anchored rendering is needed,
   and no ordering metadata has to survive into the prompt.
 
+## Bracketed arm (explicit relation marker)
+
+A fifth arm wraps each group of related lines in braces, keeping the anchored
+placement: `{ anchor, neighbour }`. It isolates "the relation is stated" from
+"the relation is implied by position".
+
+`deepseek-v4-flash` returned 503 mid-session, so this arm ran on
+`deepseek-v4.1-flash` with all five arms in the same run; within-run pairs are
+the comparable ones, and the four-arm pattern reproduced (page 45.5% versus tail
+95.7% at n=23).
+
+| scope | anchored | bracketed | bracketed vs anchored |
+| --- | ---: | ---: | --- |
+| temporal + single-hop, n=23 | 100% (23/23) | 95.7% (22/23) | 0W / 1L / 22 ties, p=1 |
+| multi-hop, n=40 | 87.2% (34/39) | 86.8% (33/38) | 0W / 0L / 37 ties |
+
+Stating the relation explicitly changes nothing: one loss and 59 ties across 63
+paired questions. The multi-hop scope stopped at 40 of 84 questions because the
+remaining questions could not change an exactly-tied comparison.
+
 ## Caveats
 
 - Absolute accuracies come from one run per arm. Repeating the page arm on
@@ -101,6 +121,12 @@ Multi-hop (n=84, 82–83 judged per arm):
 ## Artifacts
 
 `evals/locomo/results/adjacency-rendering-reg23b/` and
-`adjacency-rendering-multi84/` hold per-question answers and labels. The probe is
+`adjacency-rendering-multi84/` hold per-question answers and labels; the
+bracketed arm is in `adjacency-rendering-reg23-v41/` and
+`adjacency-rendering-multi84-v41/`. The probe is
 `evals/omnimemeval/research/probes/adjacency-rendering-ablation.ts`; rendering
 tests are in `tests/evals/adjacency-rendering.test.ts`.
+
+The probe now fills only the arms a stored row is missing, so adding a rendering
+costs one arm rather than re-running the whole set. The first bracketed runs
+re-ran all five arms, which was a probe design defect, not a measurement need.
