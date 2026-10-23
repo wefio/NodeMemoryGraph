@@ -47,6 +47,20 @@ covers — platform, entry points, inputs, version matrix — and do not let the
 statement claim more. "The two bin entry points start on this platform" is
 checkable; "the package works" is not, and belongs in `documented-only`.
 
+## Verify the executed boundary
+
+For a new or changed runnable entry point, check the actual files with the
+applicable type/static checker, then exercise the affected command path with a
+small fixture or controlled dependency. Cover argument/input handling, dispatch,
+output and failure status as applicable. Imports and helper tests alone do not
+verify that wiring; a dry run that exits before it does not cover it either.
+
+Keep this check within the task's permissions and
+[spending boundary](../repo-development/SKILL.md#repository-governance).
+When the live dependency cannot be exercised, use a controlled substitute and
+state which integration remains unverified. A passing local check is not a
+reason to start an unauthorized external workload.
+
 ## Choose the cheapest kind that can actually fail
 
 | Situation                                   | `kind`              | Why                                                            |

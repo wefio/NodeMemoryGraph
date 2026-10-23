@@ -56,8 +56,9 @@ Complexity must be kept within a limit of 15.
 2. Inspect `git status --short`; preserve unrelated changes and commit only your files.
 3. Read the applicable sections of the owning design and the exact code you will
    modify. For documentation or process changes, follow
-   [doc-maintenance](../doc-maintenance/SKILL.md); for one-off scripts or ad-hoc
-   analysis, follow [script-reuse](../script-reuse/SKILL.md).
+   [doc-maintenance](../doc-maintenance/SKILL.md); for scripts, analysis tools,
+   probes or maintenance automation, including retained and resumable jobs,
+   follow [script-reuse](../script-reuse/SKILL.md).
 4. State a testable outcome. For defects and lifecycle work, write the failing behavior test first.
 5. Immediately before the first substantive file write, register one open in-flight
    goal on the `repo-development` Task Board channel. Its content contains only

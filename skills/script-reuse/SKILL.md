@@ -1,6 +1,6 @@
 ---
 name: script-reuse
-description: Use when a task needs a throwaway script, ad-hoc analysis, or probe in this repository — how to write one that is right (flags, no silent zeros, a self-check, provenance in the output), and where the ready-made parts are if you would rather import them.
+description: Create or change scripts, analysis tools, probes, and maintenance automation in this repository, including one-off work, retained reproducers, and resumable jobs.
 ---
 
 # Write the one-off script, and write it right
@@ -14,11 +14,13 @@ here is meant to talk you out of that. Two things are governed instead:
 - do not ship a script that **quietly produces a wrong number** — the number gets
   quoted long after the script is deleted.
 
-[The parts shelf](../../docs/guides/parts.md) is the other half of the offer: if a
-ready-made piece fits — percentiles, `mapConcurrent`, atomic JSON writes, the
-control-plane API — import it instead of re-deriving it. That is a shortcut, not a
-requirement. A script with its own three-line helper is fine as long as it is the
-_first_ copy.
+These boundaries also apply when a script is retained for others to rerun.
+Before adding a helper or orchestration block, search the relevant code and
+[parts shelf](../../docs/guides/parts.md) for its responsibility, not just its
+proposed name. Import an existing implementation when its contract fits. The
+shelf is a discovery aid, not a required dependency or an exhaustive inventory.
+A local helper is fine for its first consumer; actual reuse, not anticipated
+reuse, justifies extraction.
 
 ## What makes it right
 
@@ -75,6 +77,8 @@ existing example: one routine per file, exporting only functions, imported by
 - Bad input throws at the boundary: `parsePiPromptTurns` rejects an empty message
   and a misplaced `--turn`.
 - It has a test.
+- Importing a routine does not start a job, parse the caller's arguments, or
+  mutate artifacts. Execution effects belong to an explicit entry point.
 
 This is the difference between a **routine** and a **one-off entry point**. The
 entry point may be thrown away; the routine stays as soon as a second script needs
@@ -85,14 +89,23 @@ it. Until then, co-locate it with its only consumer.
 - **A part is an import, not a command.** Do not add an `nmg-rcp` subcommand, an
   npm script, or a new `tools/*.ts` entry point because one task needed a
   composition. Nobody else will call it, and it will rot.
-- **The second definition is the signal.** If a helper you just wrote already
-  exists in another file, move it to a place both can import. Where is your call;
-  it only has to sit outside the module that already owns the concept.
+- **The second definition is the signal.** Reuse the existing owner or extract
+  the shared responsibility when a second consumer needs it. This includes
+  process startup, readiness, retries and cleanup, not only small calculations.
+  Keep experiment-specific choices at the caller; do not build a framework for
+  hypothetical consumers.
+- **Shared meaning has one implementation owner.** Parsing, eligibility,
+  normalization and metrics used for comparison come from their owning
+  contract, not a copied local variant. A deliberate alternative has a distinct
+  name and contract. An independent verification implementation remains a
+  labelled check, compared on shared cases, not a competing operational default.
 - **Never move judgement into a part.** Choosing narrow versus full, or deciding
   whether a change is acceptable, stays in one reviewed place. A part that makes
   that choice for you is a gate wearing a library's clothes.
-- **Throwaway means throwaway.** Do not commit the script. Commit only the part,
-  and only once a second script needs it.
+- **Distinguish disposable work from maintained entry points.** Do not commit
+  a disposable script. If other work depends on rerunning its command, retain it
+  at the relevant owner with documented inputs and checks instead of calling it
+  temporary. A shared part still needs an actual second consumer.
 
 ## When a part is missing
 
@@ -103,6 +116,31 @@ it does, its signature, and a minimal call.
 Use the [parts shelf](../../docs/guides/parts.md) to find callable imports that
 exist now; it is not a backlog of helpers to build. If no entry fits, apply the
 policy above.
+
+## Own execution and resume boundaries
+
+- **Declare resource ownership.** A command that starts a process or opens a
+  writable workspace distinguishes resources it creates from resources it
+  borrows. Isolate writable state and endpoints, or acquire the existing
+  exclusive-use mechanism before sharing them. Clean up owned resources on
+  success and failure; do not stop or delete borrowed resources.
+- **Bind reused output to the work that produced it.** Before resuming or
+  reusing a result, compare its recorded identity with the requested work:
+  input content or immutable revision, result-affecting configuration,
+  implementation/schema version, and model or prompt version where relevant.
+  A path, row ID or existing answer is not that identity. Missing or changed
+  identity starts a separate run, unless the owner provides an explicit,
+  checked compatibility or migration rule. Record non-secret identity fields,
+  not credentials or whole environment files.
+- **Persist completed work safely.** Record completion only after the unit's
+  required outputs are durable. Reuse only compatible completed units; identify
+  reused and newly computed work separately in the report. Use the existing
+  atomic-write or checkpoint facility rather than copying it.
+
+Before describing an entry point as runnable, apply
+[entry-point verification](../verification-traceability/SKILL.md#verify-the-executed-boundary).
+For conclusions drawn from its output, apply the existing
+[reader review](../doc-maintenance/references/reader-review.md#review-and-acceptance).
 
 ## What is not mechanized
 

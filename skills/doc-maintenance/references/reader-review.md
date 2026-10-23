@@ -158,6 +158,10 @@ For each reading unit being changed:
 3. Compare the source contract and old text with the revision using the facts
    checklist above. Verify commands or examples when the change affects their
    operational meaning. Mark unverified environments and unresolved facts.
+   When evidence changes a claim, reconcile its current summary, conclusion,
+   decision and dependent guidance in the same change; a later correction
+   paragraph does not retire an earlier instruction. Keep superseded readings
+   only as clearly labelled history with a link to the current conclusion.
 4. Follow affected references in both directions after relocation. Confirm that
    the linked section contains the needed constraints, not just that a file exists.
 5. Review paired texts for the same facts, obligations, warnings and commands,
