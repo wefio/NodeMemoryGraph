@@ -142,8 +142,6 @@ the ranked page, capped — so the product needs no rendering change.
   accuracies are not the suite's accuracy.
 - Token use: 234,862 prompt tokens (regression) and 854,287 (multi-hop), with no
   provider cache hits reported.
-- `deepseek-v4-flash` and `deepseek-v4.1-flash` are aliases for the same model,
-  so arms filled under either name are comparable.
 
 ## Artifacts
 
