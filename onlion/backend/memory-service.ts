@@ -68,6 +68,9 @@ export const AML_SEARCH_PROFILE = Object.freeze({
   maxTier: 3 as const,
   graphHops: 1,
   expandChains: true,
+  // Neighbourhood budget for chain expansion; five members measured as the
+  // useful point (see the append-only decision record).
+  chainExpansionMaxMembers: 5,
   secondPass: true,
   vectorGranularity: "records" as const,
   leafBlockRouting: true,

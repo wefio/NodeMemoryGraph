@@ -446,6 +446,9 @@ async function add(env, input) {
   });
 }
 
+/** Neighbourhood budget: measured on LoCoMo, five appended records carry 40-47%
+ * of the coverage gain of twenty at roughly a third of the text. */
+const APPENDED_MAX_RECORDS = 5;
 const MAX_SEARCH_CLAUSES = 8;
 /** One request may carry independent retrieval clauses: each is plain text plus
  * an optional label. The legacy `query`(+`options`) shape is one clause. */
@@ -618,7 +621,11 @@ async function search(env, input, options = {}) {
       candidates = candidates.slice(0, topK);
     }
     persistence.inline_bytes = manifest.parts.reduce((sum, p) => sum + deltaBytes(p), 0);
-    const appended = collectAppended(appendedById, candidates, topK);
+    const appended = collectAppended(
+      appendedById,
+      candidates,
+      Math.min(topK, APPENDED_MAX_RECORDS),
+    );
     return {
       readOnly: !changed,
       response: {

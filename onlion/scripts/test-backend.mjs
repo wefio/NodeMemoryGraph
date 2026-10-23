@@ -432,6 +432,17 @@ print(json.dumps(r))`,
       "appended never repeats a page record",
     );
   assert.equal(mix.body.clauses.find((c) => c.name === "broad").appendOnly, true);
+  // The supplement has its own record budget: five, independent of top_k.
+  const capped = await call("a", "/search", {
+    user_id: "append-supplement",
+    top_k: 20,
+    queries: [
+      { name: "original", text: "striped herd savanna" },
+      { name: "broad", text: "luminous galactic nucleus", appendOnly: true },
+    ],
+  });
+  assert.equal(capped.status, 200, JSON.stringify(capped));
+  assert.ok(capped.body.appended.length <= 5, "supplement is capped at five records");
   // A supplement that resolves to the same record as the page is dropped, so the
   // two fields never repeat a record however the clauses overlap.
   const overlap = await call("a", "/search", {

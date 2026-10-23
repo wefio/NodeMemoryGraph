@@ -33,12 +33,14 @@ Bounds and refusals:
 
 - the first clause carries the presentation and cannot be append-only;
 - at least one clause must be ranked;
-- `appended` is capped at `top_k` records and is absent when no clause is
-  append-only, so a ranked-only response keeps its shape.
+- `appended` is capped at five records (or `top_k` when smaller) and is absent
+  when no clause is append-only, so a ranked-only response keeps its shape.
 
-The service caps the supplement by record count. A text budget for the
-supplement belongs to the caller that renders it: measured coverage rises with
-appended characters up to about twice the page text and flattens after that.
+The service caps the supplement at five records, which measured as the useful
+point on LoCoMo: five appended neighbours carry 40-47% of the coverage gain of
+twenty at roughly a third of the text (multi-hop 20.8% -> 23.7% versus 28.3%;
+temporal+single-hop 76.6% -> 84.1% versus 92.4%). A text budget for the
+supplement still belongs to the caller that renders it.
 
 ## Alternatives considered
 
