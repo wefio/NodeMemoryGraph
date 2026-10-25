@@ -77,7 +77,13 @@ import {
   requireText,
   stableLeafBlockId,
 } from "./rows.ts";
-import { hierarchyWeight, memoryEmbeddingText, type StoreRow as Row } from "./search-ranking.ts";
+import {
+  hierarchyWeight,
+  MEMORY_PREVIOUS_TURN_SQL,
+  memoryEmbeddingModelId,
+  memoryEmbeddingText,
+  type StoreRow as Row,
+} from "./search-ranking.ts";
 import { encodeVector } from "./vector-codec.ts";
 
 import type { Constructor } from "./store-ctor.ts";
@@ -1035,7 +1041,8 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
     rebuildVectorIndex(): number {
       const rows = this.db
         .prepare(
-          `SELECT m.id, m.statement, m.node_id, n.canonical_name, n.summary
+          `SELECT m.id, m.statement, m.event_time, m.node_id, n.canonical_name, n.summary,
+                  ${MEMORY_PREVIOUS_TURN_SQL} AS previous_turn
          FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id
          WHERE m.storage_state = 'indexed'`,
         )
@@ -1053,11 +1060,14 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       this.db.exec("BEGIN IMMEDIATE");
       try {
         for (const row of rows) {
-          const text = memoryEmbeddingText(row.statement, row.canonical_name);
+          const text = memoryEmbeddingText(row.statement, {
+            eventTime: row.event_time,
+            previousTurn: row.previous_turn,
+          });
           const vector = this.embedder.embed(text);
           upsert.run(
             row.id,
-            this.embedder.model,
+            memoryEmbeddingModelId(this.embedder.model),
             this.embedder.dimensions,
             "[]",
             encodeVector(vector),

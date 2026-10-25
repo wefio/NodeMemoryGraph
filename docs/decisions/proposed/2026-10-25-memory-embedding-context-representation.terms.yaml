@@ -1,0 +1,7 @@
+version: 2
+terms: []
+references:
+  - memoryEmbeddingText
+  - memoryEmbeddingModelId
+  - representation version
+  - previous turn
