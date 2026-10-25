@@ -116,12 +116,40 @@ def create_app(config: ServerConfig) -> Any:
     model = SentenceTransformer(config.model, device=device)
 
     def encode_batch(texts: list[str]):
-        return model.encode(
-            texts,
-            batch_size=config.encode_batch_size,
-            normalize_embeddings=True,
-            show_progress_bar=False,
-        )
+        # An empty batch reaches the tokenizer as an empty text list and raises
+        # TypeError inside sentence-transformers, which surfaces as a 500 for
+        # every request sharing that batch. An empty encode is a no-op, not an
+        # error, so return no vectors instead of failing the callers.
+        if not texts:
+            return []
+        try:
+            return model.encode(
+                texts,
+                batch_size=config.encode_batch_size,
+                normalize_embeddings=True,
+                show_progress_bar=False,
+            )
+        except TypeError:
+            # Diagnostic: the tokenizer rejects the batch even though every
+            # element is a str, so isolate the offending elements by encoding
+            # each one alone and reporting the first few that fail.
+            offenders = []
+            for index, text in enumerate(texts):
+                surrogate = any(0xD800 <= ord(ch) <= 0xDFFF for ch in text)
+                if surrogate:
+                    offenders.append((index, "surrogate", repr(text[:60])))
+                    continue
+                try:
+                    model.encode([text], show_progress_bar=False)
+                except Exception as error:
+                    offenders.append((index, type(error).__name__, repr(text[:60])))
+                if len(offenders) >= 5:
+                    break
+            print(
+                f"[bge-server] encode rejected batch={len(texts)} offenders={offenders}",
+                flush=True,
+            )
+            raise
 
     batcher = EmbeddingBatcher(
         encode_batch,
@@ -155,12 +183,32 @@ def create_app(config: ServerConfig) -> Any:
             raise HTTPException(status_code=503, detail=str(error)) from error
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
+        if len(vectors) != len(texts):
+            raise HTTPException(status_code=400, detail="embedding count mismatch")
         return {
             "object": "list",
             "model": payload.get("model") or config.model,
             "data": [
                 {"object": "embedding", "embedding": vector.tolist(), "index": index}
                 for index, vector in enumerate(vectors)
+            ],
+        }
+
+    @app.get("/models")
+    @app.get("/v1/models")
+    def models() -> dict[str, Any]:
+        # OpenAI-compatible model listing. Cloud embedding providers expose
+        # GET /v1/models; the local service mirrors it so callers that probe
+        # model availability before embedding behave identically on both paths.
+        return {
+            "object": "list",
+            "data": [
+                {
+                    "id": config.model,
+                    "object": "model",
+                    "created": 0,
+                    "owned_by": "bge-embed",
+                }
             ],
         }
 
