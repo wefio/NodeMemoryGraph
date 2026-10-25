@@ -48,6 +48,7 @@ import {
   recallHitTerms,
   recallReason,
   rerankEqualScoresByQueryCoverage,
+  memoryEmbeddingModelId,
   termOverlapScore,
   type StoreRow as Row,
 } from "./search-ranking.ts";
@@ -1705,7 +1706,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       return this.searchWithVector(
         query,
         this.embedder.embed(query),
-        this.embedder.model,
+        memoryEmbeddingModelId(this.embedder.model),
         options,
         [],
         filterUsage,

@@ -187,6 +187,11 @@ export function renderSessionActiveGraphSurface(
   return prepareSessionActiveGraphSurface(snapshot, maxCharacters, options).text;
 }
 
+/** Characters of a record's source evidence that the evidence surface renders.
+ *  `renderEvidenceSurface` and the budget estimator must agree on this, or the
+ *  budget charges text nobody will ever read. */
+export const SOURCE_EXCERPT_CHARS = 320;
+
 function excerpt(value: string, maxLength: number): string {
   const normalized = value.replace(/\s+/gu, " ").trim();
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}…`;
@@ -357,7 +362,7 @@ export function renderEvidenceSurface(
       : "";
     const source =
       !forgotten && evidence.content.trim() !== memory.statement.trim()
-        ? `\n  SOURCE=${excerpt(evidence.content, 320)}`
+        ? `\n  SOURCE=${excerpt(evidence.content, SOURCE_EXCERPT_CHARS)}`
         : "";
     const statement = forgotten ? "[forget] (content withdrawn)" : memory.statement;
     return `- ${flags.length > 0 ? `${flags.join(" ")} ` : ""}${statement}\n  ${details.join("; ")}${externalSource}${source}`;

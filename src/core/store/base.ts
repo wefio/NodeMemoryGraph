@@ -60,6 +60,8 @@ import { ScopeWriteIndex, type ScopeWriteIndexRow, writeTokens } from "./scope-w
 import type { TransactionPort } from "./store-ctor.ts";
 import {
   ftsExpression,
+  MEMORY_PREVIOUS_TURN_SQL,
+  memoryEmbeddingModelId,
   memoryEmbeddingText,
   normalizeStatement,
   surfaceAnchorExpression,
@@ -2049,7 +2051,8 @@ export class NmgStoreBase {
   embeddingDocuments(afterMemoryId = "", limit = 256, missingModel?: string): EmbeddingDocument[] {
     const rows = this.db
       .prepare(
-        `SELECT m.id, m.statement, n.canonical_name, n.summary
+        `SELECT m.id, m.statement, m.event_time, n.canonical_name, n.summary,
+                ${MEMORY_PREVIOUS_TURN_SQL} AS previous_turn
        FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id
        WHERE m.id > ?
          AND m.storage_state = 'indexed'
@@ -2066,7 +2069,10 @@ export class NmgStoreBase {
       ) as Row[];
     return rows.map((row) => ({
       memoryId: String(row.id),
-      text: memoryEmbeddingText(row.statement, row.canonical_name),
+      text: memoryEmbeddingText(row.statement, {
+        eventTime: row.event_time,
+        previousTurn: row.previous_turn,
+      }),
     }));
   }
   nodeEmbeddingDocuments(
@@ -2656,9 +2662,17 @@ export class NmgStoreBase {
       );
     return transform;
   }
-  memoryText(memory: Pick<MemoryRecord, "statement">, nodeId: string): string {
-    const node = this.requireNode(nodeId);
-    return memoryEmbeddingText(memory.statement, node.canonicalName);
+  memoryText(
+    memory: Pick<MemoryRecord, "statement"> & { eventTime?: string | null },
+    _nodeId: string,
+    previousTurn?: string,
+  ): string {
+    // The node id stays in the signature so callers do not change; the name no
+    // longer takes part in the embedding text.
+    return memoryEmbeddingText(memory.statement, {
+      eventTime: memory.eventTime,
+      previousTurn,
+    });
   }
   upsertEmbedding(memoryId: string, text: string): void {
     const vector = this.embedder.embed(text);
@@ -2674,7 +2688,7 @@ export class NmgStoreBase {
       )
       .run(
         memoryId,
-        this.embedder.model,
+        memoryEmbeddingModelId(this.embedder.model),
         this.embedder.dimensions,
         "[]",
         encodeVector(vector),
@@ -2683,13 +2697,20 @@ export class NmgStoreBase {
   }
   refreshEmbeddings(memoryIds: string[]): void {
     const select = this.db.prepare(
-      `SELECT m.id, m.statement, m.node_id, n.canonical_name, n.summary
+      `SELECT m.id, m.statement, m.event_time, m.node_id, n.canonical_name, n.summary,
+              ${MEMORY_PREVIOUS_TURN_SQL} AS previous_turn
        FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id WHERE m.id = ?`,
     );
     for (const memoryId of memoryIds) {
       const row = select.get(memoryId) as Row | undefined;
       if (row)
-        this.upsertEmbedding(memoryId, memoryEmbeddingText(row.statement, row.canonical_name));
+        this.upsertEmbedding(
+          memoryId,
+          memoryEmbeddingText(row.statement, {
+            eventTime: row.event_time,
+            previousTurn: row.previous_turn,
+          }),
+        );
     }
   }
   nodeIdsForMemories(memoryIds: readonly string[]): string[] {

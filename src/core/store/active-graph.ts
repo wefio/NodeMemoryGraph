@@ -11,6 +11,7 @@ import type {
   SearchOptions,
 } from "../types.ts";
 import { normalize } from "./search-ranking.ts";
+import { SOURCE_EXCERPT_CHARS } from "../../integration/agent-surface.ts";
 
 export const DEFAULT_ACTIVE_GRAPH_BUDGET: ActiveGraphBudget = {
   maxNodes: 8,
@@ -104,14 +105,47 @@ export function fibonacciEvidenceBudgets(maxEvidence: number): number[] {
   return budgets;
 }
 
+/** Approximate cost of one result *as the evidence surface renders it*.
+ *
+ * The budget exists to bound what the reader receives, so it must charge the
+ * rendered text and nothing else. Two charged items previously had no rendered
+ * counterpart at all:
+ *
+ * - `node.summary` (~1.5k characters on LongMemEval) is node-level metadata the
+ *   evidence surface never prints, and it is *shared* by every record of that
+ *   node (~10 records per node on LongMemEval), so charging it per record
+ *   multiplied it by the node's record count.
+ * - `evidence.content` was charged in full while the surface prints at most
+ *   `SOURCE_EXCERPT_CHARS` of it.
+ *
+ * Measured on LongMemEval user _17 that estimator charged 898 tokens/record
+ * against 377 rendered, i.e. 2.38x, and the 6,000-token budget returned 6.7
+ * records where the rendered cost allows 15.9 — the observed page averaged
+ * 6.89 records and never reached the requested 20.
+ *
+ * The statement is charged in full because it is rendered in full; the details
+ * line is approximated from the fields it prints. */
 export function estimateResultTokens(result: MemorySearchResult): number {
-  const characters =
-    result.memory.statement.length +
+  const memory = result.memory;
+  const details =
+    memory.id.length +
     result.node.canonicalName.length +
-    result.node.summary.length +
-    result.evidence.content.length;
+    memory.memoryType.length +
+    memory.truthStatus.length +
+    JSON.stringify(memory.scope).length +
+    (memory.eventTime?.length ?? 0) +
+    DETAILS_OVERHEAD_CHARS;
+  const source =
+    result.evidence.content.trim() === memory.statement.trim()
+      ? 0
+      : Math.min(result.evidence.content.length, SOURCE_EXCERPT_CHARS);
+  const characters = memory.statement.length + details + source;
   return Math.max(1, Math.ceil(characters / 4));
 }
+
+/** Separators and labels the details line adds around its field values
+ *  (`- `, `\n  `, `memory=`, `node=`, `type=`, `truth=`, `scope=`, `time=`, `; `). */
+const DETAILS_OVERHEAD_CHARS = 64;
 
 export interface ActiveGraphBudgetSelection {
   results: MemorySearchResult[];
