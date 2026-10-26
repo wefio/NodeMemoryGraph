@@ -1,0 +1,206 @@
+{
+  "schema": 1,
+  "measuredAt": "2026-10-26T04:45:34.563Z",
+  "nodeVersion": "v24.19.0",
+  "input": {
+    "fixture": "infra-v1",
+    "iterations": 40,
+    "recordCount": 200
+  },
+  "implementation": {
+    "evals/retrieval/infra-perf.ts": "e992644dcc0be4593cd2a001de72545f63f44e21e7fcf19c39bf05ad5c6acd7b",
+    "src/integration/information-output.ts": "3100011d34877e67e3448f34f5582ad3a1f4662f3ba5d6ccf836105e3742e123",
+    "src/core/store/base.ts": "837b91ce386d89f14e1f2303544a1074f9615fc8c4c7452ec9ece2394c1b491d",
+    "src/core/store/retrieval.ts": "329ea2b411a0cb1f782e1bc035f0da8eac3b529a5c5bab1ff4f6b8936ff008f4"
+  },
+  "information": [
+    {
+      "count": 20,
+      "format": "flat",
+      "maxCharacters": 8000,
+      "latencyMs": {
+        "mean": 0.0798899999999989,
+        "p50": 0.07110000000000127,
+        "p95": 0.1518000000000086
+      },
+      "characters": 3749,
+      "included": 20,
+      "omitted": 0,
+      "outputDigest": "baa54241648a0c813c34fe76ec72a072f0ce368bba914ee3f774ac99207113d9"
+    },
+    {
+      "count": 20,
+      "format": "flat",
+      "maxCharacters": 1000000,
+      "latencyMs": {
+        "mean": 0.07534749999999804,
+        "p50": 0.05330000000000723,
+        "p95": 0.14060000000000628
+      },
+      "characters": 3749,
+      "included": 20,
+      "omitted": 0,
+      "outputDigest": "baa54241648a0c813c34fe76ec72a072f0ce368bba914ee3f774ac99207113d9"
+    },
+    {
+      "count": 20,
+      "format": "context",
+      "maxCharacters": 8000,
+      "latencyMs": {
+        "mean": 0.13316749999999758,
+        "p50": 0.09069999999999823,
+        "p95": 0.384900000000016
+      },
+      "characters": 3806,
+      "included": 20,
+      "omitted": 0,
+      "outputDigest": "f5345da5f60e851f7c79eb5bd8b942b790e168b74fc3a72399ac1fed3011d0c0"
+    },
+    {
+      "count": 20,
+      "format": "context",
+      "maxCharacters": 1000000,
+      "latencyMs": {
+        "mean": 0.07131999999999934,
+        "p50": 0.05649999999999977,
+        "p95": 0.11220000000000141
+      },
+      "characters": 3806,
+      "included": 20,
+      "omitted": 0,
+      "outputDigest": "f5345da5f60e851f7c79eb5bd8b942b790e168b74fc3a72399ac1fed3011d0c0"
+    },
+    {
+      "count": 200,
+      "format": "flat",
+      "maxCharacters": 8000,
+      "latencyMs": {
+        "mean": 0.485612499999997,
+        "p50": 0.4281000000000006,
+        "p95": 0.9829000000000008
+      },
+      "characters": 7897,
+      "included": 42,
+      "omitted": 158,
+      "outputDigest": "1fc4ae58280dd8de5acc26d4d800ca82b0a157eac63f5661c69a6143571a377a"
+    },
+    {
+      "count": 200,
+      "format": "flat",
+      "maxCharacters": 1000000,
+      "latencyMs": {
+        "mean": 0.3710749999999997,
+        "p50": 0.3196000000000083,
+        "p95": 0.845499999999987
+      },
+      "characters": 37689,
+      "included": 200,
+      "omitted": 0,
+      "outputDigest": "eca4a2ff161ebca9f90523699e646cd560c03028f0f0c251e8e900e3f31a7805"
+    },
+    {
+      "count": 200,
+      "format": "context",
+      "maxCharacters": 8000,
+      "latencyMs": {
+        "mean": 0.4597450000000009,
+        "p50": 0.3965999999999781,
+        "p95": 1.059500000000014
+      },
+      "characters": 7981,
+      "included": 42,
+      "omitted": 158,
+      "outputDigest": "8e1af36411d967eea34f8c7a5b52d647b173fd7f1df03ae4b1d270e901b0008b"
+    },
+    {
+      "count": 200,
+      "format": "context",
+      "maxCharacters": 1000000,
+      "latencyMs": {
+        "mean": 0.4488250000000001,
+        "p50": 0.37590000000000146,
+        "p95": 0.8889999999999532
+      },
+      "characters": 37746,
+      "included": 200,
+      "omitted": 0,
+      "outputDigest": "1223a2ada0a977d9f12a3d792dcaadc52fa85947156a48c9be653e0cb5793c9f"
+    },
+    {
+      "count": 2000,
+      "format": "flat",
+      "maxCharacters": 8000,
+      "latencyMs": {
+        "mean": 3.3613725000000017,
+        "p50": 3.1350000000000477,
+        "p95": 4.7216999999999985
+      },
+      "characters": 7898,
+      "included": 42,
+      "omitted": 1958,
+      "outputDigest": "9b03b46bc140d2affb91a774cae41a7038d1b3ea19fe362bcccf672f10f20c3c"
+    },
+    {
+      "count": 2000,
+      "format": "flat",
+      "maxCharacters": 1000000,
+      "latencyMs": {
+        "mean": 3.3875900000000057,
+        "p50": 2.9892999999999574,
+        "p95": 5.162000000000035
+      },
+      "characters": 378889,
+      "included": 2000,
+      "omitted": 0,
+      "outputDigest": "58b8baf1363a3158b76e4188b8db87cf7d83e00a6a92983d45b3a3d2cf67291d"
+    },
+    {
+      "count": 2000,
+      "format": "context",
+      "maxCharacters": 8000,
+      "latencyMs": {
+        "mean": 3.6227000000000005,
+        "p50": 3.2795000000000982,
+        "p95": 6.180499999999938
+      },
+      "characters": 7954,
+      "included": 42,
+      "omitted": 1958,
+      "outputDigest": "7a29213cee9743f40577b362e366c3110a870d92a3af9ced3db901dc5fe8ad95"
+    },
+    {
+      "count": 2000,
+      "format": "context",
+      "maxCharacters": 1000000,
+      "latencyMs": {
+        "mean": 4.316642499999986,
+        "p50": 3.873399999999947,
+        "p95": 7.415199999999913
+      },
+      "characters": 378946,
+      "included": 2000,
+      "omitted": 0,
+      "outputDigest": "a3fd3399cffe4cbf9ecf83099c9c3b142281564474f3cc18058263a79e71620e"
+    }
+  ],
+  "retrieval": {
+    "latencyMs": {
+      "mean": 5.143687500000004,
+      "p50": 4.972000000000207,
+      "p95": 6.79970000000003
+    },
+    "statementsPerQuery": 203,
+    "returned": 20,
+    "outputDigest": "24b964e64cf7490a780bab56215b4dfad6d3fb734ac8574ee37399b3e41c4602",
+    "phases": {
+      "timings": {
+        "search.direct": 4.68,
+        "relations": 0.01,
+        "search.related": 0,
+        "edges": 0,
+        "trace": 0
+      },
+      "totalMs": 4.97
+    }
+  }
+}

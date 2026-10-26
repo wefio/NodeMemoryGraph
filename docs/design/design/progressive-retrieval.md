@@ -133,6 +133,15 @@ Offline learned relevance uses the source and evaluation boundaries in
 [relevance-training.md](../relevance-training.md). Its artifacts remain candidates;
 cross-corpus measurements do not grant runtime admission.
 
+### Evidence assembly
+
+Direct-result assembly and node-result assembly load linked evidence in batches
+of at most 400 distinct memory IDs. This preserves result order and each memory's
+SQL history-ID order. A linked ID with no history row remains in `evidenceIds`
+but contributes no `evidenceRecords` entry. Each result receives independent
+history objects; batching does not change candidate admission, scoring or the
+primary evidence selected by the existing query.
+
 ### Temporal evidence presentation
 
 [Historical, write and validity times](core-data-model.md#core-data-model) remain

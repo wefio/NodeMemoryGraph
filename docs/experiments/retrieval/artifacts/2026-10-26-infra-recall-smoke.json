@@ -1,0 +1,236 @@
+{
+  "measuredAt": "2026-10-26T05:15:36.618Z",
+  "nodeVersion": "v24.19.0",
+  "baselineRevision": "d8992f99125958a331b63f2aeb98f7571e2bba93",
+  "input": {
+    "dataset": "longmemeval",
+    "datasetPath": "C:\\Documents\\GitHub\\NodeMemoryGraph\\.benchmarks\\official\\OmniMemEval\\data\\longmemeval\\longmemeval_s_cleaned.json",
+    "datasetHash": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+    "runInput": "C:\\Documents\\GitHub\\NodeMemoryGraph\\.benchmarks\\official\\OmniMemEval\\results\\lme\\nmg-longmemeval_20261025T095539Z\\nmg_lme_search_results.json",
+    "runInputHash": "8bf015cb28feeda57c0b6d7a61c112cfc7b7f430cfd58cc02d8e0b1ca522810d",
+    "storesRoot": "C:\\Documents\\GitHub\\NodeMemoryGraph\\.benchmarks\\omnimemeval-nmg",
+    "cachePath": "C:\\Documents\\GitHub\\NodeMemoryGraph\\.benchmarks\\shared-embedding-cache.sqlite",
+    "indexId": "bge-small-en-v1.5@1e9807091681",
+    "limit": 2,
+    "questions": 2,
+    "topK": 20,
+    "scoring": "evals/retrieval/score.ts candidate-in-gold; micro evidence recall; ranked prefix only",
+    "scoreImplementation": "75274307c6bdf3c89c492fbbe1386630d4fedce9bae20287db3dc269dbd5967a",
+    "runnerImplementation": "f66f35d7943a56c2f924604f69a1435340b19645753f411b14e65ae2313d778b"
+  },
+  "implementation": {
+    "baseline": {
+      "src/core/store/base.ts": "8e29cd77573b2a8042ebe107ed94bb081339c6ace7ce820f9572ec3cd104f7d3",
+      "src/core/store/retrieval.ts": "4e9dd3a12069d56c4879d18b81d5fa812b73decb3778d2f3f6056437c96672e6",
+      "src/integration/information-output.ts": "0ddd816f921d1d32cf54f3168e16e720ada64aa1c056ab699f2faae72e1fe0fa",
+      "src/core/store/active-graph.ts": "9718ea84a8606703da94707645045e3fcca24f50999140db6a7f739a94defc6b",
+      "src/integration/agent-surface.ts": "9609c16191ca4888635ddccaac9bd22ef858ff9ceb743cda4f31e415a548f184",
+      "evals/omnimemeval/bridge.ts": "04111265ddd22c4b60c59394bfdb74c7047d02b6a126e4df5b04a93fea5a0d39"
+    },
+    "candidate": {
+      "src/core/store/base.ts": "b095df456c6e94cab92d164cba8460f0ec6b70ffa1c23b3cd09f47d5016eb094",
+      "src/core/store/retrieval.ts": "8f8680369ab8aa340f0af0cee0f53f00e5d2ef5611599ef786e2694ce3b051d3",
+      "src/integration/information-output.ts": "8500cc27f34486c20fa975c95892547c8569a60ddfc27c660a96263b9e5e7caa",
+      "src/core/store/active-graph.ts": "9718ea84a8606703da94707645045e3fcca24f50999140db6a7f739a94defc6b",
+      "src/integration/agent-surface.ts": "9609c16191ca4888635ddccaac9bd22ef858ff9ceb743cda4f31e415a548f184",
+      "evals/omnimemeval/bridge.ts": "04111265ddd22c4b60c59394bfdb74c7047d02b6a126e4df5b04a93fea5a0d39"
+    }
+  },
+  "baseline": {
+    "overall": {
+      "questions": 2,
+      "questionsWithGolds": 2,
+      "golds": 2,
+      "recallAt": {
+        "1": 1,
+        "5": 1,
+        "10": 1,
+        "20": 1
+      },
+      "anyEvidenceRate": 1,
+      "allEvidenceRate": 1,
+      "anyEvidenceAtK": 1,
+      "allEvidenceAtK": 1,
+      "mrrGold": 1,
+      "mrrQuestion": 1,
+      "legacy": {
+        "anyEvidenceRate": 1,
+        "allEvidenceRate": 1,
+        "evidenceRecall": 1
+      },
+      "meanContextChars": 11753,
+      "latencyMs": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0
+      }
+    },
+    "single-session-user": {
+      "questions": 2,
+      "questionsWithGolds": 2,
+      "golds": 2,
+      "recallAt": {
+        "1": 1,
+        "5": 1,
+        "10": 1,
+        "20": 1
+      },
+      "anyEvidenceRate": 1,
+      "allEvidenceRate": 1,
+      "anyEvidenceAtK": 1,
+      "allEvidenceAtK": 1,
+      "mrrGold": 1,
+      "mrrQuestion": 1,
+      "legacy": {
+        "anyEvidenceRate": 1,
+        "allEvidenceRate": 1,
+        "evidenceRecall": 1
+      },
+      "meanContextChars": 11753,
+      "latencyMs": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0
+      }
+    }
+  },
+  "candidate": {
+    "overall": {
+      "questions": 2,
+      "questionsWithGolds": 2,
+      "golds": 2,
+      "recallAt": {
+        "1": 1,
+        "5": 1,
+        "10": 1,
+        "20": 1
+      },
+      "anyEvidenceRate": 1,
+      "allEvidenceRate": 1,
+      "anyEvidenceAtK": 1,
+      "allEvidenceAtK": 1,
+      "mrrGold": 1,
+      "mrrQuestion": 1,
+      "legacy": {
+        "anyEvidenceRate": 1,
+        "allEvidenceRate": 1,
+        "evidenceRecall": 1
+      },
+      "meanContextChars": 11753,
+      "latencyMs": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0
+      }
+    },
+    "single-session-user": {
+      "questions": 2,
+      "questionsWithGolds": 2,
+      "golds": 2,
+      "recallAt": {
+        "1": 1,
+        "5": 1,
+        "10": 1,
+        "20": 1
+      },
+      "anyEvidenceRate": 1,
+      "allEvidenceRate": 1,
+      "anyEvidenceAtK": 1,
+      "allEvidenceAtK": 1,
+      "mrrGold": 1,
+      "mrrQuestion": 1,
+      "legacy": {
+        "anyEvidenceRate": 1,
+        "allEvidenceRate": 1,
+        "evidenceRecall": 1
+      },
+      "meanContextChars": 11753,
+      "latencyMs": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0
+      }
+    }
+  },
+  "regressedQuestions": 0,
+  "changedOutputs": 0,
+  "changedRankedIds": 0,
+  "rows": [
+    {
+      "id": "e47becba",
+      "userId": "lme_exper_user_longmemeval_20261025T095539Z_0",
+      "queryHash": "2ca9a0d5f1876fa9e2cca5d2f38a6d2b5082703ddfb8ab0a5b33dfa1f8216684",
+      "snapshotHash": "a672738c425c1cb0ad74b3d540d7a521930a5c814f9151309af67fb4a3615b93",
+      "baseline": {
+        "category": "single-session-user",
+        "goldRanks": [
+          1
+        ],
+        "rankedGoldRanks": [
+          1
+        ],
+        "legacyHits": [
+          true
+        ],
+        "contextChars": 1400
+      },
+      "candidate": {
+        "category": "single-session-user",
+        "goldRanks": [
+          1
+        ],
+        "rankedGoldRanks": [
+          1
+        ],
+        "legacyHits": [
+          true
+        ],
+        "contextChars": 1400
+      },
+      "baselineOutputHash": "710b88e8e77983ef5119e3a8e62e47990f6b64a5620ce09401deb25754eba9af",
+      "candidateOutputHash": "710b88e8e77983ef5119e3a8e62e47990f6b64a5620ce09401deb25754eba9af",
+      "rankedIdsEqual": true,
+      "regressed": false,
+      "baselineResultCount": 3,
+      "candidateResultCount": 3
+    },
+    {
+      "id": "118b2229",
+      "userId": "lme_exper_user_longmemeval_20261025T095539Z_1",
+      "queryHash": "092f4e554cd2fc97f90d1dce7badab62d9779c64d596789beef74fd878e2d64c",
+      "snapshotHash": "5e0021b6742dc84479561182cc1c83ee9808dbe843ab5b699f84e27ae16219b7",
+      "baseline": {
+        "category": "single-session-user",
+        "goldRanks": [
+          1
+        ],
+        "rankedGoldRanks": [
+          1
+        ],
+        "legacyHits": [
+          true
+        ],
+        "contextChars": 22106
+      },
+      "candidate": {
+        "category": "single-session-user",
+        "goldRanks": [
+          1
+        ],
+        "rankedGoldRanks": [
+          1
+        ],
+        "legacyHits": [
+          true
+        ],
+        "contextChars": 22106
+      },
+      "baselineOutputHash": "1a49a2cff8c84b1cf09a11b944842ec49609a488f6e0a124e4f9f7e11f53dc82",
+      "candidateOutputHash": "1a49a2cff8c84b1cf09a11b944842ec49609a488f6e0a124e4f9f7e11f53dc82",
+      "rankedIdsEqual": true,
+      "regressed": false,
+      "baselineResultCount": 13,
+      "candidateResultCount": 13
+    }
+  ]
+}

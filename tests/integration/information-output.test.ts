@@ -233,3 +233,62 @@ test("prepared content and source binding do not follow later caller mutations",
   });
   assert.equal(output.text, "[open] Review parser.");
 });
+
+test("context cost follows the all-AG envelope transition, including a rejected transition", () => {
+  const ag: InformationView = {
+    purpose: "state",
+    source: { kind: "ag", sessionId: "s", taskFrameId: "t", itemId: "i" },
+    body: "AG",
+  };
+  const board: InformationView = {
+    purpose: "state",
+    source: { kind: "board", taskId: "t", entryId: "e" },
+    body: "Board",
+  };
+  const agText =
+    '<nmg_state space="ag">\n<nmg_working_state>\nAG\n</nmg_working_state>\n</nmg_state>';
+  // Adding a board state shrinks the wrapper; charging only positive deltas is wrong.
+  const mixed = prepareInformationOutput([ag, board], {
+    format: "context",
+    maxCharacters: agText.length,
+  });
+  assert.equal(mixed.text, "<nmg_state>\nAG\nBoard\n</nmg_state>");
+  assert.equal(mixed.omitted.length, 0);
+  const rejected = prepareInformationOutput([ag, { ...board, body: "x".repeat(200) }], {
+    format: "context",
+    maxCharacters: agText.length,
+  });
+  assert.equal(rejected.text, agText);
+  assert.equal(rejected.omitted.length, 1);
+});
+
+test("flat cost counts UTF-16, labels and separators and skips duplicates even after omission", () => {
+  const item: InformationView = {
+    source: { kind: "memory", memoryId: "m" },
+    body: "😀",
+    requiredLabels: ["[x]"],
+  };
+  assert.equal(prepareInformationOutput([item], { maxCharacters: 6 }).text, "[x] 😀");
+  assert.equal(prepareInformationOutput([item], { maxCharacters: 5 }).text, "");
+  const large = { ...item, body: "x".repeat(100) };
+  const output = prepareInformationOutput([large, large, item], { maxCharacters: 16 });
+  assert.equal(output.text, "[x] 😀\nomitted=1");
+  assert.equal(output.omitted.length, 1);
+  assert.equal(output.included.length, 1);
+});
+
+test("context notice removal accounts for disappearing groups", () => {
+  const output = prepareInformationOutput(
+    [
+      { purpose: "material", body: "M" },
+      { purpose: "guidance", body: "G" },
+      { purpose: "material", body: "x".repeat(300) },
+    ],
+    { format: "context", maxCharacters: 70 },
+  );
+  assert.equal(output.text, "<nmg_material>\nM\n</nmg_material>\n\nomitted=2");
+  assert.deepEqual(
+    output.omitted.map((view) => view.body),
+    ["G", "x".repeat(300)],
+  );
+});

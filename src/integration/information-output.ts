@@ -23,6 +23,7 @@ export interface InformationOutputOptions {
 interface OutputRow {
   view: InformationView;
   text: string;
+  fingerprint?: string;
   notice?: boolean;
 }
 
@@ -69,14 +70,17 @@ export function prepareInformationOutput(
   const rows: OutputRow[] = [];
   const omitted: InformationView[] = [];
   const seen = new Set<string>();
+  const size = new OutputSize(format);
   for (const view of ordered) {
-    const text = [...(view.requiredLabels ?? []), view.body].filter(Boolean).join(" ");
-    if (!text || duplicateView(view, text, seen)) continue;
-    const row = { view, text };
-    if (renderRows([...rows, row], format).length > maxCharacters) omitted.push(view);
-    else rows.push(row);
+    const row = prepareRow(view, seen);
+    if (!row) continue;
+    size.update(row, 1);
+    if (size.length > maxCharacters) {
+      size.update(row, -1);
+      omitted.push(view);
+    } else rows.push(row);
   }
-  appendOmissionNotice(rows, omitted, maxCharacters, format);
+  appendOmissionNotice(rows, omitted, maxCharacters, format, size);
   return Object.freeze({
     text: renderRows(rows, format),
     views: snapshot,
@@ -114,29 +118,77 @@ function purposeOf(view: InformationView): InformationPurpose {
   return purpose;
 }
 
+function prepareRow(view: InformationView, seen: Set<string>): OutputRow | undefined {
+  const text = [...(view.requiredLabels ?? []), view.body].filter(Boolean).join(" ");
+  if (!text) return undefined;
+  const fingerprint = view.source ? viewFingerprint(view, text) : undefined;
+  if (fingerprint && seen.has(fingerprint)) return undefined;
+  if (fingerprint) seen.add(fingerprint);
+  return { view, text, fingerprint };
+}
+
 function renderRows(rows: readonly OutputRow[], format: "flat" | "context"): string {
   if (format === "flat") return rows.map((row) => row.text).join("\n");
   const groups = (Object.keys(PURPOSE_ENVELOPES) as InformationPurpose[]).flatMap((purpose) => {
     const items = rows.filter((row) => !row.notice && purposeOf(row.view) === purpose);
     if (items.length === 0) return [];
-    const [open, close] = contextEnvelope(purpose, items);
+    const [open, close] = contextEnvelope(
+      purpose,
+      items.every((row) => row.view.source?.kind === "ag"),
+    );
     return [`${open}\n${items.map((row) => row.text).join("\n")}\n${close}`];
   });
   return [...groups, ...rows.filter((row) => row.notice).map((row) => row.text)].join("\n\n");
 }
 
-function contextEnvelope(
-  purpose: InformationPurpose,
-  items: readonly OutputRow[],
-): readonly [string, string] {
-  if (purpose === "state" && items.every((row) => row.view.source?.kind === "ag")) {
+function contextEnvelope(purpose: InformationPurpose, allAg: boolean): readonly [string, string] {
+  if (purpose === "state" && allAg) {
     return ['<nmg_state space="ag">\n<nmg_working_state>', "</nmg_working_state>\n</nmg_state>"];
   }
   return PURPOSE_ENVELOPES[purpose];
 }
 
-function outputLength(rows: readonly OutputRow[], format: "flat" | "context" = "flat"): number {
-  return renderRows(rows, format).length;
+/** Counts the same UTF-16 units as renderRows without rebuilding admitted text.
+ * State wrappers can shrink when a non-AG item enters, so rejected additions
+ * must restore both counts, not just subtract the candidate body length.
+ */
+class OutputSize {
+  private count = 0;
+  private characters = 0;
+  private readonly groups = new Map<
+    InformationPurpose,
+    { count: number; characters: number; nonAg: number }
+  >();
+  private readonly format: "flat" | "context";
+
+  constructor(format: "flat" | "context") {
+    this.format = format;
+  }
+
+  update(row: OutputRow, direction: 1 | -1): void {
+    this.count += direction;
+    this.characters += direction * row.text.length;
+    if (this.format === "flat") return;
+    const purpose = purposeOf(row.view);
+    const group = this.groups.get(purpose) ?? { count: 0, characters: 0, nonAg: 0 };
+    group.count += direction;
+    group.characters += direction * row.text.length;
+    group.nonAg += direction * Number(row.view.source?.kind !== "ag");
+    this.groups.set(purpose, group);
+  }
+
+  get length(): number {
+    if (this.format === "flat") return this.characters + Math.max(0, this.count - 1);
+    let total = 0;
+    let groupCount = 0;
+    for (const [purpose, group] of this.groups) {
+      if (group.count === 0) continue;
+      const [open, close] = contextEnvelope(purpose, group.nonAg === 0);
+      total += open.length + close.length + group.characters + group.count + 1;
+      groupCount++;
+    }
+    return total + Math.max(0, groupCount - 1) * 2;
+  }
 }
 
 function appendOmissionNotice(
@@ -144,14 +196,15 @@ function appendOmissionNotice(
   omitted: InformationView[],
   maxCharacters: number,
   format: "flat" | "context",
+  size: OutputSize,
 ): void {
   if (omitted.length === 0) return;
   let notice = `omitted=${omitted.length}`;
   if (format === "context") {
-    appendContextOmissionNotice(rows, omitted, maxCharacters);
+    appendContextOmissionNotice(rows, omitted, maxCharacters, size);
     return;
   }
-  let used = outputLength(rows);
+  let used = size.length;
   while (rows.length > 0 && used + 1 + notice.length > maxCharacters) {
     const row = rows.pop()!;
     used -= row.text.length + Number(rows.length > 0);
@@ -165,11 +218,12 @@ function appendContextOmissionNotice(
   rows: OutputRow[],
   omitted: InformationView[],
   maxCharacters: number,
+  size: OutputSize,
 ): void {
   for (;;) {
     const text = `omitted=${omitted.length}`;
     const notice: OutputRow = { view: { body: text }, text, notice: true };
-    if (outputLength([...rows, notice], "context") <= maxCharacters) {
+    if (size.length + (rows.length > 0 ? 2 : 0) + text.length <= maxCharacters) {
       rows.push(notice);
       return;
     }
@@ -181,6 +235,7 @@ function appendContextOmissionNotice(
     );
     if (index < 0) return;
     const [removed] = rows.splice(index, 1);
+    size.update(removed!, -1);
     omitted.unshift(removed!.view);
   }
 }
@@ -190,7 +245,7 @@ function outputEntry(row: OutputRow): InformationOutputEntry[] {
   return [
     Object.freeze({
       source: row.view.source,
-      contentHash: viewFingerprint(row.view, row.text),
+      contentHash: row.fingerprint!,
       disclosure: row.view.preview ? ("preview" as const) : ("full" as const),
     }),
   ];
@@ -265,14 +320,6 @@ function viewFingerprint(view: InformationView, text: string): string {
       ]),
     )
     .digest("hex");
-}
-
-function duplicateView(view: InformationView, text: string, seen: Set<string>): boolean {
-  if (!view.source) return false;
-  const fingerprint = viewFingerprint(view, text);
-  if (seen.has(fingerprint)) return true;
-  seen.add(fingerprint);
-  return false;
 }
 
 function copyView(view: InformationView): InformationView {

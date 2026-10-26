@@ -53,6 +53,13 @@ Inbox/Delta + surface anchors + fine-grained record semantics
 
 离线学习相关性使用 [relevance-training.md](../relevance-training.md) 中的来源与评测边界。其产物仍是候选；跨语料测量不授予运行时准入。
 
+### 证据组装
+
+直接结果与节点结果在组装时，按每批最多 400 个不同记忆 ID 读取关联证据。
+这保留结果顺序以及每条记忆按 SQL 历史 ID 排列的证据顺序。关联 ID 对应的历史行缺失时，
+该 ID 仍保留在 `evidenceIds` 中，但不产生 `evidenceRecords` 条目。
+各结果获得独立的历史对象；批量读取不改变候选准入、评分或原查询选择的主证据。
+
 ### 时间证据展示
 
 [历史时间、写入时间与有效期](core-data-model.zh-CN.md#核心数据模型)保持分离。共享 Agent Surface 在精简检索与精确证据元数据中保留 `eventTime`，本地 OmniMemEval 桥使用同一界面。纯文本协议可以在选出结果后调用 [`renderTemporalEvidence`](../../../src/integration/temporal-evidence.ts)：识别到时间查询时，为每条具有有效时间的记录加标签；否则只为含已识别相对时间表达的记录加标签。未知或无效时间不产生标签，已有时间戳前缀不重复添加。ISO 日期和时间戳保留完整精度与原始时区偏移，不截断为日历日期。
