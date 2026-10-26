@@ -153,6 +153,12 @@ Omission notices first reclaim trailing optional items, not complete state,
 recovery checkpoints or diagnostics. If protected items fill a small budget,
 omission counts still survive as metadata.
 
+Budget preparation counts admitted body lengths and purpose-group envelopes
+incrementally, then renders the selected rows once. The counter includes the
+all-AG state wrapper and its transition to a mixed-source wrapper. A rejected
+candidate restores both body and group counts. Source fingerprints are computed
+once per nonempty candidate and reused for included-source metadata.
+
 Structured `views` are input snapshots; `included` identifies admitted output
 sources and `omitted` retains omissions. Ordinary tools keep flat presentation
 and original budgets; protocol/source identity does not change. Preparation does

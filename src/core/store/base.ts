@@ -2940,12 +2940,40 @@ export class NmgStoreBase {
         includeHistorical ? 1 : 0,
         limit,
       ) as Row[];
-    return rows.map((row) => {
-      const result = mapSearchResult(row, 0);
-      result.memory.evidenceIds = this.evidenceIds(result.memory.id);
-      result.evidenceRecords = this.evidenceRecords(result.memory.evidenceIds);
-      return result;
-    });
+    return this.hydrateEvidence(rows.map((row) => mapSearchResult(row, 0)));
+  }
+  /** Load provenance after result selection, in bounded batches. The LEFT JOIN
+   * retains linked IDs even if their history row is absent, matching the single
+   * record readers. SQL ordering preserves the existing history-ID order.
+   */
+  protected hydrateEvidence(results: MemorySearchResult[]): MemorySearchResult[] {
+    const ids = [...new Set(results.map((result) => result.memory.id))];
+    const linked = new Map<string, Row[]>();
+    for (let offset = 0; offset < ids.length; offset += 400) {
+      const batch = ids.slice(offset, offset + 400);
+      const rows = this.db
+        .prepare(
+          `
+        SELECT l.memory_id AS linked_memory_id, l.history_id AS linked_history_id, h.*
+        FROM memory_evidence_links l
+        LEFT JOIN history_records h ON h.id = l.history_id
+        WHERE l.memory_id IN (${batch.map(() => "?").join(",")})
+        ORDER BY l.memory_id, l.history_id`,
+        )
+        .all(...batch) as Row[];
+      for (const row of rows) {
+        const id = String(row.linked_memory_id);
+        const records = linked.get(id) ?? [];
+        records.push(row);
+        linked.set(id, records);
+      }
+    }
+    for (const result of results) {
+      const rows = linked.get(result.memory.id) ?? [];
+      result.memory.evidenceIds = rows.map((row) => String(row.linked_history_id));
+      result.evidenceRecords = rows.filter((row) => row.id !== null).map(mapHistory);
+    }
+    return results;
   }
   evidenceRecords(ids: string[]): HistoryRecord[] {
     const statement = this.db.prepare("SELECT * FROM history_records WHERE id = ?");

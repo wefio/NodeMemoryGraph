@@ -62,7 +62,6 @@ import type {
   ActiveGraphSelection,
   TesseraRecord,
   LeafBlock,
-  HistoryRecord,
   MemoryContext,
   MemoryRecord,
   MemoryChainType,
@@ -237,8 +236,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
     declare protected resolveActiveNodeName: (nodeName: string) => string;
     declare protected ftsCandidates: (query: string, limit: number) => string[];
     declare protected surfaceAnchorCandidates: (query: string, limit: number) => string[];
-    declare protected evidenceIds: (memoryId: string) => string[];
-    declare protected evidenceRecords: (ids: string[]) => HistoryRecord[];
+    declare protected hydrateEvidence: (results: MemorySearchResult[]) => MemorySearchResult[];
     declare protected resultsForNode: (
       nodeId: string,
       maxTier: MemoryTier,
@@ -2329,11 +2327,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         forcedCandidateIds.length > 0,
       );
       const results = applyRelevanceGates(query, rankedResults, limit, options);
-      for (const result of results) {
-        result.memory.evidenceIds = this.evidenceIds(result.memory.id);
-        result.evidenceRecords = this.evidenceRecords(result.memory.evidenceIds);
-      }
-      return results;
+      return this.hydrateEvidence(results);
     }
 
     private resolveSupersessionTarget(memoryId: string, eventTimeTo?: string): Row | undefined {
