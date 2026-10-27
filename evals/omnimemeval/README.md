@@ -96,12 +96,12 @@ retrieval probe ranks whole sessions, the answer context retained timestamped
 user turns and excluded verbose assistant turns. This is a paired mechanism
 probe, not the record-level NMG leaderboard configuration.
 
-| Arm | Correct | Accuracy | Mean context chars |
-| --- | ---: | ---: | ---: |
-| Original query Top-20 | 108/133 | 81.20% | 29,868 |
-| Legacy Top1+QPP2 reverse Top-20 | 107/133 | 80.45% | 30,317 |
-| Weighted-RRF three-route Top-20 | **111/133** | **83.46%** | 30,223 |
-| Weighted-RRF three-route Top-25 | 110/133 | 82.71% | 37,079 |
+| Arm                             |     Correct |   Accuracy | Mean context chars |
+| ------------------------------- | ----------: | ---------: | -----------------: |
+| Original query Top-20           |     108/133 |     81.20% |             29,868 |
+| Legacy Top1+QPP2 reverse Top-20 |     107/133 |     80.45% |             30,317 |
+| Weighted-RRF three-route Top-20 | **111/133** | **83.46%** |             30,223 |
+| Weighted-RRF three-route Top-25 |     110/133 |     82.71% |             37,079 |
 
 The Top-25 arm had 10 paired wins and 8 losses against the original route
 (two-sided exact binomial `p=0.815`), so the two-answer net gain is not evidence
@@ -314,6 +314,40 @@ dispatcher, LoCoMo's benchmark-local search dispatcher, and the conversation-ID
 helper. OmniMemEval currently keeps these allowlists separately from its
 central client registry, so copying only `nmg_client.py` is insufficient.
 
+## Answer and judge policy
+
+The reader and judge are not part of the harness's memory logic, and their
+configuration is part of a run's identity: two runs at different output budgets,
+or with provider reasoning left on, are not comparable. Three settings matter,
+and _**where each one is applied depends on the environment being tested**_ — no
+single component owns them:
+
+| Setting                          | Why it matters                                                                                                                                                                                                            |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Per-module output-token ceiling  | suites either hard-code `max_tokens=1000` or send none at all, and answer and judge need different budgets                                                                                                                |
+| Provider reasoning switch        | with a 300-token answer budget and reasoning on, the completion is spent on hidden reasoning and `content` comes back empty; measured on this batch: 739 of 871 PersonaMem answers and 351 of 400 BEAM answers were empty |
+| Upstream-required request header | opencode's Go endpoint rejects a request without `x-opencode-session` (400 `MissingSessionID`)                                                                                                                            |
+
+Where they can live, by environment:
+
+- **Local harness against a hosted provider.** They currently require three edits
+  to the pinned checkout's `scripts/utils/llm_client.py`. That checkout is
+  git-ignored, so a fresh clone cannot reproduce such a run; the edits have to be
+  redone by hand.
+- **A proxy in front of the provider.** `llm-gateway.ts` in this directory applies
+  all three and writes one JSONL line per call; point `ANSWER_BASE_URL` and
+  `EVAL_BASE_URL` at it and the harness stays untouched. It is optional, not the
+  required path: `npm run` nothing else and no other component depends on it.
+- **An official provider API directly.** Usually only the output ceiling applies;
+  reasoning control and session headers may not exist.
+- **The deployed memory service.** Not involved — it stores and retrieves memory
+  and makes no answer or judge calls.
+
+Record the settings that actually applied beside any reported score. The numbers in
+this file were produced with `deepseek-v4-flash`, temperature 0, a 300-token answer
+budget, a 1,000-token judge budget and provider reasoning disabled, against
+opencode `/zen/go/v1`.
+
 ## Current official smoke results
 
 ### LongMemEval
@@ -324,10 +358,10 @@ then used `deepseek-chat` (`deepseek-v4-flash`, temperature 0) for both answer
 generation and judging. A matched no-memory artifact preserved the same seven
 questions and prompts while clearing all retrieved context.
 
-| Arm | LLM-as-Judge | Context tokens / question | Search mean / P95 |
-| --- | ---: | ---: | ---: |
-| NMG, K=20 | **0.8571** (6/7) | 1,150 | 152 / 160 ms |
-| No memory | 0.0000 (0/7) | 270 | 0 / 0 ms |
+| Arm       |     LLM-as-Judge | Context tokens / question | Search mean / P95 |
+| --------- | ---------------: | ------------------------: | ----------------: |
+| NMG, K=20 | **0.8571** (6/7) |                     1,150 |      152 / 160 ms |
+| No memory |     0.0000 (0/7) |                       270 |          0 / 0 ms |
 
 All seven NMG units completed ingestion, retrieval, cleanup, answering, and
 judging without failures. The earlier run missed both `Target` and `Serenity
@@ -347,10 +381,10 @@ golden answers, reader, judge, and prompts while removing only retrieved
 context. Both arms used `deepseek-chat` (currently `deepseek-v4-flash`) at
 temperature 0 with `top_k=20`.
 
-| Arm | LLM-as-Judge | F1 | METEOR | Answer prompt tokens / question | Search mean / P95 |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| NMG | **0.6404** (317/495) | 0.1544 | 0.2124 | 1,138 | 156 / 175 ms |
-| No memory | 0.0646 (32/495) | 0.0853 | 0.0904 | 278 | 0 / 0 ms |
+| Arm       |         LLM-as-Judge |     F1 | METEOR | Answer prompt tokens / question | Search mean / P95 |
+| --------- | -------------------: | -----: | -----: | ------------------------------: | ----------------: |
+| NMG       | **0.6404** (317/495) | 0.1544 | 0.2124 |                           1,138 |      156 / 175 ms |
+| No memory |      0.0646 (32/495) | 0.0853 | 0.0904 |                             278 |          0 / 0 ms |
 
 The absolute NMG gain is **+57.6 judge points**. Search and answer stages
 completed 500/500 in both arms. The official judge accepted 495/500 outputs in
@@ -361,14 +395,14 @@ narrow label format. The skipped question sets differ. On the 490 questions
 successfully judged in both arms, NMG scores 0.6408 (314/490) versus 0.0653
 (32/490), so the matched-subset result is unchanged.
 
-| Category on common 490 | NMG | No memory | Questions |
-| --- | ---: | ---: | ---: |
-| single-session user | **0.9714** | 0.0857 | 70 |
-| temporal reasoning | **0.7519** | 0.0620 | 129 |
-| knowledge update | **0.7692** | 0.0769 | 78 |
-| multi-session | **0.5227** | 0.0909 | 132 |
-| single-session assistant | **0.2857** | 0.0000 | 56 |
-| single-session preference | **0.1600** | 0.0000 | 25 |
+| Category on common 490    |        NMG | No memory | Questions |
+| ------------------------- | ---------: | --------: | --------: |
+| single-session user       | **0.9714** |    0.0857 |        70 |
+| temporal reasoning        | **0.7519** |    0.0620 |       129 |
+| knowledge update          | **0.7692** |    0.0769 |        78 |
+| multi-session             | **0.5227** |    0.0909 |       132 |
+| single-session assistant  | **0.2857** |    0.0000 |        56 |
+| single-session preference | **0.1600** |    0.0000 |        25 |
 
 The result shows a large end-to-end memory benefit with the fixed weak reader,
 but also identifies the next quality targets: assistant memories, preferences,
@@ -432,11 +466,11 @@ evidence recall were 85.19% and 87.41%, respectively.
 On the 482 questions successfully judged in the BGE, lexical NMG, and
 no-memory runs, the scores were:
 
-| Arm on common 482 | Accuracy | Correct |
-| --- | ---: | ---: |
-| NMG + record BGE | **0.8008** | 386 |
-| NMG lexical/FTS | 0.6473 | 312 |
-| No memory | 0.0664 | 32 |
+| Arm on common 482 |   Accuracy | Correct |
+| ----------------- | ---------: | ------: |
+| NMG + record BGE  | **0.8008** |     386 |
+| NMG lexical/FTS   |     0.6473 |     312 |
+| No memory         |     0.0664 |      32 |
 
 BGE versus lexical NMG produced 96 wins, 22 losses, and 364 ties, a net gain of
 74 questions. Against no memory it produced 356 wins, 2 losses, and 124 ties.
@@ -464,10 +498,10 @@ record embeddings, `top_k=20`, and the default QPP-off retrieval path. The
 streaming search was split into non-overlapping index ranges and merged with
 the checked shard merger, which proved that all 500 indices were present once.
 
-| Arm | Official judge | F1 | METEOR | Search mean / P50 / P95 |
-| --- | ---: | ---: | ---: | ---: |
-| Current NMG + BGE | **0.6278** (312/497) | 0.1675 | 0.2322 | 7.81s / 9.10s / 10.32s |
-| Matched no memory | 0.0607 (30/494) | 0.0961 | 0.1081 | 0 / 0 / 0 ms |
+| Arm               |       Official judge |     F1 | METEOR | Search mean / P50 / P95 |
+| ----------------- | -------------------: | -----: | -----: | ----------------------: |
+| Current NMG + BGE | **0.6278** (312/497) | 0.1675 | 0.2322 |  7.81s / 9.10s / 10.32s |
+| Matched no memory |      0.0607 (30/494) | 0.0961 | 0.1081 |            0 / 0 / 0 ms |
 
 On the 491 questions judged successfully in both arms, current NMG scores
 0.6293 (309/491), versus 0.0611 (30/491) without memory: an absolute gain of
@@ -587,15 +621,15 @@ The first complete PersonaMem v2 run used record-level
 5,000/5,000 questions without search or answer failures. With the fixed
 DeepSeek v4 Flash reader it scored **34.44%** overall:
 
-| Category | Accuracy |
-| --- | ---: |
-| sensitive preference | 28.57% |
-| ask to forget | 12.88% |
-| health / medical | 43.84% |
-| neutral | 39.98% |
-| therapy | 36.68% |
-| anti-stereotypical preference | 41.40% |
-| stereotypical preference | 49.72% |
+| Category                      | Accuracy |
+| ----------------------------- | -------: |
+| sensitive preference          |   28.57% |
+| ask to forget                 |   12.88% |
+| health / medical              |   43.84% |
+| neutral                       |   39.98% |
+| therapy                       |   36.68% |
+| anti-stereotypical preference |   41.40% |
+| stereotypical preference      |   49.72% |
 
 The low `ask_to_forget` score exposed a semantic error rather than a capacity
 problem. Deleting the active preference removed stale evidence but also removed
@@ -622,11 +656,11 @@ the database schema.
 
 Two matched diagnostics validate this representation:
 
-| `ask_to_forget` arm | Accuracy | Delta vs deletion-only | Search path |
-| --- | ---: | ---: | --- |
-| deletion only | 14.12% | -- | record BGE |
-| NMG `[forget]`, real end-to-end | **18.70%** | +4.58 | record BGE |
-| NMG `[forget]`, nearest-tag ablation | **20.52%** | +6.40 | BGE nearest revocation |
+| `ask_to_forget` arm                  |   Accuracy | Delta vs deletion-only | Search path            |
+| ------------------------------------ | ---------: | ---------------------: | ---------------------- |
+| deletion only                        |     14.12% |                     -- | record BGE             |
+| NMG `[forget]`, real end-to-end      | **18.70%** |                  +4.58 | record BGE             |
+| NMG `[forget]`, nearest-tag ablation | **20.52%** |                  +6.40 | BGE nearest revocation |
 
 The complete record-BGE run finished all 200 persona lifecycles, 5,000
 searches, and 5,000 answers without failures. On `ask_to_forget`, it produced
@@ -734,11 +768,11 @@ A matched retrieval-budget ablation rebuilt an isolated benchmark namespace for
 each setting:
 
 | Top K | Any evidence | All evidence | Evidence recall | Mean context chars | Mean / P95 latency |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 5 | 48.1% | 40.6% | 32.7% | 1,042 | 233 / 496 ms |
-| 10 | 55.7% | 46.0% | 39.0% | 2,064 | 256 / 548 ms |
-| 20 | 61.8% | 49.6% | 45.0% | 4,152 | 329 / 619 ms |
-| 40 | 63.6% | 51.0% | 46.6% | 4,877 | 325 / 609 ms |
+| ----: | -----------: | -----------: | --------------: | -----------------: | -----------------: |
+|     5 |        48.1% |        40.6% |           32.7% |              1,042 |       233 / 496 ms |
+|    10 |        55.7% |        46.0% |           39.0% |              2,064 |       256 / 548 ms |
+|    20 |        61.8% |        49.6% |           45.0% |              4,152 |       329 / 619 ms |
+|    40 |        63.6% |        51.0% |           46.6% |              4,877 |       325 / 609 ms |
 
 `top_k=20` remains the default knee point. Doubling to 40 recovers only 1.6
 additional evidence-recall points while increasing context by 17.5%. Multi-hop
@@ -787,17 +821,17 @@ both runs; one judge call per run was skipped under `--skip-failed-judge 1`
 because the judge wrapped its label JSON with an explanation that upstream's
 strict `extract_label_json` regex rejects.
 
-| Version | LLM-as-Judge | F1 | ROUGE-L | METEOR |
-| --- | ---: | ---: | ---: | ---: |
-| NMG (record vectors K=20) | **0.6173** | 0.3424 | 0.3573 | 0.3664 |
-| No-memory lower bound | 0.1741 | 0.1309 | 0.1254 | 0.1166 |
+| Version                   | LLM-as-Judge |     F1 | ROUGE-L | METEOR |
+| ------------------------- | -----------: | -----: | ------: | -----: |
+| NMG (record vectors K=20) |   **0.6173** | 0.3424 |  0.3573 | 0.3664 |
+| No-memory lower bound     |       0.1741 | 0.1309 |  0.1254 | 0.1166 |
 
-| Category | NMG | No memory | Questions |
-| --- | ---: | ---: | ---: |
-| single hop | 0.6813 | 0.2093 | 841 |
-| temporal reasoning | 0.6854 | 0.0592 | 321 |
-| multi hop | 0.4184 | 0.1423 | 282 |
-| open domain | 0.4105 | 0.3438 | 96 |
+| Category           |    NMG | No memory | Questions |
+| ------------------ | -----: | --------: | --------: |
+| single hop         | 0.6813 |    0.2093 |       841 |
+| temporal reasoning | 0.6854 |    0.0592 |       321 |
+| multi hop          | 0.4184 |    0.1423 |       282 |
+| open domain        | 0.4105 |    0.3438 |        96 |
 
 NMG beats the matched baseline by 44.3 judge points overall. Temporal
 reasoning gains the most (+62.6 points), validating the selective event-time
@@ -845,13 +879,13 @@ Set `NMG_EMBED_BASE_URL=http://127.0.0.1:8000/v1`,
 `NMG_EMBED_MODEL=BAAI/bge-small-en-v1.5`, and
 `NMG_EMBED_PROFILE=bge-en` in the OmniMemEval environment file.
 
-| Retrieval path | Any evidence | All evidence | Evidence recall | Mean context chars | Mean / P95 latency |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| FTS5 lexical | 61.8% | 49.4% | 45.1% | 4,450 | 327 / 637 ms |
-| Node + leaf summaries (5 nodes) | 23.8% | 17.9% | 16.4% | 3,335 | 281 / 342 ms |
-| Node + leaf summaries (10 nodes) | 26.1% | 19.7% | 18.0% | 3,359 | 312 / 371 ms |
-| Record vectors | **68.0%** | **54.1%** | **52.9%** | 4,458 | 314 / 361 ms |
-| Node + leaf + record union | 25.7% | 19.4% | 17.7% | 3,358 | 568 / 647 ms |
+| Retrieval path                   | Any evidence | All evidence | Evidence recall | Mean context chars | Mean / P95 latency |
+| -------------------------------- | -----------: | -----------: | --------------: | -----------------: | -----------------: |
+| FTS5 lexical                     |        61.8% |        49.4% |           45.1% |              4,450 |       327 / 637 ms |
+| Node + leaf summaries (5 nodes)  |        23.8% |        17.9% |           16.4% |              3,335 |       281 / 342 ms |
+| Node + leaf summaries (10 nodes) |        26.1% |        19.7% |           18.0% |              3,359 |       312 / 371 ms |
+| Record vectors                   |    **68.0%** |    **54.1%** |       **52.9%** |              4,458 |       314 / 361 ms |
+| Node + leaf + record union       |        25.7% |        19.4% |           17.7% |              3,358 |       568 / 647 ms |
 
 The compressed hierarchy is therefore not accepted as the sole evidence
 retrieval index. Its summaries discard distinctions needed by LoCoMo, and the
@@ -876,11 +910,11 @@ conversations and 400 probing questions at K=20. The auxiliary audit matches
 the benchmark's `source_chat_ids` against exact normalized source messages;
 it is a retrieval diagnostic, not the official Nugget Score.
 
-| Retrieval path | Any evidence | All evidence | Evidence recall | Mean context chars | First query | Steady P50 / P95 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| FTS5, user-first actor policy | 58.3% | 27.9% | 26.2% | 3,451 | 146 ms | 9 / 15 ms |
-| BGE records, lazy first-query index | 65.9% | **34.4%** | **32.9%** | 3,099 | 2,102 ms | 41 / 62 ms |
-| BGE records, incremental add-time index | **66.2%** | 33.8% | 32.8% | 3,118 | **193 ms** | **40 / 51 ms** |
+| Retrieval path                          | Any evidence | All evidence | Evidence recall | Mean context chars | First query | Steady P50 / P95 |
+| --------------------------------------- | -----------: | -----------: | --------------: | -----------------: | ----------: | ---------------: |
+| FTS5, user-first actor policy           |        58.3% |        27.9% |           26.2% |              3,451 |      146 ms |        9 / 15 ms |
+| BGE records, lazy first-query index     |        65.9% |    **34.4%** |       **32.9%** |              3,099 |    2,102 ms |       41 / 62 ms |
+| BGE records, incremental add-time index |    **66.2%** |        33.8% |           32.8% |              3,118 |  **193 ms** |   **40 / 51 ms** |
 
 Record vectors therefore generalize beyond LoCoMo: they gain 6.7 evidence
 recall points on BEAM while returning slightly less text. They are retained.
