@@ -26,4 +26,5 @@ when that prefix repeats the directory name. A rolling summary or note uses
 | `execution/` | restricted out-of-order execution for agents: what the wait is worth, and which measured failure modes the machinery addresses (the earlier admission run stays at the top level) |
 | `verification/` | measured verification planning and coverage experiments |
 
-`benchmark-results.md` stays at the top level because it spans topics.
+`benchmark-results.md` stays at the top level because it spans topics. The
+[architecture baseline](architecture-baseline-2026-10-27.md) also spans topics.
