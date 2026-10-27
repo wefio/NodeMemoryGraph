@@ -25,6 +25,25 @@ The existing 8,000-character AG display ceiling is reused as the preparation def
 
 ## Consequences
 
+The foundation also covers shared search, exact-evidence and save-reply surfaces.
+The [presentation contract](../../design/state-spaces.md#unified-context-information-items)
+keeps their domain budgets and acknowledgement semantics explicit. Reusing the
+same preparation gives typed and text consumers one projection while keeping
+existing ordinary tool text. Applying the generic display ceiling again would
+discard already-admitted evidence or a completed write's acknowledgement.
+Composite save follow-ups remain atomic so their candidate caveats cannot be
+omitted independently. This extends the shared boundary; it does not replace
+write results or establish a new storage protocol.
+
+The [memory-surface measurement](../../experiments/retrieval/memory-surface-unification-2026-10-26.md)
+records output parity and the additional preparation cost. Uniform source
+metadata and immutable snapshots cost work; this extension is not a speedup claim.
+Disclosure hashes are deferred and memoized within each prepared snapshot.
+This avoids hashing for text-only callers and omitted rows while preserving the
+existing per-source hash format. A whole-batch signature would not supply those
+per-source identities; a global cache would need content-version and scope
+invalidation that this request-local cache does not require.
+
 Contracts live at [`information-view.ts`](../../../src/core/information-view.ts); pure preparation/confirmation at [`information-output.ts`](../../../src/integration/information-output.ts); domain projection and compatible text interfaces at [`agent-surface.ts`](../../../src/integration/agent-surface.ts). The package exports these interfaces through `src/index.ts`. Board preview projection remains owned by `types.ts` and `store/base.ts`; prompt wording remains owned by `nmg-prompts.yaml` and its generator.
 
 Deterministic regressions cover intact constraints, protected-label budgets and omissions, canonical deduplication, source/status/preview fingerprint changes, immutable prepared snapshots, reader-local AG confirmation, rewritten output, ordinary JSON/library consumption, complete board artifact identity, unchanged creation cursors after verdict updates, and cursor withholding after budget omission. Existing board claim/delivery/judgment tests must continue to pass; preparation itself performs no disclosure write.

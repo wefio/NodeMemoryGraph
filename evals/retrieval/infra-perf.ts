@@ -65,9 +65,14 @@ function measureInformation() {
     }));
     for (const format of ["flat", "context"] as const) {
       for (const maxCharacters of [8000, 1_000_000]) {
-        const { result, latencyMs } = measure(() =>
-          prepareInformationOutput(views, { format, maxCharacters }),
-        );
+        const prepare = () => prepareInformationOutput(views, { format, maxCharacters });
+        const { result, latencyMs } = measure(() => {
+          const output = prepare();
+          // Include deferred disclosure work in the original full-output metric.
+          void output.included;
+          return output;
+        });
+        const { latencyMs: textOnlyLatencyMs } = measure(() => prepare().text);
         assert.ok(result.text.length <= maxCharacters);
         assert.equal(result.included.length + result.omitted.length, count);
         reports.push({
@@ -75,6 +80,7 @@ function measureInformation() {
           format,
           maxCharacters,
           latencyMs,
+          textOnlyLatencyMs,
           characters: result.text.length,
           included: result.included.length,
           omitted: result.omitted.length,

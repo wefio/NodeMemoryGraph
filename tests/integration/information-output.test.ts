@@ -234,6 +234,36 @@ test("prepared content and source binding do not follow later caller mutations",
   assert.equal(output.text, "[open] Review parser.");
 });
 
+test("deferred source metadata uses the prepared snapshot and is reusable as plain JSON", () => {
+  const source = { kind: "memory" as const, memoryId: "m", activeGraphId: "graph" };
+  const view = { source, body: "Original value", requiredLabels: ["[preview]"], preview: true };
+  const output = prepareInformationOutput([view, view]);
+  assert.equal(output.text, "[preview] Original value");
+  source.memoryId = "different";
+  view.body = "Changed value";
+  view.requiredLabels[0] = "[verified]";
+  const entries = output.included;
+  assert.equal(entries.length, 1);
+  assert.deepEqual(entries[0].source, { kind: "memory", memoryId: "m", activeGraphId: "graph" });
+  assert.equal(entries[0].disclosure, "preview");
+  assert.equal(output.included, entries);
+  assert.ok(Object.isFrozen(entries) && Object.isFrozen(entries[0]));
+  assert.deepEqual(JSON.parse(JSON.stringify(output)).included, entries);
+  const again = prepareInformationOutput([
+    {
+      source: { kind: "memory", memoryId: "m", activeGraphId: "graph" },
+      body: "Original value",
+      requiredLabels: ["[preview]"],
+      preview: true,
+    },
+  ]);
+  assert.deepEqual(again.included, entries);
+  assert.deepEqual(
+    confirmInformationOutput(output, { sessionId: "reader", text: "changed" }).entries,
+    [],
+  );
+});
+
 test("context cost follows the all-AG envelope transition, including a rejected transition", () => {
   const ag: InformationView = {
     purpose: "state",

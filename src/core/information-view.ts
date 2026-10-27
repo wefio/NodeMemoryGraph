@@ -47,6 +47,7 @@ export interface InformationOutputReceipt {
 export interface PreparedInformationOutput {
   readonly text: string;
   readonly views: readonly InformationView[];
+  /** Source hashes are computed on first access and memoized for this snapshot. */
   readonly included: readonly InformationOutputEntry[];
   readonly omitted: readonly InformationView[];
 }

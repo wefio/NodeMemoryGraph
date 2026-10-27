@@ -7,6 +7,14 @@ import { SessionActiveGraphRuntime } from "../../src/core/session-active-graph.t
 import { compactSearchContext } from "../../src/integration/search-projection.ts";
 import { loadPrompts, renderDisclosure } from "../../src/prompts/load.ts";
 import {
+  confirmInformationOutput,
+  prepareInformationOutput,
+} from "../../src/integration/information-output.ts";
+import {
+  prepareSearchSurface,
+  prepareCompactSearchSurface,
+  prepareEvidenceSurface,
+  prepareRememberSurface,
   prepareSessionActiveGraphSurface,
   prepareTaskBoardSurface,
   renderCompactSearchSurface,
@@ -329,6 +337,101 @@ test("shared remember surface bounds semantic follow-up candidates", () => {
   assert.match(rendered, /old-2/u);
   assert.doesNotMatch(rendered, /old-3/u);
   assert.match(rendered, /decide semantically/u);
+});
+
+test("memory surfaces expose preview and exact sources without mutating the result", () => {
+  const memory = context();
+  const original = structuredClone(memory);
+  const search = prepareSearchSurface(memory);
+  const compact = prepareCompactSearchSurface(compactSearchContext(memory));
+  const evidence = prepareEvidenceSurface(memory);
+  assert.equal(search.text, compact.text);
+  assert.deepEqual(search.included, compact.included);
+  for (const output of [search, evidence]) {
+    assert.equal(output.included.length, 2);
+    assert.deepEqual(
+      output.included.map((entry) => entry.source),
+      ["memory-a", "memory-b"].map((memoryId) => ({
+        kind: "memory",
+        memoryId,
+        activeGraphId: "ag-atlas",
+      })),
+    );
+    assert.deepEqual(
+      confirmInformationOutput(output, { sessionId: "reader", text: output.text }).entries,
+      output.included,
+    );
+    assert.deepEqual(output.omitted, []);
+  }
+  assert.ok(search.included.every((entry) => entry.disclosure === "preview"));
+  assert.ok(evidence.included.every((entry) => entry.disclosure === "full"));
+  assert.deepEqual(memory, original);
+  memory.results[0].memory.statement = "Changed after preparation";
+  assert.doesNotMatch(evidence.text, /Changed after preparation/u);
+});
+
+test("exact memory tools retain admitted evidence beyond the generic display default", () => {
+  const memory = context();
+  memory.results[0].memory.statement = "Exact value. ".repeat(1000) + "Final value: 427.";
+  const output = prepareEvidenceSurface(memory, { missingMemoryIds: ["absent"] });
+  assert.ok(output.text.length > 8000);
+  assert.ok(output.text.includes(memory.results[0].memory.statement));
+  assert.match(output.text, /MISSING: absent/u);
+  assert.deepEqual(output.omitted, []);
+});
+
+test("withdrawn evidence never creates a full-content disclosure receipt", () => {
+  const memory = context();
+  memory.results[0].memory.markers = [{ kind: "forget" }];
+  const output = prepareEvidenceSurface(memory);
+  assert.match(output.text, /content withdrawn/u);
+  assert.doesNotMatch(output.text, /Atlas receives input|Exact source detail for memory-a/u);
+  assert.equal(output.included[0].disclosure, "preview");
+  assert.equal(output.included[1].disclosure, "full");
+});
+
+test("remember keeps its write acknowledgement and indivisible follow-ups without claiming disclosure", () => {
+  const candidate = {
+    memoryId: "old",
+    nodeId: "node",
+    statement: "Previous exact value",
+    similarity: 0.8,
+    eventTime: null,
+  };
+  const output = prepareRememberSurface(
+    {
+      memory: searchResultFixture("saved", "New exact value").memory,
+      duplicates: [candidate],
+      supersedeCandidates: [candidate],
+    },
+    { postamble: "(markers: source_gap)" },
+  );
+  assert.ok(output.text.startsWith("Saved saved.\n"));
+  assert.ok(output.text.endsWith("\n(markers: source_gap)"));
+  assert.deepEqual(
+    output.included,
+    [],
+    "acknowledgements and composite hints have no exact memory source",
+  );
+  assert.deepEqual(output.omitted, []);
+  const blocks = output.views.filter((view) => view.preview);
+  assert.equal(blocks.length, 2);
+  for (const block of blocks) {
+    assert.match(block.body, /Previous exact value/u);
+    assert.match(block.body, /Similarity|Similarity alone/u);
+    const bounded = prepareInformationOutput([block], { maxCharacters: 30 });
+    assert.deepEqual(bounded.omitted, [block]);
+    assert.doesNotMatch(bounded.text, /Previous exact value/u);
+  }
+  const long = prepareRememberSurface(
+    { memory: searchResultFixture("saved", "Value").memory },
+    {
+      postamble: "A host diagnostic. ".repeat(1000),
+    },
+  );
+  assert.ok(long.text.startsWith("Saved saved.\n"));
+  assert.ok(long.text.length > 8000);
+  assert.deepEqual(long.omitted, []);
 });
 
 test("a delivered and judged entry renders its deliverable and verdict, not just its claim", () => {

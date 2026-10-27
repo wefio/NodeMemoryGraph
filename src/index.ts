@@ -35,6 +35,10 @@ export {
 } from "./integration/config.ts";
 export type { QppActuationMode, SearchRecommendationMode } from "./integration/config.ts";
 export {
+  prepareSearchSurface,
+  prepareCompactSearchSurface,
+  prepareEvidenceSurface,
+  prepareRememberSurface,
   prepareSessionActiveGraphSurface,
   prepareTaskBoardSurface,
   renderEvidenceSurface,
@@ -47,6 +51,7 @@ export {
 } from "./integration/agent-surface.ts";
 export type {
   EvidenceSurfaceOptions,
+  RememberSurfaceOptions,
   SearchSurfaceOptions,
   SessionActiveGraphSurfaceOptions,
   TaskBoardDirectoryEntry,
