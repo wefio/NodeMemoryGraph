@@ -920,10 +920,8 @@ export default {
           sessionId,
         })) as RememberResult;
         const markerNote =
-          markers.length > 0
-            ? `\n(markers: ${markers.map((marker) => marker.kind).join(", ")})`
-            : "";
-        return { content: renderRememberSurface(remembered) + markerNote };
+          markers.length > 0 ? `(markers: ${markers.map((marker) => marker.kind).join(", ")})` : "";
+        return { content: renderRememberSurface(remembered, { postamble: markerNote }) };
       },
     });
 

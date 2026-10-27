@@ -1,0 +1,184 @@
+{
+  "schema": 1,
+  "measuredAt": "2026-10-26T08:59:33.870Z",
+  "nodeVersion": "v24.19.0",
+  "input": {
+    "fixture": "memory-surface-v1",
+    "iterations": 200
+  },
+  "implementation": {
+    "evals/retrieval/memory-surface.ts": "12c32f7275f1f655c731a40527d455ec56d422e99d237e1b973aefb8d762f016",
+    "tests/helpers/search-result.ts": "eac94011b56ce77b886315a8562d99ad318f1f3eca9e40636cfb5ba6a9b8ad0c",
+    "src/integration/agent-surface.ts": "90b995aa571ffde207184e15a3778877e8f97a2ac823188f79b7a758101aeb37",
+    "src/integration/information-output.ts": "e9fc9d575a8c60cee459fc53a7480784ad00442ec1d917bd1915de8f45c55224",
+    "src/integration/search-projection.ts": "5569329ac3c000ff547a957624d492e1913d82649e486d16ed0556a11e7743e8",
+    "src/integration/chain-projection.ts": "e95881e46f031fdc2f1642ed7fb4985ce3780b2dfe99c1261c1027c0c632c6f8"
+  },
+  "cases": [
+    {
+      "name": "search-0",
+      "inputHash": "ed1defc673920d5b38603df1db67c2d2b9427a330657482a9a52b5d7c7411536",
+      "outputHash": "2dca23c5df09215ceeae0f92503d343861d25e4fc4fa4ed7299d534f331be55a",
+      "characters": 153,
+      "latencyMs": {
+        "mean": 0.0031870000000003527,
+        "p50": 0.0030000000000001137,
+        "p95": 0.0037999999999982492
+      }
+    },
+    {
+      "name": "compact-0",
+      "inputHash": "ed1defc673920d5b38603df1db67c2d2b9427a330657482a9a52b5d7c7411536",
+      "outputHash": "2dca23c5df09215ceeae0f92503d343861d25e4fc4fa4ed7299d534f331be55a",
+      "characters": 153,
+      "latencyMs": {
+        "mean": 0.004280999999999508,
+        "p50": 0.0024999999999977263,
+        "p95": 0.00549999999999784
+      }
+    },
+    {
+      "name": "evidence-0",
+      "inputHash": "ed1defc673920d5b38603df1db67c2d2b9427a330657482a9a52b5d7c7411536",
+      "outputHash": "9b54db5ecbbaf893d2f5cc7c671b8093bb1556e43b62940daa3889df2e7efe6e",
+      "characters": 42,
+      "latencyMs": {
+        "mean": 0.0035265000000001124,
+        "p50": 0.0031000000000034333,
+        "p95": 0.003500000000002501
+      }
+    },
+    {
+      "name": "search-1",
+      "inputHash": "5a1de477e2ae98aaa04d2f564194d676d3bc260128fde90dd1a69d65d1d89cf9",
+      "outputHash": "a324049a3778a70456169e56b6c35dc1f007289596d622447346553a377043ae",
+      "characters": 570,
+      "latencyMs": {
+        "mean": 0.016198000000000407,
+        "p50": 0.013700000000000045,
+        "p95": 0.024799999999999045
+      }
+    },
+    {
+      "name": "compact-1",
+      "inputHash": "5a1de477e2ae98aaa04d2f564194d676d3bc260128fde90dd1a69d65d1d89cf9",
+      "outputHash": "a324049a3778a70456169e56b6c35dc1f007289596d622447346553a377043ae",
+      "characters": 570,
+      "latencyMs": {
+        "mean": 0.010820500000000096,
+        "p50": 0.009799999999998477,
+        "p95": 0.01819999999999311
+      }
+    },
+    {
+      "name": "evidence-1",
+      "inputHash": "5a1de477e2ae98aaa04d2f564194d676d3bc260128fde90dd1a69d65d1d89cf9",
+      "outputHash": "7e363c6f64e643c1ba8403084d218d6f7f27eb83abaf6c2ac698ae7006e689e3",
+      "characters": 1087,
+      "latencyMs": {
+        "mean": 0.015651999999999618,
+        "p50": 0.014200000000002433,
+        "p95": 0.017799999999994043
+      }
+    },
+    {
+      "name": "search-20",
+      "inputHash": "ac4c3ea49ba25cb3fb068ab6f3c617a78ba20b0d89b85b67819a298fbfadb7b1",
+      "outputHash": "2dae197a89bb397abebac5858953321ad9e91ca8582bc3a22ee2266514e7fcd7",
+      "characters": 8266,
+      "latencyMs": {
+        "mean": 0.15135900000000008,
+        "p50": 0.12760000000000105,
+        "p95": 0.2547999999999888
+      }
+    },
+    {
+      "name": "compact-20",
+      "inputHash": "ac4c3ea49ba25cb3fb068ab6f3c617a78ba20b0d89b85b67819a298fbfadb7b1",
+      "outputHash": "2dae197a89bb397abebac5858953321ad9e91ca8582bc3a22ee2266514e7fcd7",
+      "characters": 8266,
+      "latencyMs": {
+        "mean": 0.08262050000000017,
+        "p50": 0.07110000000000127,
+        "p95": 0.1092000000000155
+      }
+    },
+    {
+      "name": "evidence-20",
+      "inputHash": "ac4c3ea49ba25cb3fb068ab6f3c617a78ba20b0d89b85b67819a298fbfadb7b1",
+      "outputHash": "d76ebb8db0d088dda5b3be86bb4cefb82271487ab8686ab38d7158250054bd57",
+      "characters": 20972,
+      "latencyMs": {
+        "mean": 0.2007290000000006,
+        "p50": 0.18000000000000682,
+        "p95": 0.3289000000000044
+      }
+    },
+    {
+      "name": "search-200",
+      "inputHash": "3c41ec80de0a1e618fcb92c7bf6df4e70a98b831565b381eb2982a710097d0bb",
+      "outputHash": "7614b3e78fd807e1a7053be66ed1f9ea7434a2285e2155c31f247c4a50641d58",
+      "characters": 81546,
+      "latencyMs": {
+        "mean": 1.2634645000000029,
+        "p50": 1.1301000000000272,
+        "p95": 1.8879999999999768
+      }
+    },
+    {
+      "name": "compact-200",
+      "inputHash": "3c41ec80de0a1e618fcb92c7bf6df4e70a98b831565b381eb2982a710097d0bb",
+      "outputHash": "7614b3e78fd807e1a7053be66ed1f9ea7434a2285e2155c31f247c4a50641d58",
+      "characters": 81546,
+      "latencyMs": {
+        "mean": 0.6611210000000005,
+        "p50": 0.5957999999999402,
+        "p95": 1.4746000000000095
+      }
+    },
+    {
+      "name": "evidence-200",
+      "inputHash": "3c41ec80de0a1e618fcb92c7bf6df4e70a98b831565b381eb2982a710097d0bb",
+      "outputHash": "0bd60c4d266fb0ac02d507b0fa20689463d2c5cc9eb1a4d77434e630ee1537e8",
+      "characters": 209912,
+      "latencyMs": {
+        "mean": 1.872691000000005,
+        "p50": 1.7432000000000016,
+        "p95": 2.586400000000026
+      }
+    },
+    {
+      "name": "remember-0",
+      "inputHash": "8b32a5fc2b2ce184b8e5ce04e4ba3b7ee72de6810d9679148b4f30b996bc0a52",
+      "outputHash": "4f714b733425b4943351546c235f83ccbf8614694052bd60ad7364cb4890b9e4",
+      "characters": 12,
+      "latencyMs": {
+        "mean": 0.0025349999999980354,
+        "p50": 0.002300000000104774,
+        "p95": 0.004100000000107684
+      }
+    },
+    {
+      "name": "remember-1",
+      "inputHash": "ea29de79e1cd05e45d5132b4b72c736237167b0792b75e48d86256ea40fee7e5",
+      "outputHash": "4cc2366797aa916c0c2f085c4790796118039079c8353ab7b6c77fe1a3acacbc",
+      "characters": 922,
+      "latencyMs": {
+        "mean": 0.007171999999992522,
+        "p50": 0.006499999999959982,
+        "p95": 0.010100000000193177
+      }
+    },
+    {
+      "name": "remember-6",
+      "inputHash": "8b4de2ea5c6b0a72d87afd4eb618a9e9cb69e0ea68b55b99146bb241f036f09c",
+      "outputHash": "41fa4aa59c20d07c3942b22c6c6fd460595be393d9f8536f441f959fc50fbf14",
+      "characters": 1682,
+      "latencyMs": {
+        "mean": 0.012775499999999057,
+        "p50": 0.012300000000095679,
+        "p95": 0.016000000000076398
+      }
+    }
+  ]
+}

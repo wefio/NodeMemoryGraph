@@ -156,8 +156,12 @@ omission counts still survive as metadata.
 Budget preparation counts admitted body lengths and purpose-group envelopes
 incrementally, then renders the selected rows once. The counter includes the
 all-AG state wrapper and its transition to a mixed-source wrapper. A rejected
-candidate restores both body and group counts. Source fingerprints are computed
-once per nonempty candidate and reused for included-source metadata.
+candidate restores both body and group counts. Deduplication compares canonical
+source identity, purpose, preview status and exact rendered text. Source hashes
+are generated only for final admitted rows when `included` is first read, then
+cached on that prepared output. Text-only reads need no disclosure hashes.
+The cache belongs to the immutable snapshot; confirmation still checks the exact
+fragment and reader session on every call. It is not an authentication cache.
 
 Structured `views` are input snapshots; `included` identifies admitted output
 sources and `omitted` retains omissions. Ordinary tools keep flat presentation
@@ -165,6 +169,24 @@ and original budgets; protocol/source identity does not change. Preparation does
 not confirm provider send or commit a disclosure ledger. New selection rules do
 not delete existing session history. This output budget is not a complete
 multidimensional AG-construction budget.
+
+Explicit search, exact-evidence reads and successful memory-save replies also
+project into `InformationView` before preparation. Their text interfaces return
+the prepared text; typed consumers can inspect the same views and source metadata.
+These memory tools retain their domain limits (selected records, source excerpts,
+logical structure and follow-up counts), without an additional 8,000-character
+display cutoff. A save acknowledgement therefore keeps its status and ID. It has
+no memory source handle: acknowledging a write does not disclose the saved text.
+Each multi-record follow-up block keeps its candidates, caveat and action hint
+together as one preview item, without claiming disclosure of an individual record.
+Search source entries are previews; withdrawn evidence also remains preview-only.
+
+Automatic context uses the independently admissible candidate projection, which
+attaches preview, degraded-retrieval and graph-reference labels to each row.
+An explicit tool page's separate preamble, graph scope and logical-chain rows
+must not be independently omitted and then treated as that context projection.
+The view protocol does not replace `MemoryContext`, `RememberResult` or RPC data,
+execute a write, or alter domain admission and ranking.
 
 ## Model entry and compatibility
 

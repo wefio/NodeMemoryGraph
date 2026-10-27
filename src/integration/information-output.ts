@@ -23,7 +23,7 @@ export interface InformationOutputOptions {
 interface OutputRow {
   view: InformationView;
   text: string;
-  fingerprint?: string;
+  identity?: string;
   notice?: boolean;
 }
 
@@ -69,7 +69,7 @@ export function prepareInformationOutput(
       : snapshot;
   const rows: OutputRow[] = [];
   const omitted: InformationView[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, Set<string>>();
   const size = new OutputSize(format);
   for (const view of ordered) {
     const row = prepareRow(view, seen);
@@ -81,10 +81,15 @@ export function prepareInformationOutput(
     } else rows.push(row);
   }
   appendOmissionNotice(rows, omitted, maxCharacters, format, size);
+  let included: readonly InformationOutputEntry[] | undefined;
   return Object.freeze({
     text: renderRows(rows, format),
     views: snapshot,
-    included: Object.freeze(rows.flatMap(outputEntry)),
+    // Text-only consumers need no disclosure hashes. The frozen snapshot makes
+    // this per-output memoization safe without revision or invalidation rules.
+    get included() {
+      return (included ??= Object.freeze(rows.flatMap(outputEntry)));
+    },
     omitted: Object.freeze(omitted),
   });
 }
@@ -118,13 +123,22 @@ function purposeOf(view: InformationView): InformationPurpose {
   return purpose;
 }
 
-function prepareRow(view: InformationView, seen: Set<string>): OutputRow | undefined {
+function prepareRow(view: InformationView, seen: Map<string, Set<string>>): OutputRow | undefined {
   const text = [...(view.requiredLabels ?? []), view.body].filter(Boolean).join(" ");
   if (!text) return undefined;
-  const fingerprint = view.source ? viewFingerprint(view, text) : undefined;
-  if (fingerprint && seen.has(fingerprint)) return undefined;
-  if (fingerprint) seen.add(fingerprint);
-  return { view, text, fingerprint };
+  const identity = view.source ? sourceIdentity(view.source) : undefined;
+  if (identity) {
+    const key = JSON.stringify([
+      identity,
+      Boolean(view.preview),
+      ...(view.purpose === undefined ? [] : [view.purpose]),
+    ]);
+    const texts = seen.get(key) ?? new Set<string>();
+    if (texts.has(text)) return undefined;
+    texts.add(text);
+    seen.set(key, texts);
+  }
+  return { view, text, identity };
 }
 
 function renderRows(rows: readonly OutputRow[], format: "flat" | "context"): string {
@@ -245,7 +259,7 @@ function outputEntry(row: OutputRow): InformationOutputEntry[] {
   return [
     Object.freeze({
       source: row.view.source,
-      contentHash: row.fingerprint!,
+      contentHash: viewFingerprint(row),
       disclosure: row.view.preview ? ("preview" as const) : ("full" as const),
     }),
   ];
@@ -309,11 +323,11 @@ function sourceIdentity(source: InformationSource): string {
   }
 }
 
-function viewFingerprint(view: InformationView, text: string): string {
+function viewFingerprint({ view, text, identity }: OutputRow): string {
   return createHash("sha256")
     .update(
       JSON.stringify([
-        sourceIdentity(view.source!),
+        identity,
         text,
         Boolean(view.preview),
         ...(view.purpose === undefined ? [] : [view.purpose]),
