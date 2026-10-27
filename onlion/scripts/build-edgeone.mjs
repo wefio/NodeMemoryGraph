@@ -6,6 +6,7 @@
  * sqlite artefacts are inlined as base64 and rehydrated into WebAssembly.Module
  * at cold start. That also removes every filesystem-path assumption.
  */
+/* eslint-disable no-console -- deliberate build output */
 import { build } from "esbuild";
 import fs from "node:fs";
 import path from "node:path";

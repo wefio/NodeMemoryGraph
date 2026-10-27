@@ -81,7 +81,8 @@ export function createCosBucket(config) {
       nowSeconds: Math.floor(clock() / 1000),
     });
     // `host` is derived from the URL; sending it again confuses some runtimes.
-    const { host, ...outgoing } = signedHeaders;
+    const outgoing = { ...signedHeaders };
+    delete outgoing.host;
     outgoing.authorization = signed.authorization;
     const url = `https://${endpoint}${path}${signed.query ? `?${signed.query}` : ""}`;
     const response = await fetchImpl(url, { method, headers: outgoing, body });

@@ -138,29 +138,42 @@ export class OpenAIEmbeddingClient {
    */
   private async request(inputs: string[], extraBody: Record<string, unknown>): Promise<number[][]> {
     if (inputs.length === 0) return [];
-    const cap = this.batchSize;
-    if (inputs.length > cap) {
-      // Chunks are independent HTTP calls, so run a few of them concurrently.
-      // Sequential chunking serializes a large Add behind provider round trips;
-      // under 16 concurrent writers that is the difference between ~30 serial
-      // calls and ~8 rounds. Results are stitched back in input order.
-      const chunks: string[][] = [];
-      for (let offset = 0; offset < inputs.length; offset += cap) {
-        chunks.push(inputs.slice(offset, offset + cap));
-      }
-      const results: number[][][] = new Array(chunks.length);
-      let next = 0;
-      const worker = async () => {
-        while (next < chunks.length) {
-          const index = next++;
-          results[index] = await this.request(chunks[index], extraBody);
-        }
-      };
-      await Promise.all(
-        Array.from({ length: Math.min(this.chunkConcurrency, chunks.length) }, worker),
-      );
-      return results.flat();
+    if (inputs.length <= this.batchSize) return this.requestBatch(inputs, extraBody);
+    return this.requestChunked(inputs, extraBody);
+  }
+
+  /**
+   * Chunks are independent HTTP calls, so a few of them run concurrently.
+   * Sequential chunking serializes a large Add behind provider round trips;
+   * under 16 concurrent writers that is the difference between ~30 serial calls
+   * and ~8 rounds. Results are stitched back in input order.
+   */
+  private async requestChunked(
+    inputs: string[],
+    extraBody: Record<string, unknown>,
+  ): Promise<number[][]> {
+    const chunks: string[][] = [];
+    for (let offset = 0; offset < inputs.length; offset += this.batchSize) {
+      chunks.push(inputs.slice(offset, offset + this.batchSize));
     }
+    const results: number[][][] = new Array(chunks.length);
+    let next = 0;
+    const worker = async () => {
+      while (next < chunks.length) {
+        const index = next++;
+        results[index] = await this.requestBatch(chunks[index], extraBody);
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(this.chunkConcurrency, chunks.length) }, worker),
+    );
+    return results.flat();
+  }
+
+  private async requestBatch(
+    inputs: string[],
+    extraBody: Record<string, unknown>,
+  ): Promise<number[][]> {
     const body = JSON.stringify({
       model: this.#apiModel,
       input: inputs,
