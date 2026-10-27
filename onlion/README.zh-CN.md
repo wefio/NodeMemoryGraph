@@ -41,6 +41,21 @@ node node_modules/wrangler/bin/wrangler.js deploy --config dist/server/wrangler.
 
 `--dry-run` 加 `--outdir` 可只验证打包、不触碰远端资源。本地冒烟全流程（健康检查、Add、回执冲突、图文 Search、隔离）位于 `.runtime/verification/smoke-local.mjs`，针对 `wrangler dev` 运行。
 
+## EdgeOne 部署
+
+需要大陆评测流量直连时走这个目标（原托管平台对大陆出口返回 403）。设计与踩坑记录在 `onlion/edgeone-migration-plan.md`。
+
+```bash
+npm run build:edgeone   # dist/edgeone（单文件函数）+ dist/edgeone.zip
+npm run test:cos        # 存储适配器打真实桶
+npm run test:edgeone    # 用构建产物 + 真实桶跑完整 Add/Search/reset
+npm run deploy:edgeone  # edgeone makers deploy ./dist/edgeone -n nmg-memory-api
+```
+
+存储从 R2 换成腾讯云 COS。桶必须与函数**同地域**，且**不能开启版本控制**：适配器用 `x-cos-forbid-overwrite` 模拟 manifest 的 CAS，而 COS 对已开启版本控制的桶会忽略该头。函数地域是**项目级**控制台设置、下次部署才生效；`edgeone.json` 不会给已存在的项目改地域，所以用 `x-nmg-region` 响应头确认实际落点。
+
+配置全部来自平台环境变量，不读文件：`NMG_API_KEY`、`NMG_COS_BUCKET`/`NMG_COS_REGION`/`NMG_COS_SECRET_ID`/`NMG_COS_SECRET_KEY`，以及可选的 `NMG_EMBED_*`（含义与 Wrangler 目标一致）。`npm run smoke:edgeone` 验收已部署端点（`NMG_ENDPOINT=... NMG_API_KEY=...`）。
+
 ## 多模态行为
 
 - Add 与 Search 接受有序 `text`/`image_url` parts；仅 Base64 data URL（JPEG/PNG/WebP/GIF），单图、单条内容与单请求均有上限。

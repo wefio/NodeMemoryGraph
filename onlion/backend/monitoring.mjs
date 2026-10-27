@@ -52,7 +52,10 @@ export function reportFailure(error,status,kind='request_failure'){
   const entry={id:crypto.randomUUID(),at:new Date().toISOString(),kind,status,
     trace_id:context.trace_id,route:context.route,stage:stages.get(error)??'handler',
     ...classifyError(error),...(context.user_id_hash?{user_id_hash:context.user_id_hash}:{}),
-    ...(context.request_id_hash?{request_id_hash:context.request_id_hash}:{})};
+    ...(context.request_id_hash?{request_id_hash:context.request_id_hash}:{}),
+    // NMG_DEBUG_ERRORS=1 surfaces the exception name/message for diagnosis; the
+    // default record still carries no exception text, stack or request content.
+    ...(context.env.NMG_DEBUG_ERRORS==='1'?{debug:{name:error?.name??null,message:String(error?.message??'').slice(0,300)}}:{})};
   localFailures.unshift(entry);localFailures.length=Math.min(localFailures.length,MAX_ERRORS);
   // No exception text, stack, request body, source statements or credentials.
   console.error(JSON.stringify({event:'nmg_failure',...entry}));

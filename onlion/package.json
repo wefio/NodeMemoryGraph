@@ -8,14 +8,19 @@
   },
   "scripts": {
     "build": "node scripts/build-backend.mjs",
+    "build:edgeone": "node scripts/build-edgeone.mjs",
+    "deploy:edgeone": "edgeone makers deploy ./dist/edgeone -n nmg-memory-api --json",
     "check": "tsc --noEmit",
     "start": "node node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .runtime/wrangler --ip 127.0.0.1 --inspector-port 0",
     "test:backend": "node scripts/test-backend.mjs",
     "test:temporal": "node --experimental-transform-types scripts/test-temporal-evidence.mjs",
     "test:media": "node --experimental-transform-types scripts/test-multimodal-service.mjs",
     "test:worker-media": "node scripts/test-multimodal-worker.mjs",
+    "test:cos": "node scripts/test-cos-bucket.mjs",
+    "test:edgeone": "node scripts/test-edgeone-worker.mjs",
     "verify": "npm run build && npm run check && npm run test:temporal && npm run test:media && npm run test:backend && npm run test:worker-media",
-    "generate:callbacks": "node scripts/generate-callbacks.mjs"
+    "generate:callbacks": "node scripts/generate-callbacks.mjs",
+    "smoke:edgeone": "node scripts/smoke-edgeone.mjs"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

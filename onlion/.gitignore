@@ -8,3 +8,5 @@ dist/
 *.tsbuildinfo
 # Generated from callbacks.manifest.json at build time
 /sqlite-wasm/callbacks.wasm
+# edgeone CLI project link (machine-local)
+.edgeone/
