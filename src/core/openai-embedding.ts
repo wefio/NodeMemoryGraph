@@ -89,23 +89,17 @@ export class OpenAIEmbeddingClient {
     );
     this.queryBody = options.queryBody ?? {};
     this.documentBody = options.documentBody ?? {};
-    this.indexId = `${this.model}@${createHash("sha256")
-      .update(
-        JSON.stringify({
-          ...(options.indexNamespace ? { indexNamespace: options.indexNamespace } : {}),
-          dimensions: this.dimensions ?? null,
-          documentTemplate: this.documentTemplate,
-          ...(Object.keys(this.documentBody).length ? { documentBody: this.documentBody } : {}),
-          profile: this.profile,
-          queryInstruction: this.queryTemplate.includes("{instruction}")
-            ? this.queryInstruction
-            : null,
-          queryTemplate: this.queryTemplate,
-          ...(Object.keys(this.queryBody).length ? { queryBody: this.queryBody } : {}),
-        }),
-      )
-      .digest("hex")
-      .slice(0, 12)}`;
+    this.indexId = indexIdentity({
+      model: this.model,
+      ...(options.indexNamespace ? { indexNamespace: options.indexNamespace } : {}),
+      dimensions: this.dimensions,
+      documentTemplate: this.documentTemplate,
+      documentBody: this.documentBody,
+      profile: this.profile,
+      queryTemplate: this.queryTemplate,
+      queryInstruction: this.queryInstruction,
+      queryBody: this.queryBody,
+    });
     this.timeoutMs = Math.max(1, options.timeoutMs ?? 10_000);
   }
 
@@ -213,7 +207,8 @@ export class OpenAIEmbeddingClient {
           body,
           signal: AbortSignal.timeout(this.timeoutMs),
         });
-        if (!RETRYABLE_STATUS(response.status) || attempt >= RETRY_DELAYS_MS.length) return response;
+        if (!RETRYABLE_STATUS(response.status) || attempt >= RETRY_DELAYS_MS.length)
+          return response;
       } catch (error) {
         // A timeout is retried too: the request may simply have been slow.
         if (attempt >= RETRY_DELAYS_MS.length) throw error;
@@ -221,6 +216,42 @@ export class OpenAIEmbeddingClient {
       await sleep(RETRY_DELAYS_MS[attempt]);
     }
   }
+}
+
+/**
+ * The stored-vector identity: any change to the model, dimensions, templates or
+ * per-call bodies means existing embeddings cannot be reused. Serialisation order
+ * is part of the contract, so keep the spread order identical when editing.
+ */
+function indexIdentity(input: {
+  model: string;
+  indexNamespace?: string;
+  dimensions?: number;
+  documentTemplate: string;
+  documentBody: Record<string, unknown>;
+  profile: EmbeddingProfileName;
+  queryTemplate: string;
+  queryInstruction: string;
+  queryBody: Record<string, unknown>;
+}): string {
+  const fingerprint = createHash("sha256")
+    .update(
+      JSON.stringify({
+        ...(input.indexNamespace ? { indexNamespace: input.indexNamespace } : {}),
+        dimensions: input.dimensions ?? null,
+        documentTemplate: input.documentTemplate,
+        ...(Object.keys(input.documentBody).length ? { documentBody: input.documentBody } : {}),
+        profile: input.profile,
+        queryInstruction: input.queryTemplate.includes("{instruction}")
+          ? input.queryInstruction
+          : null,
+        queryTemplate: input.queryTemplate,
+        ...(Object.keys(input.queryBody).length ? { queryBody: input.queryBody } : {}),
+      }),
+    )
+    .digest("hex")
+    .slice(0, 12);
+  return `${input.model}@${fingerprint}`;
 }
 
 function requireTextTemplate(template: string): string {

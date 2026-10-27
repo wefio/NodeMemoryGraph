@@ -28,7 +28,8 @@ export class CosError extends Error {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const normalizeEtag = (value) => (value ? String(value).replace(/^"|"$/g, "").toLowerCase() : undefined);
+const normalizeEtag = (value) =>
+  value ? String(value).replace(/^"|"$/g, "").toLowerCase() : undefined;
 const sameEtag = (left, right) => !!left && !!right && normalizeEtag(left) === normalizeEtag(right);
 const sha1Hex = (text) => createHash("sha1").update(text, "utf8").digest("hex");
 const byteLength = (body) => (typeof body === "string" ? Buffer.byteLength(body) : body.byteLength);
@@ -87,7 +88,12 @@ export function createCosBucket(config) {
     const url = `https://${endpoint}${path}${signed.query ? `?${signed.query}` : ""}`;
     const response = await fetchImpl(url, { method, headers: outgoing, body });
     if (response.status >= 500 || response.status === 429) {
-      const error = new CosError(response.status, "server_error", `COS ${method} ${key} answered ${response.status}`, key);
+      const error = new CosError(
+        response.status,
+        "server_error",
+        `COS ${method} ${key} answered ${response.status}`,
+        key,
+      );
       error.retryable = true;
       throw error;
     }
@@ -99,7 +105,8 @@ export function createCosBucket(config) {
       try {
         return await rawFetch(method, key, options);
       } catch (error) {
-        const retryable = error.retryable || error.code === "ECONNRESET" || error.name === "TimeoutError";
+        const retryable =
+          error.retryable || error.code === "ECONNRESET" || error.name === "TimeoutError";
         if (!retryable || attempt >= RETRY_DELAYS_MS.length) throw error;
         await sleep(RETRY_DELAYS_MS[attempt]);
       }
@@ -113,7 +120,12 @@ export function createCosBucket(config) {
     } catch {
       /* body is optional */
     }
-    throw new CosError(response.status, code, `COS ${method} ${key} failed with ${response.status} (${code})`, key);
+    throw new CosError(
+      response.status,
+      code,
+      `COS ${method} ${key} failed with ${response.status} (${code})`,
+      key,
+    );
   }
 
   async function putObject(key, body, options = {}, { forbidOverwrite = false } = {}) {
@@ -163,9 +175,14 @@ export function createCosBucket(config) {
     const owner = randomUUID();
     let acquiredAt = 0;
     for (let attempt = 0; attempt < CLAIM_WAIT_ATTEMPTS; attempt++) {
-      const created = await putObject(claimKey, JSON.stringify({ owner, at: new Date(clock()).toISOString() }), {
-        httpMetadata: { contentType: "application/json" },
-      }, { forbidOverwrite: true });
+      const created = await putObject(
+        claimKey,
+        JSON.stringify({ owner, at: new Date(clock()).toISOString() }),
+        {
+          httpMetadata: { contentType: "application/json" },
+        },
+        { forbidOverwrite: true },
+      );
       if (created) {
         acquiredAt = clock();
         break;
@@ -222,7 +239,8 @@ export function createCosBucket(config) {
     let expectedStatus = 200;
     if (options.range) {
       const { offset = 0, length } = options.range;
-      headers.range = length === undefined ? `bytes=${offset}-` : `bytes=${offset}-${offset + length - 1}`;
+      headers.range =
+        length === undefined ? `bytes=${offset}-` : `bytes=${offset}-${offset + length - 1}`;
       expectedStatus = 206;
     }
     const response = await send("GET", key, { headers });
@@ -249,23 +267,36 @@ export function createCosBucket(config) {
     const response = await send("GET", "", { query });
     if (!response.ok) await fail(response, `list ${prefix ?? ""}`, "GET");
     const xml = await response.text();
-    const objects = [...xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)].map((match) => ({
-      key: xmlTag(match[1], "Key"),
-      size: Number(xmlTag(match[1], "Size") ?? 0),
-    })).filter((object) => typeof object.key === "string");
+    const objects = [...xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)]
+      .map((match) => ({
+        key: xmlTag(match[1], "Key"),
+        size: Number(xmlTag(match[1], "Size") ?? 0),
+      }))
+      .filter((object) => typeof object.key === "string");
     const truncated = xmlTag(xml, "IsTruncated") === "true";
     const next = xmlTag(xml, "NextContinuationToken");
     if (truncated && !next)
-      throw new CosError(500, "list_cursor_missing", `COS listed ${objects.length} objects but returned no continuation token`, prefix);
+      throw new CosError(
+        500,
+        "list_cursor_missing",
+        `COS listed ${objects.length} objects but returned no continuation token`,
+        prefix,
+      );
     return { objects, truncated, cursor: truncated ? next : null };
   }
 
   async function put(key, body, options = {}) {
     const onlyIf = options.onlyIf;
     if (!onlyIf) return putObject(key, body, options);
-    if (onlyIf.etagDoesNotMatch === "*") return putObject(key, body, options, { forbidOverwrite: true });
+    if (onlyIf.etagDoesNotMatch === "*")
+      return putObject(key, body, options, { forbidOverwrite: true });
     if (onlyIf.etagMatches) return conditionalPut(key, body, options, onlyIf.etagMatches);
-    throw new CosError(400, "unsupported_conditional", "COS adapter supports onlyIf.etagMatches and onlyIf.etagDoesNotMatch:'*'", key);
+    throw new CosError(
+      400,
+      "unsupported_conditional",
+      "COS adapter supports onlyIf.etagMatches and onlyIf.etagDoesNotMatch:'*'",
+      key,
+    );
   }
 
   async function remove(keys) {

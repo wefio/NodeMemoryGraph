@@ -18,9 +18,18 @@ const workspace = path.resolve(root, "..");
 const outDir = path.join(root, "dist/edgeone");
 const functionFile = path.join(outDir, "cloud-functions/[[default]].js");
 
-execFileSync(process.execPath, [path.join(workspace, "scripts/generate-prompts.ts")], { cwd: workspace, stdio: "inherit" });
-const revision = execFileSync(process.execPath, [path.join(root, "scripts/generate-callbacks.mjs")], { cwd: root, stdio: "inherit" });
-const dirty = execFileSync("git", ["status", "--porcelain"], { cwd: workspace, encoding: "utf8" }).trim().length > 0;
+execFileSync(process.execPath, [path.join(workspace, "scripts/generate-prompts.ts")], {
+  cwd: workspace,
+  stdio: "inherit",
+});
+const revision = execFileSync(
+  process.execPath,
+  [path.join(root, "scripts/generate-callbacks.mjs")],
+  { cwd: root, stdio: "inherit" },
+);
+const dirty =
+  execFileSync("git", ["status", "--porcelain"], { cwd: workspace, encoding: "utf8" }).trim()
+    .length > 0;
 const sourceRevision = revision + (dirty ? "+dirty" : "");
 
 fs.rmSync(outDir, { recursive: true, force: true });
@@ -86,7 +95,11 @@ fs.writeFileSync(
 );
 fs.writeFileSync(
   path.join(outDir, "package.json"),
-  JSON.stringify({ name: "nmg-memory-api-edgeone", private: true, type: "module", version: "0.0.0" }, null, 2),
+  JSON.stringify(
+    { name: "nmg-memory-api-edgeone", private: true, type: "module", version: "0.0.0" },
+    null,
+    2,
+  ),
 );
 
 // The deploy folder is uploaded verbatim, so a local `.env` left behind by
@@ -103,4 +116,6 @@ const archive = writeZip(
   collectEntries(outDir, "nmg-memory-api/"),
 );
 console.log(`Built EdgeOne Node function (${(size / 1024 / 1024).toFixed(2)} MiB) at dist/edgeone`);
-console.log(`Packed dist/edgeone.zip (${archive.entries} entries, ${(archive.bytes / 1024 / 1024).toFixed(2)} MiB uncompressed)`);
+console.log(
+  `Packed dist/edgeone.zip (${archive.entries} entries, ${(archive.bytes / 1024 / 1024).toFixed(2)} MiB uncompressed)`,
+);
