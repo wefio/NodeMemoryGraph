@@ -60,6 +60,32 @@ resources. The local smoke flow (health, Add, receipt conflict, text/image
 Search, isolation) lives in `.runtime/verification/smoke-local.mjs` and runs
 against `wrangler dev`.
 
+## EdgeOne deployment
+
+Use this target when the evaluation traffic must reach the service from
+mainland China; the hosted-platform path returns 403 to those requests.
+`onlion/edgeone-migration-plan.md` owns the design and the collected pitfalls.
+
+```bash
+npm run build:edgeone   # dist/edgeone (single-file function) + dist/edgeone.zip
+npm run test:cos        # storage adapter against the real bucket
+npm run test:edgeone    # full Add/Search/reset over the built artifact + real bucket
+npm run deploy:edgeone  # edgeone makers deploy ./dist/edgeone -n nmg-memory-api
+```
+
+Storage is Tencent COS instead of R2. The bucket must be in the **same region**
+as the function, and **version control must stay off**: the storage adapter
+emulates the manifest CAS with `x-cos-forbid-overwrite`, which COS ignores on
+versioned buckets. The function region is a per-project console setting that
+only applies on the next deployment; `edgeone.json` does not retarget an
+existing project, so verify placement with the `x-nmg-region` response header.
+
+Configuration comes from the platform environment, not from files:
+`NMG_API_KEY`, `NMG_COS_BUCKET`/`NMG_COS_REGION`/`NMG_COS_SECRET_ID`/`NMG_COS_SECRET_KEY`,
+and the optional `NMG_EMBED_*` set (same meaning as for the Wrangler target).
+`npm run smoke:edgeone` checks a deployed endpoint end to end
+(`NMG_ENDPOINT=... NMG_API_KEY=...`).
+
 ## Multimodal behavior
 
 - Add and Search accept ordered `text`/`image_url` parts; Base64 data URLs

@@ -86,3 +86,6 @@ results/
 # Local goal/planning state (pi goal mode); a scratch plan is not repository content.
 .pi/goals/
 .pi/.goals-pool-snapshot.json
+
+# local scratch (agent fixtures, probe output)
+.runtime/

@@ -182,8 +182,15 @@ async function readJson(request) {
 async function mutateUser(env, userId, operation) {
   const sqlite = await measure("sqlite_init", () => sqliteReady()),
     key = keyFor(userId);
+  // Concurrent writers on one user serialize through the manifest CAS: each loser
+  // re-reads and retries. 4 attempts is fine for incidental overlap, but a
+  // benchmark harness can hit one user with 16 writers at once, where every
+  // round trip is cheap (~1 s) and giving up surfaces as a spurious 503.
+  const attempts = Number(env.NMG_WRITE_ATTEMPTS) > 0 ? Number(env.NMG_WRITE_ATTEMPTS) : 12;
   let generation;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    // Jitter keeps retrying writers from colliding again in lockstep.
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 15 + Math.random() * 85));
     const { object, manifest: before } = await measure("manifest_read", () =>
       loadManifest(env.MEMORY, key, userId),
     );

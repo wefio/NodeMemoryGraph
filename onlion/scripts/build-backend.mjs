@@ -10,7 +10,9 @@ const revision = execFileSync(process.execPath, [path.join(root, 'scripts/genera
 execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace, encoding: 'utf8' }).trim();
 const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: workspace, encoding: 'utf8' }).trim().length > 0;
 const sourceRevision = revision + (dirty ? '+dirty' : '');
-fs.rmSync('dist', { recursive: true, force: true });
+// Only this target's output: build:edgeone writes dist/edgeone and must survive.
+fs.rmSync('dist/server', { recursive: true, force: true });
+fs.rmSync('dist/.openai', { recursive: true, force: true });
 fs.mkdirSync('dist/server', { recursive: true });
 fs.cpSync('sqlite-wasm', 'dist/server/sqlite', { recursive: true, filter: (source) => !source.endsWith('callbacks.manifest.json') });
 await build({
