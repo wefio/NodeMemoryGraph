@@ -144,7 +144,8 @@ export async function clearLog(bucket,userKey){
     const page=await bucket.list({prefix,cursor,limit:1000});
     const keys=(page?.objects??[]).map(object=>object.key).filter(key=>typeof key==='string'&&key.startsWith(prefix)&&key.length>prefix.length);
     if(keys.length){await bucket.delete(keys);removed+=keys.length;}
-    if(!page?.truncated||!page.cursor)break;
+    // A cursor that does not advance would loop forever inside a reset.
+    if(!page?.truncated||!page.cursor||page.cursor===cursor)break;
     cursor=page.cursor;
   }
   return removed;
