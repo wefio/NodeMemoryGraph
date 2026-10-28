@@ -6,6 +6,7 @@ import { createWorkerFixture } from "./worker-fixture.mjs";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { applyPageDelta, makePageDelta } from "../backend/page-delta.mjs";
+import { MAX_QUERY_CHUNKS, QUERY_CHUNK_CHARS, poolQueryVectors, splitQueryChunks } from "../backend/query-chunks.mjs";
 const root = process.cwd();
 const storage = path.join(root, ".runtime/tests/backend-r2");
 const python = process.env.NMG_TEST_PYTHON ?? "python";
@@ -876,6 +877,9 @@ print(json.dumps(r))`,
       max_message_chars: 1_000_000,
       max_combined_message_chars: 1_500_000,
       max_ordered_content_bytes: 4 * 1024 * 1024,
+      query_chunk_chars: QUERY_CHUNK_CHARS,
+      max_query_chunks: MAX_QUERY_CHUNKS,
+      max_query_features: 24,
     });
     const longQuery = await call("a", "/search", {
       user_id: "payload-limits",
@@ -896,7 +900,48 @@ print(json.dumps(r))`,
       413,
       "a message longer than the old 128000-character cap must not be rejected as too large",
     );
-    console.log("PASS: payload caps follow the platform body limit rather than a global character budget.");
+    // A long query must still produce one usable vector: the text is split into
+    // bounded windows and the chunk vectors are pooled, because an embedding model
+    // only sees its own token window.
+    assert.deepEqual(splitQueryChunks("short question"), ["short question"]);
+    const longText = ("memory question about the trip. ".repeat(400)).trim();
+    const windows = splitQueryChunks(longText);
+    assert.ok(windows.length > 1, "a long query must split");
+    assert.ok(
+      windows.length <= MAX_QUERY_CHUNKS,
+      `chunk count must stay bounded, got ${windows.length}`,
+    );
+    for (const window of windows)
+      assert.ok(window.length <= QUERY_CHUNK_CHARS, `chunk exceeds the window: ${window.length}`);
+    assert.ok(windows.join("").length > 0);
+    const unit = [1, 0, 0];
+    const pooled = poolQueryVectors([unit, unit]);
+    assert.deepEqual(
+      pooled.map((value) => Math.round(value * 1e6) / 1e6),
+      unit,
+      "pooling identical unit vectors returns the same unit vector",
+    );
+    const mixed = poolQueryVectors([
+      [1, 0],
+      [0, 1],
+    ]);
+    const length = Math.hypot(...mixed);
+    assert.ok(Math.abs(length - 1) < 1e-9, `pooled vector must stay unit length, got ${length}`);
+    assert.ok(mixed[0] > 0 && mixed[1] > 0, "pooling averages the chunk directions");
+    // The windows must always cover the tail: without it, anything past
+    // limit*size characters was never searched at all.
+    const NL = String.fromCharCode(10);
+    const huge =
+      "filler sentence about weather. ".repeat(800).trim() + NL + "WHERE IS THE SPARE KEY";
+    const hugeWindows = splitQueryChunks(huge);
+    assert.ok(
+      hugeWindows.at(-1).includes("SPARE KEY"),
+      "the end-anchored window must contain the tail of a long query",
+    );
+    assert.ok(huge.length > QUERY_CHUNK_CHARS * MAX_QUERY_CHUNKS, "precondition: longer than the window budget");
+    console.log(
+      "PASS: a long query splits into bounded windows and always covers its tail, and the pool helper keeps a unit vector for callers that need one.",
+    );
   }
 
 } finally {
