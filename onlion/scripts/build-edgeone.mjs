@@ -22,11 +22,17 @@ execFileSync(process.execPath, [path.join(workspace, "scripts/generate-prompts.t
   cwd: workspace,
   stdio: "inherit",
 });
-const revision = execFileSync(
-  process.execPath,
-  [path.join(root, "scripts/generate-callbacks.mjs")],
-  { cwd: root, stdio: "inherit" },
-);
+// Run for its artifact only: with `stdio: inherit` this call returns null, so the
+// previous code recorded the string "null" as the source revision on every EdgeOne
+// build and a deployed function could not name the commit it came from.
+execFileSync(process.execPath, [path.join(root, "scripts/generate-callbacks.mjs")], {
+  cwd: root,
+  stdio: "inherit",
+});
+const revision = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+  cwd: workspace,
+  encoding: "utf8",
+}).trim();
 const dirty =
   execFileSync("git", ["status", "--porcelain"], { cwd: workspace, encoding: "utf8" }).trim()
     .length > 0;

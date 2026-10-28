@@ -61,7 +61,10 @@ try {
   const health = await firstSupported("health");
   check(`${health.route} is reachable (${health.result.ms} ms)`, health.result.status === 200, `${health.result.status} ${health.result.raw?.slice(0, 200)}`);
 
-  const denied = await call(health.route, undefined, "wrong-key");
+  // Health is deliberately unauthenticated: the evaluation harness probes it with
+  // no credential and expects 200, so the credential check must use a data route.
+  const searchRoute = (await firstSupported("search")).route;
+  const denied = await call(searchRoute, { user_id: userId, query: "probe", top_k: 1 }, "wrong-key");
   check("a wrong API key is rejected", denied.status === 401, String(denied.status));
 
   const add = await firstSupported("add");
@@ -70,19 +73,20 @@ try {
     user_id: userId,
     session_id: "smoke",
     request_id: "smoke-1",
-    messages: [{ role: "user", content: "The smoke test passphrase is copper kettle.", timestamp: Date.now() }],
+    messages: [{ role: "user", content: "The smoke test passphrase is copper kettle." }],
   });
   check(`POST ${addRoute} commits (${first.ms} ms)`, first.status === 200, `${first.status} ${first.raw?.slice(0, 300)}`);
 
+  // A replay must be byte-identical. The same request_id with different content is
+  // a conflict (409), which is the correct answer, not a failed idempotent retry —
+  // so no volatile field may appear in this body.
   const replay = await call(addRoute, {
     user_id: userId,
     session_id: "smoke",
     request_id: "smoke-1",
-    messages: [{ role: "user", content: "The smoke test passphrase is copper kettle.", timestamp: Date.now() }],
+    messages: [{ role: "user", content: "The smoke test passphrase is copper kettle." }],
   });
   check("replaying the same request_id is idempotent", replay.status === 200, `${replay.status}`);
-
-  const searchRoute = (await firstSupported("search")).route;
   const search = await call(searchRoute, { user_id: userId, query: "smoke passphrase", top_k: 5 });
   const hits = search.body?.data ?? [];
   check(`POST ${searchRoute} retrieves the memory (${search.ms} ms)`, search.status === 200 && hits.length > 0, `${search.status} hits=${hits.length}`);
