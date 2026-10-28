@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { createWorkerFixture } from "./worker-fixture.mjs";
 
 // Per-process directory: on Windows a previous run's Miniflare can still hold a handle
@@ -79,6 +80,19 @@ function addBody(userId, requestId, content, sessionId = "s") {
 
 try {
   const health = await call("/health");
+  // The fixture overrides the mode, so the code default is pinned at the source instead: a
+  // future edit must not quietly put production back on the synchronous path.
+  {
+    const source = fs.readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "../backend/worker.mjs"),
+      "utf8",
+    );
+    assert.match(
+      source,
+      /const addMode = \(env\) => \(env\.NMG_ADD_MODE === "sync" \? "sync" : "log"\)/,
+      "the code default must be the log path, with NMG_ADD_MODE=sync as the escape hatch",
+    );
+  }
   assert.equal(health.body.limits.add_mode, "log", "the fixture must run the log path");
 
   // I1: accepted Add is searchable before any fold.

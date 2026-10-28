@@ -743,36 +743,119 @@ async function reconcilePending(env, userId, count) {
     return { response: { pending: count } };
   });
 }
-/** Fuses the entries still in the log into the page, scored against the same query
- *  features the partitions were searched with.
+/** Terms the lexical fallback scores against: the query features, split the way the
+ *  store's own lexical channel splits them (lowercase, alphanumeric runs, stopword-ish
+ *  short tokens dropped). */
+function queryTerms(features) {
+  const seen = new Set();
+  for (const feature of features)
+    for (const term of String(feature)
+      .toLowerCase()
+      .split(/[^a-z0-9一-鿿]+/u))
+      if (term.length > 2) seen.add(term);
+  return [...seen];
+}
+
+/** How many query terms a pending entry mentions. Zero means it is not a match, which is
+ *  what keeps an unmatched query answering with an empty page in a lexical-only
+ *  deployment. */
+function pendingTermScore(content, terms) {
+  const text = String(content).toLowerCase();
+  let score = 0;
+  for (const term of terms) if (text.includes(term)) score += 1;
+  return score;
+}
+/** Fuses the entries still in the log into the page, scored against the same clauses the
+ *  partitions were searched with.
  *
- *  Each entry costs one embedding call, capped by `MAX_PENDING_READ`, because a search
- *  has to see an Add that was just accepted. A record whose vector cannot be produced
- *  is left out rather than ranked at zero: it would otherwise displace real evidence.
+ *  Each entry costs one embedding call, capped by `MAX_PENDING_READ`, because a search has
+ *  to see an Add that was just accepted. It is also attributed to the clause it matches
+ *  best: the per-clause counts must keep covering every returned memory, which is the
+ *  multi-clause contract, and a pending record that skipped attribution made the sum fall
+ *  short of the page size.
+ *
+ *  Without a vector channel the same fusion runs on term overlap instead, because a
+ *  deployment that has no embeddings still has to return what it accepted - and a flat
+ *  zero score would return every pending entry for every query, including one that
+ *  matches nothing.
  */
-async function fusePendingRecords({ env, ctx, features, candidates, client, modes, topK }) {
-  if (pendingCount(ctx.manifest) === 0 || !client) return candidates;
+async function fusePendingRecords({
+  env,
+  ctx,
+  features,
+  candidates,
+  client,
+  modes,
+  topK,
+  contributions,
+  appendOnly,
+  appendedById,
+}) {
+  if (pendingCount(ctx.manifest) === 0) return candidates;
   const waiting = await pendingForSearch(env, ctx, Math.min(topK, MAX_PENDING_READ));
   if (waiting.length === 0) return candidates;
-  const featureVectors = [];
-  for (const list of features)
+  const attribute = (clauseIndex) => {
+    const total = contributions?.[clauseIndex];
+    if (total && clauseIndex >= 0) total.contributed += 1;
+  };
+  const merge = (scored) => {
+    const page = [];
+    for (const item of scored) {
+      attribute(item.clause);
+      // An append-only clause never competes for the page: its matches are the supplement,
+      // exactly as they are for a folded record.
+      if (appendOnly?.[item.clause]) {
+        const prior = appendedById?.get(item.record.id);
+        if (prior && prior.score > item.record.score) continue;
+        appendedById?.set(item.record.id, item.record);
+        continue;
+      }
+      page.push(item.record);
+    }
+    return [...candidates, ...page]
+      .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+      .slice(0, topK);
+  };
+
+  if (!client) {
+    const termsPerClause = features.map((list) => queryTerms(list));
+    const scored = [];
+    for (const record of waiting) {
+      const perClause = termsPerClause.map((terms) => pendingTermScore(record.content, terms));
+      const best = Math.max(...perClause);
+      if (best > 0)
+        scored.push({ record: { ...record, score: best }, clause: perClause.indexOf(best) });
+    }
+    return merge(scored);
+  }
+
+  const vectorsPerClause = [];
+  for (const list of features) {
+    const vectors = [];
     for (const text of list) {
       const [vector] = await client.embedQueries([text]).catch(() => []);
-      if (vector) featureVectors.push(vector);
+      if (vector) vectors.push(vector);
     }
+    vectorsPerClause.push(vectors);
+  }
+  const scored = [];
   for (const record of waiting) {
     const [vector] = await client.embedQueries([record.content]).catch(() => []);
     if (!vector) continue;
-    record.score = featureVectors.reduce(
-      (best, feature) => Math.max(best, cosineSimilarity(vector, feature)),
-      -Infinity,
+    const perClause = vectorsPerClause.map((vectors) =>
+      vectors.reduce(
+        (best, feature) => Math.max(best, cosineSimilarity(vector, feature)),
+        -Infinity,
+      ),
     );
+    const best = Math.max(...perClause);
+    if (!Number.isFinite(best)) continue;
     modes.add("records");
+    scored.push({ record: { ...record, score: best }, clause: perClause.indexOf(best) });
   }
-  return [...candidates, ...waiting.filter((record) => Number.isFinite(record.score))]
-    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
-    .slice(0, topK);
+  return merge(scored);
 }
+
 /** Records that are still in the log, shaped like page items so the existing
  *  fusion by identity and highest score applies unchanged.
  *
@@ -789,7 +872,11 @@ async function pendingForSearch(env, ctx, limit) {
       id: `pending:${entry.request_hash}:${index}`,
       content: message.indexText ?? (typeof message.content === "string" ? message.content : ""),
       score: 0,
-      event_time: null,
+      // Message times, not the accept time: a pending entry must look like the record it
+      // will become, or the page changes shape the moment a fold runs. `created_at` and
+      // `event_time` both come from the message, which is what the partition would store.
+      event_time: message.chat_time ?? null,
+      created_at: message.chat_time ?? new Date(entry.received_at).toISOString(),
       stored_at: new Date(entry.received_at).toISOString(),
       pending: true,
     })),
@@ -855,8 +942,9 @@ async function add(env, input) {
 const APPENDED_MAX_RECORDS = 5;
 
 /** Where an Add is accepted: `log` writes one immutable entry and folds it later,
- *  `sync` is the original read-modify-write. Measured before it becomes default. */
-const addMode = (env) => (env.NMG_ADD_MODE === "log" ? "log" : "sync");
+ *  `sync` is the original read-modify-write. `log` is the default; `NMG_ADD_MODE=sync`
+ *  is the escape hatch, so a deployment can go back without a code change. */
+const addMode = (env) => (env.NMG_ADD_MODE === "sync" ? "sync" : "log");
 /** Entries folded into a partition by one request. A fold is one partition write
  *  regardless of how many entries it absorbs, so a 16-way burst needs two folds. */
 const FOLD_BATCH = 8;
@@ -1073,6 +1161,9 @@ async function search(env, input, options = {}) {
       client,
       modes,
       topK,
+      contributions,
+      appendOnly,
+      appendedById,
     });
     candidates = fused;
     persistence.inline_bytes = manifest.parts.reduce((sum, p) => sum + deltaBytes(p), 0);
@@ -1125,6 +1216,21 @@ async function status(env, taskId) {
   const { manifest } = await loadManifest(env.MEMORY, key, "");
   const receipt = manifest.receipts[requestHash];
   if (receipt) return { ...receipt.response, completed_at: receipt.completed_at };
+  // An Add accepted into the log has no partition receipt yet, but it is durable and the
+  // caller is entitled to ask about it. The entry is scoped to the current generation, the
+  // same rule the accept-side replay lookup follows.
+  const pending = await findLogEntry(env.MEMORY, key, requestHash, {
+    generation: manifest.generation ?? null,
+  }).then(
+    (found) => found?.entry ?? null,
+    () => null,
+  );
+  if (pending)
+    return {
+      ...pending.response,
+      completed_at: new Date(pending.received_at).toISOString(),
+      pending: true,
+    };
   const legacy = manifest.parts.find((p) => p.key === objectKey(key));
   if (legacy) {
     // Status uses the original file name and never needs the original user_id.

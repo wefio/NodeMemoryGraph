@@ -195,6 +195,14 @@ try {
   assert.equal(largeResult.body.added, 70);
   for (let i = 0; i < 32; i++)
     assert.deepEqual(await call(i % 2 ? "a" : "b", "/add", large), largeResult);
+  // Fold the accepted entries into a partition before inspecting the snapshot: with the
+  // log accept path an Add is durable but still pending, so `parts` stays empty until a
+  // fold runs. This check is about the snapshot's contents, not about when it appears.
+  const foldBatch = await call("a", "/admin/fold?user_id=batch70", {}, undefined, {
+    "oai-authenticated-user-email": "owner@example.test",
+    origin: "http://localhost",
+  });
+  assert.equal(foldBatch.status, 200, JSON.stringify(foldBatch.body));
   const batchBucket = await mf.getR2Bucket("MEMORY", "a");
   const batchManifest = JSON.parse(
     await (

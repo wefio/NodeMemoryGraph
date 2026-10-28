@@ -1,0 +1,8 @@
+version: 2
+terms: []
+references:
+  - append log
+  - fold
+  - accept path
+  - concurrency burst
+  - connection timeout
