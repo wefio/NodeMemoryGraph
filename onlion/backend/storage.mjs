@@ -26,12 +26,12 @@ export function pendingCount(manifest){
   return Number.isSafeInteger(count)&&count>0?count:0;
 }
 /** Shallow copy of `manifest` carrying `count` pending entries; `receipts` is
- *  shared, as everywhere else in this module. A zero count removes the key
- *  entirely: `pending: 0` on its own would already change the stored bytes. */
+ *  shared, as everywhere else in this module. Delegates the rule to `setPending`
+ *  so "zero deletes the key" has one implementation: two copies of that rule is
+ *  how the drain once committed `pending: 0` and stayed v4. */
 export function withPending(manifest,count){
-  if(!Number.isSafeInteger(count)||count<0)throw new TypeError('pending count must be a non-negative integer');
   const next={...manifest};
-  if(count)next.pending=count;else delete next.pending;
+  setPending(next,count);
   return next;
 }
 /** Sets the pending count on the manifest **in place**.
@@ -212,6 +212,11 @@ function resetManifestState(manifest,resetId,key){
   const empty={format:'nmg-shards-v2',generation:crypto.randomUUID(),parts:[],receipts:{},
     reset:{id:resetId,at:new Date().toISOString(),pending_keys:keys},
     reset_receipts:{...manifest.reset_receipts,[receiptKey]:new Date().toISOString()}};
+  // Carry the count instead of clearing it. If the log cleanup below fails, entries
+  // from the old generation are still on disk; a zero here would let a fold retire
+  // and subtract them until the clamp hits 0, and the short-circuit would then hide
+  // everything accepted after the reset.
+  setPending(empty,pendingCount(manifest));
   return {receiptKey,empty};
 }
 async function clearResetPendingKeys(bucket,key,userId,current){
@@ -246,6 +251,18 @@ export async function resetUser(bucket,userId,resetId){
   // skip the other, and repeating the same reset_id retries both.
   const partsCleared=await clearResetPendingKeys(bucket,key,userId,current);
   const logCleared=await clearLog(bucket,key).then(()=>true,()=>false);
+  if(logCleared){
+    // Only now is the count provably zero. Metadata-only, and gated on the count not
+    // having moved: an equal count means nothing was accepted between the read and
+    // the clear, so this cannot eat a concurrent accept's reservation.
+    try{
+      const {object,manifest}=await loadManifest(bucket,key,userId);
+      if(pendingCount(manifest)===pendingCount(current)){
+        setPending(manifest,0);
+        await commitManifest(bucket,key,object,manifest);
+      }
+    }catch{/* A repeat of the same reset_id retries the whole cleanup. */}
+  }
   const cleanupComplete=partsCleared&&logCleared;
   return {success:true,user_id:userId,reset_id:resetId,reset_at:current.reset_receipts?.[createHash('sha256').update(resetId).digest('hex')]??current.reset.at,
     cleanup_complete:cleanupComplete,

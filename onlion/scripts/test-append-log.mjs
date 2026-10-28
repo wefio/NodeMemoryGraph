@@ -4,6 +4,7 @@
 // contract: forbid-overwrite is a falsy PUT, delete of a missing key is a no-op,
 // and list pages by cursor.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,7 +28,7 @@ const USER = 'userkey0123456789abcdef';
 
 function memoryBucket({ pageSize = 1000 } = {}) {
   const records = new Map();
-  const stats = { puts: 0, deletes: 0, lists: 0 };
+  const stats = { puts: 0, deletes: 0, lists: 0, gets: 0 };
   let sequence = 0;
   const bodyOf = (record) => record.body;
   const view = (key, record) => ({
@@ -45,6 +46,7 @@ function memoryBucket({ pageSize = 1000 } = {}) {
     records,
     stats,
     async get(key) {
+      stats.gets += 1;
       const record = records.get(key);
       return record ? view(key, record) : null;
     },
@@ -202,6 +204,50 @@ assert.throws(() => logEntryName(1700000000000, `${'A'.repeat(64)}`), RangeError
   assert.equal((await listPending(slow, USER, { limit: Infinity })).length, 5);
   assert.equal(slow.stats.lists, 5, 'the fold path follows the cursor to the last page');
 
+  // A generation filter must not be starved by older entries: the current ones sit
+  // behind the foreign ones, and a key-truncated read would never reach them.
+  const mixed = memoryBucket();
+  const serial = (index) => String(index).padStart(64, '0');
+  for (const index of [0, 1, 2])
+    await putLogEntry(mixed, USER, {
+      ...entry(1700000000000 + index, serial(index), `old${index}`),
+      generation: 'g1',
+    });
+  for (const index of [3, 4])
+    await putLogEntry(mixed, USER, {
+      ...entry(1700000000000 + index, serial(index), `new${index}`),
+      generation: 'g2',
+    });
+  assert.deepEqual(
+    (await listPending(mixed, USER, { limit: 2, generation: 'g2' })).map(
+      (item) => item.entry.messages[0].content,
+    ),
+    ['new3', 'new4'],
+  );
+  assert.equal((await listPending(mixed, USER, { limit: 2, generation: 'g1' })).length, 2);
+  assert.deepEqual(await listPending(mixed, USER, { limit: 2, generation: 'gone' }), []);
+
+  // The scan behind a filter is bounded: a log stuffed with foreign entries returns
+  // fewer matches instead of reading the whole prefix (I6), so a search cannot be
+  // made to pay for a log it will never use.
+  const buried = memoryBucket();
+  for (let index = 0; index < 40; index += 1)
+    await putLogEntry(buried, USER, {
+      ...entry(1700000000000 + index, serial(index), `old${index}`),
+      generation: 'g1',
+    });
+  await putLogEntry(buried, USER, {
+    ...entry(1700000000500, HASH_A, 'current'),
+    generation: 'g2',
+  });
+  buried.stats.gets = 0;
+  const buriedRead = await listPending(buried, USER, { limit: 2, generation: 'g2' });
+  assert.deepEqual(buriedRead, [], 'a bounded scan may return fewer matches than the limit');
+  assert.ok(
+    buried.stats.gets <= 8,
+    `a filtered read must not read the whole prefix (read ${buried.stats.gets} entries)`,
+  );
+
   // A fold or reset can delete an entry between the list and the read.
   const racing = {
     ...bucket,
@@ -321,5 +367,49 @@ console.log(
   );
   console.log(
     'PASS: the landed check answers yes / no / unknown, and unknown is never collapsed to no.',
+  );
+}
+
+// A generation filter must be applied while reading, not after truncating keys: with
+// stale entries first, a post-truncation filter returns nothing and the read path
+// silently stops seeing the entries accepted after a reset.
+{
+  const bucket = memoryBucket();
+  const stale = [];
+  for (let i = 0; i < 3; i += 1) {
+    const entry = {
+      v: 1,
+      generation: 'old',
+      user_id: 'u',
+      session_id: 's',
+      request_id: `stale-${i}`,
+      request_hash: createHash('sha256').update(`stale-${i}`).digest('hex'),
+      fingerprint: 'f',
+      received_at: 1700000000000 + i,
+      messages: [],
+    };
+    await putLogEntry(bucket, 'user-key', entry);
+    stale.push(entry);
+  }
+  for (let i = 0; i < 2; i += 1) {
+    await putLogEntry(bucket, 'user-key', {
+      v: 1,
+      generation: 'new',
+      user_id: 'u',
+      session_id: 's',
+      request_id: `fresh-${i}`,
+      request_hash: createHash('sha256').update(`fresh-${i}`).digest('hex'),
+      fingerprint: 'f',
+      received_at: 1700000001000 + i,
+      messages: [],
+    });
+  }
+  const fresh = await listPending(bucket, 'user-key', { limit: 2, generation: 'new' });
+  assert.equal(fresh.length, 2, 'the window must be filled with current-generation entries');
+  assert.ok(fresh.every(({ entry }) => entry.generation === 'new'));
+  const staleOnly = await listPending(bucket, 'user-key', { limit: 8, generation: 'old' });
+  assert.equal(staleOnly.length, 3);
+  console.log(
+    'PASS: a generation filter fills the window from current entries even when every older key sorts first.',
   );
 }

@@ -711,10 +711,9 @@ async function pendingForSearch(env, ctx, limit) {
   if (pendingCount(ctx.manifest) === 0) return [];
   const waiting = await listPending(env.MEMORY, ctx.key, {
     limit: Math.min(limit, MAX_PENDING_READ),
+    generation: ctx.manifest.generation ?? null,
   });
-  return waiting
-    .filter(({ entry }) => (entry.generation ?? null) === (ctx.manifest.generation ?? null))
-    .flatMap(({ entry }) =>
+  return waiting.flatMap(({ entry }) =>
     entry.messages.map((message, index) => ({
       id: `pending:${entry.request_hash}:${index}`,
       content: message.indexText ?? (typeof message.content === "string" ? message.content : ""),

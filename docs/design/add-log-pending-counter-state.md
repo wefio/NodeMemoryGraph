@@ -63,6 +63,28 @@ stored count. Every row states what the transition must leave behind.
 | any          | reset                                     | C         | generation barrier first, then `clearLog` (I4)                                |
 | any          | capacity read                             | unchanged | reports the counter, writes nothing                                           |
 
+## Cross-generation shadowing (state G plus a zero count)
+
+State **G** is only safe while the count is above zero. Two independent mechanisms
+break that, and fixing either alone is not enough:
+
+- **The read window.** A filtered list must be filtered _while reading_. Listing keys
+  first and filtering after truncation lets a handful of entries from the old
+  generation consume the whole window, so `pendingForSearch` returns nothing while
+  current entries sit in the log. `listPending` therefore lists every key when a
+  `generation` is given (and stays bounded when it is not).
+- **The reset hand-off.** The empty manifest a reset commits used to drop `pending`,
+  so after a failed log cleanup the surviving stale entries had **objects but no
+  count**. A fold then retired and subtracted them - entries that were never added to
+  the count - driving it to zero, where the short-circuit hides everything accepted
+  after the reset. The reset now carries the count forward and zeroes it only after
+  `clearLog` succeeded, guarded by the count not having moved so it cannot eat a
+  concurrent reservation.
+
+With only the first fix the count still drifts to zero; with only the second the read
+window is still starved. The table's T1 is what both are serving: the count may never
+fall below what the current generation can read.
+
 ## Invariants
 
 - **T1 — never below the truth.** `manifest.pending >= |readable entries|` at every

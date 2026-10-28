@@ -6,9 +6,10 @@
  * The invariant worth protecting is negative: a user whose log is empty must
  * store exactly the bytes today's writer stores, so a deployment with the log
  * disabled (or drained) is indistinguishable on disk from the current one.
- * A second invariant is that the log prefix has one owner — this test seeds and
- * inspects entries through append-log.mjs's logPrefix, so clearLog() cannot
- * drift to a prefix the accept path does not write.
+ * A second invariant is that the log prefix has exactly one definition. storage.mjs
+ * takes it from append-log.mjs's logPrefix() (see the design's clearLog note), so
+ * this test spells the frozen name out literally and requires both the entries it
+ * seeds and the prefix that function returns to agree with it.
  *
  * No build, no Miniflare, no COS credentials: a bucket with the same five
  * operations (get/head/put/delete/list) plus the conditional-write contract is
@@ -26,6 +27,7 @@ import {
   manifestFormat,
   pendingCount,
   resetUser,
+  setPending,
   withPending,
 } from "../backend/storage.mjs";
 
@@ -91,7 +93,14 @@ function createMemoryBucket() {
 const bodyOf = (bucket, key) => bucket.objects.get(key)?.body;
 const keysUnder = (bucket, prefix) => [...bucket.objects.keys()].filter((key) => key.startsWith(prefix));
 const entryName = (sequence, hashChar) => `${String(sequence).padStart(13, "0")}-${hashChar.repeat(64)}.json`;
+// The frozen name from the design, spelled out rather than derived: clearLog()
+// must delete what the accept path wrote even if append-log.mjs renames its
+// prefix, so the test seeds with the literal and checks the function against it.
+const frozenPrefix = (userKey) => `users/${userKey}/log/`;
 const flat = () => ({ format: "nmg-shards-v2", parts: [], receipts: {} });
+
+assert.equal(logPrefix(keyFor("prefix-contract")), frozenPrefix(keyFor("prefix-contract")));
+assert.equal(logPrefix("abc123"), "users/abc123/log/");
 
 // 1. Format selection: pending decides v4, otherwise the existing v2/v3 rule.
 {
@@ -130,6 +139,46 @@ const flat = () => ({ format: "nmg-shards-v2", parts: [], receipts: {} });
   for (const bad of [-1, 1.5, Number.NaN, "2", undefined])
     assert.throws(() => withPending(base, bad), TypeError, `withPending(${String(bad)})`);
   console.log("PASS: withPending copies, drops the key at zero, and rejects non-counts.");
+}
+
+// 2b. setPending is the in-place form the worker actually calls, and the reason it
+// exists: Object.assign(manifest, withPending(manifest, 0)) keeps the old key, so a
+// drain would never delete it and the manifest would stay v4 forever.
+{
+  const v4 = () => ({ format: STORAGE_FORMAT_V4, parts: [], receipts: {}, pending: 7 });
+  const manifest = v4();
+  assert.equal(setPending(manifest, 3), 3);
+  assert.equal(manifest.pending, 3, "setPending must work in place");
+  assert.equal(setPending(manifest, 0), 0);
+  assert.ok(!("pending" in manifest), "zero must delete the key, not store 0");
+  // Byte equality with the same manifest that never carried a pending key; the
+  // format string is commitManifest's job, not setPending's.
+  assert.equal(
+    JSON.stringify(manifest),
+    JSON.stringify({ format: STORAGE_FORMAT_V4, parts: [], receipts: {} }),
+  );
+
+  // The bug that shipped once: assigning a key-less copy cannot delete a key, so a
+  // drain left `pending: 7` behind and the manifest stayed v4 forever.
+  const trapped = v4();
+  Object.assign(trapped, withPending(trapped, 0));
+  assert.equal(trapped.pending, 7, "documents why callers must use setPending, not Object.assign");
+  setPending(trapped, 0);
+  assert.ok(!("pending" in trapped));
+
+  // Both forms must agree on the stored bytes: if only one of them is ever changed,
+  // the drift comes back through the other one.
+  const copied = withPending(v4(), 0);
+  const inPlace = v4();
+  setPending(inPlace, 0);
+  assert.equal(JSON.stringify(copied), JSON.stringify(inPlace));
+  const two = v4();
+  assert.equal(setPending(two, 2), 2, "setPending returns the stored count, not the manifest");
+  assert.equal(JSON.stringify(two), JSON.stringify(withPending(v4(), 2)));
+
+  for (const bad of [-1, 1.5, Number.NaN, "2", undefined])
+    assert.throws(() => setPending(v4(), bad), TypeError, `setPending(${String(bad)})`);
+  console.log("PASS: setPending writes in place, deletes the key at zero, and refuses non-counts.");
 }
 
 // 3. commitManifest: lazy bytes, v4 while pending, CAS still enforces one writer.
@@ -214,10 +263,10 @@ const flat = () => ({ format: "nmg-shards-v2", parts: [], receipts: {} });
   const bucket = createMemoryBucket();
   const owner = keyFor("log-owner");
   const other = keyFor("log-other");
-  const prefix = logPrefix(owner);
+  const prefix = frozenPrefix(owner);
   const names = [entryName(1, "a"), entryName(2, "b")];
   for (const name of names) await bucket.put(prefix + name, JSON.stringify({ v: 1 }));
-  await bucket.put(logPrefix(other) + names[0], JSON.stringify({ v: 1 }));
+  await bucket.put(frozenPrefix(other) + names[0], JSON.stringify({ v: 1 }));
   for (const neighbour of [
     `users/${owner}/manifest.json`,
     `users/${owner}/login.json`,
@@ -234,18 +283,26 @@ const flat = () => ({ format: "nmg-shards-v2", parts: [], receipts: {} });
     `users/${owner}/login.json`,
     `users/${owner}/logx/keep.json`,
     `users/${owner}/parts/keep.sqlite`,
-    logPrefix(other) + names[0],
+    frozenPrefix(other) + names[0],
   ])
     assert.ok(bucket.objects.has(neighbour), `${neighbour} must survive`);
   assert.equal(await clearLog(bucket, owner), 0, "a repeated clear removes nothing");
-  console.log("PASS: clearLog deletes only this user's log entries and repeats as a no-op.");
+
+  // A key that could step outside its own tree must be refused before anything is
+  // listed. String equality alone would not catch a later divergence in validation.
+  const listsBefore = bucket.stats.lists;
+  for (const key of ["a/b", "a\\b", "..", ".", ""])
+    await assert.rejects(clearLog(bucket, key), RangeError, `clearLog(${JSON.stringify(key)})`);
+  assert.equal(bucket.stats.lists, listsBefore, "a rejected key must not reach the bucket");
+  assert.throws(() => logPrefix("a/b"), RangeError);
+  console.log("PASS: clearLog deletes only this user's log entries, repeats as a no-op, and refuses escaping keys.");
 }
 
 // 6. clearLog pages through a log larger than one list response.
 {
   const bucket = createMemoryBucket();
   const owner = keyFor("log-bulk");
-  const prefix = logPrefix(owner);
+  const prefix = frozenPrefix(owner);
   const total = 1205;
   for (let sequence = 1; sequence <= total; sequence++)
     bucket.objects.set(prefix + entryName(sequence, "c"), { body: "{}", etag: "e" });
@@ -261,7 +318,7 @@ const flat = () => ({ format: "nmg-shards-v2", parts: [], receipts: {} });
   const bucket = createMemoryBucket();
   const userId = "reset-user";
   const userKey = keyFor(userId);
-  const prefix = logPrefix(userKey);
+  const prefix = frozenPrefix(userKey);
   await commitManifest(bucket, userKey, null, withPending(flat(), 2));
   const names = [entryName(1, "d"), entryName(2, "e")];
   for (const name of names) await bucket.put(prefix + name, JSON.stringify({ v: 1, generation: "g1" }));
@@ -289,7 +346,7 @@ const flat = () => ({ format: "nmg-shards-v2", parts: [], receipts: {} });
   const bucket = createMemoryBucket();
   const userId = "reset-log-failure";
   const userKey = keyFor(userId);
-  const prefix = logPrefix(userKey);
+  const prefix = frozenPrefix(userKey);
   for (const name of [entryName(3, "f"), entryName(4, "0")])
     await bucket.put(prefix + name, JSON.stringify({ v: 1, generation: "g1" }));
   const unavailable = { ...bucket, delete: async () => Promise.reject(new Error("COS unavailable")) };

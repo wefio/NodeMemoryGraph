@@ -21,6 +21,10 @@ const MAX_RECEIVED_MS = 10 ** SEQ_DIGITS - 1;
 const REQUEST_HASH = /^[0-9a-f]{64}$/;
 const LIST_PAGE = 1000; // COS list page size
 const READ_CONCURRENCY = 4;
+// A generation-filtered read may look past the first `limit` entries, but never
+// past a multiple of it: a log stuffed with entries from an older generation must
+// cost bounded reads instead of a scan of the whole prefix.
+const SCAN_FACTOR = 4;
 
 export function logPrefix(userKey) {
   if (!isPathSegment(userKey)) throw new RangeError(`Invalid user key: ${String(userKey)}`);
@@ -59,8 +63,6 @@ export async function readLogEntry(bucket, userKey, name) {
   return entry;
 }
 
-/** Finds the oldest entry carrying one request_hash. The oldest match wins so a
- *  retry that recomputed received_at still resolves to the accepted entry. */
 /** Did this entry reach the bucket?
  *
  *  Three states on purpose: `null` means the question could not be answered, and a
@@ -74,12 +76,17 @@ export async function readLogEntry(bucket, userKey, name) {
  *  whether a failed write actually failed. */
 export async function logEntryLanded(bucket, userKey, entry) {
   try {
-    const object = await bucket.head(logPrefix(userKey) + logEntryName(entry.received_at, entry.request_hash));
-    return object ? true : false;
+    const name = logEntryName(entry.received_at, entry.request_hash);
+    const object = await bucket.head(logPrefix(userKey) + name);
+    return !!object;
   } catch {
+    // A failed HEAD, or an entry that cannot be named, is "unknown", never "absent".
     return null;
   }
 }
+
+/** Finds the oldest entry carrying one request_hash. The oldest match wins so a
+ *  retry that recomputed received_at still resolves to the accepted entry. */
 export async function findLogEntry(bucket, userKey, requestHash) {
   const suffix = `-${requestHashSuffix(requestHash)}.json`;
   const objects = await listObjects(bucket, userKey);
@@ -91,26 +98,41 @@ export async function findLogEntry(bucket, userKey, requestHash) {
 }
 
 /** Pending entries in arrival order. `limit` defaults to MAX_PENDING_READ (the
- *  read path's cap, which is also what bounds its listing); pass Infinity for the
- *  fold path, which wants everything and follows the cursor to the last page. */
+ *  read path's cap); pass Infinity for the fold path, which wants everything.
+ *  `generation`, when given, drops entries taken under another generation so
+ *  `limit` counts entries the caller can actually use. A filter has to look past
+ *  the first `limit` keys - truncating first would let a handful of older entries
+ *  consume the whole window and hide the current ones - but only as far as
+ *  max(MAX_PENDING_READ, SCAN_FACTOR * limit): a log full of foreign entries
+ *  returns fewer matches rather than paging through the whole prefix. */
 export async function listPending(bucket, userKey, options = {}) {
   const limit = readLimit(options?.limit);
+  const generation = options?.generation;
   const prefix = logPrefix(userKey);
-  const objects = await listObjects(bucket, userKey, limit);
+  const scan =
+    limit === Infinity
+      ? Infinity
+      : generation === undefined
+        ? limit
+        : Math.max(MAX_PENDING_READ, limit * SCAN_FACTOR);
+  const objects = await listObjects(bucket, userKey, scan);
   const pending = [];
-  for (let index = 0; index < objects.length; index += READ_CONCURRENCY) {
+  for (let index = 0; index < objects.length && pending.length < limit; index += READ_CONCURRENCY) {
     const chunk = objects.slice(index, index + READ_CONCURRENCY);
     const read = await Promise.all(
       chunk.map(async (object) => {
         const name = object.key.slice(prefix.length);
         // A concurrent fold or reset may delete an entry between list and get.
         const entry = await readLogEntry(bucket, userKey, name);
-        return entry ? { name, entry } : null;
+        if (!entry) return null;
+        if (generation !== undefined && (entry.generation ?? null) !== (generation ?? null))
+          return null;
+        return { name, entry };
       }),
     );
     pending.push(...read.filter(Boolean));
   }
-  return pending;
+  return pending.slice(0, limit);
 }
 
 /** Batch delete. Deletion is always after the partition commit, so repeating it
