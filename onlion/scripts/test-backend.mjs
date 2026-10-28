@@ -6,7 +6,13 @@ import { createWorkerFixture } from "./worker-fixture.mjs";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { applyPageDelta, makePageDelta } from "../backend/page-delta.mjs";
-import { MAX_QUERY_CHUNKS, QUERY_CHUNK_CHARS, poolQueryVectors, splitQueryChunks } from "../backend/query-chunks.mjs";
+import {
+  MAX_QUERY_FEATURES,
+  MAX_QUERY_WINDOWS,
+  QUERY_CHUNK_CHARS,
+  planQueryWindows,
+  selectQueryFeatures,
+} from "../backend/query-chunks.mjs";
 const root = process.cwd();
 const storage = path.join(root, ".runtime/tests/backend-r2");
 const python = process.env.NMG_TEST_PYTHON ?? "python";
@@ -189,6 +195,14 @@ try {
   assert.equal(largeResult.body.added, 70);
   for (let i = 0; i < 32; i++)
     assert.deepEqual(await call(i % 2 ? "a" : "b", "/add", large), largeResult);
+  // Fold the accepted entries into a partition before inspecting the snapshot: with the
+  // log accept path an Add is durable but still pending, so `parts` stays empty until a
+  // fold runs. This check is about the snapshot's contents, not about when it appears.
+  const foldBatch = await call("a", "/admin/fold?user_id=batch70", {}, undefined, {
+    "oai-authenticated-user-email": "owner@example.test",
+    origin: "http://localhost",
+  });
+  assert.equal(foldBatch.status, 200, JSON.stringify(foldBatch.body));
   const batchBucket = await mf.getR2Bucket("MEMORY", "a");
   const batchManifest = JSON.parse(
     await (
@@ -878,8 +892,11 @@ print(json.dumps(r))`,
       max_combined_message_chars: 1_500_000,
       max_ordered_content_bytes: 4 * 1024 * 1024,
       query_chunk_chars: QUERY_CHUNK_CHARS,
-      max_query_chunks: MAX_QUERY_CHUNKS,
+      max_query_chunks: MAX_QUERY_WINDOWS,
       max_query_features: 24,
+      add_mode: "sync",
+      pending_read_limit: 8,
+      merge_batch: 8,
     });
     const longQuery = await call("a", "/search", {
       user_id: "payload-limits",
@@ -900,50 +917,84 @@ print(json.dumps(r))`,
       413,
       "a message longer than the old 128000-character cap must not be rejected as too large",
     );
-    // A long query must still produce one usable vector: the text is split into
-    // bounded windows and the chunk vectors are pooled, because an embedding model
-    // only sees its own token window.
-    assert.deepEqual(splitQueryChunks("short question"), ["short question"]);
-    const longText = ("memory question about the trip. ".repeat(400)).trim();
-    const windows = splitQueryChunks(longText);
+    // A long query is searched by bounded windows plus the clause itself: an
+    // embedding model only sees its own token window.
+    assert.deepEqual(planQueryWindows("short question"), ["short question"]);
+    const longText = "memory question about the trip. ".repeat(400).trim();
+    const windows = planQueryWindows(longText);
     assert.ok(windows.length > 1, "a long query must split");
     assert.ok(
-      windows.length <= MAX_QUERY_CHUNKS,
-      `chunk count must stay bounded, got ${windows.length}`,
+      windows.length <= MAX_QUERY_WINDOWS,
+      `window count must stay bounded, got ${windows.length}`,
     );
     for (const window of windows)
       assert.ok(window.length <= QUERY_CHUNK_CHARS, `chunk exceeds the window: ${window.length}`);
     assert.ok(windows.join("").length > 0);
-    const unit = [1, 0, 0];
-    const pooled = poolQueryVectors([unit, unit]);
-    assert.deepEqual(
-      pooled.map((value) => Math.round(value * 1e6) / 1e6),
-      unit,
-      "pooling identical unit vectors returns the same unit vector",
-    );
-    const mixed = poolQueryVectors([
-      [1, 0],
-      [0, 1],
-    ]);
-    const length = Math.hypot(...mixed);
-    assert.ok(Math.abs(length - 1) < 1e-9, `pooled vector must stay unit length, got ${length}`);
-    assert.ok(mixed[0] > 0 && mixed[1] > 0, "pooling averages the chunk directions");
     // The windows must always cover the tail: without it, anything past
     // limit*size characters was never searched at all.
     const NL = String.fromCharCode(10);
     const huge =
       "filler sentence about weather. ".repeat(800).trim() + NL + "WHERE IS THE SPARE KEY";
-    const hugeWindows = splitQueryChunks(huge);
+    const hugeWindows = planQueryWindows(huge);
     assert.ok(
       hugeWindows.at(-1).includes("SPARE KEY"),
       "the end-anchored window must contain the tail of a long query",
     );
-    assert.ok(huge.length > QUERY_CHUNK_CHARS * MAX_QUERY_CHUNKS, "precondition: longer than the window budget");
+    assert.ok(
+      huge.length > QUERY_CHUNK_CHARS * MAX_QUERY_WINDOWS,
+      "precondition: longer than the window budget",
+    );
+    // The feature list is the clause itself (the model's own token window sees the
+    // opening with more context than a character window) followed by bounded
+    // windows, opening first and the end-anchored tail second.
+    const features = selectQueryFeatures([huge]);
+    assert.equal(features[0][0], huge, "the first feature is the clause itself");
+    for (const feature of features[0].slice(1))
+      assert.ok(
+        feature.length <= QUERY_CHUNK_CHARS,
+        `feature exceeds the model window: ${feature.length}`,
+      );
+    assert.ok(
+      features[0].length <= MAX_QUERY_FEATURES,
+      `the feature budget must hold, got ${features[0].length}`,
+    );
+    assert.ok(
+      features[0].length <= MAX_QUERY_FEATURES,
+      `one clause cannot exceed the request budget, got ${features[0].length}`,
+    );
+    assert.ok(
+      features[0][0].startsWith("filler"),
+      "the clause is its own feature, so its opening is always searched",
+    );
+    assert.ok(
+      !features[0][1].startsWith(features[0][0].slice(0, 40)),
+      "the opening window is dropped: the clause itself already covers it",
+    );
+    assert.ok(
+      features[0][1].includes("SPARE KEY"),
+      "the end-anchored tail comes first, so budget pressure costs the middle",
+    );
+    // A clause that does not split contributes exactly one feature, which is the
+    // previous behaviour, and short clauses are never windowed.
+    assert.deepEqual(selectQueryFeatures(["short question"]), [["short question"]]);
+    // The budget is shared round-robin: one very long clause cannot starve another.
+    const twoClauses = selectQueryFeatures([huge, huge, "short question"], 3);
+    assert.equal(twoClauses.length, 3);
+    assert.ok(
+      twoClauses.every((list) => list.length >= 1),
+      "every clause keeps its head when the budget is tight",
+    );
+    assert.ok(
+      twoClauses[0].length >= twoClauses[2].length,
+      "extra budget goes to the clause that can still spend it",
+    );
     console.log(
-      "PASS: a long query splits into bounded windows and always covers its tail, and the pool helper keeps a unit vector for callers that need one.",
+      "PASS: a long query plans bounded windows that always cover its tail, and mean pooling is no longer part of the service.",
+    );
+    console.log(
+      "PASS: the clause is its own feature, the opening window is dropped as redundant, the end-anchored tail is spent first, and a short clause contributes exactly one feature.",
     );
   }
-
 } finally {
   await mf.dispose();
 }

@@ -3,6 +3,7 @@ import {applyPageDelta, makePageDelta, deltaBytes} from './page-delta.mjs';
 import {createHash} from 'node:crypto';
 import {DatabaseSync, withDatabases} from './sqlite.mjs';
 import {EmbeddingPreparation} from './embedding-session.mjs';
+import {logPrefix} from './append-log.mjs';
 
 export const USER_LIMIT=1024*1024*1024;
 export const PART_LIMIT=8*1024*1024;
@@ -10,17 +11,57 @@ export const PART_TARGET=6*1024*1024;
 export const MAX_PARTS=128;
 export const MAX_RECEIPTS=16384;
 export const MAX_MANIFEST_BYTES=16*1024*1024;
+// v4 is v2/v3 plus a pending log. It is only written while `pending` is non-zero,
+// so a user whose log is empty keeps the exact bytes an older deployment wrote.
+export const STORAGE_FORMAT_V4='nmg-shards-v4';
+const STORAGE_FORMATS=['nmg-shards-v2','nmg-shards-v3',STORAGE_FORMAT_V4];
 export const keyFor=text=>createHash('sha256').update(text).digest('hex').slice(0,24);
 export class StorageError extends Error {
   constructor(code,message,status=413){super(message);this.code=code;this.status=status;}
 }
 const manifestKey=key=>`users/${key}/manifest.json`;
+/** Entries still in the log. Absent or zero means nothing is pending. */
+export function pendingCount(manifest){
+  const count=manifest?.pending??0;
+  return Number.isSafeInteger(count)&&count>0?count:0;
+}
+/** Shallow copy of `manifest` carrying `count` pending entries; `receipts` is
+ *  shared, as everywhere else in this module. Delegates the rule to `setPending`
+ *  so "zero deletes the key" has one implementation: two copies of that rule is
+ *  how the drain once committed `pending: 0` and stayed v4. */
+export function withPending(manifest,count){
+  const next={...manifest};
+  setPending(next,count);
+  return next;
+}
+/** Sets the pending count on the manifest **in place**.
+ *
+ *  Zero deletes the key instead of storing `pending: 0`: the lazy format bump and
+ *  the "a drained log stores the same bytes as a deployment that never had one"
+ *  invariant both depend on absence, not on a zero value. In place because the
+ *  caller is holding the clone it is about to commit - and because
+ *  `Object.assign(manifest, withPending(manifest, 0))` silently keeps the old key,
+ *  which is a bug this service already shipped once. Returns the stored count. */
+export function setPending(manifest,count){
+  if(!Number.isSafeInteger(count)||count<0)throw new TypeError('pending count must be a non-negative integer');
+  if(count)manifest.pending=count;else delete manifest.pending;
+  return count;
+}
+/** Format to store. Pending entries make the manifest unreadable to a
+ *  deployment that predates the log, which is the correct failure mode. */
+export function manifestFormat(manifest){
+  if(pendingCount(manifest)>0)return STORAGE_FORMAT_V4;
+  return manifest.parts.some(p=>p.delta)?'nmg-shards-v3':'nmg-shards-v2';
+}
 export async function loadManifest(bucket,key,userId){
   const object=await bucket.get(manifestKey(key));
   if(object){
     if(object.size>MAX_MANIFEST_BYTES)throw new StorageError('user_storage_limit','User manifest exceeds 16 MiB');
     const manifest=await object.json();
-    if(!['nmg-shards-v2','nmg-shards-v3'].includes(manifest.format)||!Array.isArray(manifest.parts))throw new StorageError('storage_corrupt','Unsupported user storage format',503);
+    if(!STORAGE_FORMATS.includes(manifest.format)||!Array.isArray(manifest.parts))throw new StorageError('storage_corrupt','Unsupported user storage format',503);
+    // A forged or truncated count would silently skip folding, so treat it as
+    // corruption instead of reading it as zero.
+    if(manifest.pending!==undefined&&(!Number.isSafeInteger(manifest.pending)||manifest.pending<0))throw new StorageError('storage_corrupt','Invalid pending count in user manifest',503);
     return {object,manifest};
   }
   const legacy=await bucket.head(`users/${key}.sqlite`);
@@ -67,9 +108,20 @@ async function openPart(bucket,part,sqlite,operation,options){
     return {...result,snapshot,legacyReceipts,previousImage:image};
   });
 }
-export async function stagePart(bucket,userKey,part,snapshot){
+/** Uploads one partition snapshot.
+ *
+ *  `reuse` lets a single request skip an upload it already made for
+ *  byte-identical content. A manifest CAS conflict retries the whole operation, so
+ *  without it every retry paid for another multi-megabyte snapshot upload, which
+ *  was the dominant cost of concurrent Adds on one user. Content is compared, not
+ *  assumed deterministic. */
+export async function stagePart(bucket,userKey,part,snapshot,reuse){
+  const fingerprint=reuse?`${part.scope}\n${createHash('sha256').update(snapshot).digest('hex')}`:null;
+  const prior=fingerprint?reuse.get(fingerprint):null;
+  if(prior)return {...part,key:prior,bytes:snapshot.byteLength};
   const key=`users/${userKey}/parts/${crypto.randomUUID()}.sqlite`;
   await measure('partition_save',()=>bucket.put(key,snapshot,{httpMetadata:{contentType:'application/vnd.sqlite3'},customMetadata:{format:'nmg-part-v2'}}));
+  if(fingerprint)reuse.set(fingerprint,key);
   const base={...part};
   delete base.delta;
   return {...base,key,bytes:snapshot.byteLength};
@@ -83,13 +135,33 @@ export async function stageSearchPart(bucket,userKey,part,result,userBudget,full
 export async function commitManifest(bucket,key,previous,manifest){
   // Older deployments must reject overlay manifests rather than silently load
   // the stale base snapshot. Fully compacted manifests remain v2-compatible.
-  manifest.format=manifest.parts.some(p=>p.delta)?'nmg-shards-v3':'nmg-shards-v2';
+  // The same laziness keeps a drained log byte-identical to v2/v3.
+  if(!pendingCount(manifest))delete manifest.pending;
+  manifest.format=manifestFormat(manifest);
   if(manifest.parts.length>MAX_PARTS||manifest.parts.reduce((sum,p)=>sum+p.bytes,0)>USER_LIMIT)
     throw new StorageError('user_storage_limit','User exceeds 1 GiB or 128 storage partitions');
   if(Object.keys(manifest.receipts).length>MAX_RECEIPTS)throw new StorageError('request_receipt_limit','User exceeds 16384 distinct Add requests');
   const body=JSON.stringify(manifest);
   if(new TextEncoder().encode(body).length>MAX_MANIFEST_BYTES)throw new StorageError('user_storage_limit','User manifest exceeds 16 MiB');
   return bucket.put(manifestKey(key),body,{onlyIf:previous?{etagMatches:previous.etag}:{etagDoesNotMatch:'*'},httpMetadata:{contentType:'application/json'}});
+}
+/** Deletes every pending log entry for one user. Reset is the only caller and
+ *  runs it after the generation barrier is committed, so a fold racing the reset
+ *  cannot fold these entries anyway (I4). The prefix comes from append-log.mjs so
+ *  the two modules cannot drift apart. Returns the number of objects removed; a
+ *  second call removes nothing, which is what makes retrying a reset safe. */
+export async function clearLog(bucket,userKey){
+  const prefix=logPrefix(userKey);
+  let removed=0, cursor;
+  for(;;){
+    const page=await bucket.list({prefix,cursor,limit:1000});
+    const keys=(page?.objects??[]).map(object=>object.key).filter(key=>typeof key==='string'&&key.startsWith(prefix)&&key.length>prefix.length);
+    if(keys.length){await bucket.delete(keys);removed+=keys.length;}
+    // A cursor that does not advance would loop forever inside a reset.
+    if(!page?.truncated||!page.cursor||page.cursor===cursor)break;
+    cursor=page.cursor;
+  }
+  return removed;
 }
 export async function removeStaged(bucket,keys){
   if(keys.length)await bucket.delete(keys);
@@ -120,11 +192,14 @@ export async function userCapacity(bucket,userId){
   return {user_id:userId,checked_at:new Date().toISOString(),source:legacy?'legacy_object_head':'manifest',
     exists:!!object||legacy,sqlite_bytes:sqlite,partitions,add_requests:requests,manifest_bytes:metadata,
     inline_delta_bytes:manifest.parts.reduce((sum,p)=>sum+deltaBytes(p),0),
+    pending_entries:pendingCount(manifest),
     active_partition:{bytes:last?.bytes??0,target_bytes:PART_TARGET,max_add_bytes:PART_LIMIT,
       target_headroom_bytes:last?Math.max(0,PART_TARGET-last.bytes):PART_TARGET},
     warnings,notes:[
       'SQLite bytes describe current logical images, including restored overlays; not total billed bucket usage.',
       'No exact memory count is collected. Add requests count distinct durable receipts, not messages or memories.',
+      'pending_entries counts accepted Adds that are durable in the log but not yet folded into a partition.',
+
       'Remaining byte quota does not guarantee another Add fits; rollover, request size and metadata limits also apply.',
       ...(legacy?['Legacy receipt count is unknown until the existing image is imported by a normal operation.']:[])]};
 }
@@ -137,6 +212,11 @@ function resetManifestState(manifest,resetId,key){
   const empty={format:'nmg-shards-v2',generation:crypto.randomUUID(),parts:[],receipts:{},
     reset:{id:resetId,at:new Date().toISOString(),pending_keys:keys},
     reset_receipts:{...manifest.reset_receipts,[receiptKey]:new Date().toISOString()}};
+  // Carry the count instead of clearing it. If the log cleanup below fails, entries
+  // from the old generation are still on disk; a zero here would let a fold retire
+  // and subtract them until the clamp hits 0, and the short-circuit would then hide
+  // everything accepted after the reset.
+  setPending(empty,pendingCount(manifest));
   return {receiptKey,empty};
 }
 async function clearResetPendingKeys(bucket,key,userId,current){
@@ -167,7 +247,23 @@ export async function resetUser(bucket,userId,resetId){
     if(await commitManifest(bucket,key,object,empty)){current=empty;break;}
   }
   if(!current)throw new StorageError('reset_conflict','Concurrent changes detected; pause writes and retry the same reset_id',409);
-  const cleanupComplete=await clearResetPendingKeys(bucket,key,userId,current);
+  // Part cleanup and log cleanup are independent: a failure in one must not
+  // skip the other, and repeating the same reset_id retries both.
+  const partsCleared=await clearResetPendingKeys(bucket,key,userId,current);
+  const logCleared=await clearLog(bucket,key).then(()=>true,()=>false);
+  if(logCleared){
+    // Only now is the count provably zero. Metadata-only, and gated on the count not
+    // having moved: an equal count means nothing was accepted between the read and
+    // the clear, so this cannot eat a concurrent accept's reservation.
+    try{
+      const {object,manifest}=await loadManifest(bucket,key,userId);
+      if(pendingCount(manifest)===pendingCount(current)){
+        setPending(manifest,0);
+        await commitManifest(bucket,key,object,manifest);
+      }
+    }catch{/* A repeat of the same reset_id retries the whole cleanup. */}
+  }
+  const cleanupComplete=partsCleared&&logCleared;
   return {success:true,user_id:userId,reset_id:resetId,reset_at:current.reset_receipts?.[createHash('sha256').update(resetId).digest('hex')]??current.reset.at,
     cleanup_complete:cleanupComplete,
     message:cleanupComplete?'User memory and Add receipts reset; previous referenced snapshots removed.':'User memory and Add receipts reset; retry the same reset_id to finish snapshot cleanup.'};

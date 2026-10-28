@@ -54,11 +54,30 @@ import {
   retireParts,
   userCapacity,
   resetUser,
+  manifestFormat,
+  pendingCount,
+  setPending,
 } from "./storage.mjs";
 import { deltaBytes, USER_DELTA_LIMIT } from "./page-delta.mjs";
 import { deferredDocuments } from "./embedding-session.mjs";
 import { queryVector, rememberQueryVector } from "./query-cache.mjs";
-import { MAX_QUERY_CHUNKS, QUERY_CHUNK_CHARS, splitQueryChunks } from "./query-chunks.mjs";
+import {
+  LOG_ENTRY_VERSION,
+  MAX_PENDING_READ,
+  deleteLogEntries,
+  findLogEntry,
+  foldPlan,
+  listPending,
+  logEntryLanded,
+  putLogEntry,
+} from "./append-log.mjs";
+import { cosineSimilarity } from "../../src/core/vector.ts";
+import {
+  MAX_QUERY_FEATURES,
+  MAX_QUERY_WINDOWS,
+  QUERY_CHUNK_CHARS,
+  selectQueryFeatures,
+} from "./query-chunks.mjs";
 const MAX_DATABASE_BYTES = USER_LIMIT;
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
 /** Payload caps are sized against the platform request body, not against a single
@@ -79,14 +98,13 @@ const MAX_QUERY_CHARS = 1_000_000;
 const MAX_MESSAGE_CHARS = 1_000_000;
 const MAX_COMBINED_MESSAGE_CHARS = 1_500_000;
 const MAX_ORDERED_CONTENT_BYTES = 4 * 1024 * 1024;
-const MAX_QUERY_FEATURES = 24;
 const TEXT_LIMITS = {
   max_query_chars: MAX_QUERY_CHARS,
   max_message_chars: MAX_MESSAGE_CHARS,
   max_combined_message_chars: MAX_COMBINED_MESSAGE_CHARS,
   max_ordered_content_bytes: MAX_ORDERED_CONTENT_BYTES,
   query_chunk_chars: QUERY_CHUNK_CHARS,
-  max_query_chunks: MAX_QUERY_CHUNKS,
+  max_query_chunks: MAX_QUERY_WINDOWS,
   max_query_features: MAX_QUERY_FEATURES,
 };
 const SOURCE_REVISION =
@@ -210,7 +228,55 @@ async function readJson(request) {
     throw new HttpError(400, "invalid_json", "Body must be a JSON object");
   }
 }
+/** Retry delay for a manifest CAS conflict: exponential with full jitter. The
+ *  previous fixed 15-100 ms window made sixteen writers re-collide in lockstep, so
+ *  each of them spent its whole attempt budget on the same round trips. */
+const WRITE_BACKOFF_BASE_MS = 20;
+const WRITE_BACKOFF_CAP_MS = 600;
+const writeBackoffMs = (attempt) =>
+  Math.random() * Math.min(WRITE_BACKOFF_CAP_MS, WRITE_BACKOFF_BASE_MS * 2 ** (attempt - 1));
 // Atomic manifest commits preserve request idempotency across all partitions.
+/** One attempt's manifest read, with the guard that turns a reset during a retry into
+ *  a clear 409 instead of a write against a replaced dataset. */
+async function readAttempt(env, key, userId, attempt, generation) {
+  const { object, manifest: before } = await measure("manifest_read", () =>
+    loadManifest(env.MEMORY, key, userId),
+  );
+  const observed = before.generation ?? null;
+  if (attempt === 0) return { object, before, generation: observed };
+  if (observed !== generation)
+    throw new HttpError(
+      409,
+      "user_reset",
+      "User memory was reset during this operation; submit only the new dataset",
+    );
+  return { object, before, generation };
+}
+
+/** Runs the operation once and commits it, or reports that the CAS rejected the write.
+ *
+ *  The outcome carries an explicit `retry` flag rather than signalling a lost CAS with
+ *  `response: null`. `null` is a legal JSON payload, so an operation that legitimately
+ *  returned it would be retried until the attempt budget ran out and then answered 503 -
+ *  a failure mode no test would notice. Read-only outcomes are `committed: false` and
+ *  must not be retried either. */
+async function commitAttempt(env, { sqlite, key, object, before, operation, reuse, staged }) {
+  const manifest = structuredClone(before);
+  const result = await operation({ sqlite, key, manifest, staged, reuse });
+  if (result.readOnly) return { response: result.response, committed: false, retry: false };
+  const saved = await measure("manifest_commit", () =>
+    commitManifest(env.MEMORY, key, object, manifest),
+  );
+  if (!saved) return { retry: true };
+  const live = new Set(manifest.parts.map((p) => p.key));
+  await removeStaged(
+    env.MEMORY,
+    staged.filter((k) => !live.has(k)),
+  ).catch(() => {});
+  await measure("retired_cleanup", () => retireParts(env.MEMORY, before, manifest));
+  return { response: result.response, committed: true, retry: false };
+}
+
 async function mutateUser(env, userId, operation) {
   const sqlite = await measure("sqlite_init", () => sqliteReady()),
     key = keyFor(userId);
@@ -219,50 +285,50 @@ async function mutateUser(env, userId, operation) {
   // benchmark harness can hit one user with 16 writers at once, where every
   // round trip is cheap (~1 s) and giving up surfaces as a spurious 503.
   const attempts = Number(env.NMG_WRITE_ATTEMPTS) > 0 ? Number(env.NMG_WRITE_ATTEMPTS) : 12;
+  // Partition snapshots this request already uploaded, keyed by content. A retry
+  // recomputes the snapshot, and a competing Add that rewrote a different
+  // partition leaves this one byte-identical, so re-uploading it was pure cost.
+  const reuse = new Map();
+  let committed = false;
   let generation;
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    // Jitter keeps retrying writers from colliding again in lockstep.
-    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 15 + Math.random() * 85));
-    const { object, manifest: before } = await measure("manifest_read", () =>
-      loadManifest(env.MEMORY, key, userId),
-    );
-    const observed = before.generation ?? null;
-    if (attempt === 0) generation = observed;
-    else if (observed !== generation)
-      throw new HttpError(
-        409,
-        "user_reset",
-        "User memory was reset during this operation; submit only the new dataset",
-      );
-    const manifest = structuredClone(before),
-      staged = [];
-    try {
-      const result = await operation({ sqlite, key, manifest, staged });
-      if (result.readOnly) return result.response;
-      const saved = await measure("manifest_commit", () =>
-        commitManifest(env.MEMORY, key, object, manifest),
-      );
-      if (saved) {
-        const live = new Set(manifest.parts.map((p) => p.key));
-        await removeStaged(
-          env.MEMORY,
-          staged.filter((k) => !live.has(k)),
-        ).catch(() => {});
-        await measure("retired_cleanup", () => retireParts(env.MEMORY, before, manifest));
-        return result.response;
+  try {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, writeBackoffMs(attempt)));
+      const attemptState = await readAttempt(env, key, userId, attempt, generation);
+      generation = attemptState.generation;
+      // Staged objects survive a conflict retry so the next attempt can reuse an
+      // identical upload; they are removed once, after the last attempt.
+      const staged = [];
+      try {
+        const outcome = await commitAttempt(env, {
+          sqlite,
+          key,
+          object: attemptState.object,
+          before: attemptState.before,
+          operation,
+          reuse,
+          staged,
+        });
+        if (!outcome.retry) {
+          // Only the ending attempt may claim the commit: a lost CAS must not touch
+          // `committed`, or the `finally` cleanup below would run for a write that a
+          // rival did commit.
+          committed ||= outcome.committed;
+          return outcome.response;
+        }
+      } catch (error) {
+        if (error.code === "snapshot_changed") continue;
+        throw error;
       }
-    } catch (error) {
-      await removeStaged(env.MEMORY, staged).catch(() => {});
-      if (error.code === "snapshot_changed") continue;
-      throw error;
     }
-    await removeStaged(env.MEMORY, staged).catch(() => {});
+    throw new HttpError(
+      503,
+      "write_conflict",
+      "Concurrent changes detected; retry the same request_id",
+    );
+  } finally {
+    if (!committed) await removeStaged(env.MEMORY, [...reuse.values()]).catch(() => {});
   }
-  throw new HttpError(
-    503,
-    "write_conflict",
-    "Concurrent changes detected; retry the same request_id",
-  );
 }
 function embeddingClient(env) {
   const client = createEmbeddingClientFromEnv({
@@ -412,12 +478,20 @@ async function addOneBatch(env, ctx, requestId, batch, manifest, staged) {
       "One Add batch exceeds 8 MiB; submit fewer messages",
     );
   copyLegacyReceipts(manifest, result.legacyReceipts);
-  const part = await stagePart(env.MEMORY, ctx.key, manifest.parts[index], result.snapshot);
+  const part = await stagePart(
+    env.MEMORY,
+    ctx.key,
+    manifest.parts[index],
+    result.snapshot,
+    ctx.reuse,
+  );
   manifest.parts[index] = part;
   staged.push(part.key);
   return result.response.added;
 }
-async function add(env, input) {
+/** Validation shared by both accept paths: the log and the synchronous write must
+ *  reject exactly the same requests, or a mode switch changes what is legal. */
+function readAddRequest(input) {
   const userId = textField(input.user_id ?? input.userId, "user_id");
   requestIdentity(userId, input.request_id);
   const requestId = textField(input.request_id, "request_id");
@@ -436,10 +510,383 @@ async function add(env, input) {
       "request_too_large",
       `Combined message content limit is ${MAX_COMBINED_MESSAGE_CHARS} characters`,
     );
-  const fingerprint = hash(JSON.stringify({ sessionId, messages }));
+  return {
+    userId,
+    requestId,
+    sessionId,
+    messages,
+    requestHash: hash(requestId),
+    fingerprint: hash(JSON.stringify({ sessionId, messages })),
+  };
+}
+/** Body returned by both accept paths. `completed` describes persistence, not
+ *  compaction: after the log write the data is durable and readable through
+ *  `pendingForSearch`, which is what the contract asks a 200 to mean. */
+function addResponse(key, requestId, userId, sessionId, requestHash, added) {
+  return {
+    success: true,
+    request_id: requestId,
+    user_id: userId,
+    session_id: sessionId,
+    task_id: `${key}.${requestHash}`,
+    status: "completed",
+    added,
+  };
+}
+/** Accepts an Add as one immutable log entry.
+ *
+ *  The cost is a manifest read, one log write, and a manifest CAS that carries the
+ *  pending counter - no partition download, no SQLite export, no snapshot upload,
+ *  which is what made a 16-way burst on one user sixteen multi-megabyte rounds.
+ *  The retry loop re-writes the same entry (a replay, no write) and re-commits only
+ *  the manifest, so a conflict is cheap here. */
+async function acceptAdd(env, input) {
+  const { userId, requestId, sessionId, messages, requestHash, fingerprint } =
+    readAddRequest(input);
+  const contentView = createContentView();
+  let accepted = 0;
+  let prepared = null;
+  let reservation = null;
+  const response = await mutateUser(env, userId, async (ctx) => {
+    const reused = await existingReceipt(env, ctx, requestHash, fingerprint);
+    if (reused) return reused;
+    // Scoped to this generation: an entry written before a reset has the same name,
+    // and replaying its stored response would swallow the new Add - the request would
+    // answer 200 while its data was never recorded (class A, data lost).
+    const pending = await findLogEntry(env.MEMORY, ctx.key, requestHash, {
+      generation: ctx.manifest.generation ?? null,
+    });
+    if (pending) {
+      if (pending.entry.fingerprint !== fingerprint)
+        throw new HttpError(
+          409,
+          "request_id_reused",
+          "request_id was already used for different content",
+        );
+      return { readOnly: true, response: pending.entry.response };
+    }
+    // Structured content is prepared once per request, not once per retry: a
+    // caption may come from a vision model and a CAS conflict must not pay for it
+    // twice. It is prepared before the entry is written, so a fold never has to call
+    // a vision model while holding a partition.
+    if (!prepared) {
+      prepared = [];
+      for (const message of messages)
+        prepared.push(
+          typeof message.content === "string"
+            ? message
+            : { ...message, indexText: await contentView(message.content) },
+        );
+    }
+    const response = addResponse(
+      ctx.key,
+      requestId,
+      userId,
+      sessionId,
+      requestHash,
+      prepared.length,
+    );
+    // Reserve the counter *before* the entry is durable. The order is the safety
+    // argument: a failed commit leaves no entry behind, while a failed write leaves
+    // the counter one too high - and an over-count only costs a log listing. The
+    // other order strands an entry no counter accounts for, and `pendingCount === 0`
+    // then hides it from every search (I1).
+    accepted = setPending(ctx.manifest, pendingCount(ctx.manifest) + 1);
+    reservation = {
+      key: ctx.key,
+      entry: {
+        v: LOG_ENTRY_VERSION,
+        generation: ctx.manifest.generation ?? null,
+        user_id: userId,
+        session_id: sessionId,
+        request_id: requestId,
+        request_hash: requestHash,
+        fingerprint,
+        received_at: Date.now(),
+        messages: prepared,
+        response,
+      },
+    };
+    return { response };
+  });
+  // The reservation is committed; only now must the entry become durable. A failure
+  // answers 5xx with the counter one too high, which capacity or the next fold
+  // corrects by reading the log back.
+  if (reservation) {
+    try {
+      await putLogEntry(env.MEMORY, reservation.key, reservation.entry);
+    } catch (error) {
+      // A throwing write is not proof that nothing reached the bucket: the storage
+      // wrapper writes first and then verifies the generation, so the throw can
+      // happen after the object landed. Ask instead of assuming, and only give the
+      // slot back when the answer is a definite "no" - releasing for an entry that
+      // is on disk leaves a counter below the truth, which hides accepted data.
+      const landed = await logEntryLanded(env.MEMORY, reservation.key, reservation.entry).catch(
+        () => null,
+      );
+      if (landed === true) return { response, pending: accepted };
+      if (landed === false) await releasePending(env, userId).catch(() => {});
+      throw error;
+    }
+  }
+  return { response, pending: accepted };
+}
+/** Folds waiting entries into the partition, one partition write for the batch.
+ *
+ *  Entries whose receipt already exists are skipped, which is what makes a fold
+ *  that committed and then crashed before deleting its entries safe to repeat (I3).
+ *  Their objects are removed only after the commit, never before. */
+async function foldPending(env, userId) {
+  const client = embeddingClient(env);
+  const key = keyFor(userId);
+  const waiting = await listPending(env.MEMORY, key, { limit: FOLD_BATCH });
+  if (waiting.length === 0) {
+    // An empty log with a non-zero counter is the residue of a reservation whose
+    // write never landed. Nothing else notices it: the fold trigger is the counter
+    // itself, so it never fires. Give one slot back per call and report the release
+    // as progress, which is what keeps `/admin/fold` iterating until it is clean.
+    const manifest = (await loadManifest(env.MEMORY, key, userId)).manifest;
+    if (pendingCount(manifest) === 0) return { folded: 0, remaining: 0, released: false };
+    const released = await releasePending(env, userId).catch(() => null);
+    // `remaining` must be the count *after* the release. Reporting the pre-release
+    // number made a log that needed exactly the round budget answer 409 on its last
+    // call: safe, but it looked like the drain had failed to make progress.
+    return { folded: 0, remaining: released ?? pendingCount(manifest), released: true };
+  }
+  const plan = foldPlan(waiting, { maxEntries: FOLD_BATCH, maxBytes: MAX_BODY_BYTES });
+  let drop = [];
+  let remaining = 0;
+  const result = await mutateUser(env, userId, async (ctx) => {
+    // A name leaves the counter whether the entry is applied or skipped: a receipt
+    // that already exists (crash recovery) and a cross-generation entry both mean
+    // this name is finished with. Counting only the applied ones leaves the counter
+    // above zero forever, which disables the search short-circuit in
+    // `pendingForSearch` and reports a backlog that does not exist.
+    const names = new Set();
+    let folded = 0;
+    const generation = ctx.manifest.generation ?? null;
+    for (const { name, entry } of plan.fold) {
+      names.add(name);
+      if (ctx.manifest.receipts[entry.request_hash]) continue;
+      if ((entry.generation ?? null) !== generation) continue;
+      const batch = entry.messages.map((message, index) => ({
+        ...message,
+        source_message_id: `aml:${entry.request_hash}:${index}`,
+      }));
+      await addOneBatch(
+        env,
+        { ...ctx, userId, sessionId: entry.session_id, client },
+        entry.request_id,
+        batch,
+        ctx.manifest,
+        ctx.staged,
+      );
+      ctx.manifest.receipts[entry.request_hash] = {
+        fingerprint: entry.fingerprint,
+        response: entry.response,
+        completed_at: new Date().toISOString(),
+      };
+      folded += 1;
+    }
+    drop = [...names];
+    if (names.size === 0) return { readOnly: true, response: { folded: 0 } };
+    // The counter is deliberately not touched here. Subtracting what this batch
+    // retired is only correct for the attempt that computed the plan: `mutateUser`
+    // re-runs this callback with the *same* plan after a CAS conflict, and by then a
+    // rival fold has usually retired those names already, so the subtraction would
+    // happen twice and drive the count below the log. The count is reconciled from
+    // the log after the delete instead - derived, never accumulated.
+    return { response: { folded } };
+  });
+  // Only after the commit: an entry present without a receipt is safe to repeat,
+  // an entry deleted without a receipt would be lost (I3).
+  if (drop.length > 0) {
+    await deleteLogEntries(env.MEMORY, key, drop).catch(() => {});
+    // One read of the log's own truth settles every way the count could have drifted:
+    // a stale plan after a CAS retry, entries whose receipt already existed, entries
+    // from another generation, and a failed delete. Reading it after the delete is
+    // what makes the counter a derivation instead of a history.
+    const left = await listPending(env.MEMORY, key, { limit: Infinity }).then(
+      (list) => list.length,
+      () => null,
+    );
+    if (left !== null) {
+      remaining = left;
+      await reconcilePending(env, userId, left).catch(() => {});
+    }
+  }
+  return { folded: result.folded ?? 0, remaining };
+}
+/** Gives one reserved slot back after a write that never became durable.
+ *
+ *  Relative, not absolute: a concurrent accept may have reserved in between, and
+ *  writing a computed absolute value would erase its increment (a lost update).
+ *  The read-modify-write is inside the manifest CAS like every other count change. */
+async function releasePending(env, userId) {
+  const response = await mutateUser(env, userId, async (ctx) => {
+    const count = pendingCount(ctx.manifest);
+    if (count === 0) return { readOnly: true, response: { pending: 0 } };
+    setPending(ctx.manifest, count - 1);
+    return { response: { pending: count - 1 } };
+  });
+  // The count itself, not the response body: callers that report `remaining` need
+  // the value after the release, and `mutateUser` already unwraps `response`.
+  return response.pending;
+}
+/** Writes the observed number of waiting entries back to the manifest. Used after a
+ *  failed delete, where the decremented counter no longer matches the log. */
+async function reconcilePending(env, userId, count) {
+  return mutateUser(env, userId, async (ctx) => {
+    if (pendingCount(ctx.manifest) === count)
+      return { readOnly: true, response: { pending: count } };
+    setPending(ctx.manifest, count);
+    return { response: { pending: count } };
+  });
+}
+/** Terms the lexical fallback scores against: the query features, split the way the
+ *  store's own lexical channel splits them (lowercase, alphanumeric runs, stopword-ish
+ *  short tokens dropped). */
+function queryTerms(features) {
+  const seen = new Set();
+  for (const feature of features)
+    for (const term of String(feature)
+      .toLowerCase()
+      .split(/[^a-z0-9一-鿿]+/u))
+      if (term.length > 2) seen.add(term);
+  return [...seen];
+}
+
+/** How many query terms a pending entry mentions. Zero means it is not a match, which is
+ *  what keeps an unmatched query answering with an empty page in a lexical-only
+ *  deployment. */
+function pendingTermScore(content, terms) {
+  const text = String(content).toLowerCase();
+  let score = 0;
+  for (const term of terms) if (text.includes(term)) score += 1;
+  return score;
+}
+/** Fuses the entries still in the log into the page, scored against the same clauses the
+ *  partitions were searched with.
+ *
+ *  Each entry costs one embedding call, capped by `MAX_PENDING_READ`, because a search has
+ *  to see an Add that was just accepted. It is also attributed to the clause it matches
+ *  best: the per-clause counts must keep covering every returned memory, which is the
+ *  multi-clause contract, and a pending record that skipped attribution made the sum fall
+ *  short of the page size.
+ *
+ *  Without a vector channel the same fusion runs on term overlap instead, because a
+ *  deployment that has no embeddings still has to return what it accepted - and a flat
+ *  zero score would return every pending entry for every query, including one that
+ *  matches nothing.
+ */
+async function fusePendingRecords({
+  env,
+  ctx,
+  features,
+  candidates,
+  client,
+  modes,
+  topK,
+  contributions,
+  appendOnly,
+  appendedById,
+}) {
+  if (pendingCount(ctx.manifest) === 0) return candidates;
+  const waiting = await pendingForSearch(env, ctx, Math.min(topK, MAX_PENDING_READ));
+  if (waiting.length === 0) return candidates;
+  const attribute = (clauseIndex) => {
+    const total = contributions?.[clauseIndex];
+    if (total && clauseIndex >= 0) total.contributed += 1;
+  };
+  const merge = (scored) => {
+    const page = [];
+    for (const item of scored) {
+      attribute(item.clause);
+      // An append-only clause never competes for the page: its matches are the supplement,
+      // exactly as they are for a folded record.
+      if (appendOnly?.[item.clause]) {
+        const prior = appendedById?.get(item.record.id);
+        if (prior && prior.score > item.record.score) continue;
+        appendedById?.set(item.record.id, item.record);
+        continue;
+      }
+      page.push(item.record);
+    }
+    return [...candidates, ...page]
+      .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+      .slice(0, topK);
+  };
+
+  if (!client) {
+    const termsPerClause = features.map((list) => queryTerms(list));
+    const scored = [];
+    for (const record of waiting) {
+      const perClause = termsPerClause.map((terms) => pendingTermScore(record.content, terms));
+      const best = Math.max(...perClause);
+      if (best > 0)
+        scored.push({ record: { ...record, score: best }, clause: perClause.indexOf(best) });
+    }
+    return merge(scored);
+  }
+
+  const vectorsPerClause = [];
+  for (const list of features) {
+    const vectors = [];
+    for (const text of list) {
+      const [vector] = await client.embedQueries([text]).catch(() => []);
+      if (vector) vectors.push(vector);
+    }
+    vectorsPerClause.push(vectors);
+  }
+  const scored = [];
+  for (const record of waiting) {
+    const [vector] = await client.embedQueries([record.content]).catch(() => []);
+    if (!vector) continue;
+    const perClause = vectorsPerClause.map((vectors) =>
+      vectors.reduce(
+        (best, feature) => Math.max(best, cosineSimilarity(vector, feature)),
+        -Infinity,
+      ),
+    );
+    const best = Math.max(...perClause);
+    if (!Number.isFinite(best)) continue;
+    modes.add("records");
+    scored.push({ record: { ...record, score: best }, clause: perClause.indexOf(best) });
+  }
+  return merge(scored);
+}
+
+/** Records that are still in the log, shaped like page items so the existing
+ *  fusion by identity and highest score applies unchanged.
+ *
+ *  Scoring happens in `search`: one embedding call per entry, capped at
+ *  `MAX_PENDING_READ`, because a search must see an Add that was just accepted. */
+async function pendingForSearch(env, ctx, limit) {
+  if (pendingCount(ctx.manifest) === 0) return [];
+  const waiting = await listPending(env.MEMORY, ctx.key, {
+    limit: Math.min(limit, MAX_PENDING_READ),
+    generation: ctx.manifest.generation ?? null,
+  });
+  return waiting.flatMap(({ entry }) =>
+    entry.messages.map((message, index) => ({
+      id: `pending:${entry.request_hash}:${index}`,
+      content: message.indexText ?? (typeof message.content === "string" ? message.content : ""),
+      score: 0,
+      // Message times, not the accept time: a pending entry must look like the record it
+      // will become, or the page changes shape the moment a fold runs. `created_at` and
+      // `event_time` both come from the message, which is what the partition would store.
+      event_time: message.chat_time ?? null,
+      created_at: message.chat_time ?? new Date(entry.received_at).toISOString(),
+      stored_at: new Date(entry.received_at).toISOString(),
+      pending: true,
+    })),
+  );
+}
+async function add(env, input) {
+  const { userId, requestId, sessionId, messages, requestHash, fingerprint } =
+    readAddRequest(input);
   const client = embeddingClient(env);
   const contentView = createContentView();
-  const requestHash = hash(requestId);
   const serviceContext = { userId, sessionId, client };
   return mutateUser(env, userId, async (ctx) => {
     const { key, manifest, staged } = ctx;
@@ -494,40 +941,24 @@ async function add(env, input) {
  * of the coverage gain of twenty at roughly a third of the text. */
 const APPENDED_MAX_RECORDS = 5;
 
-/** Whole-clause texts plus their split windows, bounded by `MAX_QUERY_FEATURES`.
+/** Where an Add is accepted: `log` writes one immutable entry and folds it later,
+ *  `sync` is the original read-modify-write. `log` is the default; `NMG_ADD_MODE=sync`
+ *  is the escape hatch, so a deployment can go back without a code change. */
+const addMode = (env) => (env.NMG_ADD_MODE === "sync" ? "sync" : "log");
+/** Entries folded into a partition by one request. A fold is one partition write
+ *  regardless of how many entries it absorbs, so a 16-way burst needs two folds. */
+const FOLD_BATCH = 8;
+/** Accept stops accepting and folds instead once this many entries are waiting. */
+const FOLD_TRIGGER = 24;
+
+/** Features to embed and search per clause, bounded by `MAX_QUERY_FEATURES`.
  *
- * A clause is searched by several features: its whole text (what the embedding
- * model's own window sees) and each window of `splitQueryChunks`. Results fuse by
- * identity on the highest score, so a record matches a clause by its *best*
- * feature. Measured on LoCoMo multi-hop, that never loses to the whole text alone
- * and recovers a query whose informative part sits past the model's window, where
- * pooling the windows into one vector lost most of the recall. Windows are handed
- * out round-robin so one very long clause cannot starve the others. A clause that
- * does not split contributes exactly one feature, which is the previous behaviour. */
-function queryFeatures(queries) {
-  const windows = queries.map((text) => splitQueryChunks(text));
-  const features = queries.map((text) => [text]);
-  let budget = MAX_QUERY_FEATURES - queries.length;
-  // Head is already in. Give the end-anchored window next, so the far end of a
-  // long clause survives budget pressure, then the middle windows in order.
-  const pending = windows.map((list) =>
-    list.length <= 1 ? [] : [list[list.length - 1], ...list.slice(1, -1)],
-  );
-  const cursors = pending.map(() => 0);
-  let progressed = true;
-  while (budget > 0 && progressed) {
-    progressed = false;
-    for (let i = 0; i < windows.length && budget > 0; i += 1) {
-      const next = cursors[i];
-      if (next >= pending[i].length) continue;
-      cursors[i] = next + 1;
-      features[i].push(pending[i][next]);
-      budget -= 1;
-      progressed = true;
-    }
-  }
-  return features;
-}
+ * The raw clause is never embedded: `selectQueryFeatures` returns its head window,
+ * its end-anchored tail window, then the interior windows, so both ends of a long
+ * clause reach the model instead of a megabyte string the model silently truncated.
+ * Results fuse by identity on the highest score, so a record matches a clause by
+ * its *best* feature. `warmClauseVectors` trims the tail end of this list when the
+ * embedding budget runs out, which is why the order matters. */
 const MAX_SEARCH_CLAUSES = 8;
 /** One request may carry independent retrieval clauses: each is plain text plus
  * an optional label. The legacy `query`(+`options`) shape is one clause. */
@@ -597,11 +1028,33 @@ function addAppended(appended, memories) {
     if (!prior || (memory.score ?? 0) >= (prior.score ?? 0)) appended.set(memory.id, memory);
   }
 }
-/** Resolve every clause vector once, before SQLite is opened: the per-request
- * cache then supplies every partition without holding a DB during remote I/O. */
-async function warmClauseVectors(client, queries, parts) {
+/** Resolve every feature before SQLite is opened, so no partition holds a database
+ *  across remote I/O.
+ *
+ *  `selectQueryFeatures` already spent the feature budget, so every feature here is
+ *  one the search will use: nothing is trimmed. Features are resolved round by
+ *  round — round 0 across all clauses, then round 1, and so on — which keeps the
+ *  clauses balanced instead of finishing one clause's windows before starting the
+ *  next. Best-effort: a failed embedding is simply not cached, and the feature falls
+ *  back to whatever the retrieval layer manages, so the request still answers. */
+const WARM_CONCURRENCY = 4;
+async function warmClauseVectors(client, features, parts) {
   if (!client || parts.length === 0) return;
-  for (const clause of queries) await client.embedQueries([clause]).catch(() => undefined);
+  const depth = Math.max(0, ...features.map((list) => list.length));
+  for (let round = 0; round < depth; round += 1) {
+    const batch = [];
+    features.forEach((list) => {
+      if (round < list.length) batch.push(list[round]);
+    });
+    let next = 0;
+    const warm = async () => {
+      while (next < batch.length) {
+        const text = batch[next++];
+        await client.embedQueries([text]).catch(() => undefined);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(WARM_CONCURRENCY, batch.length) }, warm));
+  }
 }
 /** Fold one partition's persistence mode into the request totals. */
 function tallyPartPersistence(persistence, saved) {
@@ -639,7 +1092,7 @@ async function search(env, input, options = {}) {
   const optionTexts = choices.map((choice) => textField(choice, "option", 4096));
   const clauses = await readClauses(input, optionTexts);
   const queries = clauses.map((clause) => clause.text);
-  const features = queryFeatures(queries);
+  const features = selectQueryFeatures(queries);
   const appendOnly = clauses.map((clause) => clause.appendOnly === true);
   const hasAppendOnly = appendOnly.some(Boolean);
   const appendedById = new Map();
@@ -650,7 +1103,7 @@ async function search(env, input, options = {}) {
     let candidates = [];
     const modes = new Set();
     let changed = false;
-    await warmClauseVectors(client, queries, manifest.parts);
+    await warmClauseVectors(client, features, manifest.parts);
     const persistence = { inline_delta_saves: 0, full_snapshot_saves: 0, changed_pages: 0 };
     for (let i = 0; i < manifest.parts.length; i++) {
       const result = await runPart(
@@ -700,6 +1153,19 @@ async function search(env, input, options = {}) {
       candidates.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
       candidates = candidates.slice(0, topK);
     }
+    const fused = await fusePendingRecords({
+      env,
+      ctx: { key, manifest },
+      features,
+      candidates,
+      client,
+      modes,
+      topK,
+      contributions,
+      appendOnly,
+      appendedById,
+    });
+    candidates = fused;
     persistence.inline_bytes = manifest.parts.reduce((sum, p) => sum + deltaBytes(p), 0);
     const appended = collectAppended(
       appendedById,
@@ -725,7 +1191,7 @@ async function search(env, input, options = {}) {
         })),
         ...(hasAppendOnly ? { appended } : {}),
         persistence,
-        storage_format: manifest.parts.some((p) => p.delta) ? "nmg-shards-v3" : "nmg-shards-v2",
+        storage_format: manifestFormat(manifest),
       },
     };
   });
@@ -750,6 +1216,21 @@ async function status(env, taskId) {
   const { manifest } = await loadManifest(env.MEMORY, key, "");
   const receipt = manifest.receipts[requestHash];
   if (receipt) return { ...receipt.response, completed_at: receipt.completed_at };
+  // An Add accepted into the log has no partition receipt yet, but it is durable and the
+  // caller is entitled to ask about it. The entry is scoped to the current generation, the
+  // same rule the accept-side replay lookup follows.
+  const pending = await findLogEntry(env.MEMORY, key, requestHash, {
+    generation: manifest.generation ?? null,
+  }).then(
+    (found) => found?.entry ?? null,
+    () => null,
+  );
+  if (pending)
+    return {
+      ...pending.response,
+      completed_at: new Date(pending.received_at).toISOString(),
+      pending: true,
+    };
   const legacy = manifest.parts.find((p) => p.key === objectKey(key));
   if (legacy) {
     // Status uses the original file name and never needs the original user_id.
@@ -893,8 +1374,12 @@ async function healthResponse(env, path) {
     max_partitions: MAX_PARTS,
     graph_scope: "partition",
     max_request_bytes: MAX_BODY_BYTES,
-    limits: TEXT_LIMITS,
-    add_mode: "synchronous",
+    limits: {
+      ...TEXT_LIMITS,
+      add_mode: addMode(env),
+      pending_read_limit: MAX_PENDING_READ,
+      merge_batch: FOLD_BATCH,
+    },
     upstream_commit: SOURCE_REVISION.split("+")[0],
     source_revision: SOURCE_REVISION,
     core_source: CORE_SOURCE,
@@ -1218,9 +1703,46 @@ async function capacityRoute(request, env, url, path) {
     await userCapacity(env.MEMORY, textField(url.searchParams.get("user_id"), "user_id")),
   );
 }
+/** Drains one user's log. Needed before rolling the code back - a v4 manifest is
+ *  unreadable to an older deployment - and by the log-mode test, which otherwise has
+ *  no way to observe a fully drained counter. Bounded so one request cannot fold an
+ *  unbounded log. */
+async function foldRoute(request, env, url, path) {
+  if (path !== "/admin/fold") return undefined;
+  requireOwner(request, env);
+  if (request.method !== "POST")
+    throw new HttpError(405, "method_not_allowed", "Use POST to fold one user's log");
+  const userId = textField(url.searchParams.get("user_id"), "user_id");
+  let folded = 0;
+  let remaining = 0;
+  let released = 0;
+  for (let round = 0; round < 8; round += 1) {
+    const step = await foldPending(env, userId);
+    folded += step.folded;
+    remaining = step.remaining;
+    if (step.released) released += 1;
+    if (step.folded === 0 && !step.released) break;
+  }
+  // A drain is a verification, not an attempt: the runbook uses it before rolling
+  // the code back, and a v4 manifest is unreadable to an older deployment. Answering
+  // 200 with entries left would make that check a false green, so anything not fully
+  // drained is a 409 the caller has to retry.
+  const drained = remaining === 0;
+  return json(
+    { success: drained, user_id: userId, folded, released, remaining },
+    drained ? 200 : 409,
+  );
+}
 async function addRoute(request, env, path) {
   if ((path !== "/add" && path !== "/remember") || request.method !== "POST") return undefined;
-  return json(await add(env, await readJson(request)));
+  const input = await readJson(request);
+  if (addMode(env) !== "log") return json(await add(env, input));
+  const accepted = await acceptAdd(env, input);
+  // A burst leaves entries waiting; fold a bounded batch here rather than on the
+  // read path, so accepted latency stays flat while the log cannot grow forever.
+  if (accepted.pending >= FOLD_TRIGGER)
+    await foldPending(env, accepted.response.user_id).catch(() => {});
+  return json(accepted.response);
 }
 async function handle(request, env) {
   const url = new URL(request.url);
@@ -1228,7 +1750,8 @@ async function handle(request, env) {
   const early =
     pageResponse(request, env, path) ??
     (await healthResponse(env, path)) ??
-    (await reclaimAllRoute(request, env, path));
+    (await reclaimAllRoute(request, env, path)) ??
+    (await foldRoute(request, env, url, path));
   if (early) return early;
   if (isMemoryRoute(path)) {
     if (path.startsWith("/admin/")) requireOwner(request, env);

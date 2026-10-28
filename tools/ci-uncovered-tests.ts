@@ -15,11 +15,18 @@
 // evidence of that run, not as suites anyone maintains, so scanning them is a false positive.
 // Anything *else* that falls out of CI has to be acknowledged here on purpose.
 import { execFileSync } from "node:child_process";
-import { globSync, readFileSync } from "node:fs";
+import { existsSync, globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** The entry points of the CI jobs, in .github/workflows/ci.yml. */
-const CI_ENTRY_POINTS = ["verify:product-ci", "verify:research", "verify:chaos"];
+const CI_ENTRY_POINTS = ["verify:product-ci", "verify:research", "verify:chaos", "verify:onlion"];
+
+/** A second manifest whose suites live in its own script set. Service tests are
+ *  `scripts/test-*.mjs` invoked by name rather than globbed `.test.ts` files, so both
+ *  the universe and the resolution need to know about them - otherwise a whole
+ *  production surface sits outside every CI job and outside this gate, which is
+ *  exactly how six defects reached a green commit. */
+const SERVICE_ROOT = "onlion";
 
 /** Specific roots precede their parent. Acknowledgement does not imply standalone execution. */
 const ACKNOWLEDGED_ROOTS = [
@@ -29,6 +36,26 @@ const ACKNOWLEDGED_ROOTS = [
     reason: "fixture checks run through their harness",
   },
   { prefix: "evals/", onDemand: true, reason: "on-demand only" },
+  {
+    prefix: "onlion/scripts/test-cos-bucket.mjs",
+    onDemand: true,
+    reason: "needs a real COS bucket and credentials",
+  },
+  {
+    prefix: "onlion/scripts/test-edgeone-worker.mjs",
+    onDemand: true,
+    reason: "needs a deployed endpoint and credentials",
+  },
+  {
+    prefix: "onlion/scripts/test-capacity.mjs",
+    onDemand: true,
+    reason: "asserts the synchronous accept path; not yet ported to the log default",
+  },
+  {
+    prefix: "onlion/scripts/test-request-resume.mjs",
+    onDemand: true,
+    reason: "asserts the synchronous accept path; not yet ported to the log default",
+  },
   {
     prefix: "docs/experiments/execution/archive/",
     onDemand: false,
@@ -42,16 +69,44 @@ function acknowledgedRoot(file: string) {
 
 type Scripts = Record<string, string>;
 
-/** Follows `npm run <name>` chains so a job's script can be read for its own globs. */
-function scriptGlobs(name: string, scripts: Scripts, seen = new Set<string>()): string[] {
-  if (seen.has(name)) return [];
-  seen.add(name);
+/** Follows `npm run <name>` chains so a job's script can be read for its own globs.
+ *  A `cd onlion && ...` segment switches to that manifest; a `node <file>` segment
+ *  names the file it runs, which is how the service suites are invoked. */
+function scriptGlobs(
+  name: string,
+  scripts: Scripts,
+  manifests: Record<string, Scripts>,
+  prefix = "",
+  seen = new Set<string>(),
+): string[] {
+  const key = prefix + name;
+  if (seen.has(key)) return [];
+  seen.add(key);
   const command = scripts[name];
-  if (command === undefined) throw new Error(`no such script: ${name}`);
+  if (command === undefined) {
+    // A root entry point that names a script nobody defines is drift and must be loud. A
+    // subpackage script that is absent contributes nothing: the job that runs that package
+    // would fail at `npm run <name>` on its own, so this gate does not duplicate it.
+    if (prefix) return [];
+    throw new Error(`no such script: ${key}`);
+  }
   const globs: string[] = [];
-  for (const match of command.matchAll(/npm run ([a-zA-Z0-9:_-]+)/g))
-    globs.push(...scriptGlobs(match[1]!, scripts, seen));
-  for (const match of command.matchAll(/"([^"]*\*[^"]*)"/g)) globs.push(match[1]!);
+  for (const segment of command.split("&&")) {
+    const part = segment.trim();
+    const nested = /^cd\s+([\w./-]+)$/.exec(part);
+    if (nested) {
+      prefix = nested[1]!.replace(/\/$/u, "") + "/";
+      continue;
+    }
+    const run = /^npm run ([a-zA-Z0-9:_-]+)$/.exec(part);
+    if (run) {
+      globs.push(...scriptGlobs(run[1]!, manifests[prefix] ?? {}, manifests, prefix, seen));
+      continue;
+    }
+    const node = /^node\s+(?:--\S+\s+)*(\S+\.(?:mjs|cjs|js|ts|mts))$/.exec(part);
+    if (node) globs.push(prefix + node[1]!);
+  }
+  for (const match of command.matchAll(/"([^"]*\*[^"]*)"/g)) globs.push(prefix + match[1]!);
   return globs;
 }
 
@@ -65,16 +120,32 @@ export interface Coverage {
 
 /** Every test file in the repository, and which of them the CI jobs reach. */
 export function testCoverage(root: string): Coverage {
-  const scripts = (
-    JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { scripts: Scripts }
-  ).scripts;
-  const globs = [...new Set(CI_ENTRY_POINTS.flatMap((name) => scriptGlobs(name, scripts)))];
+  // A manifest that is not there contributes no scripts: this gate is also run against
+  // synthetic repositories in its own tests, which carry a root manifest and nothing else.
+  const read = (dir: string) => {
+    const file = join(root, dir, "package.json");
+    if (!existsSync(file)) return {};
+    return (JSON.parse(readFileSync(file, "utf8")) as { scripts: Scripts }).scripts;
+  };
+  const manifests: Record<string, Scripts> = {
+    "": read(""),
+    [`${SERVICE_ROOT}/`]: read(SERVICE_ROOT),
+  };
+  const globs = [
+    ...new Set(CI_ENTRY_POINTS.flatMap((name) => scriptGlobs(name, manifests[""]!, manifests))),
+  ];
   const covered = new Set<string>();
   for (const glob of globs)
     for (const file of globSync(glob, { cwd: root })) covered.add(file.replaceAll("\\", "/"));
   // Only files the repository actually contains: another agent's untracked work in progress is
   // not part of it yet, and judging it here would report a gap nobody has committed.
-  const all = execFileSync("git", ["ls-files", "*.test.ts"], { cwd: root, encoding: "utf8" })
+  // The service suites are `scripts/test-*.mjs`, invoked by name rather than globbed, so
+  // they are part of the universe too - otherwise a whole production surface sits outside
+  // every CI job and outside this gate.
+  const all = execFileSync("git", ["ls-files", "*.test.ts", `${SERVICE_ROOT}/scripts/test-*.mjs`], {
+    cwd: root,
+    encoding: "utf8",
+  })
     .split("\n")
     .map((file) => file.trim())
     .filter(Boolean);

@@ -93,7 +93,16 @@ try {
   check("retrieval mode is reported", typeof search.body?.retrieval_mode === "string", JSON.stringify(search.body?.retrieval_mode));
 
   const capacity = await call(`/api/capacity?user_id=${encodeURIComponent(userId)}`);
-  check("/api/capacity answers", capacity.status === 200 && capacity.body?.sqlite_bytes?.used > 0, `${capacity.status} ${capacity.raw?.slice(0, 200)}`);
+  // Either the Add reached a partition or it is still waiting in the log: which one
+  // depends on the accept path, and asserting only the first made this smoke a test of
+  // the sync path rather than of the service.
+  const stored =
+    (capacity.body?.sqlite_bytes?.used ?? 0) > 0 || (capacity.body?.pending_entries ?? 0) > 0;
+  check(
+    "/api/capacity answers",
+    capacity.status === 200 && stored,
+    `${capacity.status} sqlite=${capacity.body?.sqlite_bytes?.used} pending=${capacity.body?.pending_entries}`,
+  );
 
   const reset = await call("/api/reset", { user_id: userId, confirm_user_id: userId, reset_id: "smoke-reset" });
   check("/api/reset commits the barrier", reset.status === 200, `${reset.status} ${reset.raw?.slice(0, 200)}`);

@@ -39,6 +39,28 @@ jobs:
       - name: Dependency audit
         run: npm audit --production --audit-level=high
 
+  onlion:
+    name: Service backend (onlion)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          # Two manifests: the service builds its prompt tables with a root-level
+          # tool, so both dependency trees are installed.
+          cache-dependency-path: |
+            package-lock.json
+            onlion/package-lock.json
+      - run: npm ci
+      - name: Install service dependencies
+        run: npm ci
+        working-directory: onlion
+      - name: Service verification contract
+        run: npm run verify:onlion
+
   tests:
     name: Product tests and coverage
     runs-on: ubuntu-latest
