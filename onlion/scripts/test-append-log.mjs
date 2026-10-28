@@ -528,3 +528,40 @@ console.log(
     'PASS: a generation filter fills the window from current entries even when every older key sorts first.',
   );
 }
+
+// A read window that takes the oldest entries hides the newest ones - the entry a
+// streaming update just added is exactly what a search is asking about.
+{
+  const bucket = memoryBucket();
+  const names = [];
+  for (let index = 0; index < 12; index += 1) {
+    const entry = {
+      v: 1,
+      generation: 'g1',
+      user_id: 'u',
+      session_id: 's',
+      request_id: `entry-${index}`,
+      request_hash: createHash('sha256').update(`entry-${index}`).digest('hex'),
+      fingerprint: 'f',
+      received_at: 1700000000000 + index,
+      messages: [],
+    };
+    await putLogEntry(bucket, 'window-key', entry);
+    names.push(logEntryName(entry.received_at, entry.request_hash));
+  }
+  const oldest = await listPending(bucket, 'window-key', { limit: 4, generation: 'g1' });
+  assert.deepEqual(
+    oldest.map((item) => item.name),
+    names.slice(0, 4),
+    'the default window is arrival order, which the fold needs',
+  );
+  const newest = await listPending(bucket, 'window-key', { limit: 4, generation: 'g1', newest: true });
+  assert.deepEqual(
+    newest.map((item) => item.name),
+    names.slice(-4),
+    'a newest window must hold the entries that arrived last',
+  );
+  console.log(
+    'PASS: the pending window reads from the head for the fold and from the tail for search.',
+  );
+}
