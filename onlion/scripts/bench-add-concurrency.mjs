@@ -226,13 +226,18 @@ async function main() {
   // Three attempts: one stall is how an ordinary host behaves on a bad minute, but a
   // benchmark against a dead endpoint must not report zeros.
   let reachable = false;
+  let server = null;
   for (let attempt = 0; attempt < 3 && !reachable; attempt += 1) {
     try {
       const health = await fetch(`${endpoint}/health`, { signal: AbortSignal.timeout(20_000) });
       reachable = health.ok;
-      if (!reachable) process.stderr.write(`health answered ${health.status}\n`);
+      if (reachable) server = await health.json();
+      else
+        process.stderr.write(`health answered ${health.status}
+`);
     } catch (error) {
-      process.stderr.write(`health attempt ${attempt + 1} failed: ${error.message}\n`);
+      process.stderr.write(`health attempt ${attempt + 1} failed: ${error.message}
+`);
     }
   }
   if (!reachable) {
@@ -243,6 +248,21 @@ async function main() {
 
   const stamp = Date.now().toString(36);
   const user = `bench-${stamp}`;
+  // The deployment decides which path is being measured, not the flag: declaring `log`
+  // against a `sync` deployment would otherwise produce "folds 0" and read like a
+  // legitimate log measurement with nothing folded - the exact symptom of a forgotten
+  // environment variable. Refuse to run, with the same exit code as an unreachable
+  // endpoint: both mean the setup is wrong, not the service.
+  const serverMode = server?.limits?.add_mode ?? null;
+  if (serverMode !== null && serverMode !== values["add-mode"]) {
+    process.stderr.write(
+      `deployment runs add_mode=${serverMode} but this run declares ${values["add-mode"]}: ` +
+        "set NMG_ADD_MODE on the project and redeploy, or pass the matching --add-mode\n",
+    );
+    process.exitCode = 2;
+    return;
+  }
+
   const summary = {
     label: values.label,
     mode: values.mode,
@@ -252,6 +272,11 @@ async function main() {
     messages,
     roundCount: rounds,
     warmup,
+    server: {
+      add_mode: serverMode,
+      source_revision: server?.source_revision ?? null,
+      upstream_commit: server?.upstream_commit ?? null,
+    },
     rounds: [],
   };
 
@@ -286,6 +311,10 @@ async function main() {
       );
   } else {
     for (let round = 0; round < rounds; round += 1) {
+      // Drain before each round when a credential allows it: otherwise only the first
+      // round sits below the fold trigger, the clean group collapses to one round (n=16,
+      // a maximum rather than a p95), and the gate has nothing to quote.
+      if (values.owner) await drain(endpoint, values.key, user, values.owner, timeout);
       const before = await pendingOf(endpoint, values.key, user, timeout);
       const tasks = Array.from(
         { length: concurrency },
@@ -302,12 +331,12 @@ async function main() {
       roundSummary.crossedTrigger =
         before === null ? null : before + roundSummary.accepted >= FOLD_TRIGGER;
       roundSummary.foldsDerived = deriveFolds(
-        values["add-mode"],
+        serverMode ?? values["add-mode"],
         before,
         roundSummary.accepted,
         after,
       );
-      if (values["add-mode"] === "sync" && (before !== 0 || after !== 0))
+      if (serverMode === "sync" && (before !== 0 || after !== 0))
         roundSummary.modeMismatch = `declared sync but pending moved ${before}->${after}; the deployment may be running the log path`;
       summary.rounds.push(roundSummary);
       if (!values.json)
@@ -336,17 +365,15 @@ async function main() {
     const measured = summary.rounds.reduce((sum, round) => sum + round.count, 0);
     const clientErrors = summary.rounds.reduce((sum, round) => sum + round.clientErrors, 0);
     summary.addMode = values["add-mode"];
-    summary.pooledClean =
-      cleanTimes.length === 0
-        ? null
-        : {
-            n: cleanTimes.length,
-            p50: Math.round(percentile(cleanTimes, 0.5)),
-            p95: Math.round(percentile(cleanTimes, 0.95)),
-            p95IsMax: cleanTimes.length < 20,
-            rounds: summary.rounds.filter((round) => round.crossedTrigger === false).length,
-          };
+    const stats = (times) => ({
+      n: times.length,
+      p50: Math.round(percentile(times, 0.5)),
+      p95: Math.round(percentile(times, 0.95)),
+      p95IsMax: times.length < 20,
+    });
     summary.pooled = {
+      all: stats(pooledTimes),
+      clean: cleanTimes.length === 0 ? null : stats(cleanTimes),
       n: pooledTimes.length,
       p50: Math.round(percentile(pooledTimes, 0.5)),
       p95: Math.round(percentile(pooledTimes, 0.95)),
@@ -359,9 +386,9 @@ async function main() {
       `rounds=${rounds} n=${summary.pooled.n} | p50 ${summary.pooled.p50}ms | ` +
       `${summary.pooled.p95IsMax ? "p95(=max)" : "p95"} ${summary.pooled.p95}ms | ` +
       `failures ${summary.pooled.failures} (client ${clientErrors}) ` +
-      (summary.pooledClean
-        ? `| clean rounds=${summary.pooledClean.rounds} n=${summary.pooledClean.n} ` +
-          `p95${summary.pooledClean.p95IsMax ? "(=max)" : ""} ${summary.pooledClean.p95}ms`
+      (summary.pooled.clean
+        ? `| clean n=${summary.pooled.clean.n} ` +
+          `p95${summary.pooled.clean.p95IsMax ? "(=max)" : ""} ${summary.pooled.clean.p95}ms`
         : "| no round avoided the fold trigger") +
       (values["add-mode"] === "log"
         ? ` | folds derived=${summary.pooled.foldsDerived} (derived, not reported by the service)`
