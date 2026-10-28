@@ -18,9 +18,10 @@
     "test:worker-media": "node scripts/test-multimodal-worker.mjs",
     "test:cos": "node scripts/test-cos-bucket.mjs",
     "test:edgeone": "node scripts/test-edgeone-worker.mjs",
-    "verify": "npm run build && npm run check && npm run test:temporal && npm run test:media && npm run test:backend && npm run test:worker-media",
+    "verify": "npm run build && npm run check && npm run test:temporal && npm run test:media && npm run test:backend && npm run test:add-log && npm run test:worker-media",
     "generate:callbacks": "node scripts/generate-callbacks.mjs",
-    "smoke:edgeone": "node scripts/smoke-edgeone.mjs"
+    "smoke:edgeone": "node scripts/smoke-edgeone.mjs",
+    "test:add-log": "node scripts/test-add-log-mode.mjs"
   },
   "devDependencies": {
     "@types/node": "24.12.4",
