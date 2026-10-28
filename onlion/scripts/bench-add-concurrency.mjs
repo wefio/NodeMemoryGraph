@@ -24,6 +24,15 @@
  *     --concurrency 16 --messages 8 --rounds 3 --warmup 1 \
  *     --owner owner@example.test
  *
+ * A percentile needs enough samples to exist: with `count < 20` the 0.95 quantile is the
+ * maximum, so per-round lines (16 samples by default) are labelled `p95(=max)` and only
+ * the pooled figure - `concurrency x rounds`, 48 by default - is quoted as a p95. The
+ * stopping rule quotes the pooled value for that reason.
+ *
+ * Rounds are grouped after the fact by `crossedTrigger`, which is `pendingBefore +
+ * accepted >= FOLD_TRIGGER`: a round that crosses the trigger contains the request that
+ * had to fold. It is `null` when `pendingBefore` could not be read - unknown is not false.
+ *
  * Failed *connections* are reported apart from server failures: on a bad minute this
  * host cannot establish TLS, and folding both into one number would let the percentiles
  * describe the client while looking like an answer about the service.
@@ -148,6 +157,9 @@ function summarise(label, results) {
     count: results.length,
     p50: Math.round(percentile(times, 0.5)),
     p95: Math.round(percentile(times, 0.95)),
+    // Below 20 samples the 0.95 quantile lands on the last sample, so calling it a p95
+    // would invite a decision on a maximum.
+    p95IsMax: times.length < 20,
     max: Math.round(times.at(-1) ?? 0),
     statuses: Object.fromEntries([...byStatus].sort()),
     failures: failures.length,
@@ -284,6 +296,8 @@ async function main() {
       roundSummary.pendingAfter = after;
       roundSummary.accepted = results.filter((result) => result.status === 200).length;
       roundSummary.samples = results.map(timing);
+      roundSummary.crossedTrigger =
+        before === null ? null : before + roundSummary.accepted >= FOLD_TRIGGER;
       roundSummary.foldsDerived = deriveFolds(
         values["add-mode"],
         before,
@@ -296,7 +310,8 @@ async function main() {
       if (!values.json)
         process.stdout.write(
           `${roundSummary.label}: n=${roundSummary.count} p50=${roundSummary.p50}ms ` +
-            `p95=${roundSummary.p95}ms max=${roundSummary.max}ms ` +
+            `${roundSummary.p95IsMax ? "p95(=max)" : "p95"}=${roundSummary.p95}ms ` +
+            `max=${roundSummary.max}ms ` +
             `failures=${roundSummary.failures} (client=${roundSummary.clientErrors} ` +
             `server=${roundSummary.serverErrors}) pending ${before}->${after} ` +
             `folds~${roundSummary.foldsDerived} statuses=${JSON.stringify(roundSummary.statuses)}\n`,
@@ -316,13 +331,14 @@ async function main() {
       n: pooledTimes.length,
       p50: Math.round(percentile(pooledTimes, 0.5)),
       p95: Math.round(percentile(pooledTimes, 0.95)),
+      p95IsMax: pooledTimes.length < 20,
       failures: summary.rounds.reduce((sum, round) => sum + round.failures, 0),
       foldsDerived: summary.rounds.reduce((sum, round) => sum + (round.foldsDerived ?? 0), 0),
     };
     summary.headline =
       `${summary.label}: mode=burst concurrency=${concurrency} messages=${messages} ` +
       `rounds=${rounds} n=${summary.pooled.n} | p50 ${summary.pooled.p50}ms | ` +
-      `p95 ${summary.pooled.p95}ms | ` +
+      `${summary.pooled.p95IsMax ? "p95(=max)" : "p95"} ${summary.pooled.p95}ms | ` +
       `failures ${summary.pooled.failures} (client ${clientErrors}) ` +
       (values["add-mode"] === "log"
         ? `| folds derived=${summary.pooled.foldsDerived} (derived, not reported by the service)`

@@ -7,8 +7,11 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { createWorkerFixture } from "./worker-fixture.mjs";
 
-const storage = path.join(process.cwd(), ".runtime/tests/log-mode-r2");
-fs.rmSync(storage, { recursive: true, force: true });
+// Per-process directory: on Windows a previous run's Miniflare can still hold a handle
+// on the shared path and the cleanup fails with EPERM before any test runs. The retries
+// cover the case where the handle is released a moment later.
+const storage = path.join(process.cwd(), ".runtime/tests/log-mode-r2-" + process.pid);
+fs.rmSync(storage, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 const DIMENSIONS = 8;
 /** Deterministic unit vector per text, so a record and the query that names it
  *  produce the same direction. */
