@@ -48,6 +48,19 @@ export async function memoryBucket(bucket){
       return result;
     },
     delete:keys=>bucket.delete(Array.isArray(keys)?keys.map(scoped):scoped(keys)),
+    // Enumeration is scoped the same way: the caller sees logical keys, and a
+    // listing can never cross into another generation's objects. Cursors are
+    // passed through untouched because they are only valid for one scoped prefix,
+    // which is the only prefix this wrapper can produce.
+    async list(options={}){
+      const target=options.prefix===undefined?prefix:scoped(options.prefix);
+      const page=await bucket.list({...options,prefix:target});
+      const objects=(page?.objects??[]).map(object=>({
+        ...object,
+        key:prefix&&String(object.key).startsWith(prefix)?String(object.key).slice(prefix.length):object.key,
+      }));
+      return {...page,objects};
+    },
   };
 }
 

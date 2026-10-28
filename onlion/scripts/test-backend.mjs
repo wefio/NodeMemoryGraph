@@ -886,6 +886,9 @@ print(json.dumps(r))`,
       query_chunk_chars: QUERY_CHUNK_CHARS,
       max_query_chunks: MAX_QUERY_WINDOWS,
       max_query_features: 24,
+      add_mode: "sync",
+      pending_read_limit: 8,
+      merge_batch: 8,
     });
     const longQuery = await call("a", "/search", {
       user_id: "payload-limits",
