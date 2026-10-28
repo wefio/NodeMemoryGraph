@@ -1,0 +1,9 @@
+version: 2
+terms: []
+references:
+  - pending counter
+  - state table
+  - reservation
+  - landed check
+  - fold batch
+  - generation barrier
