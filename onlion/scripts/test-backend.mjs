@@ -895,7 +895,7 @@ print(json.dumps(r))`,
       max_query_chunks: MAX_QUERY_WINDOWS,
       max_query_features: 24,
       add_mode: "sync",
-      pending_read_limit: 8,
+      pending_read_limit: 16,
       merge_batch: 8,
     });
     const longQuery = await call("a", "/search", {

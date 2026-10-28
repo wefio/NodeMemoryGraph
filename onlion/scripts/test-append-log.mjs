@@ -97,7 +97,7 @@ const entry = (receivedAt, requestHash, marker, messages = [{ role: 'user', cont
 
 // --- frozen surface -------------------------------------------------------
 assert.equal(LOG_ENTRY_VERSION, 1);
-assert.equal(MAX_PENDING_READ, 8);
+assert.equal(MAX_PENDING_READ, 16);
 const moduleSource = fs.readFileSync(
   path.join(path.dirname(fileURLToPath(import.meta.url)), '../backend/append-log.mjs'),
   'utf8',
@@ -291,8 +291,9 @@ assert.throws(() => logEntryName(1700000000000, `${'A'.repeat(64)}`), RangeError
   const buriedRead = await listPending(buried, USER, { limit: 2, generation: 'g2' });
   assert.deepEqual(buriedRead, [], 'a bounded scan may return fewer matches than the limit');
   assert.ok(
-    buried.stats.gets <= 8,
-    `a filtered read must not read the whole prefix (read ${buried.stats.gets} entries)`,
+    buried.stats.gets <= MAX_PENDING_READ,
+    `a filtered read must stay inside its scan window, max(MAX_PENDING_READ, 4 * limit) ` +
+      `(read ${buried.stats.gets} entries)`,
   );
   // The documented bound, in code rather than prose: search asks for at most
   // MAX_PENDING_READ, so a filter scans at most max(MAX_PENDING_READ, 4 * limit) keys.

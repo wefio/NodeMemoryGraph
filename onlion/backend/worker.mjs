@@ -951,8 +951,16 @@ const addMode = (env) => (env.NMG_ADD_MODE === "sync" ? "sync" : "log");
 /** Entries folded into a partition by one request. A fold is one partition write
  *  regardless of how many entries it absorbs, so a 16-way burst needs two folds. */
 const FOLD_BATCH = 8;
-/** Accept stops accepting and folds instead once this many entries are waiting. */
-const FOLD_TRIGGER = 24;
+/** Fold as soon as a full batch is waiting.
+ *
+ *  This is a read-window contract, not a tuning knob: a search reads at most
+ *  `MAX_PENDING_READ` entries, so anything beyond that is invisible until it folds. With a
+ *  higher trigger the standing backlog lived between the batch and the trigger (16..23 at
+ *  the old value of 24) and every search hid part of it - whichever end the window took.
+ *  Folding at one batch keeps the backlog below the window, and costs no extra partition
+ *  writes: a fold absorbs exactly one batch, so the cadence is one fold per batch of
+ *  accepts at any trigger value above it. */
+const FOLD_TRIGGER = FOLD_BATCH;
 
 /** Features to embed and search per clause, bounded by `MAX_QUERY_FEATURES`.
  *
