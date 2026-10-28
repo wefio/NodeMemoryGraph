@@ -58,7 +58,12 @@ import {
 import { deltaBytes, USER_DELTA_LIMIT } from "./page-delta.mjs";
 import { deferredDocuments } from "./embedding-session.mjs";
 import { queryVector, rememberQueryVector } from "./query-cache.mjs";
-
+import {
+  MAX_QUERY_CHUNKS,
+  QUERY_CHUNK_CHARS,
+  poolQueryVectors,
+  splitQueryChunks,
+} from "./query-chunks.mjs";
 const MAX_DATABASE_BYTES = USER_LIMIT;
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
 /** Payload caps are sized against the platform request body, not against a single
@@ -84,6 +89,8 @@ const TEXT_LIMITS = {
   max_message_chars: MAX_MESSAGE_CHARS,
   max_combined_message_chars: MAX_COMBINED_MESSAGE_CHARS,
   max_ordered_content_bytes: MAX_ORDERED_CONTENT_BYTES,
+  query_chunk_chars: QUERY_CHUNK_CHARS,
+  max_query_chunks: MAX_QUERY_CHUNKS,
 };
 const SOURCE_REVISION =
   typeof __NMG_SOURCE_REVISION__ === "undefined" ? "development" : __NMG_SOURCE_REVISION__;
@@ -284,9 +291,24 @@ function embeddingClient(env) {
           measure("embedding", async () => {
             const cached = queryVector(key);
             if (cached) return cached;
-            const vectors = await embeddingOperation(() => client.embedQueries(inputs));
-            rememberQueryVector(key, vectors);
-            return vectors;
+            // A long query is one vector, not one broken vector: split it into
+            // bounded windows, embed every window, and pool them. Short queries
+            // produce a single chunk and take the unchanged path.
+            const chunks = inputs.map((input) => splitQueryChunks(input));
+            const flat = chunks.flat();
+            const vectors = await embeddingOperation(() => client.embedQueries(flat));
+            if (vectors.length !== flat.length)
+              throw new Error(
+                `embedding returned ${vectors.length} vectors for ${flat.length} query chunks`,
+              );
+            let offset = 0;
+            const pooled = chunks.map((windows) => {
+              const slice = vectors.slice(offset, offset + windows.length);
+              offset += windows.length;
+              return slice.length === 1 ? slice[0] : poolQueryVectors(slice);
+            });
+            rememberQueryVector(key, pooled);
+            return pooled;
           }),
         );
       return queries.get(key);
