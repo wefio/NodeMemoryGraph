@@ -179,11 +179,14 @@ export async function userCapacity(bucket,userId){
   return {user_id:userId,checked_at:new Date().toISOString(),source:legacy?'legacy_object_head':'manifest',
     exists:!!object||legacy,sqlite_bytes:sqlite,partitions,add_requests:requests,manifest_bytes:metadata,
     inline_delta_bytes:manifest.parts.reduce((sum,p)=>sum+deltaBytes(p),0),
+    pending_entries:pendingCount(manifest),
     active_partition:{bytes:last?.bytes??0,target_bytes:PART_TARGET,max_add_bytes:PART_LIMIT,
       target_headroom_bytes:last?Math.max(0,PART_TARGET-last.bytes):PART_TARGET},
     warnings,notes:[
       'SQLite bytes describe current logical images, including restored overlays; not total billed bucket usage.',
       'No exact memory count is collected. Add requests count distinct durable receipts, not messages or memories.',
+      'pending_entries counts accepted Adds that are durable in the log but not yet folded into a partition.',
+
       'Remaining byte quota does not guarantee another Add fits; rollover, request size and metadata limits also apply.',
       ...(legacy?['Legacy receipt count is unknown until the existing image is imported by a normal operation.']:[])]};
 }

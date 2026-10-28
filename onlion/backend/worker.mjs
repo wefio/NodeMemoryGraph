@@ -512,6 +512,8 @@ async function acceptAdd(env, input) {
     readAddRequest(input);
   const contentView = createContentView();
   let accepted = 0;
+  let prepared = null;
+  let reservation = null;
   const response = await mutateUser(env, userId, async (ctx) => {
     const reused = await existingReceipt(env, ctx, requestHash, fingerprint);
     if (reused) return reused;
@@ -525,34 +527,47 @@ async function acceptAdd(env, input) {
         );
       return { readOnly: true, response: pending.entry.response };
     }
-    // Structured content is prepared before the entry is written, so a fold never
-    // has to call a vision model while holding a partition.
-    const prepared = [];
-    for (const message of messages)
-      prepared.push(
-        typeof message.content === "string"
-          ? message
-          : { ...message, indexText: await contentView(message.content) },
-      );
+    // Structured content is prepared once per request, not once per retry: a
+    // caption may come from a vision model and a CAS conflict must not pay for it
+    // twice. It is prepared before the entry is written, so a fold never has to call
+    // a vision model while holding a partition.
+    if (!prepared) {
+      prepared = [];
+      for (const message of messages)
+        prepared.push(
+          typeof message.content === "string"
+            ? message
+            : { ...message, indexText: await contentView(message.content) },
+        );
+    }
     const response = addResponse(ctx.key, requestId, userId, sessionId, requestHash, prepared.length);
-    await putLogEntry(env.MEMORY, ctx.key, {
-      v: LOG_ENTRY_VERSION,
-      generation: ctx.manifest.generation ?? null,
-      user_id: userId,
-      session_id: sessionId,
-      request_id: requestId,
-      request_hash: requestHash,
-      fingerprint,
-      received_at: Date.now(),
-      messages: prepared,
-      response,
-    });
-    // The counter rides the manifest this operation commits: it is what lets a
-    // search short-circuit to "nothing pending" without listing the log.
-    accepted = pendingCount(ctx.manifest) + 1;
-    Object.assign(ctx.manifest, withPending(ctx.manifest, accepted));
+    // Reserve the counter *before* the entry is durable. The order is the safety
+    // argument: a failed commit leaves no entry behind, while a failed write leaves
+    // the counter one too high - and an over-count only costs a log listing. The
+    // other order strands an entry no counter accounts for, and `pendingCount === 0`
+    // then hides it from every search (I1).
+    accepted = applyPending(ctx.manifest, pendingCount(ctx.manifest) + 1);
+    reservation = {
+      key: ctx.key,
+      entry: {
+        v: LOG_ENTRY_VERSION,
+        generation: ctx.manifest.generation ?? null,
+        user_id: userId,
+        session_id: sessionId,
+        request_id: requestId,
+        request_hash: requestHash,
+        fingerprint,
+        received_at: Date.now(),
+        messages: prepared,
+        response,
+      },
+    };
     return { response };
   });
+  // The reservation is committed; only now must the entry become durable. A failure
+  // answers 5xx with the counter one too high, which capacity or the next fold
+  // corrects by reading the log back.
+  if (reservation) await putLogEntry(env.MEMORY, reservation.key, reservation.entry);
   return { response, pending: accepted };
 }
 /** Folds waiting entries into the partition, one partition write for the batch.
@@ -602,17 +617,57 @@ async function foldPending(env, userId) {
     }
     drop = [...names];
     if (names.size === 0) return { readOnly: true, response: { folded: 0 } };
-    Object.assign(
+    remaining = applyPending(
       ctx.manifest,
-      withPending(ctx.manifest, Math.max(0, pendingCount(ctx.manifest) - names.size)),
+      Math.max(0, pendingCount(ctx.manifest) - names.size),
     );
-    remaining = pendingCount(ctx.manifest);
     return { response: { folded } };
   });
   // Only after the commit: an entry present without a receipt is safe to repeat,
   // an entry deleted without a receipt would be lost (I3).
-  if (drop.length > 0) await deleteLogEntries(env.MEMORY, key, drop).catch(() => {});
+  if (drop.length > 0) {
+    const deleted = await deleteLogEntries(env.MEMORY, key, drop).then(
+      () => true,
+      () => false,
+    );
+    // The counter was already decremented for the names we meant to delete. If the
+    // delete failed they are still listed, and subtracting again next round would
+    // walk the counter down until the fold trigger never fires again. Read the truth
+    // back instead of trusting the subtraction.
+    if (!deleted) {
+      const left = await listPending(env.MEMORY, key, { limit: Infinity }).then(
+        (list) => list.length,
+        () => null,
+      );
+      if (left !== null) {
+        remaining = left;
+        await reconcilePending(env, userId, left).catch(() => {});
+      }
+    }
+  }
   return { folded: result.folded ?? 0, remaining };
+}
+/** Applies a pending count to the manifest being committed.
+ *
+ *  `Object.assign` cannot express `withPending`'s zero case: at zero it returns a
+ *  copy *without* the key, and assigning over a manifest that still has `pending`
+ *  leaves the old value in place. The last fold then commits "0" while the stored
+ *  manifest still says 7, so the search short-circuit stays disabled forever. */
+function applyPending(manifest, count) {
+  const next = withPending(manifest, count);
+  if (!("pending" in next)) delete manifest.pending;
+  Object.assign(manifest, next);
+  return manifest.pending ?? 0;
+}
+/** Writes the observed number of waiting entries back to the manifest. Used after a
+ *  failed delete, where the decremented counter no longer matches the log. */
+async function reconcilePending(env, userId, count) {
+  return mutateUser(env, userId, async (ctx) => {
+    if (pendingCount(ctx.manifest) === count)
+      return { readOnly: true, response: { pending: count } };
+    applyPending(ctx.manifest, count);
+    return { response: { pending: count } };
+  });
 }
 /** Records that are still in the log, shaped like page items so the existing
  *  fusion by identity and highest score applies unchanged.
@@ -1452,6 +1507,26 @@ async function capacityRoute(request, env, url, path) {
     await userCapacity(env.MEMORY, textField(url.searchParams.get("user_id"), "user_id")),
   );
 }
+/** Drains one user's log. Needed before rolling the code back - a v4 manifest is
+ *  unreadable to an older deployment - and by the log-mode test, which otherwise has
+ *  no way to observe a fully drained counter. Bounded so one request cannot fold an
+ *  unbounded log. */
+async function foldRoute(request, env, url, path) {
+  if (path !== "/admin/fold") return undefined;
+  requireOwner(request, env);
+  if (request.method !== "POST")
+    throw new HttpError(405, "method_not_allowed", "Use POST to fold one user's log");
+  const userId = textField(url.searchParams.get("user_id"), "user_id");
+  let folded = 0;
+  let remaining = 0;
+  for (let round = 0; round < 8; round += 1) {
+    const step = await foldPending(env, userId);
+    folded += step.folded;
+    remaining = step.remaining;
+    if (step.folded === 0) break;
+  }
+  return json({ success: true, user_id: userId, folded, remaining });
+}
 async function addRoute(request, env, path) {
   if ((path !== "/add" && path !== "/remember") || request.method !== "POST") return undefined;
   const input = await readJson(request);
@@ -1468,7 +1543,8 @@ async function handle(request, env) {
   const early =
     pageResponse(request, env, path) ??
     (await healthResponse(env, path)) ??
-    (await reclaimAllRoute(request, env, path));
+    (await reclaimAllRoute(request, env, path)) ??
+    (await foldRoute(request, env, url, path));
   if (early) return early;
   if (isMemoryRoute(path)) {
     if (path.startsWith("/admin/")) requireOwner(request, env);

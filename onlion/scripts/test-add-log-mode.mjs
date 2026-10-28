@@ -42,10 +42,14 @@ const mf = createWorkerFixture({
 });
 const worker = await mf.getWorker("a");
 let counter = 0;
-async function call(route, body) {
+async function call(route, body, headers = {}) {
   const response = await worker.fetch("http://localhost" + route, {
     method: body ? "POST" : "GET",
-    headers: { authorization: "Bearer test-key", "content-type": "application/json" },
+    headers: {
+      authorization: "Bearer test-key",
+      "content-type": "application/json",
+      ...headers,
+    },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   const text = await response.text();
@@ -114,6 +118,27 @@ try {
   // I2 after folding: the receipt now lives in the partition.
   const replayAfterFold = await call("/add", addBody("alice", "req-1", "the spare key is under the blue planter"));
   assert.deepEqual(replayAfterFold.body, first.body, "replay must survive folding");
+
+  // The counter is observable, and draining it is an operation, not a side effect:
+  // without this the burst would settle above zero forever and a search would list
+  // the log on every request.
+  const waiting = await call("/capacity?user_id=alice");
+  assert.ok(waiting.body.pending_entries > 0, "the burst must leave entries waiting");
+  const drain = await call("/admin/fold?user_id=alice", {}, {
+    "oai-authenticated-user-email": "owner@example.test",
+    origin: "http://localhost",
+  });
+  assert.equal(drain.status, 200, JSON.stringify(drain.body));
+  assert.ok(drain.body.folded > 0, "draining must fold something");
+  const drained = await call("/capacity?user_id=alice");
+  assert.equal(drained.body.pending_entries, 0, "draining must zero the counter: drain=" + JSON.stringify(drain.body) + " before=" + waiting.body.pending_entries + " after=" + drained.body.pending_entries);
+  const afterDrain = await call("/search", { user_id: "alice", query: "spare key under the blue planter", top_k: 50 });
+  const drainedRecord = afterDrain.body.data.find((item) => String(item.content).includes("spare key"));
+  assert.ok(drainedRecord, "a drained entry must still be searchable");
+  assert.ok(
+    !String(drainedRecord.id).startsWith("pending:"),
+    "a drained entry must be served by the partition",
+  );
 
   // Reset drains the log as well as the partitions.
   const reset = await call("/reset", { user_id: "alice", confirm_user_id: "alice", reset_id: `reset-${++counter}` });
