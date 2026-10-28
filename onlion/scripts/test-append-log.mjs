@@ -18,6 +18,7 @@ import {
   listPending,
   deleteLogEntries,
   foldPlan,
+  logEntryLanded,
 } from '../backend/append-log.mjs';
 
 const HASH_A = 'a'.repeat(64);
@@ -189,6 +190,18 @@ assert.throws(() => logEntryName(1700000000000, `${'A'.repeat(64)}`), RangeError
   );
   assert.ok(paged.stats.lists >= 3, 'the cursor must be followed to the last page');
 
+  // The read path must not pay for the whole log: with one key per page, a
+  // two-entry read stops after two pages, and the fold path still sees all five.
+  const slow = memoryBucket({ pageSize: 1 });
+  for (const index of [0, 1, 2, 3, 4])
+    await putLogEntry(slow, USER, entry(1700000000000 + index, hashes[index], `m${index}`));
+  slow.stats.lists = 0;
+  assert.equal((await listPending(slow, USER, { limit: 2 })).length, 2);
+  assert.equal(slow.stats.lists, 2, 'a bounded read must stop listing once it has enough');
+  slow.stats.lists = 0;
+  assert.equal((await listPending(slow, USER, { limit: Infinity })).length, 5);
+  assert.equal(slow.stats.lists, 5, 'the fold path follows the cursor to the last page');
+
   // A fold or reset can delete an entry between the list and the read.
   const racing = {
     ...bucket,
@@ -284,3 +297,29 @@ assert.throws(() => logEntryName(1700000000000, `${'A'.repeat(64)}`), RangeError
 console.log(
   'PASS: append-log names are padded, sortable idempotency keys; forbid-overwrite replays without a write; pending listing is cursor-paged and arrival-ordered; deletes are idempotent; foldPlan is count- and byte-bounded and always makes progress.',
 );
+
+// The landed check has three answers and the caller must not collapse them: "no"
+// releases a reserved slot, "unknown" must leave the counter alone.
+{
+  const entry = { v: 1, received_at: 1700000000000, request_hash: HASH_A };
+  const bucketWith = (behaviour) => ({
+    head:
+      behaviour === 'object'
+        ? async () => ({ size: 10, etag: 'x' })
+        : behaviour === 'null'
+          ? async () => null
+          : async () => {
+              throw new Error('head unavailable');
+            },
+  });
+  assert.equal(await logEntryLanded(bucketWith('object'), 'k'.repeat(24), entry), true);
+  assert.equal(await logEntryLanded(bucketWith('null'), 'k'.repeat(24), entry), false);
+  assert.equal(
+    await logEntryLanded(bucketWith('throw'), 'k'.repeat(24), entry),
+    null,
+    'an unreadable answer is unknown, never false',
+  );
+  console.log(
+    'PASS: the landed check answers yes / no / unknown, and unknown is never collapsed to no.',
+  );
+}

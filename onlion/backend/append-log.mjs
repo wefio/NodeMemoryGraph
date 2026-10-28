@@ -61,6 +61,25 @@ export async function readLogEntry(bucket, userKey, name) {
 
 /** Finds the oldest entry carrying one request_hash. The oldest match wins so a
  *  retry that recomputed received_at still resolves to the accepted entry. */
+/** Did this entry reach the bucket?
+ *
+ *  Three states on purpose: `null` means the question could not be answered, and a
+ *  caller that reads "unknown" as "absent" releases a reservation for an entry that
+ *  is already on disk - a counter below the truth, which is the one direction that
+ *  hides accepted data from search. Existence is asked with HEAD, not by reading the
+ *  entry: `readLogEntry` throws on an entry it cannot parse, and that error says
+ *  nothing about whether the object was written.
+ *
+ *  Exported beyond the frozen set on purpose: the write path needs it to decide
+ *  whether a failed write actually failed. */
+export async function logEntryLanded(bucket, userKey, entry) {
+  try {
+    const object = await bucket.head(logPrefix(userKey) + logEntryName(entry.received_at, entry.request_hash));
+    return object ? true : false;
+  } catch {
+    return null;
+  }
+}
 export async function findLogEntry(bucket, userKey, requestHash) {
   const suffix = `-${requestHashSuffix(requestHash)}.json`;
   const objects = await listObjects(bucket, userKey);
@@ -72,11 +91,12 @@ export async function findLogEntry(bucket, userKey, requestHash) {
 }
 
 /** Pending entries in arrival order. `limit` defaults to MAX_PENDING_READ (the
- *  read path's cap); pass Infinity for the fold path, which wants everything. */
+ *  read path's cap, which is also what bounds its listing); pass Infinity for the
+ *  fold path, which wants everything and follows the cursor to the last page. */
 export async function listPending(bucket, userKey, options = {}) {
   const limit = readLimit(options?.limit);
   const prefix = logPrefix(userKey);
-  const objects = (await listObjects(bucket, userKey)).slice(0, limit);
+  const objects = await listObjects(bucket, userKey, limit);
   const pending = [];
   for (let index = 0; index < objects.length; index += READ_CONCURRENCY) {
     const chunk = objects.slice(index, index + READ_CONCURRENCY);
@@ -187,9 +207,11 @@ function stripPrefix(userKey, name) {
 }
 
 // Pages through the log prefix and returns objects in arrival (name) order.
-// The cursor, not the page size, is what guarantees every entry is seen; the log
-// is bounded by PENDING_BYTES_LIMIT, so reading the whole list stays cheap.
-async function listObjects(bucket, userKey) {
+// The bucket lists keys in ascending order (COS and R2 both do), so once `limit`
+// names are collected a later page can only hold later ones: the read path stops
+// there, which keeps its cost bounded by MAX_PENDING_READ instead of by the log.
+// The fold path passes Infinity and still follows the cursor to the last page.
+async function listObjects(bucket, userKey, limit = Infinity) {
   const prefix = logPrefix(userKey);
   const objects = [];
   let cursor;
@@ -202,11 +224,11 @@ async function listObjects(bucket, userKey) {
         object.key.length > prefix.length,
     );
     objects.push(...matching);
-    if (!page?.truncated || !page.cursor) break;
+    if (objects.length >= limit || !page?.truncated || !page.cursor) break;
     cursor = page.cursor;
   }
   objects.sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
-  return objects;
+  return objects.slice(0, limit);
 }
 
 function logError(code, message, key) {

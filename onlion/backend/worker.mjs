@@ -68,6 +68,7 @@ import {
   findLogEntry,
   foldPlan,
   listPending,
+  logEntryLanded,
   putLogEntry,
 } from "./append-log.mjs";
 import { cosineSimilarity } from "../../src/core/vector.ts";
@@ -571,12 +572,16 @@ async function acceptAdd(env, input) {
     try {
       await putLogEntry(env.MEMORY, reservation.key, reservation.entry);
     } catch (error) {
-      // The reservation committed but the entry did not become durable. Returning
-      // the slot immediately keeps the counter honest: without this an over-count
-      // below the fold trigger has no path back to zero, so the manifest stays v4,
-      // /capacity keeps reporting a backlog, and every search pays a log listing
-      // that can never short-circuit.
-      await releasePending(env, userId).catch(() => {});
+      // A throwing write is not proof that nothing reached the bucket: the storage
+      // wrapper writes first and then verifies the generation, so the throw can
+      // happen after the object landed. Ask instead of assuming, and only give the
+      // slot back when the answer is a definite "no" - releasing for an entry that
+      // is on disk leaves a counter below the truth, which hides accepted data.
+      const landed = await logEntryLanded(env.MEMORY, reservation.key, reservation.entry).catch(
+        () => null,
+      );
+      if (landed === true) return { response, pending: accepted };
+      if (landed === false) await releasePending(env, userId).catch(() => {});
       throw error;
     }
   }
