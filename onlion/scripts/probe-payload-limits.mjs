@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- deliberate test/diagnostic output */
 /** Manual probe: payload caps and long-query chunking, end to end.
  *
  * Runs the BUILT worker under Miniflare (same modules and compatibility target as
