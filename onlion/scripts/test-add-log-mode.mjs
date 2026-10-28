@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { createWorkerFixture } from "./worker-fixture.mjs";
 
 const storage = path.join(process.cwd(), ".runtime/tests/log-mode-r2");
@@ -183,6 +184,39 @@ try {
     !String(drainedRecord.id).startsWith("pending:"),
     "a drained entry must be served by the partition",
   );
+
+  // Residue: an empty log with a non-zero counter is what a reservation whose write
+  // never landed leaves behind. Nothing else notices it, because the fold is only
+  // triggered by that counter, so the drain has to release it - and report the count
+  // *after* the release, or the last call of a full round budget answers 409.
+  const bucket = await mf.getR2Bucket("MEMORY", "a");
+  const owner = {
+    "oai-authenticated-user-email": "owner@example.test",
+    origin: "http://localhost",
+  };
+  async function seedPendingCounter(userId, pending) {
+    const key = createHash("sha256").update(userId).digest("hex").slice(0, 24);
+    await bucket.put(
+      `users/${key}/manifest.json`,
+      JSON.stringify({ format: "nmg-shards-v4", parts: [], receipts: {}, pending }),
+    );
+  }
+  await seedPendingCounter("residue-one", 1);
+  const residueOne = await call("/admin/fold?user_id=residue-one", {}, owner);
+  assert.equal(residueOne.status, 200, JSON.stringify(residueOne.body));
+  assert.equal(residueOne.body.remaining, 0, "a single residue slot must report clean");
+  assert.equal(residueOne.body.released, 1);
+
+  // Nine slots exceed one drain pass, so the first call must say "not clean" rather
+  // than claim success it cannot back up.
+  await seedPendingCounter("residue-nine", 9);
+  const partial = await call("/admin/fold?user_id=residue-nine", {}, owner);
+  assert.equal(partial.status, 409, JSON.stringify(partial.body));
+  assert.equal(partial.body.success, false);
+  assert.equal(partial.body.remaining, 1, "one slot is left after a full pass");
+  const finished = await call("/admin/fold?user_id=residue-nine", {}, owner);
+  assert.equal(finished.status, 200, JSON.stringify(finished.body));
+  assert.equal(finished.body.remaining, 0);
 
   // Reset drains the log as well as the partitions.
   const reset = await call("/reset", {

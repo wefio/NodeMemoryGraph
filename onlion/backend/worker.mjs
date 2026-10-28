@@ -604,7 +604,10 @@ async function foldPending(env, userId) {
     const manifest = (await loadManifest(env.MEMORY, key, userId)).manifest;
     if (pendingCount(manifest) === 0) return { folded: 0, remaining: 0, released: false };
     const released = await releasePending(env, userId).catch(() => null);
-    return { folded: 0, remaining: released?.response?.pending ?? pendingCount(manifest), released: true };
+    // `remaining` must be the count *after* the release. Reporting the pre-release
+    // number made a log that needed exactly the round budget answer 409 on its last
+    // call: safe, but it looked like the drain had failed to make progress.
+    return { folded: 0, remaining: released ?? pendingCount(manifest), released: true };
   }
   const plan = foldPlan(waiting, { maxEntries: FOLD_BATCH, maxBytes: MAX_BODY_BYTES });
   let drop = [];
@@ -679,12 +682,15 @@ async function foldPending(env, userId) {
  *  writing a computed absolute value would erase its increment (a lost update).
  *  The read-modify-write is inside the manifest CAS like every other count change. */
 async function releasePending(env, userId) {
-  return mutateUser(env, userId, async (ctx) => {
+  const response = await mutateUser(env, userId, async (ctx) => {
     const count = pendingCount(ctx.manifest);
     if (count === 0) return { readOnly: true, response: { pending: 0 } };
     setPending(ctx.manifest, count - 1);
     return { response: { pending: count - 1 } };
   });
+  // The count itself, not the response body: callers that report `remaining` need
+  // the value after the release, and `mutateUser` already unwraps `response`.
+  return response.pending;
 }
 /** Writes the observed number of waiting entries back to the manifest. Used after a
  *  failed delete, where the decremented counter no longer matches the log. */
