@@ -165,7 +165,10 @@ function summarise(label, results) {
  *  declared mode decides, and a mismatch between the declaration and what pending does is
  *  reported rather than smoothed over. */
 function deriveFolds(addMode, before, accepted, after) {
-  if (addMode !== "log" || before === null || after === null) return null;
+  // In sync mode folding cannot happen at all, so the answer is zero rather than
+  // unknown; only a log-mode run that cannot read the counter gets `null`.
+  if (addMode !== "log") return 0;
+  if (before === null || after === null) return null;
   const absorbed = before + accepted - after;
   if (absorbed < 0) return 0;
   return Math.round(absorbed / FOLD_BATCH);
@@ -232,7 +235,7 @@ async function main() {
     user,
     concurrency,
     messages,
-    rounds,
+    roundCount: rounds,
     warmup,
     rounds: [],
   };
@@ -280,6 +283,7 @@ async function main() {
       roundSummary.pendingBefore = before;
       roundSummary.pendingAfter = after;
       roundSummary.accepted = results.filter((result) => result.status === 200).length;
+      roundSummary.samples = results.map(timing);
       roundSummary.foldsDerived = deriveFolds(
         values["add-mode"],
         before,
@@ -298,21 +302,27 @@ async function main() {
             `folds~${roundSummary.foldsDerived} statuses=${JSON.stringify(roundSummary.statuses)}\n`,
         );
     }
+    // Pooled percentiles come from the per-request samples. Averaging per-round
+    // percentiles (or, worse, taking their maximum) is not a p95 of anything, and it
+    // hid that in the first version: the headline was the slowest round's slowest
+    // reported value.
     const pooledTimes = summary.rounds
-      .flatMap((round) => [round.p50, round.p95])
+      .flatMap((round) => round.samples.map((sample) => sample.ms))
       .sort((left, right) => left - right);
     const measured = summary.rounds.reduce((sum, round) => sum + round.count, 0);
     const clientErrors = summary.rounds.reduce((sum, round) => sum + round.clientErrors, 0);
     summary.addMode = values["add-mode"];
     summary.pooled = {
+      n: pooledTimes.length,
       p50: Math.round(percentile(pooledTimes, 0.5)),
-      p95: Math.round(percentile(pooledTimes, 1)),
+      p95: Math.round(percentile(pooledTimes, 0.95)),
       failures: summary.rounds.reduce((sum, round) => sum + round.failures, 0),
       foldsDerived: summary.rounds.reduce((sum, round) => sum + (round.foldsDerived ?? 0), 0),
     };
     summary.headline =
       `${summary.label}: mode=burst concurrency=${concurrency} messages=${messages} ` +
-      `rounds=${rounds} | p50 ${summary.pooled.p50}ms | p95 ${summary.pooled.p95}ms | ` +
+      `rounds=${rounds} n=${summary.pooled.n} | p50 ${summary.pooled.p50}ms | ` +
+      `p95 ${summary.pooled.p95}ms | ` +
       `failures ${summary.pooled.failures} (client ${clientErrors}) ` +
       (values["add-mode"] === "log"
         ? `| folds derived=${summary.pooled.foldsDerived} (derived, not reported by the service)`
