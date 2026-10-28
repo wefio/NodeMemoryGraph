@@ -249,6 +249,41 @@ try {
   assert.equal(finished.status, 200, JSON.stringify(finished.body));
   assert.equal(finished.body.remaining, 0);
 
+
+  // The read window must cover everything that is waiting. With the fold trigger at one
+  // batch, a run of Adds leaves at most a batch pending, so every accepted fact stays
+  // searchable - the failure this pins is a standing backlog larger than the window, which
+  // hid whichever end the window did not take.
+  {
+    const windowUser = "window-" + process.pid;
+    const markers = [];
+    for (let index = 0; index < 20; index += 1) {
+      const content = `marker ${index} says the vault code is ${2000 + index}`;
+      markers.push(content);
+      const added = await call(
+        "/add",
+        addBody(windowUser, `win-${index}`, content),
+      );
+      assert.equal(added.status, 200, JSON.stringify(added.body));
+    }
+    const windowCapacity = await call(`/capacity?user_id=${windowUser}`);
+    assert.ok(
+      windowCapacity.body.pending_entries < 8,
+      `pending must stay below the read window, got ${windowCapacity.body.pending_entries}`,
+    );
+    for (const [index, content] of markers.entries()) {
+      const found = await call("/search", {
+        user_id: windowUser,
+        query: `vault code ${2000 + index}`,
+        top_k: 100,
+      });
+      assert.ok(
+        (found.body.data ?? []).some((item) => String(item.content).includes(content)),
+        `marker ${index} must be searchable while the log is live`,
+      );
+    }
+  }
+
   // Reset drains the log as well as the partitions.
   const reset = await call("/reset", {
     user_id: "alice",
