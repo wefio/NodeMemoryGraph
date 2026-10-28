@@ -86,15 +86,35 @@ export async function logEntryLanded(bucket, userKey, entry) {
 }
 
 /** Finds the oldest entry carrying one request_hash. The oldest match wins so a
- *  retry that recomputed received_at still resolves to the accepted entry. */
-export async function findLogEntry(bucket, userKey, requestHash) {
+ *  retry that recomputed received_at still resolves to the accepted entry.
+ *
+ *  `generation`, when given, skips entries written under another generation: after a
+ *  reset the old echo must not be replayed to a client whose data was wiped. The
+ *  listing is deliberately unbounded - a replay lookup has to be able to report a
+ *  real miss, so it cannot stop at the first page.
+ *
+ *  Skipping a match and continuing is required, not defensive: one request_hash can
+ *  legitimately have an entry in two generations (accepted before a reset, replayed
+ *  after it, with the old object still present while `clearLog` finishes). A filter
+ *  that stopped at the first match would drop the old entry and then report a miss,
+ *  so a later retry would be accepted a third time instead of resolving to the entry
+ *  the current generation already holds. The same loop covers a match whose entry
+ *  vanished between list and read; that case only avoids manufacturing a redundant
+ *  object, because a receipt written by a fold is checked before this lookup and
+ *  stays the authoritative duplicate guard. */
+export async function findLogEntry(bucket, userKey, requestHash, options = {}) {
   const suffix = `-${requestHashSuffix(requestHash)}.json`;
-  const objects = await listObjects(bucket, userKey);
-  const match = objects.find((object) => object.key.endsWith(suffix));
-  if (!match) return null;
-  const name = match.key.slice(logPrefix(userKey).length);
-  const entry = await readLogEntry(bucket, userKey, name);
-  return entry ? { name, entry } : null;
+  const generation = options?.generation;
+  const prefix = logPrefix(userKey);
+  for (const object of await listObjects(bucket, userKey)) {
+    if (!object.key.endsWith(suffix)) continue;
+    const name = object.key.slice(prefix.length);
+    const entry = await readLogEntry(bucket, userKey, name);
+    if (!entry) continue;
+    if (generation !== undefined && (entry.generation ?? null) !== (generation ?? null)) continue;
+    return { name, entry };
+  }
+  return null;
 }
 
 /** Pending entries in arrival order. `limit` defaults to MAX_PENDING_READ (the

@@ -150,6 +150,39 @@ assert.throws(() => logEntryName(1700000000000, `${'A'.repeat(64)}`), RangeError
   assert.deepEqual(await putLogEntry(bucket, USER, retried), { name: `1700000009999-${HASH_A}.json`, created: true });
   assert.equal((await findLogEntry(bucket, USER, HASH_A)).name, `1700000000000-${HASH_A}.json`);
 
+  // After a reset the old echo must not be replayed to a client whose data was
+  // wiped: the generation filter skips the older entry and finds the current one.
+  const generations = memoryBucket();
+  await putLogEntry(generations, USER, { ...entry(1700000000000, HASH_A, 'old'), generation: 'g1' });
+  await putLogEntry(generations, USER, { ...entry(1700000600000, HASH_A, 'new'), generation: 'g2' });
+  assert.equal((await findLogEntry(generations, USER, HASH_A)).entry.messages[0].content, 'old');
+  assert.equal(
+    (await findLogEntry(generations, USER, HASH_A, { generation: 'g2' })).entry.messages[0].content,
+    'new',
+  );
+  assert.equal(await findLogEntry(generations, USER, HASH_A, { generation: 'gone' }), null);
+
+  // A match that vanishes between the list and the read is skipped, not reported as
+  // a miss: the replay lookup must keep looking at the next candidate.
+  const vanishing = memoryBucket();
+  await putLogEntry(vanishing, USER, entry(1700000000000, HASH_A, 'first'));
+  await putLogEntry(vanishing, USER, entry(1700000000001, HASH_A, 'second'));
+  const vanishingKey = `${logPrefix(USER)}1700000000000-${HASH_A}.json`;
+  const racingLookup = {
+    ...vanishing,
+    async get(key) {
+      if (key === vanishingKey) {
+        vanishing.records.delete(key);
+        return null;
+      }
+      return vanishing.get(key);
+    },
+  };
+  assert.equal(
+    (await findLogEntry(racingLookup, USER, HASH_A)).entry.messages[0].content,
+    'second',
+  );
+
   await assert.rejects(putLogEntry(bucket, USER, { ...first, v: 2 }), RangeError);
   const wrongVersion = memoryBucket();
   await wrongVersion.put(`${logPrefix(USER)}1700000000000-${HASH_A}.json`, JSON.stringify({ ...first, v: 99 }));
@@ -247,6 +280,13 @@ assert.throws(() => logEntryName(1700000000000, `${'A'.repeat(64)}`), RangeError
     buried.stats.gets <= 8,
     `a filtered read must not read the whole prefix (read ${buried.stats.gets} entries)`,
   );
+  // The documented bound, in code rather than prose: search asks for at most
+  // MAX_PENDING_READ, so a filter scans at most max(MAX_PENDING_READ, 4 * limit) keys.
+  // Beyond that the current generation stays out of the window until folds retire the
+  // leftovers - which is why the counter has to include them (reset hand-off).
+  buried.stats.gets = 0;
+  assert.deepEqual(await listPending(buried, USER, { limit: 8, generation: 'g2' }), []);
+  assert.equal(buried.stats.gets, 32, 'a filtered read scans at most 32 keys for limit 8');
 
   // A fold or reset can delete an entry between the list and the read.
   const racing = {

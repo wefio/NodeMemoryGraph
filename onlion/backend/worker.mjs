@@ -518,7 +518,12 @@ async function acceptAdd(env, input) {
   const response = await mutateUser(env, userId, async (ctx) => {
     const reused = await existingReceipt(env, ctx, requestHash, fingerprint);
     if (reused) return reused;
-    const pending = await findLogEntry(env.MEMORY, ctx.key, requestHash);
+    // Scoped to this generation: an entry written before a reset has the same name,
+    // and replaying its stored response would swallow the new Add - the request would
+    // answer 200 while its data was never recorded (class A, data lost).
+    const pending = await findLogEntry(env.MEMORY, ctx.key, requestHash, {
+      generation: ctx.manifest.generation ?? null,
+    });
     if (pending) {
       if (pending.entry.fingerprint !== fingerprint)
         throw new HttpError(
