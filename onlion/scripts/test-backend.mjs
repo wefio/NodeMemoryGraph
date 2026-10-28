@@ -879,6 +879,7 @@ print(json.dumps(r))`,
       max_ordered_content_bytes: 4 * 1024 * 1024,
       query_chunk_chars: QUERY_CHUNK_CHARS,
       max_query_chunks: MAX_QUERY_CHUNKS,
+      max_query_features: 24,
     });
     const longQuery = await call("a", "/search", {
       user_id: "payload-limits",
@@ -927,7 +928,9 @@ print(json.dumps(r))`,
     const length = Math.hypot(...mixed);
     assert.ok(Math.abs(length - 1) < 1e-9, `pooled vector must stay unit length, got ${length}`);
     assert.ok(mixed[0] > 0 && mixed[1] > 0, "pooling averages the chunk directions");
-    console.log("PASS: a long query splits into bounded windows and pools to one unit query vector.");
+    console.log(
+      "PASS: a long query splits into bounded windows, and the pool helper keeps a unit vector for callers that need one.",
+    );
   }
 
 } finally {

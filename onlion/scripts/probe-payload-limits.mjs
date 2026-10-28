@@ -68,6 +68,7 @@ try {
     "I research regenerative agriculture at the university.",
     "We adopted a puppy named Biscuit in March.",
     "My commute to work takes about forty minutes by train.",
+    "The spare key is kept under the blue ceramic planter on the balcony.",
   ];
   const added = await post("/add", {
     user_id: userId,
@@ -76,6 +77,21 @@ try {
     messages: turns.map((content) => ({ role: "user", content })),
   });
   check("add seed messages", added.status === 200, `status=${added.status} ${added.ms}ms`);
+
+  // Distractors, so a top-k page is a strict subset and a hit means ranking, not
+  // "the store is smaller than the page".
+  const distractors = Array.from(
+    { length: 24 },
+    (_unused, index) =>
+      `Note ${index + 1}: I rewired the desk lamp, sorted the toolbox, and walked past the harbour at noon.`,
+  );
+  const noise = await post("/add", {
+    user_id: userId,
+    session_id: "noise",
+    request_id: "noise-1",
+    messages: distractors.map((content) => ({ role: "user", content })),
+  });
+  check("add distractor memories", noise.status === 200, `status=${noise.status}`);
 
   // 1. Short query: exactly one embedding text.
   let before = await batcherTexts();
@@ -108,7 +124,38 @@ try {
     `      records=${long.body.data?.length ?? 0} mode=${long.body.retrieval_mode} totalMs=${long.body.timings?.totalMs} chunksEmbedded=${after - before}`,
   );
 
-  // 3. A message above the old 128000-character cap.
+  // 3. A long query whose informative part sits past the model's window. The
+  //    marker is only in the tail, so the whole-text feature alone cannot see it;
+  //    the windowed features can. This is the behaviour per-feature fusion adds.
+  const marker = "blue ceramic planter";
+  const head = "Here is a long transcript of unrelated small talk. ".repeat(120);
+  const tailQuery = `${head}
+Where did I say I keep the spare key?`;
+  const tail = await post("/search", { user_id: userId, query: tailQuery, top_k: 5 });
+  const tailHit = (tail.body.data ?? []).some((item) =>
+    String(item.content ?? "").includes(marker),
+  );
+  check(
+    `a ${tailQuery.length}-character query finds evidence that only its tail mentions`,
+    tail.status === 200 && tailHit,
+    `status=${tail.status} hit=${tailHit} records=${tail.body.data?.length ?? 0}`,
+  );
+
+  // Control: the same shape without the marker must not surface that record, so
+  // the hit above is not an artefact of the filler text.
+  const controlQuery = `${head}
+What did I say about the weather that afternoon?`;
+  const control = await post("/search", { user_id: userId, query: controlQuery, top_k: 5 });
+  const controlHit = (control.body.data ?? []).some((item) =>
+    String(item.content ?? "").includes(marker),
+  );
+  check(
+    "the same query shape without the marker does not surface it",
+    control.status === 200 && !controlHit,
+    `status=${control.status} hit=${controlHit}`,
+  );
+
+  // 4. A message above the old 128000-character cap.
   const bigMessage = ("This is a long turn about the trip. " + "detail ".repeat(10)).repeat(2000);
   const big = await post("/add", {
     user_id: userId,
@@ -122,7 +169,7 @@ try {
     `status=${big.status} ${big.ms}ms ${JSON.stringify(big.body.error ?? "")}`,
   );
 
-  // 4. Over the 6 MiB body limit must still be refused, and clearly.
+  // 5. Over the 6 MiB body limit must still be refused, and clearly.
   const huge = "x".repeat(7 * 1024 * 1024);
   const over = await post("/add", {
     user_id: userId,

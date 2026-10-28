@@ -58,12 +58,7 @@ import {
 import { deltaBytes, USER_DELTA_LIMIT } from "./page-delta.mjs";
 import { deferredDocuments } from "./embedding-session.mjs";
 import { queryVector, rememberQueryVector } from "./query-cache.mjs";
-import {
-  MAX_QUERY_CHUNKS,
-  QUERY_CHUNK_CHARS,
-  poolQueryVectors,
-  splitQueryChunks,
-} from "./query-chunks.mjs";
+import { MAX_QUERY_CHUNKS, QUERY_CHUNK_CHARS, splitQueryChunks } from "./query-chunks.mjs";
 const MAX_DATABASE_BYTES = USER_LIMIT;
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
 /** Payload caps are sized against the platform request body, not against a single
@@ -84,6 +79,7 @@ const MAX_QUERY_CHARS = 1_000_000;
 const MAX_MESSAGE_CHARS = 1_000_000;
 const MAX_COMBINED_MESSAGE_CHARS = 1_500_000;
 const MAX_ORDERED_CONTENT_BYTES = 4 * 1024 * 1024;
+const MAX_QUERY_FEATURES = 24;
 const TEXT_LIMITS = {
   max_query_chars: MAX_QUERY_CHARS,
   max_message_chars: MAX_MESSAGE_CHARS,
@@ -91,6 +87,7 @@ const TEXT_LIMITS = {
   max_ordered_content_bytes: MAX_ORDERED_CONTENT_BYTES,
   query_chunk_chars: QUERY_CHUNK_CHARS,
   max_query_chunks: MAX_QUERY_CHUNKS,
+  max_query_features: MAX_QUERY_FEATURES,
 };
 const SOURCE_REVISION =
   typeof __NMG_SOURCE_REVISION__ === "undefined" ? "development" : __NMG_SOURCE_REVISION__;
@@ -291,24 +288,14 @@ function embeddingClient(env) {
           measure("embedding", async () => {
             const cached = queryVector(key);
             if (cached) return cached;
-            // A long query is one vector, not one broken vector: split it into
-            // bounded windows, embed every window, and pool them. Short queries
-            // produce a single chunk and take the unchanged path.
-            const chunks = inputs.map((input) => splitQueryChunks(input));
-            const flat = chunks.flat();
-            const vectors = await embeddingOperation(() => client.embedQueries(flat));
-            if (vectors.length !== flat.length)
-              throw new Error(
-                `embedding returned ${vectors.length} vectors for ${flat.length} query chunks`,
-              );
-            let offset = 0;
-            const pooled = chunks.map((windows) => {
-              const slice = vectors.slice(offset, offset + windows.length);
-              offset += windows.length;
-              return slice.length === 1 ? slice[0] : poolQueryVectors(slice);
-            });
-            rememberQueryVector(key, pooled);
-            return pooled;
+            // Embedded exactly as given. Long-query handling lives in
+            // `queryFeatures`, which searches the whole clause and its windows as
+            // separate features: pooling them here would average the query's
+            // aspects into one compromise vector, which measured worse than either
+            // the whole text or the per-feature maximum.
+            const vectors = await embeddingOperation(() => client.embedQueries(inputs));
+            rememberQueryVector(key, vectors);
+            return vectors;
           }),
         );
       return queries.get(key);
@@ -506,6 +493,36 @@ async function add(env, input) {
 /** Neighbourhood budget: measured on LoCoMo, five appended records carry 40-47%
  * of the coverage gain of twenty at roughly a third of the text. */
 const APPENDED_MAX_RECORDS = 5;
+
+/** Whole-clause texts plus their split windows, bounded by `MAX_QUERY_FEATURES`.
+ *
+ * A clause is searched by several features: its whole text (what the embedding
+ * model's own window sees) and each window of `splitQueryChunks`. Results fuse by
+ * identity on the highest score, so a record matches a clause by its *best*
+ * feature. Measured on LoCoMo multi-hop, that never loses to the whole text alone
+ * and recovers a query whose informative part sits past the model's window, where
+ * pooling the windows into one vector lost most of the recall. Windows are handed
+ * out round-robin so one very long clause cannot starve the others. A clause that
+ * does not split contributes exactly one feature, which is the previous behaviour. */
+function queryFeatures(queries) {
+  const windows = queries.map((text) => splitQueryChunks(text));
+  const features = queries.map((text) => [text]);
+  let budget = MAX_QUERY_FEATURES - queries.length;
+  const cursors = windows.map(() => 1);
+  let progressed = true;
+  while (budget > 0 && progressed) {
+    progressed = false;
+    for (let i = 0; i < windows.length && budget > 0; i += 1) {
+      const next = cursors[i];
+      if (next >= windows[i].length) continue;
+      cursors[i] = next + 1;
+      features[i].push(windows[i][next]);
+      budget -= 1;
+      progressed = true;
+    }
+  }
+  return features;
+}
 const MAX_SEARCH_CLAUSES = 8;
 /** One request may carry independent retrieval clauses: each is plain text plus
  * an optional label. The legacy `query`(+`options`) shape is one clause. */
@@ -617,6 +634,7 @@ async function search(env, input, options = {}) {
   const optionTexts = choices.map((choice) => textField(choice, "option", 4096));
   const clauses = await readClauses(input, optionTexts);
   const queries = clauses.map((clause) => clause.text);
+  const features = queryFeatures(queries);
   const appendOnly = clauses.map((clause) => clause.appendOnly === true);
   const hasAppendOnly = appendOnly.some(Boolean);
   const appendedById = new Map();
@@ -638,7 +656,7 @@ async function search(env, input, options = {}) {
           const service = new AmlMemoryService(partKey, client);
           return {
             response: await measure("retrieval_including_embedding", () =>
-              service.search(queries, topK, appendOnly),
+              service.search(queries, topK, appendOnly, features),
             ),
           };
         },

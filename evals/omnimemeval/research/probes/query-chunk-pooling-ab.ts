@@ -25,7 +25,7 @@ import { poolQueryVectors, splitQueryChunks } from "../../../../onlion/backend/q
 /** The bge-en query template: chunk vectors must come from the same view as the
  *  baked record vectors or the comparison would measure a template change. */
 const QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
-const CONDITIONS = ["short", "long", "mixed"] as const;
+const CONDITIONS = ["short", "long", "mixed", "tail"] as const;
 type Condition = (typeof CONDITIONS)[number];
 
 interface Qa {
@@ -45,17 +45,26 @@ interface Doc {
 }
 interface Row {
   condition: Condition;
-  aHits: number;
-  cHits: number;
   total: number;
-  aAll: number;
-  cAll: number;
-  identical: boolean;
+  aHits?: number;
+  cHits?: number;
+  dHits?: number;
+  eHits?: number;
+  aAll?: number;
+  cAll?: number;
+  dAll?: number;
+  eAll?: number;
+  identical?: boolean;
 }
 interface Options {
   page: number;
   candidates: number;
   longChars: number;
+  /** Which vector strategies to compute: `a` mean-pool, `c` max-rerank over a
+   *  pooled candidate pool, `d` no splitting, `e` search with the head vector and
+   *  every chunk as separate features, reduced by max. Only the requested arms are
+   *  embedded; `e` needs both the head and the chunks, so it covers `a`/`c`/`d`. */
+  arms: Set<string>;
 }
 
 const STORES: Record<string, string> = {
@@ -162,6 +171,28 @@ function rankByVector(vector: Float32Array, docs: Doc[], limit: number): string[
     .map((row) => row.id);
 }
 
+/** Every feature searched independently, reduced by max: a document's score is
+ *  its best similarity to any feature (head vector or any chunk). This keeps the
+ *  head as "what the query is about" while letting a later chunk match on its own,
+ *  so neither a head-aligned nor a tail-aligned long query is penalised. */
+function rankByFeatureMax(
+  features: Float32Array[],
+  docs: Doc[],
+  limit: number,
+): { page: string[]; perFeature: string[][] } {
+  const perFeature = features.map((feature) => rankByVector(feature, docs, limit));
+  const page = docs
+    .map((doc) => {
+      let best = -Infinity;
+      for (const feature of features) best = Math.max(best, cosineSimilarity(feature, doc.vector));
+      return { id: doc.id, score: best };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((row) => row.id);
+  return { page, perFeature };
+}
+
 /** Page from the pooled vector, then reranked by the best single chunk. */
 function rankByChunkMax(
   pooled: Float32Array,
@@ -227,11 +258,27 @@ function queryTexts(
     .join("\n")
     .slice(0, longChars)
     .padEnd(longChars, " .");
-  return { short: question, long: `${question}\n${padding}`, mixed };
+  // `tail` puts the question after the padding: with no splitting the model only
+  // sees its head window, so this condition separates "truncation works" from
+  // "truncation worked because the question happened to be first".
+  return {
+    short: question,
+    long: `${question}\n${padding}`,
+    mixed,
+    tail: `${padding}\n${question}`,
+  };
 }
 
+/** Three arms per condition:
+ *  A = mean-pooled chunk vector, B rounds the page (shipped);
+ *  C = same pooled vector for a candidate pool, reranked by per-chunk max;
+ *  D = no chunking at all — the whole query as one text, so the embedding model
+ *      applies its own token window. D is the baseline for "is chunking worth it". */
+/** A = mean-pooled chunk vector (shipped); C = pooled candidate pool reranked by
+ *  per-chunk max; D = no chunking at all — the whole query as one text, so the
+ *  embedding model applies its own token window. D is the baseline for "is
+ *  chunking worth it". */
 async function evaluateQuestion(
-  sample: Sample,
   question: string,
   gold: string[][],
   others: string[],
@@ -240,33 +287,54 @@ async function evaluateQuestion(
   options: Options,
 ): Promise<Row[]> {
   const texts = queryTexts(question, others, options.longChars);
+  const wantChunks = options.arms.has("a") || options.arms.has("c") || options.arms.has("e");
+  const wantWhole = options.arms.has("d") || options.arms.has("e");
   const chunksBy = Object.fromEntries(
-    CONDITIONS.map((condition) => [condition, splitQueryChunks(texts[condition]) as string[]]),
+    CONDITIONS.map((condition) => [
+      condition,
+      wantChunks ? (splitQueryChunks(texts[condition]) as string[]) : [],
+    ]),
   ) as Record<Condition, string[]>;
-  const flat = CONDITIONS.flatMap((condition) => chunksBy[condition]);
-  const vectors = await embed(embedBase, flat);
+  const chunkTexts = wantChunks
+    ? CONDITIONS.flatMap((condition) => chunksBy[condition])
+    : ([] as string[]);
+  const wholeTexts = wantWhole ? CONDITIONS.map((condition) => texts[condition]) : [];
+  const vectors = await embed(embedBase, [...chunkTexts, ...wholeTexts]);
+  const whole = vectors.slice(chunkTexts.length);
   const rows: Row[] = [];
   let offset = 0;
-  for (const condition of CONDITIONS) {
+  for (const [index, condition] of CONDITIONS.entries()) {
     const count = chunksBy[condition].length;
     const chunks = vectors.slice(offset, offset + count);
     offset += count;
-    const pooled = count === 1 ? chunks[0]! : poolQueryVectors(chunks);
-    const aPage = rankByVector(pooled, docs, options.page);
-    const cPage = rankByChunkMax(pooled, chunks, docs, options);
-    const a = recallOf(gold, aPage);
-    const c = recallOf(gold, cPage);
-    rows.push({
-      condition,
-      aHits: a.hits,
-      cHits: c.hits,
-      total: a.total,
-      aAll: a.all,
-      cAll: c.all,
-      identical: aPage.join(",") === cPage.join(","),
-    });
+    const row: Row = { condition, total: gold.length };
+    if (wantChunks) {
+      const pooled = count === 1 ? chunks[0]! : poolQueryVectors(chunks);
+      const aPage = rankByVector(pooled, docs, options.page);
+      const a = recallOf(gold, aPage);
+      row.aHits = a.hits;
+      row.aAll = a.all;
+      if (options.arms.has("c")) {
+        const cPage = rankByChunkMax(pooled, chunks, docs, options);
+        const c = recallOf(gold, cPage);
+        row.cHits = c.hits;
+        row.cAll = c.all;
+        row.identical = aPage.join(",") === cPage.join(",");
+      }
+    }
+    if (wantWhole) {
+      const d = recallOf(gold, rankByVector(whole[index]!, docs, options.page));
+      row.dHits = d.hits;
+      row.dAll = d.all;
+    }
+    if (options.arms.has("e")) {
+      const { page } = rankByFeatureMax([whole[index]!, ...chunks], docs, options.page);
+      const e = recallOf(gold, page);
+      row.eHits = e.hits;
+      row.eAll = e.all;
+    }
+    rows.push(row);
   }
-  void sample;
   return rows;
 }
 
@@ -288,9 +356,7 @@ async function runSample(
     if (!question || labels.length === 0) continue;
     const gold = goldSetsFor(labels, turns, docs);
     if (gold.length === 0) continue;
-    rows.push(
-      ...(await evaluateQuestion(sample, question, gold, others, docs, paths.embed, options)),
-    );
+    rows.push(...(await evaluateQuestion(question, gold, others, docs, paths.embed, options)));
   }
   return rows;
 }
@@ -299,21 +365,52 @@ function summarize(rows: Row[]): Array<Record<string, string | number>> {
   return CONDITIONS.map((condition) => {
     const slice = rows.filter((row) => row.condition === condition);
     const n = Math.max(1, slice.length);
-    const sum = (key: keyof Row) => slice.reduce((total, row) => total + Number(row[key]), 0);
-    const wins = slice.filter((row) => row.cAll > row.aAll).length;
-    const losses = slice.filter((row) => row.cAll < row.aAll).length;
+    const totalLabels = Math.max(
+      1,
+      slice.reduce((sum, row) => sum + row.total, 0),
+    );
+    const pct = (key: "aHits" | "cHits" | "dHits" | "eHits") => {
+      const present = slice.filter((row) => row[key] !== undefined);
+      if (present.length === 0) return null;
+      const hits = present.reduce((sum, row) => sum + Number(row[key]), 0);
+      return Number(((100 * hits) / totalLabels).toFixed(2));
+    };
+    const share = (key: "aAll" | "cAll" | "dAll" | "eAll") => {
+      const present = slice.filter((row) => row[key] !== undefined);
+      if (present.length === 0) return null;
+      return Number(
+        ((100 * present.reduce((sum, row) => sum + Number(row[key]), 0)) / n).toFixed(2),
+      );
+    };
+    const paired = (left: "aAll" | "cAll" | "eAll", right: "dAll" | "aAll" | "cAll") => {
+      const usable = slice.filter((row) => row[left] !== undefined && row[right] !== undefined);
+      if (usable.length === 0) return "-";
+      const wins = usable.filter((row) => Number(row[left]) > Number(row[right])).length;
+      const losses = usable.filter((row) => Number(row[left]) < Number(row[right])).length;
+      return `${wins}W/${losses}L p=${signTestP(wins, losses).toFixed(4)}`;
+    };
+    const cOverD = paired("cAll", "dAll");
+    const aOverD = paired("aAll", "dAll");
+    const eOverD = paired("eAll", "dAll");
+    const eOverA = paired("eAll", "aAll");
+    const eOverC = paired("eAll", "cAll");
     return {
       condition,
       n: slice.length,
-      aRecall: Number(((100 * sum("aHits")) / Math.max(1, sum("total"))).toFixed(2)),
-      cRecall: Number(((100 * sum("cHits")) / Math.max(1, sum("total"))).toFixed(2)),
-      aAll: Number(((100 * sum("aAll")) / n).toFixed(2)),
-      cAll: Number(((100 * sum("cAll")) / n).toFixed(2)),
+      aRecall: pct("aHits"),
+      cRecall: pct("cHits"),
+      dRecall: pct("dHits"),
+      eRecall: pct("eHits"),
+      aAll: share("aAll"),
+      cAll: share("cAll"),
+      dAll: share("dAll"),
+      eAll: share("eAll"),
       identical: slice.filter((row) => row.identical).length,
-      wins,
-      losses,
-      ties: slice.length - wins - losses,
-      p: Number(signTestP(wins, losses).toFixed(4)),
+      cOverD,
+      aOverD,
+      eOverD,
+      eOverA,
+      eOverC,
     };
   });
 }
@@ -329,6 +426,7 @@ async function main(): Promise<void> {
       page: { type: "string", default: "20" },
       candidates: { type: "string", default: "100" },
       "long-chars": { type: "string", default: "6000" },
+      arms: { type: "string", default: "a,c,d" },
     },
   });
   if (!values.data || !values.stores || !values.bge || !values.embed)
@@ -337,6 +435,12 @@ async function main(): Promise<void> {
     page: Number(values.page),
     candidates: Number(values.candidates),
     longChars: Number(values["long-chars"]),
+    arms: new Set(
+      values.arms
+        .split(",")
+        .map((arm) => arm.trim())
+        .filter(Boolean),
+    ),
   };
   const paths = {
     stores: values.stores,
@@ -354,9 +458,12 @@ async function main(): Promise<void> {
   );
   for (const row of summary)
     console.log(
-      `${String(row.condition).padEnd(6)} identical=${row.identical}/${row.n} | ` +
-        `A all=${row.aAll}% recall=${row.aRecall}% | C all=${row.cAll}% recall=${row.cRecall}% | ` +
-        `${row.wins}W/${row.losses}L/${row.ties}T p=${row.p}`,
+      `${String(row.condition).padEnd(6)} n=${row.n} | ` +
+        `D(no-split) all=${row.dAll}% rec=${row.dRecall}% | ` +
+        `A(pool) all=${row.aAll}% rec=${row.aRecall}% | ` +
+        `C(max-rerank) all=${row.cAll}% rec=${row.cRecall}% | ` +
+        `E(head+chunks max) all=${row.eAll}% rec=${row.eRecall}% | ` +
+        `E>D ${row.eOverD} | E>A ${row.eOverA} | E>C ${row.eOverC}`,
     );
   console.log(`wrote ${values.out}`);
 }

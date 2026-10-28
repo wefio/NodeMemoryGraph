@@ -200,8 +200,20 @@ export class AmlMemoryService {
   /** Search the ranked clauses into one page and the append-only clauses into a
    * separate supplement. Append-only results never compete for the page slots:
    * they are returned as `appended`, deduplicated against the page, so a
-   * retrieval dimension that is broad but imprecise cannot crowd out evidence. */
-  async search(queries: string[], limit: number, appendOnly: readonly boolean[] = []) {
+   * retrieval dimension that is broad but imprecise cannot crowd out evidence.
+   *
+   * `features[i]` optionally lists several texts to search for clause `i` — the
+   * whole clause (which is what the embedding model's own window sees) plus its
+   * windows. Every feature is searched and results fuse by identity on the highest
+   * score, so a clause scores a record by its *best* matching feature instead of a
+   * pooled average; a long query keeps both its opening and a later passage. One
+   * feature per clause is the previous behaviour, byte for byte. */
+  async search(
+    queries: string[],
+    limit: number,
+    appendOnly: readonly boolean[] = [],
+    features?: readonly (readonly string[])[],
+  ) {
     if (this.client) {
       const health = this.store.embeddingIndexHealth(this.client.indexId);
       if (!health || health.pending.records || !health.targets.includes("records")) {
@@ -218,27 +230,31 @@ export class AmlMemoryService {
     for (const [index, query] of queries.entries()) {
       // User isolation is the physical manifest/partition boundary, including
       // legacy rows whose pre-upgrade scope differs. No session filter.
-      const context = await searchMemoryContext(this.store, this.client, query, {
-        ...AML_SEARCH_PROFILE,
-        limit,
-        activeGraphBudget: {
-          maxNodes: limit,
-          maxEvidence: limit,
-          maxTierBudget: limit,
-          maxTokens: Math.max(1000, limit * 300),
-        },
-      });
-      records ||= context.retrieval?.mode === "hybrid";
-      if (appendOnly[index]) {
-        for (const result of context.results) {
-          const prior = appendedById.get(result.memory.id);
-          if (!prior || result.combinedScore > prior.combinedScore) {
-            appendedById.set(result.memory.id, result);
+      const texts = features?.[index]?.length ? features[index]! : [query];
+      for (const text of texts) {
+        const context = await searchMemoryContext(this.store, this.client, text, {
+          ...AML_SEARCH_PROFILE,
+          limit,
+          activeGraphBudget: {
+            maxNodes: limit,
+            maxEvidence: limit,
+            maxTierBudget: limit,
+            maxTokens: Math.max(1000, limit * 300),
+          },
+        });
+        records ||= context.retrieval?.mode === "hybrid";
+        if (appendOnly[index]) {
+          for (const result of context.results) {
+            const prior = appendedById.get(result.memory.id);
+            if (!prior || result.combinedScore > prior.combinedScore) {
+              appendedById.set(result.memory.id, result);
+            }
           }
+          continue;
         }
-        continue;
+        // Attribution stays per clause: a chunk of clause i contributes to i.
+        for (const result of context.results) trackCandidate(byId, index, result);
       }
-      for (const result of context.results) trackCandidate(byId, index, result);
     }
     // Fuse clauses by identity, keep native scores, apply the AML hard cap.
     const selected = [...byId.values()]
