@@ -56,7 +56,7 @@ import {
   resetUser,
   manifestFormat,
   pendingCount,
-  withPending,
+  setPending,
 } from "./storage.mjs";
 import { deltaBytes, USER_DELTA_LIMIT } from "./page-delta.mjs";
 import { deferredDocuments } from "./embedding-session.mjs";
@@ -546,7 +546,7 @@ async function acceptAdd(env, input) {
     // the counter one too high - and an over-count only costs a log listing. The
     // other order strands an entry no counter accounts for, and `pendingCount === 0`
     // then hides it from every search (I1).
-    accepted = applyPending(ctx.manifest, pendingCount(ctx.manifest) + 1);
+    accepted = setPending(ctx.manifest, pendingCount(ctx.manifest) + 1);
     reservation = {
       key: ctx.key,
       entry: {
@@ -638,7 +638,7 @@ async function foldPending(env, userId) {
     }
     drop = [...names];
     if (names.size === 0) return { readOnly: true, response: { folded: 0 } };
-    remaining = applyPending(
+    remaining = setPending(
       ctx.manifest,
       Math.max(0, pendingCount(ctx.manifest) - names.size),
     );
@@ -668,18 +668,6 @@ async function foldPending(env, userId) {
   }
   return { folded: result.folded ?? 0, remaining };
 }
-/** Applies a pending count to the manifest being committed.
- *
- *  `Object.assign` cannot express `withPending`'s zero case: at zero it returns a
- *  copy *without* the key, and assigning over a manifest that still has `pending`
- *  leaves the old value in place. The last fold then commits "0" while the stored
- *  manifest still says 7, so the search short-circuit stays disabled forever. */
-function applyPending(manifest, count) {
-  const next = withPending(manifest, count);
-  if (!("pending" in next)) delete manifest.pending;
-  Object.assign(manifest, next);
-  return manifest.pending ?? 0;
-}
 /** Gives one reserved slot back after a write that never became durable.
  *
  *  Relative, not absolute: a concurrent accept may have reserved in between, and
@@ -689,7 +677,7 @@ async function releasePending(env, userId) {
   return mutateUser(env, userId, async (ctx) => {
     const count = pendingCount(ctx.manifest);
     if (count === 0) return { readOnly: true, response: { pending: 0 } };
-    applyPending(ctx.manifest, count - 1);
+    setPending(ctx.manifest, count - 1);
     return { response: { pending: count - 1 } };
   });
 }
@@ -699,7 +687,7 @@ async function reconcilePending(env, userId, count) {
   return mutateUser(env, userId, async (ctx) => {
     if (pendingCount(ctx.manifest) === count)
       return { readOnly: true, response: { pending: count } };
-    applyPending(ctx.manifest, count);
+    setPending(ctx.manifest, count);
     return { response: { pending: count } };
   });
 }
@@ -1561,7 +1549,15 @@ async function foldRoute(request, env, url, path) {
     if (step.released) released += 1;
     if (step.folded === 0 && !step.released) break;
   }
-  return json({ success: true, user_id: userId, folded, released, remaining });
+  // A drain is a verification, not an attempt: the runbook uses it before rolling
+  // the code back, and a v4 manifest is unreadable to an older deployment. Answering
+  // 200 with entries left would make that check a false green, so anything not fully
+  // drained is a 409 the caller has to retry.
+  const drained = remaining === 0;
+  return json(
+    { success: drained, user_id: userId, folded, released, remaining },
+    drained ? 200 : 409,
+  );
 }
 async function addRoute(request, env, path) {
   if ((path !== "/add" && path !== "/remember") || request.method !== "POST") return undefined;

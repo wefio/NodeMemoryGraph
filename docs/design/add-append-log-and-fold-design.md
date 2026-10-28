@@ -128,7 +128,9 @@ stays, so a fold that races a reset cannot resurrect old data.
 
 `/health limits` reports `add_mode`, `pending_read_limit`, `merge_batch`;
 `/capacity` reports `pending_entries`, `pending_bytes`, `folded_total`. `Add`
-responses gain phase timings (`accept`, `fold`) so the next latency question can be
+`POST /admin/fold?user_id=` drains a log in bounded rounds and answers **409** until it
+is empty, so the pre-rollback check cannot pass half-drained. `Add` responses gain phase
+timings (`accept`, `fold`) so the next latency question can be
 answered from a response instead of a log hunt.
 
 ## Frozen interfaces (slice 1)
@@ -198,10 +200,9 @@ async function foldPending(env, userId, limits)            // { folded, remainin
 async function pendingForSearch(env, userId, limit)        // provisional records, max MAX_PENDING_READ
 ```
 
-`pendingForSearch` returns page-shaped items (`id`/`content`/`score`/`stored_at`
-with `id` prefixed `pending:`) so the existing fusion by identity and highest score
-applies unchanged. Each pending item costs one embedding call at read time, capped
-at `MAX_PENDING_READ` per search.
+`pendingForSearch` returns page-shaped items with `pending:`-prefixed ids so the
+existing fusion applies unchanged; each item costs one embedding call, capped at
+`MAX_PENDING_READ`.
 
 ## Invariants (each one becomes a test)
 

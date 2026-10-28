@@ -78,7 +78,10 @@ try {
   assert.equal(health.body.limits.add_mode, "log", "the fixture must run the log path");
 
   // I1: accepted Add is searchable before any fold.
-  const first = await call("/add", addBody("alice", "req-1", "the spare key is under the blue planter"));
+  const first = await call(
+    "/add",
+    addBody("alice", "req-1", "the spare key is under the blue planter"),
+  );
   assert.equal(first.status, 200, JSON.stringify(first.body).slice(0, 900));
   assert.equal(first.body.status, "completed");
   const seen = await call("/search", { user_id: "alice", query: "spare key", top_k: 20 });
@@ -93,7 +96,10 @@ try {
   );
 
   // I2: replay returns the same body; different content for the same id is 409.
-  const replay = await call("/add", addBody("alice", "req-1", "the spare key is under the blue planter"));
+  const replay = await call(
+    "/add",
+    addBody("alice", "req-1", "the spare key is under the blue planter"),
+  );
   assert.deepEqual(replay.body, first.body, "a replay must return the stored response");
   const conflict = await call("/add", addBody("alice", "req-1", "different content entirely"));
   assert.equal(conflict.status, 409);
@@ -101,8 +107,15 @@ try {
 
   // Fold: enough accepts trip the trigger, and everything stays searchable.
   for (let index = 0; index < 30; index += 1)
-    await call("/add", addBody("alice", `bulk-${index}`, `filler turn number ${index} about the garden`));
-  const afterFold = await call("/search", { user_id: "alice", query: "spare key under the blue planter", top_k: 50 });
+    await call(
+      "/add",
+      addBody("alice", `bulk-${index}`, `filler turn number ${index} about the garden`),
+    );
+  const afterFold = await call("/search", {
+    user_id: "alice",
+    query: "spare key under the blue planter",
+    top_k: 50,
+  });
   assert.equal(afterFold.status, 200);
   const keyRecord = afterFold.body.data.find((item) => String(item.content).includes("spare key"));
   assert.ok(keyRecord, "a folded entry must remain searchable");
@@ -116,7 +129,10 @@ try {
   );
 
   // I2 after folding: the receipt now lives in the partition.
-  const replayAfterFold = await call("/add", addBody("alice", "req-1", "the spare key is under the blue planter"));
+  const replayAfterFold = await call(
+    "/add",
+    addBody("alice", "req-1", "the spare key is under the blue planter"),
+  );
   assert.deepEqual(replayAfterFold.body, first.body, "replay must survive folding");
 
   // The counter is observable, and draining it is an operation, not a side effect:
@@ -124,16 +140,44 @@ try {
   // the log on every request.
   const waiting = await call("/capacity?user_id=alice");
   assert.ok(waiting.body.pending_entries > 0, "the burst must leave entries waiting");
-  const drain = await call("/admin/fold?user_id=alice", {}, {
-    "oai-authenticated-user-email": "owner@example.test",
-    origin: "http://localhost",
-  });
+  const drain = await call(
+    "/admin/fold?user_id=alice",
+    {},
+    {
+      "oai-authenticated-user-email": "owner@example.test",
+      origin: "http://localhost",
+    },
+  );
   assert.equal(drain.status, 200, JSON.stringify(drain.body));
   assert.ok(drain.body.folded > 0, "draining must fold something");
   const drained = await call("/capacity?user_id=alice");
-  assert.equal(drained.body.pending_entries, 0, "draining must zero the counter: drain=" + JSON.stringify(drain.body) + " before=" + waiting.body.pending_entries + " after=" + drained.body.pending_entries);
-  const afterDrain = await call("/search", { user_id: "alice", query: "spare key under the blue planter", top_k: 50 });
-  const drainedRecord = afterDrain.body.data.find((item) => String(item.content).includes("spare key"));
+  assert.equal(
+    drained.body.pending_entries,
+    0,
+    `draining must zero the counter: drain=${JSON.stringify(drain.body)} before=${waiting.body.pending_entries} after=${drained.body.pending_entries}`,
+  );
+  // A drain is a verification, not an attempt: the runbook gates a rollback on it, so
+  // "clean" must be distinguishable from "ran out of rounds".
+  assert.equal(drain.body.success, true, "a drained log must report success");
+  const again = await call(
+    "/admin/fold?user_id=alice",
+    {},
+    {
+      "oai-authenticated-user-email": "owner@example.test",
+      origin: "http://localhost",
+    },
+  );
+  assert.equal(again.status, 200, "draining an already clean log stays 200");
+  assert.equal(again.body.remaining, 0);
+  assert.equal(again.body.folded, 0);
+  const afterDrain = await call("/search", {
+    user_id: "alice",
+    query: "spare key under the blue planter",
+    top_k: 50,
+  });
+  const drainedRecord = afterDrain.body.data.find((item) =>
+    String(item.content).includes("spare key"),
+  );
   assert.ok(drainedRecord, "a drained entry must still be searchable");
   assert.ok(
     !String(drainedRecord.id).startsWith("pending:"),
@@ -141,7 +185,11 @@ try {
   );
 
   // Reset drains the log as well as the partitions.
-  const reset = await call("/reset", { user_id: "alice", confirm_user_id: "alice", reset_id: `reset-${++counter}` });
+  const reset = await call("/reset", {
+    user_id: "alice",
+    confirm_user_id: "alice",
+    reset_id: `reset-${++counter}`,
+  });
   assert.equal(reset.status, 200, JSON.stringify(reset.body));
   const afterReset = await call("/search", { user_id: "alice", query: "spare key", top_k: 20 });
   assert.equal(afterReset.body.data.length, 0, "reset must remove pending and folded data");

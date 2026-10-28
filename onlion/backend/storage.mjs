@@ -34,6 +34,19 @@ export function withPending(manifest,count){
   if(count)next.pending=count;else delete next.pending;
   return next;
 }
+/** Sets the pending count on the manifest **in place**.
+ *
+ *  Zero deletes the key instead of storing `pending: 0`: the lazy format bump and
+ *  the "a drained log stores the same bytes as a deployment that never had one"
+ *  invariant both depend on absence, not on a zero value. In place because the
+ *  caller is holding the clone it is about to commit - and because
+ *  `Object.assign(manifest, withPending(manifest, 0))` silently keeps the old key,
+ *  which is a bug this service already shipped once. Returns the stored count. */
+export function setPending(manifest,count){
+  if(!Number.isSafeInteger(count)||count<0)throw new TypeError('pending count must be a non-negative integer');
+  if(count)manifest.pending=count;else delete manifest.pending;
+  return count;
+}
 /** Format to store. Pending entries make the manifest unreadable to a
  *  deployment that predates the log, which is the correct failure mode. */
 export function manifestFormat(manifest){
