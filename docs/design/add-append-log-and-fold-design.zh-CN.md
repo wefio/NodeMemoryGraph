@@ -158,6 +158,10 @@ export async function clearLog(bucket, userKey)  // reset 路径；前缀必须�
 `commitManifest` 写 `manifestFormat(manifest)`；`loadManifest` 接受 v4。只有
 `pending > 0` 时格式才变成 v4——这正是"开关关闭时盘上字节不变"的保证所在。
 
+`clearLog` 的前缀取自 `append-log.mjs`，不在本地重复声明字符串。两半并行开发期间刻意避免
+这个运行时依赖，为的是任一半能单独跑起来；两者一起发布之后，"前缀不可能漂移"比"模块能
+单独加载"更值钱。
+
 ### worker 接缝（单写者）
 
 ```js

@@ -184,6 +184,11 @@ export async function clearLog(bucket, userKey)  // reset path; prefix must equa
 format only becomes v4 once `pending > 0`, which is what keeps a flag-off deployment
 byte-identical on disk.
 
+`clearLog` takes its prefix from `append-log.mjs` instead of redeclaring the string.
+That runtime dependency was deliberately avoided while the two halves were being
+written in parallel, so that either could run alone; once they ship together, a
+prefix that cannot drift is worth more than a module that loads on its own.
+
 ### Worker seams (single writer)
 
 ```js
