@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url);
-const {Miniflare}=createRequire(require.resolve('wrangler/package.json'))('miniflare');
+// Resolved from this package: wrangler's own range tracks a newer Miniflare whose
+// constructor rejects this fixture's options, and a transitive dependency is not a pin.
+const {Miniflare}=require('miniflare');
 const root=process.cwd(), storage=path.join(root,'.sites-runtime/resume-r2');
 fs.rmSync(storage,{recursive:true,force:true});
 const modules=[{type:'ESModule',path:root+'/dist/server/index.js'},

@@ -37,6 +37,26 @@ const ACKNOWLEDGED_ROOTS = [
   },
   { prefix: "evals/", onDemand: true, reason: "on-demand only" },
   {
+    prefix: "onlion/scripts/test-cos-bucket.mjs",
+    onDemand: true,
+    reason: "needs a real COS bucket and credentials",
+  },
+  {
+    prefix: "onlion/scripts/test-edgeone-worker.mjs",
+    onDemand: true,
+    reason: "needs a deployed endpoint and credentials",
+  },
+  {
+    prefix: "onlion/scripts/test-capacity.mjs",
+    onDemand: true,
+    reason: "asserts the synchronous accept path; not yet ported to the log default",
+  },
+  {
+    prefix: "onlion/scripts/test-request-resume.mjs",
+    onDemand: true,
+    reason: "asserts the synchronous accept path; not yet ported to the log default",
+  },
+  {
     prefix: "docs/experiments/execution/archive/",
     onDemand: false,
     reason: "archived candidate evidence",
