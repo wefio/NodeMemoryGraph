@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- deliberate test/diagnostic output */
 /* Verifies the log accept path end to end: durable accept, replay, fold, and that a
  * search sees an entry that has not been folded yet. Runs against the built worker
  * with a stub embedding endpoint, so no model or network is involved. */

@@ -382,7 +382,7 @@ assert.throws(() => logEntryName(1700000000000, `${'A'.repeat(64)}`), RangeError
     `1700000000001-${HASH_A}.json`,
     `1700000000002-${HASH_A}.json`,
   ];
-  for (const [index, name] of names.entries())
+  for (let index = 0; index < names.length; index += 1)
     await putLogEntry(bucket, USER, entry(1700000000000 + index, HASH_A, `m${index}`));
   assert.equal(bucket.records.size, 3);
 

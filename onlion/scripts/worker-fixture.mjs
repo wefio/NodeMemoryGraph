@@ -2,7 +2,10 @@ import path from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { Miniflare } = createRequire(require.resolve("wrangler/package.json"))("miniflare");
+// Resolved from this package, not through wrangler: wrangler's own range tracks a newer
+// Miniflare whose constructor rejects this fixture's options, and a transitive dependency
+// is not a pin. CI installs from the lockfile, so the two have to agree.
+const { Miniflare } = require("miniflare");
 const root = path.resolve(import.meta.dirname, "..");
 const modules = [
   { type: "ESModule", path: path.join(root, "dist/server/index.js") },

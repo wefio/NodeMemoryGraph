@@ -2,43 +2,35 @@
  * Does the log accept path actually beat the synchronous one under a burst?
  *
  * The stopping rules for the append-log write path put one number behind the default:
- * a 16-way concurrent Add burst must show a lower p95 with `NMG_ADD_MODE=log` than with
+ * a 16-way concurrent Add burst must show a lower p95 with the log accept path than with
  * `sync`. This produces both numbers from the same client against the same endpoint.
  *
  * Three things it deliberately does differently from a naive burst loop:
  *
  *  - **one user per run, not per round.** A fresh user per round peaks at `concurrency`
- *    pending entries, which is below `FOLD_TRIGGER`, so a burst benchmark would never
- *    fold at all - it would measure accept and call it the write path. One user lets
- *    pending accumulate across rounds, which is what makes folding happen, and it also
- *    stops every round from paying the first-Add cold path again.
- *  - **folds are derived, not read.** There is no `folded_total` anywhere in the service
- *    (`/capacity` reports `pending_entries` only), so each round samples pending before
- *    and after and derives how many folds must have run, marking the value `derived`.
+ *    pending entries, below `FOLD_TRIGGER`, so a burst benchmark would never fold at all
+ *    and would measure accept while calling it the write path.
+ *  - **folds are derived, not read.** The service exposes no fold counter, so each round
+ *    samples `pending_entries` before and after and derives how many folds must have run.
  *  - **the fold cost is isolated.** `--mode fold` warms pending to one below the trigger
- *    and then times a single Add, which is the request that must pay both the accept and
- *    a fold. Mixed into a burst, that request cannot be identified after the fact.
+ *    and then times a single Add, which is the request that must pay both.
+ *
+ * A percentile needs enough samples to exist: with fewer than twenty the 0.95 quantile is
+ * the maximum, so per-round lines are labelled `p95(=max)` and only the pooled figure -
+ * `concurrency x rounds` - is quoted as a p95.
+ *
+ * Rounds are grouped by `crossedTrigger` (`pendingBefore + accepted >= FOLD_TRIGGER`):
+ * a round that crosses contains the request that had to fold. It is `null` when the
+ * counter could not be read, and `null` is excluded from the clean group rather than
+ * counted as clean.
+ *
+ * Failed *connections* are reported apart from server failures, and a run where most
+ * requests never connected says so instead of publishing percentiles about this host.
  *
  *   node onlion/scripts/bench-add-concurrency.mjs \
  *     --endpoint https://api.nmgmemory.dpdns.org --key "$KEY" \
  *     --concurrency 16 --messages 8 --rounds 3 --warmup 1 \
- *     --owner owner@example.test
- *
- * A percentile needs enough samples to exist: with `count < 20` the 0.95 quantile is the
- * maximum, so per-round lines (16 samples by default) are labelled `p95(=max)` and only
- * the pooled figure - `concurrency x rounds`, 48 by default - is quoted as a p95. The
- * stopping rule quotes the pooled value for that reason.
- *
- * Rounds are grouped after the fact by `crossedTrigger`, which is `pendingBefore +
- * accepted >= FOLD_TRIGGER`: a round that crosses the trigger contains the request that
- * had to fold. It is `null` when `pendingBefore` could not be read - unknown is not false,
- * so those rounds are excluded from the clean group rather than counted as clean: one
- * capacity read that times out would otherwise mix fold samples into "pure accept" and
- * contaminate exactly the number the gate quotes.
- *
- * Failed *connections* are reported apart from server failures: on a bad minute this
- * host cannot establish TLS, and folding both into one number would let the percentiles
- * describe the client while looking like an answer about the service.
+ *     --owner owner@example.test --add-mode log
  */
 import { parseArgs } from "node:util";
 
@@ -72,8 +64,8 @@ async function request(url, options) {
   try {
     const response = await fetch(url, options);
     const text = await response.text();
-    // The parsed body is kept for the capacity reads and dropped before serialisation:
-    // a page of records per request would dominate the JSON and say nothing about timing.
+    // The parsed body is kept for the capacity reads and dropped before serialisation: a
+    // page of records per request would dominate the JSON and say nothing about timing.
     let body = null;
     try {
       body = JSON.parse(text);
@@ -172,16 +164,19 @@ function summarise(label, results) {
   };
 }
 
-/** How many folds must have run: pending grew by the accepts that succeeded and shrank
- *  by what each fold absorbed. Derived, because the service exposes no fold counter.
+const stats = (times) => ({
+  n: times.length,
+  p50: Math.round(percentile(times, 0.5)),
+  p95: Math.round(percentile(times, 0.95)),
+  p95IsMax: times.length < 20,
+});
+
+/** How many folds must have run: pending grew by the accepts that succeeded and shrank by
+ *  what each fold absorbed. Derived, because the service exposes no fold counter.
  *
- *  Only meaningful with the log accept path: in `sync` mode an accepted Add never becomes
- *  a pending entry, so the same arithmetic would invent folds that cannot exist. The
- *  declared mode decides, and a mismatch between the declaration and what pending does is
- *  reported rather than smoothed over. */
+ *  Only meaningful with the log accept path: in `sync` mode an accepted Add never becomes a
+ *  pending entry, so the same arithmetic would invent folds that cannot exist. */
 function deriveFolds(addMode, before, accepted, after) {
-  // In sync mode folding cannot happen at all, so the answer is zero rather than
-  // unknown; only a log-mode run that cannot read the counter gets `null`.
   if (addMode !== "log") return 0;
   if (before === null || after === null) return null;
   const absorbed = before + accepted - after;
@@ -189,7 +184,7 @@ function deriveFolds(addMode, before, accepted, after) {
   return Math.round(absorbed / FOLD_BATCH);
 }
 
-async function main() {
+function parseOptions() {
   const { values } = parseArgs({
     options: {
       endpoint: { type: "string" },
@@ -210,201 +205,216 @@ async function main() {
   if (!endpoint || !values.key) {
     process.stderr.write("usage: bench-add-concurrency --endpoint URL --key KEY\n");
     process.exitCode = 2;
-    return;
+    return null;
   }
-  const concurrency = Number(values.concurrency);
-  const messages = Number(values.messages);
-  const rounds = Number(values.rounds);
-  const warmup = Number(values.warmup);
-  const timeout = Number(values.timeout);
   if (values.mode !== "burst" && values.mode !== "fold") {
     process.stderr.write(`unknown --mode: ${values.mode} (burst | fold)\n`);
     process.exitCode = 2;
-    return;
+    return null;
   }
+  return {
+    endpoint,
+    key: values.key,
+    concurrency: Number(values.concurrency),
+    messages: Number(values.messages),
+    rounds: Number(values.rounds),
+    warmup: Number(values.warmup),
+    timeout: Number(values.timeout),
+    mode: values.mode,
+    addMode: values["add-mode"],
+    owner: values.owner,
+    json: values.json,
+    label: values.label,
+  };
+}
 
-  // Three attempts: one stall is how an ordinary host behaves on a bad minute, but a
-  // benchmark against a dead endpoint must not report zeros.
-  let reachable = false;
+/** Three attempts: one stall is how an ordinary host behaves on a bad minute, but a
+ *  benchmark against a dead endpoint must not report zeros. */
+async function waitForEndpoint(endpoint) {
   let server = null;
-  for (let attempt = 0; attempt < 3 && !reachable; attempt += 1) {
+  for (let attempt = 0; attempt < 3 && server === null; attempt += 1) {
     try {
       const health = await fetch(`${endpoint}/health`, { signal: AbortSignal.timeout(20_000) });
-      reachable = health.ok;
-      if (reachable) server = await health.json();
-      else
-        process.stderr.write(`health answered ${health.status}
-`);
+      if (health.ok) server = await health.json();
+      else process.stderr.write(`health answered ${health.status}\n`);
     } catch (error) {
-      process.stderr.write(`health attempt ${attempt + 1} failed: ${error.message}
-`);
+      process.stderr.write(`health attempt ${attempt + 1} failed: ${error.message}\n`);
     }
   }
-  if (!reachable) {
-    process.stderr.write(`endpoint unreachable: ${endpoint}\n`);
+  return server;
+}
+
+async function runFoldMode(config, summary) {
+  // One below the trigger, untimed, so the single timed Add is the request that pays a
+  // fold. Its cost is an upper bound on what folding adds to one Add.
+  for (let index = 0; index < FOLD_TRIGGER - 1; index += 1)
+    await add(config.endpoint, config.key, summary.user, `${summary.stamp}-pre-${index}`, config.messages, config.timeout);
+  const before = await pendingOf(config.endpoint, config.key, summary.user, config.timeout);
+  const timed = await add(config.endpoint, config.key, summary.user, `${summary.stamp}-boundary`, config.messages, config.timeout);
+  const after = await pendingOf(config.endpoint, config.key, summary.user, config.timeout);
+  summary.boundary = {
+    ...summarise("fold boundary", [timed]),
+    sample: timing(timed),
+    pendingBefore: before,
+    pendingAfter: after,
+    foldsDerived: deriveFolds(summary.server.add_mode ?? config.addMode, before, timed.status === 200 ? 1 : 0, after),
+  };
+  // One sample: there is no percentile to report, only that measurement, and it is an
+  // upper bound on what folding adds to one Add.
+  if (!config.json)
+    process.stdout.write(
+      `fold boundary (single sample, upper bound): status ${summary.boundary.sample.status} ` +
+        `in ${summary.boundary.sample.ms}ms | pending ${before} -> ${after} | ` +
+        `folds derived=${summary.boundary.foldsDerived}\n`,
+    );
+}
+
+async function runBurstMode(config, summary) {
+  for (let round = 0; round < config.rounds; round += 1) {
+    // Drain before each round when a credential allows it: otherwise only the first round
+    // sits below the fold trigger, the clean group collapses to one round (n=16, a maximum
+    // rather than a p95), and the gate has nothing to quote.
+    if (config.owner) await drain(config.endpoint, config.key, summary.user, config.owner, config.timeout);
+    const before = await pendingOf(config.endpoint, config.key, summary.user, config.timeout);
+    const tasks = Array.from(
+      { length: config.concurrency },
+      (_unused, slot) => () =>
+        add(config.endpoint, config.key, summary.user, `${summary.stamp}-${round}-${slot}`, config.messages, config.timeout),
+    );
+    const results = await burst(tasks, config.concurrency);
+    const after = await pendingOf(config.endpoint, config.key, summary.user, config.timeout);
+    const roundSummary = summarise(`round ${round + 1}`, results);
+    roundSummary.samples = results.map(timing);
+    roundSummary.pendingBefore = before;
+    roundSummary.pendingAfter = after;
+    roundSummary.accepted = results.filter((result) => result.status === 200).length;
+    roundSummary.crossedTrigger =
+      before === null ? null : before + roundSummary.accepted >= FOLD_TRIGGER;
+    roundSummary.foldsDerived = deriveFolds(
+      summary.server.add_mode ?? config.addMode,
+      before,
+      roundSummary.accepted,
+      after,
+    );
+    if (summary.server.add_mode === "sync" && (before !== 0 || after !== 0))
+      roundSummary.modeMismatch =
+        `declared sync but pending moved ${before}->${after}; the deployment may be running the log path`;
+    summary.rounds.push(roundSummary);
+    if (!config.json)
+      process.stdout.write(
+        `${roundSummary.label}: n=${roundSummary.count} p50=${roundSummary.p50}ms ` +
+          `${roundSummary.p95IsMax ? "p95(=max)" : "p95"}=${roundSummary.p95}ms ` +
+          `max=${roundSummary.max}ms failures=${roundSummary.failures} ` +
+          `(client=${roundSummary.clientErrors} server=${roundSummary.serverErrors}) ` +
+          `pending ${before}->${after} folds~${roundSummary.foldsDerived} ` +
+          `crossed=${roundSummary.crossedTrigger} statuses=${JSON.stringify(roundSummary.statuses)}\n`,
+      );
+  }
+  summariseBurst(summary, config);
+}
+
+function summariseBurst(summary, config) {
+  const pooledTimes = summary.rounds
+    .flatMap((round) => round.samples.map((sample) => sample.ms))
+    .sort((left, right) => left - right);
+  // "clean" = rounds that provably never crossed the fold trigger. A round whose pending
+  // counter could not be read is not clean, it is unknown.
+  const cleanTimes = summary.rounds
+    .filter((round) => round.crossedTrigger === false)
+    .flatMap((round) => round.samples.map((sample) => sample.ms))
+    .sort((left, right) => left - right);
+  const measured = summary.rounds.reduce((sum, round) => sum + round.count, 0);
+  const clientErrors = summary.rounds.reduce((sum, round) => sum + round.clientErrors, 0);
+  summary.addMode = config.addMode;
+  summary.pooled = {
+    all: stats(pooledTimes),
+    clean: cleanTimes.length === 0 ? null : stats(cleanTimes),
+    failures: summary.rounds.reduce((sum, round) => sum + round.failures, 0),
+    foldsDerived: summary.rounds.reduce((sum, round) => sum + (round.foldsDerived ?? 0), 0),
+  };
+  summary.headline =
+    `${summary.label}: mode=burst concurrency=${config.concurrency} messages=${config.messages} ` +
+    `rounds=${config.rounds} n=${summary.pooled.all.n} | p50 ${summary.pooled.all.p50}ms | ` +
+    `${summary.pooled.all.p95IsMax ? "p95(=max)" : "p95"} ${summary.pooled.all.p95}ms | ` +
+    `failures ${summary.pooled.failures} (client ${clientErrors}) ` +
+    (summary.pooled.clean
+      ? `| clean n=${summary.pooled.clean.n} ` +
+        `${summary.pooled.clean.p95IsMax ? "p95(=max)" : "p95"} ${summary.pooled.clean.p95}ms`
+      : "| no round avoided the fold trigger") +
+    (config.addMode === "log"
+      ? ` | folds derived=${summary.pooled.foldsDerived} (derived, not reported by the service)`
+      : ` | add mode=${config.addMode} (log inactive, pending must stay 0)`);
+  // Refuse to present a measurement that is mostly this host failing to connect.
+  if (clientErrors * 2 >= measured)
+    summary.warning =
+      "more than half the requests never established a connection; these percentiles " +
+      "measure this host, not the endpoint - run the burst from a stable vantage point";
+}
+
+function report(summary, json) {
+  if (json) {
+    process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+    return;
+  }
+  if (summary.headline) process.stdout.write(`${summary.headline}\n`);
+  if (summary.warning) process.stdout.write(`WARNING: ${summary.warning}\n`);
+}
+
+async function main() {
+  const config = parseOptions();
+  if (!config) return;
+  const server = await waitForEndpoint(config.endpoint);
+  if (!server) {
+    process.stderr.write(`endpoint unreachable: ${config.endpoint}\n`);
     process.exitCode = 2;
     return;
   }
-
-  const stamp = Date.now().toString(36);
-  const user = `bench-${stamp}`;
   // The deployment decides which path is being measured, not the flag: declaring `log`
   // against a `sync` deployment would otherwise produce "folds 0" and read like a
   // legitimate log measurement with nothing folded - the exact symptom of a forgotten
   // environment variable. Refuse to run, with the same exit code as an unreachable
   // endpoint: both mean the setup is wrong, not the service.
-  const serverMode = server?.limits?.add_mode ?? null;
-  if (serverMode !== null && serverMode !== values["add-mode"]) {
+  const serverMode = server.limits?.add_mode ?? null;
+  if (serverMode !== null && serverMode !== config.addMode) {
     process.stderr.write(
-      `deployment runs add_mode=${serverMode} but this run declares ${values["add-mode"]}: ` +
+      `deployment runs add_mode=${serverMode} but this run declares ${config.addMode}: ` +
         "set NMG_ADD_MODE on the project and redeploy, or pass the matching --add-mode\n",
     );
     process.exitCode = 2;
     return;
   }
 
+  const stamp = Date.now().toString(36);
   const summary = {
-    label: values.label,
-    mode: values.mode,
-    endpoint,
-    user,
-    concurrency,
-    messages,
-    roundCount: rounds,
-    warmup,
+    label: config.label,
+    mode: config.mode,
+    endpoint: config.endpoint,
+    user: `bench-${stamp}`,
+    stamp,
+    concurrency: config.concurrency,
+    messages: config.messages,
+    roundCount: config.rounds,
+    warmup: config.warmup,
     server: {
       add_mode: serverMode,
-      source_revision: server?.source_revision ?? null,
-      upstream_commit: server?.upstream_commit ?? null,
+      source_revision: server.source_revision ?? null,
+      upstream_commit: server.upstream_commit ?? null,
     },
     rounds: [],
   };
 
   // Warm the cold path, then empty the log so the measured rounds start from zero: a
   // warmup Add leaves one pending entry, and the first round would otherwise start at 1.
-  if (warmup > 0) {
-    await add(endpoint, values.key, user, `${stamp}-warmup`, messages, timeout);
-    summary.drain = await drain(endpoint, values.key, user, values.owner, timeout);
+  if (config.warmup > 0) {
+    await add(config.endpoint, config.key, summary.user, `${stamp}-warmup`, config.messages, config.timeout);
+    summary.drain = await drain(config.endpoint, config.key, summary.user, config.owner, config.timeout);
     if (!summary.drain.drained)
       process.stderr.write(`drain skipped or failed: ${JSON.stringify(summary.drain)}\n`);
   }
 
-  if (values.mode === "fold") {
-    // One below the trigger, untimed, so the single timed Add is the request that pays
-    // a fold. Its cost is an upper bound on what folding adds to one Add.
-    for (let index = 0; index < FOLD_TRIGGER - 1; index += 1)
-      await add(endpoint, values.key, user, `${stamp}-pre-${index}`, messages, timeout);
-    const before = await pendingOf(endpoint, values.key, user, timeout);
-    const timed = await add(endpoint, values.key, user, `${stamp}-boundary`, messages, timeout);
-    const after = await pendingOf(endpoint, values.key, user, timeout);
-    summary.boundary = {
-      ...summarise("fold boundary", [timed]),
-      sample: timing(timed),
-      pendingBefore: before,
-      pendingAfter: after,
-      foldsDerived: deriveFolds(values["add-mode"], before, timed.status === 200 ? 1 : 0, after),
-    };
-    if (!values.json)
-      process.stdout.write(
-        `fold boundary: ${summary.boundary.status} in ${summary.boundary.max}ms | ` +
-          `pending ${before} -> ${after} | folds derived=${summary.boundary.foldsDerived}\n`,
-      );
-  } else {
-    for (let round = 0; round < rounds; round += 1) {
-      // Drain before each round when a credential allows it: otherwise only the first
-      // round sits below the fold trigger, the clean group collapses to one round (n=16,
-      // a maximum rather than a p95), and the gate has nothing to quote.
-      if (values.owner) await drain(endpoint, values.key, user, values.owner, timeout);
-      const before = await pendingOf(endpoint, values.key, user, timeout);
-      const tasks = Array.from(
-        { length: concurrency },
-        (_unused, slot) => () =>
-          add(endpoint, values.key, user, `${stamp}-${round}-${slot}`, messages, timeout),
-      );
-      const results = await burst(tasks, concurrency);
-      const after = await pendingOf(endpoint, values.key, user, timeout);
-      const roundSummary = summarise(`round ${round + 1}`, results);
-      roundSummary.pendingBefore = before;
-      roundSummary.pendingAfter = after;
-      roundSummary.accepted = results.filter((result) => result.status === 200).length;
-      roundSummary.samples = results.map(timing);
-      roundSummary.crossedTrigger =
-        before === null ? null : before + roundSummary.accepted >= FOLD_TRIGGER;
-      roundSummary.foldsDerived = deriveFolds(
-        serverMode ?? values["add-mode"],
-        before,
-        roundSummary.accepted,
-        after,
-      );
-      if (serverMode === "sync" && (before !== 0 || after !== 0))
-        roundSummary.modeMismatch = `declared sync but pending moved ${before}->${after}; the deployment may be running the log path`;
-      summary.rounds.push(roundSummary);
-      if (!values.json)
-        process.stdout.write(
-          `${roundSummary.label}: n=${roundSummary.count} p50=${roundSummary.p50}ms ` +
-            `${roundSummary.p95IsMax ? "p95(=max)" : "p95"}=${roundSummary.p95}ms ` +
-            `max=${roundSummary.max}ms ` +
-            `failures=${roundSummary.failures} (client=${roundSummary.clientErrors} ` +
-            `server=${roundSummary.serverErrors}) pending ${before}->${after} ` +
-            `folds~${roundSummary.foldsDerived} statuses=${JSON.stringify(roundSummary.statuses)}\n`,
-        );
-    }
-    // Pooled percentiles come from the per-request samples. Averaging per-round
-    // percentiles (or, worse, taking their maximum) is not a p95 of anything, and it
-    // hid that in the first version: the headline was the slowest round's slowest
-    // reported value.
-    const pooledTimes = summary.rounds
-      .flatMap((round) => round.samples.map((sample) => sample.ms))
-      .sort((left, right) => left - right);
-    // "clean" = rounds that provably never crossed the fold trigger. A round whose
-    // pending counter could not be read is not clean, it is unknown.
-    const cleanTimes = summary.rounds
-      .filter((round) => round.crossedTrigger === false)
-      .flatMap((round) => round.samples.map((sample) => sample.ms))
-      .sort((left, right) => left - right);
-    const measured = summary.rounds.reduce((sum, round) => sum + round.count, 0);
-    const clientErrors = summary.rounds.reduce((sum, round) => sum + round.clientErrors, 0);
-    summary.addMode = values["add-mode"];
-    const stats = (times) => ({
-      n: times.length,
-      p50: Math.round(percentile(times, 0.5)),
-      p95: Math.round(percentile(times, 0.95)),
-      p95IsMax: times.length < 20,
-    });
-    summary.pooled = {
-      all: stats(pooledTimes),
-      clean: cleanTimes.length === 0 ? null : stats(cleanTimes),
-      n: pooledTimes.length,
-      p50: Math.round(percentile(pooledTimes, 0.5)),
-      p95: Math.round(percentile(pooledTimes, 0.95)),
-      p95IsMax: pooledTimes.length < 20,
-      failures: summary.rounds.reduce((sum, round) => sum + round.failures, 0),
-      foldsDerived: summary.rounds.reduce((sum, round) => sum + (round.foldsDerived ?? 0), 0),
-    };
-    summary.headline =
-      `${summary.label}: mode=burst concurrency=${concurrency} messages=${messages} ` +
-      `rounds=${rounds} n=${summary.pooled.n} | p50 ${summary.pooled.p50}ms | ` +
-      `${summary.pooled.p95IsMax ? "p95(=max)" : "p95"} ${summary.pooled.p95}ms | ` +
-      `failures ${summary.pooled.failures} (client ${clientErrors}) ` +
-      (summary.pooled.clean
-        ? `| clean n=${summary.pooled.clean.n} ` +
-          `p95${summary.pooled.clean.p95IsMax ? "(=max)" : ""} ${summary.pooled.clean.p95}ms`
-        : "| no round avoided the fold trigger") +
-      (values["add-mode"] === "log"
-        ? ` | folds derived=${summary.pooled.foldsDerived} (derived, not reported by the service)`
-        : ` | add mode=${values["add-mode"]} (log inactive, pending must stay 0)`);
-    // Refuse to present a measurement that is mostly this host failing to connect.
-    if (clientErrors * 2 >= measured)
-      summary.warning =
-        "more than half the requests never established a connection; these percentiles " +
-        "measure this host, not the endpoint - run the burst from a stable vantage point";
-  }
-
-  if (values.json) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
-  else {
-    if (summary.headline) process.stdout.write(`${summary.headline}\n`);
-    if (summary.warning) process.stdout.write(`WARNING: ${summary.warning}\n`);
-  }
+  if (config.mode === "fold") await runFoldMode(config, summary);
+  else await runBurstMode(config, summary);
+  report(summary, config.json);
 }
 
 await main();
