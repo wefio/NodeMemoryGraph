@@ -161,6 +161,11 @@ export async function findLogEntry(bucket, userKey, requestHash, options = {}) {
 export async function listPending(bucket, userKey, options = {}) {
   const limit = readLimit(options?.limit);
   const generation = options?.generation;
+  // `newest` reads from the tail of the arrival order. The fold wants the oldest entries
+  // (they are the ones a reader has waited longest for), while a search wants the newest:
+  // a streaming update is invisible if the window is filled with the entries that were
+  // already there.
+  const newest = options?.newest === true;
   const skipRequestHash = options?.skipRequestHash;
   if (skipRequestHash !== undefined && typeof skipRequestHash !== 'function')
     throw new TypeError('skipRequestHash must be a function');
@@ -173,9 +178,13 @@ export async function listPending(bucket, userKey, options = {}) {
         ? Math.max(MAX_PENDING_READ, limit * SCAN_FACTOR)
         : limit;
   const objects = await listObjects(bucket, userKey, scan);
+  // A tail window is taken by name before any body is read: names sort in arrival order,
+  // so the last `scan` keys are the newest entries without paying for the ones skipped.
+  const candidates = newest && Number.isFinite(scan) ? objects.slice(-scan) : objects;
   const pending = [];
-  for (let index = 0; index < objects.length && pending.length < limit; index += READ_CONCURRENCY) {
-    const chunk = objects.slice(index, index + READ_CONCURRENCY);
+  const ceiling = newest ? Infinity : limit;
+  for (let index = 0; index < candidates.length && pending.length < ceiling; index += READ_CONCURRENCY) {
+    const chunk = candidates.slice(index, index + READ_CONCURRENCY);
     const read = await Promise.all(
       chunk.map(async (object) => {
         const name = object.key.slice(prefix.length);
@@ -205,7 +214,9 @@ export async function listPending(bucket, userKey, options = {}) {
     );
     pending.push(...read.filter(Boolean));
   }
-  return pending.slice(0, limit);
+  // Oldest-first callers take the head, newest-first callers the tail: both return at most
+  // `limit` entries, in arrival order, so the fold still applies them the way they arrived.
+  return newest ? pending.slice(-limit) : pending.slice(0, limit);
 }
 
 /** Batch delete. Deletion is always after the partition commit, so repeating it

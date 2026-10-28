@@ -93,3 +93,17 @@ them is far larger than the run-to-run spread within a mode.
   unreadable to an older deployment.
 - Folding happens on the `Add` path when pending reaches `FOLD_TRIGGER`; it never happens
   on the read path, so search latency does not inherit write contention.
+
+## Follow-up: the read window takes the newest entries
+
+The first version of this path read the _oldest_ pending entries into the search window, which
+is the right order for folding and the wrong order for reading. Measured on the deployed
+service with twenty sequential Adds to one user (below the fold trigger, so nothing folded):
+markers 0, 3 and 7 were found and markers 8, 12 and 19 were missing - the window held the
+first eight entries and hid everything after them. Nothing recovers those entries, because a
+search never folds and the fold is triggered by the counter.
+
+`listPending` gained a `newest` option that takes the tail of the arrival order by name before
+reading any body, and the search path passes it. The fold still reads the head, so entries are
+applied in the order they arrived. A test pins both directions, because either one alone would
+look correct.

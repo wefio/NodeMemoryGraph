@@ -866,6 +866,9 @@ async function pendingForSearch(env, ctx, limit) {
   const waiting = await listPending(env.MEMORY, ctx.key, {
     limit: Math.min(limit, MAX_PENDING_READ),
     generation: ctx.manifest.generation ?? null,
+    // Newest first: a streaming update has to be visible before it is folded, and taking
+    // the oldest entries meant the most recent ones fell outside the window.
+    newest: true,
   });
   return waiting.flatMap(({ entry }) =>
     entry.messages.map((message, index) => ({
