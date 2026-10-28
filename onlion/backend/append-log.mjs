@@ -14,6 +14,12 @@
 // TypeError, and an object inside the log prefix whose name is not a log entry is
 // treated as corruption (`log_entry_name`) rather than skipped - hiding it would make
 // a naming change look like "Add answers 200 but nothing is searchable".
+//
+// Because every reader validates that name, the `log/` prefix is reserved for entries
+// named by logEntryName and nothing else: a sidecar file (metadata, markers, compaction
+// state) placed inside it would fail accept, search and fold for that user at once, so
+// future additions belong beside the prefix (`users/<key>/log-meta.json`) instead. The
+// only way to clear a stray object is a reset, which deletes the prefix wholesale.
 import { Buffer } from 'node:buffer';
 
 export const LOG_ENTRY_VERSION = 1; // must equal the HTTP payloads' `v`

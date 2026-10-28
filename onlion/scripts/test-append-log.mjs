@@ -102,7 +102,9 @@ const moduleSource = fs.readFileSync(
   path.join(path.dirname(fileURLToPath(import.meta.url)), '../backend/append-log.mjs'),
   'utf8',
 );
-const imports = [...moduleSource.matchAll(/^import\s.*?from\s+'([^']+)';/gm)].map((match) => match[1]);
+const imports = [...moduleSource.matchAll(/^import\s.*?from\s+['"]([^'"]+)['"];?/gm)].map(
+  (match) => match[1],
+);
 assert.deepEqual(imports, ['node:buffer'], 'append-log must not import worker.mjs, storage.mjs or SQLite');
 
 // --- naming --------------------------------------------------------------

@@ -1274,7 +1274,6 @@ async function healthResponse(env, path) {
       pending_read_limit: MAX_PENDING_READ,
       merge_batch: FOLD_BATCH,
     },
-    add_mode: "synchronous",
     upstream_commit: SOURCE_REVISION.split("+")[0],
     source_revision: SOURCE_REVISION,
     core_source: CORE_SOURCE,
