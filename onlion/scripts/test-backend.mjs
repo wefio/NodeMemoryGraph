@@ -928,8 +928,19 @@ print(json.dumps(r))`,
     const length = Math.hypot(...mixed);
     assert.ok(Math.abs(length - 1) < 1e-9, `pooled vector must stay unit length, got ${length}`);
     assert.ok(mixed[0] > 0 && mixed[1] > 0, "pooling averages the chunk directions");
+    // The windows must always cover the tail: without it, anything past
+    // limit*size characters was never searched at all.
+    const NL = String.fromCharCode(10);
+    const huge =
+      "filler sentence about weather. ".repeat(800).trim() + NL + "WHERE IS THE SPARE KEY";
+    const hugeWindows = splitQueryChunks(huge);
+    assert.ok(
+      hugeWindows.at(-1).includes("SPARE KEY"),
+      "the end-anchored window must contain the tail of a long query",
+    );
+    assert.ok(huge.length > QUERY_CHUNK_CHARS * MAX_QUERY_CHUNKS, "precondition: longer than the window budget");
     console.log(
-      "PASS: a long query splits into bounded windows, and the pool helper keeps a unit vector for callers that need one.",
+      "PASS: a long query splits into bounded windows and always covers its tail, and the pool helper keeps a unit vector for callers that need one.",
     );
   }
 

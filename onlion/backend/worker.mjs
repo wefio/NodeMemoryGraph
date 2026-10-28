@@ -508,15 +508,20 @@ function queryFeatures(queries) {
   const windows = queries.map((text) => splitQueryChunks(text));
   const features = queries.map((text) => [text]);
   let budget = MAX_QUERY_FEATURES - queries.length;
-  const cursors = windows.map(() => 1);
+  // Head is already in. Give the end-anchored window next, so the far end of a
+  // long clause survives budget pressure, then the middle windows in order.
+  const pending = windows.map((list) =>
+    list.length <= 1 ? [] : [list[list.length - 1], ...list.slice(1, -1)],
+  );
+  const cursors = pending.map(() => 0);
   let progressed = true;
   while (budget > 0 && progressed) {
     progressed = false;
     for (let i = 0; i < windows.length && budget > 0; i += 1) {
       const next = cursors[i];
-      if (next >= windows[i].length) continue;
+      if (next >= pending[i].length) continue;
       cursors[i] = next + 1;
-      features[i].push(windows[i][next]);
+      features[i].push(pending[i][next]);
       budget -= 1;
       progressed = true;
     }

@@ -141,6 +141,20 @@ Where did I say I keep the spare key?`;
     `status=${tail.status} hit=${tailHit} records=${tail.body.data?.length ?? 0}`,
   );
 
+  // The same check past the window budget (8 x 2,000 characters): before the
+  // end-anchored window, text beyond that point was never searched.
+  const longHead = "Here is a long transcript of unrelated small talk. ".repeat(800);
+  const farQuery = `${longHead}${String.fromCharCode(10)}Where did I say I keep the spare key?`;
+  const far = await post("/search", { user_id: userId, query: farQuery, top_k: 5 });
+  const farHit = (far.body.data ?? []).some((item) =>
+    String(item.content ?? "").includes(marker),
+  );
+  check(
+    `a ${farQuery.length}-character query (past the window budget) still finds tail-only evidence`,
+    far.status === 200 && farHit,
+    `status=${far.status} hit=${farHit}`,
+  );
+
   // Control: the same shape without the marker must not surface that record, so
   // the hit above is not an artefact of the filler text.
   const controlQuery = `${head}
