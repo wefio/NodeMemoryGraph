@@ -646,32 +646,29 @@ async function foldPending(env, userId) {
     }
     drop = [...names];
     if (names.size === 0) return { readOnly: true, response: { folded: 0 } };
-    remaining = setPending(
-      ctx.manifest,
-      Math.max(0, pendingCount(ctx.manifest) - names.size),
-    );
+    // The counter is deliberately not touched here. Subtracting what this batch
+    // retired is only correct for the attempt that computed the plan: `mutateUser`
+    // re-runs this callback with the *same* plan after a CAS conflict, and by then a
+    // rival fold has usually retired those names already, so the subtraction would
+    // happen twice and drive the count below the log. The count is reconciled from
+    // the log after the delete instead - derived, never accumulated.
     return { response: { folded } };
   });
   // Only after the commit: an entry present without a receipt is safe to repeat,
   // an entry deleted without a receipt would be lost (I3).
   if (drop.length > 0) {
-    const deleted = await deleteLogEntries(env.MEMORY, key, drop).then(
-      () => true,
-      () => false,
+    await deleteLogEntries(env.MEMORY, key, drop).catch(() => {});
+    // One read of the log's own truth settles every way the count could have drifted:
+    // a stale plan after a CAS retry, entries whose receipt already existed, entries
+    // from another generation, and a failed delete. Reading it after the delete is
+    // what makes the counter a derivation instead of a history.
+    const left = await listPending(env.MEMORY, key, { limit: Infinity }).then(
+      (list) => list.length,
+      () => null,
     );
-    // The counter was already decremented for the names we meant to delete. If the
-    // delete failed they are still listed, and subtracting again next round would
-    // walk the counter down until the fold trigger never fires again. Read the truth
-    // back instead of trusting the subtraction.
-    if (!deleted) {
-      const left = await listPending(env.MEMORY, key, { limit: Infinity }).then(
-        (list) => list.length,
-        () => null,
-      );
-      if (left !== null) {
-        remaining = left;
-        await reconcilePending(env, userId, left).catch(() => {});
-      }
+    if (left !== null) {
+      remaining = left;
+      await reconcilePending(env, userId, left).catch(() => {});
     }
   }
   return { folded: result.folded ?? 0, remaining };

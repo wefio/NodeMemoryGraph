@@ -141,6 +141,19 @@ try {
   // the log on every request.
   const waiting = await call("/capacity?user_id=alice");
   assert.ok(waiting.body.pending_entries > 0, "the burst must leave entries waiting");
+  // The counter is a derivation, not a history: after the burst's folds it must equal
+  // the number of entries actually in the log. Subtraction would drift here on a CAS
+  // retry, and a count below the log hides accepted data.
+  {
+    const key = createHash("sha256").update("alice").digest("hex").slice(0, 24);
+    const liveBucket = await mf.getR2Bucket("MEMORY", "a");
+    const listed = await liveBucket.list({ prefix: `users/${key}/log/` });
+    assert.equal(
+      waiting.body.pending_entries,
+      listed.objects.length,
+      "the counter must equal the number of log entries",
+    );
+  }
   const drain = await call(
     "/admin/fold?user_id=alice",
     {},

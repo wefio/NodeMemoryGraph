@@ -85,6 +85,14 @@ With only the first fix the count still drifts to zero; with only the second the
 window is still starved. The table's T1 is what both are serving: the count may never
 fall below what the current generation can read.
 
+### The read window is bounded, not eliminated
+
+A filtered listing scans `SCAN_FACTOR * limit` keys (4 × 8 = **32** on the read path), so
+more than 32 stale entries can still push current ones out of one window. That window
+self-heals rather than staying broken: the reset hand-off carries the stale count, so
+the fold trigger sees the backlog and retires those entries, after which the window
+fills from current entries again.
+
 ## Invariants
 
 - **T1 — never below the truth.** `manifest.pending >= |readable entries|` at every

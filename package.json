@@ -123,7 +123,8 @@
     "pi:state": "node --experimental-strip-types scripts/pi-control.ts state",
     "skill:nmg:sync": "node --experimental-strip-types scripts/sync-nmg-skill.ts",
     "skill:nmg:check": "node --experimental-strip-types scripts/sync-nmg-skill.ts --check",
-    "docs:check": "node --experimental-strip-types scripts/verify-docs.mts && node --experimental-strip-types scripts/verify-document-groups.ts",    "agent:context": "node --experimental-strip-types tools/repo-context.ts",
+    "docs:check": "node --experimental-strip-types scripts/verify-docs.mts && node --experimental-strip-types scripts/verify-document-groups.ts",
+    "agent:context": "node --experimental-strip-types tools/repo-context.ts",
     "agent:context:check": "node --experimental-strip-types tools/repo-context.ts --check",
     "agent:verify": "node --experimental-strip-types tools/agent-verify-watchdog.ts",
     "ci:uncovered-tests": "node --experimental-strip-types tools/ci-uncovered-tests.ts --check",
@@ -145,7 +146,8 @@
     "test:cg": "node --experimental-strip-types --test tests/core/autodiff.test.ts tests/core/differentiable-controller.test.ts tests/core/hierarchical-activation.test.ts tests/core/memory-graph-reasoner.test.ts tests/core/fork-merge.test.ts tests/core/robustness.test.ts",
     "glossary:check": "node --experimental-strip-types tools/glossary-check.ts",
     "check:policy-words": "node --experimental-strip-types tools/policy-word-check.ts",
-    "rtm:check": "node --experimental-strip-types tools/rtm-check.ts"
+    "rtm:check": "node --experimental-strip-types tools/rtm-check.ts",
+    "verify:onlion": "cd onlion && npm run verify"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
