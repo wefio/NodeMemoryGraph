@@ -57,7 +57,7 @@ terms:
     anchor: "Checkable evidence for a conclusion"
     status: proposed
   - term: "baseline digest"
-    aliases: ["baselineDigest", "基线摘要"]
+    aliases: ["baselineDigest","基线摘要"]
     definition: >-
       A content identifier binding a candidate to the frozen input baseline used to produce and check it; patch application checks the binding instead of assuming a changing directory is unchanged.
       将候选绑定到其生成与验证所用冻结输入基线的内容标识；应用补丁时核对绑定，不假定变化中的目录仍未改变。

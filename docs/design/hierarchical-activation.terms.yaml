@@ -9,7 +9,7 @@ terms:
     anchor: Current source behavior
     status: canonical
   - term: "hierarchical activation"
-    aliases: ["HA", "HierarchicalActivation", "层次化激活"]
+    aliases: ["HA","HierarchicalActivation","层次化激活"]
     definition: >-
       The experimental activation engine behind an explicit vector-scoring mode, not evidence of default routing, Active Graph admission, persistent session training or quality gains.
       显式 vector 评分模式背后的实验激活引擎，不证明默认路由、Active Graph admission、持久化 session 训练或质量收益。

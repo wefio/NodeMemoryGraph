@@ -8,11 +8,4 @@ terms:
     owner: docs/design/retrieval-confidence-controller.md
     anchor: Scope
     status: canonical
-references:
-  [
-    QPP,
-    learnable controller,
-    cumulative Fibonacci evidence tier,
-    same-pool progressive re-selection,
-    QPP expansion trace,
-  ]
+references: [QPP, learnable controller, cumulative Fibonacci evidence tier, same-pool progressive re-selection, QPP expansion trace]

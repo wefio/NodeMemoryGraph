@@ -49,7 +49,7 @@ terms:
     anchor: When the chain path may be entered
     status: canonical
   - term: "session move"
-    aliases: ["nextSessionMove decision", "会话单步决策"]
+    aliases: ["nextSessionMove decision","会话单步决策"]
     definition: >-
       A deterministic admit-or-close decision for the current session under its declared plan and current facts, with plan-order tie breaking and no offline ceiling or numeric cost input.
       根据声明的 plan 和当前事实对当前 session 作出的确定性 admit-or-close 决策，以 plan 顺序打破平局，不读取离线 ceiling 或数值成本。
@@ -57,7 +57,7 @@ terms:
     anchor: "Online: ready set, repair-first, baseline"
     status: canonical
   - term: "repair-first continuation"
-    aliases: ["repair-first", "修复优先延续"]
+    aliases: ["repair-first","修复优先延续"]
     definition: >-
       A named constraint a plan enables to continue a legal session and repair unfinished work when declared facts change; enabling no constraints keeps one unit per session.
       由 plan 启用的命名约束，用于延续合法 session，并在声明事实变化时修复未完成部分；未启用约束时保持每 session 一个 unit。
@@ -65,7 +65,7 @@ terms:
     anchor: "Online: ready set, repair-first, baseline"
     status: canonical
   - term: "plain execution surface"
-    aliases: ["plain tool set", "普通执行工具集合"]
+    aliases: ["plain tool set","普通执行工具集合"]
     definition: >-
       The Pi runner's tool set selected from the first attempt's required operations when chain mode is off; a capability configuration rather than a measured price.
       Pi runner 未启用 chain 模式时，按首个 attempt 所需操作选择的工具集合；它是能力配置，不是测得的价格。
@@ -73,7 +73,7 @@ terms:
     anchor: "Execution tool sets"
     status: canonical
   - term: "chain execution surface"
-    aliases: ["chain tool union", "链式执行工具并集"]
+    aliases: ["chain tool union","链式执行工具并集"]
     definition: >-
       The Pi runner's tool union registered once for several units; unavailable per-unit operations still refuse, and string conclusion kinds still face artifact-envelope and host validation.
       Pi runner 为多个 unit 一次注册的工具并集；当前 unit 不可用的操作仍拒绝，字符串 conclusion kind 仍受 artifact envelope 和宿主验证。

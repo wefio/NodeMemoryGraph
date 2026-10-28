@@ -9,7 +9,7 @@ terms:
     anchor: Current source contract
     status: canonical
   - term: "progressive warm disclosure"
-    aliases: ["progressiveWarmDisclosure", "渐进热结果披露"]
+    aliases: ["progressiveWarmDisclosure","渐进热结果披露"]
     definition: >-
       A two-window presentation path exposing a warm prefix before deferred memory IDs are loaded; separate from opening deeper storage tiers and not an implication of tiered retrieval.
       先披露 warm 前缀、再加载延后 memory ID 的双窗口呈现路径；它与打开更深存储 tier 分离，不意味着分层检索。

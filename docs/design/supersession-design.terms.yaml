@@ -33,7 +33,7 @@ terms:
     anchor: "Applying supersession"
     status: canonical
   - term: "memory evidence role"
-    aliases: ["evidence_role", "记忆证据角色"]
+    aliases: ["evidence_role","记忆证据角色"]
     definition: >-
       Record metadata describing a memory's evidence function; post-write supersession sets the successor role to update without proving its claim true.
       描述记忆证据职能的记录元数据；写后取代将后继角色设为 update，但不由此证明其声明为真。

@@ -1,8 +1,7 @@
 version: 2
 terms:
   - term: historical design note
-    aliases:
-      [dated implementation record, historical design record, dated design snapshot, 历史设计记录]
+    aliases: [dated implementation record, historical design record, dated design snapshot, 历史设计记录]
     definition: >-
       A retained description of a past design and rollout; its implementation and verification claims must not be read as the current contract. Current runtime behavior must be checked against its present code and owning contract.
       保留的既往设计与落地描述；其中的实现和验证陈述不能视为当前契约。当前运行时行为必须对照现行源码和 owner 契约确认。
