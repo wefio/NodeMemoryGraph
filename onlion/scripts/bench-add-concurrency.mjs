@@ -31,7 +31,10 @@
  *
  * Rounds are grouped after the fact by `crossedTrigger`, which is `pendingBefore +
  * accepted >= FOLD_TRIGGER`: a round that crosses the trigger contains the request that
- * had to fold. It is `null` when `pendingBefore` could not be read - unknown is not false.
+ * had to fold. It is `null` when `pendingBefore` could not be read - unknown is not false,
+ * so those rounds are excluded from the clean group rather than counted as clean: one
+ * capacity read that times out would otherwise mix fold samples into "pure accept" and
+ * contaminate exactly the number the gate quotes.
  *
  * Failed *connections* are reported apart from server failures: on a bad minute this
  * host cannot establish TLS, and folding both into one number would let the percentiles
@@ -324,9 +327,25 @@ async function main() {
     const pooledTimes = summary.rounds
       .flatMap((round) => round.samples.map((sample) => sample.ms))
       .sort((left, right) => left - right);
+    // "clean" = rounds that provably never crossed the fold trigger. A round whose
+    // pending counter could not be read is not clean, it is unknown.
+    const cleanTimes = summary.rounds
+      .filter((round) => round.crossedTrigger === false)
+      .flatMap((round) => round.samples.map((sample) => sample.ms))
+      .sort((left, right) => left - right);
     const measured = summary.rounds.reduce((sum, round) => sum + round.count, 0);
     const clientErrors = summary.rounds.reduce((sum, round) => sum + round.clientErrors, 0);
     summary.addMode = values["add-mode"];
+    summary.pooledClean =
+      cleanTimes.length === 0
+        ? null
+        : {
+            n: cleanTimes.length,
+            p50: Math.round(percentile(cleanTimes, 0.5)),
+            p95: Math.round(percentile(cleanTimes, 0.95)),
+            p95IsMax: cleanTimes.length < 20,
+            rounds: summary.rounds.filter((round) => round.crossedTrigger === false).length,
+          };
     summary.pooled = {
       n: pooledTimes.length,
       p50: Math.round(percentile(pooledTimes, 0.5)),
@@ -340,9 +359,13 @@ async function main() {
       `rounds=${rounds} n=${summary.pooled.n} | p50 ${summary.pooled.p50}ms | ` +
       `${summary.pooled.p95IsMax ? "p95(=max)" : "p95"} ${summary.pooled.p95}ms | ` +
       `failures ${summary.pooled.failures} (client ${clientErrors}) ` +
+      (summary.pooledClean
+        ? `| clean rounds=${summary.pooledClean.rounds} n=${summary.pooledClean.n} ` +
+          `p95${summary.pooledClean.p95IsMax ? "(=max)" : ""} ${summary.pooledClean.p95}ms`
+        : "| no round avoided the fold trigger") +
       (values["add-mode"] === "log"
-        ? `| folds derived=${summary.pooled.foldsDerived} (derived, not reported by the service)`
-        : `| add mode=${values["add-mode"]} (log inactive, pending must stay 0)`);
+        ? ` | folds derived=${summary.pooled.foldsDerived} (derived, not reported by the service)`
+        : ` | add mode=${values["add-mode"]} (log inactive, pending must stay 0)`);
     // Refuse to present a measurement that is mostly this host failing to connect.
     if (clientErrors * 2 >= measured)
       summary.warning =
