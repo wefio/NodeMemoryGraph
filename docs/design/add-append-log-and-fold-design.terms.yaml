@@ -1,10 +1,3 @@
 version: 2
 terms: []
-references:
-  - append log
-  - fold
-  - manifest CAS
-  - partition snapshot
-  - request_id idempotency
-  - pending entries
-  - EdgeOne cloud function
+references: []

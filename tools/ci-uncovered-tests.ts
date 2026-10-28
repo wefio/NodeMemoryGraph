@@ -15,7 +15,7 @@
 // evidence of that run, not as suites anyone maintains, so scanning them is a false positive.
 // Anything *else* that falls out of CI has to be acknowledged here on purpose.
 import { execFileSync } from "node:child_process";
-import { globSync, readFileSync } from "node:fs";
+import { existsSync, globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** The entry points of the CI jobs, in .github/workflows/ci.yml. */
@@ -63,7 +63,13 @@ function scriptGlobs(
   if (seen.has(key)) return [];
   seen.add(key);
   const command = scripts[name];
-  if (command === undefined) throw new Error(`no such script: ${key}`);
+  if (command === undefined) {
+    // A root entry point that names a script nobody defines is drift and must be loud. A
+    // subpackage script that is absent contributes nothing: the job that runs that package
+    // would fail at `npm run <name>` on its own, so this gate does not duplicate it.
+    if (prefix) return [];
+    throw new Error(`no such script: ${key}`);
+  }
   const globs: string[] = [];
   for (const segment of command.split("&&")) {
     const part = segment.trim();
@@ -94,9 +100,13 @@ export interface Coverage {
 
 /** Every test file in the repository, and which of them the CI jobs reach. */
 export function testCoverage(root: string): Coverage {
-  const read = (dir: string) =>
-    (JSON.parse(readFileSync(join(root, dir, "package.json"), "utf8")) as { scripts: Scripts })
-      .scripts;
+  // A manifest that is not there contributes no scripts: this gate is also run against
+  // synthetic repositories in its own tests, which carry a root manifest and nothing else.
+  const read = (dir: string) => {
+    const file = join(root, dir, "package.json");
+    if (!existsSync(file)) return {};
+    return (JSON.parse(readFileSync(file, "utf8")) as { scripts: Scripts }).scripts;
+  };
   const manifests: Record<string, Scripts> = {
     "": read(""),
     [`${SERVICE_ROOT}/`]: read(SERVICE_ROOT),
@@ -109,7 +119,13 @@ export function testCoverage(root: string): Coverage {
     for (const file of globSync(glob, { cwd: root })) covered.add(file.replaceAll("\\", "/"));
   // Only files the repository actually contains: another agent's untracked work in progress is
   // not part of it yet, and judging it here would report a gap nobody has committed.
-  const all = execFileSync("git", ["ls-files", "*.test.ts"], { cwd: root, encoding: "utf8" })
+  // The service suites are `scripts/test-*.mjs`, invoked by name rather than globbed, so
+  // they are part of the universe too - otherwise a whole production surface sits outside
+  // every CI job and outside this gate.
+  const all = execFileSync("git", ["ls-files", "*.test.ts", `${SERVICE_ROOT}/scripts/test-*.mjs`], {
+    cwd: root,
+    encoding: "utf8",
+  })
     .split("\n")
     .map((file) => file.trim())
     .filter(Boolean);

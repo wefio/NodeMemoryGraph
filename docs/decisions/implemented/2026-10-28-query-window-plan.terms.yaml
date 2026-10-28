@@ -1,12 +1,3 @@
 version: 2
 terms: []
-references:
-  - query window
-  - planQueryWindows
-  - selectQueryFeatures
-  - MAX_QUERY_FEATURES
-  - MAX_QUERY_WINDOWS
-  - LoCoMo
-  - gold evidence recall
-  - page delta
-  - PART_DELTA_LIMIT
+references: []

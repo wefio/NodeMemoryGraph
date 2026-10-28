@@ -32,6 +32,9 @@ const scripts = (coverage: string) => ({
   "test:coverage": `node --test ${coverage}`,
   "test:research": 'node --test "tests/evals/**/*.test.ts"',
   "test:chaos": 'node --test "tests/chaos/*.test.ts"',
+  // The service entry point switches into its own manifest; a fixture has no `onlion/`, and
+  // the gate treats a missing manifest as "no scripts" rather than an error.
+  "verify:onlion": "cd onlion && npm run verify",
 });
 
 test("it names the suites no CI job reaches, and passes when they are acknowledged", (t) => {
