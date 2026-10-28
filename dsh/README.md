@@ -52,13 +52,15 @@ The search is kicked off on `agent/inbox/inserted` (before the turn's first prom
 assembly); a fast path that lands after the first assembly just shows from the next
 step, and being runtime context the memory stays in front of the model for the
 **whole turn**, not only the first step. Exact evidence stays behind `nmg_get`;
-passing that `activeGraphId` records actual use on the session's AG trace. A
-per-session window folds ids injected in the last 12 messages.
+passing that `activeGraphId` records actual use on the session's AG trace. Automatic preparation does not record disclosure or fold candidates as already
+delivered. The shared InformationView budget includes the recall preamble and
+feedback guidance. UI history remains visible, but only the current turn’s
+generation contributes model context.
 
 **Performance:** every NMG call — the per-turn recall and all five tools — goes
 straight to the running daemon over HTTP JSON-RPC (single-digit-ms); the one-shot
 CLI (~180 ms) is only the fallback when no daemon is up. A 1.5 s budget
-(`AbortSignal.timeout`) aborts a slow or dead recall, and the injection never
+(shared `RecallBudget`) bounds preparation and rejects late results, and the injection never
 blocks a step — any failure falls back to `next()`.
 
 ## UI tool cards

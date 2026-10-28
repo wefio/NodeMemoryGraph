@@ -24,6 +24,8 @@ async function withHost(
     service: NmgService;
     requests: Array<{ method: string; params: Record<string, unknown> }>;
     subprocessCalls: () => number;
+    inbox: (text: string) => void;
+    recall: () => string;
   }) => Promise<void>,
 ) {
   const directory = mkdtempSync(join(tmpdir(), "nmg-dsh-state-"));
@@ -70,6 +72,8 @@ async function withHost(
       apply(context: unknown): () => void;
     };
     const tools = new Map<string, HostTool>();
+    const events = new Map<string, (payload: unknown) => void>();
+    const contributions = new Map<string, (context: unknown) => string>();
     dispose = plugin.apply({
       tools: {
         register(tool: HostTool) {
@@ -88,11 +92,13 @@ async function withHost(
       },
       sandboxPolicy: { workspaceRoot: directory },
       systemPrompt: {
-        context() {
+        context(input: { name: string; text: (context: unknown) => string }) {
+          contributions.set(input.name, input.text);
           return () => {};
         },
       },
-      on() {
+      on(name: string, handler: (payload: unknown) => void) {
+        events.set(name, handler);
         return () => {};
       },
       interval() {
@@ -112,6 +118,12 @@ async function withHost(
       service,
       requests,
       subprocessCalls: () => subprocessCalls,
+      inbox: (text) =>
+        events.get("agent/inbox/inserted")!({
+          agent: { id: "dsh-recall" },
+          message: { content: [{ type: "text", text }] },
+        }),
+      recall: () => contributions.get("nmg:recall")!({ agent: { id: "dsh-recall" } }),
     });
   } finally {
     dispose?.();
@@ -130,6 +142,31 @@ const context = {
   signal: new AbortController().signal,
 };
 const ag = { space: "ag" };
+
+test("DSH automatic context is budgeted and unconfirmed; a new empty turn excludes its old snapshot", async () => {
+  await withHost(false, async ({ service, requests, inbox, recall }) => {
+    await service.invoke("remember", {
+      statement: "Atlas uses SQLite offline",
+      nodeName: "Atlas storage",
+    });
+    inbox("What did we decide about Atlas SQLite storage?");
+    const deadline = Date.now() + 3_000;
+    while (!recall() && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const text = recall();
+    assert.match(text, /Atlas uses SQLite/);
+    assert.ok(text.length <= 16_000);
+    assert.match(text, /candidate preview; not exact evidence/);
+    assert.equal(
+      requests.some((r) => r.params.action === "disclose"),
+      false,
+    );
+    assert.equal(recall(), text, "repeated context assembly preserves the prepared fragment");
+    inbox("");
+    assert.equal(recall(), "");
+  });
+});
 
 test("DSH registers one state tool, keeps AG usable without coordination, and rejects Lab daily-state writes", async () => {
   await withHost(false, async ({ tools, service, subprocessCalls }) => {

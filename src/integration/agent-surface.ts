@@ -331,14 +331,20 @@ function searchCandidateLine(
  * and reference scope travel with each row even if neighbouring rows are omitted.
  */
 export function searchInformationViews(context: MemoryContext): InformationView[] {
-  const compact = compactSearchContext(context);
+  return compactSearchInformationViews(compactSearchContext(context), context.memoryReferences);
+}
+
+export function compactSearchInformationViews(
+  compact: CompactSearchContext,
+  references?: SearchSurfaceOptions["memoryReferences"],
+): InformationView[] {
   const labels = [
     "[candidate preview; not exact evidence]",
     degradedRetrievalNote(compact.retrieval),
     compact.activeGraphId ? `activeGraphId=${compact.activeGraphId}` : "",
   ].filter(Boolean);
   const views: InformationView[] = compact.candidates.map((candidate) => ({
-    ...candidateInformationView(candidate, compact.activeGraphId, context.memoryReferences),
+    ...candidateInformationView(candidate, compact.activeGraphId, references),
     requiredLabels: labels,
   }));
   for (const tessera of compact.tesserae ?? []) {
@@ -354,6 +360,30 @@ export function searchInformationViews(context: MemoryContext): InformationView[
       requiredLabels: [degradedRetrievalNote(compact.retrieval)].filter(Boolean),
     });
   return views;
+}
+
+/** One automatic context budget includes host notices and follow-up guidance.
+ * Preparation supplies source-bound candidates, never a delivery receipt.
+ */
+export function prepareAutomaticRecallSurface(
+  context: CompactSearchContext,
+  options: { preamble?: string; postamble?: string; maxCharacters?: number } = {},
+): PreparedInformationOutput {
+  return prepareInformationOutput(
+    [
+      { purpose: "diagnostic", body: options.preamble ?? "" },
+      ...compactSearchInformationViews(context),
+      {
+        purpose: "guidance",
+        body:
+          context.logicalChainCount > 0
+            ? `logical_chains=${context.logicalChainCount}; use nmg_get for exact evidence.`
+            : "",
+      },
+      { purpose: "guidance", body: options.postamble ?? "" },
+    ],
+    { format: "context", maxCharacters: options.maxCharacters },
+  );
 }
 
 function searchMemoryReference(

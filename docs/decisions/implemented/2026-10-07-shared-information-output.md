@@ -48,6 +48,18 @@ Contracts live at [`information-view.ts`](../../../src/core/information-view.ts)
 
 Deterministic regressions cover intact constraints, protected-label budgets and omissions, canonical deduplication, source/status/preview fingerprint changes, immutable prepared snapshots, reader-local AG confirmation, rewritten output, ordinary JSON/library consumption, complete board artifact identity, unchanged creation cursors after verdict updates, and cursor withholding after budget omission. Existing board claim/delivery/judgment tests must continue to pass; preparation itself performs no disclosure write.
 
+Automatic recall shares the independently budgeted candidate projection across
+Pi, OpenCode, DSH and WorkBuddy. Preparing or assembling that fragment does not
+write the semantic-memory disclosure ledger. The host hooks can still be
+followed by transformation, cancellation or transport failure, so they cannot
+justify suppressing the same candidate on a later turn. This deliberately
+accepts repeated previews until a final source-bound input witness is available.
+It also replaces marker-only injection deduplication with exact fragment matching
+in OpenCode and fences late or replaced preparations. The owning
+[context contract](../../design/state-spaces.md#unified-context-information-items)
+defines the budgets and host lifetime boundaries; explicit tool disclosure is
+outside this automatic-path change.
+
 ## Deferred
 
 Dedicated `working_state` replace/clear and captured-generation fencing are now implemented separately in the [bounded current-state slice](2026-10-08-ag-working-state.md), with an explicit session-frame adapter fallback. Host-confirmed output-to-ledger wiring, authorization/version rechecks, one combined dynamic-surface budget, semantic task identity beyond that fallback, other-host input selection and matched model-cost/quality evaluation remain open. Pi dedicated state selection/restoration is recorded separately in the [input-selection slice](2026-10-08-ag-working-state-input.md); final confirmation remains unsupported. No live LLM, embedding call or memory benchmark was run for this foundation. Deterministic tests do not establish context-growth savings or continuity benefits in a live host.

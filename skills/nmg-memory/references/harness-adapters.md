@@ -122,9 +122,12 @@ suitable lifecycle integration, an adapter may run a bounded search for each new
 user turn and expose the **Active-Graph header projection** (compact headers plus
 `activeGraphId`) through the host's supported context mechanism. Keep exact
 statements and evidence behind `get(activeGraphId)`, which records actual use on
-the AG trace; merely showing an injected header is not use. Bound the search,
-fold repeated IDs according to the shared disclosure contract, and let the user
-turn proceed when recall fails.
+the AG trace; merely showing an injected header is not use. Bound the search and
+let the user turn proceed when recall fails. Automatic output follows the
+[shared context contract](../../../docs/design/state-spaces.md#unified-context-information-items):
+include host notices in its budget and do not fold future candidates on the
+assumption that a prepared fragment was delivered. Final input confirmation is
+unsupported by the current automatic host hooks.
 
 Automatic context preparation uses one absolute five-second waiting budget, not a fresh allowance per RPC. Keep timely completed candidates if a later phase expires, propagate cancellation where supported, and do not imply that a timeout preempts synchronous SQLite work or stops remote work. Explicit model-requested search is outside this automatic deadline. Use the [waiting-budget contract](../../../docs/design/session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.md) for checkpoints, remaining-budget admission and daemon limits.
 

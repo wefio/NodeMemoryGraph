@@ -27,7 +27,7 @@ import {
   extractPromptText,
 } from "../src/integration/agent-attribution.ts";
 import {
-  renderCompactSearchSurface,
+  prepareAutomaticRecallSurface,
   renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
@@ -53,11 +53,13 @@ import {
   renameAgentIdentity,
 } from "../src/integration/agent-identity.ts";
 import {
-  compactDisclosureEntries,
   compactSearchContext,
   memoryDisclosureEntries,
 } from "../src/integration/search-projection.ts";
 import { SessionRecallFlow } from "../src/integration/session-recall-flow.ts";
+import { RecallBudget } from "../src/integration/recall-budget.ts";
+import { prepareInformationOutput } from "../src/integration/information-output.ts";
+import type { PreparedInformationOutput } from "../src/core/information-view.ts";
 import { SessionTaskWindow } from "../src/integration/session-task-window.ts";
 import {
   captureStateInvocation,
@@ -203,15 +205,6 @@ function historyMessages(history: readonly unknown[] | null | undefined): Array<
     );
 }
 
-/** Automatic recall must never hold the turn: one search round with per-call
- * lease timeouts, fenced by an overall prompt budget. */
-function withBudget<T>(work: Promise<T>, budgetMs: number): Promise<T | undefined> {
-  return Promise.race([
-    work.catch(() => undefined as T | undefined),
-    new Promise<undefined>((resolve) => setTimeout(resolve, budgetMs, undefined)),
-  ]);
-}
-
 function normalizeToolName(tool: string): string {
   return tool === "shell" ? "bash" : tool;
 }
@@ -230,8 +223,20 @@ export default {
     // requests. The staged body RETAINS for the whole execution — provider
     // retries rebuild the request context without the previously pushed
     // system message, so re-delivery is decided per request by content
-    // (marker scan), and teardown happens at execution completion.
-    const pendingInjections = new Map<string, string>();
+    // (exact fragment match), and teardown happens at execution completion.
+    const pendingInjections = new Map<
+      string,
+      {
+        output: PreparedInformationOutput;
+        context?: MemoryContext;
+      }
+    >();
+    const preparations = new Map<string, AbortController>();
+    const cancelRecall = (sessionId: string) => {
+      preparations.get(sessionId)?.abort();
+      preparations.delete(sessionId);
+      pendingInjections.delete(sessionId);
+    };
     // sessionID → project layout (tool executor contexts carry no directory).
     const sessions = new Map<string, SessionRecord>();
     const commitNudges = new Set<string>();
@@ -270,14 +275,10 @@ export default {
       "disclosure lands on this shared session's active graph. Ignore noise; an empty",
       "match is a valid result.",
     ].join("\n");
-    // First line doubles as the delivery marker: re-delivery dedup scans
-    // system-role messages for exactly this header.
-    const contextInjectionMarker = RECALL_PREAMBLE.split("\n")[0] ?? RECALL_PREAMBLE;
-
     const recallHeaders = async (
       sessionId: string,
       request: NonNullable<ReturnType<SessionTaskWindow["prepare"]>>,
-    ): Promise<string> => {
+    ): Promise<MemoryContext | undefined> => {
       const projectDir = projectDirectory(sessionId);
       const context = (await invoke("search", {
         query: request.query,
@@ -291,37 +292,10 @@ export default {
         projectDir,
         sessionId,
       })) as MemoryContext;
-      if (!context.results || context.results.length === 0) return "";
-      const compact = compactSearchContext(context);
-      const decision = (await invoke("sessionActiveGraph", {
-        action: "disclose",
-        sessionId,
-        projectionId: compact.activeGraphId ?? undefined,
-        disclosure: "header",
-        entries: compactDisclosureEntries(compact),
-      }).catch(() => null)) as { freshMemoryIds?: unknown } | null;
-      const freshIds = new Set(
-        Array.isArray(decision?.freshMemoryIds)
-          ? (decision.freshMemoryIds as string[])
-          : compact.candidates.map((candidate) => candidate.id),
-      );
-      const fresh = compact.candidates.filter((candidate) => freshIds.has(candidate.id));
-      if (fresh.length === 0) return "";
-      // Only the candidates this injection surfaces count as attribution
-      // evidence — preparation is not provider transmission.
-      attribution.note(sessionId, {
-        ...context,
-        results: context.results.filter((result) => freshIds.has(result.memory.id)),
-      });
-      return [
-        RECALL_PREAMBLE,
-        renderCompactSearchSurface({ ...compact, candidates: fresh }, { emptyText: "" }),
-      ]
-        .filter(Boolean)
-        .join("\n");
+      return context.results?.length ? context : undefined;
     };
 
-    const stagePromptRecall = async (event: PromptHookEvent): Promise<void> => {
+    const stagePromptRecall = async (event: PromptHookEvent, signal: AbortSignal) => {
       const sessionId = String(event?.sessionID ?? "");
       const prompt = textOfPrompt(event?.prompt);
       const turnKey = event?.messageID ? `message:${event.messageID}` : `prompt:${Date.now()}`;
@@ -341,15 +315,42 @@ export default {
       }).catch(() => undefined)) as NmgSessionActiveGraphResult | undefined;
       const decision =
         handshake?.action === "beginDisclosureTurn" ? handshake.sessionRecall?.decision : undefined;
+      signal.throwIfAborted();
       const request = taskWindow.prepare(sessionId, prompt, decision);
-      const surface = request ? await recallHeaders(sessionId, request).catch(() => "") : "";
-      const body = [surface, nudge].filter(Boolean).join("\n\n");
-      if (!body) return;
-      pendingInjections.set(sessionId, body);
-      while (pendingInjections.size > PENDING_INJECTIONS_CAP) {
-        const oldest = pendingInjections.keys().next().value;
-        if (oldest === undefined) break;
-        pendingInjections.delete(oldest);
+      const context = request
+        ? await recallHeaders(sessionId, request).catch(() => undefined)
+        : undefined;
+      signal.throwIfAborted();
+      const output = context
+        ? prepareAutomaticRecallSurface(compactSearchContext(context), {
+            preamble: RECALL_PREAMBLE,
+            postamble: nudge,
+          })
+        : prepareInformationOutput([{ purpose: "guidance", body: nudge }], { format: "context" });
+      return { output, context };
+    };
+
+    const preparePromptRecall = async (event: PromptHookEvent, sessionId: string) => {
+      cancelRecall(sessionId);
+      const controller = new AbortController();
+      const budget = new RecallBudget(PROMPT_BUDGET_MS, controller.signal);
+      preparations.set(sessionId, controller);
+      try {
+        const pending = await budget.run("automatic.context", (signal) =>
+          stagePromptRecall(event, signal),
+        );
+        if (preparations.get(sessionId) !== controller || !pending.output.text) return;
+        pendingInjections.set(sessionId, pending);
+        while (pendingInjections.size > PENDING_INJECTIONS_CAP) {
+          const oldest = pendingInjections.keys().next().value;
+          if (oldest === undefined) break;
+          pendingInjections.delete(oldest);
+        }
+      } catch {
+        // A cancelled or late preparation never becomes an injection.
+      } finally {
+        budget.close();
+        if (preparations.get(sessionId) === controller) preparations.delete(sessionId);
       }
     };
 
@@ -367,7 +368,7 @@ export default {
         };
         sessions.set(sessionId, { ...existing, lastPromptAt: Date.now() });
       }
-      await withBudget(stagePromptRecall(raw as PromptHookEvent), PROMPT_BUDGET_MS);
+      if (sessionId) await preparePromptRecall(raw as PromptHookEvent, sessionId);
     });
 
     await ctx.session.hook("context", (raw: ContextHookEvent) => {
@@ -379,28 +380,41 @@ export default {
       // Keep the staged body until execution completion: after a provider
       // retry the host rebuilds this request from the transcript without the
       // previously pushed message, so re-delivery is decided by content, not
-      // by one-shot consumption. The marker scan (system role only) prevents
+      // by one-shot consumption. Exact text matching (system role only) prevents
       // duplicates on step-tool requests that already carry the injection.
       const carried = messages.some((message) => {
         if (message?.role !== "system") return false;
         const content = message.content;
-        if (typeof content === "string") return content.includes(contextInjectionMarker);
+        if (typeof content === "string") return content === pending.output.text;
         return (
           Array.isArray(content) &&
-          content.some((part) =>
-            String((part as { text?: unknown })?.text ?? "").includes(contextInjectionMarker),
+          content.some(
+            (part) => String((part as { text?: unknown })?.text ?? "") === pending.output.text,
           )
         );
       });
       if (carried) return void undefined;
       // OpenCode lowers message content itself; only parts arrays are safe
       // here (a bare string crashes provider lowering — probed).
-      messages.push({ role: "system", content: [{ type: "text", text: pending }] });
+      messages.push({ role: "system", content: [{ type: "text", text: pending.output.text }] });
+      if (pending.context) {
+        const ids = new Set(
+          pending.output.included.flatMap((entry) =>
+            entry.source.kind === "memory" ? [entry.source.memoryId] : [],
+          ),
+        );
+        attribution.note(sessionId, {
+          ...pending.context,
+          results: pending.context.results.filter((result) => ids.has(result.memory.id)),
+        });
+      }
+      // Assembly is not final provider delivery; no disclosure-ledger write.
     });
 
     await ctx.session.hook("compaction", async (raw: SessionScopedHookEvent) => {
       const sessionId = raw?.sessionID;
       if (!sessionId) return;
+      cancelRecall(sessionId);
       await invoke("sessionActiveGraph", { action: "clearDisclosures", sessionId }).catch(
         () => undefined,
       );
@@ -1223,7 +1237,7 @@ export default {
               type === "session.execution.failed") &&
             sessionId
           ) {
-            pendingInjections.delete(sessionId);
+            cancelRecall(sessionId);
             await flushAttributionAndHeartbeat(sessionId).catch(() => undefined);
           }
         } catch {
@@ -1326,6 +1340,8 @@ export default {
 
     return async () => {
       abort.abort();
+      for (const controller of preparations.values()) controller.abort();
+      preparations.clear();
       pendingInjections.clear();
       commitNudges.clear();
       for (const sessionId of sessions.keys()) {

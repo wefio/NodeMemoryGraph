@@ -33,7 +33,14 @@ function assertTimedOutPhase(result: HookResult, phase: string): void {
   );
 }
 
-for (const delayed of ["hello", "state", "search", "telemetry"] as const) {
+for (const delayed of [
+  "hello",
+  "state",
+  "search",
+  "telemetry",
+  "cancel",
+  "session-switch",
+] as const) {
   test(
     `automatic recall stops at five seconds during ${delayed} and keeps only timely typed items`,
     { timeout: 10_000 },
@@ -72,6 +79,8 @@ for (const delayed of ["hello", "state", "search", "telemetry"] as const) {
         reached = resolve;
       });
       const seenRequests: string[] = [];
+      const cancellation = new AbortController();
+      let currentSessionId = "budget-session";
       t.mock.timers.enable({ apis: ["setTimeout"] });
       if (delayed === "telemetry") {
         t.mock.method(ControllerShadowBridge.prototype, "retrieval", async () => {
@@ -107,7 +116,7 @@ for (const delayed of ["hello", "state", "search", "telemetry"] as const) {
         if (
           (delayed === "hello" && request.method === "hello") ||
           (delayed === "state" && request.method === "state") ||
-          (delayed === "search" && request.method === "search")
+          (["search", "cancel", "session-switch"].includes(delayed) && request.method === "search")
         ) {
           reached();
           await new Promise<void>((resolve) => setTimeout(resolve, 6_000));
@@ -126,8 +135,9 @@ for (const delayed of ["hello", "state", "search", "telemetry"] as const) {
       const pending = handlers.get("before_agent_start")!(
         { prompt, systemPrompt: "base" },
         {
+          signal: cancellation.signal,
           sessionManager: {
-            getSessionId: () => "budget-session",
+            getSessionId: () => currentSessionId,
             getSessionFile: () => "budget.jsonl",
           },
         },
@@ -142,11 +152,17 @@ for (const delayed of ["hello", "state", "search", "telemetry"] as const) {
             throw new Error("the hook returned without entering the delayed phase");
           }),
         ]);
+        if (delayed === "cancel") cancellation.abort();
+        if (delayed === "session-switch") currentSessionId = "replacement-session";
         t.mock.timers.tick(5_000);
         await new Promise<void>((resolve) => setImmediate(resolve));
         assert.equal(settled, true, "a late phase must not exceed the shared turn budget");
         const result = await pending;
         const content = result.message?.content ?? "";
+        if (delayed === "cancel" || delayed === "session-switch") {
+          assert.equal(content, "", "cancelled or foreign turns cannot carry even completed state");
+          return;
+        }
         if (delayed === "telemetry") assert.match(content, new RegExp(memory.id));
         else assert.doesNotMatch(content, new RegExp(memory.id));
         if (delayed === "search" || delayed === "telemetry") {

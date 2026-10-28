@@ -59,7 +59,7 @@ function jsonRpc(result: unknown): Response {
   });
 }
 
-test("WorkBuddy recall verifies v9 and uses the daemon-owned session disclosure ledger", async () => {
+test("WorkBuddy recall verifies v9 and never commits disclosure before stdout is consumed", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-workbuddy-hook-"));
   writeLease(directory);
   const originalFetch = globalThis.fetch;
@@ -115,7 +115,7 @@ test("WorkBuddy recall verifies v9 and uses the daemon-owned session disclosure 
     const agCalls = calls.filter((call) => call.method === "sessionActiveGraph");
     assert.deepEqual(
       agCalls.map((call) => call.params.action),
-      ["beginDisclosureTurn", "disclose"],
+      ["beginDisclosureTurn"],
     );
     assert.ok(agCalls.every((call) => call.params.sessionId === search.params.sessionId));
   } finally {

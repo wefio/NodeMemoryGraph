@@ -42,7 +42,7 @@ Spawned tools are named `nmg_search`, `nmg_get`, `nmg_remember`, and
 | Capability | Mechanism |
 |---|---|
 | Automatic recall | `prompt` hook stages a small-budget header search (`limit`≈13, `maxTier` 1, `graphHops` 1) per admitted user turn; the next `context` hook request appends the recall once as a trailing system-role parts message. Turn cost is fenced to ~1.5 s |
-| Memory tools | `nmg_search` / `nmg_get` / `nmg_remember` render through the shared Agent Surface (`renderSearchSurface` / `renderEvidenceSurface` / `renderRememberSurface`); session-AG disclosure ledger dedups both injected and tool-surfaced candidates |
+| Memory tools | `nmg_search` / `nmg_get` / `nmg_remember` render through the shared Agent Surface (`renderSearchSurface` / `renderEvidenceSurface` / `renderRememberSurface`); explicit tools retain session-AG disclosure bookkeeping; automatic preparation does not commit disclosure |
 | Working state | `nmg_state space=ag` (read/status/replace/clear/enable/disable) with the shared `captureStateInvocation` fence |
 | Task board | `nmg_state space=board` (put/read/claim/deliver/judge/subscribe/… + rename), world-channel lobby surfaced on world reads; `nmg_state` itself is SDK-neutral — see the lossy list below |
 | Event records and task status | `board-events` capability over `nmg_state space=board`; typed event payloads, public notes and task-owner-derived status; versioned notices use shared wake delivery without a claim or world broadcast |
@@ -55,8 +55,11 @@ Spawned tools are named `nmg_search`, `nmg_get`, `nmg_remember`, and
 
 - Staged injections retain for the whole execution: a provider step retry
   rebuilds the request context without them, so every rebuilt context is
-  re-delivered (deduplicated by the recall preamble marker inside the
-  pushed system message) until the execution completes.
+  re-delivered (deduplicated by exact prepared text inside a system message)
+  until the execution completes. New turns and compaction invalidate pending
+  fragments; cancelled or late work cannot stage a replacement. The shared
+  [context contract](../docs/design/state-spaces.md#unified-context-information-items)
+  owns output budgets and the unsupported final-delivery confirmation boundary.
 - The tool executor context carries no project directory, and the OpenCode
   2.0.32 plugin event stream emits no `session.created`; sessions map to
   project dirs from the first event that carries
