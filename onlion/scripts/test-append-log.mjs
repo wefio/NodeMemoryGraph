@@ -183,6 +183,18 @@ assert.throws(() => logEntryName(1700000000000, `${'A'.repeat(64)}`), RangeError
     'second',
   );
 
+  // The replay lookup validates the whole name too: a key that only looks like an entry
+  // (`foo-<hash>.json`, no 13-digit prefix) is reported as a naming problem, not later as
+  // a JSON parse error.
+  const strayLookup = memoryBucket();
+  await putLogEntry(strayLookup, USER, entry(1700000000000, HASH_B, 'kept'));
+  await strayLookup.put(`${logPrefix(USER)}foo-${HASH_A}.json`, '{}');
+  await assert.rejects(
+    () => findLogEntry(strayLookup, USER, HASH_A),
+    (error) => error.code === 'log_entry_name',
+    'a lookalike name must be reported as corruption, not as a parse error',
+  );
+
   await assert.rejects(putLogEntry(bucket, USER, { ...first, v: 2 }), RangeError);
   const wrongVersion = memoryBucket();
   await wrongVersion.put(`${logPrefix(USER)}1700000000000-${HASH_A}.json`, JSON.stringify({ ...first, v: 99 }));
@@ -287,6 +299,67 @@ assert.throws(() => logEntryName(1700000000000, `${'A'.repeat(64)}`), RangeError
   buried.stats.gets = 0;
   assert.deepEqual(await listPending(buried, USER, { limit: 8, generation: 'g2' }), []);
   assert.equal(buried.stats.gets, 32, 'a filtered read scans at most 32 keys for limit 8');
+
+  // An entry the caller is finished with (its receipt is already written, the object
+  // is not deleted yet) must be skipped before its body is read: that saves one GET
+  // here and one embedding call per ghost on the search path.
+  const ghosts = memoryBucket();
+  const receipts = new Set([0, 1, 2, 3].map((index) => serial(index)));
+  for (let index = 0; index < 4; index += 1)
+    await putLogEntry(ghosts, USER, {
+      ...entry(1700000000000 + index, serial(index), `ghost${index}`),
+      generation: 'g',
+    });
+  for (const index of [4, 5])
+    await putLogEntry(ghosts, USER, {
+      ...entry(1700000000000 + index, serial(index), `live${index}`),
+      generation: 'g',
+    });
+  ghosts.stats.gets = 0;
+  const live = await listPending(ghosts, USER, {
+    limit: 2,
+    skipRequestHash: (hash) => receipts.has(hash),
+  });
+  assert.deepEqual(
+    live.map((item) => item.entry.messages[0].content),
+    ['live4', 'live5'],
+  );
+  assert.equal(ghosts.stats.gets, 2, 'a skipped entry must not cost a body read');
+  // Without the filter the ghosts still show up: the fold batch needs to see them to
+  // delete them, and the reconcile count needs the log's own truth.
+  assert.equal((await listPending(ghosts, USER, { limit: Infinity })).length, 6);
+  await assert.rejects(() => listPending(ghosts, USER, { skipRequestHash: 'nope' }), TypeError);
+  // A name in the log prefix that is not a log entry is corruption, not a reason to
+  // hide the entry: with a predicate the hash comes from the name, so the failure has
+  // to be loud instead of turning into a silent skip.
+  const stray = memoryBucket();
+  await putLogEntry(stray, USER, entry(1700000000000, serial(0), 'kept'));
+  await stray.put(`${logPrefix(USER)}not-a-log-entry.json`, '{}');
+  await assert.rejects(
+    () => listPending(stray, USER, { limit: 2, skipRequestHash: () => false }),
+    (error) => error.code === 'log_entry_name',
+    'an unparseable name must fail loudly when a predicate needs the hash',
+  );
+  // The fold batch and the reconcile read pass no predicate; they must report the same
+  // corpus problem with the same code instead of a raw JSON SyntaxError.
+  await assert.rejects(
+    () => listPending(stray, USER, { limit: Infinity }),
+    (error) => error.code === 'log_entry_name',
+    'an unparseable name must fail loudly for callers without a predicate too',
+  );
+  // A name that only looks like an entry (`foo-<hash>.json`) must not slip through the
+  // shape check and turn into a JSON parse error further down.
+  const lookalike = memoryBucket();
+  await putLogEntry(lookalike, USER, entry(1700000000000, serial(0), 'kept'));
+  await lookalike.put(`${logPrefix(USER)}foo-${HASH_A}.json`, '{}');
+  await assert.rejects(
+    () => listPending(lookalike, USER, { limit: 2, skipRequestHash: () => false }),
+    (error) => error.code === 'log_entry_name',
+    'a lookalike name must be reported as corruption',
+  );
+  console.log(
+    'PASS: a receipt the caller already wrote skips the entry before its body is read, and is still visible to the fold path and to the reconcile count.',
+  );
 
   // A fold or reset can delete an entry between the list and the read.
   const racing = {

@@ -9,6 +9,11 @@
 // This module only uses the injected bucket contract (get/head/put/delete/list)
 // and must never import worker.mjs, storage.mjs or SQLite: it is the seam that
 // lets the accept path, the fold and the read path be built in parallel.
+//
+// Errors: a value outside its allowed range throws RangeError, a wrong type throws
+// TypeError, and an object inside the log prefix whose name is not a log entry is
+// treated as corruption (`log_entry_name`) rather than skipped - hiding it would make
+// a naming change look like "Add answers 200 but nothing is searchable".
 import { Buffer } from 'node:buffer';
 
 export const LOG_ENTRY_VERSION = 1; // must equal the HTTP payloads' `v`
@@ -103,12 +108,22 @@ export async function logEntryLanded(bucket, userKey, entry) {
  *  object, because a receipt written by a fold is checked before this lookup and
  *  stays the authoritative duplicate guard. */
 export async function findLogEntry(bucket, userKey, requestHash, options = {}) {
-  const suffix = `-${requestHashSuffix(requestHash)}.json`;
+  const wanted = requestHashSuffix(requestHash);
   const generation = options?.generation;
   const prefix = logPrefix(userKey);
   for (const object of await listObjects(bucket, userKey)) {
-    if (!object.key.endsWith(suffix)) continue;
     const name = object.key.slice(prefix.length);
+    // The whole name, not just the hash suffix: anything that logEntryName could not
+    // have produced is corpus corruption and must not be reported later as a content
+    // error by `readLogEntry`.
+    const hash = requestHashFromName(name);
+    if (hash === null)
+      throw logError(
+        'log_entry_name',
+        `Object in the log prefix is not named like a log entry: ${name}`,
+        name,
+      );
+    if (hash !== wanted) continue;
     const entry = await readLogEntry(bucket, userKey, name);
     if (!entry) continue;
     if (generation !== undefined && (entry.generation ?? null) !== (generation ?? null)) continue;
@@ -119,22 +134,38 @@ export async function findLogEntry(bucket, userKey, requestHash, options = {}) {
 
 /** Pending entries in arrival order. `limit` defaults to MAX_PENDING_READ (the
  *  read path's cap); pass Infinity for the fold path, which wants everything.
- *  `generation`, when given, drops entries taken under another generation so
- *  `limit` counts entries the caller can actually use. A filter has to look past
- *  the first `limit` keys - truncating first would let a handful of older entries
- *  consume the whole window and hide the current ones - but only as far as
- *  max(MAX_PENDING_READ, SCAN_FACTOR * limit): a log full of foreign entries
- *  returns fewer matches rather than paging through the whole prefix. */
+ *
+ *  Two filters decide which entries the caller can actually use, and both run
+ *  *while reading* rather than after the truncation:
+ *  - `generation`: drops entries taken under another generation.
+ *  - `skipRequestHash(hash)`: drops entries the caller is finished with. The search
+ *    path passes a receipt lookup here, so an entry that is folded but not yet
+ *    deleted costs one name inspection and zero body reads.
+ *  Truncating first would let a handful of such entries consume the whole window
+ *  and hide the current ones, so any filter widens the scan to
+ *  max(MAX_PENDING_READ, SCAN_FACTOR * limit) keys; past that a log full of
+ *  filtered-out entries returns fewer matches instead of paging through the whole
+ *  prefix. Callers that need the log's truth (the fold batch, and the reconcile
+ *  count) must pass neither filter.
+ *
+ *  Every listed name is validated, so a stray object under the log prefix fails every
+ *  caller with `log_entry_name` rather than being ignored or reported as a content
+ *  error. That is deliberate fail-loud behaviour, and it does not clear itself: the
+ *  log prefix is only emptied by a reset (`clearLog`). */
 export async function listPending(bucket, userKey, options = {}) {
   const limit = readLimit(options?.limit);
   const generation = options?.generation;
+  const skipRequestHash = options?.skipRequestHash;
+  if (skipRequestHash !== undefined && typeof skipRequestHash !== 'function')
+    throw new TypeError('skipRequestHash must be a function');
   const prefix = logPrefix(userKey);
+  const filtered = generation !== undefined || skipRequestHash !== undefined;
   const scan =
     limit === Infinity
       ? Infinity
-      : generation === undefined
-        ? limit
-        : Math.max(MAX_PENDING_READ, limit * SCAN_FACTOR);
+      : filtered
+        ? Math.max(MAX_PENDING_READ, limit * SCAN_FACTOR)
+        : limit;
   const objects = await listObjects(bucket, userKey, scan);
   const pending = [];
   for (let index = 0; index < objects.length && pending.length < limit; index += READ_CONCURRENCY) {
@@ -142,6 +173,22 @@ export async function listPending(bucket, userKey, options = {}) {
     const read = await Promise.all(
       chunk.map(async (object) => {
         const name = object.key.slice(prefix.length);
+        // Every caller parses the name, not just the one with a predicate: an object in
+        // this prefix that is not named like an entry is corruption, and reporting it as
+        // `log_entry_name` here keeps the fold and the reconcile read from failing with a
+        // raw JSON SyntaxError that says nothing about naming. Skipping it instead would
+        // turn a rename of logEntryName into "Add answers 200, nothing is searchable, and
+        // the log drains normally".
+        const hash = requestHashFromName(name);
+        if (hash === null)
+          throw logError(
+            'log_entry_name',
+            `Object in the log prefix is not named like a log entry: ${name}`,
+            name,
+          );
+        // The hash is in the name, so an entry the caller is finished with is skipped
+        // before its body is fetched: no read, no parse, no embedding downstream.
+        if (skipRequestHash && skipRequestHash(hash)) return null;
         // A concurrent fold or reset may delete an entry between list and get.
         const entry = await readLogEntry(bucket, userKey, name);
         if (!entry) return null;
@@ -209,6 +256,17 @@ function requestHashSuffix(requestHash) {
   if (!REQUEST_HASH.test(requestHash ?? ''))
     throw new RangeError(`Invalid request_hash: ${String(requestHash)}`);
   return requestHash;
+}
+
+// The name has exactly one shape, the one `logEntryName` produces: 13 zero-padded
+// millisecond digits, the request hash, and `.json`. A caller that only needs the hash
+// (a receipt lookup) reads it from there, and every reader validates the full shape -
+// a looser match would let `foo-<hash>.json` through and report a naming problem as a
+// content problem.
+const LOG_NAME = new RegExp(`^(\\d{${SEQ_DIGITS}})-([0-9a-f]{64})\\.json$`);
+function requestHashFromName(name) {
+  const match = LOG_NAME.exec(name);
+  return match ? match[2] : null;
 }
 
 function readLimit(limit) {
