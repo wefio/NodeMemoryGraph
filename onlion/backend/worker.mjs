@@ -61,6 +61,30 @@ import { queryVector, rememberQueryVector } from "./query-cache.mjs";
 
 const MAX_DATABASE_BYTES = USER_LIMIT;
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
+/** Payload caps are sized against the platform request body, not against a single
+ *  global character budget. The benchmark contract states there is no global
+ *  character cap and that an unsupported payload should get a clear 4xx, so a cap
+ *  here may reject only what cannot fit — not what merely reads long.
+ *
+ *  Measured failure: an Agent Memory Leaderboard smoke run failed its whole Search
+ *  stage with `413 content_too_large` because the per-clause cap was 4,096
+ *  characters, and a separate Add failed the same way because one message exceeded
+ *  128,000 characters. Both payloads fit comfortably in a 6 MiB body, so both were
+ *  our limit rejecting legitimate input.
+ *
+ *  The query cap is generous on purpose: query embedding is best-effort
+ *  (`warmClauseVectors` swallows its failure), so a very long query degrades to
+ *  lexical retrieval instead of failing the request. */
+const MAX_QUERY_CHARS = 1_000_000;
+const MAX_MESSAGE_CHARS = 1_000_000;
+const MAX_COMBINED_MESSAGE_CHARS = 1_500_000;
+const MAX_ORDERED_CONTENT_BYTES = 4 * 1024 * 1024;
+const TEXT_LIMITS = {
+  max_query_chars: MAX_QUERY_CHARS,
+  max_message_chars: MAX_MESSAGE_CHARS,
+  max_combined_message_chars: MAX_COMBINED_MESSAGE_CHARS,
+  max_ordered_content_bytes: MAX_ORDERED_CONTENT_BYTES,
+};
 const SOURCE_REVISION =
   typeof __NMG_SOURCE_REVISION__ === "undefined" ? "development" : __NMG_SOURCE_REVISION__;
 // Cache only the completed, I/O-free WASM instance. Pending operations belong
@@ -86,14 +110,18 @@ function textField(value, label, max = 512) {
     );
   return value;
 }
-function contentField(value, maxTextChars = 128000) {
+function contentField(value, maxTextChars = MAX_MESSAGE_CHARS) {
   try {
     const content = normalizeContent(value, { maxTextChars });
     if (
       typeof content !== "string" &&
-      new TextEncoder().encode(JSON.stringify(content)).length > 2 * 1024 * 1024
+      new TextEncoder().encode(JSON.stringify(content)).length > MAX_ORDERED_CONTENT_BYTES
     ) {
-      throw new HttpError(413, "content_too_large", "Ordered source content limit is 2 MiB");
+      throw new HttpError(
+        413,
+        "content_too_large",
+        `Ordered source content limit is ${MAX_ORDERED_CONTENT_BYTES} bytes`,
+      );
     }
     return content;
   } catch (error) {
@@ -393,11 +421,11 @@ async function add(env, input) {
     chars += contentText(message.content).length;
     return message;
   });
-  if (chars > 128000)
+  if (chars > MAX_COMBINED_MESSAGE_CHARS)
     throw new HttpError(
       413,
       "request_too_large",
-      "Combined message content limit is 128000 characters",
+      `Combined message content limit is ${MAX_COMBINED_MESSAGE_CHARS} characters`,
     );
   const fingerprint = hash(JSON.stringify({ sessionId, messages }));
   const client = embeddingClient(env);
@@ -464,7 +492,7 @@ async function readClauses(input, optionTexts) {
   if (nodes === undefined) {
     // Preserve query text; use opaque image references or optional pixel descriptions.
     // Options never enter the vision request and are not used to infer an answer.
-    const queryContent = contentField(input.query, 4096);
+    const queryContent = contentField(input.query, MAX_QUERY_CHARS);
     const query = await createContentView()(queryContent);
     return dedupeClauses([
       { text: query, name: null },
@@ -483,7 +511,7 @@ async function readClauses(input, optionTexts) {
     throw new HttpError(400, "invalid_request", "queries and query cannot be combined");
   const clauses = nodes.map((node) => {
     if (typeof node === "string")
-      return { text: textField(node, "query", 4096), name: null, appendOnly: false };
+      return { text: textField(node, "query", MAX_QUERY_CHARS), name: null, appendOnly: false };
     if (!node || typeof node !== "object")
       throw new HttpError(
         400,
@@ -494,7 +522,7 @@ async function readClauses(input, optionTexts) {
     // appendOnly clause results never compete for the page; they are returned as
     // a supplement, so a broad dimension cannot crowd out ranked evidence.
     const appendOnly = node.appendOnly === true || node.mode === "append";
-    return { text: textField(node.text ?? node.query, "query", 4096), name, appendOnly };
+    return { text: textField(node.text ?? node.query, "query", MAX_QUERY_CHARS), name, appendOnly };
   });
   if (clauses[0].appendOnly)
     throw new HttpError(
@@ -820,6 +848,7 @@ async function healthResponse(env, path) {
     max_partitions: MAX_PARTS,
     graph_scope: "partition",
     max_request_bytes: MAX_BODY_BYTES,
+    limits: TEXT_LIMITS,
     add_mode: "synchronous",
     upstream_commit: SOURCE_REVISION.split("+")[0],
     source_revision: SOURCE_REVISION,

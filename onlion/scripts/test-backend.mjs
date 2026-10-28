@@ -864,6 +864,41 @@ print(json.dumps(r))`,
   console.log(
     "PASS: auth, validation, daemon-core search, user isolation, idempotency, write status, cross-isolate concurrent writes, cold restart persistence.",
   );
+  // Payload caps must fit the platform request body, not a single global
+  // character budget. A leaderboard smoke Search failed its whole stage with
+  // 413 content_too_large because the per-clause cap was 4,096 characters, and an
+  // Add failed the same way above 128,000 characters per message. Both payloads
+  // fit in a 6 MiB body, so both were our limit rejecting legitimate input.
+  {
+    const limits = (await call("a", "/health")).body.limits;
+    assert.deepEqual(limits, {
+      max_query_chars: 1_000_000,
+      max_message_chars: 1_000_000,
+      max_combined_message_chars: 1_500_000,
+      max_ordered_content_bytes: 4 * 1024 * 1024,
+    });
+    const longQuery = await call("a", "/search", {
+      user_id: "payload-limits",
+      query: "memory question ".repeat(1000),
+    });
+    assert.notEqual(
+      longQuery.status,
+      413,
+      "a query longer than the old 4096-character cap must not be rejected as too large",
+    );
+    const longMessage = await call("a", "/add", {
+      user_id: "payload-limits",
+      request_id: "payload-limits-add",
+      messages: [{ role: "user", content: "long turn ".repeat(20000) }],
+    });
+    assert.notEqual(
+      longMessage.status,
+      413,
+      "a message longer than the old 128000-character cap must not be rejected as too large",
+    );
+    console.log("PASS: payload caps follow the platform body limit rather than a global character budget.");
+  }
+
 } finally {
   await mf.dispose();
 }
