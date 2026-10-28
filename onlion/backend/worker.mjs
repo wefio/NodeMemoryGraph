@@ -255,24 +255,26 @@ async function readAttempt(env, key, userId, attempt, generation) {
 
 /** Runs the operation once and commits it, or reports that the CAS rejected the write.
  *
- *  `response: null` means another writer committed first and the caller should retry;
- *  a response with `committed: false` is the read-only short circuit, which never
- *  writes a manifest. */
+ *  The outcome carries an explicit `retry` flag rather than signalling a lost CAS with
+ *  `response: null`. `null` is a legal JSON payload, so an operation that legitimately
+ *  returned it would be retried until the attempt budget ran out and then answered 503 -
+ *  a failure mode no test would notice. Read-only outcomes are `committed: false` and
+ *  must not be retried either. */
 async function commitAttempt(env, { sqlite, key, object, before, operation, reuse, staged }) {
   const manifest = structuredClone(before);
   const result = await operation({ sqlite, key, manifest, staged, reuse });
-  if (result.readOnly) return { response: result.response, committed: false };
+  if (result.readOnly) return { response: result.response, committed: false, retry: false };
   const saved = await measure("manifest_commit", () =>
     commitManifest(env.MEMORY, key, object, manifest),
   );
-  if (!saved) return { response: null, committed: false };
+  if (!saved) return { retry: true };
   const live = new Set(manifest.parts.map((p) => p.key));
   await removeStaged(
     env.MEMORY,
     staged.filter((k) => !live.has(k)),
   ).catch(() => {});
   await measure("retired_cleanup", () => retireParts(env.MEMORY, before, manifest));
-  return { response: result.response, committed: true };
+  return { response: result.response, committed: true, retry: false };
 }
 
 async function mutateUser(env, userId, operation) {
@@ -307,7 +309,10 @@ async function mutateUser(env, userId, operation) {
           reuse,
           staged,
         });
-        if (outcome.response !== null) {
+        if (!outcome.retry) {
+          // Only the ending attempt may claim the commit: a lost CAS must not touch
+          // `committed`, or the `finally` cleanup below would run for a write that a
+          // rival did commit.
           committed ||= outcome.committed;
           return outcome.response;
         }
