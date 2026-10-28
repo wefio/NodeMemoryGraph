@@ -53,6 +53,12 @@ Inbox/Delta + surface anchors + fine-grained record semantics
 
 离线学习相关性使用 [relevance-training.md](../relevance-training.md) 中的来源与评测边界。其产物仍是候选；跨语料测量不授予运行时准入。
 
+### 请求内查询准备
+
+daemon 一次搜索内，相同 embedding 批次共享向量，不共享 Store 读取。
+新调用重新准备，失败或空结果可重试。每次使用仍检查 scope、索引健康和期限。
+精确批次身份与向量复制隔离见[实现](../../../src/integration/search.ts)。
+
 ### 证据组装
 
 直接结果与节点结果在组装时，按每批最多 400 个不同记忆 ID 读取关联证据。

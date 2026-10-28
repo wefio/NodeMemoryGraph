@@ -1,0 +1,91 @@
+{
+  "measuredAt": "2026-10-28T12:57:15.875Z",
+  "runtime": "v24.19.0",
+  "platform": "win32",
+  "input": "synthetic in-memory stores; deterministic vectors; simulated provider wait",
+  "recordsPerStore": 60,
+  "iterations": 30,
+  "delayMs": 20,
+  "warmup": 3,
+  "options": {
+    "limit": 20,
+    "maxTier": 3,
+    "graphHops": 0,
+    "secondPass": false,
+    "persistTrace": false
+  },
+  "sourceHashes": {
+    "src/integration/search.ts": "26b6315a9aeb249a35d4bd2a30792c86ef244baf75e021321a8bca54b1a16230",
+    "src/cli/service.ts": "ff21e276e59f40743097ca178fa05856a33111e5e7618e6bf56ea16962018f94"
+  },
+  "reports": [
+    {
+      "queries": [
+        "Atlas database"
+      ],
+      "matched": 30,
+      "calls": {
+        "direct": 30,
+        "request": 30
+      },
+      "latencyMs": {
+        "direct": {
+          "mean": 30.617663333333347,
+          "p50": 30.680200000000013,
+          "p95": 33.96699999999987
+        },
+        "request": {
+          "mean": 31.111319999999992,
+          "p50": 31.15209999999979,
+          "p95": 34.73079999999982
+        }
+      }
+    },
+    {
+      "queries": [
+        "Atlas database",
+        "Atlas database"
+      ],
+      "matched": 30,
+      "calls": {
+        "direct": 60,
+        "request": 30
+      },
+      "latencyMs": {
+        "direct": {
+          "mean": 61.391046666666746,
+          "p50": 60.623999999999796,
+          "p95": 68.82240000000002
+        },
+        "request": {
+          "mean": 32.6625933333333,
+          "p50": 32.65550000000076,
+          "p95": 38.17569999999978
+        }
+      }
+    },
+    {
+      "queries": [
+        "Atlas database",
+        "SQLite observations"
+      ],
+      "matched": 30,
+      "calls": {
+        "direct": 60,
+        "request": 60
+      },
+      "latencyMs": {
+        "direct": {
+          "mean": 61.994286666666476,
+          "p50": 61.50089999999909,
+          "p95": 68.90779999999995
+        },
+        "request": {
+          "mean": 61.054703333333386,
+          "p50": 61.04560000000038,
+          "p95": 68.30010000000038
+        }
+      }
+    }
+  ]
+}

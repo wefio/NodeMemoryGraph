@@ -133,6 +133,14 @@ Offline learned relevance uses the source and evaluation boundaries in
 [relevance-training.md](../relevance-training.md). Its artifacts remain candidates;
 cross-corpus measurements do not grant runtime admission.
 
+### Request-local query preparation
+
+Within one daemon search, identical embedding batches share vectors, never
+Store reads. New calls use fresh preparation; failures/empty results can retry.
+Scope, index-health and deadline checks remain per use. See
+[implementation](../../../src/integration/search.ts) for exact batch identity
+and copied-vector isolation.
+
 ### Evidence assembly
 
 Direct-result assembly and node-result assembly load linked evidence in batches

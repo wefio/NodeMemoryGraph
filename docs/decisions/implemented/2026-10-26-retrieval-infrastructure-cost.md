@@ -21,7 +21,7 @@ fingerprint. Store assembly reads linked history with bounded SQL joins.
 The contracts remain at [state presentation](../../design/state-spaces.md#unified-context-information-items)
 and [retrieval evidence assembly](../../design/design/progressive-retrieval.md#evidence-assembly).
 The existing rendered-evidence token estimator and exact-evidence renderer
-remain unchanged. This change adds no independent renderer, budget or cache.
+remain unchanged. The assembly change adds no independent renderer or budget.
 
 ## Alternatives considered
 
@@ -44,3 +44,21 @@ include output hashes and repeat runs. They establish local cost reductions;
 the separate full LME paired check establishes unchanged recall@20 and output
 on 500 questions. Neither result establishes recall improvement or a speedup
 of the complete answer-and-judge pipeline.
+
+## Request-local query preparation extension
+
+A daemon search can call the shared search entry for several stores or repeated
+semantic clauses. Previously each healthy hybrid branch embedded the same text
+again. Reuse only the query preparation within that invocation, while preserving
+fresh store reads and the existing automatic deadline. Failures and empty
+responses remain retryable. This avoids the invalidation, tenant boundaries and
+retention cost of a process-wide cache; it does not combine different queries or
+alter provider batch semantics. The [retrieval contract](../../design/design/progressive-retrieval.md#request-local-query-preparation)
+owns its lifetime and exclusions.
+
+The [paired measurement](../../experiments/retrieval/request-preparation-2026-10-28.md)
+records provider call counts, simulated waiting time and exact candidate equality.
+Tests include a real loopback HTTP provider through `NmgService`, deletion between
+reads, concurrent consumers, retries and cancellation. This extension has not been
+measured against live providers or a full recall benchmark; the earlier 500-question
+LME evidence above belongs to the earlier assembly change.

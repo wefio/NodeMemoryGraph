@@ -123,7 +123,7 @@ import {
   taskRunStatus,
   type RunPlanTaskInput,
 } from "../integration/task-coordinator.ts";
-import { searchMemoryContext } from "../integration/search.ts";
+import { requestQueryEmbeddingClient, searchMemoryContext } from "../integration/search.ts";
 import { RecallBudget } from "../integration/recall-budget.ts";
 import { simhash64, simhashToHex, simhashFromHex, hammingDistance } from "../core/simhash.ts";
 import { ControllerPolicyChannel } from "../integration/controller-channel.ts";
@@ -2070,7 +2070,7 @@ export class NmgService {
       relevanceModelFloor: DEFAULT_MODEL_FLOOR,
     };
     const raws = [query, ...(queries ?? [])];
-    const embedding = this.#configuredEmbeddingClient();
+    const embedding = requestQueryEmbeddingClient(this.#configuredEmbeddingClient());
     // Tessera (bookmark) source: independent of projectDir — tesserae live in the
     // shared store and are searched alongside memory. Snippet relocation to a
     // line needs the project root (to read the current file), so the resolver
