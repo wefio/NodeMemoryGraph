@@ -567,7 +567,19 @@ async function acceptAdd(env, input) {
   // The reservation is committed; only now must the entry become durable. A failure
   // answers 5xx with the counter one too high, which capacity or the next fold
   // corrects by reading the log back.
-  if (reservation) await putLogEntry(env.MEMORY, reservation.key, reservation.entry);
+  if (reservation) {
+    try {
+      await putLogEntry(env.MEMORY, reservation.key, reservation.entry);
+    } catch (error) {
+      // The reservation committed but the entry did not become durable. Returning
+      // the slot immediately keeps the counter honest: without this an over-count
+      // below the fold trigger has no path back to zero, so the manifest stays v4,
+      // /capacity keeps reporting a backlog, and every search pays a log listing
+      // that can never short-circuit.
+      await releasePending(env, userId).catch(() => {});
+      throw error;
+    }
+  }
   return { response, pending: accepted };
 }
 /** Folds waiting entries into the partition, one partition write for the batch.
@@ -579,7 +591,16 @@ async function foldPending(env, userId) {
   const client = embeddingClient(env);
   const key = keyFor(userId);
   const waiting = await listPending(env.MEMORY, key, { limit: FOLD_BATCH });
-  if (waiting.length === 0) return { folded: 0, remaining: 0 };
+  if (waiting.length === 0) {
+    // An empty log with a non-zero counter is the residue of a reservation whose
+    // write never landed. Nothing else notices it: the fold trigger is the counter
+    // itself, so it never fires. Give one slot back per call and report the release
+    // as progress, which is what keeps `/admin/fold` iterating until it is clean.
+    const manifest = (await loadManifest(env.MEMORY, key, userId)).manifest;
+    if (pendingCount(manifest) === 0) return { folded: 0, remaining: 0, released: false };
+    const released = await releasePending(env, userId).catch(() => null);
+    return { folded: 0, remaining: released?.response?.pending ?? pendingCount(manifest), released: true };
+  }
   const plan = foldPlan(waiting, { maxEntries: FOLD_BATCH, maxBytes: MAX_BODY_BYTES });
   let drop = [];
   let remaining = 0;
@@ -658,6 +679,19 @@ function applyPending(manifest, count) {
   if (!("pending" in next)) delete manifest.pending;
   Object.assign(manifest, next);
   return manifest.pending ?? 0;
+}
+/** Gives one reserved slot back after a write that never became durable.
+ *
+ *  Relative, not absolute: a concurrent accept may have reserved in between, and
+ *  writing a computed absolute value would erase its increment (a lost update).
+ *  The read-modify-write is inside the manifest CAS like every other count change. */
+async function releasePending(env, userId) {
+  return mutateUser(env, userId, async (ctx) => {
+    const count = pendingCount(ctx.manifest);
+    if (count === 0) return { readOnly: true, response: { pending: 0 } };
+    applyPending(ctx.manifest, count - 1);
+    return { response: { pending: count - 1 } };
+  });
 }
 /** Writes the observed number of waiting entries back to the manifest. Used after a
  *  failed delete, where the decremented counter no longer matches the log. */
@@ -1519,13 +1553,15 @@ async function foldRoute(request, env, url, path) {
   const userId = textField(url.searchParams.get("user_id"), "user_id");
   let folded = 0;
   let remaining = 0;
+  let released = 0;
   for (let round = 0; round < 8; round += 1) {
     const step = await foldPending(env, userId);
     folded += step.folded;
     remaining = step.remaining;
-    if (step.folded === 0) break;
+    if (step.released) released += 1;
+    if (step.folded === 0 && !step.released) break;
   }
-  return json({ success: true, user_id: userId, folded, remaining });
+  return json({ success: true, user_id: userId, folded, released, remaining });
 }
 async function addRoute(request, env, path) {
   if ((path !== "/add" && path !== "/remember") || request.method !== "POST") return undefined;
