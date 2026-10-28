@@ -426,24 +426,16 @@ function midText(question: string, longChars: number, fraction: number): string 
   return `${fillerText(before)}\n${question}\n${fillerText(after)}`;
 }
 
-/** Three arms per condition:
- *  A = mean-pooled chunk vector, B rounds the page (shipped);
- *  C = same pooled vector for a candidate pool, reranked by per-chunk max;
- *  D = no chunking at all — the whole query as one text, so the embedding model
- *      applies its own token window. D is the baseline for "is chunking worth it". */
-/** A = mean-pooled chunk vector (shipped); C = pooled candidate pool reranked by
- *  per-chunk max; D = no chunking at all — the whole query as one text, so the
- *  embedding model applies its own token window. D is the baseline for "is
- *  chunking worth it". */
-async function evaluateQuestion(
-  question: string,
-  gold: string[][],
-  others: string[],
-  docs: Doc[],
+/** Feature texts for every condition, and their vectors.
+ *
+ *  Each arm needs a different subset, so the sets are gathered once per question and
+ *  sliced back in the same order. Keeping the gathering here leaves the per-condition
+ *  loop reading as a list of arms rather than a list of bookkeeping. */
+async function prepareVectors(
+  texts: Record<Condition, string>,
   embedBase: string,
   options: Options,
-): Promise<Row[]> {
-  const texts = queryTexts(question, others, options.longChars, options.offsets);
+) {
   const wantChunks = options.arms.has("a") || options.arms.has("c") || options.arms.has("e");
   const wantWhole =
     options.arms.has("d") ||
@@ -463,76 +455,98 @@ async function evaluateQuestion(
       wantPlan ? planQueryWindows(texts[condition], 2000, 9, options.planCount) : [],
     ]),
   ) as Record<Condition, string[]>;
-  const chunkTexts = wantChunks
-    ? CONDITIONS.flatMap((condition) => chunksBy[condition])
-    : ([] as string[]);
+  const chunkTexts = CONDITIONS.flatMap((condition) => chunksBy[condition]);
   const wholeTexts = wantWhole ? CONDITIONS.map((condition) => texts[condition]) : [];
   const planTexts = wantPlan ? CONDITIONS.flatMap((condition) => planBy[condition]) : [];
   const vectors = await embed(embedBase, [...chunkTexts, ...wholeTexts, ...planTexts]);
-  const whole = vectors.slice(chunkTexts.length, chunkTexts.length + wholeTexts.length);
-  const plans = vectors.slice(chunkTexts.length + wholeTexts.length);
+  return {
+    chunksBy,
+    planBy,
+    chunks: vectors.slice(0, chunkTexts.length),
+    whole: vectors.slice(chunkTexts.length, chunkTexts.length + wholeTexts.length),
+    plans: vectors.slice(chunkTexts.length + wholeTexts.length),
+    wantChunks,
+    wantWhole,
+    wantPlan,
+  };
+}
+
+interface ArmInput {
+  gold: string[][];
+  docs: Doc[];
+  options: Options;
+  whole?: Float32Array;
+  chunks: Float32Array[];
+  plans: Float32Array[];
+  arms: Set<string>;
+}
+
+/** Every arm's page for one condition. One function per arm would be six functions of
+ *  four lines; the branches below are the arms themselves. */
+function scoreCondition(input: ArmInput): Partial<Row> {
+  const { gold, docs, options, whole, chunks, plans } = input;
+  const { page, arms } = options;
+  const row: Partial<Row> = {};
+  const record = (name: string, recall: ReturnType<typeof recallOf>) => {
+    row[`${name}Hits` as keyof Row] = recall.hits as never;
+    row[`${name}All` as keyof Row] = recall.all as never;
+  };
+  if (arms.has("a") || arms.has("c") || arms.has("e")) {
+    const pooled = chunks.length === 1 ? chunks[0]! : poolQueryVectors(chunks);
+    const aPage = rankByVector(pooled, docs, page);
+    record("a", recallOf(gold, aPage));
+    if (arms.has("c")) {
+      const cPage = rankByChunkMax(pooled, chunks, docs, options);
+      record("c", recallOf(gold, cPage));
+      row.identical = aPage.join(",") === cPage.join(",");
+    }
+  }
+  if (arms.has("d") && whole) record("d", recallOf(gold, rankByVector(whole, docs, page)));
+  if (arms.has("e") && whole)
+    record("e", recallOf(gold, rankByFeatureMax([whole, ...chunks], docs, page).page));
+  if (arms.has("f")) record("f", recallOf(gold, rankByFeatureMax(plans, docs, page).page));
+  if (arms.has("g") && whole)
+    record("g", recallOf(gold, rankByFeatureMax([whole, ...plans], docs, page).page));
+  // H drops the first planned window: the clause itself already covers the opening
+  // with the model's own token window, which is longer than one character window.
+  if (arms.has("h") && whole)
+    record("h", recallOf(gold, rankByFeatureMax([whole, ...plans.slice(1)], docs, page).page));
+  return row;
+}
+
+async function evaluateQuestion(
+  question: string,
+  gold: string[][],
+  others: string[],
+  docs: Doc[],
+  embedBase: string,
+  options: Options,
+): Promise<Row[]> {
+  const texts = queryTexts(question, others, options.longChars, options.offsets);
+  const prepared = await prepareVectors(texts, embedBase, options);
   const rows: Row[] = [];
-  let offset = 0;
+  let chunkOffset = 0;
   let planOffset = 0;
   for (const [index, condition] of CONDITIONS.entries()) {
-    const count = chunksBy[condition].length;
-    const chunks = vectors.slice(offset, offset + count);
-    offset += count;
-    const planCount = planBy[condition].length;
-    const planVectors = plans.slice(planOffset, planOffset + planCount);
+    const chunkCount = prepared.chunksBy[condition].length;
+    const planCount = prepared.planBy[condition].length;
+    const chunks = prepared.chunks.slice(chunkOffset, chunkOffset + chunkCount);
+    const plans = prepared.plans.slice(planOffset, planOffset + planCount);
+    chunkOffset += chunkCount;
     planOffset += planCount;
-    const row: Row = { condition, total: gold.length };
-    if (wantChunks) {
-      const pooled = count === 1 ? chunks[0]! : poolQueryVectors(chunks);
-      const aPage = rankByVector(pooled, docs, options.page);
-      const a = recallOf(gold, aPage);
-      row.aHits = a.hits;
-      row.aAll = a.all;
-      if (options.arms.has("c")) {
-        const cPage = rankByChunkMax(pooled, chunks, docs, options);
-        const c = recallOf(gold, cPage);
-        row.cHits = c.hits;
-        row.cAll = c.all;
-        row.identical = aPage.join(",") === cPage.join(",");
-      }
-    }
-    if (wantWhole) {
-      const d = recallOf(gold, rankByVector(whole[index]!, docs, options.page));
-      row.dHits = d.hits;
-      row.dAll = d.all;
-    }
-    if (options.arms.has("e")) {
-      const { page } = rankByFeatureMax([whole[index]!, ...chunks], docs, options.page);
-      const e = recallOf(gold, page);
-      row.eHits = e.hits;
-      row.eAll = e.all;
-    }
-    if (wantPlan) {
-      const { page } = rankByFeatureMax(planVectors, docs, options.page);
-      const f = recallOf(gold, page);
-      row.fHits = f.hits;
-      row.fAll = f.all;
-    }
-    if (options.arms.has("h")) {
-      // The clause itself already covers the opening with the model's own token
-      // window, which is longer than one character window, so H drops the first
-      // window and spends the saved call elsewhere.
-      const { page } = rankByFeatureMax(
-        [whole[index]!, ...planVectors.slice(1)],
+    rows.push({
+      condition,
+      total: gold.length,
+      ...scoreCondition({
+        gold,
         docs,
-        options.page,
-      );
-      const h = recallOf(gold, page);
-      row.hHits = h.hits;
-      row.hAll = h.all;
-    }
-    if (options.arms.has("g")) {
-      const { page } = rankByFeatureMax([whole[index]!, ...planVectors], docs, options.page);
-      const g = recallOf(gold, page);
-      row.gHits = g.hits;
-      row.gAll = g.all;
-    }
-    rows.push(row);
+        options,
+        whole: prepared.whole[index],
+        chunks,
+        plans,
+        arms: options.arms,
+      }),
+    });
   }
   return rows;
 }

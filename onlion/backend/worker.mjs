@@ -236,6 +236,45 @@ const WRITE_BACKOFF_CAP_MS = 600;
 const writeBackoffMs = (attempt) =>
   Math.random() * Math.min(WRITE_BACKOFF_CAP_MS, WRITE_BACKOFF_BASE_MS * 2 ** (attempt - 1));
 // Atomic manifest commits preserve request idempotency across all partitions.
+/** One attempt's manifest read, with the guard that turns a reset during a retry into
+ *  a clear 409 instead of a write against a replaced dataset. */
+async function readAttempt(env, key, userId, attempt, generation) {
+  const { object, manifest: before } = await measure("manifest_read", () =>
+    loadManifest(env.MEMORY, key, userId),
+  );
+  const observed = before.generation ?? null;
+  if (attempt === 0) return { object, before, generation: observed };
+  if (observed !== generation)
+    throw new HttpError(
+      409,
+      "user_reset",
+      "User memory was reset during this operation; submit only the new dataset",
+    );
+  return { object, before, generation };
+}
+
+/** Runs the operation once and commits it, or reports that the CAS rejected the write.
+ *
+ *  `response: null` means another writer committed first and the caller should retry;
+ *  a response with `committed: false` is the read-only short circuit, which never
+ *  writes a manifest. */
+async function commitAttempt(env, { sqlite, key, object, before, operation, reuse, staged }) {
+  const manifest = structuredClone(before);
+  const result = await operation({ sqlite, key, manifest, staged, reuse });
+  if (result.readOnly) return { response: result.response, committed: false };
+  const saved = await measure("manifest_commit", () =>
+    commitManifest(env.MEMORY, key, object, manifest),
+  );
+  if (!saved) return { response: null, committed: false };
+  const live = new Set(manifest.parts.map((p) => p.key));
+  await removeStaged(
+    env.MEMORY,
+    staged.filter((k) => !live.has(k)),
+  ).catch(() => {});
+  await measure("retired_cleanup", () => retireParts(env.MEMORY, before, manifest));
+  return { response: result.response, committed: true };
+}
+
 async function mutateUser(env, userId, operation) {
   const sqlite = await measure("sqlite_init", () => sqliteReady()),
     key = keyFor(userId);
@@ -253,36 +292,24 @@ async function mutateUser(env, userId, operation) {
   try {
     for (let attempt = 0; attempt < attempts; attempt++) {
       if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, writeBackoffMs(attempt)));
-      const { object, manifest: before } = await measure("manifest_read", () =>
-        loadManifest(env.MEMORY, key, userId),
-      );
-      const observed = before.generation ?? null;
-      if (attempt === 0) generation = observed;
-      else if (observed !== generation)
-        throw new HttpError(
-          409,
-          "user_reset",
-          "User memory was reset during this operation; submit only the new dataset",
-        );
-      const manifest = structuredClone(before),
-        staged = [];
+      const attemptState = await readAttempt(env, key, userId, attempt, generation);
+      generation = attemptState.generation;
       // Staged objects survive a conflict retry so the next attempt can reuse an
       // identical upload; they are removed once, after the last attempt.
+      const staged = [];
       try {
-        const result = await operation({ sqlite, key, manifest, staged, reuse });
-        if (result.readOnly) return result.response;
-        const saved = await measure("manifest_commit", () =>
-          commitManifest(env.MEMORY, key, object, manifest),
-        );
-        if (saved) {
-          committed = true;
-          const live = new Set(manifest.parts.map((p) => p.key));
-          await removeStaged(
-            env.MEMORY,
-            staged.filter((k) => !live.has(k)),
-          ).catch(() => {});
-          await measure("retired_cleanup", () => retireParts(env.MEMORY, before, manifest));
-          return result.response;
+        const outcome = await commitAttempt(env, {
+          sqlite,
+          key,
+          object: attemptState.object,
+          before: attemptState.before,
+          operation,
+          reuse,
+          staged,
+        });
+        if (outcome.response !== null) {
+          committed ||= outcome.committed;
+          return outcome.response;
         }
       } catch (error) {
         if (error.code === "snapshot_changed") continue;
@@ -546,7 +573,14 @@ async function acceptAdd(env, input) {
             : { ...message, indexText: await contentView(message.content) },
         );
     }
-    const response = addResponse(ctx.key, requestId, userId, sessionId, requestHash, prepared.length);
+    const response = addResponse(
+      ctx.key,
+      requestId,
+      userId,
+      sessionId,
+      requestHash,
+      prepared.length,
+    );
     // Reserve the counter *before* the entry is durable. The order is the safety
     // argument: a failed commit leaves no entry behind, while a failed write leaves
     // the counter one too high - and an over-count only costs a log listing. The
@@ -704,6 +738,36 @@ async function reconcilePending(env, userId, count) {
     return { response: { pending: count } };
   });
 }
+/** Fuses the entries still in the log into the page, scored against the same query
+ *  features the partitions were searched with.
+ *
+ *  Each entry costs one embedding call, capped by `MAX_PENDING_READ`, because a search
+ *  has to see an Add that was just accepted. A record whose vector cannot be produced
+ *  is left out rather than ranked at zero: it would otherwise displace real evidence.
+ */
+async function fusePendingRecords({ env, ctx, features, candidates, client, modes, topK }) {
+  if (pendingCount(ctx.manifest) === 0 || !client) return candidates;
+  const waiting = await pendingForSearch(env, ctx, Math.min(topK, MAX_PENDING_READ));
+  if (waiting.length === 0) return candidates;
+  const featureVectors = [];
+  for (const list of features)
+    for (const text of list) {
+      const [vector] = await client.embedQueries([text]).catch(() => []);
+      if (vector) featureVectors.push(vector);
+    }
+  for (const record of waiting) {
+    const [vector] = await client.embedQueries([record.content]).catch(() => []);
+    if (!vector) continue;
+    record.score = featureVectors.reduce(
+      (best, feature) => Math.max(best, cosineSimilarity(vector, feature)),
+      -Infinity,
+    );
+    modes.add("records");
+  }
+  return [...candidates, ...waiting.filter((record) => Number.isFinite(record.score))]
+    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+    .slice(0, topK);
+}
 /** Records that are still in the log, shaped like page items so the existing
  *  fusion by identity and highest score applies unchanged.
  *
@@ -724,10 +788,11 @@ async function pendingForSearch(env, ctx, limit) {
       stored_at: new Date(entry.received_at).toISOString(),
       pending: true,
     })),
-    );
+  );
 }
 async function add(env, input) {
-  const { userId, requestId, sessionId, messages, requestHash, fingerprint } = readAddRequest(input);
+  const { userId, requestId, sessionId, messages, requestHash, fingerprint } =
+    readAddRequest(input);
   const client = embeddingClient(env);
   const contentView = createContentView();
   const serviceContext = { userId, sessionId, client };
@@ -995,29 +1060,16 @@ async function search(env, input, options = {}) {
       candidates.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
       candidates = candidates.slice(0, topK);
     }
-    if (pendingCount(manifest) > 0) {
-      const waiting = await pendingForSearch(env, { key, manifest }, Math.min(topK, MAX_PENDING_READ));
-      if (waiting.length > 0 && client) {
-        const featureVectors = [];
-        for (const list of features)
-          for (const text of list) {
-            const [vector] = await client.embedQueries([text]).catch(() => []);
-            if (vector) featureVectors.push(vector);
-          }
-        for (const record of waiting) {
-          const [vector] = await client.embedQueries([record.content]).catch(() => []);
-          if (!vector) continue;
-          record.score = featureVectors.reduce(
-            (best, feature) => Math.max(best, cosineSimilarity(vector, feature)),
-            -Infinity,
-          );
-          modes.add("records");
-        }
-        candidates = [...candidates, ...waiting.filter((record) => Number.isFinite(record.score))]
-          .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
-          .slice(0, topK);
-      }
-    }
+    const fused = await fusePendingRecords({
+      env,
+      ctx: { key, manifest },
+      features,
+      candidates,
+      client,
+      modes,
+      topK,
+    });
+    candidates = fused;
     persistence.inline_bytes = manifest.parts.reduce((sum, p) => sum + deltaBytes(p), 0);
     const appended = collectAppended(
       appendedById,
@@ -1578,7 +1630,8 @@ async function addRoute(request, env, path) {
   const accepted = await acceptAdd(env, input);
   // A burst leaves entries waiting; fold a bounded batch here rather than on the
   // read path, so accepted latency stays flat while the log cannot grow forever.
-  if (accepted.pending >= FOLD_TRIGGER) await foldPending(env, accepted.response.user_id).catch(() => {});
+  if (accepted.pending >= FOLD_TRIGGER)
+    await foldPending(env, accepted.response.user_id).catch(() => {});
   return json(accepted.response);
 }
 async function handle(request, env) {
