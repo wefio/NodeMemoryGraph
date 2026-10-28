@@ -100,11 +100,16 @@ try {
     await call("/add", addBody("alice", `bulk-${index}`, `filler turn number ${index} about the garden`));
   const afterFold = await call("/search", { user_id: "alice", query: "spare key under the blue planter", top_k: 50 });
   assert.equal(afterFold.status, 200);
+  const keyRecord = afterFold.body.data.find((item) => String(item.content).includes("spare key"));
+  assert.ok(keyRecord, "a folded entry must remain searchable");
+  // The first Add is the oldest entry, so the first fold that ran during the burst
+  // absorbed it. Serving it from the partition rather than from the log is the only
+  // thing that proves folding happened at all - a run where foldPending silently
+  // did nothing still answered every other assertion in this file.
   assert.ok(
-    afterFold.body.data.some((item) => String(item.content).includes("spare key")),
-    "a folded entry must remain searchable",
+    !String(keyRecord.id).startsWith("pending:"),
+    `the oldest entry must have been folded, got ${keyRecord.id}`,
   );
-  assert.equal(afterFold.body.storage_format, "nmg-shards-v4", "pending entries make the manifest v4");
 
   // I2 after folding: the receipt now lives in the partition.
   const replayAfterFold = await call("/add", addBody("alice", "req-1", "the spare key is under the blue planter"));

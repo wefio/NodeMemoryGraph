@@ -566,15 +566,21 @@ async function foldPending(env, userId) {
   const waiting = await listPending(env.MEMORY, key, { limit: FOLD_BATCH });
   if (waiting.length === 0) return { folded: 0, remaining: 0 };
   const plan = foldPlan(waiting, { maxEntries: FOLD_BATCH, maxBytes: MAX_BODY_BYTES });
-  const names = [];
+  let drop = [];
   let remaining = 0;
   const result = await mutateUser(env, userId, async (ctx) => {
+    // A name leaves the counter whether the entry is applied or skipped: a receipt
+    // that already exists (crash recovery) and a cross-generation entry both mean
+    // this name is finished with. Counting only the applied ones leaves the counter
+    // above zero forever, which disables the search short-circuit in
+    // `pendingForSearch` and reports a backlog that does not exist.
+    const names = new Set();
     let folded = 0;
-    for (const name of plan.fold) {
-      const entry = waiting.find((item) => item.name === name)?.entry;
-      if (!entry) continue;
+    const generation = ctx.manifest.generation ?? null;
+    for (const { name, entry } of plan.fold) {
+      names.add(name);
       if (ctx.manifest.receipts[entry.request_hash]) continue;
-      if ((entry.generation ?? null) !== (ctx.manifest.generation ?? null)) continue;
+      if ((entry.generation ?? null) !== generation) continue;
       const batch = entry.messages.map((message, index) => ({
         ...message,
         source_message_id: `aml:${entry.request_hash}:${index}`,
@@ -593,20 +599,20 @@ async function foldPending(env, userId) {
         completed_at: new Date().toISOString(),
       };
       folded += 1;
-      names.push(name);
     }
+    drop = [...names];
+    if (names.size === 0) return { readOnly: true, response: { folded: 0 } };
     Object.assign(
       ctx.manifest,
-      withPending(ctx.manifest, Math.max(0, pendingCount(ctx.manifest) - folded)),
+      withPending(ctx.manifest, Math.max(0, pendingCount(ctx.manifest) - names.size)),
     );
     remaining = pendingCount(ctx.manifest);
-    if (folded === 0) return { readOnly: true, response: { folded: 0 } };
     return { response: { folded } };
   });
   // Only after the commit: an entry present without a receipt is safe to repeat,
   // an entry deleted without a receipt would be lost (I3).
-  if (names.length > 0) await deleteLogEntries(env.MEMORY, key, names).catch(() => {});
-  return { folded: result.folded ?? names.length, remaining };
+  if (drop.length > 0) await deleteLogEntries(env.MEMORY, key, drop).catch(() => {});
+  return { folded: result.folded ?? 0, remaining };
 }
 /** Records that are still in the log, shaped like page items so the existing
  *  fusion by identity and highest score applies unchanged.
@@ -618,7 +624,9 @@ async function pendingForSearch(env, ctx, limit) {
   const waiting = await listPending(env.MEMORY, ctx.key, {
     limit: Math.min(limit, MAX_PENDING_READ),
   });
-  return waiting.flatMap(({ entry }) =>
+  return waiting
+    .filter(({ entry }) => (entry.generation ?? null) === (ctx.manifest.generation ?? null))
+    .flatMap(({ entry }) =>
     entry.messages.map((message, index) => ({
       id: `pending:${entry.request_hash}:${index}`,
       content: message.indexText ?? (typeof message.content === "string" ? message.content : ""),
@@ -627,7 +635,7 @@ async function pendingForSearch(env, ctx, limit) {
       stored_at: new Date(entry.received_at).toISOString(),
       pending: true,
     })),
-  );
+    );
 }
 async function add(env, input) {
   const { userId, requestId, sessionId, messages, requestHash, fingerprint } = readAddRequest(input);
