@@ -1,0 +1,115 @@
+# A recorded graveyard for cleanup the commit could not finish
+
+[简体中文](2026-10-29-recorded-graveyard-for-cleanup.zh-CN.md) · [Terms](2026-10-29-recorded-graveyard-for-cleanup.terms.yaml)
+
+**Status:** proposed
+
+## Problem
+
+Cleanup of superseded partition snapshots happens **after** the manifest compare-and-swap
+succeeds, because a key may only be deleted once the manifest that stopped referencing it is
+durable. That leaves three ways to leave an orphan with no name:
+
+- the function is killed after the commit and before the delete (the platform ceiling, a
+  restart);
+- a delete fails and the caller's `.catch(() => {})` swallows it;
+- the delete is now batched at the provider's 1000-key limit, so a later batch can fail after
+  earlier ones succeeded - a **partial** cleanup that reports nothing and names nothing.
+
+None of these is visible from the manifest, which is the only thing a later request reads. The
+invariant that matters - every key under `parts/` is referenced by the manifest - holds only
+during a quiet period with no crash and with every delete batch succeeding, which is exactly the
+condition an incident violates.
+
+## Proposal
+
+Record the doomed keys in the manifest before deleting them, so a failed delete has a name that
+survives the request.
+
+1. **Order: record, then delete.** The keys are appended to `manifest.graveyard` inside the same
+   CAS that stops referencing them. Deletion of the previous graveyard happens **before** that
+   CAS, on the keys that are in neither the new `parts` nor the new `graveyard` - and never on
+   keys written by this same commit, or the drain would eat what it just recorded.
+2. **A failed delete stays named.** Whatever could not be deleted remains in the new
+   `graveyard` and is carried to the next commit at no extra round trip. Retries are idempotent,
+   and a rival cannot reference our graveyard keys, so re-deleting is safe.
+3. **Never delete doomed keys before the CAS.** Tempting - they are not in the new manifest - but
+   a retry's content fingerprint can still point at one of them, and the committed manifest would
+   then reference an object that no longer exists.
+4. **Bounded, newest first.** The field has a cap; over the cap, drop the **oldest** entries and
+   keep the newest, because the newest are the ones a partitioned delete just failed to remove.
+   An unbounded field would grow the manifest without limit under contention.
+5. **A corrupt graveyard never blocks service.** On read, a value that is not an array, or one
+   longer than the read cap, is **skipped** (no drain this request) and counted, never sliced -
+   slicing would drop keys from the cleanup list and manufacture the leak this record exists to
+   prevent. On write, the field is **replaced** with this commit's doomed set and counted, so
+   every manifest we write has a well-formed array. `/add`, `/search` and `/capacity` keep
+   serving regardless of what the field contains.
+6. **`/capacity` reports `graveyard_pending`.** Its length is the direct measure of recorded
+   backlog, with no LIST call. It measures **only what was recorded**; orphans created before
+   this mechanism existed are invisible to it and must be measured separately.
+
+## What this does and does not establish
+
+- It gives a **bounded and self-healing** residue, not an **immediate** one: the last batch of a
+  quiet period waits for the next commit, so the invariant holds "after the last commit", not "at
+  any instant".
+- It does not repair orphans that already exist. A local memory-bucket soak or a one-off admin
+  LIST is the only way to see those, and the two numbers must not be compared as one series.
+- It does not make a stalled bucket fast; it makes the residue named.
+
+## Rollback
+
+During a rollback, an older writer does not know about the field and drops it while rewriting the
+manifest, so keys recorded by the newer writer lose their only name. Rolling forward again does
+not restore them. Storage does not shrink; the leak becomes unnamed. This is recorded here so it
+is not later investigated as a new defect.
+
+## Acceptance criteria
+
+- **Empty state is byte-identical**: with an empty graveyard the manifest contains no
+  `graveyard` key at all, so a user who never triggers the mechanism is indistinguishable from
+  one written by today's deployment. `JSON.stringify` must not contain the string.
+- **Availability with a corrupt field**: seed a manifest with `graveyard: "not-an-array"` and one
+  with an array longer than the read cap; assert `/add`, `/search` and `/capacity` all answer
+  normally, that the value is preserved until the next successful write, and that the counter is
+  reported. Without this test nothing prevents a future edit from turning it back into a 503.
+- **Record then delete**: a failed delete leaves the key in the next manifest's graveyard, and the
+  following successful commit removes it.
+
+## Risks
+
+- **The drain deletes a live key.** The filter is "in neither the new `parts` nor the new
+  `graveyard`". A mistake there destroys a referenced snapshot, which is data loss, not residue:
+  this is the reason the filter is spelled out and tested before the mechanism is enabled.
+- **The cap drops a key that is still referenced.** Newest-first exists to avoid it, but a wrong
+  comparison could drop the newest instead of the oldest; the acceptance test has to pin the
+  direction, not just the length.
+- **An older writer drops the field** (see Rollback): in-flight keys lose their only name and
+  never come back.
+- **Manifest growth under contention.** Bounded by the cap, but the cap has to be small enough
+  that 128 partitions of doomed keys never approach `MAX_MANIFEST_BYTES`.
+
+## Alternatives considered
+
+- **A timeout heuristic** ("delete anything under `parts/` older than N") without recording: needs
+  a background sweep for a scenario that has no background execution on this platform, and it
+  guesses at a threshold instead of knowing which keys were doomed.
+- **Delete before the CAS** so the failure window disappears: breaks retries, see rule 3.
+- **Unbounded graveyard**: grows the manifest without limit exactly when writes are contending.
+- **Swift at delete time rather than recorded**: batching turned a whole-batch rejection into a
+  partial one; a retry-driven sweep inside the same request is what actually finishes the job.
+
+## Consequences
+
+- One new manifest field, written only when there is something to record, so a drained manifest
+  stays byte-identical to today's.
+- Cleanup costs at most one extra commit to converge, and nothing extra on the wire.
+- An operator gets a number (`graveyard_pending`) that says how much recorded backlog exists.
+
+## Scope
+
+This is **not** part of the append-log accept slice, and not part of its gate. It changes the
+manifest format, so it gets its own decision entry (this one) and its own commit boundary; it must
+not land quietly inside the add-log ticket, or a later reader cannot tell which intent added a
+field to the manifest.
