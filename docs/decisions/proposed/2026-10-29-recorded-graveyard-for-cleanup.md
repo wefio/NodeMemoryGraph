@@ -97,6 +97,13 @@ is not later investigated as a new defect.
   with an array longer than the read cap; assert `/add`, `/search` and `/capacity` all answer
   normally, that the value is preserved until the next successful write, and that the counter is
   reported. Without this test nothing prevents a future edit from turning it back into a 503.
+- **The write side is an assertion, not a description.** Feed several corrupt graveyards - a
+  non-array, an array holding non-string entries, one longer than the cap, and one containing a
+  key that is also a live `parts` entry - and after one successful write assert that the field is
+  either absent or (an array of non-empty strings **and** no longer than the cap **and** disjoint
+  from `parts`). Without this, an implementation that forgets the `parts` filter or the cap passes
+  every other criterion here, and the first entry under Risks - a wrong filter deleting live data -
+  stays a paragraph instead of a test.
 - **Record then delete**: a failed delete leaves the key in the next manifest's graveyard, and the
   following successful commit removes it.
 
