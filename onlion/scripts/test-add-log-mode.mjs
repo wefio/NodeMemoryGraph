@@ -98,6 +98,25 @@ try {
     );
   }
   assert.equal(health.body.limits.add_mode, "log", "the fixture must run the log path");
+  {
+    // A missing seventh argument is invisible at runtime: the signature defaults to null, the
+    // snapshot is re-uploaded on every CAS retry, and only a bucket listing shows it. The same
+    // reason the add-mode default is pinned here applies to a call-site argument.
+    const source = fs.readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "../backend/worker.mjs"),
+      "utf8",
+    );
+    assert.match(
+      source,
+      /async \(\{ sqlite, key, manifest, staged, reuse \}\)/,
+      "the search operation must receive the attempt's reuse map",
+    );
+    assert.match(
+      source,
+      /options\.fullSnapshot \|\| env\.NMG_SEARCH_DELTAS === "0",[\s\S]{0,400}?reuse,/,
+      "stageSearchPart must be given the reuse map, or a retry re-uploads an identical snapshot",
+    );
+  }
 
   // I1: accepted Add is searchable before any fold.
   const first = await call(

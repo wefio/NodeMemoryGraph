@@ -272,9 +272,13 @@ async function commitAttempt(env, { sqlite, key, object, before, operation, reus
   );
   if (!saved) return { retry: true };
   const live = new Set(manifest.parts.map((p) => p.key));
+  // `reuse` holds keys uploaded by an earlier attempt of this same request. A committed attempt
+  // has to retire those too: they belong to a manifest that lost its CAS, so filtering only
+  // `staged` left one orphan per reused snapshot under parts/. The end-state invariant is
+  // "every key under parts/ is referenced by the manifest", which is what this enforces.
   await removeStaged(
     env.MEMORY,
-    staged.filter((k) => !live.has(k)),
+    [...new Set([...staged, ...reuse.values()])].filter((k) => !live.has(k)),
   ).catch(() => {});
   await measure("retired_cleanup", () => retireParts(env.MEMORY, before, manifest));
   return { response: result.response, committed: true, retry: false };
@@ -1212,7 +1216,7 @@ async function search(env, input, options = {}) {
   const contributions = clauses.map((_clause, index) => ({ index, contributed: 0, exclusive: 0 }));
   const client = embeddingClient(env),
     started = Date.now();
-  return mutateUser(env, userId, async ({ sqlite, key, manifest, staged }) => {
+  return mutateUser(env, userId, async ({ sqlite, key, manifest, staged, reuse }) => {
     let candidates = [];
     const modes = new Set();
     let changed = false;
@@ -1252,6 +1256,9 @@ async function search(env, input, options = {}) {
             result,
             USER_DELTA_LIMIT - otherBytes,
             options.fullSnapshot || env.NMG_SEARCH_DELTAS === "0",
+            // Without this a search retry re-uploaded a byte-identical snapshot: the signature
+            // accepted a reuse map, the call site never passed one.
+            reuse,
           );
       copyLegacyReceipts(manifest, result.legacyReceipts);
       manifest.parts[i] = saved.part;
