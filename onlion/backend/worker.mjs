@@ -29,6 +29,7 @@ import compiledSqlite from "../sqlite-wasm/sqlite3.wasm";
 import { configure, DatabaseSync, withDatabases, sqliteStats } from "./sqlite.mjs";
 import { memRequestStarted, memLog, memFields } from "./mem-trace.mjs";
 import { AmlMemoryService, AML_SEARCH_PROFILE, CORE_SOURCE } from "./memory-service.ts";
+import { memoryEmbeddingText } from "../../src/core/store/search-ranking.ts";
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
 import {
   normalizeContent,
@@ -358,6 +359,14 @@ const EMBED_DOCUMENT_TIMEOUT_MS = 25_000;
  *  well inside it: past this point the Add fails with a clear code instead of running out the
  *  clock with no answer. */
 const EMBED_WRITE_BUDGET_MS = 45_000;
+/** How long an accept may spend embedding its own messages inline.
+ *
+ *  The document text is `[day ]statement` for this path - `previous_turn` is never supplied by the
+ *  service - so it is fully determined by the message and can be computed before the fold runs.
+ *  Doing it here, under a budget, keeps the provider call out of the fold, which is the only place
+ *  that serialises per user: a fold that has the vectors is a pure storage operation. If the
+ *  budget expires the entry is written without them and the fold embeds as it does today. */
+const ACCEPT_EMBED_MS = 8_000;
 /** Total embedding work one search may spend, across every call site.
  *
  *  A single search embeds its clauses, their windows, every pending record and each
@@ -365,7 +374,16 @@ const EMBED_WRITE_BUDGET_MS = 45_000;
  *  call means a slow provider costs a degraded score instead of the whole request:
  *  every caller already treats a missing vector as "score this one by term overlap". */
 const EMBED_QUERY_BUDGET_MS = 25_000;
-function embeddingClient(env) {
+/** The text a record is embedded from. Kept in one place so the accept-time vector and the fold's
+ *  own computation cannot drift: both call this. */
+function embeddingTextOf(message) {
+  const statement =
+    message.indexText ?? (typeof message.content === "string" ? message.content : "");
+  return memoryEmbeddingText(statement, { eventTime: message.chat_time });
+}
+/** Seeds the client with vectors the entry already carries, so a fold finds them instead of
+ *  calling the provider. Keyed by text, which is what the store asks for. */
+function embeddingClient(env, seed) {
   const client = createEmbeddingClientFromEnv({
     ...env,
     NMG_EMBED_TIMEOUT_MS: env.NMG_EMBED_TIMEOUT_MS ?? String(EMBED_TIMEOUT_MS),
@@ -410,6 +428,13 @@ function embeddingClient(env) {
         return embeddingOperation(() => client.embed(inputs));
       }),
     embedDocuments: deferredDocuments((inputs) => {
+      // A fold that already holds these vectors must not call the provider: this is what keeps the
+      // fold a storage-only operation. A partial match falls through to the provider for all of
+      // them, which is correct and only costs the call this avoids in the common case.
+      if (seed) {
+        const seeded = inputs.map((text) => seed.get(text) ?? null);
+        if (seeded.every(Boolean)) return Promise.resolve(seeded);
+      }
       // Bounded by a total, not by an attempt: without it one slow provider turned a single
       // Add into a 55-120 s request that the platform killed with no answer.
       if (Date.now() >= writeDeadline)
@@ -418,6 +443,9 @@ function embeddingClient(env) {
         });
       return embeddingOperation(() => documents().embedDocuments(inputs));
     }),
+    // The raw provider call, for a caller outside any SQLite session - the accept path. The
+    // deferred form above is for the fold, where it signals a preparation and throws by design.
+    embedDocumentsDirect: (inputs) => embeddingOperation(() => documents().embedDocuments(inputs)),
     // Cached per TEXT, not per input array. The retrieval engine embeds one feature at a
     // time (`embedQueries([text])`), so a cache keyed by the array only ever hits when the
     // caller happens to ask for the same list: pre-warming a batch would populate nothing the
@@ -653,6 +681,9 @@ async function acceptAdd(env, input) {
         : { ...message, indexText: await contentView(message.content) },
     );
   const response = addResponse(key, requestId, userId, sessionId, requestHash, prepared.length);
+  // Best effort inside a budget: the vectors travel with the entry, so the fold that eventually
+  // applies it does not have to reach the provider. A timeout leaves them out and the fold embeds.
+  const vectors = await inlineEntryVectors(env, prepared);
   const entry = {
     v: LOG_ENTRY_VERSION,
     generation,
@@ -664,6 +695,7 @@ async function acceptAdd(env, input) {
     received_at: Date.now(),
     messages: prepared,
     response,
+    ...(vectors ? { vectors: vectors.vectors, vector_model: vectors.model } : {}),
   };
   try {
     await putLogEntry(env.MEMORY, key, entry);
@@ -678,6 +710,26 @@ async function acceptAdd(env, input) {
   // No manifest write at all, not even for the count. The log listing answers "how many are
   // waiting" whenever somebody actually asks (`/capacity`), and that is the only consumer.
   return { response };
+}
+/** Embeds this entry's messages inside `ACCEPT_EMBED_MS`, or reports that it did not finish.
+ *
+ *  Losing the race is not an error: the entry is still written, the fold embeds instead, and the
+ *  abandoned call is harmless. What it buys is that in the common case the fold never contacts the
+ *  provider - and the fold is the only per-user serialisation point left. */
+async function inlineEntryVectors(env, messages) {
+  const client = embeddingClient(env);
+  if (!client || messages.length === 0) return null;
+  const budget =
+    Number(env.NMG_ACCEPT_EMBED_MS) >= 0 ? Number(env.NMG_ACCEPT_EMBED_MS) : ACCEPT_EMBED_MS;
+  if (budget === 0) return null;
+  const texts = messages.map((message) => embeddingTextOf(message));
+  const embedded = client.embedDocumentsDirect(texts).catch(() => null);
+  const raced = await Promise.race([
+    embedded,
+    new Promise((resolve) => setTimeout(() => resolve(null), budget)),
+  ]);
+  if (!raced || raced.length !== texts.length) return null;
+  return { vectors: raced, model: client.indexId };
 }
 /** Folds waiting entries into the partition, one partition write for the batch.
  *
@@ -721,9 +773,12 @@ async function foldPending(env, userId) {
         ...message,
         source_message_id: `aml:${entry.request_hash}:${index}`,
       }));
+      // The entry may carry the vectors its accept computed. Handing them to this entry's client
+      // means the fold applies storage and nothing else.
+      const seeded = seedFromEntry(env, entry);
       await addOneBatch(
         env,
-        { ...ctx, userId, sessionId: entry.session_id, client },
+        { ...ctx, userId, sessionId: entry.session_id, client: seeded ?? client },
         entry.request_id,
         batch,
         ctx.manifest,
@@ -1158,6 +1213,19 @@ function watchSlowRequest(env, context, started) {
   }, afterMs);
   timer?.unref?.();
   return () => clearTimeout(timer);
+}
+/** Vectors an entry already carries, keyed by the text the store will ask for. Null when the entry
+ *  has none, when they belong to a different index, or when the counts do not line up. */
+function seedFromEntry(env, entry) {
+  if (!Array.isArray(entry.vectors) || entry.vectors.length !== entry.messages.length) return null;
+  const client = embeddingClient(env);
+  if (!client || entry.vector_model !== client.indexId) return null;
+  const seed = new Map();
+  entry.messages.forEach((message, index) => {
+    const vector = entry.vectors[index];
+    if (Array.isArray(vector) && vector.length) seed.set(embeddingTextOf(message), vector);
+  });
+  return seed.size ? embeddingClient(env, seed) : null;
 }
 /** Fold one partition's persistence mode into the request totals. */
 function tallyPartPersistence(persistence, saved) {

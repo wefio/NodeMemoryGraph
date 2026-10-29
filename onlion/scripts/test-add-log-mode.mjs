@@ -152,6 +152,24 @@ try {
       "the partition loop must stop at a deadline and mark the page partial",
     );
     assert.match(source, /partial,/, "the response must say whether the page is partial");
+    // Spend is bounded per request, not per record: the fold's backfill must cap its batches, or
+    // one fold embeds a whole partition's backlog and is charged for it.
+    {
+      const service = fs.readFileSync(
+        path.join(path.dirname(fileURLToPath(import.meta.url)), "../backend/memory-service.ts"),
+        "utf8",
+      );
+      assert.match(
+        service,
+        /syncRecordEmbeddings\(this\.store, this\.client, 32, \{ maxBatches: 1 \}\)/,
+        "both backfill call sites must cap their batches",
+      );
+      assert.equal(
+        (service.match(/syncRecordEmbeddings\(this\.store, this\.client, 32\)/g) ?? []).length,
+        0,
+        "the unbounded backfill form must not come back",
+      );
+    }
   }
 
   // I1: accepted Add is searchable before any fold.
@@ -400,6 +418,40 @@ try {
       `one batch per purpose; saw ${embedCalls.length} calls with ${embedCalls
         .map((inputs) => inputs.length)
         .join("/")} inputs`,
+    );
+  }
+
+  // The vectors travel with the entry, so the fold must not buy them again. The observable is the
+  // provider call count: an Add makes at most one call - its own inline embed - even when it is
+  // the Add that triggers a fold. Without the seed the fold would add a second call for the same
+  // text, which is the serialisation the whole change exists to remove.
+  {
+    const inlineUser = "inline-" + process.pid;
+    let worst = 0;
+    for (let index = 0; index < 24; index += 1) {
+      const before = embedCalls.length;
+      const added = await call(
+        "/add",
+        addBody(inlineUser, `inline-${index}`, `inline marker ${index} about the tide gauge`),
+      );
+      assert.equal(added.status, 200, JSON.stringify(added.body));
+      worst = Math.max(worst, embedCalls.length - before);
+    }
+    assert.equal(
+      worst,
+      1,
+      `an Add must embed its own messages once and the fold must reuse them; saw ${worst} calls`,
+    );
+    // The assertion above is only meaningful if a fold actually ran, so prove it did: some of the
+    // 24 entries are on disk and the backlog is smaller than the log.
+    const afterFolds = await call(`/capacity?user_id=${inlineUser}`);
+    assert.ok(
+      (afterFolds.body.sqlite_bytes?.used ?? 0) > 0,
+      "a fold must have written a partition during the loop",
+    );
+    assert.ok(
+      (afterFolds.body.pending_entries ?? 99) < 24,
+      "a fold must have drained part of the log during the loop",
     );
   }
 
