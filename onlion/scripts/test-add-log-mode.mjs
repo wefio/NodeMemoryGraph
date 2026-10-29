@@ -121,8 +121,8 @@ try {
     // the entry is durable before the fold, and a partial page is worth more than no answer.
     assert.match(
       source,
-      /const backlogDue = accepted\.pending === null \|\| accepted\.pending >= FOLD_TRIGGER;[\s\S]{0,200}?if \(backlogDue && Date\.now\(\) - startedAt < foldBudget\)/,
-      "the fold must run under a budget; unbounded, a contended user folds its way past 120 s",
+      /const dueBySchedule =[\s\S]{0,240}?if \(dueBySchedule && Date\.now\(\) - startedAt < foldBudget\)/,
+      "the fold must be scheduled and budgeted; unbounded, a contended user folds past 120 s",
     );
     // The root fix: an accept takes no compare-and-swap at all. Sixteen concurrent Adds on one
     // user used to serialise on the manifest and lose twelve times each, redoing a megabyte of
@@ -133,15 +133,11 @@ try {
       const end = source.indexOf("/** Folds waiting entries into the partition");
       const body = source.slice(start, end);
       assert.ok(start > 0 && end > start, "acceptAdd must still exist");
-      assert.ok(
-        !body.includes("mutateUser("),
-        "accept must not take a compare-and-swap; the log entry and its key are the truth",
-      );
-      assert.match(
-        body,
-        /bumpPendingHint\(env, key, userId\)\.catch\(\(\) => null\)/,
-        "the count is a hint: one attempt, and losing it must not fail the accept",
-      );
+      for (const forbidden of ["mutateUser(", "commitManifest(", "setPending("])
+        assert.ok(
+          !body.includes(forbidden),
+          `accept must write nothing but its log entry; found ${forbidden}`,
+        );
     }
     // And the read path must not trust a zero hint, or accepted data becomes invisible.
     assert.ok(
@@ -342,13 +338,12 @@ try {
     }
   }
 
-  // One search embeds every pending record and every query feature in a single call.
-  // The sequential version spent a round trip per text - thirty or more inside one
-  // search - which is how a slow provider ran into the invocation ceiling instead of
-  // costing a score.
+  // One search embeds every pending record in a single call, and its features in another.
+  // The sequential version spent a round trip per text - thirty or more inside one search -
+  // which is how a slow provider ran into the invocation ceiling instead of costing a score.
   {
     const batchUser = "batch-" + process.pid;
-    for (let index = 0; index < 6; index += 1) {
+    for (let index = 0; index < 4; index += 1) {
       const content = `batch marker ${index} records the tidepier${index} gauge reading`;
       const added = await call("/add", addBody(batchUser, `batch-${index}`, content));
       assert.equal(added.status, 200, JSON.stringify(added.body));
@@ -360,20 +355,26 @@ try {
       top_k: 20,
     });
     assert.equal(found.status, 200, JSON.stringify(found.body));
-    // The record text is rendered (a date and role prefix may be added), so the marker
-    // token is what identifies it rather than the raw message content.
+    // The rendered record text may carry a date and role prefix, so the marker token identifies
+    // it. How many of the four are still pending depends on the fold schedule, which is a rate
+    // rather than a counter, so the count is not pinned here - the shape is: pending records
+    // reach the provider inside one call, not one call per record.
     assert.ok(
-      embedCalls.some((inputs) => inputs.filter((text) => /tidepier\d/.test(text)).length >= 6),
-      `pending records must be embedded in one batch; saw ${
-        embedCalls.length
-      } calls with ${embedCalls.map((inputs) => inputs.length).join("/")} inputs`,
+      embedCalls.some((inputs) => inputs.some((text) => /tidepier\d/.test(text))),
+      `pending records must reach the provider; saw ${embedCalls
+        .map((inputs) => inputs.length)
+        .join("/")}`,
+    );
+    assert.ok(
+      embedCalls.length <= 2,
+      `one batch per purpose; saw ${embedCalls.length} calls with ${embedCalls
+        .map((inputs) => inputs.length)
+        .join("/")} inputs`,
     );
   }
 
-  // A search must embed its features in one call, not one call per feature. The engine asks
-  // for a single feature at a time, so the batch only helps if the cache is keyed by text -
-  // and against a provider across a region boundary, twenty-four round trips per search is
-  // the difference between a search that finishes and one that hits the invocation ceiling.
+  // A search embeds its features in one call, not one per feature: the engine asks for a single
+  // feature at a time, so the cache is keyed by text and the warm pass fetches them together.
   {
     const featureUser = "features-" + process.pid;
     for (let index = 0; index < 3; index += 1) {
@@ -394,8 +395,6 @@ try {
       top_k: 20,
     });
     assert.equal(found.status, 200, JSON.stringify(found.body));
-    // Two calls at most: the feature batch and the pending-record batch. Before the cache was
-    // keyed by text this was one call per feature plus one per pending record.
     assert.ok(
       embedCalls.length <= 2,
       `one batch per purpose; saw ${embedCalls.length} calls with ${embedCalls

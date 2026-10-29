@@ -675,19 +675,9 @@ async function acceptAdd(env, input) {
     if (landed === true) return { response, pending: null };
     throw error;
   }
-  // The count is a hint, not a reservation. One attempt and no retry: losing the compare-and-swap
-  // only makes the hint stale, and a stale hint costs one listing - the log is the truth.
-  const hint = await bumpPendingHint(env, key, userId).catch(() => null);
-  return { response, pending: hint };
-}
-/** Best-effort bump of the pending count. Never retried and never trusted: a stale hint costs one
- *  listing on the read path, while retrying it is what turned a burst of writers into requests
- *  that ran out the platform's invocation budget. */
-async function bumpPendingHint(env, key, userId) {
-  const { object, manifest } = await loadManifest(env.MEMORY, key, userId);
-  setPending(manifest, pendingCount(manifest) + 1);
-  const saved = await commitManifest(env.MEMORY, key, object, manifest);
-  return saved ? pendingCount(manifest) : null;
+  // No manifest write at all, not even for the count. The log listing answers "how many are
+  // waiting" whenever somebody actually asks (`/capacity`), and that is the only consumer.
+  return { response };
 }
 /** Folds waiting entries into the partition, one partition write for the batch.
  *
@@ -849,7 +839,9 @@ async function fusePendingRecords({
   appendOnly,
   appendedById,
 }) {
-  if (pendingCount(ctx.manifest) === 0) return candidates;
+  // No gate on the count here either. This is the short-circuit that made accepted entries
+  // invisible once the accept stopped maintaining the count: the manifest said zero while the log
+  // held entries. The listing inside `pendingForSearch` is bounded, so asking is always cheap.
   const waiting = await pendingForSearch(env, ctx, Math.min(topK, MAX_PENDING_READ));
   if (waiting.length === 0) return candidates;
   const attribute = (clauseIndex) => {
@@ -1745,6 +1737,18 @@ function embeddingDiagnostics(env) {
     last_observation: embeddingObservation(),
   };
 }
+/** `/capacity` with `pending_entries` derived from the log instead of a maintained counter.
+ *
+ *  The counter is gone from the accept path, so the only honest number is a listing. It is bounded:
+ *  `pending_capped` says the bound was reached, which is enough for an operator and avoids reading a
+ *  log that a stalled fold let grow without limit. */
+async function capacityReport(env, userId) {
+  const capacity = await userCapacity(env.MEMORY, userId);
+  const cap = Number(env.NMG_CAPACITY_PENDING_CAP) > 0 ? Number(env.NMG_CAPACITY_PENDING_CAP) : 200;
+  const listed = await listPending(env.MEMORY, keyFor(userId), { limit: cap }).catch(() => null);
+  if (listed === null) return { ...capacity, pending_entries: null, pending_capped: null };
+  return { ...capacity, pending_entries: listed.length, pending_capped: listed.length >= cap };
+}
 async function adminStatusResponse(env) {
   const [sqlite, r2, reclaim, history] = await Promise.all([
     check(() => sqliteReady().then(() => true)),
@@ -1823,9 +1827,7 @@ async function adminRouteDispatcher(request, env, url, path) {
     return json({ load: setStatistics(input.enabled) });
   }
   if (path === "/admin/capacity" && request.method === "GET")
-    return json(
-      await userCapacity(env.MEMORY, textField(url.searchParams.get("user_id"), "user_id")),
-    );
+    return json(await capacityReport(env, textField(url.searchParams.get("user_id"), "user_id")));
   if (path === "/admin/reset" && request.method === "POST")
     return json(await reset(env, await readJson(request)));
   if (path === "/admin/key" && request.method === "GET") return json({ api_key: env.NMG_API_KEY });
@@ -1909,9 +1911,7 @@ async function resetRoute(request, env, path) {
 }
 async function capacityRoute(request, env, url, path) {
   if (path !== "/capacity" || request.method !== "GET") return undefined;
-  return json(
-    await userCapacity(env.MEMORY, textField(url.searchParams.get("user_id"), "user_id")),
-  );
+  return json(await capacityReport(env, textField(url.searchParams.get("user_id"), "user_id")));
 }
 /** Drains one user's log. Needed before rolling the code back - a v4 manifest is
  *  unreadable to an older deployment - and by the log-mode test, which otherwise has
@@ -1955,11 +1955,14 @@ async function addRoute(request, env, path) {
   // ceiling; the entry is already durable, so the backlog simply waits.
   const foldBudget =
     Number(env.NMG_FOLD_BUDGET_MS) >= 0 ? Number(env.NMG_FOLD_BUDGET_MS) : FOLD_BUDGET_MS;
-  // The count is a hint that may be missing (its bump lost the compare-and-swap) or stale. An
-  // unknown hint is worth a look: the fold lists the log first, so looking at an empty log costs
-  // one listing, while skipping a real backlog would hide accepted data.
-  const backlogDue = accepted.pending === null || accepted.pending >= FOLD_TRIGGER;
-  if (backlogDue && Date.now() - startedAt < foldBudget)
+  // The trigger cannot read a count that no longer exists, so it is scheduled: roughly one accept
+  // in FOLD_TRIGGER attempts a fold. The fold lists the log first and does nothing when fewer than
+  // a batch is waiting, so a wasted attempt costs one listing, while a missed backlog would hide
+  // accepted data - the schedule is a rate, not a correctness signal.
+  const foldEvery = Number(env.NMG_FOLD_EVERY) > 0 ? Number(env.NMG_FOLD_EVERY) : FOLD_TRIGGER;
+  const dueBySchedule =
+    Number.parseInt(hash(accepted.response.request_id).slice(0, 6), 16) % foldEvery === 0;
+  if (dueBySchedule && Date.now() - startedAt < foldBudget)
     await foldPending(env, accepted.response.user_id).catch(() => {});
   return json(accepted.response);
 }
