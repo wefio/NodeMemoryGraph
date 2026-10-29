@@ -24,11 +24,14 @@ function vector(text) {
   const norm = Math.hypot(...raw) || 1;
   return raw.map((value) => Number((value / norm).toFixed(6)));
 }
+/** Every embedding call the worker makes, so a test can assert how the work is batched. */
+const embedCalls = [];
 const outboundService = async (request) => {
   const url = new URL(request.url);
   if (!url.pathname.endsWith("/embeddings")) return new Response("not found", { status: 404 });
   const body = await request.json();
   const inputs = Array.isArray(body.input) ? body.input : [body.input];
+  embedCalls.push(inputs);
   return new Response(
     JSON.stringify({ data: inputs.map((text, index) => ({ index, embedding: vector(text) })) }),
     { headers: { "content-type": "application/json" } },
@@ -249,7 +252,6 @@ try {
   assert.equal(finished.status, 200, JSON.stringify(finished.body));
   assert.equal(finished.body.remaining, 0);
 
-
   // The read window must cover everything that is waiting. With the fold trigger at one
   // batch, a run of Adds leaves at most a batch pending, so every accepted fact stays
   // searchable - the failure this pins is a standing backlog larger than the window, which
@@ -260,10 +262,7 @@ try {
     for (let index = 0; index < 20; index += 1) {
       const content = `marker ${index} says the vault code is ${2000 + index}`;
       markers.push(content);
-      const added = await call(
-        "/add",
-        addBody(windowUser, `win-${index}`, content),
-      );
+      const added = await call("/add", addBody(windowUser, `win-${index}`, content));
       assert.equal(added.status, 200, JSON.stringify(added.body));
     }
     const windowCapacity = await call(`/capacity?user_id=${windowUser}`);
@@ -282,6 +281,34 @@ try {
         `marker ${index} must be searchable while the log is live`,
       );
     }
+  }
+
+  // One search embeds every pending record and every query feature in a single call.
+  // The sequential version spent a round trip per text - thirty or more inside one
+  // search - which is how a slow provider ran into the invocation ceiling instead of
+  // costing a score.
+  {
+    const batchUser = "batch-" + process.pid;
+    for (let index = 0; index < 6; index += 1) {
+      const content = `batch marker ${index} records the tidepier${index} gauge reading`;
+      const added = await call("/add", addBody(batchUser, `batch-${index}`, content));
+      assert.equal(added.status, 200, JSON.stringify(added.body));
+    }
+    embedCalls.length = 0;
+    const found = await call("/search", {
+      user_id: batchUser,
+      query: "tide table pier",
+      top_k: 20,
+    });
+    assert.equal(found.status, 200, JSON.stringify(found.body));
+    // The record text is rendered (a date and role prefix may be added), so the marker
+    // token is what identifies it rather than the raw message content.
+    assert.ok(
+      embedCalls.some((inputs) => inputs.filter((text) => /tidepier\d/.test(text)).length >= 6),
+      `pending records must be embedded in one batch; saw ${
+        embedCalls.length
+      } calls with ${embedCalls.map((inputs) => inputs.length).join("/")} inputs`,
+    );
   }
 
   // Reset drains the log as well as the partitions.

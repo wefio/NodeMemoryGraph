@@ -897,6 +897,11 @@ print(json.dumps(r))`,
       add_mode: "sync",
       pending_read_limit: 16,
       merge_batch: 8,
+      // Advertised because they bound one invocation: a per-attempt embedding timeout at
+      // or above the 120 s platform ceiling turns a slow provider into a dead request.
+      embed_timeout_ms: 10_000,
+      embed_query_budget_ms: 25_000,
+      slow_report_ms: 60_000,
     });
     const longQuery = await call("a", "/search", {
       user_id: "payload-limits",
