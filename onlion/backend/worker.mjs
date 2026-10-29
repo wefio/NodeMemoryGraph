@@ -1678,6 +1678,62 @@ function overallServiceStatus({ blocked, maintenance, recent, history, queueStat
     ? "degraded"
     : "ok";
 }
+/** Bounded count of a field across failure entries, largest first. */
+function countTop(entries, keyOf, limit = 8) {
+  const counts = new Map();
+  for (const entry of entries) {
+    const key = keyOf(entry);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))
+    .slice(0, limit)
+    .map(([key, count]) => ({ key, count }));
+}
+/** What the deployment is actually configured to talk to, for an operator looking at one
+ *  line of JSON.
+ *
+ *  The endpoint is reported as scheme, host and path - never the key - because "which endpoint
+ *  is this build calling" kept being a guess: a stale env var, a console setting the CLI deploy
+ *  did not carry, or a switch that was applied to the wrong environment all looked identical
+ *  from the outside. Values come from the client the requests themselves use, so they cannot
+ *  drift from what is in effect. */
+function embeddingDiagnostics(env) {
+  const raw = env.NMG_EMBED_BASE_URL ?? null;
+  let endpoint = null;
+  if (raw) {
+    try {
+      const url = new URL(raw);
+      endpoint = `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, "")}`;
+    } catch {
+      endpoint = "unparseable";
+    }
+  }
+  let client;
+  try {
+    client = createEmbeddingClientFromEnv({
+      ...env,
+      NMG_EMBED_TIMEOUT_MS: env.NMG_EMBED_TIMEOUT_MS ?? String(EMBED_TIMEOUT_MS),
+    });
+  } catch {
+    client = undefined;
+  }
+  const number = (value, fallback) => (Number(value) > 0 ? Number(value) : fallback);
+  return {
+    configured: !!(env.NMG_EMBED_PROVIDER || raw),
+    endpoint,
+    provider: env.NMG_EMBED_PROVIDER ?? (raw ? "openai" : null),
+    model: client?.model ?? env.NMG_EMBED_MODEL ?? null,
+    dimensions: client?.dimensions ?? number(env.NMG_EMBED_DIMENSIONS, null),
+    profile: client?.profile ?? null,
+    index_id: client?.indexId ?? null,
+    timeout_ms: number(env.NMG_EMBED_TIMEOUT_MS, EMBED_TIMEOUT_MS),
+    document_timeout_ms: number(env.NMG_EMBED_TIMEOUT_MS, EMBED_DOCUMENT_TIMEOUT_MS),
+    query_budget_ms: number(env.NMG_EMBED_QUERY_BUDGET_MS, EMBED_QUERY_BUDGET_MS),
+    write_budget_ms: number(env.NMG_EMBED_WRITE_BUDGET_MS, EMBED_WRITE_BUDGET_MS),
+    last_observation: embeddingObservation(),
+  };
+}
 async function adminStatusResponse(env) {
   const [sqlite, r2, reclaim, history] = await Promise.all([
     check(() => sqliteReady().then(() => true)),
@@ -1711,19 +1767,29 @@ async function adminStatusResponse(env) {
     },
     authentication: { configured: !!env.NMG_API_KEY },
     maintenance: reclaim.value ?? null,
-    embedding: {
-      configured: !!(env.NMG_EMBED_PROVIDER || env.NMG_EMBED_BASE_URL),
-      model: env.NMG_EMBED_MODEL || null,
-      status: "not_probed",
-      last_observation: embeddingObservation(),
-    },
+    revision: SOURCE_REVISION,
+    embedding: embeddingDiagnostics(env),
     checks_ms: { sqlite: sqlite.ms, r2: r2.ms },
     load,
     queue: queueState,
     // On demand, per instance: the same fields the slow-request report carries, so memory
     // can be watched while a deployment is live instead of only after an incident.
     memory: memFields({ sqlite: sqliteStats() }),
-    failures: { scope: "shared_best_effort", retention_hours: 24, maximum: 20, entries: failures },
+    failures: {
+      scope: env.NMG_ERROR_HISTORY === "1" ? "shared_best_effort" : "isolate_only",
+      retention_hours: 24,
+      maximum: 20,
+      // Reading twenty entries to answer "what is failing" is what made three incidents slow
+      // to diagnose, so the counts are computed here: same data, one glance.
+      summary: {
+        total: failures.length,
+        by_code: countTop(failures, (entry) => entry.code ?? "unknown"),
+        by_route: countTop(failures, (entry) => entry.route ?? "unknown"),
+        from: failures.at(-1)?.at ?? null,
+        to: failures[0]?.at ?? null,
+      },
+      entries: failures,
+    },
     limitations: [
       "Basic probes do not guarantee model availability.",
       "Queue and last embedding observation describe only this isolate.",
