@@ -26,7 +26,8 @@ import {
 } from "./diagnostics.mjs";
 import init from "../sqlite-wasm/worker-loader.mjs";
 import compiledSqlite from "../sqlite-wasm/sqlite3.wasm";
-import { configure, DatabaseSync, withDatabases } from "./sqlite.mjs";
+import { configure, DatabaseSync, withDatabases, sqliteStats } from "./sqlite.mjs";
+import { memRequestStarted, memLog, memFields } from "./mem-trace.mjs";
 import { AmlMemoryService, AML_SEARCH_PROFILE, CORE_SOURCE } from "./memory-service.ts";
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
 import {
@@ -174,6 +175,9 @@ async function sqliteReady() {
   if (!ready) {
     ready = instance;
     configure(ready);
+    // Once per instance: what loading the SQLite module costs, before any request data is
+    // touched. `seq` here is the request that paid for the load.
+    memLog("sqlite_ready", null, { sqlite: sqliteStats() });
   }
   return ready;
 }
@@ -1129,6 +1133,10 @@ function watchSlowRequest(env, context, started) {
         elapsed_ms: Date.now() - started,
         add_mode: env.NMG_ADD_MODE ?? null,
         queue: queueStatus(),
+        // A killed invocation carries none of this, so the report has to be written while
+        // the request is still alive: memory, how many requests this instance has served,
+        // and how many SQLite images it has held at once.
+        ...memFields({ sqlite: sqliteStats() }),
       }),
     );
   }, afterMs);
@@ -1678,6 +1686,9 @@ async function adminStatusResponse(env) {
     checks_ms: { sqlite: sqlite.ms, r2: r2.ms },
     load,
     queue: queueState,
+    // On demand, per instance: the same fields the slow-request report carries, so memory
+    // can be watched while a deployment is live instead of only after an incident.
+    memory: memFields({ sqlite: sqliteStats() }),
     failures: { scope: "shared_best_effort", retention_hours: 24, maximum: 20, entries: failures },
     limitations: [
       "Basic probes do not guarantee model availability.",
@@ -1870,7 +1881,9 @@ export default {
     const context = { trace_id: traceId, route, env, execution };
     return withRequest(context, () => {
       const track = statisticsEnabled();
-      const stopSlowWatch = watchSlowRequest(env, context, Date.now());
+      const startedAt = Date.now();
+      context.seq = memRequestStarted(route);
+      const stopSlowWatch = watchSlowRequest(env, context, startedAt);
       if (track) requestAccepted();
       const received = track ? performance.now() : 0;
       let begun;
@@ -1925,7 +1938,14 @@ export default {
             return response;
           })
         : job;
-      return tracked.finally(stopSlowWatch);
+      return tracked.finally(() => {
+        stopSlowWatch();
+        memLog("exit", route, {
+          seq: context.seq,
+          elapsed_ms: Date.now() - startedAt,
+          sqlite: sqliteStats(),
+        });
+      });
     });
   },
 };

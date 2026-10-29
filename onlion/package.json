@@ -18,14 +18,15 @@
     "test:worker-media": "node scripts/test-multimodal-worker.mjs",
     "test:cos": "node scripts/test-cos-bucket.mjs",
     "test:edgeone": "node scripts/test-edgeone-worker.mjs",
-    "verify": "npm run build && npm run check && npm run test:temporal && npm run test:media && npm run test:backend && npm run test:append-log && npm run test:manifest-pending && npm run test:add-log && npm run test:page-delta && npm run test:extractive && npm run test:worker-media",
+    "verify": "npm run build && npm run check && npm run test:temporal && npm run test:media && npm run test:backend && npm run test:append-log && npm run test:manifest-pending && npm run test:add-log && npm run test:page-delta && npm run test:extractive && npm run test:mem && npm run test:worker-media",
     "generate:callbacks": "node scripts/generate-callbacks.mjs",
     "smoke:edgeone": "node scripts/smoke-edgeone.mjs",
     "test:add-log": "node scripts/test-add-log-mode.mjs",
     "test:append-log": "node scripts/test-append-log.mjs",
     "test:manifest-pending": "node scripts/test-manifest-pending.mjs",
     "test:page-delta": "node scripts/test-page-delta.mjs",
-    "test:extractive": "node --experimental-transform-types scripts/test-extractive-summaries.mjs"
+    "test:extractive": "node --experimental-transform-types scripts/test-extractive-summaries.mjs",
+    "test:mem": "node scripts/test-mem-trace.mjs"
   },
   "devDependencies": {
     "@types/node": "24.12.4",
