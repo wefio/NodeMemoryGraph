@@ -341,6 +341,23 @@ try {
     );
   }
 
+  // With a provider configured, the private status answers which endpoint and which vector
+  // space are live - the question that had to be guessed three times during the 2026-10-29
+  // incidents.
+  {
+    const status = await call("/admin/status", undefined, {
+      "oai-authenticated-user-email": "owner@example.test",
+    });
+    assert.equal(status.status, 200, JSON.stringify(status.body));
+    assert.equal(status.body.embedding.configured, true);
+    assert.equal(status.body.embedding.endpoint, "https://embed.test/v1");
+    assert.equal(status.body.embedding.model, "bge-small-en-v1.5");
+    assert.match(status.body.embedding.index_id, /^.+@[0-9a-f]{12}$/);
+    assert.equal(status.body.embedding.dimensions, DIMENSIONS);
+    assert.ok(!JSON.stringify(status.body).includes("test-key"));
+    console.log("PASS: the private status reports the live endpoint, model and index identity.");
+  }
+
   // Reset drains the log as well as the partitions.
   const reset = await call("/reset", {
     user_id: "alice",

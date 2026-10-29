@@ -123,6 +123,17 @@ async function persistFailure(bucket, entry) {
     if (saved) return;
   }
 }
+/** Host of the configured embedding endpoint, or null. Never the key, never the path:
+ *  the host is what tells two deployments apart. */
+function embeddingHost(env) {
+  const raw = env?.NMG_EMBED_BASE_URL;
+  if (!raw) return null;
+  try {
+    return new URL(raw).host;
+  } catch {
+    return "unparseable";
+  }
+}
 export function reportFailure(error, status, kind = "request_failure") {
   const context = requests.getStore();
   if (!context) return;
@@ -137,6 +148,10 @@ export function reportFailure(error, status, kind = "request_failure") {
     ...classifyError(error),
     ...(context.user_id_hash ? { user_id_hash: context.user_id_hash } : {}),
     ...(context.request_id_hash ? { request_id_hash: context.request_id_hash } : {}),
+    // Which provider deployment the failing request was talking to. Without it every
+    // embedding incident had to be told apart by timestamp instead of by configuration.
+    ...(embeddingHost(context.env) ? { embedding_host: embeddingHost(context.env) } : {}),
+    ...(context.env.NMG_EMBED_MODEL ? { embedding_model: context.env.NMG_EMBED_MODEL } : {}),
     // NMG_DEBUG_ERRORS=1 surfaces the exception name/message for diagnosis; the
     // default record still carries no exception text, stack or request content.
     ...(context.env.NMG_DEBUG_ERRORS === "1"
@@ -149,6 +164,11 @@ export function reportFailure(error, status, kind = "request_failure") {
   localFailures.length = Math.min(localFailures.length, MAX_ERRORS);
   // No exception text, stack, request body, source statements or credentials.
   console.error(JSON.stringify({ event: "nmg_failure", ...entry }));
+  // Sharing the history across isolates costs two bucket round trips per failure - a read and
+  // a CAS write on one shared key - which is paid exactly when the service is already in
+  // trouble. The platform log carries the same entry for free and is where incidents are
+  // actually read, so the shared copy is opt-in.
+  if (context.env.NMG_ERROR_HISTORY !== "1") return;
   if (context.env.MEMORY && context.execution?.waitUntil) {
     context.execution.waitUntil(
       persistFailure(context.env.MEMORY, entry).catch(() =>

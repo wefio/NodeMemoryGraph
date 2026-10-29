@@ -533,6 +533,37 @@ print(json.dumps(r))`,
     "oai-authenticated-user-email": "owner@example.test",
     origin: "http://localhost",
   };
+  // The private status endpoint has to answer "what is this build actually talking to" without
+  // a guess: endpoint, model, index identity, the timings that bound a request. The key must
+  // never appear in it.
+  {
+    const signedOut = await call("a", "/admin/status");
+    assert.equal(signedOut.status, 401, "status is owner-only");
+    const ownerHeaders = { "oai-authenticated-user-email": "owner@example.test" };
+    const status = await call("a", "/admin/status", undefined, undefined, ownerHeaders);
+    assert.equal(status.status, 200, JSON.stringify(status.body));
+    const embedding = status.body.embedding;
+    // This suite runs without a provider, so the honest answer is "not configured" - and the
+    // timings still report the code defaults, because they bound a request either way.
+    assert.equal(embedding.configured, false);
+    assert.equal(embedding.endpoint, null);
+    assert.equal(embedding.index_id, null);
+    assert.equal(embedding.timeout_ms, 10_000);
+    assert.equal(embedding.document_timeout_ms, 25_000);
+    assert.equal(embedding.write_budget_ms, 45_000);
+    assert.ok(String(status.body.revision).length > 0, "the build identifies itself");
+    // workerd reports zeros here; the shape is what this asserts. The deployed runtime
+    // returns real numbers, which is how the 2026-10-29 numbers were finally read.
+    for (const key of ["rss", "heapUsed", "external", "arrayBuffers"])
+      assert.equal(typeof status.body.memory.mem[key], "number", `memory.${key} is reported`);
+    assert.equal(status.body.memory.instance.seq, 4, "the instance counts its requests");
+    assert.equal(status.body.failures.scope, "isolate_only", "shared history is opt-in");
+    assert.ok(Array.isArray(status.body.failures.summary.by_code));
+    const body = JSON.stringify(status.body);
+    assert.ok(!body.includes("test-key"), "the diagnostics must not echo the key");
+    assert.ok(!body.includes("api_key"), "the diagnostics must not carry a key field");
+  }
+
   const serviceHealth = await call("a", "/health");
   assert.equal(serviceHealth.body.memory_service, "daemon-core-aml-v1");
   assert.equal(serviceHealth.body.harness, false);
