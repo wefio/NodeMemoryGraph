@@ -193,7 +193,8 @@ export class OpenAIEmbeddingClient {
    * Transient upstream failures (connection resets between a compute region and
    * the model endpoint, 429, 5xx) are retried here. Without this, one dropped
    * socket surfaces as a failed Add; with it, the caller sees a slow-but-correct
-   * write. Non-retryable answers (400 invalid key/model/batch) surface at once.
+   * write. Non-retryable answers (400 invalid key/model/batch) surface at once,
+   * and so does a timeout - see the catch below.
    */
   private async send(body: string): Promise<Response> {
     for (let attempt = 0; ; attempt++) {
@@ -210,7 +211,15 @@ export class OpenAIEmbeddingClient {
         if (!RETRYABLE_STATUS(response.status) || attempt >= RETRY_DELAYS_MS.length)
           return response;
       } catch (error) {
-        // A timeout is retried too: the request may simply have been slow.
+        // A timeout is not retried. The caller is an HTTP request with an invocation
+        // ceiling, so retrying a slow dependency multiplies the time it takes to fail
+        // rather than the chance of success: at a 90 s per-attempt budget one retried
+        // timeout is already longer than the 120 s the invocation is killed at, which
+        // turns "the provider was slow" into "the request died with no answer".
+        // A connection reset says nothing about the endpoint being slow, so those are
+        // still retried.
+        const name = (error as { name?: string } | undefined)?.name;
+        if (name === "TimeoutError" || name === "AbortError") throw error;
         if (attempt >= RETRY_DELAYS_MS.length) throw error;
       }
       await sleep(RETRY_DELAYS_MS[attempt]);

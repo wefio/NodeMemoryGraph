@@ -215,3 +215,74 @@ test("embedding requests stop at the configured timeout", async () => {
     );
   }
 });
+
+test("a timeout is not retried, because the caller runs inside an invocation ceiling", async () => {
+  let attempts = 0;
+  const server = createServer((_request, response) => {
+    attempts += 1;
+    // Slower than the client's budget, then answered so the socket can close.
+    setTimeout(() => {
+      if (!response.writableEnded) response.end("{}");
+    }, 600).unref();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const client = new OpenAIEmbeddingClient({
+      baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      timeoutMs: 100,
+    });
+    await assert.rejects(() => client.embed(["slow"]));
+    // The retry delays are 150 ms and 500 ms: waiting past both proves none landed.
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    assert.equal(
+      attempts,
+      1,
+      "a timeout must surface at once: retrying it multiplies the time the invocation spends before it dies",
+    );
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
+test("a dropped connection is still retried", async () => {
+  let attempts = 0;
+  const server = createServer((request, response) => {
+    attempts += 1;
+    if (attempts === 1) {
+      request.socket.destroy();
+      return;
+    }
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => (body += chunk));
+    request.on("end", () => {
+      const payload = JSON.parse(body) as { input: string[] };
+      response.setHeader("content-type", "application/json");
+      response.end(
+        JSON.stringify({
+          data: payload.input.map((_text, index) => ({ index, embedding: [index] })),
+        }),
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const client = new OpenAIEmbeddingClient({
+      baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    });
+    assert.deepEqual(await client.embed(["first", "second"]), [[0], [1]]);
+    assert.equal(attempts, 2, "a reset says nothing about the endpoint being slow");
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});

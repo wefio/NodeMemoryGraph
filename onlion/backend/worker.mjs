@@ -330,20 +330,55 @@ async function mutateUser(env, userId, operation) {
     if (!committed) await removeStaged(env.MEMORY, [...reuse.values()]).catch(() => {});
   }
 }
+/** Per-attempt embedding timeout.
+ *
+ *  The platform kills an invocation at 120 s and the client retries a timeout, so a
+ *  per-attempt budget of 90 s made one slow call 90 s + backoff + 90 s: the request died
+ *  at the platform ceiling with no answer and no diagnostics, which is what the 220
+ *  timeouts of the 2026-10-29 incident look like. Ten seconds is the provider client's
+ *  own default and leaves room for a round trip to be slow ten times over. */
+const EMBED_TIMEOUT_MS = 10_000;
+/** Total embedding work one search may spend, across every call site.
+ *
+ *  A single search embeds its clauses, their windows, every pending record and each
+ *  partition's query - all inside one invocation. Bounding the total rather than each
+ *  call means a slow provider costs a degraded score instead of the whole request:
+ *  every caller already treats a missing vector as "score this one by term overlap". */
+const EMBED_QUERY_BUDGET_MS = 25_000;
 function embeddingClient(env) {
   const client = createEmbeddingClientFromEnv({
     ...env,
-    NMG_EMBED_TIMEOUT_MS: env.NMG_EMBED_TIMEOUT_MS ?? "90000",
+    NMG_EMBED_TIMEOUT_MS: env.NMG_EMBED_TIMEOUT_MS ?? String(EMBED_TIMEOUT_MS),
   });
   if (!client) return undefined;
   const queries = new Map();
   const provider = hash(JSON.stringify([client.indexId, client.baseUrl, client.apiKey]));
+  const budgetMs =
+    Number(env.NMG_EMBED_QUERY_BUDGET_MS) > 0
+      ? Number(env.NMG_EMBED_QUERY_BUDGET_MS)
+      : EMBED_QUERY_BUDGET_MS;
+  const deadline = Date.now() + budgetMs;
+  // Thrown from inside `measure`'s async callback this becomes a rejection, which is what
+  // every call site is written against (`catch(() => [])`). A synchronous throw would
+  // escape that and fail the request instead of degrading it.
+  const spend = () => {
+    if (Date.now() < deadline) return;
+    throw Object.assign(new Error("embedding budget exhausted for this request"), {
+      code: "embedding_budget_exhausted",
+    });
+  };
   return {
     indexId: client.indexId,
     model: client.model,
     profile: client.profile,
-    embed: (inputs) => embeddingOperation(() => client.embed(inputs)),
+    embed: (inputs) =>
+      Promise.resolve().then(() => {
+        spend();
+        return embeddingOperation(() => client.embed(inputs));
+      }),
     embedDocuments: deferredDocuments((inputs) =>
+      // Documents are the write path: they carry the memory itself, so they are not
+      // budgeted. The per-attempt timeout and the batch size bound them instead.
       embeddingOperation(() => client.embedDocuments(inputs)),
     ),
     embedQueries(inputs) {
@@ -354,6 +389,7 @@ function embeddingClient(env) {
           measure("embedding", async () => {
             const cached = queryVector(key);
             if (cached) return cached;
+            spend();
             // Embedded exactly as given. Long-query handling lives in
             // `queryFeatures`, which searches the whole clause and its windows as
             // separate features: pooling them here would average the query's
@@ -829,18 +865,27 @@ async function fusePendingRecords({
     return merge(scored);
   }
 
-  const vectorsPerClause = [];
-  for (const list of features) {
-    const vectors = [];
-    for (const text of list) {
-      const [vector] = await client.embedQueries([text]).catch(() => []);
-      if (vector) vectors.push(vector);
-    }
-    vectorsPerClause.push(vectors);
-  }
+  // One batch call, not one call per feature and per record. The vectors are the same,
+  // and the sequential version spent up to forty round trips inside a single search -
+  // which is how a slow provider became a 120 s invocation the platform had to kill.
+  const texts = [];
+  const position = new Map();
+  const collect = (text) => {
+    if (!position.has(text)) position.set(text, texts.push(text) - 1);
+  };
+  for (const list of features) for (const text of list) collect(text);
+  for (const record of waiting) collect(record.content);
+  const vectors = await client.embedQueries(texts).catch(() => []);
+  const byText = new Map();
+  texts.forEach((text, index) => {
+    if (vectors[index]) byText.set(text, vectors[index]);
+  });
+  const vectorsPerClause = features.map((list) =>
+    list.map((text) => byText.get(text)).filter(Boolean),
+  );
   const scored = [];
   for (const record of waiting) {
-    const [vector] = await client.embedQueries([record.content]).catch(() => []);
+    const vector = byText.get(record.content);
     if (!vector) continue;
     const perClause = vectorsPerClause.map((vectors) =>
       vectors.reduce(
@@ -1066,6 +1111,29 @@ async function warmClauseVectors(client, features, parts) {
     };
     await Promise.all(Array.from({ length: Math.min(WARM_CONCURRENCY, batch.length) }, warm));
   }
+}
+/** Reports a request that is still running after `NMG_SLOW_REPORT_MS`. The platform
+ *  kills an invocation at 120 s and a killed invocation leaves nothing behind, so an
+ *  incident like the 220 timeouts of 2026-10-29 says only "it took 120 s" - never which
+ *  part held it. This writes one line at 60 s, which survives the kill. */
+function watchSlowRequest(env, context, started) {
+  const afterMs = Number(env.NMG_SLOW_REPORT_MS) > 0 ? Number(env.NMG_SLOW_REPORT_MS) : 60_000;
+  const timer = setTimeout(() => {
+    // eslint-disable-next-line no-console -- diagnostic output, like monitoring.mjs
+    console.error(
+      JSON.stringify({
+        event: "nmg_slow_request",
+        at: new Date().toISOString(),
+        trace_id: context.trace_id,
+        route: context.route,
+        elapsed_ms: Date.now() - started,
+        add_mode: env.NMG_ADD_MODE ?? null,
+        queue: queueStatus(),
+      }),
+    );
+  }, afterMs);
+  timer?.unref?.();
+  return () => clearTimeout(timer);
 }
 /** Fold one partition's persistence mode into the request totals. */
 function tallyPartPersistence(persistence, saved) {
@@ -1390,6 +1458,15 @@ async function healthResponse(env, path) {
       add_mode: addMode(env),
       pending_read_limit: MAX_PENDING_READ,
       merge_batch: FOLD_BATCH,
+      // Reported because they bound a request: an invocation is killed at 120 s, and a
+      // per-attempt timeout larger than that turns a slow provider into a dead request.
+      embed_timeout_ms:
+        Number(env.NMG_EMBED_TIMEOUT_MS) > 0 ? Number(env.NMG_EMBED_TIMEOUT_MS) : EMBED_TIMEOUT_MS,
+      embed_query_budget_ms:
+        Number(env.NMG_EMBED_QUERY_BUDGET_MS) > 0
+          ? Number(env.NMG_EMBED_QUERY_BUDGET_MS)
+          : EMBED_QUERY_BUDGET_MS,
+      slow_report_ms: Number(env.NMG_SLOW_REPORT_MS) > 0 ? Number(env.NMG_SLOW_REPORT_MS) : 60_000,
     },
     upstream_commit: SOURCE_REVISION.split("+")[0],
     source_revision: SOURCE_REVISION,
@@ -1793,6 +1870,7 @@ export default {
     const context = { trace_id: traceId, route, env, execution };
     return withRequest(context, () => {
       const track = statisticsEnabled();
+      const stopSlowWatch = watchSlowRequest(env, context, Date.now());
       if (track) requestAccepted();
       const received = track ? performance.now() : 0;
       let begun;
@@ -1847,7 +1925,7 @@ export default {
             return response;
           })
         : job;
-      return tracked;
+      return tracked.finally(stopSlowWatch);
     });
   },
 };

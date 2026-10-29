@@ -28,6 +28,14 @@ export class CosError extends Error {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** One COS round trip may not outlast this.
+ *
+ *  Nothing bounded these requests before, so a stalled bucket hung until the platform
+ *  killed the invocation at 120 s - the same ceiling that hid the embedding problem. A
+ *  timeout here surfaces as a retryable error, and each caller's own retry decides what
+ *  to do with it instead of the instance waiting out the clock. */
+const COS_TIMEOUT_MS = 20_000;
 const normalizeEtag = (value) =>
   value ? String(value).replace(/^"|"$/g, "").toLowerCase() : undefined;
 const sameEtag = (left, right) => !!left && !!right && normalizeEtag(left) === normalizeEtag(right);
@@ -55,6 +63,33 @@ function xmlTag(xml, name) {
 const escapeXml = (text) =>
   String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+/** One round trip, bounded.
+ *
+ *  Nothing bounded these before, so a stalled bucket hung until the platform killed the
+ *  invocation at 120 s. The timeout belongs to the transport rather than to each caller:
+ *  it surfaces as a retryable error, and the caller's own retry decides what to do. */
+async function sendRequest(fetchImpl, timeoutMs, method, key, url, headers, body) {
+  try {
+    return await fetchImpl(url, {
+      method,
+      headers,
+      body,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError";
+    const wrapped = new CosError(
+      0,
+      timedOut ? "timeout" : "network_error",
+      `COS ${method} ${key} ${
+        timedOut ? `timed out after ${timeoutMs} ms` : `failed: ${error?.name ?? error?.message}`
+      }`,
+      key,
+    );
+    wrapped.retryable = true;
+    throw wrapped;
+  }
+}
 export function createCosBucket(config) {
   const {
     bucket,
@@ -65,6 +100,7 @@ export function createCosBucket(config) {
     fetchImpl = fetch,
     clock = Date.now,
     staleClaimMs = CLAIM_STALE_MS,
+    timeoutMs = COS_TIMEOUT_MS,
   } = config;
   if (!bucket || !region || !secretId || !secretKey)
     throw new Error("COS bucket needs bucket, region, secretId and secretKey");
@@ -86,7 +122,7 @@ export function createCosBucket(config) {
     delete outgoing.host;
     outgoing.authorization = signed.authorization;
     const url = `https://${endpoint}${path}${signed.query ? `?${signed.query}` : ""}`;
-    const response = await fetchImpl(url, { method, headers: outgoing, body });
+    const response = await sendRequest(fetchImpl, timeoutMs, method, key, url, outgoing, body);
     if (response.status >= 500 || response.status === 429) {
       const error = new CosError(
         response.status,
