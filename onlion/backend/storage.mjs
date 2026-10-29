@@ -172,8 +172,14 @@ export async function clearLog(bucket,userKey){
   }
   return removed;
 }
+// A multi-object delete takes at most 1000 keys per request (R2 and S3 both stop
+// there). The set can exceed that: one search attempt stages a snapshot per part,
+// so `staged ∪ reuse` for a wide user passes 1000 easily. An oversized call fails
+// as a whole, and behind the callers' `catch` that is indistinguishable from a
+// cleanup that removed nothing - the same permanent orphan, one level up.
+const DELETE_BATCH = 1000;
 export async function removeStaged(bucket,keys){
-  if(keys.length)await bucket.delete(keys);
+  for(let i=0;i<keys.length;i+=DELETE_BATCH)await bucket.delete(keys.slice(i,i+DELETE_BATCH));
 }
 export async function retireParts(bucket,before,after){
   const live=new Set(after.parts.map(p=>p.key));

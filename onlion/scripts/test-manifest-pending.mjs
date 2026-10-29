@@ -27,6 +27,7 @@ import {
   manifestFormat,
   newPart,
   pendingCount,
+  removeStaged,
   resetUser,
   setPending,
   stageSearchPart,
@@ -38,7 +39,7 @@ import {
  * is first-create-only, and `list` pages with a stable key cursor so deleting
  * while paging behaves like COS/R2 (an index cursor would silently skip keys).
  */
-function createMemoryBucket() {
+function createMemoryBucket({ maxDeleteKeys = Infinity } = {}) {
   const objects = new Map(); // key -> { body, etag }
   const stats = { puts: 0, deletes: 0, lists: 0 };
   const etagOf = (body) => createHash("md5").update(body).digest("hex");
@@ -75,7 +76,12 @@ function createMemoryBucket() {
       return { key, etag, size: Buffer.byteLength(text) };
     },
     async delete(keys) {
-      for (const key of Array.isArray(keys) ? keys : [keys]) if (objects.delete(key)) stats.deletes++;
+      const list = Array.isArray(keys) ? keys : [keys];
+      // R2 and S3 both cap a multi-object delete at 1000 keys; an oversized request
+      // fails as a whole rather than deleting what it can.
+      if (list.length > maxDeleteKeys)
+        throw new Error(`delete accepts at most ${maxDeleteKeys} keys, got ${list.length}`);
+      for (const key of list) if (objects.delete(key)) stats.deletes++;
     },
     async list({ prefix = "", limit = 1000, cursor } = {}) {
       stats.lists++;
@@ -363,6 +369,24 @@ assert.equal(logPrefix("abc123"), "users/abc123/log/");
   assert.equal(retried.cleanup_complete, true);
   assert.deepEqual(keysUnder(bucket, prefix), []);
   console.log("PASS: a failed log cleanup reports incomplete and the same reset_id finishes it.");
+}
+
+{
+  // The provider caps a multi-object delete at 1000 keys. `staged ∪ reuse` can pass
+  // that for a wide user (one snapshot per part per attempt), and an oversized request
+  // fails as a whole - which the callers' catch turns into "cleanup succeeded, nothing
+  // removed". So the batch size is part of the contract, not an implementation detail.
+  const bucket = createMemoryBucket({ maxDeleteKeys: 1000 });
+  const keys = Array.from({ length: 1500 }, (_unused, index) => `users/batch/parts/${index}.sqlite`);
+  for (const key of keys) await bucket.put(key, "snapshot");
+
+  await removeStaged(bucket, keys);
+  assert.equal(bucket.objects.size, 0, "a cleanup above the batch limit must still delete everything");
+  assert.equal(bucket.stats.deletes, 1500);
+
+  console.log(
+    "PASS: removeStaged batches at the provider limit — an oversized cleanup deletes instead of failing whole.",
+  );
 }
 
 console.log(
