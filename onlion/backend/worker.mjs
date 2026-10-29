@@ -1049,6 +1049,19 @@ const FOLD_BATCH = 8;
  *  writes: a fold absorbs exactly one batch, so the cadence is one fold per batch of
  *  accepts at any trigger value above it. */
 const FOLD_TRIGGER = FOLD_BATCH;
+/** How long an Add may spend folding before it leaves the backlog for the next request.
+ *
+ *  A fold is one partition rewrite - read, export, write - and it runs *after* the entry is
+ *  durable, so skipping it is honest: the accept already earned its 200. Running it unbounded
+ *  is what turned a contended user into a request the platform killed at 120 s, and a killed
+ *  request loses the whole evaluation attempt rather than one fold. */
+const FOLD_BUDGET_MS = 20_000;
+/** How long a search may spend reading partitions before it answers with what it has.
+ *
+ *  Every partition is read to be exhaustive, which is unbounded in the manifest. Past this the
+ *  page is built from the partitions already read and marked `partial`: fewer candidates for one
+ *  question, instead of a request killed at the ceiling and no answer at all. */
+const SEARCH_DEADLINE_MS = 60_000;
 
 /** Features to embed and search per clause, bounded by `MAX_QUERY_FEATURES`.
  *
@@ -1222,7 +1235,16 @@ async function search(env, input, options = {}) {
     let changed = false;
     await warmClauseVectors(client, features, manifest.parts);
     const persistence = { inline_delta_saves: 0, full_snapshot_saves: 0, changed_pages: 0 };
+    const searchDeadline =
+      Number(env.NMG_SEARCH_DEADLINE_MS) >= 0
+        ? Number(env.NMG_SEARCH_DEADLINE_MS)
+        : SEARCH_DEADLINE_MS;
+    let partial = false;
     for (let i = 0; i < manifest.parts.length; i++) {
+      if (Date.now() - started > searchDeadline) {
+        partial = true;
+        break;
+      }
       const result = await runPart(
         env.MEMORY,
         manifest.parts[i],
@@ -1297,6 +1319,7 @@ async function search(env, input, options = {}) {
       response: {
         data: candidates,
         retrieval_mode: modes.has("records") ? "records" : "lexical",
+        partial,
         timings: {
           totalMs: Date.now() - started,
           partitions: manifest.parts.length,
@@ -1943,10 +1966,15 @@ async function addRoute(request, env, path) {
   if ((path !== "/add" && path !== "/remember") || request.method !== "POST") return undefined;
   const input = await readJson(request);
   if (addMode(env) !== "log") return json(await add(env, input));
+  const startedAt = Date.now();
   const accepted = await acceptAdd(env, input);
   // A burst leaves entries waiting; fold a bounded batch here rather than on the
   // read path, so accepted latency stays flat while the log cannot grow forever.
-  if (accepted.pending >= FOLD_TRIGGER)
+  // The budget is what keeps a contended user from folding its way into the platform
+  // ceiling; the entry is already durable, so the backlog simply waits.
+  const foldBudget =
+    Number(env.NMG_FOLD_BUDGET_MS) >= 0 ? Number(env.NMG_FOLD_BUDGET_MS) : FOLD_BUDGET_MS;
+  if (accepted.pending >= FOLD_TRIGGER && Date.now() - startedAt < foldBudget)
     await foldPending(env, accepted.response.user_id).catch(() => {});
   return json(accepted.response);
 }

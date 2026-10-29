@@ -116,6 +116,20 @@ try {
       /options\.fullSnapshot \|\| env\.NMG_SEARCH_DELTAS === "0",[\s\S]{0,400}?reuse,/,
       "stageSearchPart must be given the reuse map, or a retry re-uploads an identical snapshot",
     );
+    // The two budgets are what keep a request from being killed at the platform ceiling. A
+    // killed request loses the whole evaluation attempt, so their removal has to fail a test:
+    // the entry is durable before the fold, and a partial page is worth more than no answer.
+    assert.match(
+      source,
+      /accepted\.pending >= FOLD_TRIGGER && Date\.now\(\) - startedAt < foldBudget/,
+      "the fold must run under a budget; unbounded, a contended user folds its way past 120 s",
+    );
+    assert.match(
+      source,
+      /if \(Date\.now\(\) - started > searchDeadline\) \{\s*partial = true;\s*break;/,
+      "the partition loop must stop at a deadline and mark the page partial",
+    );
+    assert.match(source, /partial,/, "the response must say whether the page is partial");
   }
 
   // I1: accepted Add is searchable before any fold.
