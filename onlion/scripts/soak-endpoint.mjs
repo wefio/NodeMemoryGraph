@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- a CLI that reports through stdout */
 /* Endpoint soak: the same shape the evaluation uses, from your network.
  *
  * The failures worth reproducing are connection-level ones - `PARTICIPANT_ENDPOINT_UNAVAILABLE`
