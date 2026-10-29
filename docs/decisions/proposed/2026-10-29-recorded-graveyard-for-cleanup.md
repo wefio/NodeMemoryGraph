@@ -103,7 +103,11 @@ is not later investigated as a new defect.
   either absent or (an array of non-empty strings **and** no longer than the cap **and** disjoint
   from `parts`). Without this, an implementation that forgets the `parts` filter or the cap passes
   every other criterion here, and the first entry under Risks - a wrong filter deleting live data -
-  stays a paragraph instead of a test.
+  stays a paragraph instead of a test. In the live-key case also assert the referenced **object
+  still exists**: an implementation that deletes first and tidies the field afterwards satisfies
+  disjointness while destroying live data. In the over-cap case assert **which** keys survive, not
+  just the length - the newest entries and the newly doomed ones must be kept and the oldest
+  dropped - because a reversed comparison passes a length-only test.
 - **Record then delete**: a failed delete leaves the key in the next manifest's graveyard, and the
   following successful commit removes it.
 
