@@ -35,7 +35,11 @@ survives the request.
    and a rival cannot reference our graveyard keys, so re-deleting is safe.
 3. **Never delete doomed keys before the CAS.** Tempting - they are not in the new manifest - but
    a retry's content fingerprint can still point at one of them, and the committed manifest would
-   then reference an object that no longer exists.
+   then reference an object that no longer exists. The drain before the CAS is a different shape
+   with the opposite conclusion, and the reason is worth keeping: graveyard keys come from
+   **earlier requests**, so they can never appear in this request's `reuse`, while staged keys
+   **belong to this request** - which is exactly why deleting a staged key also has to remove it
+   from `reuse`. Same appearance, opposite answer, different reason.
 4. **Bounded, newest first.** The field has a cap; over the cap, drop the **oldest** entries and
    keep the newest, because the newest are the ones a partitioned delete just failed to remove.
    An unbounded field would grow the manifest without limit under contention.
@@ -45,9 +49,13 @@ survives the request.
    prevent. On write, the field is **replaced** with this commit's doomed set and counted, so
    every manifest we write has a well-formed array. `/add`, `/search` and `/capacity` keep
    serving regardless of what the field contains.
-6. **`/capacity` reports `graveyard_pending`.** Its length is the direct measure of recorded
-   backlog, with no LIST call. It measures **only what was recorded**; orphans created before
-   this mechanism existed are invisible to it and must be measured separately.
+6. **The counters ride the channel an operator already reads.** `userCapacity` returns
+   `pending_entries` and `manifest_bytes` per user and already raises `warnings` at 80% of a
+   limit, so `graveyard_pending`, `graveyard_dropped_unparseable` and `graveyard_dropped_cap`
+   belong in the same object, and a non-zero drop counter raises a warning ("leaking") there
+   rather than in a field nobody has a reason to look at. `graveyard_pending` measures **only
+   what was recorded**; orphans created before this mechanism existed are invisible to it and
+   must be measured separately.
 
 ## What this does and does not establish
 
@@ -89,6 +97,15 @@ is not later investigated as a new defect.
   never come back.
 - **Manifest growth under contention.** Bounded by the cap, but the cap has to be small enough
   that 128 partitions of doomed keys never approach `MAX_MANIFEST_BYTES`.
+
+## Companion pit: a manifest at the byte ceiling also has no way back
+
+`commitManifest` throws when the receipt count exceeds `MAX_RECEIPTS`, and it throws the same way
+when the encoded manifest exceeds `MAX_MANIFEST_BYTES`. Both are the same class as an unparseable
+graveyard - a user that cannot be written to at all, repairable only by `/reset` or an admin
+action - and both deserve to be recorded together rather than one being fixed and the other
+forgotten. This record does not fix them; it notes that the graveyard's cap must be small enough
+that it can never be the reason a manifest crosses that ceiling.
 
 ## Alternatives considered
 
