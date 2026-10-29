@@ -901,6 +901,8 @@ print(json.dumps(r))`,
       // or above the 120 s platform ceiling turns a slow provider into a dead request.
       embed_timeout_ms: 10_000,
       embed_query_budget_ms: 25_000,
+      embed_document_timeout_ms: 25_000,
+      embed_write_budget_ms: 45_000,
       slow_report_ms: 60_000,
     });
     const longQuery = await call("a", "/search", {

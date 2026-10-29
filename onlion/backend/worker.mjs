@@ -342,6 +342,19 @@ async function mutateUser(env, userId, operation) {
  *  timeouts of the 2026-10-29 incident look like. Ten seconds is the provider client's
  *  own default and leaves room for a round trip to be slow ten times over. */
 const EMBED_TIMEOUT_MS = 10_000;
+/** Per-attempt timeout for documents.
+ *
+ *  A query is small and the provider is remote from the function, so ten seconds is already
+ *  generous for it. A document batch is neither: it carries a whole message, and the calls
+ *  cross a region boundary, where a healthy round trip and a stalled one differ by an order of
+ *  magnitude. Cutting a document at ten seconds turned "the provider was slow" into a failed
+ *  Add, which is the one failure the write path cannot absorb. */
+const EMBED_DOCUMENT_TIMEOUT_MS = 25_000;
+/** Total embedding work one write may spend. The invocation is killed at 120 s, and the write
+ *  still needs room for its partition round trips after the vectors land, so the budget is
+ *  well inside it: past this point the Add fails with a clear code instead of running out the
+ *  clock with no answer. */
+const EMBED_WRITE_BUDGET_MS = 45_000;
 /** Total embedding work one search may spend, across every call site.
  *
  *  A single search embeds its clauses, their windows, every pending record and each
@@ -362,6 +375,19 @@ function embeddingClient(env) {
       ? Number(env.NMG_EMBED_QUERY_BUDGET_MS)
       : EMBED_QUERY_BUDGET_MS;
   const deadline = Date.now() + budgetMs;
+  const writeBudgetMs =
+    Number(env.NMG_EMBED_WRITE_BUDGET_MS) > 0
+      ? Number(env.NMG_EMBED_WRITE_BUDGET_MS)
+      : EMBED_WRITE_BUDGET_MS;
+  const writeDeadline = Date.now() + writeBudgetMs;
+  // A second client, not a second knob on the first: the provider client keeps one timeout,
+  // and documents need a longer one than queries.
+  let documentClient;
+  const documents = () =>
+    (documentClient ??= createEmbeddingClientFromEnv({
+      ...env,
+      NMG_EMBED_TIMEOUT_MS: env.NMG_EMBED_TIMEOUT_MS ?? String(EMBED_DOCUMENT_TIMEOUT_MS),
+    }));
   // Thrown from inside `measure`'s async callback this becomes a rejection, which is what
   // every call site is written against (`catch(() => [])`). A synchronous throw would
   // escape that and fail the request instead of degrading it.
@@ -380,11 +406,15 @@ function embeddingClient(env) {
         spend();
         return embeddingOperation(() => client.embed(inputs));
       }),
-    embedDocuments: deferredDocuments((inputs) =>
-      // Documents are the write path: they carry the memory itself, so they are not
-      // budgeted. The per-attempt timeout and the batch size bound them instead.
-      embeddingOperation(() => client.embedDocuments(inputs)),
-    ),
+    embedDocuments: deferredDocuments((inputs) => {
+      // Bounded by a total, not by an attempt: without it one slow provider turned a single
+      // Add into a 55-120 s request that the platform killed with no answer.
+      if (Date.now() >= writeDeadline)
+        throw Object.assign(new Error("embedding budget exhausted for this request"), {
+          code: "embedding_budget_exhausted",
+        });
+      return embeddingOperation(() => documents().embedDocuments(inputs));
+    }),
     embedQueries(inputs) {
       const key = hash(JSON.stringify([provider, inputs]));
       if (!queries.has(key))
@@ -1137,6 +1167,7 @@ function watchSlowRequest(env, context, started) {
         // the request is still alive: memory, how many requests this instance has served,
         // and how many SQLite images it has held at once.
         ...memFields({ sqlite: sqliteStats() }),
+        last_embedding: embeddingObservation(),
       }),
     );
   }, afterMs);
@@ -1474,6 +1505,14 @@ async function healthResponse(env, path) {
         Number(env.NMG_EMBED_QUERY_BUDGET_MS) > 0
           ? Number(env.NMG_EMBED_QUERY_BUDGET_MS)
           : EMBED_QUERY_BUDGET_MS,
+      embed_document_timeout_ms:
+        Number(env.NMG_EMBED_TIMEOUT_MS) > 0
+          ? Number(env.NMG_EMBED_TIMEOUT_MS)
+          : EMBED_DOCUMENT_TIMEOUT_MS,
+      embed_write_budget_ms:
+        Number(env.NMG_EMBED_WRITE_BUDGET_MS) > 0
+          ? Number(env.NMG_EMBED_WRITE_BUDGET_MS)
+          : EMBED_WRITE_BUDGET_MS,
       slow_report_ms: Number(env.NMG_SLOW_REPORT_MS) > 0 ? Number(env.NMG_SLOW_REPORT_MS) : 60_000,
     },
     upstream_commit: SOURCE_REVISION.split("+")[0],
