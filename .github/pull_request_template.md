@@ -36,6 +36,7 @@
 - [ ] If dependencies or a lockfile changed: `npm run check:lock` passes, the root `package-lock.json` is synchronized, and `npm audit --omit=dev --audit-level=high` reports no vulnerabilities
 - [ ] If a subpackage changed (such as `dsh/dsh-nmg`): `npm run verify:packages` passes (frozen-lockfile install + build), and `pnpm-lock.yaml`/the lockfile matches `package.json`
 - [ ] For documentation changes, `npm run docs:check` was run; decision/design changes follow the doc-maintenance rules
+- [ ] **Every doc owner this change touches is named here**, with the file that was added or edited: decision record (`docs/decisions/`), design (`docs/design/`), experiment (`docs/experiments/`), postmortem (`docs/postmortem/`), guide (`docs/guides/`) — or `none`, with the reason. A behaviour change with no owner named is a defect, not an omission: the next reader has nowhere to look. "Updated docs" without a path does not satisfy this item.
 - [ ] `## Not verified` is filled in (write `None.` if nothing remains); non-trivial changes include a decision record
 - [ ] New code methods stay within the cyclomatic-complexity threshold (CodeFactor / `npm run complexity:gate`)
 - [ ] No reproducible build artifacts are committed: do not check in `dist/`, `dsh/dsh-nmg/lib/`, `src/prompts/nmg-prompts.generated.ts`, or `.nmg-search-scope` (see `docs/decisions/rejected/2026-09-02-track-build-artifacts-in-git.md`)
