@@ -623,92 +623,71 @@ async function acceptAdd(env, input) {
   const { userId, requestId, sessionId, messages, requestHash, fingerprint } =
     readAddRequest(input);
   const contentView = createContentView();
-  let accepted = 0;
-  let prepared = null;
-  let reservation = null;
-  const response = await mutateUser(env, userId, async (ctx) => {
-    const reused = await existingReceipt(env, ctx, requestHash, fingerprint);
-    if (reused) return reused;
-    // Scoped to this generation: an entry written before a reset has the same name,
-    // and replaying its stored response would swallow the new Add - the request would
-    // answer 200 while its data was never recorded (class A, data lost).
-    const pending = await findLogEntry(env.MEMORY, ctx.key, requestHash, {
-      generation: ctx.manifest.generation ?? null,
-    });
-    if (pending) {
-      if (pending.entry.fingerprint !== fingerprint)
-        throw new HttpError(
-          409,
-          "request_id_reused",
-          "request_id was already used for different content",
-        );
-      return { readOnly: true, response: pending.entry.response };
-    }
-    // Structured content is prepared once per request, not once per retry: a
-    // caption may come from a vision model and a CAS conflict must not pay for it
-    // twice. It is prepared before the entry is written, so a fold never has to call
-    // a vision model while holding a partition.
-    if (!prepared) {
-      prepared = [];
-      for (const message of messages)
-        prepared.push(
-          typeof message.content === "string"
-            ? message
-            : { ...message, indexText: await contentView(message.content) },
-        );
-    }
-    const response = addResponse(
-      ctx.key,
-      requestId,
-      userId,
-      sessionId,
-      requestHash,
-      prepared.length,
-    );
-    // Reserve the counter *before* the entry is durable. The order is the safety
-    // argument: a failed commit leaves no entry behind, while a failed write leaves
-    // the counter one too high - and an over-count only costs a log listing. The
-    // other order strands an entry no counter accounts for, and `pendingCount === 0`
-    // then hides it from every search (I1).
-    accepted = setPending(ctx.manifest, pendingCount(ctx.manifest) + 1);
-    reservation = {
-      key: ctx.key,
-      entry: {
-        v: LOG_ENTRY_VERSION,
-        generation: ctx.manifest.generation ?? null,
-        user_id: userId,
-        session_id: sessionId,
-        request_id: requestId,
-        request_hash: requestHash,
-        fingerprint,
-        received_at: Date.now(),
-        messages: prepared,
-        response,
-      },
-    };
-    return { response };
-  });
-  // The reservation is committed; only now must the entry become durable. A failure
-  // answers 5xx with the counter one too high, which capacity or the next fold
-  // corrects by reading the log back.
-  if (reservation) {
-    try {
-      await putLogEntry(env.MEMORY, reservation.key, reservation.entry);
-    } catch (error) {
-      // A throwing write is not proof that nothing reached the bucket: the storage
-      // wrapper writes first and then verifies the generation, so the throw can
-      // happen after the object landed. Ask instead of assuming, and only give the
-      // slot back when the answer is a definite "no" - releasing for an entry that
-      // is on disk leaves a counter below the truth, which hides accepted data.
-      const landed = await logEntryLanded(env.MEMORY, reservation.key, reservation.entry).catch(
-        () => null,
+  const key = keyFor(userId);
+  // One read of the manifest, and only for what the log cannot answer: the generation this entry
+  // belongs to, and the receipt of a request that was already folded. Nothing here takes a
+  // compare-and-swap, which is the point - sixteen concurrent Adds on one user used to fight over
+  // this object and lose twelve times each, redoing a megabyte of partition work per retry.
+  const { manifest } = await loadManifest(env.MEMORY, key, userId);
+  const reused = await existingReceipt(env, { key, manifest }, requestHash, fingerprint);
+  if (reused) return reused;
+  // Scoped to this generation: an entry written before a reset has the same name, and replaying
+  // its stored response would swallow the new Add - the request would answer 200 while its data
+  // was never recorded (class A, data lost).
+  const generation = manifest.generation ?? null;
+  const pendingEntry = await findLogEntry(env.MEMORY, key, requestHash, { generation });
+  if (pendingEntry) {
+    if (pendingEntry.entry.fingerprint !== fingerprint)
+      throw new HttpError(
+        409,
+        "request_id_reused",
+        "request_id was already used for different content",
       );
-      if (landed === true) return { response, pending: accepted };
-      if (landed === false) await releasePending(env, userId).catch(() => {});
-      throw error;
-    }
+    return { readOnly: true, response: pendingEntry.entry.response };
   }
-  return { response, pending: accepted };
+  const prepared = [];
+  for (const message of messages)
+    prepared.push(
+      typeof message.content === "string"
+        ? message
+        : { ...message, indexText: await contentView(message.content) },
+    );
+  const response = addResponse(key, requestId, userId, sessionId, requestHash, prepared.length);
+  const entry = {
+    v: LOG_ENTRY_VERSION,
+    generation,
+    user_id: userId,
+    session_id: sessionId,
+    request_id: requestId,
+    request_hash: requestHash,
+    fingerprint,
+    received_at: Date.now(),
+    messages: prepared,
+    response,
+  };
+  try {
+    await putLogEntry(env.MEMORY, key, entry);
+  } catch (error) {
+    // A throwing write is not proof that nothing reached the bucket: the storage wrapper writes
+    // first and then verifies the generation, so the throw can happen after the object landed.
+    // Ask instead of assuming - an entry on disk must not be reported as a failure.
+    const landed = await logEntryLanded(env.MEMORY, key, entry).catch(() => null);
+    if (landed === true) return { response, pending: null };
+    throw error;
+  }
+  // The count is a hint, not a reservation. One attempt and no retry: losing the compare-and-swap
+  // only makes the hint stale, and a stale hint costs one listing - the log is the truth.
+  const hint = await bumpPendingHint(env, key, userId).catch(() => null);
+  return { response, pending: hint };
+}
+/** Best-effort bump of the pending count. Never retried and never trusted: a stale hint costs one
+ *  listing on the read path, while retrying it is what turned a burst of writers into requests
+ *  that ran out the platform's invocation budget. */
+async function bumpPendingHint(env, key, userId) {
+  const { object, manifest } = await loadManifest(env.MEMORY, key, userId);
+  setPending(manifest, pendingCount(manifest) + 1);
+  const saved = await commitManifest(env.MEMORY, key, object, manifest);
+  return saved ? pendingCount(manifest) : null;
 }
 /** Folds waiting entries into the partition, one partition write for the batch.
  *
@@ -950,7 +929,9 @@ async function fusePendingRecords({
  *  Scoring happens in `search`: one embedding call per entry, capped at
  *  `MAX_PENDING_READ`, because a search must see an Add that was just accepted. */
 async function pendingForSearch(env, ctx, limit) {
-  if (pendingCount(ctx.manifest) === 0) return [];
+  // No short-circuit on the count: it is a hint that can lag or be absent, and trusting a zero is
+  // how accepted data becomes invisible (I1). The listing below is bounded by MAX_PENDING_READ, so
+  // never trusting the hint costs one small request.
   const waiting = await listPending(env.MEMORY, ctx.key, {
     limit: Math.min(limit, MAX_PENDING_READ),
     generation: ctx.manifest.generation ?? null,
@@ -1974,7 +1955,11 @@ async function addRoute(request, env, path) {
   // ceiling; the entry is already durable, so the backlog simply waits.
   const foldBudget =
     Number(env.NMG_FOLD_BUDGET_MS) >= 0 ? Number(env.NMG_FOLD_BUDGET_MS) : FOLD_BUDGET_MS;
-  if (accepted.pending >= FOLD_TRIGGER && Date.now() - startedAt < foldBudget)
+  // The count is a hint that may be missing (its bump lost the compare-and-swap) or stale. An
+  // unknown hint is worth a look: the fold lists the log first, so looking at an empty log costs
+  // one listing, while skipping a real backlog would hide accepted data.
+  const backlogDue = accepted.pending === null || accepted.pending >= FOLD_TRIGGER;
+  if (backlogDue && Date.now() - startedAt < foldBudget)
     await foldPending(env, accepted.response.user_id).catch(() => {});
   return json(accepted.response);
 }

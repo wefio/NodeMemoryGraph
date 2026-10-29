@@ -121,8 +121,34 @@ try {
     // the entry is durable before the fold, and a partial page is worth more than no answer.
     assert.match(
       source,
-      /accepted\.pending >= FOLD_TRIGGER && Date\.now\(\) - startedAt < foldBudget/,
+      /const backlogDue = accepted\.pending === null \|\| accepted\.pending >= FOLD_TRIGGER;[\s\S]{0,200}?if \(backlogDue && Date\.now\(\) - startedAt < foldBudget\)/,
       "the fold must run under a budget; unbounded, a contended user folds its way past 120 s",
+    );
+    // The root fix: an accept takes no compare-and-swap at all. Sixteen concurrent Adds on one
+    // user used to serialise on the manifest and lose twelve times each, redoing a megabyte of
+    // partition work per retry; that is what took a write from 0.5 s to 51-106 s. If a future
+    // edit routes the accept through `mutateUser` again, this fails.
+    {
+      const start = source.indexOf("async function acceptAdd(env, input) {");
+      const end = source.indexOf("/** Folds waiting entries into the partition");
+      const body = source.slice(start, end);
+      assert.ok(start > 0 && end > start, "acceptAdd must still exist");
+      assert.ok(
+        !body.includes("mutateUser("),
+        "accept must not take a compare-and-swap; the log entry and its key are the truth",
+      );
+      assert.match(
+        body,
+        /bumpPendingHint\(env, key, userId\)\.catch\(\(\) => null\)/,
+        "the count is a hint: one attempt, and losing it must not fail the accept",
+      );
+    }
+    // And the read path must not trust a zero hint, or accepted data becomes invisible.
+    assert.ok(
+      !/async function pendingForSearch\(env, ctx, limit\) \{\s*if \(pendingCount\(ctx\.manifest\) === 0\)/.test(
+        source,
+      ),
+      "the pending read must not short-circuit on the hint",
     );
     assert.match(
       source,
@@ -353,7 +379,11 @@ try {
     for (let index = 0; index < 3; index += 1) {
       const added = await call(
         "/add",
-        addBody(featureUser, `feat-${index}`, `feature marker ${index} about harbour tide ${index}`),
+        addBody(
+          featureUser,
+          `feat-${index}`,
+          `feature marker ${index} about harbour tide ${index}`,
+        ),
       );
       assert.equal(added.status, 200, JSON.stringify(added.body));
     }
