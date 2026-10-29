@@ -126,10 +126,19 @@ export async function stagePart(bucket,userKey,part,snapshot,reuse){
   delete base.delta;
   return {...base,key,bytes:snapshot.byteLength};
 }
-export async function stageSearchPart(bucket,userKey,part,result,userBudget,fullSnapshot=false){
+/** Turns one part's search result into the snapshot the manifest will reference.
+ *
+ *  `reuse` has to be forwarded, and it does double duty: it is what lets a retry
+ *  skip an upload it already made for byte-identical content, and it is also the
+ *  only record of *every* key this request uploaded - a snapshot staged by an
+ *  abandoned attempt stays in the map so the caller can collect it after a later
+ *  attempt commits. Dropping the argument silently loses both, and the loss is
+ *  invisible: the request still works, it just re-uploads whole snapshots that no
+ *  cleanup can name afterwards. */
+export async function stageSearchPart(bucket,userKey,part,result,userBudget,fullSnapshot=false,reuse=null){
   const patch=fullSnapshot?null:measureSync('delta_encode',()=>makePageDelta(part,result.previousImage,result.snapshot,userBudget));
   if(patch)return {...patch,mode:patch.changed?'inline_page_delta':'unchanged',stagedKey:null};
-  const saved=await stagePart(bucket,userKey,part,result.snapshot);
+  const saved=await stagePart(bucket,userKey,part,result.snapshot,reuse);
   return {part:saved,mode:'full_snapshot',stagedKey:saved.key,changed:true,changedPages:0,inlineBytes:0};
 }
 export async function commitManifest(bucket,key,previous,manifest){
@@ -163,8 +172,14 @@ export async function clearLog(bucket,userKey){
   }
   return removed;
 }
+// A multi-object delete takes at most 1000 keys per request (R2 and S3 both stop
+// there). The set can exceed that: one search attempt stages a snapshot per part,
+// so `staged ∪ reuse` for a wide user passes 1000 easily. An oversized call fails
+// as a whole, and behind the callers' `catch` that is indistinguishable from a
+// cleanup that removed nothing - the same permanent orphan, one level up.
+const DELETE_BATCH = 1000;
 export async function removeStaged(bucket,keys){
-  if(keys.length)await bucket.delete(keys);
+  for(let i=0;i<keys.length;i+=DELETE_BATCH)await bucket.delete(keys.slice(i,i+DELETE_BATCH));
 }
 export async function retireParts(bucket,before,after){
   const live=new Set(after.parts.map(p=>p.key));

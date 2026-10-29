@@ -98,6 +98,79 @@ try {
     );
   }
   assert.equal(health.body.limits.add_mode, "log", "the fixture must run the log path");
+  {
+    // A missing seventh argument is invisible at runtime: the signature defaults to null, the
+    // snapshot is re-uploaded on every CAS retry, and only a bucket listing shows it. The same
+    // reason the add-mode default is pinned here applies to a call-site argument.
+    const source = fs.readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "../backend/worker.mjs"),
+      "utf8",
+    );
+    assert.match(
+      source,
+      /async \(\{ sqlite, key, manifest, staged, reuse \}\)/,
+      "the search operation must receive the attempt's reuse map",
+    );
+    assert.match(
+      source,
+      /options\.fullSnapshot \|\| env\.NMG_SEARCH_DELTAS === "0",[\s\S]{0,400}?reuse,/,
+      "stageSearchPart must be given the reuse map, or a retry re-uploads an identical snapshot",
+    );
+    // The two budgets are what keep a request from being killed at the platform ceiling. A
+    // killed request loses the whole evaluation attempt, so their removal has to fail a test:
+    // the entry is durable before the fold, and a partial page is worth more than no answer.
+    assert.match(
+      source,
+      /const dueBySchedule =[\s\S]{0,240}?if \(dueBySchedule && Date\.now\(\) - startedAt < foldBudget\)/,
+      "the fold must be scheduled and budgeted; unbounded, a contended user folds past 120 s",
+    );
+    // The root fix: an accept takes no compare-and-swap at all. Sixteen concurrent Adds on one
+    // user used to serialise on the manifest and lose twelve times each, redoing a megabyte of
+    // partition work per retry; that is what took a write from 0.5 s to 51-106 s. If a future
+    // edit routes the accept through `mutateUser` again, this fails.
+    {
+      const start = source.indexOf("async function acceptAdd(env, input) {");
+      const end = source.indexOf("/** Folds waiting entries into the partition");
+      const body = source.slice(start, end);
+      assert.ok(start > 0 && end > start, "acceptAdd must still exist");
+      for (const forbidden of ["mutateUser(", "commitManifest(", "setPending("])
+        assert.ok(
+          !body.includes(forbidden),
+          `accept must write nothing but its log entry; found ${forbidden}`,
+        );
+    }
+    // And the read path must not trust a zero hint, or accepted data becomes invisible.
+    assert.ok(
+      !/async function pendingForSearch\(env, ctx, limit\) \{\s*if \(pendingCount\(ctx\.manifest\) === 0\)/.test(
+        source,
+      ),
+      "the pending read must not short-circuit on the hint",
+    );
+    assert.match(
+      source,
+      /if \(Date\.now\(\) - started > searchDeadline\) \{\s*partial = true;\s*break;/,
+      "the partition loop must stop at a deadline and mark the page partial",
+    );
+    assert.match(source, /partial,/, "the response must say whether the page is partial");
+    // Spend is bounded per request, not per record: the fold's backfill must cap its batches, or
+    // one fold embeds a whole partition's backlog and is charged for it.
+    {
+      const service = fs.readFileSync(
+        path.join(path.dirname(fileURLToPath(import.meta.url)), "../backend/memory-service.ts"),
+        "utf8",
+      );
+      assert.match(
+        service,
+        /syncRecordEmbeddings\(this\.store, this\.client, 32, \{ maxBatches: 1 \}\)/,
+        "both backfill call sites must cap their batches",
+      );
+      assert.equal(
+        (service.match(/syncRecordEmbeddings\(this\.store, this\.client, 32\)/g) ?? []).length,
+        0,
+        "the unbounded backfill form must not come back",
+      );
+    }
+  }
 
   // I1: accepted Add is searchable before any fold.
   const first = await call(
@@ -283,13 +356,12 @@ try {
     }
   }
 
-  // One search embeds every pending record and every query feature in a single call.
-  // The sequential version spent a round trip per text - thirty or more inside one
-  // search - which is how a slow provider ran into the invocation ceiling instead of
-  // costing a score.
+  // One search embeds every pending record in a single call, and its features in another.
+  // The sequential version spent a round trip per text - thirty or more inside one search -
+  // which is how a slow provider ran into the invocation ceiling instead of costing a score.
   {
     const batchUser = "batch-" + process.pid;
-    for (let index = 0; index < 6; index += 1) {
+    for (let index = 0; index < 4; index += 1) {
       const content = `batch marker ${index} records the tidepier${index} gauge reading`;
       const added = await call("/add", addBody(batchUser, `batch-${index}`, content));
       assert.equal(added.status, 200, JSON.stringify(added.body));
@@ -301,26 +373,36 @@ try {
       top_k: 20,
     });
     assert.equal(found.status, 200, JSON.stringify(found.body));
-    // The record text is rendered (a date and role prefix may be added), so the marker
-    // token is what identifies it rather than the raw message content.
+    // The rendered record text may carry a date and role prefix, so the marker token identifies
+    // it. How many of the four are still pending depends on the fold schedule, which is a rate
+    // rather than a counter, so the count is not pinned here - the shape is: pending records
+    // reach the provider inside one call, not one call per record.
     assert.ok(
-      embedCalls.some((inputs) => inputs.filter((text) => /tidepier\d/.test(text)).length >= 6),
-      `pending records must be embedded in one batch; saw ${
-        embedCalls.length
-      } calls with ${embedCalls.map((inputs) => inputs.length).join("/")} inputs`,
+      embedCalls.some((inputs) => inputs.some((text) => /tidepier\d/.test(text))),
+      `pending records must reach the provider; saw ${embedCalls
+        .map((inputs) => inputs.length)
+        .join("/")}`,
+    );
+    assert.ok(
+      embedCalls.length <= 2,
+      `one batch per purpose; saw ${embedCalls.length} calls with ${embedCalls
+        .map((inputs) => inputs.length)
+        .join("/")} inputs`,
     );
   }
 
-  // A search must embed its features in one call, not one call per feature. The engine asks
-  // for a single feature at a time, so the batch only helps if the cache is keyed by text -
-  // and against a provider across a region boundary, twenty-four round trips per search is
-  // the difference between a search that finishes and one that hits the invocation ceiling.
+  // A search embeds its features in one call, not one per feature: the engine asks for a single
+  // feature at a time, so the cache is keyed by text and the warm pass fetches them together.
   {
     const featureUser = "features-" + process.pid;
     for (let index = 0; index < 3; index += 1) {
       const added = await call(
         "/add",
-        addBody(featureUser, `feat-${index}`, `feature marker ${index} about harbour tide ${index}`),
+        addBody(
+          featureUser,
+          `feat-${index}`,
+          `feature marker ${index} about harbour tide ${index}`,
+        ),
       );
       assert.equal(added.status, 200, JSON.stringify(added.body));
     }
@@ -331,13 +413,45 @@ try {
       top_k: 20,
     });
     assert.equal(found.status, 200, JSON.stringify(found.body));
-    // Two calls at most: the feature batch and the pending-record batch. Before the cache was
-    // keyed by text this was one call per feature plus one per pending record.
     assert.ok(
       embedCalls.length <= 2,
       `one batch per purpose; saw ${embedCalls.length} calls with ${embedCalls
         .map((inputs) => inputs.length)
         .join("/")} inputs`,
+    );
+  }
+
+  // The vectors travel with the entry, so the fold must not buy them again. The observable is the
+  // provider call count: an Add makes at most one call - its own inline embed - even when it is
+  // the Add that triggers a fold. Without the seed the fold would add a second call for the same
+  // text, which is the serialisation the whole change exists to remove.
+  {
+    const inlineUser = "inline-" + process.pid;
+    let worst = 0;
+    for (let index = 0; index < 24; index += 1) {
+      const before = embedCalls.length;
+      const added = await call(
+        "/add",
+        addBody(inlineUser, `inline-${index}`, `inline marker ${index} about the tide gauge`),
+      );
+      assert.equal(added.status, 200, JSON.stringify(added.body));
+      worst = Math.max(worst, embedCalls.length - before);
+    }
+    assert.equal(
+      worst,
+      1,
+      `an Add must embed its own messages once and the fold must reuse them; saw ${worst} calls`,
+    );
+    // The assertion above is only meaningful if a fold actually ran, so prove it did: some of the
+    // 24 entries are on disk and the backlog is smaller than the log.
+    const afterFolds = await call(`/capacity?user_id=${inlineUser}`);
+    assert.ok(
+      (afterFolds.body.sqlite_bytes?.used ?? 0) > 0,
+      "a fold must have written a partition during the loop",
+    );
+    assert.ok(
+      (afterFolds.body.pending_entries ?? 99) < 24,
+      "a fold must have drained part of the log during the loop",
     );
   }
 

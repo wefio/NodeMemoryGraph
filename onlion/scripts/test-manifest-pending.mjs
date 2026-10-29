@@ -25,9 +25,12 @@ import {
   keyFor,
   loadManifest,
   manifestFormat,
+  newPart,
   pendingCount,
+  removeStaged,
   resetUser,
   setPending,
+  stageSearchPart,
   withPending,
 } from "../backend/storage.mjs";
 
@@ -36,7 +39,7 @@ import {
  * is first-create-only, and `list` pages with a stable key cursor so deleting
  * while paging behaves like COS/R2 (an index cursor would silently skip keys).
  */
-function createMemoryBucket() {
+function createMemoryBucket({ maxDeleteKeys = Infinity } = {}) {
   const objects = new Map(); // key -> { body, etag }
   const stats = { puts: 0, deletes: 0, lists: 0 };
   const etagOf = (body) => createHash("md5").update(body).digest("hex");
@@ -73,7 +76,12 @@ function createMemoryBucket() {
       return { key, etag, size: Buffer.byteLength(text) };
     },
     async delete(keys) {
-      for (const key of Array.isArray(keys) ? keys : [keys]) if (objects.delete(key)) stats.deletes++;
+      const list = Array.isArray(keys) ? keys : [keys];
+      // R2 and S3 both cap a multi-object delete at 1000 keys; an oversized request
+      // fails as a whole rather than deleting what it can.
+      if (list.length > maxDeleteKeys)
+        throw new Error(`delete accepts at most ${maxDeleteKeys} keys, got ${list.length}`);
+      for (const key of list) if (objects.delete(key)) stats.deletes++;
     },
     async list({ prefix = "", limit = 1000, cursor } = {}) {
       stats.lists++;
@@ -363,7 +371,64 @@ assert.equal(logPrefix("abc123"), "users/abc123/log/");
   console.log("PASS: a failed log cleanup reports incomplete and the same reset_id finishes it.");
 }
 
+{
+  // The provider caps a multi-object delete at 1000 keys. `staged ∪ reuse` can pass
+  // that for a wide user (one snapshot per part per attempt), and an oversized request
+  // fails as a whole - which the callers' catch turns into "cleanup succeeded, nothing
+  // removed". So the batch size is part of the contract, not an implementation detail.
+  const bucket = createMemoryBucket({ maxDeleteKeys: 1000 });
+  const keys = Array.from({ length: 1500 }, (_unused, index) => `users/batch/parts/${index}.sqlite`);
+  for (const key of keys) await bucket.put(key, "snapshot");
+
+  await removeStaged(bucket, keys);
+  assert.equal(bucket.objects.size, 0, "a cleanup above the batch limit must still delete everything");
+  assert.equal(bucket.stats.deletes, 1500);
+
+  console.log(
+    "PASS: removeStaged batches at the provider limit — an oversized cleanup deletes instead of failing whole.",
+  );
+}
+
 console.log(
   "PASS: manifest pending/lazy-v4/clearLog verified without a build — " +
     "empty log keeps today's bytes, pending log is v4, reset drains the log.",
 );
+
+{
+  // A search retry re-stages the partition it just uploaded. Passing `reuse` makes
+  // that free for identical content, and - the part that is easy to lose - it is how
+  // the abandoned attempt's snapshot stays reachable for cleanup after a later
+  // attempt commits. Without the argument the request still succeeds while uploading
+  // a whole snapshot per retry that no cleanup can name, so the assertion is on both
+  // effects of the same call.
+  const bucket = createMemoryBucket();
+  const userKey = keyFor("search-reuse");
+  const part = newPart("search-reuse");
+  const snapshot = Buffer.from("nmg-part-v2 snapshot bytes");
+  const resultOf = { snapshot, previousImage: null };
+  const reuse = new Map();
+
+  const first = await stageSearchPart(bucket, userKey, part, resultOf, 0, true, reuse);
+  assert.equal(first.mode, "full_snapshot");
+  assert.equal(bucket.stats.puts, 1, "the first staging uploads once");
+  assert.ok(
+    [...reuse.values()].includes(first.stagedKey),
+    "a staged search snapshot must be registered so an abandoned attempt can be collected",
+  );
+
+  const second = await stageSearchPart(bucket, userKey, part, resultOf, 0, true, reuse);
+  assert.equal(second.stagedKey, first.stagedKey, "identical content reuses the upload");
+  assert.equal(bucket.stats.puts, 1, "a retry with the same content must not upload again");
+
+  // The behaviour a caller gets by forgetting the argument: correct on the wire,
+  // duplicated on the bucket. Spelled out so the difference is visible in a diff.
+  const forgetful = createMemoryBucket();
+  const forgotten = newPart("search-reuse");
+  await stageSearchPart(forgetful, userKey, forgotten, resultOf, 0, true);
+  await stageSearchPart(forgetful, userKey, forgotten, resultOf, 0, true);
+  assert.equal(forgetful.stats.puts, 2, "without reuse every attempt uploads another snapshot");
+
+  console.log(
+    "PASS: a search staging call forwards reuse — identical content uploads once and the key stays registered for cleanup.",
+  );
+}

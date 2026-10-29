@@ -186,7 +186,11 @@ export class AmlMemoryService {
     // Same ordered, transactional primitive as daemon rememberBatch. The
     // outer manifest commit also makes multiple internal batches atomic.
     this.store.rememberMany(inputs);
-    if (this.client) await syncRecordEmbeddings(this.store, this.client, 32);
+    // Bounded like the search path: a fold must not embed a whole partition's backlog in one
+    // request. Without the cap the cost and the duration of one fold are unbounded in the number
+    // of vectorless records, so a single call can both burn the provider budget and run into the
+    // invocation ceiling. Later folds continue where this one stopped.
+    if (this.client) await syncRecordEmbeddings(this.store, this.client, 32, { maxBatches: 1 });
     // After embeddings: leaf-summary staleness must not trigger extra
     // embedding batches in records-granularity mode.
     runExtractiveLeafSummaries(this.store);
