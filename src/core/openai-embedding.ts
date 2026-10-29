@@ -91,6 +91,12 @@ export class OpenAIEmbeddingClient {
     this.documentBody = options.documentBody ?? {};
     this.indexId = indexIdentity({
       model: this.model,
+      // The endpoint takes part in the identity. Two deployments of the same model name can
+      // serve different weights, and a vector from one is not comparable with a query
+      // embedded by the other - but nothing else in the identity would notice, so switching
+      // endpoints used to leave the stored vectors silently in place and mix two spaces.
+      // With it here, a switch makes the index stale and the existing backfill re-embeds.
+      providerEndpoint: endpointIdentity(options.baseUrl),
       ...(options.indexNamespace ? { indexNamespace: options.indexNamespace } : {}),
       dimensions: this.dimensions,
       documentTemplate: this.documentTemplate,
@@ -232,8 +238,22 @@ export class OpenAIEmbeddingClient {
  * per-call bodies means existing embeddings cannot be reused. Serialisation order
  * is part of the contract, so keep the spread order identical when editing.
  */
+/** The part of the endpoint that identifies the deployment: scheme, host and path, without
+ *  a trailing slash or any query, so an equivalent spelling of the same endpoint keeps the
+ *  same identity and a genuinely different one does not. */
+function endpointIdentity(baseUrl: string | undefined): string | null {
+  if (!baseUrl) return null;
+  try {
+    const url = new URL(baseUrl);
+    return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return baseUrl.replace(/\/+$/, "");
+  }
+}
+
 function indexIdentity(input: {
   model: string;
+  providerEndpoint?: string | null;
   indexNamespace?: string;
   dimensions?: number;
   documentTemplate: string;
@@ -246,6 +266,7 @@ function indexIdentity(input: {
   const fingerprint = createHash("sha256")
     .update(
       JSON.stringify({
+        ...(input.providerEndpoint ? { providerEndpoint: input.providerEndpoint } : {}),
         ...(input.indexNamespace ? { indexNamespace: input.indexNamespace } : {}),
         dimensions: input.dimensions ?? null,
         documentTemplate: input.documentTemplate,

@@ -286,3 +286,28 @@ test("a dropped connection is still retried", async () => {
     );
   }
 });
+
+test("the embedding index identity separates deployments of the same model", () => {
+  // Two regions of the same provider serve the same model name. A vector from one is not
+  // comparable with a query embedded by the other, and nothing else in the identity - model,
+  // dimensions, templates - differs, so the endpoint has to be part of it. Without this, a
+  // switch left every stored vector in place and silently mixed the two spaces.
+  const mainland = new OpenAIEmbeddingClient({
+    baseUrl: "https://embed.example.cn/compatible-mode/v1",
+    model: "text-embedding-v4",
+    dimensions: 1024,
+  });
+  const singapore = new OpenAIEmbeddingClient({
+    baseUrl: "https://embed.example.sg/compatible-mode/v1",
+    model: "text-embedding-v4",
+    dimensions: 1024,
+  });
+  const spelling = new OpenAIEmbeddingClient({
+    baseUrl: "https://embed.example.cn/compatible-mode/v1/",
+    model: "text-embedding-v4",
+    dimensions: 1024,
+  });
+  assert.notEqual(mainland.indexId, singapore.indexId, "a different endpoint is a different index");
+  assert.equal(spelling.indexId, mainland.indexId, "a trailing slash is the same endpoint");
+  assert.match(mainland.indexId, /^text-embedding-v4@[0-9a-f]{12}$/);
+});

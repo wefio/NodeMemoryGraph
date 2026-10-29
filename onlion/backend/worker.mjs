@@ -61,7 +61,6 @@ import {
 } from "./storage.mjs";
 import { deltaBytes, USER_DELTA_LIMIT } from "./page-delta.mjs";
 import { deferredDocuments } from "./embedding-session.mjs";
-import { queryVector, rememberQueryVector } from "./query-cache.mjs";
 import {
   LOG_ENTRY_VERSION,
   MAX_PENDING_READ,
@@ -368,8 +367,8 @@ function embeddingClient(env) {
     NMG_EMBED_TIMEOUT_MS: env.NMG_EMBED_TIMEOUT_MS ?? String(EMBED_TIMEOUT_MS),
   });
   if (!client) return undefined;
-  const queries = new Map();
-  const provider = hash(JSON.stringify([client.indexId, client.baseUrl, client.apiKey]));
+  /** text -> vector, for every feature this request has needed so far. */
+  const vectorsByText = new Map();
   const budgetMs =
     Number(env.NMG_EMBED_QUERY_BUDGET_MS) > 0
       ? Number(env.NMG_EMBED_QUERY_BUDGET_MS)
@@ -415,26 +414,32 @@ function embeddingClient(env) {
         });
       return embeddingOperation(() => documents().embedDocuments(inputs));
     }),
+    // Cached per TEXT, not per input array. The retrieval engine embeds one feature at a
+    // time (`embedQueries([text])`), so a cache keyed by the array only ever hits when the
+    // caller happens to ask for the same list: pre-warming a batch would populate nothing the
+    // engine could use, and it would embed every feature separately instead. Against a
+    // provider across a region boundary that is up to twenty-four round trips per search
+    // instead of one.
     embedQueries(inputs) {
-      const key = hash(JSON.stringify([provider, inputs]));
-      if (!queries.has(key))
-        queries.set(
-          key,
-          measure("embedding", async () => {
-            const cached = queryVector(key);
-            if (cached) return cached;
+      const unique = [...new Set(inputs)];
+      const missing = unique.filter((text) => !vectorsByText.has(text));
+      const fetched = missing.length
+        ? measure("embedding", async () => {
             spend();
             // Embedded exactly as given. Long-query handling lives in
             // `queryFeatures`, which searches the whole clause and its windows as
             // separate features: pooling them here would average the query's
             // aspects into one compromise vector, which measured worse than either
             // the whole text or the per-feature maximum.
-            const vectors = await embeddingOperation(() => client.embedQueries(inputs));
-            rememberQueryVector(key, vectors);
+            const vectors = await embeddingOperation(() => client.embedQueries(missing));
+            if (vectors.length !== missing.length)
+              throw new Error("embedding provider returned an invalid query batch");
             return vectors;
-          }),
-        );
-      return queries.get(key);
+          }).then((vectors) => {
+            missing.forEach((text, index) => vectorsByText.set(text, vectors[index]));
+          })
+        : undefined;
+      return Promise.resolve(fetched).then(() => inputs.map((text) => vectorsByText.get(text)));
     },
   };
 }
@@ -1127,24 +1132,14 @@ function addAppended(appended, memories) {
  *  clauses balanced instead of finishing one clause's windows before starting the
  *  next. Best-effort: a failed embedding is simply not cached, and the feature falls
  *  back to whatever the retrieval layer manages, so the request still answers. */
-const WARM_CONCURRENCY = 4;
 async function warmClauseVectors(client, features, parts) {
   if (!client || parts.length === 0) return;
-  const depth = Math.max(0, ...features.map((list) => list.length));
-  for (let round = 0; round < depth; round += 1) {
-    const batch = [];
-    features.forEach((list) => {
-      if (round < list.length) batch.push(list[round]);
-    });
-    let next = 0;
-    const warm = async () => {
-      while (next < batch.length) {
-        const text = batch[next++];
-        await client.embedQueries([text]).catch(() => undefined);
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(WARM_CONCURRENCY, batch.length) }, warm));
-  }
+  // One call for every distinct feature text. The engine then looks each one up by text, so
+  // this pre-warms exactly the entries it will ask for; doing it per text meant up to
+  // twenty-four cross-region round trips before the first partition was even opened.
+  const texts = [...new Set(features.flat())];
+  if (texts.length === 0) return;
+  await client.embedQueries(texts).catch(() => undefined);
 }
 /** Reports a request that is still running after `NMG_SLOW_REPORT_MS`. The platform
  *  kills an invocation at 120 s and a killed invocation leaves nothing behind, so an

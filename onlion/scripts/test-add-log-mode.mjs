@@ -311,6 +311,36 @@ try {
     );
   }
 
+  // A search must embed its features in one call, not one call per feature. The engine asks
+  // for a single feature at a time, so the batch only helps if the cache is keyed by text -
+  // and against a provider across a region boundary, twenty-four round trips per search is
+  // the difference between a search that finishes and one that hits the invocation ceiling.
+  {
+    const featureUser = "features-" + process.pid;
+    for (let index = 0; index < 3; index += 1) {
+      const added = await call(
+        "/add",
+        addBody(featureUser, `feat-${index}`, `feature marker ${index} about harbour tide ${index}`),
+      );
+      assert.equal(added.status, 200, JSON.stringify(added.body));
+    }
+    embedCalls.length = 0;
+    const found = await call("/search", {
+      user_id: featureUser,
+      query: "harbour tide levels and the engineering notes from the second session",
+      top_k: 20,
+    });
+    assert.equal(found.status, 200, JSON.stringify(found.body));
+    // Two calls at most: the feature batch and the pending-record batch. Before the cache was
+    // keyed by text this was one call per feature plus one per pending record.
+    assert.ok(
+      embedCalls.length <= 2,
+      `one batch per purpose; saw ${embedCalls.length} calls with ${embedCalls
+        .map((inputs) => inputs.length)
+        .join("/")} inputs`,
+    );
+  }
+
   // Reset drains the log as well as the partitions.
   const reset = await call("/reset", {
     user_id: "alice",
