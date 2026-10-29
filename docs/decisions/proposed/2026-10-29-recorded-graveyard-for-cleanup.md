@@ -43,12 +43,19 @@ survives the request.
 4. **Bounded, newest first.** The field has a cap; over the cap, drop the **oldest** entries and
    keep the newest, because the newest are the ones a partitioned delete just failed to remove.
    An unbounded field would grow the manifest without limit under contention.
-5. **A corrupt graveyard never blocks service.** On read, a value that is not an array, or one
-   longer than the read cap, is **skipped** (no drain this request) and counted, never sliced -
-   slicing would drop keys from the cleanup list and manufacture the leak this record exists to
-   prevent. On write, the field is **replaced** with this commit's doomed set and counted, so
-   every manifest we write has a well-formed array. `/add`, `/search` and `/capacity` keep
-   serving regardless of what the field contains.
+5. **A corrupt graveyard never blocks service, and is not blindly overwritten.** On read, a value
+   that is not an array, or one longer than the read cap, is **skipped** (no drain this request)
+   and counted, never sliced - slicing would drop keys from the cleanup list and manufacture the
+   leak this record exists to prevent. Writing does not simply overwrite, because a partially
+   corrupt value can still contain valid keys: a value that is not an array contributes nothing, an
+   array contributes the entries that are non-empty strings, and everything else is dropped and
+   counted as `graveyard_dropped_unparseable`. The salvaged keys, this commit's doomed set and the
+   carried-forward remainder are then unioned, filtered against the new `parts` - a graveyard entry
+   that is also a live part is a contradiction, and the next drain would delete live data -
+   deduplicated, capped newest-first (drops counted as `graveyard_dropped_cap`), and only then
+   written. Overwriting outright would discard keys that were perfectly parseable, which is our own
+   leak rather than the corruption's. `/add`, `/search` and `/capacity` keep serving regardless of
+   what the field contains.
 6. **The counters ride the channel an operator already reads.** `userCapacity` returns
    `pending_entries` and `manifest_bytes` per user and already raises `warnings` at 80% of a
    limit, so `graveyard_pending`, `graveyard_dropped_unparseable` and `graveyard_dropped_cap`
@@ -56,6 +63,14 @@ survives the request.
    rather than in a field nobody has a reason to look at. `graveyard_pending` measures **only
    what was recorded**; orphans created before this mechanism existed are invisible to it and
    must be measured separately.
+
+7. **Reset keeps the names.** `resetManifestState` builds a fresh object literal, so any field it
+   does not name is dropped, and `clearResetPendingKeys` only knows `parts` keys plus
+   `reset.pending_keys`. A graveyard key would therefore survive a reset with nothing referring to
+   it - permanently, since reclamation only sweeps other epochs - and reset is supposed to be the
+   escape hatch. Reset merges the graveyard into `reset.pending_keys` (already de-duplicated there)
+   and drops the field; `clearResetPendingKeys` already deletes in the same 1000-key batches, so
+   this adds no new limit.
 
 ## What this does and does not establish
 

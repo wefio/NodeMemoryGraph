@@ -31,14 +31,24 @@ manifest 引用——只在"无崩溃、且每一批删除都成功"的静默期
    ——这正是"删掉 staged 键还必须同时从 `reuse` 移除"那条规则必要的原因。外观相同，结论相反，理由不同。
 4. **有界、新键优先。** 字段有上限；超限丢**最旧**的、保留最新的——最新的恰好是某批删除刚失败的那批。
    无界会让 manifest 在争用时无限增长。
-5. **坏 graveyard 永不阻塞服务。** 读侧遇到非数组、或长度超过读上限的值时**跳过**（本次不 drain）并计数，
-   **绝不 slice**——截断等于把一部分键从清理清单里悄悄扔掉，正是本条记录要防的泄漏。写侧**用本次待删集合覆盖**
-   它并计数，于是我们写出的每个 manifest 都是良构的。无论字段内容如何，`/add`、`/search`、`/capacity` 都正常服务。
+5. **坏 graveyard 永不阻塞服务，也不直接覆盖。** 读侧遇到非数组、或长度超过读上限的值时**跳过**（本次不 drain）
+   并计数，**绝不 slice**——截断等于把一部分键从清理清单里悄悄扔掉，正是本条记录要防的泄漏。写侧不是简单覆盖，
+   因为**部分损坏的值里仍可能有合法键**：非数组贡献 0；是数组则贡献其中非空字符串的项，其余丢弃并计入
+   `graveyard_dropped_unparseable`。随后把「抢救出的键 + 本次待删集合 + 从上次带过来的剩余」做并集，
+   按新 `parts` 过滤（graveyard 里的键同时又是 live part 是自相矛盾，下一次 drain 会删到活数据），去重，
+   按新键优先做 cap（丢弃计入 `graveyard_dropped_cap`），最后才写出。直接覆盖等于丢掉本来完全可解析的键，
+   那是我们自己制造的泄漏，不是损坏造成的。无论字段内容如何，`/add`、`/search`、`/capacity` 都正常服务。
 6. **计数器走运维已经在看的那条通道。** `userCapacity` 按用户返回 `pending_entries`、`manifest_bytes`，并且已经有
    80% 触发 `warnings` 的机制，所以 `graveyard_pending`、`graveyard_dropped_unparseable`、
    `graveyard_dropped_cap` 应放进同一个对象，且后两者非零时在那里产生一条 warning（"leaking"），
    而不是放在没人有理由去查的新字段里。`graveyard_pending` 只度量**被记录过的**积压；机理上线前产生的孤儿
    它看不见，必须单独测。
+
+7. **reset 要保住这些名字。** `resetManifestState` 构造的是一个全新的对象字面量，它没点名的字段会被丢掉，
+   而 `clearResetPendingKeys` 只认识 `parts` 的键和 `reset.pending_keys`。于是 graveyard 里的键会在 reset 之后
+   活下来、却没有任何东西再引用它——而且是**永久**的，因为回收只扫其它代；而 reset 本该是那条逃生通道。
+   所以 reset 要把 graveyard 并进 `reset.pending_keys`（那里已经去重）并丢掉字段；`clearResetPendingKeys`
+   本来就是按 1000 键分批删，所以这不引入新的上限。
 
 ## 这确立了什么、没有确立什么
 
