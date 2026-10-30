@@ -432,7 +432,7 @@ function embeddingClient(env, seed) {
     embed: (inputs) =>
       Promise.resolve().then(() => {
         spend();
-        return embeddingOperation(() => client.embed(inputs));
+        return embeddingOperation(() => client.embed(inputs), env);
       }),
     embedDocuments: deferredDocuments((inputs) => {
       // A fold that already holds these vectors must not call the provider: this is what keeps the
@@ -448,11 +448,12 @@ function embeddingClient(env, seed) {
         throw Object.assign(new Error("embedding budget exhausted for this request"), {
           code: "embedding_budget_exhausted",
         });
-      return embeddingOperation(() => documents().embedDocuments(inputs));
+      return embeddingOperation(() => documents().embedDocuments(inputs), env);
     }),
     // The raw provider call, for a caller outside any SQLite session - the accept path. The
     // deferred form above is for the fold, where it signals a preparation and throws by design.
-    embedDocumentsDirect: (inputs) => embeddingOperation(() => documents().embedDocuments(inputs)),
+    embedDocumentsDirect: (inputs) =>
+      embeddingOperation(() => documents().embedDocuments(inputs), env),
     // Cached per TEXT, not per input array. The retrieval engine embeds one feature at a
     // time (`embedQueries([text])`), so a cache keyed by the array only ever hits when the
     // caller happens to ask for the same list: pre-warming a batch would populate nothing the
@@ -470,7 +471,7 @@ function embeddingClient(env, seed) {
             // separate features: pooling them here would average the query's
             // aspects into one compromise vector, which measured worse than either
             // the whole text or the per-feature maximum.
-            const vectors = await embeddingOperation(() => client.embedQueries(missing));
+            const vectors = await embeddingOperation(() => client.embedQueries(missing), env);
             if (vectors.length !== missing.length)
               throw new Error("embedding provider returned an invalid query batch");
             return vectors;
