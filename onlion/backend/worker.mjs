@@ -174,6 +174,16 @@ async function sqliteReady() {
   // not pay for decoding and compiling them. This platform starts a fresh isolate per request,
   // so that saving is per request, not per container.
   const compiled = typeof compiledSqlite === "function" ? compiledSqlite() : compiledSqlite;
+  // OPFS is a browser storage VFS: this runtime has no `location`, so both installers throw a
+  // TypeError and the loader prints a stack on every cold start - the log noise the operator has
+  // seen since day one. The loader gates them on `config.disable.vfs` (worker-loader.mjs 15699,
+  // 16964), and its config comes from `globalThis.sqlite3ApiConfig` (worker-loader.mjs 3064),
+  // **not** from init()'s argument: passing it to init() had no effect at all, which is why this
+  // is set here instead of with the other options.
+  globalThis.sqlite3ApiConfig = {
+    ...(globalThis.sqlite3ApiConfig ?? {}),
+    disable: { ...(globalThis.sqlite3ApiConfig?.disable ?? {}), vfs: { opfs: true, "opfs-wl": true } },
+  };
   const instance = await init({
     instantiateWasm(imports, receive) {
       const instance = new WebAssembly.Instance(compiled, imports);
@@ -1306,7 +1316,7 @@ function addClauseContributions(contributions, clauses) {
  *  own loop with its own deadline branches. It mutates `contributions` and `appendedById`
  *  in place because the attribution across the whole request (all partitions plus the
  *  pending entries) is one set of totals, not a per-partition stat. */
-async function readSearchCandidates(env, sqlite, { manifest, queries, topK, appendOnly, features, client, started, contributions, appendedById }) {
+async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, appendOnly, features, client, started, contributions, appendedById }) {
   const modes = new Set();
   let candidates = [];
   let partial = false;
@@ -1322,7 +1332,7 @@ async function readSearchCandidates(env, sqlite, { manifest, queries, topK, appe
       const result = await runPart(
         env.MEMORY,
         manifest.parts[i],
-        sqlite,
+        await getSqlite(),
         async ({ key: partKey }) => {
           // Declining the backfill is what makes this read safe and cheap: without it the
           // service would embed vectorless records inside a search and change the SQLite
@@ -1387,7 +1397,13 @@ async function search(env, input) {
   let manifest = (await measure("manifest_read", () =>
     loadManifest(env.MEMORY, keyFor(userId), userId),
   )).manifest;
-  const sqlite = await measure("sqlite_init", () => sqliteReady());
+  // Loaded on the first partition, not up front: a user whose writes are still in the log has no
+  // partitions at all (the harness's first questions are exactly that), and the manifest read is
+  // the only thing a search needs for them. Measured before this: /health at 25 ms with
+  // sqlite_loaded=false against 84 ms for a search that loaded the module for nothing.
+  let sqlitePromise;
+  const getSqlite = () =>
+    (sqlitePromise ??= measure("sqlite_init", () => sqliteReady()));
   for (;;) {
     try {
   {
@@ -1395,7 +1411,7 @@ async function search(env, input) {
     await warmClauseVectors(client, features, manifest.parts);
     const persistence = { inline_delta_saves: 0, full_snapshot_saves: 0, changed_pages: 0 };
     const { candidates: pageCandidates, modes: modesRead, partial: partialRead } =
-      await readSearchCandidates(env, sqlite, {
+      await readSearchCandidates(env, getSqlite, {
         manifest,
         queries,
         topK,
