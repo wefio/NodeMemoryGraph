@@ -1,13 +1,35 @@
 import {observedStage} from './monitoring.mjs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 const profiles = new AsyncLocalStorage();
+/** The stage this isolate is currently inside.
+ *
+ *  The 60 s slow-request line reported memory, queue state and the last embedding call, and every
+ *  120 s kill in the 2026-10-30 windows still needed a code read to say where it was. One string
+ *  assignment per measured stage fixes that: a fresh isolate per request on this platform means
+ *  there is no cross-request ambiguity, and a reused one only makes it approximate, which the log
+ *  says explicitly by naming the field `stage_isolate`.
+ */
+let activeStage = null;
+export const currentStage = () => activeStage;
 function timedMeasure(name, operation) {
   const profile = profiles.getStore();
-  if (!profile) return operation();
+  if (!profile) {
+    const prior = activeStage;
+    activeStage = name;
+    return (async () => {
+      try {
+        return await operation();
+      } finally {
+        activeStage = prior;
+      }
+    })();
+  }
   return (async()=>{
     const start = performance.now();
+    const prior = activeStage;
+    activeStage = name;
     try { return await operation(); }
-    finally { profile[name] = (profile[name] || 0) + performance.now() - start; }
+    finally { activeStage = prior; profile[name] = (profile[name] || 0) + performance.now() - start; }
   })();
 }
 function timedMeasureSync(name, operation) {
