@@ -189,7 +189,52 @@ export function reportFailure(error, status, kind = "request_failure") {
     );
   }
 }
-export async function embeddingOperation(operation) {
+/** Provider circuit breaker.
+ *
+ *  2026-10-30 17:35-17:49: one saturated embedding account answered nothing but timeouts, and
+ *  every Add paid for it twice - once in the accept's inline embed, again in the fold's backfill -
+ *  then retried the whole manifest compare-and-swap because the backfill threw. Seventeen requests
+ *  died at the 120 s ceiling and one ran 196 s. A provider that is down must cost a request
+ *  nothing: while the breaker is open, an embedding call fails in microseconds instead of twelve
+ *  seconds, records are stored without vectors, and they score lexically until a later fold
+ *  backfills them. Quality degrades for the duration of the outage; latency does not.
+ *
+ *  Only provider-side failures trip it. A 400 from a malformed input is our bug and must stay
+ *  visible rather than be hidden behind a breaker that also silences the next good request. */
+const breaker = { openUntil: 0, openedAt: null, trips: 0, reason: null };
+const tripsBreaker = (code) =>
+  code === "dependency_timeout" ||
+  code === "embedding_timeout" ||
+  code === "embedding_network_error" ||
+  code === "embedding_http_429" ||
+  /^embedding_http_5\d\d$/.test(String(code));
+/** Milliseconds a trip keeps the provider out of the request path. */
+function breakerWindowMs(env) {
+  const configured = Number(env?.NMG_EMBED_BREAKER_MS);
+  return Number.isFinite(configured) && configured >= 0 ? configured : 30_000;
+}
+export function embeddingBreakerStatus() {
+  const open = Date.now() < breaker.openUntil;
+  return {
+    state: open ? "open" : "closed",
+    open_until: open ? new Date(breaker.openUntil).toISOString() : null,
+    opened_at: breaker.openedAt,
+    trips: breaker.trips,
+    reason: breaker.reason,
+  };
+}
+/** Ends the current trip early. The operator path after a provider recovers. */
+export function resetEmbeddingBreaker() {
+  breaker.openUntil = 0;
+  breaker.reason = null;
+  return embeddingBreakerStatus();
+}
+export async function embeddingOperation(operation, env) {
+  if (Date.now() < breaker.openUntil) {
+    const error = new Error("embedding provider is in a breaker window after a failure");
+    error.code = "embedding_suppressed";
+    throw error;
+  }
   // The call crosses a region boundary (function in ap-hongkong, provider elsewhere), so its
   // duration is the number that decides whether a per-attempt timeout is sane. Recording only
   // the status left that unknown through two incidents.
@@ -220,6 +265,13 @@ export async function embeddingOperation(operation) {
       ...classifyError(error),
     };
     reportFailure(error, null, "embedding_failure");
+    const code = lastEmbedding.code;
+    if (tripsBreaker(code)) {
+      breaker.openUntil = Date.now() + breakerWindowMs(env);
+      breaker.openedAt = new Date().toISOString();
+      breaker.trips += 1;
+      breaker.reason = code;
+    }
     throw error;
   }
 }

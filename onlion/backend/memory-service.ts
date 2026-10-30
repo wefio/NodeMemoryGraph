@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { NmgStore } from "../../src/core/store.ts";
 import { syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
+import { EmbeddingPreparation } from "./embedding-session.mjs";
 import { searchMemoryContext } from "../../src/integration/search.ts";
 import {
   projectAmlMemory,
@@ -116,6 +117,29 @@ export class AmlMemoryService {
     this.allowBackfill = options.allowBackfill;
   }
   private allowBackfill?: boolean;
+  /** The last backfill failure, for /admin/status. Deliberately not thrown: see backfillVectors. */
+  private lastBackfillError: string | null = null;
+
+  /** Bounded vector backfill that never fails its caller: the worst case is a record that keeps
+   *  scoring lexically until a later fold tries again. */
+  private async backfillVectors(): Promise<void> {
+    if (!this.client) return;
+    try {
+      await syncRecordEmbeddings(this.store, this.client, 32, { maxBatches: 1 });
+      this.lastBackfillError = null;
+    } catch (error) {
+      // EmbeddingPreparation is control flow, not a failure: `runPart` expects it to unwind the
+      // SQLite session so the documents can be embedded outside it, then re-enters. Swallowing it
+      // here looked like success and silently dropped the records - the write completed with a
+      // snapshot that never contained them, and only the fold/searchability test noticed.
+      if (error instanceof EmbeddingPreparation) throw error;
+      this.lastBackfillError = String((error as { code?: string })?.code ?? error);
+    }
+  }
+
+  get backfillStatus(): string | null {
+    return this.lastBackfillError;
+  }
 
   async rememberBatch(userId: string, sessionId: string, requestId: string, messages: Message[]) {
     // Node-summary compensation without an LLM writer. The identity name below
@@ -194,7 +218,13 @@ export class AmlMemoryService {
     // request. Without the cap the cost and the duration of one fold are unbounded in the number
     // of vectorless records, so a single call can both burn the provider budget and run into the
     // invocation ceiling. Later folds continue where this one stopped.
-    if (this.client) await syncRecordEmbeddings(this.store, this.client, 32, { maxBatches: 1 });
+    // A vector backfill is an optimisation, not part of the write's contract. Before this
+    // guard a provider timeout threw out of here, out of the fold, and into `mutateUser`, which
+    // re-ran the whole attempt (up to twelve times, each paying the timeout again): that is how
+    // 2026-10-30 produced Adds at 15-55 s and seventeen kills at the 120 s ceiling. The records
+    // are already stored; leaving them vectorless costs lexical scoring until a later fold
+    // backfills them, which is strictly better than failing the write.
+    if (this.client) await this.backfillVectors();
     // After embeddings: leaf-summary staleness must not trigger extra
     // embedding batches in records-granularity mode.
     runExtractiveLeafSummaries(this.store);
@@ -232,7 +262,7 @@ export class AmlMemoryService {
         if (this.allowBackfill === false) {
           /* fall through: vectorless records score lexically until a fold backfills */
         } else {
-          await syncRecordEmbeddings(this.store, this.client, 32, { maxBatches: 1 });
+          await this.backfillVectors();
         }
       }
     }
