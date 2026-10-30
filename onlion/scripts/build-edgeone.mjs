@@ -54,6 +54,18 @@ const inlineWasm = {
   name: "inline-wasm",
   setup(pluginBuild) {
     pluginBuild.onLoad({ filter: /\.wasm$/ }, async (args) => {
+      // Only the big one is deferred. `callbacks.wasm` (19 KB) is consumed by the generated
+      // loader as a real WebAssembly.Module via a static import, so wrapping it in a factory
+      // made `new WebAssembly.Instance(function, ...)` throw and every SQLite request answer 503
+      // - caught on the deployed endpoint, not by the suite (Miniflare uses the wrangler build).
+      if (path.basename(args.path) === "callbacks.wasm") {
+        const bytes = fs.readFileSync(args.path).toString("base64");
+        return {
+          loader: "js",
+          contents: `export default new WebAssembly.Module(Buffer.from(${JSON.stringify(bytes)}, "base64"));`,
+          watchFiles: [args.path],
+        };
+      }
       const bytes = fs.readFileSync(args.path).toString("base64");
       const encoded = JSON.stringify(bytes);
       return {
