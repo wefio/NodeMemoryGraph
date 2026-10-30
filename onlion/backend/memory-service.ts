@@ -109,9 +109,13 @@ export class AmlMemoryService {
   constructor(
     key: string,
     private client?: EmbeddingClient,
+    options: { /** Whether search may backfill vectorless records: false on the read path. */
+    allowBackfill?: boolean } = {},
   ) {
     this.store = new NmgStore(`/tmp/nmg/${key}.sqlite`, undefined, { scopeWriteIndex: true });
+    this.allowBackfill = options.allowBackfill;
   }
+  private allowBackfill?: boolean;
 
   async rememberBatch(userId: string, sessionId: string, requestId: string, messages: Message[]) {
     // Node-summary compensation without an LLM writer. The identity name below
@@ -221,9 +225,15 @@ export class AmlMemoryService {
     if (this.client) {
       const health = this.store.embeddingIndexHealth(this.client.indexId);
       if (!health || health.pending.records || !health.targets.includes("records")) {
-        // New writes are fully indexed before their Add succeeds. Bound the
-        // compatibility backfill for pre-upgrade or changed-model snapshots.
-        await syncRecordEmbeddings(this.store, this.client, 32, { maxBatches: 1 });
+        // A pure-read search declines the backfill: the write path owns vector
+        // materialisation (inline at accept, bounded in the fold). Skipping it keeps the
+        // read path free of document embedding and of SQLite change - which is what lets
+        // a search answer without staging or committing anything.
+        if (this.allowBackfill === false) {
+          /* fall through: vectorless records score lexically until a fold backfills */
+        } else {
+          await syncRecordEmbeddings(this.store, this.client, 32, { maxBatches: 1 });
+        }
       }
     }
     // Track which clauses surfaced each memory, so a caller can see whether the

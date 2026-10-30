@@ -106,16 +106,23 @@ try {
       path.join(path.dirname(fileURLToPath(import.meta.url)), "../backend/worker.mjs"),
       "utf8",
     );
-    assert.match(
-      source,
-      /async \(\{ sqlite, key, manifest, staged, reuse \}\)/,
-      "the search operation must receive the attempt's reuse map",
-    );
-    assert.match(
-      source,
-      /options\.fullSnapshot \|\| env\.NMG_SEARCH_DELTAS === "0",[\s\S]{0,400}?reuse,/,
-      "stageSearchPart must be given the reuse map, or a retry re-uploads an identical snapshot",
-    );
+    // The search is a read: no staging, no snapshot export, no compare-and-swap. Vector
+    // materialisation belongs to the write path, so the search's service declines the
+    // document-embedding backfill. A read that can write carries a CAS's failure modes -
+    // that is how a 90 ms search died 503 before it had touched storage.
+    {
+      const sliceStart = source.indexOf("async function search(env, input)");
+      assert.ok(sliceStart >= 0, "search signature must not take an options bag");
+      const sliceEnd = source.indexOf("async function reset(");
+      const body = source.slice(sliceStart, sliceEnd);
+      for (const forbidden of ["stageSearchPart", "commitManifest", "staged", "reuse", "readOnly: !changed"])
+        assert.ok(
+          !body.includes(forbidden),
+          `the search must never ${forbidden}; it is a read`,
+        );
+      for (const required of ["allowBackfill: false", "readOnly: true", "manifest_read", "fusePendingRecords"])
+        assert.ok(body.includes(required), `the search must contain ${required}`);
+    }
     // The two budgets are what keep a request from being killed at the platform ceiling. A
     // killed request loses the whole evaluation attempt, so their removal has to fail a test:
     // the entry is durable before the fold, and a partial page is worth more than no answer.
@@ -356,9 +363,11 @@ try {
     }
   }
 
-  // One search embeds every pending record in a single call, and its features in another.
-  // The sequential version spent a round trip per text - thirty or more inside one search -
-  // which is how a slow provider ran into the invocation ceiling instead of costing a score.
+  // One search embeds its features in at most one provider call. Pending records the accept
+  // already embedded are reused, not re-embedded: the write side embeds, the read side asks
+  // the provider for query texts it has never seen. The sequential version spent a round trip
+  // per text - thirty or more inside one search - which is how a slow provider ran into the
+  // invocation ceiling instead of costing a score.
   {
     const batchUser = "batch-" + process.pid;
     for (let index = 0; index < 4; index += 1) {
@@ -374,14 +383,13 @@ try {
     });
     assert.equal(found.status, 200, JSON.stringify(found.body));
     // The rendered record text may carry a date and role prefix, so the marker token identifies
-    // it. How many of the four are still pending depends on the fold schedule, which is a rate
-    // rather than a counter, so the count is not pinned here - the shape is: pending records
-    // reach the provider inside one call, not one call per record.
+    // it. Every accepted entry carries its vectors (the accept embeds in budget), so the
+    // search reuses them instead of paying the provider for the documents again.
     assert.ok(
-      embedCalls.some((inputs) => inputs.some((text) => /tidepier\d/.test(text))),
-      `pending records must reach the provider; saw ${embedCalls
-        .map((inputs) => inputs.length)
-        .join("/")}`,
+      !embedCalls.some((inputs) => inputs.some((text) => /tidepier\d/.test(text))),
+      `pending records with stored vectors must be reused; provider saw ${embedCalls
+        .map((inputs) => inputs.join(";"))
+        .join("|")}`,
     );
     assert.ok(
       embedCalls.length <= 2,

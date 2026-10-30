@@ -50,7 +50,6 @@ import {
   newPart,
   runPart,
   stagePart,
-  stageSearchPart,
   commitManifest,
   removeStaged,
   retireParts,
@@ -937,24 +936,33 @@ async function fusePendingRecords({
   // One batch call, not one call per feature and per record. The vectors are the same,
   // and the sequential version spent up to forty round trips inside a single search -
   // which is how a slow provider became a 120 s invocation the platform had to kill.
+  // A pending record the accept already embedded (the common case: the entry carries
+  // `vectors` and the index they belong to) is not re-embedded at all - the write side
+  // embeds, the read side reuses. Only a record whose accept lost the embed budget
+  // contributes its text to the provider call.
   const texts = [];
   const position = new Map();
   const collect = (text) => {
     if (!position.has(text)) position.set(text, texts.push(text) - 1);
   };
   for (const list of features) for (const text of list) collect(text);
-  for (const record of waiting) collect(record.content);
-  const vectors = await client.embedQueries(texts).catch(() => []);
+  for (const record of waiting)
+    if (!(record.vector && record.vector_model === client.indexId)) collect(record.content);
+  const vectors = texts.length ? await client.embedQueries(texts).catch(() => []) : [];
   const byText = new Map();
   texts.forEach((text, index) => {
     if (vectors[index]) byText.set(text, vectors[index]);
   });
+  const vectorOf = (record) =>
+    record.vector && record.vector_model === client.indexId
+      ? record.vector
+      : byText.get(record.content);
   const vectorsPerClause = features.map((list) =>
     list.map((text) => byText.get(text)).filter(Boolean),
   );
   const scored = [];
   for (const record of waiting) {
-    const vector = byText.get(record.content);
+    const vector = vectorOf(record);
     if (!vector) continue;
     const perClause = vectorsPerClause.map((vectors) =>
       vectors.reduce(
@@ -998,6 +1006,11 @@ async function pendingForSearch(env, ctx, limit) {
       created_at: message.chat_time ?? new Date(entry.received_at).toISOString(),
       stored_at: new Date(entry.received_at).toISOString(),
       pending: true,
+      // The vectors the accept computed, if it got them in budget. Scored directly by
+      // the fusion - the read path reuses the write path's embedding instead of paying
+      // for the documents again.
+      vector: Array.isArray(entry.vectors) ? entry.vectors[index] : undefined,
+      vector_model: entry.vector_model,
     })),
   );
 }
@@ -1251,7 +1264,7 @@ function addClauseContributions(contributions, clauses) {
     total.exclusive += clause.exclusive;
   }
 }
-async function search(env, input, options = {}) {
+async function search(env, input) {
   const userId = textField(input.user_id ?? input.userId, "user_id");
   requestIdentity(userId, input.request_id);
   const topK = input.top_k ?? input.topK;
@@ -1270,10 +1283,23 @@ async function search(env, input, options = {}) {
   const contributions = clauses.map((_clause, index) => ({ index, contributed: 0, exclusive: 0 }));
   const client = embeddingClient(env),
     started = Date.now();
-  return mutateUser(env, userId, async ({ sqlite, key, manifest, staged, reuse }) => {
+  // The search is a read. It touches the manifest and each partition once, embeds only the
+  // query side, and answers from what it read: no staging, no snapshot, no compare-and-swap.
+  // Vector materialisation belongs to the write path (inline at accept, bounded in the fold);
+  // a record without stored vectors scores lexically until a fold backfills it. That is the
+  // compaction rule every engine in this class follows - RocksDB runs compaction in background
+  // threads, Hudi keeps log compaction inline=false because inline scheduling "adds extra
+  // latency on the write path", and Cassandra operators disabled read-repair chance because
+  // it cost ~20% of read load for no guarantee. A reader that can write is also a reader that
+  // can fail and that can lose a compare-and-swap; a read-only search has neither failure
+  // mode, and it no longer pays a multi-megabyte snapshot upload to answer a question.
+  const { manifest } = await measure("manifest_read", () =>
+    loadManifest(env.MEMORY, keyFor(userId), userId),
+  );
+  const sqlite = await measure("sqlite_init", () => sqliteReady());
+  {
     let candidates = [];
     const modes = new Set();
-    let changed = false;
     await warmClauseVectors(client, features, manifest.parts);
     const persistence = { inline_delta_saves: 0, full_snapshot_saves: 0, changed_pages: 0 };
     const searchDeadline =
@@ -1291,43 +1317,21 @@ async function search(env, input, options = {}) {
         manifest.parts[i],
         sqlite,
         async ({ key: partKey }) => {
-          const service = new AmlMemoryService(partKey, client);
+          // Declining the backfill is what makes this read safe and cheap: without it the
+          // service would embed vectorless records inside a search and change the SQLite
+          // snapshot, which is what used to force the read path to write.
+          const service = new AmlMemoryService(partKey, client, { allowBackfill: false });
           return {
             response: await measure("retrieval_including_embedding", () =>
               service.search(queries, topK, appendOnly, features),
             ),
+            legacyReceipts: [],
+            readOnly: true,
           };
         },
-        { readOnlyIfUnchanged: !options.fullSnapshot && env.NMG_SEARCH_DELTAS !== "0" },
       );
-      const otherBytes = manifest.parts.reduce(
-        (sum, p, j) => sum + (j === i ? 0 : deltaBytes(p)),
-        0,
-      );
-      const saved = result.readOnly
-        ? {
-            part: manifest.parts[i],
-            mode: "unchanged",
-            changed: false,
-            stagedKey: null,
-            changedPages: 0,
-          }
-        : await stageSearchPart(
-            env.MEMORY,
-            key,
-            manifest.parts[i],
-            result,
-            USER_DELTA_LIMIT - otherBytes,
-            options.fullSnapshot || env.NMG_SEARCH_DELTAS === "0",
-            // Without this a search retry re-uploaded a byte-identical snapshot: the signature
-            // accepted a reuse map, the call site never passed one.
-            reuse,
-          );
-      copyLegacyReceipts(manifest, result.legacyReceipts);
-      manifest.parts[i] = saved.part;
-      if (saved.stagedKey) staged.push(saved.stagedKey);
-      changed ||= saved.changed || result.legacyReceipts.length > 0;
-      tallyPartPersistence(persistence, saved);
+      // A receipt that still lives in a legacy partition is replayed by the fold, the write
+      // path; the read path no longer copies it anywhere.
       modes.add(result.response.retrievalMode);
       addClauseContributions(contributions, result.response.clauses);
       addAppended(appendedById, result.response.appended);
@@ -1338,7 +1342,7 @@ async function search(env, input, options = {}) {
     }
     const fused = await fusePendingRecords({
       env,
-      ctx: { key, manifest },
+      ctx: { key: keyFor(userId), manifest },
       features,
       candidates,
       client,
@@ -1356,8 +1360,6 @@ async function search(env, input, options = {}) {
       Math.min(topK, APPENDED_MAX_RECORDS),
     );
     return {
-      readOnly: !changed,
-      response: {
         data: candidates,
         retrieval_mode: modes.has("records") ? "records" : "lexical",
         partial,
@@ -1376,9 +1378,8 @@ async function search(env, input, options = {}) {
         ...(hasAppendOnly ? { appended } : {}),
         persistence,
         storage_format: manifestFormat(manifest),
-      },
     };
-  });
+  }
 }
 async function reset(env, input) {
   const userId = textField(input.user_id, "user_id");
@@ -1452,11 +1453,7 @@ async function diagnosticSearch(env, input) {
   const runs = [];
   for (let i = 0; i < count; i++) {
     const measured = await profileSearch(() =>
-      search(
-        env,
-        { ...input, top_k: input.top_k ?? 10 },
-        { fullSnapshot: input.persistence === "snapshot" },
-      ),
+      search(env, { ...input, top_k: input.top_k ?? 10 }),
     );
     runs.push({
       server_ms: measured.server_ms,
@@ -2098,11 +2095,17 @@ export default {
           if (!metadataRequest) queueFinished();
         }
       };
+      let responseStatus = null;
       const job = Promise.resolve()
         .then(invoke)
+        .then((response) => {
+          responseStatus = response.status;
+          return response;
+        })
         .catch((error) => {
           const full = String(error.message).includes("SQLITE_FULL");
           const status = error.status || (full ? 413 : 503);
+          responseStatus = status;
           if (status >= 500 || status === 413 || status === 409) reportFailure(error, status);
           const code = error.code || (full ? "user_storage_limit" : classifyError(error).code);
           return json(
@@ -2131,6 +2134,22 @@ export default {
         : job;
       return tracked.finally(() => {
         stopSlowWatch();
+        // One line per request, never sampled. The 2026-10-30 incident showed why: a search
+        // answered 503 in 90 ms with an empty platform log, and only this line can separate
+        // "our handler returned an error" from "the platform never invoked us" - sampled
+        // output and one slow-request line cannot, at 1-in-20. If this handler never runs,
+        // the request never appears here at all, which marks the edge as the suspect.
+        console.log(
+          JSON.stringify({
+            event: "nmg_request",
+            at: new Date().toISOString(),
+            trace_id: traceId,
+            route,
+            status: responseStatus,
+            elapsed_ms: Date.now() - startedAt,
+            seq: context.seq,
+          }),
+        );
         memLog("exit", route, {
           seq: context.seq,
           elapsed_ms: Date.now() - startedAt,

@@ -156,7 +156,15 @@ export function reportFailure(error, status, kind = "request_failure") {
     // default record still carries no exception text, stack or request content.
     ...(context.env.NMG_DEBUG_ERRORS === "1"
       ? {
-          debug: { name: error?.name ?? null, message: String(error?.message ?? "").slice(0, 300) },
+          debug: {
+            name: error?.name ?? null,
+            message: String(error?.message ?? "").slice(0, 300),
+            // Local diagnosis only; the shipped default record stays, as commented above.
+            stack: String(error?.stack ?? "")
+              .split(/\r?\n/)
+              .slice(0, 6)
+              .join(" | "),
+          },
         }
       : {}),
   };
