@@ -16,6 +16,11 @@ function noteImage() {
   highWater.databases = Math.max(highWater.databases, databases);
   highWater.imageBytes = Math.max(highWater.imageBytes, imageBytes);
 }
+/** Whether this invocation has loaded the SQLite module at all. Reported per request so that
+ *  "the deferred load works" is a measurement, not a claim. */
+export function sqliteIsReady() {
+  return active;
+}
 /** What the memory trace reports: the live images in this request, the instance high-water
  *  mark, and the WASM linear memory size (which only ever grows). */
 export function sqliteStats() {

@@ -27,7 +27,13 @@ import {
 } from "./diagnostics.mjs";
 import init from "../sqlite-wasm/worker-loader.mjs";
 import compiledSqlite from "../sqlite-wasm/sqlite3.wasm";
-import { configure, DatabaseSync, withDatabases, sqliteStats } from "./sqlite.mjs";
+import {
+  configure,
+  DatabaseSync,
+  withDatabases,
+  sqliteStats,
+  sqliteIsReady,
+} from "./sqlite.mjs";
 import { memRequestStarted, memLog, memFields } from "./mem-trace.mjs";
 import { AmlMemoryService, AML_SEARCH_PROFILE, CORE_SOURCE } from "./memory-service.ts";
 import { memoryEmbeddingText } from "../../src/core/store/search-ranking.ts";
@@ -163,10 +169,15 @@ function createContentView() {
 }
 async function sqliteReady() {
   if (ready) return ready;
+  // Two build shapes: workerd (wrangler) hands us a compiled module object, while the EdgeOne
+  // build inlines the bytes behind a factory so that a request which never touches SQLite does
+  // not pay for decoding and compiling them. This platform starts a fresh isolate per request,
+  // so that saving is per request, not per container.
+  const compiled = typeof compiledSqlite === "function" ? compiledSqlite() : compiledSqlite;
   const instance = await init({
     instantiateWasm(imports, receive) {
-      const instance = new WebAssembly.Instance(compiledSqlite, imports);
-      receive(instance, compiledSqlite);
+      const instance = new WebAssembly.Instance(compiled, imports);
+      receive(instance, compiled);
       return instance.exports;
     },
     print: () => {},
@@ -1607,13 +1618,15 @@ async function healthResponse(env, path) {
   if (path !== "/health") return undefined;
   if (!env.MEMORY)
     throw new HttpError(503, "storage_unavailable", "Persistent storage binding missing");
-  const sqlite = await sqliteReady();
+  // Deliberately no sqliteReady(): /health is the harness preflight, it is hit first, and it does
+  // not read a database. Loading SQLite here made the cheapest route pay a wasm decode and
+  // compile measured at 3.6-6.5 s per invocation on this platform.
   await env.MEMORY.head("health/probe");
   return json({
     status: "ok",
     service: "NodeMemoryGraph",
     storage: "R2",
-    sqlite: sqlite.version.libVersion,
+    sqlite: "deferred until a request needs it",
     retrieval: env.NMG_EMBED_PROVIDER || env.NMG_EMBED_BASE_URL ? "hybrid" : "lexical",
     max_user_database_bytes: MAX_DATABASE_BYTES,
     storage_format: "nmg-shards-v3",
@@ -2235,6 +2248,9 @@ export default {
             elapsed_ms: Date.now() - startedAt,
             seq: context.seq,
             execution: context.execution?.waitUntil ? "waituntil" : "inline",
+            // Cheap, and the only way to prove the deferred wasm load works: false means this
+            // request finished without decoding or compiling SQLite at all.
+            sqlite_loaded: sqliteIsReady(),
           }),
         );
         memLog("exit", route, {
