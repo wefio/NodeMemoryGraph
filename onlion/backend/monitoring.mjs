@@ -200,8 +200,24 @@ export function reportFailure(error, status, kind = "request_failure") {
  *  backfills them. Quality degrades for the duration of the outage; latency does not.
  *
  *  Only provider-side failures trip it. A 400 from a malformed input is our bug and must stay
- *  visible rather than be hidden behind a breaker that also silences the next good request. */
+ *  visible rather than be hidden behind a breaker that also silences the next good request.
+ *
+ *  Scope matters, and the first version got it wrong: this platform starts a **fresh isolate per
+ *  request** (every log line carries instance.seq = 1 while uptime_s counts the container), so a
+ *  module-level breaker never outlives the request that tripped it and could not protect anything.
+ *  What actually ran to the ceiling was one request doing eight fold entries x one 12 s provider
+ *  timeout each (2026-10-30 18:12-18:27: nine dependency_timeout events, four concurrent Adds all
+ *  killed at 120 s). So the effective breaker is **per invocation**: after
+ *  NMG_EMBED_FAIL_FAST_AFTER (default 1) provider-side failure, every later call in the same
+ *  request fails in microseconds. That truncates 8 x 12 s to 12 s, which is the whole point. The
+ *  cross-request window below still applies wherever an isolate is reused. */
 const breaker = { openUntil: 0, openedAt: null, trips: 0, reason: null };
+/** Provider-side failures seen by THIS invocation. A fresh isolate resets it, which is correct. */
+let invokeFailures = 0;
+const failFastAfter = (env) => {
+  const configured = Number(env?.NMG_EMBED_FAIL_FAST_AFTER);
+  return Number.isFinite(configured) && configured >= 0 ? configured : 1;
+};
 const tripsBreaker = (code) =>
   code === "dependency_timeout" ||
   code === "embedding_timeout" ||
@@ -221,6 +237,7 @@ export function embeddingBreakerStatus() {
     opened_at: breaker.openedAt,
     trips: breaker.trips,
     reason: breaker.reason,
+    invoke_failures: invokeFailures,
   };
 }
 /** Ends the current trip early. The operator path after a provider recovers. */
@@ -230,6 +247,13 @@ export function resetEmbeddingBreaker() {
   return embeddingBreakerStatus();
 }
 export async function embeddingOperation(operation, env) {
+  // Per invocation first: this is the one that bounds a single request, and on a fresh isolate
+  // per request it is the only one that can.
+  if (invokeFailures >= failFastAfter(env)) {
+    const error = new Error("embedding provider already failed in this invocation");
+    error.code = "embedding_suppressed";
+    throw error;
+  }
   if (Date.now() < breaker.openUntil) {
     const error = new Error("embedding provider is in a breaker window after a failure");
     error.code = "embedding_suppressed";
@@ -267,6 +291,7 @@ export async function embeddingOperation(operation, env) {
     reportFailure(error, null, "embedding_failure");
     const code = lastEmbedding.code;
     if (tripsBreaker(code)) {
+      invokeFailures += 1;
       breaker.openUntil = Date.now() + breakerWindowMs(env);
       breaker.openedAt = new Date().toISOString();
       breaker.trips += 1;
