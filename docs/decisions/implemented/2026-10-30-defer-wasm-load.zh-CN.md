@@ -45,3 +45,18 @@
 - `/health` 不再报告 `sqlite.version.libVersion`，改为报告"延迟加载"。解析该字段的客户端应改从 `/admin/status` 读版本——评测端只用状态码。
 - `sqlite_loaded` 是请求行上一个布尔值，无额外分配、无内存采样。
 - wrangler 构建行为不变：workerd 依旧编译模块，`worker.mjs` 直接使用该对象。
+
+## 同日修正与后续
+
+两处缺陷、两处进一步变换，全部是在**线上**发现的，套件没抓到：
+
+1. **`callbacks.wasm` 必须保持急切**。插件第一版匹配了所有 `*.wasm`，19 KB 的 callbacks 也变成了工厂函数；生成的 loader 把它当真正的 `WebAssembly.Module` 静态导入，于是 `new WebAssembly.Instance(fn, ...)` 在 `runSQLite3PostLoadInit` 里抛错，所有需要 SQLite 的 `/search` 以 **503、75–150 ms** 失败，而 `/add` 一直成功。现在只有 `sqlite3.wasm` 懒加载。
+2. **只改 `/health` 不够**。search 在读任何东西之前就加载 SQLite，而写入还在日志里的用户根本没有分区——评测的头几题正是如此。`readSearchCandidates` 改为接收记忆化的 `getSqlite`，在分区循环内才解析。已验证：未知用户的 search 19 ms 返回 200，`sqlite_loaded: false`。
+3. **OPFS 安装器不再被尝试**。每次加载都尝试两次、抛两次（本运行时没有 `location`），每次冷启动打两条栈。loader 用 `config.disable.vfs` 做闸门，其来源是 `globalThis.sqlite3ApiConfig`（worker-loader 3064，闸门在 15699 与 16964）——**不是** `init()` 的参数，所以传在那里毫无作用。已验证：每次加载两条栈变为零（整轮 verify 从 22 行到 0）。
+
+全部部署后实测（revision `8d08df7c`）：十次冷启动 `/health` 2.2–5.3 秒，未知用户 search 2.2–4.3 秒返回 200；平台日志里热容器的 `/health` 是 **25 ms / 88 MB**。剩下的秒数是容器启动与网络，不是 wasm——那些请求的 `sqlite_loaded` 为 `false`。
+
+### 未改动
+
+- `mutateUser` 仍在开头 await `sqliteReady()`，尽管 `releasePending` 与 `reconcilePending` 根本不碰数据库。要推迟得把 thunk 贯穿 `storage.mjs` 的 `runPart`/`openPart`；受益路径是折叠的收尾事务，很少发生。作为记录在案的候选，而不是匆忙改动。
+- `npm run test:edgeone` 里 `/capacity` 那条检查期待只有日志条目的用户 `sqlite_bytes.used > 0`（它早于 log 模式默认值：新用户没有 manifest）。那是过时的测试期待，不是运行时缺陷。

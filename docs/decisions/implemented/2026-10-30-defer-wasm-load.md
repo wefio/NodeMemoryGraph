@@ -70,3 +70,38 @@ The harness preflight is `/health`. It was the most expensive route in the servi
 - `sqlite_loaded` is one boolean on the request line; no extra allocation, no memory sampling.
 - The wrangler build is untouched in behaviour: workerd still compiles the module and
   `worker.mjs` uses the object directly.
+
+## Correction and follow-up (same day)
+
+Two defects and two further transforms, all found on the deployed endpoint rather than by the suite:
+
+1. **`callbacks.wasm` had to stay eager.** The first version of the plugin matched every `*.wasm`,
+   so the 19 KB callbacks module also became a factory. The generated loader imports it as a real
+   `WebAssembly.Module`, so `new WebAssembly.Instance(fn, ...)` threw inside
+   `runSQLite3PostLoadInit` and every `/search` that needed SQLite answered **503 in 75-150 ms**
+   while `/add` kept succeeding. Only `sqlite3.wasm` is deferred now.
+2. **`/health` alone was not enough.** A search loaded SQLite before reading anything, and a user
+   whose writes are still in the log has no partitions at all - the harness's first questions are
+   exactly that. `readSearchCandidates` now takes a memoised `getSqlite` and resolves it inside the
+   partition loop. Verified: a search for an unknown user returns 200 in 19 ms with
+   `sqlite_loaded: false`.
+3. **The OPFS installers are now skipped, not attempted.** Every SQLite load tried twice and threw
+   twice (no `location` in this runtime), printing two stack traces per cold start. The loader gates
+   them on `config.disable.vfs`, whose source is `globalThis.sqlite3ApiConfig` (worker-loader 3064,
+   gates at 15699 and 16964) - **not** `init()`'s argument, which is why passing it there changed
+   nothing. Verified: two stacks per load became zero (22 log lines to 0 in a full verify run).
+
+Measured after deploying all of it (revision `8d08df7c`): `/health` 2.2-5.3 s across ten cold
+starts, an unknown-user search 200 in 2.2-4.3 s, and the platform's own log shows `/health` at
+**25 ms / 88 MB** on a warm container. The residual seconds are container start and network, not wasm:
+`sqlite_loaded` is `false` on those requests.
+
+### What did not change
+
+- `mutateUser` still awaits `sqliteReady()` up front, although `releasePending` and
+  `reconcilePending` never touch a database. Deferring it means threading a thunk through
+  `runPart`/`openPart` in `storage.mjs`; the paths that benefit are fold housekeeping, which runs
+  rarely. Left as a documented candidate rather than a rushed change.
+- The `/capacity` check in `npm run test:edgeone` expects `sqlite_bytes.used > 0` for a user that
+  has only log entries (it predates the log-mode default, where a fresh user has no manifest). That
+  is a stale test expectation, not a runtime defect.
