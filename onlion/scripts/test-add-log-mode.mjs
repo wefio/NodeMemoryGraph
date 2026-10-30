@@ -126,10 +126,29 @@ try {
     // The two budgets are what keep a request from being killed at the platform ceiling. A
     // killed request loses the whole evaluation attempt, so their removal has to fail a test:
     // the entry is durable before the fold, and a partial page is worth more than no answer.
+    // The trigger itself stays a schedule; what changed on 2026-10-30 is where it runs - after
+    // the response through `waitUntil`, not before it (a fold ridden inside the accept pushed
+    // ten Adds to 11-25 s and five into the 120 s ceiling, every one of them in foldPending).
+    // The gated inline branch remains only as the test/dev fallback, so both shapes are pinned.
     assert.match(
       source,
-      /const dueBySchedule =[\s\S]{0,240}?if \(dueBySchedule && Date\.now\(\) - startedAt < foldBudget\)/,
-      "the fold must be scheduled and budgeted; unbounded, a contended user folds past 120 s",
+      /const dueBySchedule =[\s\S]{0,900}foldPending\(env, accepted\.response\.user_id\)/,
+      "the fold trigger must stay a schedule over request_id, not a counter",
+    );
+    assert.match(
+      source,
+      /if \(foldTask && execution\?\.waitUntil && env\.NMG_FOLD_INLINE !== "1"\)[\s\S]{0,200}execution\.waitUntil\(foldTask\);/,
+      "when waitUntil exists the fold must run after the response, not inside it",
+    );
+    assert.doesNotMatch(
+      source,
+      /await foldPending\(env, accepted\.response\.user_id\)/,
+      "the accept must never await a fold inline on the serving path",
+    );
+    assert.match(
+      source,
+      /else if \(foldTask && Date\.now\(\) - startedAt < foldBudget\) await foldTask;/,
+      "the inline fallback must still be budgeted; unbounded, a contended user folds past 120 s",
     );
     // The root fix: an accept takes no compare-and-swap at all. Sixteen concurrent Adds on one
     // user used to serialise on the manifest and lose twelve times each, redoing a megabyte of

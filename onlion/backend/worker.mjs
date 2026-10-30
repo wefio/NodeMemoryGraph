@@ -1,6 +1,7 @@
 /* global __NMG_SOURCE_REVISION__ */
 import {
   withRequest,
+  currentContext,
   requestIdentity,
   queueAccepted,
   queueStarted,
@@ -2021,8 +2022,21 @@ async function addRoute(request, env, path) {
   const foldEvery = Number(env.NMG_FOLD_EVERY) > 0 ? Number(env.NMG_FOLD_EVERY) : FOLD_TRIGGER;
   const dueBySchedule =
     Number.parseInt(hash(accepted.response.request_id).slice(0, 6), 16) % foldEvery === 0;
-  if (dueBySchedule && Date.now() - startedAt < foldBudget)
-    await foldPending(env, accepted.response.user_id).catch(() => {});
+  // The measured failure (2026-10-30 14:09-14:15 burst): folds riding inside the accept
+  // pushed Adds to 11-25 s routinely and 40-100 s at the tail, and five requests died at
+  // 120 s - every one of them in foldPending. With an execution that can extend the
+  // invocation, the response goes first and the fold runs afterwards: the entry is already
+  // durable, the fold is idempotent (a crash before its entries are deleted repeats safely)
+  // and the next scheduled accept retries it, so a fold killed in flight costs nothing but
+  // one provider call, not a scored attempt. Inline folding stays the fallback for callers
+  // without waitUntil (tests, wrangler dev) and as the explicit escape hatch.
+  const foldTask = dueBySchedule
+    ? foldPending(env, accepted.response.user_id).catch(() => {})
+    : null;
+  const execution = currentContext()?.execution;
+  if (foldTask && execution?.waitUntil && env.NMG_FOLD_INLINE !== "1")
+    execution.waitUntil(foldTask);
+  else if (foldTask && Date.now() - startedAt < foldBudget) await foldTask;
   return json(accepted.response);
 }
 async function handle(request, env) {
