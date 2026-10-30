@@ -59,7 +59,7 @@ import {
   pendingCount,
   setPending,
 } from "./storage.mjs";
-import { deltaBytes, USER_DELTA_LIMIT } from "./page-delta.mjs";
+import { deltaBytes } from "./page-delta.mjs";
 import { deferredDocuments } from "./embedding-session.mjs";
 import {
   LOG_ENTRY_VERSION,
@@ -1240,12 +1240,6 @@ function seedFromEntry(env, entry) {
   });
   return seed.size ? embeddingClient(env, seed) : null;
 }
-/** Fold one partition's persistence mode into the request totals. */
-function tallyPartPersistence(persistence, saved) {
-  if (saved.mode === "inline_page_delta") persistence.inline_delta_saves++;
-  if (saved.mode === "full_snapshot") persistence.full_snapshot_saves++;
-  persistence.changed_pages += saved.changedPages;
-}
 /** The supplement returned to the caller: deduplicated against the page and
  * bounded by the same top_k, so a response never doubles unexpectedly. */
 function collectAppended(appended, page, topK) {
@@ -2139,9 +2133,9 @@ export default {
         // "our handler returned an error" from "the platform never invoked us" - sampled
         // output and one slow-request line cannot, at 1-in-20. If this handler never runs,
         // the request never appears here at all, which marks the edge as the suspect.
+        // eslint-disable-next-line no-console -- diagnostic output, like monitoring.mjs
         console.log(
           JSON.stringify({
-            event: "nmg_request",
             at: new Date().toISOString(),
             trace_id: traceId,
             route,
