@@ -41,16 +41,31 @@ const sourceRevision = revision + (dirty ? "+dirty" : "");
 fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(path.join(outDir, "cloud-functions"), { recursive: true });
 
-/** Replaces `import wasm from './x.wasm'` with a lazily built WebAssembly.Module. */
+/** Replaces `import wasm from './x.wasm'` with a lazily built WebAssembly.Module.
+ *
+ *  It has to be lazy, and the first version was not: it emitted
+ *  `export default new WebAssembly.Module(Buffer.from(<base64>, "base64"))` at module scope, so
+ *  every cold start paid a 1.6 MiB base64 decode plus a wasm compile *before* the handler ran.
+ *  This platform starts a fresh isolate per request, so that cost was charged to every request -
+ *  measured as 3.6-6.5 s for `/health`, which never needs SQLite at all. The bytes and the
+ *  compile now happen on first use, behind a factory; `worker.mjs` accepts either shape so the
+ *  wrangler build (where workerd compiles the module) keeps working unchanged. */
 const inlineWasm = {
   name: "inline-wasm",
   setup(pluginBuild) {
     pluginBuild.onLoad({ filter: /\.wasm$/ }, async (args) => {
       const bytes = fs.readFileSync(args.path).toString("base64");
-      const module = `Buffer.from(${JSON.stringify(bytes)}, "base64")`;
+      const encoded = JSON.stringify(bytes);
       return {
         loader: "js",
-        contents: `export default new WebAssembly.Module(${module});`,
+        contents: [
+          `let compiled;`,
+          `export const encodedBytes = ${encoded};`,
+          `export default function compiledWasm() {`,
+          `  compiled ??= new WebAssembly.Module(Buffer.from(encodedBytes, "base64"));`,
+          `  return compiled;`,
+          `}`,
+        ].join("\n"),
         watchFiles: [args.path],
       };
     });
