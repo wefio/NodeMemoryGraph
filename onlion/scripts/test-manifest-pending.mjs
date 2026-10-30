@@ -30,7 +30,6 @@ import {
   removeStaged,
   resetUser,
   setPending,
-  stageSearchPart,
   withPending,
 } from "../backend/storage.mjs";
 
@@ -394,41 +393,3 @@ console.log(
     "empty log keeps today's bytes, pending log is v4, reset drains the log.",
 );
 
-{
-  // A search retry re-stages the partition it just uploaded. Passing `reuse` makes
-  // that free for identical content, and - the part that is easy to lose - it is how
-  // the abandoned attempt's snapshot stays reachable for cleanup after a later
-  // attempt commits. Without the argument the request still succeeds while uploading
-  // a whole snapshot per retry that no cleanup can name, so the assertion is on both
-  // effects of the same call.
-  const bucket = createMemoryBucket();
-  const userKey = keyFor("search-reuse");
-  const part = newPart("search-reuse");
-  const snapshot = Buffer.from("nmg-part-v2 snapshot bytes");
-  const resultOf = { snapshot, previousImage: null };
-  const reuse = new Map();
-
-  const first = await stageSearchPart(bucket, userKey, part, resultOf, 0, true, reuse);
-  assert.equal(first.mode, "full_snapshot");
-  assert.equal(bucket.stats.puts, 1, "the first staging uploads once");
-  assert.ok(
-    [...reuse.values()].includes(first.stagedKey),
-    "a staged search snapshot must be registered so an abandoned attempt can be collected",
-  );
-
-  const second = await stageSearchPart(bucket, userKey, part, resultOf, 0, true, reuse);
-  assert.equal(second.stagedKey, first.stagedKey, "identical content reuses the upload");
-  assert.equal(bucket.stats.puts, 1, "a retry with the same content must not upload again");
-
-  // The behaviour a caller gets by forgetting the argument: correct on the wire,
-  // duplicated on the bucket. Spelled out so the difference is visible in a diff.
-  const forgetful = createMemoryBucket();
-  const forgotten = newPart("search-reuse");
-  await stageSearchPart(forgetful, userKey, forgotten, resultOf, 0, true);
-  await stageSearchPart(forgetful, userKey, forgotten, resultOf, 0, true);
-  assert.equal(forgetful.stats.puts, 2, "without reuse every attempt uploads another snapshot");
-
-  console.log(
-    "PASS: a search staging call forwards reuse — identical content uploads once and the key stays registered for cleanup.",
-  );
-}

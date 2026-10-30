@@ -650,90 +650,74 @@ print(json.dumps(r))`,
     assert.equal(r.status, 0, r.stderr.toString());
     return JSON.parse(r.stdout);
   };
-  // Simulate an outstanding old page overlay with a SQLite application tag.
+  // The search is a read: it must answer over an untouched overlay and change nothing in
+  // the bucket - not the manifest, not the partition, not even the counters during it.
   const oldOverlay = Buffer.from(restoredImage);
   oldOverlay.writeUInt32BE(42, 68);
   const beforeState = state(oldOverlay);
   assert.equal(beforeState.application_id, 42);
-  const outcomes = {};
-  for (const mode of ["delta", "snapshot"]) {
-    const uid = "diagnostics-parity-" + mode;
-    const key = "users/" + userKey(uid) + "/parts/parity.sqlite";
-    await bucket.put(key, restoredImage);
-    const clone = structuredClone(fixture);
-    clone.parts = [
-      makePageDelta(
-        { scope: baselinePart.scope, key, bytes: restoredImage.length },
-        restoredImage,
-        new Uint8Array(oldOverlay),
-        1024 * 1024,
-      ).part,
-    ];
-    clone.receipts = {};
-    clone.format = "nmg-shards-v3";
-    await bucket.put(manifestPath(uid), JSON.stringify(clone));
-    const r = await call(
-      "a",
-      "/admin/diagnostics/search",
-      { user_id: uid, query: "robot Atlas", repetitions: 1, persistence: mode },
-      "test-key",
-      owner,
-    );
-    assert.equal(r.status, 200, JSON.stringify(r));
-    const saved = await (await bucket.get(manifestPath(uid))).json(),
-      part = saved.parts[0];
-    const image = applyPageDelta(
-      new Uint8Array(await (await bucket.get(part.key)).arrayBuffer()),
-      part,
-    );
-    outcomes[mode] = {
-      digest: r.body.runs[0].result_digest,
-      state: state(image),
-      run: r.body.runs[0],
-      key: part.key,
-    };
-    if (mode === "delta") {
-      assert.equal(part.key, key);
-      assert.equal(saved.format, "nmg-shards-v3");
-    } else {
-      assert.notEqual(part.key, key);
-      assert.equal(saved.format, "nmg-shards-v2");
-      assert.ok(!part.delta);
-    }
-  }
-  assert.equal(
-    outcomes.delta.digest,
-    outcomes.snapshot.digest,
-    "Ordered result IDs and scores must match",
+  const rupuid = "diagnostics-readonly";
+  const key = "users/" + userKey(rupuid) + "/parts/parity.sqlite";
+  await bucket.put(key, restoredImage);
+  const fixtureClone = structuredClone(fixture);
+  fixtureClone.parts = [{
+    ...makePageDelta(
+      { scope: baselinePart.scope, key, bytes: restoredImage.length },
+      restoredImage,
+      new Uint8Array(oldOverlay),
+      1024 * 1024,
+    ).part,
+    delta: makePageDelta(
+      { scope: baselinePart.scope, key, bytes: restoredImage.length },
+      restoredImage,
+      new Uint8Array(oldOverlay),
+      1024 * 1024,
+    ).part.delta,
+  }];
+  fixtureClone.receipts = {};
+  fixtureClone.format = "nmg-shards-v3";
+  await bucket.put(manifestPath(rupuid), JSON.stringify(fixtureClone));
+  const manifestBefore = await (await bucket.get(manifestPath(rupuid))).text();
+  const read = await call(
+    "a",
+    "/admin/diagnostics/search",
+    { user_id: rupuid, query: "robot Atlas", repetitions: 2 },
+    "test-key",
+    owner,
   );
-  assert.deepEqual(
-    outcomes.delta.state,
-    outcomes.snapshot.state,
-    "Counters and trace count must survive both modes",
+  assert.equal(read.status, 200, JSON.stringify(read));
+  assert.equal(read.body.runs.length, 2);
+  assert.equal(
+    read.body.runs[0].result_digest,
+    read.body.runs[1].result_digest,
+    "Repeat reads answer the same thing: the page cannot drift because nothing was written",
   );
   assert.equal(
-    outcomes.delta.state.traces,
-    beforeState.traces,
-    "AML queries must not persist harness traces",
+    await (await bucket.get(manifestPath(rupuid))).text(),
+    manifestBefore,
+    "A search must not touch the manifest",
+  );
+  const readPart = JSON.parse(manifestBefore).parts[0];
+  assert.equal(readPart.key, key, "A search must keep referencing the original object");
+  const afterImage = applyPageDelta(
+    new Uint8Array(await (await bucket.get(key)).arrayBuffer()),
+    readPart,
   );
   assert.deepEqual(
-    outcomes.delta.state,
+    state(afterImage),
     beforeState,
-    "Search must preserve old counters and trace state without asserting unobserved use",
+    "A search must preserve counters, trace state and unobserved-use flags",
   );
-  assert.equal(outcomes.delta.run.persistence.full_snapshot_saves, 0);
-  assert.equal(outcomes.snapshot.run.persistence.full_snapshot_saves, 1);
   console.log(
     JSON.stringify({
       fixture_records: beforeState.records.length,
-      delta_inline_bytes: outcomes.delta.run.persistence.inline_bytes,
-      snapshot_bytes: restoredImage.length,
-      result_parity: true,
-      state_parity: true,
+      result_digest: read.body.runs[0].result_digest,
+      manifest_unchanged: true,
+      state_unchanged: true,
     }),
   );
   // Add folds outstanding overlays into a fresh snapshot, preserving trace state.
-  const uid = "diagnostics-parity-delta";
+  const uid = "diagnostics-readonly";
   const parallelSearches = await Promise.all(
     ["a", "b"].map((name) => call(name, "/search", { user_id: uid, query: "robot Atlas" })),
   );
@@ -747,12 +731,12 @@ print(json.dumps(r))`,
   const racedState = state(racedImage);
   assert.equal(
     racedState.traces,
-    outcomes.delta.state.traces,
+    beforeState.traces,
     "Concurrent AML searches must not create harness traces",
   );
   assert.deepEqual(
     racedState,
-    outcomes.delta.state,
+    beforeState,
     "Concurrent read-only searches must preserve existing state",
   );
   const inserted = await call("b", "/add", {
@@ -776,7 +760,7 @@ print(json.dumps(r))`,
   );
   assert.equal((await call("b", "/search", { user_id: uid, query: "robot Atlas" })).status, 200);
   console.log(
-    "PASS: snapshot/delta ordered result and state parity, read-only searches, existing delta preservation, Add compaction, cold restart.",
+    "PASS: read-only search leaves manifest, partition and counters untouched; concurrent searches preserve state; Add compaction, cold restart.",
   );
   assert.equal(
     (

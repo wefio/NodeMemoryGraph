@@ -1,0 +1,7 @@
+version: 2
+terms:
+  - term: search-is-a-read
+    definition: /search 在本次改动后为纯读路径——不 stage、不导出快照、不提交 manifest、不参与比较交换；向量物化属于写路径（accept 内联 + fold 回填）。
+    since: "2026-10-30"
+references:
+  - docs/decisions/implemented/2026-10-30-search-is-a-read.md

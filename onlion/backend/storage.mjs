@@ -126,21 +126,6 @@ export async function stagePart(bucket,userKey,part,snapshot,reuse){
   delete base.delta;
   return {...base,key,bytes:snapshot.byteLength};
 }
-/** Turns one part's search result into the snapshot the manifest will reference.
- *
- *  `reuse` has to be forwarded, and it does double duty: it is what lets a retry
- *  skip an upload it already made for byte-identical content, and it is also the
- *  only record of *every* key this request uploaded - a snapshot staged by an
- *  abandoned attempt stays in the map so the caller can collect it after a later
- *  attempt commits. Dropping the argument silently loses both, and the loss is
- *  invisible: the request still works, it just re-uploads whole snapshots that no
- *  cleanup can name afterwards. */
-export async function stageSearchPart(bucket,userKey,part,result,userBudget,fullSnapshot=false,reuse=null){
-  const patch=fullSnapshot?null:measureSync('delta_encode',()=>makePageDelta(part,result.previousImage,result.snapshot,userBudget));
-  if(patch)return {...patch,mode:patch.changed?'inline_page_delta':'unchanged',stagedKey:null};
-  const saved=await stagePart(bucket,userKey,part,result.snapshot,reuse);
-  return {part:saved,mode:'full_snapshot',stagedKey:saved.key,changed:true,changedPages:0,inlineBytes:0};
-}
 export async function commitManifest(bucket,key,previous,manifest){
   // Older deployments must reject overlay manifests rather than silently load
   // the stale base snapshot. Fully compacted manifests remain v2-compatible.
