@@ -25,7 +25,6 @@ import {
   keyFor,
   loadManifest,
   manifestFormat,
-  newPart,
   pendingCount,
   removeStaged,
   resetUser,

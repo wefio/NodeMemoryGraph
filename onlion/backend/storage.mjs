@@ -1,5 +1,5 @@
 import {measure, measureSync} from './diagnostics.mjs';
-import {applyPageDelta, makePageDelta, deltaBytes} from './page-delta.mjs';
+import {applyPageDelta, deltaBytes} from './page-delta.mjs';
 import {createHash} from 'node:crypto';
 import {DatabaseSync, withDatabases} from './sqlite.mjs';
 import {EmbeddingPreparation} from './embedding-session.mjs';
