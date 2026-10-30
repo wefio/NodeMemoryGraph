@@ -138,23 +138,32 @@ try {
     // The gated inline branch remains only as the test/dev fallback, so both shapes are pinned.
     assert.match(
       source,
-      /const dueBySchedule =[\s\S]{0,900}foldPending\(env, accepted\.response\.user_id\)/,
+      /const dueBySchedule =[\s\S]{0,2000}foldPending\(env, accepted\.response\.user_id, \{ deadline/,
       "the fold trigger must stay a schedule over request_id, not a counter",
+    );
+    // This platform gives a Node cloud function no waitUntil (the Makers context lists
+    // uuid/params/env/clientIp/server), so the fold runs inline - and therefore the budget has
+    // to be a deadline the fold checks, not a gate on whether it starts. Both are pinned:
+    // the deadline is handed down, and the fold honours it before each entry it applies.
+    assert.match(
+      source,
+      /const foldDeadline = startedAt \+ foldBudget;/,
+      "the accept must compute a real fold deadline, not just a start gate",
+    );
+    assert.match(
+      source,
+      /async function foldPending\(env, userId, \{ deadline = null \} = \{\}\) \{[\s\S]{0,1600}outOfTime\(\)\) return \{ folded: 0, remaining: null, deferred: "budget" \};/,
+      "the fold must refuse to start past its deadline",
+    );
+    assert.match(
+      source,
+      /if \(outOfTime\(\)\) \{\s*drop = names\.size \? \[\.\.\.names\] : \[\];/,
+      "the fold must stop between entries, leaving the remainder in the log",
     );
     assert.match(
       source,
       /if \(foldTask && execution\?\.waitUntil && env\.NMG_FOLD_INLINE !== "1"\)[\s\S]{0,200}execution\.waitUntil\(foldTask\);/,
-      "when waitUntil exists the fold must run after the response, not inside it",
-    );
-    assert.doesNotMatch(
-      source,
-      /await foldPending\(env, accepted\.response\.user_id\)/,
-      "the accept must never await a fold inline on the serving path",
-    );
-    assert.match(
-      source,
-      /else if \(foldTask && Date\.now\(\) - startedAt < foldBudget\) await foldTask;/,
-      "the inline fallback must still be budgeted; unbounded, a contended user folds past 120 s",
+      "a runtime that does provide waitUntil must still be used",
     );
     // The root fix: an accept takes no compare-and-swap at all. Sixteen concurrent Adds on one
     // user used to serialise on the manifest and lose twelve times each, redoing a megabyte of
