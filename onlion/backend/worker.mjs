@@ -743,7 +743,21 @@ async function inlineEntryVectors(env, messages) {
  *  Entries whose receipt already exists are skipped, which is what makes a fold
  *  that committed and then crashed before deleting its entries safe to repeat (I3).
  *  Their objects are removed only after the commit, never before. */
-async function foldPending(env, userId) {
+/** Folds one batch of waiting entries into the partition.
+ *
+ *  `deadline` is what makes the budget real. The caller's budget alone only decided whether the
+ *  fold *starts*; a fold that began at the last millisecond then ran the whole partition rewrite
+ *  and its backfill, which is how 2026-10-30 produced Adds at 40-100 s and five 120 s kills while
+ *  claiming a 20 s budget. Every expensive step now checks the clock first and stops, leaving the
+ *  rest of the log for the next scheduled attempt - the entry is already durable, so stopping is
+ *  always safe, and only the ordering of work changes.
+ *
+ *  This platform supplies no `waitUntil` to a Node cloud function (the EventContext documented
+ *  for Makers lists uuid/params/env/clientIp/server only), so folding after the response is not
+ *  available here; a bounded fold is what keeps the accept inside the invocation ceiling. */
+async function foldPending(env, userId, { deadline = null } = {}) {
+  const outOfTime = () => deadline !== null && Date.now() > deadline;
+  if (outOfTime()) return { folded: 0, remaining: null, deferred: "budget" };
   const client = embeddingClient(env);
   const key = keyFor(userId);
   const waiting = await listPending(env.MEMORY, key, { limit: FOLD_BATCH });
@@ -760,6 +774,7 @@ async function foldPending(env, userId) {
     // call: safe, but it looked like the drain had failed to make progress.
     return { folded: 0, remaining: released ?? pendingCount(manifest), released: true };
   }
+  if (outOfTime()) return { folded: 0, remaining: null, deferred: "budget" };
   const plan = foldPlan(waiting, { maxEntries: FOLD_BATCH, maxBytes: MAX_BODY_BYTES });
   let drop = [];
   let remaining = 0;
@@ -782,6 +797,12 @@ async function foldPending(env, userId) {
       }));
       // The entry may carry the vectors its accept computed. Handing them to this entry's client
       // means the fold applies storage and nothing else.
+      // Between entries, not inside one: half an entry cannot be applied. Stopping here leaves
+      // the rest of this batch in the log, where the next attempt folds it with its own budget.
+      if (outOfTime()) {
+        drop = names.size ? [...names] : [];
+        return { readOnly: drop.length === 0, response: { folded } };
+      }
       const seeded = seedFromEntry(env, entry);
       await addOneBatch(
         env,
@@ -2038,8 +2059,9 @@ async function foldRoute(request, env, url, path) {
   let folded = 0;
   let remaining = 0;
   let released = 0;
+  const drainDeadline = Date.now() + 100_000;
   for (let round = 0; round < 8; round += 1) {
-    const step = await foldPending(env, userId);
+    const step = await foldPending(env, userId, { deadline: drainDeadline });
     folded += step.folded;
     remaining = step.remaining;
     if (step.released) released += 1;
@@ -2076,19 +2098,21 @@ async function addRoute(request, env, path) {
     Number.parseInt(hash(accepted.response.request_id).slice(0, 6), 16) % foldEvery === 0;
   // The measured failure (2026-10-30 14:09-14:15 burst): folds riding inside the accept
   // pushed Adds to 11-25 s routinely and 40-100 s at the tail, and five requests died at
-  // 120 s - every one of them in foldPending. With an execution that can extend the
-  // invocation, the response goes first and the fold runs afterwards: the entry is already
-  // durable, the fold is idempotent (a crash before its entries are deleted repeats safely)
-  // and the next scheduled accept retries it, so a fold killed in flight costs nothing but
-  // one provider call, not a scored attempt. Inline folding stays the fallback for callers
-  // without waitUntil (tests, wrangler dev) and as the explicit escape hatch.
+  // 120 s - every one of them in foldPending. The budget above only decided whether a fold
+  // *started*, so a fold beginning at the last millisecond still ran a whole partition
+  // rewrite. It is now a real deadline handed to the fold, which checks it before each entry
+  // and leaves the remainder in the log - the entry is durable, so stopping costs nothing.
+  // The waitUntil branch is kept for callers that do provide one (tests, a future runtime):
+  // Makers' Node cloud function context lists uuid/params/env/clientIp/server and no such
+  // hook, and the always-on request line reports which path ran, as the execution field.
+  const foldDeadline = startedAt + foldBudget;
   const foldTask = dueBySchedule
-    ? foldPending(env, accepted.response.user_id).catch(() => {})
+    ? foldPending(env, accepted.response.user_id, { deadline: foldDeadline }).catch(() => {})
     : null;
   const execution = currentContext()?.execution;
   if (foldTask && execution?.waitUntil && env.NMG_FOLD_INLINE !== "1")
     execution.waitUntil(foldTask);
-  else if (foldTask && Date.now() - startedAt < foldBudget) await foldTask;
+  else await foldTask;
   return json(accepted.response);
 }
 async function handle(request, env) {
@@ -2205,6 +2229,7 @@ export default {
             at: new Date().toISOString(),
             trace_id: traceId,
             route,
+            method: request.method,
             status: responseStatus,
             elapsed_ms: Date.now() - startedAt,
             seq: context.seq,
