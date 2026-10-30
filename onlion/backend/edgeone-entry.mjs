@@ -4,8 +4,9 @@
  * Makers hands us a standard Request and returns whatever Response we produce,
  * so this is only an environment shim: R2's `MEMORY` binding becomes a COS
  * bucket and everything else is passed straight through to worker.mjs.
- * No third argument (execution) is supplied, which makes monitoring.mjs take
- * its synchronous fallback instead of ctx.waitUntil.
+ * The EventContext's waitUntil is adapted into the execution slot, so
+ * monitoring.mjs persists failures and the accept's fold runs after the
+ * response instead of inside it.
  */
 import worker from "./worker.mjs";
 import { createCosBucketFromEnv } from "./cos-bucket.mjs";
@@ -62,7 +63,15 @@ export function onRequest(context) {
   // Platform docs read configuration from context.env. process.env stays as a
   // fallback because `edgeone makers dev` injects the project .env there.
   const env = { ...process.env, ...(context.env ?? {}) };
-  return dispatch(normalizeRequest(context.request), env, context.server?.region);
+  // EventContext supplies waitUntil (request / params / env / waitUntil - Makers Functions
+  // handbook): it extends this invocation's life past the response, which is what lets the
+  // accept return first and fold afterwards. A no-op stands in where the context does not
+  // carry it, so the call sites never branch on the platform's mood.
+  const execution =
+    typeof context?.waitUntil === "function"
+      ? { waitUntil: (task) => context.waitUntil(task) }
+      : undefined;
+  return dispatch(normalizeRequest(context.request), env, context.server?.region, execution);
 }
 
 /**
@@ -77,15 +86,19 @@ function withDiagnostics(response, region) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
-async function dispatch(request, env, region) {
+async function dispatch(request, env, region, execution) {
   const debug = env.NMG_DEBUG_ERRORS === "1";
   const storage = memoryBucket(env);
   try {
-    const response = await worker.fetch(request, {
-      ...env,
-      MEMORY: debug ? recording(storage) : storage,
-      NMG_SERVER_REGION: region,
-    });
+    const response = await worker.fetch(
+      request,
+      {
+        ...env,
+        MEMORY: debug ? recording(storage) : storage,
+        NMG_SERVER_REGION: region,
+      },
+      execution,
+    );
     if (debug && response.status === 503) {
       const body = await response.clone().json().catch(() => null);
       return new Response(

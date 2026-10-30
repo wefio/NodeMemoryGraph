@@ -78,9 +78,11 @@ thing the accept wrote there was the pending count.
   asynchronous with a poll to collect results and this runtime has no timer; the poll would have to
   be carried by later requests. Rejected for the serving path, retained as the right tool for an
   offline re-embed.
-- **Fire the embedding after the response (waitUntil).** Our entry never receives an execution
-  context - `edgeone-entry.mjs` documents that deliberately - so there is no continuation to
-  register.
+- **Fire the embedding after the response (waitUntil).** The platform claim made here was wrong —
+  both documented models carry `waitUntil`; see the correction in
+  `2026-10-30-fold-runs-after-the-response`. What the rejection got right: folding the vectors into
+  the entry keeps the read path free of document embedding, and a deferred embed would have
+  dropped the read path back into paying for documents.
 
 ## Consequences
 

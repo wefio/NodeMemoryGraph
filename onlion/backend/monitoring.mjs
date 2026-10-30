@@ -12,6 +12,8 @@ let waiting = 0,
   lastEmbedding = null;
 const running = new Map();
 export const withRequest = (context, operation) => requests.run(context, operation);
+/** The context the current handler runs in (trace, execution, env): null outside one. */
+export const currentContext = () => requests.getStore() ?? null;
 export function requestIdentity(userId, requestId) {
   const context = requests.getStore();
   if (!context) return;

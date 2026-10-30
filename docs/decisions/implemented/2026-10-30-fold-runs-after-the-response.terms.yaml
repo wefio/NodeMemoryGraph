@@ -1,0 +1,7 @@
+version: 2
+terms:
+  - term: fold-after-response
+    definition: accept 的折叠在事件延长生命周期内执行（waitUntil），响应先返回；测试与无 waitUntil 环境走带预算的内联回退（NMG_FOLD_INLINE=1 可强制）。
+    since: "2026-10-30"
+references:
+  - docs/decisions/implemented/2026-10-30-fold-runs-after-the-response.md
