@@ -136,6 +136,9 @@ function embeddingHost(env) {
     return "unparseable";
   }
 }
+/** Whether a failing stage is one that talks to the embedding provider. */
+const embeddingStage = (stage) =>
+  typeof stage === "string" && (stage === "embedding" || stage.startsWith("embedding_"));
 export function reportFailure(error, status, kind = "request_failure") {
   const context = requests.getStore();
   if (!context) return;
@@ -150,10 +153,17 @@ export function reportFailure(error, status, kind = "request_failure") {
     ...classifyError(error),
     ...(context.user_id_hash ? { user_id_hash: context.user_id_hash } : {}),
     ...(context.request_id_hash ? { request_id_hash: context.request_id_hash } : {}),
-    // Which provider deployment the failing request was talking to. Without it every
-    // embedding incident had to be told apart by timestamp instead of by configuration.
-    ...(embeddingHost(context.env) ? { embedding_host: embeddingHost(context.env) } : {}),
-    ...(context.env.NMG_EMBED_MODEL ? { embedding_model: context.env.NMG_EMBED_MODEL } : {}),
+    // Which provider deployment the failing request was talking to - but only when the embedding
+    // provider is what failed. Attaching it to every record made a `partition_download` timeout
+    // look like an embedding fault: 2026-10-30 20:20 showed stage=partition_download beside
+    // embedding_host/embedding_model, and the operator reasonably concluded the two shared a
+    // dependency. A field that is always present carries no information.
+    ...(embeddingStage(stages.get(error)) && embeddingHost(context.env)
+      ? { embedding_host: embeddingHost(context.env) }
+      : {}),
+    ...(embeddingStage(stages.get(error)) && context.env.NMG_EMBED_MODEL
+      ? { embedding_model: context.env.NMG_EMBED_MODEL }
+      : {}),
     // NMG_DEBUG_ERRORS=1 surfaces the exception name/message for diagnosis; the
     // default record still carries no exception text, stack or request content.
     ...(context.env.NMG_DEBUG_ERRORS === "1"

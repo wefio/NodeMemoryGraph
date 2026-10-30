@@ -1335,10 +1335,29 @@ function addClauseContributions(contributions, clauses) {
  *  own loop with its own deadline branches. It mutates `contributions` and `appendedById`
  *  in place because the attribution across the whole request (all partitions plus the
  *  pending entries) is one set of totals, not a per-partition stat. */
+/** Errors that mean "this partition cannot be read right now" rather than "the request is invalid".
+ *
+ *  A timeout on the object store, a reset connection, a replaced snapshot: all of them cost one
+ *  partition, not the answer. Anything else still propagates, because a bug must stay visible. */
+function unreadablePartition(error) {
+  const code = String(error?.code ?? "");
+  return (
+    code === "snapshot_changed" ||
+    code === "dependency_timeout" ||
+    code === "embedding_timeout" ||
+    code === "operation_aborted" ||
+    error?.name === "TimeoutError" ||
+    error?.name === "AbortError" ||
+    /ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up/i.test(String(error?.message ?? ""))
+  );
+}
 async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, appendOnly, features, client, started, contributions, appendedById }) {
   const modes = new Set();
   let candidates = [];
   let partial = false;
+  /** Why the page is short, when it is: the error code of the first partition that could not be read. */
+  let degraded = null;
+  let skipped = 0;
   const searchDeadline =
     Number(env.NMG_SEARCH_DEADLINE_MS) >= 0
       ? Number(env.NMG_SEARCH_DEADLINE_MS)
@@ -1348,7 +1367,14 @@ async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, a
         partial = true;
         break;
       }
-      const result = await runPart(
+      // A partition that cannot be read must not turn a question into a 503: the harness treats a
+      // 5xx on /search as a failed attempt, while a shorter page still scores. 2026-10-30
+      // 20:18-20:20 was exactly this - stage=partition_download, dependency_timeout, 29-31 s, four
+      // consecutive 503s on /search while /add answered 200 on the same instance. /add degrades;
+      // this is the read path's equivalent. The page is marked partial and names the reason.
+      let result;
+      try {
+        result = await runPart(
         env.MEMORY,
         manifest.parts[i],
         await getSqlite(),
@@ -1366,6 +1392,16 @@ async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, a
           };
         },
       );
+      } catch (error) {
+        if (!unreadablePartition(error)) throw error;
+        partial = true;
+        degraded = degraded ?? (error.code ?? "partition_unavailable");
+        skipped += 1;
+        // Two failures in a row is a storage problem, not one bad object: stop paying the timeout
+        // per partition and answer with what has already been read.
+        if (skipped >= 2) break;
+        continue;
+      }
       // A receipt that still lives in a legacy partition is replayed by the fold, the write
       // path; the read path no longer copies it anywhere.
       modes.add(result.response.retrievalMode);
@@ -1376,7 +1412,7 @@ async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, a
       candidates.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
       candidates = candidates.slice(0, topK);
     }
-  return { candidates, modes, partial };
+  return { candidates, modes, partial, degraded };
 }
 
 async function search(env, input) {
@@ -1429,7 +1465,12 @@ async function search(env, input) {
     let candidates = [];
     await warmClauseVectors(client, features, manifest.parts);
     const persistence = { inline_delta_saves: 0, full_snapshot_saves: 0, changed_pages: 0 };
-    const { candidates: pageCandidates, modes: modesRead, partial: partialRead } =
+    const {
+      candidates: pageCandidates,
+      modes: modesRead,
+      partial: partialRead,
+      degraded,
+    } =
       await readSearchCandidates(env, getSqlite, {
         manifest,
         queries,
@@ -1467,6 +1508,7 @@ async function search(env, input) {
         data: candidates,
         retrieval_mode: modes.has("records") ? "records" : "lexical",
         partial,
+        ...(degraded ? { degraded } : {}),
         timings: {
           totalMs: Date.now() - started,
           partitions: manifest.parts.length,
