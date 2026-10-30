@@ -21,6 +21,7 @@ export function commonOpenAiOptions(environment: NodeJS.ProcessEnv): OpenAIEmbed
     documentTemplate: environment.NMG_EMBED_DOCUMENT_TEMPLATE,
     dimensions: optionalNumber(environment.NMG_EMBED_DIMENSIONS),
     batchSize: optionalNumber(environment.NMG_EMBED_BATCH_SIZE),
+    chunkConcurrency: optionalNumber(environment.NMG_EMBED_CHUNK_CONCURRENCY),
     timeoutMs: optionalNumber(environment.NMG_EMBED_TIMEOUT_MS),
   };
 }

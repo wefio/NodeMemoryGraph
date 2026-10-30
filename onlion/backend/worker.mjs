@@ -351,9 +351,11 @@ const EMBED_TIMEOUT_MS = 10_000;
  *  A query is small and the provider is remote from the function, so ten seconds is already
  *  generous for it. A document batch is neither: it carries a whole message, and the calls
  *  cross a region boundary, where a healthy round trip and a stalled one differ by an order of
- *  magnitude. Cutting a document at ten seconds turned "the provider was slow" into a failed
- *  Add, which is the one failure the write path cannot absorb. */
-const EMBED_DOCUMENT_TIMEOUT_MS = 25_000;
+ *  magnitude. The 2026-10-30 burst measured provider calls stalling to the 25 s cap while every
+ *  fold chunk waited on it under the manifest CAS; twelve seconds still gives a stalled region
+ *  cross two chances to succeed inside the fold budget, without turning one stalled call into a
+ *  25 s hold on the whole write. */
+const EMBED_DOCUMENT_TIMEOUT_MS = 12_000;
 /** Total embedding work one write may spend. The invocation is killed at 120 s, and the write
  *  still needs room for its partition round trips after the vectors land, so the budget is
  *  well inside it: past this point the Add fails with a clear code instead of running out the
@@ -404,10 +406,15 @@ function embeddingClient(env, seed) {
   // A second client, not a second knob on the first: the provider client keeps one timeout,
   // and documents need a longer one than queries.
   let documentClient;
+  // Document chunks are the load a burst sends to one provider account; each concurrent
+  // chunk is a queue position the provider may not have. One at a time unless configured:
+  // the fold's batch of 32 becomes three sequential 10-row calls instead of three racing
+  // 25 s stalls (the 2026-10-30 incident's `dependency_timeout` ×9 at 25 s).
   const documents = () =>
     (documentClient ??= createEmbeddingClientFromEnv({
       ...env,
       NMG_EMBED_TIMEOUT_MS: env.NMG_EMBED_TIMEOUT_MS ?? String(EMBED_DOCUMENT_TIMEOUT_MS),
+      NMG_EMBED_CHUNK_CONCURRENCY: env.NMG_EMBED_CHUNK_CONCURRENCY ?? "1",
     }));
   // Thrown from inside `measure`'s async callback this becomes a rejection, which is what
   // every call site is written against (`catch(() => [])`). A synchronous throw would
@@ -1103,7 +1110,7 @@ const FOLD_BUDGET_MS = 20_000;
  *  Every partition is read to be exhaustive, which is unbounded in the manifest. Past this the
  *  page is built from the partitions already read and marked `partial`: fewer candidates for one
  *  question, instead of a request killed at the ceiling and no answer at all. */
-const SEARCH_DEADLINE_MS = 60_000;
+const SEARCH_DEADLINE_MS = 25_000;
 
 /** Features to embed and search per clause, bounded by `MAX_QUERY_FEATURES`.
  *
@@ -1288,10 +1295,17 @@ async function search(env, input) {
   // it cost ~20% of read load for no guarantee. A reader that can write is also a reader that
   // can fail and that can lose a compare-and-swap; a read-only search has neither failure
   // mode, and it no longer pays a multi-megabyte snapshot upload to answer a question.
-  const { manifest } = await measure("manifest_read", () =>
+  // A fold that commits between this read and the partition GETs deletes the old objects
+  // (`retireParts`), and the GET then fails `snapshot_changed`. Before the read-only search this
+  // was absorbed by the CAS retry loop; as a pure read the path retries itself with a fresh
+  // manifest - and a 2026-10-30 15:26 /search 503 of 4.2 s is exactly the race this covered.
+  let manifestReads = 0;
+  let manifest = (await measure("manifest_read", () =>
     loadManifest(env.MEMORY, keyFor(userId), userId),
-  );
+  )).manifest;
   const sqlite = await measure("sqlite_init", () => sqliteReady());
+  for (;;) {
+    try {
   {
     let candidates = [];
     const modes = new Set();
@@ -1374,6 +1388,17 @@ async function search(env, input) {
         persistence,
         storage_format: manifestFormat(manifest),
     };
+  }
+  } catch (error) {
+      if (error.code === "snapshot_changed" && manifestReads < 2) {
+        manifestReads += 1;
+        manifest = (await measure("manifest_read", () =>
+          loadManifest(env.MEMORY, keyFor(userId), userId),
+        )).manifest;
+        continue;
+      }
+      throw error;
+    }
   }
 }
 async function reset(env, input) {
@@ -2156,6 +2181,7 @@ export default {
             status: responseStatus,
             elapsed_ms: Date.now() - startedAt,
             seq: context.seq,
+            execution: context.execution?.waitUntil ? "waituntil" : "inline",
           }),
         );
         memLog("exit", route, {
