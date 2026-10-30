@@ -24,6 +24,7 @@ import {
   requestAccepted,
   requestStarted,
   requestFinished,
+  currentStage,
 } from "./diagnostics.mjs";
 import init from "../sqlite-wasm/worker-loader.mjs";
 import compiledSqlite from "../sqlite-wasm/sqlite3.wasm";
@@ -87,6 +88,14 @@ import {
 } from "./query-chunks.mjs";
 const MAX_DATABASE_BYTES = USER_LIMIT;
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
+/** How long one request may spend receiving its body.
+ *
+ *  The platform kills an invocation at 120 s, so a body that never completes used to occupy the
+ *  whole budget and then die with nothing to show - the 51.3359 MB constant rows of the
+ *  2026-10-30 19:34-19:50 window, which never allocated because the handler was still waiting for
+ *  the upload. Thirty seconds is generous for 6 MiB and leaves the rest of the window for the work
+ *  the body asked for. */
+const BODY_TIMEOUT_MS = 30_000;
 /** Payload caps are sized against the platform request body, not against a single
  *  global character budget. The benchmark contract states there is no global
  *  character cap and that an unsupported payload should get a clear 4xx, so a cap
@@ -218,15 +227,24 @@ function authenticate(request, env) {
       "A valid Token, Bearer, or X-API-Key credential is required",
     );
 }
-async function readJson(request) {
+async function readJson(request, env) {
   if (Number(request.headers.get("content-length")) > MAX_BODY_BYTES)
     throw new HttpError(413, "request_too_large", "Request limit is 6 MiB");
   if (!request.body) throw new HttpError(400, "invalid_json", "JSON body required");
+  // Nothing below this line has a deadline of its own, so this is the only place that can give a
+  // stalled upload one instead of holding the invocation to the platform ceiling.
+  const deadline =
+    Date.now() +
+    (Number(env?.NMG_BODY_TIMEOUT_MS) > 0 ? Number(env.NMG_BODY_TIMEOUT_MS) : BODY_TIMEOUT_MS);
   const reader = request.body.getReader();
   const chunks = [];
   let length = 0;
   try {
     while (true) {
+      if (Date.now() > deadline) {
+        await reader.cancel().catch(() => {});
+        throw new HttpError(408, "request_body_timeout", "Request body did not arrive in time");
+      }
       const { done, value } = await reader.read();
       if (done) break;
       length += value.length;
@@ -1266,6 +1284,7 @@ function watchSlowRequest(env, context, started) {
         route: context.route,
         elapsed_ms: Date.now() - started,
         add_mode: env.NMG_ADD_MODE ?? null,
+        stage_isolate: currentStage(),
         queue: queueStatus(),
         // A killed invocation carries none of this, so the report has to be written while
         // the request is still alive: memory, how many requests this instance has served,
@@ -1700,7 +1719,7 @@ async function reclaimAllRoute(request, env, path) {
     throw new HttpError(503, "storage_unavailable", "Persistent storage binding missing");
   if (request.method === "GET") return json(await reclamationStatus(env.MEMORY));
   if (request.method === "POST") {
-    const input = await readJson(request);
+    const input = await readJson(request, env);
     if (input.confirm !== "ALL_MEMORY")
       throw new HttpError(
         400,
@@ -1800,7 +1819,7 @@ async function selfTestRoute(request, env, _url, path) {
   if (path !== "/diagnostics/self-test" || request.method !== "POST") return undefined;
   assertSelfTestAccess(request, env);
   env = { ...env, MEMORY: await memoryBucket(env.MEMORY) };
-  const input = await readJson(request);
+  const input = await readJson(request, env);
   if (Object.keys(input).some((k) => !["op", "persistence", "repetitions"].includes(k)))
     throw new HttpError(
       400,
@@ -1984,7 +2003,7 @@ async function adminRoute(request, env, url, path) {
 }
 async function adminRouteDispatcher(request, env, url, path) {
   if (path === "/admin/statistics" && request.method === "POST") {
-    const input = await readJson(request);
+    const input = await readJson(request, env);
     if (typeof input.enabled !== "boolean")
       throw new HttpError(400, "invalid_request", "enabled must be boolean");
     return json({ load: setStatistics(input.enabled) });
@@ -1992,14 +2011,14 @@ async function adminRouteDispatcher(request, env, url, path) {
   if (path === "/admin/capacity" && request.method === "GET")
     return json(await capacityReport(env, textField(url.searchParams.get("user_id"), "user_id")));
   if (path === "/admin/reset" && request.method === "POST")
-    return json(await reset(env, await readJson(request)));
+    return json(await reset(env, await readJson(request, env)));
   if (path === "/admin/key" && request.method === "GET") return json({ api_key: env.NMG_API_KEY });
   if (path === "/admin/status" && request.method === "GET") return adminStatusResponse(env);
   return adminDiagnosticsRoute(request, env, path);
 }
 async function adminDiagnosticsRoute(request, env, path) {
   if (path === "/admin/diagnostics/search" && request.method === "POST") {
-    const input = await readJson(request);
+    const input = await readJson(request, env);
     return json(await diagnosticSearch(env, input));
   }
   if (path === "/admin/diagnostics/seed" && request.method === "POST") {
@@ -2021,7 +2040,7 @@ async function adminDiagnosticsRoute(request, env, path) {
 }
 async function searchRoute(request, env, _url, path) {
   if (path !== "/search" || request.method !== "POST") return undefined;
-  const input = await readJson(request);
+  const input = await readJson(request, env);
   if (request.headers.get("x-nmg-profile") === "1") {
     const { result, ...diagnostics } = await profileSearch(() => search(env, input));
     return json({ ...result, diagnostics });
@@ -2046,7 +2065,7 @@ async function memoryApiRoute(request, env, url, path) {
   if (!env.MEMORY)
     throw new HttpError(503, "storage_unavailable", "Persistent storage binding missing");
   if ((path === "/reclaim" || path === "/reclaim/user") && request.method === "POST") {
-    const input = await readJson(request),
+    const input = await readJson(request, env),
       userId = textField(input.user_id, "user_id"),
       requestId = textField(input.request_id, "request_id", 128);
     const result = await reset(env, {
@@ -2070,7 +2089,7 @@ async function memoryApiRoute(request, env, url, path) {
 }
 async function resetRoute(request, env, path) {
   if (path !== "/reset" || request.method !== "POST") return undefined;
-  return json(await reset(env, await readJson(request)));
+  return json(await reset(env, await readJson(request, env)));
 }
 async function capacityRoute(request, env, url, path) {
   if (path !== "/capacity" || request.method !== "GET") return undefined;
@@ -2109,7 +2128,7 @@ async function foldRoute(request, env, url, path) {
 }
 async function addRoute(request, env, path) {
   if ((path !== "/add" && path !== "/remember") || request.method !== "POST") return undefined;
-  const input = await readJson(request);
+  const input = await readJson(request, env);
   if (addMode(env) !== "log") return json(await add(env, input));
   const startedAt = Date.now();
   const accepted = await acceptAdd(env, input);
