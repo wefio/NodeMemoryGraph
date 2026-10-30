@@ -111,8 +111,14 @@ try {
     // document-embedding backfill. A read that can write carries a CAS's failure modes -
     // that is how a 90 ms search died 503 before it had touched storage.
     {
-      const sliceStart = source.indexOf("async function search(env, input)");
-      assert.ok(sliceStart >= 0, "search signature must not take an options bag");
+      // The page read moved into `readSearchCandidates` when the search's complexity had to
+      // come down; the slice covers both, so a write reintroduced in either place fails here.
+      const sliceStart = source.indexOf("async function readSearchCandidates(");
+      assert.ok(sliceStart >= 0, "the read-only page reader must still exist");
+      assert.ok(
+        source.indexOf("async function search(env, input)") > sliceStart,
+        "search signature must not take an options bag",
+      );
       const sliceEnd = source.indexOf("async function reset(");
       const body = source.slice(sliceStart, sliceEnd);
       for (const forbidden of ["stageSearchPart", "commitManifest", "staged", "reuse", "readOnly: !changed"])

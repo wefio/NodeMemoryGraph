@@ -351,9 +351,11 @@ const EMBED_TIMEOUT_MS = 10_000;
  *  A query is small and the provider is remote from the function, so ten seconds is already
  *  generous for it. A document batch is neither: it carries a whole message, and the calls
  *  cross a region boundary, where a healthy round trip and a stalled one differ by an order of
- *  magnitude. Cutting a document at ten seconds turned "the provider was slow" into a failed
- *  Add, which is the one failure the write path cannot absorb. */
-const EMBED_DOCUMENT_TIMEOUT_MS = 25_000;
+ *  magnitude. The 2026-10-30 burst measured provider calls stalling to the 25 s cap while every
+ *  fold chunk waited on it under the manifest CAS; twelve seconds still gives a stalled region
+ *  cross two chances to succeed inside the fold budget, without turning one stalled call into a
+ *  25 s hold on the whole write. */
+const EMBED_DOCUMENT_TIMEOUT_MS = 12_000;
 /** Total embedding work one write may spend. The invocation is killed at 120 s, and the write
  *  still needs room for its partition round trips after the vectors land, so the budget is
  *  well inside it: past this point the Add fails with a clear code instead of running out the
@@ -404,10 +406,15 @@ function embeddingClient(env, seed) {
   // A second client, not a second knob on the first: the provider client keeps one timeout,
   // and documents need a longer one than queries.
   let documentClient;
+  // Document chunks are the load a burst sends to one provider account; each concurrent
+  // chunk is a queue position the provider may not have. One at a time unless configured:
+  // the fold's batch of 32 becomes three sequential 10-row calls instead of three racing
+  // 25 s stalls (the 2026-10-30 incident's `dependency_timeout` ×9 at 25 s).
   const documents = () =>
     (documentClient ??= createEmbeddingClientFromEnv({
       ...env,
       NMG_EMBED_TIMEOUT_MS: env.NMG_EMBED_TIMEOUT_MS ?? String(EMBED_DOCUMENT_TIMEOUT_MS),
+      NMG_EMBED_CHUNK_CONCURRENCY: env.NMG_EMBED_CHUNK_CONCURRENCY ?? "1",
     }));
   // Thrown from inside `measure`'s async callback this becomes a rejection, which is what
   // every call site is written against (`catch(() => [])`). A synchronous throw would
@@ -1103,7 +1110,7 @@ const FOLD_BUDGET_MS = 20_000;
  *  Every partition is read to be exhaustive, which is unbounded in the manifest. Past this the
  *  page is built from the partitions already read and marked `partial`: fewer candidates for one
  *  question, instead of a request killed at the ceiling and no answer at all. */
-const SEARCH_DEADLINE_MS = 60_000;
+const SEARCH_DEADLINE_MS = 25_000;
 
 /** Features to embed and search per clause, bounded by `MAX_QUERY_FEATURES`.
  *
@@ -1259,49 +1266,21 @@ function addClauseContributions(contributions, clauses) {
     total.exclusive += clause.exclusive;
   }
 }
-async function search(env, input) {
-  const userId = textField(input.user_id ?? input.userId, "user_id");
-  requestIdentity(userId, input.request_id);
-  const topK = input.top_k ?? input.topK;
-  if (!Number.isInteger(topK) || topK < 1 || topK > 100)
-    throw new HttpError(400, "invalid_request", "top_k must be an integer between 1 and 100");
-  const choices = input.options ?? [];
-  if (!Array.isArray(choices) || choices.length > 16)
-    throw new HttpError(400, "invalid_request", "options must be an array of at most 16 strings");
-  const optionTexts = choices.map((choice) => textField(choice, "option", 4096));
-  const clauses = await readClauses(input, optionTexts);
-  const queries = clauses.map((clause) => clause.text);
-  const features = selectQueryFeatures(queries);
-  const appendOnly = clauses.map((clause) => clause.appendOnly === true);
-  const hasAppendOnly = appendOnly.some(Boolean);
-  const appendedById = new Map();
-  const contributions = clauses.map((_clause, index) => ({ index, contributed: 0, exclusive: 0 }));
-  const client = embeddingClient(env),
-    started = Date.now();
-  // The search is a read. It touches the manifest and each partition once, embeds only the
-  // query side, and answers from what it read: no staging, no snapshot, no compare-and-swap.
-  // Vector materialisation belongs to the write path (inline at accept, bounded in the fold);
-  // a record without stored vectors scores lexically until a fold backfills it. That is the
-  // compaction rule every engine in this class follows - RocksDB runs compaction in background
-  // threads, Hudi keeps log compaction inline=false because inline scheduling "adds extra
-  // latency on the write path", and Cassandra operators disabled read-repair chance because
-  // it cost ~20% of read load for no guarantee. A reader that can write is also a reader that
-  // can fail and that can lose a compare-and-swap; a read-only search has neither failure
-  // mode, and it no longer pays a multi-megabyte snapshot upload to answer a question.
-  const { manifest } = await measure("manifest_read", () =>
-    loadManifest(env.MEMORY, keyFor(userId), userId),
-  );
-  const sqlite = await measure("sqlite_init", () => sqliteReady());
-  {
-    let candidates = [];
-    const modes = new Set();
-    await warmClauseVectors(client, features, manifest.parts);
-    const persistence = { inline_delta_saves: 0, full_snapshot_saves: 0, changed_pages: 0 };
-    const searchDeadline =
-      Number(env.NMG_SEARCH_DEADLINE_MS) >= 0
-        ? Number(env.NMG_SEARCH_DEADLINE_MS)
-        : SEARCH_DEADLINE_MS;
-    let partial = false;
+/** Reads the manifest's partitions into one global page, bounded by the search deadline.
+ *
+ *  Extraction is what keeps `search` readable, not just small: a query's page is assembled
+ *  by folding every partition's candidates through one running top-K, and that fold is its
+ *  own loop with its own deadline branches. It mutates `contributions` and `appendedById`
+ *  in place because the attribution across the whole request (all partitions plus the
+ *  pending entries) is one set of totals, not a per-partition stat. */
+async function readSearchCandidates(env, sqlite, { manifest, queries, topK, appendOnly, features, client, started, contributions, appendedById }) {
+  const modes = new Set();
+  let candidates = [];
+  let partial = false;
+  const searchDeadline =
+    Number(env.NMG_SEARCH_DEADLINE_MS) >= 0
+      ? Number(env.NMG_SEARCH_DEADLINE_MS)
+      : SEARCH_DEADLINE_MS;
     for (let i = 0; i < manifest.parts.length; i++) {
       if (Date.now() - started > searchDeadline) {
         partial = true;
@@ -1335,6 +1314,68 @@ async function search(env, input) {
       candidates.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
       candidates = candidates.slice(0, topK);
     }
+  return { candidates, modes, partial };
+}
+
+async function search(env, input) {
+  const userId = textField(input.user_id ?? input.userId, "user_id");
+  requestIdentity(userId, input.request_id);
+  const topK = input.top_k ?? input.topK;
+  if (!Number.isInteger(topK) || topK < 1 || topK > 100)
+    throw new HttpError(400, "invalid_request", "top_k must be an integer between 1 and 100");
+  const choices = input.options ?? [];
+  if (!Array.isArray(choices) || choices.length > 16)
+    throw new HttpError(400, "invalid_request", "options must be an array of at most 16 strings");
+  const optionTexts = choices.map((choice) => textField(choice, "option", 4096));
+  const clauses = await readClauses(input, optionTexts);
+  const queries = clauses.map((clause) => clause.text);
+  const features = selectQueryFeatures(queries);
+  const appendOnly = clauses.map((clause) => clause.appendOnly === true);
+  const hasAppendOnly = appendOnly.some(Boolean);
+  const appendedById = new Map();
+  const contributions = clauses.map((_clause, index) => ({ index, contributed: 0, exclusive: 0 }));
+  const client = embeddingClient(env),
+    started = Date.now();
+  // The search is a read. It touches the manifest and each partition once, embeds only the
+  // query side, and answers from what it read: no staging, no snapshot, no compare-and-swap.
+  // Vector materialisation belongs to the write path (inline at accept, bounded in the fold);
+  // a record without stored vectors scores lexically until a fold backfills it. That is the
+  // compaction rule every engine in this class follows - RocksDB runs compaction in background
+  // threads, Hudi keeps log compaction inline=false because inline scheduling "adds extra
+  // latency on the write path", and Cassandra operators disabled read-repair chance because
+  // it cost ~20% of read load for no guarantee. A reader that can write is also a reader that
+  // can fail and that can lose a compare-and-swap; a read-only search has neither failure
+  // mode, and it no longer pays a multi-megabyte snapshot upload to answer a question.
+  // A fold that commits between this read and the partition GETs deletes the old objects
+  // (`retireParts`), and the GET then fails `snapshot_changed`. Before the read-only search this
+  // was absorbed by the CAS retry loop; as a pure read the path retries itself with a fresh
+  // manifest - and a 2026-10-30 15:26 /search 503 of 4.2 s is exactly the race this covered.
+  let manifestReads = 0;
+  let manifest = (await measure("manifest_read", () =>
+    loadManifest(env.MEMORY, keyFor(userId), userId),
+  )).manifest;
+  const sqlite = await measure("sqlite_init", () => sqliteReady());
+  for (;;) {
+    try {
+  {
+    let candidates = [];
+    await warmClauseVectors(client, features, manifest.parts);
+    const persistence = { inline_delta_saves: 0, full_snapshot_saves: 0, changed_pages: 0 };
+    const { candidates: pageCandidates, modes: modesRead, partial: partialRead } =
+      await readSearchCandidates(env, sqlite, {
+        manifest,
+        queries,
+        topK,
+        appendOnly,
+        features,
+        client,
+        started,
+        contributions,
+        appendedById,
+      });
+    candidates.push(...pageCandidates);
+    const modes = modesRead;
+    const partial = partialRead;
     const fused = await fusePendingRecords({
       env,
       ctx: { key: keyFor(userId), manifest },
@@ -1374,6 +1415,17 @@ async function search(env, input) {
         persistence,
         storage_format: manifestFormat(manifest),
     };
+  }
+  } catch (error) {
+      if (error.code === "snapshot_changed" && manifestReads < 2) {
+        manifestReads += 1;
+        manifest = (await measure("manifest_read", () =>
+          loadManifest(env.MEMORY, keyFor(userId), userId),
+        )).manifest;
+        continue;
+      }
+      throw error;
+    }
   }
 }
 async function reset(env, input) {
@@ -2156,6 +2208,7 @@ export default {
             status: responseStatus,
             elapsed_ms: Date.now() - startedAt,
             seq: context.seq,
+            execution: context.execution?.waitUntil ? "waituntil" : "inline",
           }),
         );
         memLog("exit", route, {
