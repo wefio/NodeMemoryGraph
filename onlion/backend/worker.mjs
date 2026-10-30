@@ -1266,6 +1266,57 @@ function addClauseContributions(contributions, clauses) {
     total.exclusive += clause.exclusive;
   }
 }
+/** Reads the manifest's partitions into one global page, bounded by the search deadline.
+ *
+ *  Extraction is what keeps `search` readable, not just small: a query's page is assembled
+ *  by folding every partition's candidates through one running top-K, and that fold is its
+ *  own loop with its own deadline branches. It mutates `contributions` and `appendedById`
+ *  in place because the attribution across the whole request (all partitions plus the
+ *  pending entries) is one set of totals, not a per-partition stat. */
+async function readSearchCandidates(env, sqlite, { manifest, queries, topK, appendOnly, features, client, started, contributions, appendedById }) {
+  const modes = new Set();
+  let candidates = [];
+  let partial = false;
+  const searchDeadline =
+    Number(env.NMG_SEARCH_DEADLINE_MS) >= 0
+      ? Number(env.NMG_SEARCH_DEADLINE_MS)
+      : SEARCH_DEADLINE_MS;
+    for (let i = 0; i < manifest.parts.length; i++) {
+      if (Date.now() - started > searchDeadline) {
+        partial = true;
+        break;
+      }
+      const result = await runPart(
+        env.MEMORY,
+        manifest.parts[i],
+        sqlite,
+        async ({ key: partKey }) => {
+          // Declining the backfill is what makes this read safe and cheap: without it the
+          // service would embed vectorless records inside a search and change the SQLite
+          // snapshot, which is what used to force the read path to write.
+          const service = new AmlMemoryService(partKey, client, { allowBackfill: false });
+          return {
+            response: await measure("retrieval_including_embedding", () =>
+              service.search(queries, topK, appendOnly, features),
+            ),
+            legacyReceipts: [],
+            readOnly: true,
+          };
+        },
+      );
+      // A receipt that still lives in a legacy partition is replayed by the fold, the write
+      // path; the read path no longer copies it anywhere.
+      modes.add(result.response.retrievalMode);
+      addClauseContributions(contributions, result.response.clauses);
+      addAppended(appendedById, result.response.appended);
+      candidates.push(...result.response.memories);
+      // Bounded global Top K; never retain every shard's candidates in RAM.
+      candidates.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+      candidates = candidates.slice(0, topK);
+    }
+  return { candidates, modes, partial };
+}
+
 async function search(env, input) {
   const userId = textField(input.user_id ?? input.userId, "user_id");
   requestIdentity(userId, input.request_id);
@@ -1308,47 +1359,23 @@ async function search(env, input) {
     try {
   {
     let candidates = [];
-    const modes = new Set();
     await warmClauseVectors(client, features, manifest.parts);
     const persistence = { inline_delta_saves: 0, full_snapshot_saves: 0, changed_pages: 0 };
-    const searchDeadline =
-      Number(env.NMG_SEARCH_DEADLINE_MS) >= 0
-        ? Number(env.NMG_SEARCH_DEADLINE_MS)
-        : SEARCH_DEADLINE_MS;
-    let partial = false;
-    for (let i = 0; i < manifest.parts.length; i++) {
-      if (Date.now() - started > searchDeadline) {
-        partial = true;
-        break;
-      }
-      const result = await runPart(
-        env.MEMORY,
-        manifest.parts[i],
-        sqlite,
-        async ({ key: partKey }) => {
-          // Declining the backfill is what makes this read safe and cheap: without it the
-          // service would embed vectorless records inside a search and change the SQLite
-          // snapshot, which is what used to force the read path to write.
-          const service = new AmlMemoryService(partKey, client, { allowBackfill: false });
-          return {
-            response: await measure("retrieval_including_embedding", () =>
-              service.search(queries, topK, appendOnly, features),
-            ),
-            legacyReceipts: [],
-            readOnly: true,
-          };
-        },
-      );
-      // A receipt that still lives in a legacy partition is replayed by the fold, the write
-      // path; the read path no longer copies it anywhere.
-      modes.add(result.response.retrievalMode);
-      addClauseContributions(contributions, result.response.clauses);
-      addAppended(appendedById, result.response.appended);
-      candidates.push(...result.response.memories);
-      // Bounded global Top K; never retain every shard's candidates in RAM.
-      candidates.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
-      candidates = candidates.slice(0, topK);
-    }
+    const { candidates: pageCandidates, modes: modesRead, partial: partialRead } =
+      await readSearchCandidates(env, sqlite, {
+        manifest,
+        queries,
+        topK,
+        appendOnly,
+        features,
+        client,
+        started,
+        contributions,
+        appendedById,
+      });
+    candidates.push(...pageCandidates);
+    const modes = modesRead;
+    const partial = partialRead;
     const fused = await fusePendingRecords({
       env,
       ctx: { key: keyFor(userId), manifest },
