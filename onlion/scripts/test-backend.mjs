@@ -762,6 +762,40 @@ print(json.dumps(r))`,
   console.log(
     "PASS: read-only search leaves manifest, partition and counters untouched; concurrent searches preserve state; Add compaction, cold restart.",
   );
+  // 2026-10-30 20:18-20:20: four /search answered 503 at stage=partition_download while /add kept
+  // returning 200 on the same instance. A partition that cannot be read must cost a shorter page,
+  // not the answer - the harness treats a 5xx on /search as a failed attempt.
+  {
+    const brokenUser = "unreadable-partition";
+    for (let index = 0; index < 3; index += 1)
+      await call("a", "/add", {
+        user_id: brokenUser,
+        request_id: "broken-" + index,
+        messages: [{ content: "record " + index + " for the unreadable partition" }],
+      });
+    // Force a fold so the records live in a partition object rather than in the log.
+    const drained = await call("a", "/admin/fold?user_id=" + brokenUser, {}, "test-key", owner);
+    assert.equal(drained.status, 200, JSON.stringify(drained));
+    // `bucket` was captured before the fixture was disposed and restarted, so its proxy is dead:
+    // fetch a live one, or the assertion fails with an opaque #assertSafe error.
+    const liveBucket = await mf.getR2Bucket("MEMORY", "a");
+    const brokenManifest = await (await liveBucket.get(manifestPath(brokenUser))).json();
+    assert.ok(brokenManifest.parts.length > 0, "the fold must have produced a partition");
+    const victim = brokenManifest.parts[0].key;
+    assert.ok(victim, "the partition must have a key");
+    await liveBucket.delete(victim);
+    const degraded = await call("a", "/search", {
+      user_id: brokenUser,
+      query: "unreadable partition record",
+      top_k: 10,
+    });
+    assert.equal(degraded.status, 200, JSON.stringify(degraded));
+    assert.equal(degraded.body.partial, true, "a short page must say it is short");
+    assert.equal(degraded.body.degraded, "snapshot_changed");
+  }
+  console.log(
+    "PASS: a partition that cannot be read yields 200 with partial/degraded instead of a 503.",
+  );
   assert.equal(
     (
       await call(
