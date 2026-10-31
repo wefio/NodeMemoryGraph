@@ -231,6 +231,7 @@ const failFastAfter = (env) => {
 const tripsBreaker = (code) =>
   code === "dependency_timeout" ||
   code === "embedding_timeout" ||
+  code === "embedding_deadline" ||
   code === "embedding_network_error" ||
   code === "embedding_http_429" ||
   /^embedding_http_5\d\d$/.test(String(code));
@@ -256,7 +257,41 @@ export function resetEmbeddingBreaker() {
   breaker.reason = null;
   return embeddingBreakerStatus();
 }
-export async function embeddingOperation(operation, env) {
+/**
+ * Runs `operation` and rejects at `ms` **even if the promise never settles**.
+ *
+ * A cancel signal is not a bound (see
+ * docs/design/search-time-budget-design.md, invariant 8): undici's own backstop is
+ * `headersTimeout`/`bodyTimeout` = 300 s, which is longer than the platform's 120 s invocation
+ * ceiling, so a signal that fails to settle leaves nothing behind it but the kill. This wrapper is
+ * the caller-enforced deadline that sits behind the signal. The signal still works normally — it
+ * reaches its own timeout first, with the error code callers already classify — and this is only
+ * the net for the case where it does not.
+ */
+export function hardDeadline(operation, ms, label = "operation") {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        Object.assign(new Error(`${label} did not settle within ${ms} ms`), {
+          code: "embedding_deadline",
+        }),
+      );
+    }, ms);
+    Promise.resolve()
+      .then(operation)
+      .then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+  });
+}
+export async function embeddingOperation(operation, env, deadlineMs) {
   // Per invocation first: this is the one that bounds a single request, and on a fresh isolate
   // per request it is the only one that can.
   if (invokeFailures >= failFastAfter(env)) {
@@ -273,8 +308,13 @@ export async function embeddingOperation(operation, env) {
   // duration is the number that decides whether a per-attempt timeout is sane. Recording only
   // the status left that unknown through two incidents.
   const started = performance.now();
+  // `deadlineMs` is the caller's own bound. Absent means "none", which is only correct for a caller
+  // that has no invocation ceiling behind it.
   try {
-    const value = await observedStage("embedding", operation);
+    const value = await observedStage(
+      "embedding",
+      deadlineMs > 0 ? () => hardDeadline(operation, deadlineMs, "embedding") : operation,
+    );
     lastEmbedding = {
       status: "ok",
       at: new Date().toISOString(),

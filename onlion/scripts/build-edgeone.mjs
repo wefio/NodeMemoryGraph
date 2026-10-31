@@ -121,6 +121,13 @@ fs.writeFileSync(
           overseas: ["ap-hongkong"],
         },
       },
+      // A scheduled tick every 30 minutes. The platform documents a `schedules` array in
+      // edgeone.json (cron, path, method, payload, timezone) but one sentence there also reads as a
+      // one-day minimum interval while an hourly example is given, so the interval below is the
+      // falsifiable part: if only one beat a day appears in the log, the platform coerced it.
+      schedules: [
+        { name: "nmg-heartbeat", cron: "*/30 * * * *", path: "/beat", method: "POST" },
+      ],
     },
     null,
     2,

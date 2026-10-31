@@ -25,6 +25,7 @@ import {
   requestStarted,
   requestFinished,
   currentStage,
+  currentStageAgeMs,
 } from "./diagnostics.mjs";
 import init from "../sqlite-wasm/worker-loader.mjs";
 import compiledSqlite from "../sqlite-wasm/sqlite3.wasm";
@@ -385,6 +386,9 @@ async function mutateUser(env, userId, operation) {
  *  timeouts of the 2026-10-29 incident look like. Ten seconds is the provider client's
  *  own default and leaves room for a round trip to be slow ten times over. */
 const EMBED_TIMEOUT_MS = 10_000;
+/** Slack over a call's own timeout before the caller's deadline fires. The signal is expected to win;
+ *  this exists for the case where it does not settle at all. */
+const EMBED_DEADLINE_GRACE_MS = 3_000;
 /** Per-attempt timeout for documents.
  *
  *  A query is small and the provider is remote from the function, so ten seconds is already
@@ -458,12 +462,25 @@ function embeddingClient(env, seed) {
   // Thrown from inside `measure`'s async callback this becomes a rejection, which is what
   // every call site is written against (`catch(() => [])`). A synchronous throw would
   // escape that and fail the request instead of degrading it.
+  // The caller-enforced deadline behind the cancel signal (search-time-budget invariant 8). The
+  // grace is deliberate: the signal normally wins, so the classified error stays what it was, and
+  // this only fires for a call that ignores or loses its abort.
+  const graceMs = Number(env.NMG_EMBED_DEADLINE_GRACE_MS) >= 0
+    ? Number(env.NMG_EMBED_DEADLINE_GRACE_MS)
+    : EMBED_DEADLINE_GRACE_MS;
+  const perCallMs = (client) => (Number(client?.timeoutMs) > 0 ? Number(client.timeoutMs) : EMBED_TIMEOUT_MS);
   const spend = () => {
     if (Date.now() < deadline) return;
     throw Object.assign(new Error("embedding budget exhausted for this request"), {
       code: "embedding_budget_exhausted",
     });
   };
+  // Every provider call goes through this one place, so a call site cannot forget the caller
+  // deadline (search-time-budget invariant 8). The bug that produced it: a patch added the deadline
+  // to three of four call sites, and the one it missed was the query embedding - the exact path that
+  // hung for 60 s in production while the other three were covered.
+  const throughProvider = (operation, target) =>
+    embeddingOperation(operation, env, perCallMs(target) + graceMs);
   return {
     indexId: client.indexId,
     model: client.model,
@@ -471,7 +488,7 @@ function embeddingClient(env, seed) {
     embed: (inputs) =>
       Promise.resolve().then(() => {
         spend();
-        return embeddingOperation(() => client.embed(inputs), env);
+        return throughProvider(() => client.embed(inputs), client);
       }),
     embedDocuments: deferredDocuments((inputs) => {
       // A fold that already holds these vectors must not call the provider: this is what keeps the
@@ -487,12 +504,15 @@ function embeddingClient(env, seed) {
         throw Object.assign(new Error("embedding budget exhausted for this request"), {
           code: "embedding_budget_exhausted",
         });
-      return embeddingOperation(() => documents().embedDocuments(inputs), env);
+      const documentClient = documents();
+      return throughProvider(() => documentClient.embedDocuments(inputs), documentClient);
     }),
     // The raw provider call, for a caller outside any SQLite session - the accept path. The
     // deferred form above is for the fold, where it signals a preparation and throws by design.
-    embedDocumentsDirect: (inputs) =>
-      embeddingOperation(() => documents().embedDocuments(inputs), env),
+    embedDocumentsDirect: (inputs) => {
+      const documentClient = documents();
+      return throughProvider(() => documentClient.embedDocuments(inputs), documentClient);
+    },
     // Cached per TEXT, not per input array. The retrieval engine embeds one feature at a
     // time (`embedQueries([text])`), so a cache keyed by the array only ever hits when the
     // caller happens to ask for the same list: pre-warming a batch would populate nothing the
@@ -510,7 +530,7 @@ function embeddingClient(env, seed) {
             // separate features: pooling them here would average the query's
             // aspects into one compromise vector, which measured worse than either
             // the whole text or the per-feature maximum.
-            const vectors = await embeddingOperation(() => client.embedQueries(missing), env);
+            const vectors = await throughProvider(() => client.embedQueries(missing), client);
             if (vectors.length !== missing.length)
               throw new Error("embedding provider returned an invalid query batch");
             return vectors;
@@ -1274,17 +1294,29 @@ async function warmClauseVectors(client, features, parts) {
  *  part held it. This writes one line at 60 s, which survives the kill. */
 function watchSlowRequest(env, context, started) {
   const afterMs = Number(env.NMG_SLOW_REPORT_MS) > 0 ? Number(env.NMG_SLOW_REPORT_MS) : 60_000;
-  const timer = setTimeout(() => {
+  // A killed invocation writes nothing, so the only way to learn *when* a request stopped making
+  // progress is to write while it is still alive. One line at 60 s answered "which stage", and the
+  // next window proved that insufficient: the stage stayed the same for a minute and the answer
+  // ("did it advance at all?") was not in any field. These beats carry the same fields plus the age
+  // of the current stage, so a stalled dependency shows as a frozen `ms_in_stage` rather than as one
+  // unreadable name.
+  const beatMs = Number(env.NMG_BEAT_MS) > 0 ? Number(env.NMG_BEAT_MS) : 10_000;
+  const beatAfterMs = Number(env.NMG_BEAT_AFTER_MS) > 0 ? Number(env.NMG_BEAT_AFTER_MS) : 30_000;
+  const beatUntilMs = Number(env.NMG_BEAT_UNTIL_MS) > 0 ? Number(env.NMG_BEAT_UNTIL_MS) : 110_000;
+  const line = (event) => {
     // eslint-disable-next-line no-console -- diagnostic output, like monitoring.mjs
     console.error(
       JSON.stringify({
-        event: "nmg_slow_request",
+        event,
         at: new Date().toISOString(),
         trace_id: context.trace_id,
         route: context.route,
         elapsed_ms: Date.now() - started,
         add_mode: env.NMG_ADD_MODE ?? null,
         stage_isolate: currentStage(),
+        // How long that stage has been entered, not just its name: "embedding for 58 s" and
+        // "entered embedding at the 58 s mark" are different faults and used to be one log line.
+        ms_in_stage: currentStageAgeMs(),
         queue: queueStatus(),
         // A killed invocation carries none of this, so the report has to be written while
         // the request is still alive: memory, how many requests this instance has served,
@@ -1293,11 +1325,19 @@ function watchSlowRequest(env, context, started) {
         last_embedding: embeddingObservation(),
       }),
     );
-  }, afterMs);
-  timer?.unref?.();
-  return () => clearTimeout(timer);
-}
-/** Vectors an entry already carries, keyed by the text the store will ask for. Null when the entry
+  };
+  const timers = [setTimeout(() => line("nmg_slow_request"), afterMs)];
+  const beat = setInterval(() => {
+    const elapsed = Date.now() - started;
+    if (elapsed > beatUntilMs) return;
+    if (elapsed >= beatAfterMs) line("nmg_request_beat");
+  }, beatMs);
+  for (const timer of [beat, ...timers]) timer?.unref?.();
+  return () => {
+    clearInterval(beat);
+    for (const timer of timers) clearTimeout(timer);
+  };
+}/** Vectors an entry already carries, keyed by the text the store will ask for. Null when the entry
  *  has none, when they belong to a different index, or when the counts do not line up. */
 function seedFromEntry(env, entry) {
   if (!Array.isArray(entry.vectors) || entry.vectors.length !== entry.messages.length) return null;
@@ -1345,6 +1385,7 @@ function unreadablePartition(error) {
     code === "snapshot_changed" ||
     code === "dependency_timeout" ||
     code === "embedding_timeout" ||
+    code === "embedding_deadline" ||
     code === "operation_aborted" ||
     error?.name === "TimeoutError" ||
     error?.name === "AbortError" ||
@@ -1690,6 +1731,35 @@ function pageResponse(request, env, path) {
       },
     },
   );
+}
+/** A scheduled tick: the only way to learn that the platform still invokes us, and the only line
+ *  in the log that arrives when no client asked for anything.
+ *
+ *  `edgeone.json` points a `schedules` entry here. It does no storage work and loads no SQLite: its
+ *  whole job is to prove an invocation happened and to record the instance it happened in. If the
+ *  beats stop, the endpoint stopped being invoked - which is a different fault from a slow request,
+ *  and the 120 s kills of 2026-10-31 could not tell them apart. */
+function beatResponse(env, path) {
+  if (path !== "/beat" && path !== "/api/beat") return undefined;
+  // eslint-disable-next-line no-console -- diagnostic output, like monitoring.mjs
+  console.log(
+    JSON.stringify({
+      event: "nmg_beat",
+      at: new Date().toISOString(),
+      // The beat runs before the request's own trace id exists (it is answered ahead of auth,
+      // because the scheduler carries no credentials), so it carries its own.
+      trace_id: crypto.randomUUID(),
+      revision: SOURCE_REVISION.split("+")[0],
+      pid: process.pid,
+      uptime_s: Math.round(process.uptime()),
+      // Cold or warm: the only cheap, per-invocation number that separates "we were woken" from
+      // "we were already here".
+      rss_mb: Math.round((process.memoryUsage().rss / 1048576) * 100) / 100,
+      sqlite_ready: sqliteIsReady(),
+      embedding: env.NMG_EMBED_MODEL ?? null,
+    }),
+  );
+  return json({ ok: true, at: new Date().toISOString(), pid: process.pid });
 }
 async function healthResponse(env, path) {
   if (path !== "/health") return undefined;
@@ -2211,6 +2281,9 @@ async function handle(request, env) {
   const path = normalizePath(url);
   const early =
     pageResponse(request, env, path) ??
+    // Before auth on purpose: the scheduler carries no credentials, and the route exposes nothing
+    // but the fact that an invocation happened.
+    beatResponse(env, path) ??
     (await healthResponse(env, path)) ??
     (await reclaimAllRoute(request, env, path)) ??
     (await foldRoute(request, env, url, path));
@@ -2328,6 +2401,9 @@ export default {
             // Cheap, and the only way to prove the deferred wasm load works: false means this
             // request finished without decoding or compiling SQLite at all.
             sqlite_loaded: sqliteIsReady(),
+            // The stage this request left from. A killed request writes no line at all, which is
+            // exactly why the watchdog below carries the age of its stage instead.
+            stage_at_exit: currentStage(),
           }),
         );
         memLog("exit", route, {
