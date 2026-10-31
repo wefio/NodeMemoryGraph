@@ -48,8 +48,9 @@
 
 ## 4. 处理函数上下文
 
-Makers Node 云函数上下文只文档化了 `uuid`、`params`、`env`、`clientIp`、`server`（`region`、`requestId`、`geo`）。
-它**没有**文档化 `waitUntil`。
+Node.js 运行时页把处理函数上下文文档化为 `uuid`、`params`、`env`、`clientIp`、`server`（`region`、
+`requestId`、`geo`）——一个不含 `waitUntil` 的封闭枚举。而 `waitUntil` 被**明确**文档化在 **Edge Functions**
+的 `EventContext` 上，其字段是 `params`、`env`、`waitUntil`。所以这个钩子存在于本产品族，属于另一个运行时，不属于云函数。
 
 | 陈述                                                                  | 来源 |
 | --------------------------------------------------------------------- | ---- |

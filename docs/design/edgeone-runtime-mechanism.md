@@ -55,8 +55,11 @@ answers in 30–60 s was not. These are different fault classes and must not be 
 
 ## 4. The handler context
 
-The Makers Node cloud function context documents exactly `uuid`, `params`, `env`, `clientIp`,
-`server` (`region`, `requestId`, `geo`). It does **not** document `waitUntil`.
+The Node.js runtime page documents the handler context as `uuid`, `params`, `env`, `clientIp`,
+`server` (`region`, `requestId`, `geo`) — a closed enumeration with no `waitUntil`. The same
+`waitUntil` is documented, explicitly, on the **Edge Functions** `EventContext`, whose fields are
+`params`, `env`, `waitUntil`. So the hook exists in this product family and belongs to the other
+runtime, not to this one.
 
 | statement                                                                                    | source   |
 | -------------------------------------------------------------------------------------------- | -------- |
