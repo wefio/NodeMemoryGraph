@@ -9,6 +9,7 @@
 // Neither test needs a worker or a network: both are properties of the helpers, and a helper that
 // only holds inside Miniflare would not hold in the invocation that gets killed.
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { hardDeadline } from "../backend/monitoring.mjs";
 import { measure, currentStage, currentStageAgeMs } from "../backend/diagnostics.mjs";
 
@@ -90,6 +91,37 @@ function pass(what) {
   assert.equal(inner.stage, "inner");
   assert.ok(inner.age >= 5 && inner.age < 1_000, `inner age was ${inner.age} ms`);
   pass("nested stages restore the outer stage with its own age");
+}
+
+// 5. Structural pin: inside the embedding client, every provider call must go through the single
+//    helper that applies the caller deadline.
+//
+//    Deliberately a source check, not a behavioural one. A behavioural test needs a provider that
+//    ignores its abort; workerd aborts the fetch in the harness, so an uncovered call site keeps
+//    passing any such test. That is exactly how the miss shipped: three of four call sites were
+//    covered, and the uncovered one - the query embedding - was the path that hung for 60 s in
+//    production while the covered three were fine.
+{
+  const source = fs.readFileSync(new URL("../backend/worker.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("function embeddingClient(");
+  assert.ok(start > 0, "embeddingClient must exist");
+  const nextTop = source.indexOf("\nfunction ", start + 10);
+  const body = source.slice(start, nextTop > 0 ? nextTop : undefined);
+  const direct = body.match(/embeddingOperation\(/g) ?? [];
+  const through = body.match(/throughProvider\(/g) ?? [];
+  assert.equal(
+    direct.length,
+    1,
+    "embeddingOperation must appear once inside embeddingClient, in throughProvider; found " +
+      direct.length,
+  );
+  assert.ok(
+    through.length >= 4,
+    "every provider call must go through throughProvider; found " + through.length,
+  );
+  for (const name of ["embedQueries", "embedDocumentsDirect", "embedDocuments", "embed("])
+    assert.ok(body.includes(name), "call path must still be present: " + name);
+  pass("every provider call inside the embedding client goes through one deadline-applying helper");
 }
 
 process.stdout.write(`PASS: observability - ${passed.length} checks.\n`);

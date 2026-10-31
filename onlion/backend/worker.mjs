@@ -475,6 +475,12 @@ function embeddingClient(env, seed) {
       code: "embedding_budget_exhausted",
     });
   };
+  // Every provider call goes through this one place, so a call site cannot forget the caller
+  // deadline (search-time-budget invariant 8). The bug that produced it: a patch added the deadline
+  // to three of four call sites, and the one it missed was the query embedding - the exact path that
+  // hung for 60 s in production while the other three were covered.
+  const throughProvider = (operation, target) =>
+    embeddingOperation(operation, env, perCallMs(target) + graceMs);
   return {
     indexId: client.indexId,
     model: client.model,
@@ -482,7 +488,7 @@ function embeddingClient(env, seed) {
     embed: (inputs) =>
       Promise.resolve().then(() => {
         spend();
-        return embeddingOperation(() => client.embed(inputs), env, perCallMs(client) + graceMs);
+        return throughProvider(() => client.embed(inputs), client);
       }),
     embedDocuments: deferredDocuments((inputs) => {
       // A fold that already holds these vectors must not call the provider: this is what keeps the
@@ -499,16 +505,14 @@ function embeddingClient(env, seed) {
           code: "embedding_budget_exhausted",
         });
       const documentClient = documents();
-      return embeddingOperation(
-        () => documentClient.embedDocuments(inputs),
-        env,
-        perCallMs(documentClient) + graceMs,
-      );
+      return throughProvider(() => documentClient.embedDocuments(inputs), documentClient);
     }),
     // The raw provider call, for a caller outside any SQLite session - the accept path. The
     // deferred form above is for the fold, where it signals a preparation and throws by design.
-    embedDocumentsDirect: (inputs) =>
-      embeddingOperation(() => documents().embedDocuments(inputs), env),
+    embedDocumentsDirect: (inputs) => {
+      const documentClient = documents();
+      return throughProvider(() => documentClient.embedDocuments(inputs), documentClient);
+    },
     // Cached per TEXT, not per input array. The retrieval engine embeds one feature at a
     // time (`embedQueries([text])`), so a cache keyed by the array only ever hits when the
     // caller happens to ask for the same list: pre-warming a batch would populate nothing the
@@ -526,7 +530,7 @@ function embeddingClient(env, seed) {
             // separate features: pooling them here would average the query's
             // aspects into one compromise vector, which measured worse than either
             // the whole text or the per-feature maximum.
-            const vectors = await embeddingOperation(() => client.embedQueries(missing), env);
+            const vectors = await throughProvider(() => client.embedQueries(missing), client);
             if (vectors.length !== missing.length)
               throw new Error("embedding provider returned an invalid query batch");
             return vectors;
