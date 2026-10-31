@@ -25,6 +25,7 @@ import {
   requestStarted,
   requestFinished,
   currentStage,
+  currentStageAgeMs,
 } from "./diagnostics.mjs";
 import init from "../sqlite-wasm/worker-loader.mjs";
 import compiledSqlite from "../sqlite-wasm/sqlite3.wasm";
@@ -385,6 +386,9 @@ async function mutateUser(env, userId, operation) {
  *  timeouts of the 2026-10-29 incident look like. Ten seconds is the provider client's
  *  own default and leaves room for a round trip to be slow ten times over. */
 const EMBED_TIMEOUT_MS = 10_000;
+/** Slack over a call's own timeout before the caller's deadline fires. The signal is expected to win;
+ *  this exists for the case where it does not settle at all. */
+const EMBED_DEADLINE_GRACE_MS = 3_000;
 /** Per-attempt timeout for documents.
  *
  *  A query is small and the provider is remote from the function, so ten seconds is already
@@ -458,6 +462,13 @@ function embeddingClient(env, seed) {
   // Thrown from inside `measure`'s async callback this becomes a rejection, which is what
   // every call site is written against (`catch(() => [])`). A synchronous throw would
   // escape that and fail the request instead of degrading it.
+  // The caller-enforced deadline behind the cancel signal (search-time-budget invariant 8). The
+  // grace is deliberate: the signal normally wins, so the classified error stays what it was, and
+  // this only fires for a call that ignores or loses its abort.
+  const graceMs = Number(env.NMG_EMBED_DEADLINE_GRACE_MS) >= 0
+    ? Number(env.NMG_EMBED_DEADLINE_GRACE_MS)
+    : EMBED_DEADLINE_GRACE_MS;
+  const perCallMs = (client) => (Number(client?.timeoutMs) > 0 ? Number(client.timeoutMs) : EMBED_TIMEOUT_MS);
   const spend = () => {
     if (Date.now() < deadline) return;
     throw Object.assign(new Error("embedding budget exhausted for this request"), {
@@ -471,7 +482,7 @@ function embeddingClient(env, seed) {
     embed: (inputs) =>
       Promise.resolve().then(() => {
         spend();
-        return embeddingOperation(() => client.embed(inputs), env);
+        return embeddingOperation(() => client.embed(inputs), env, perCallMs(client) + graceMs);
       }),
     embedDocuments: deferredDocuments((inputs) => {
       // A fold that already holds these vectors must not call the provider: this is what keeps the
@@ -487,7 +498,12 @@ function embeddingClient(env, seed) {
         throw Object.assign(new Error("embedding budget exhausted for this request"), {
           code: "embedding_budget_exhausted",
         });
-      return embeddingOperation(() => documents().embedDocuments(inputs), env);
+      const documentClient = documents();
+      return embeddingOperation(
+        () => documentClient.embedDocuments(inputs),
+        env,
+        perCallMs(documentClient) + graceMs,
+      );
     }),
     // The raw provider call, for a caller outside any SQLite session - the accept path. The
     // deferred form above is for the fold, where it signals a preparation and throws by design.
@@ -1285,6 +1301,9 @@ function watchSlowRequest(env, context, started) {
         elapsed_ms: Date.now() - started,
         add_mode: env.NMG_ADD_MODE ?? null,
         stage_isolate: currentStage(),
+        // How long that stage has been entered, not just its name: "embedding for 58 s" and
+        // "entered embedding at the 58 s mark" are different faults and used to be one log line.
+        ms_in_stage: currentStageAgeMs(),
         queue: queueStatus(),
         // A killed invocation carries none of this, so the report has to be written while
         // the request is still alive: memory, how many requests this instance has served,
@@ -1345,6 +1364,7 @@ function unreadablePartition(error) {
     code === "snapshot_changed" ||
     code === "dependency_timeout" ||
     code === "embedding_timeout" ||
+    code === "embedding_deadline" ||
     code === "operation_aborted" ||
     error?.name === "TimeoutError" ||
     error?.name === "AbortError" ||
@@ -2328,6 +2348,9 @@ export default {
             // Cheap, and the only way to prove the deferred wasm load works: false means this
             // request finished without decoding or compiling SQLite at all.
             sqlite_loaded: sqliteIsReady(),
+            // The stage this request left from. A killed request writes no line at all, which is
+            // exactly why the watchdog below carries the age of its stage instead.
+            stage_at_exit: currentStage(),
           }),
         );
         memLog("exit", route, {

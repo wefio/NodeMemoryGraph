@@ -10,26 +10,41 @@ const profiles = new AsyncLocalStorage();
  *  says explicitly by naming the field `stage_isolate`.
  */
 let activeStage = null;
+/** When the current stage was entered. A name alone cannot distinguish "blocked here for 58 s" from
+ *  "entered here at 58 s", and a label that lags the code is indistinguishable from a correct one
+ *  until its age is printed (search-time-budget invariant 9). */
+let stageEnteredAt = null;
 export const currentStage = () => activeStage;
+export const currentStageAgeMs = () =>
+  activeStage && stageEnteredAt ? Math.round(performance.now() - stageEnteredAt) : null;
 function timedMeasure(name, operation) {
   const profile = profiles.getStore();
   if (!profile) {
     const prior = activeStage;
+    const priorAt = stageEnteredAt;
     activeStage = name;
+    stageEnteredAt = performance.now();
     return (async () => {
       try {
         return await operation();
       } finally {
         activeStage = prior;
+        stageEnteredAt = priorAt;
       }
     })();
   }
   return (async()=>{
     const start = performance.now();
     const prior = activeStage;
+    const priorAt = stageEnteredAt;
     activeStage = name;
+    stageEnteredAt = performance.now();
     try { return await operation(); }
-    finally { activeStage = prior; profile[name] = (profile[name] || 0) + performance.now() - start; }
+    finally {
+      activeStage = prior;
+      stageEnteredAt = priorAt;
+      profile[name] = (profile[name] || 0) + performance.now() - start;
+    }
   })();
 }
 function timedMeasureSync(name, operation) {
