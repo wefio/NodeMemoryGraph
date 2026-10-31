@@ -19,13 +19,13 @@ change twice.
 
 ## The phases
 
-| #   | phase                  | what bounds it                                                                                                  | owner                  |
-| --- | ---------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| 1   | read the request body  | its own body deadline                                                                                           | `readJson`             |
-| 2   | read the user manifest | one object read, no dedicated bound                                                                             | `readManifest`         |
-| 3   | read partitions        | a gate evaluated **before each partition**; when it trips, the rest is skipped and the answer is marked partial | `readSearchCandidates` |
-| 3a  | one partition download | the object store's per-call timeout                                                                             | `openPart`             |
-| 4   | read the query vector  | an **independent clock** started when the embedding client is built (or, for a write, the write clock)          | `embeddingClient`      |
+| #   | phase                  | what bounds it                                                                                                                                           | owner                  |
+| --- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| 1   | read the request body  | its own body deadline                                                                                                                                    | `readJson`             |
+| 2   | read the user manifest | one object read, no dedicated bound                                                                                                                      | `readManifest`         |
+| 3   | read partitions        | a gate evaluated **before each partition**; when it trips, the rest is skipped and the answer is marked partial                                          | `readSearchCandidates` |
+| 3a  | one partition download | the object store's per-call timeout                                                                                                                      | `openPart`             |
+| 4   | read the query vector  | an **independent clock** started when the embedding client is built (or, for a write, the write clock), plus a deadline the caller enforces on each call | `embeddingClient`      |
 
 Two phases are not in this list because they are not bounded by us at all: the
 platform's invocation ceiling, and the client's patience. Both are external facts, owned
@@ -56,6 +56,19 @@ once by a well-intentioned patch.
 7. **A write degrades and a read must too.** The write path commits an entry and defers
    the expensive part; the read path has no equivalent deferral, so its only graceful
    failure is a shorter page. A 5xx from `/search` costs a whole attempt.
+8. **A cancel signal is not a bound.** Every dependency call carries a deadline enforced by
+   the caller as well as whatever the transport does with the signal. The transport's own
+   backstop is measured in minutes — undici's `headersTimeout` and `bodyTimeout` both
+   default to 300 s, and its documentation does not promise exact firing — so a signal that
+   fails to settle leaves nothing behind it but the platform killing the invocation. A
+   dependency that ignores, defers or loses an abort must still cost a bounded amount of a
+   request.
+9. **A stage name is not evidence; its age is.** Any report that names a stage also carries
+   how long that stage has been entered, and a request that ends records the stage it ended
+   in. Without the age, "blocked in embedding for 58 s" and "entered embedding at 58 s" are
+   the same log line, and a name that lags the code looks exactly like a name that is
+   correct. This invariant exists because a wrong label is indistinguishable from a right
+   one until the age is printed.
 
 ## Reading a log line without guessing
 
