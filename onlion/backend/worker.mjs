@@ -1294,11 +1294,20 @@ async function warmClauseVectors(client, features, parts) {
  *  part held it. This writes one line at 60 s, which survives the kill. */
 function watchSlowRequest(env, context, started) {
   const afterMs = Number(env.NMG_SLOW_REPORT_MS) > 0 ? Number(env.NMG_SLOW_REPORT_MS) : 60_000;
-  const timer = setTimeout(() => {
+  // A killed invocation writes nothing, so the only way to learn *when* a request stopped making
+  // progress is to write while it is still alive. One line at 60 s answered "which stage", and the
+  // next window proved that insufficient: the stage stayed the same for a minute and the answer
+  // ("did it advance at all?") was not in any field. These beats carry the same fields plus the age
+  // of the current stage, so a stalled dependency shows as a frozen `ms_in_stage` rather than as one
+  // unreadable name.
+  const beatMs = Number(env.NMG_BEAT_MS) > 0 ? Number(env.NMG_BEAT_MS) : 10_000;
+  const beatAfterMs = Number(env.NMG_BEAT_AFTER_MS) > 0 ? Number(env.NMG_BEAT_AFTER_MS) : 30_000;
+  const beatUntilMs = Number(env.NMG_BEAT_UNTIL_MS) > 0 ? Number(env.NMG_BEAT_UNTIL_MS) : 110_000;
+  const line = (event) => {
     // eslint-disable-next-line no-console -- diagnostic output, like monitoring.mjs
     console.error(
       JSON.stringify({
-        event: "nmg_slow_request",
+        event,
         at: new Date().toISOString(),
         trace_id: context.trace_id,
         route: context.route,
@@ -1316,11 +1325,19 @@ function watchSlowRequest(env, context, started) {
         last_embedding: embeddingObservation(),
       }),
     );
-  }, afterMs);
-  timer?.unref?.();
-  return () => clearTimeout(timer);
-}
-/** Vectors an entry already carries, keyed by the text the store will ask for. Null when the entry
+  };
+  const timers = [setTimeout(() => line("nmg_slow_request"), afterMs)];
+  const beat = setInterval(() => {
+    const elapsed = Date.now() - started;
+    if (elapsed > beatUntilMs) return;
+    if (elapsed >= beatAfterMs) line("nmg_request_beat");
+  }, beatMs);
+  for (const timer of [beat, ...timers]) timer?.unref?.();
+  return () => {
+    clearInterval(beat);
+    for (const timer of timers) clearTimeout(timer);
+  };
+}/** Vectors an entry already carries, keyed by the text the store will ask for. Null when the entry
  *  has none, when they belong to a different index, or when the counts do not line up. */
 function seedFromEntry(env, entry) {
   if (!Array.isArray(entry.vectors) || entry.vectors.length !== entry.messages.length) return null;
@@ -1714,6 +1731,35 @@ function pageResponse(request, env, path) {
       },
     },
   );
+}
+/** A scheduled tick: the only way to learn that the platform still invokes us, and the only line
+ *  in the log that arrives when no client asked for anything.
+ *
+ *  `edgeone.json` points a `schedules` entry here. It does no storage work and loads no SQLite: its
+ *  whole job is to prove an invocation happened and to record the instance it happened in. If the
+ *  beats stop, the endpoint stopped being invoked - which is a different fault from a slow request,
+ *  and the 120 s kills of 2026-10-31 could not tell them apart. */
+function beatResponse(env, path) {
+  if (path !== "/beat" && path !== "/api/beat") return undefined;
+  // eslint-disable-next-line no-console -- diagnostic output, like monitoring.mjs
+  console.log(
+    JSON.stringify({
+      event: "nmg_beat",
+      at: new Date().toISOString(),
+      // The beat runs before the request's own trace id exists (it is answered ahead of auth,
+      // because the scheduler carries no credentials), so it carries its own.
+      trace_id: crypto.randomUUID(),
+      revision: SOURCE_REVISION.split("+")[0],
+      pid: process.pid,
+      uptime_s: Math.round(process.uptime()),
+      // Cold or warm: the only cheap, per-invocation number that separates "we were woken" from
+      // "we were already here".
+      rss_mb: Math.round((process.memoryUsage().rss / 1048576) * 100) / 100,
+      sqlite_ready: sqliteIsReady(),
+      embedding: env.NMG_EMBED_MODEL ?? null,
+    }),
+  );
+  return json({ ok: true, at: new Date().toISOString(), pid: process.pid });
 }
 async function healthResponse(env, path) {
   if (path !== "/health") return undefined;
@@ -2235,6 +2281,9 @@ async function handle(request, env) {
   const path = normalizePath(url);
   const early =
     pageResponse(request, env, path) ??
+    // Before auth on purpose: the scheduler carries no credentials, and the route exposes nothing
+    // but the fact that an invocation happened.
+    beatResponse(env, path) ??
     (await healthResponse(env, path)) ??
     (await reclaimAllRoute(request, env, path)) ??
     (await foldRoute(request, env, url, path));

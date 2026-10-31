@@ -93,7 +93,19 @@ function pass(what) {
   pass("nested stages restore the outer stage with its own age");
 }
 
-// 5. Structural pin: inside the embedding client, every provider call must go through the single
+// 5. The scheduled tick is declared in the artefact the platform reads, not only in the source.
+{
+  const settings = JSON.parse(
+    fs.readFileSync(new URL("../dist/edgeone/edgeone.json", import.meta.url), "utf8"),
+  );
+  const beat = (settings.schedules ?? []).find((entry) => entry.path === "/beat");
+  assert.ok(beat, "edgeone.json must declare the /beat schedule or the endpoint never ticks");
+  assert.equal(beat.method, "POST");
+  assert.match(beat.cron, /^\*\/30 \* \* \* \*$/, "the tick must be every 30 minutes");
+  pass("the built edgeone.json declares a 30-minute scheduled tick to /beat");
+}
+
+// 6. Structural pin: inside the embedding client, every provider call must go through the single
 //    helper that applies the caller deadline.
 //
 //    Deliberately a source check, not a behavioural one. A behavioural test needs a provider that

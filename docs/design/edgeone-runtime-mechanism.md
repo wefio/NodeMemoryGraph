@@ -82,7 +82,22 @@ invocation, which is why a budget expressed as "start before X" was replaced by 
 **Consequence.** A row whose duration and memory are both zero cannot support any conclusion
 about speed or memory. Two rows agreeing on RSS is weak evidence of the same container.
 
-## 6. Deploy behaviour
+## 6. Scheduled invocations
+
+`edgeone.json` documents a `schedules` array that invokes a function route on a cron expression:
+`name`, `cron` (five fields, or six with seconds), `path`, `method`, `payload`, `timezone`. The same
+page shows an hourly example **and** a sentence that reads as a one-day minimum interval, so the
+interval is not established: the 30-minute tick this repository ships is the experiment that settles
+it (a single beat per day means the platform coerced the expression).
+
+| statement                                                                               | source                                             |
+| --------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| a cron-driven invocation exists and needs no external caller                            | official                                           |
+| the minimum interval is at least a minute                                               | official                                           |
+| whether 30 minutes is honoured                                                          | **unknown** - measured by whether the beats appear |
+| a schedule fires with no client request, so its log line proves the platform invoked us | official + reasoning                               |
+
+## 7. Deploy behaviour
 
 | statement                                                                         | source                                                 |
 | --------------------------------------------------------------------------------- | ------------------------------------------------------ |
