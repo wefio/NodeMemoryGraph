@@ -121,13 +121,19 @@ fs.writeFileSync(
           overseas: ["ap-hongkong"],
         },
       },
-      // A scheduled tick every 30 minutes. The platform documents a `schedules` array in
-      // edgeone.json (cron, path, method, payload, timezone) but one sentence there also reads as a
-      // one-day minimum interval while an hourly example is given, so the interval below is the
-      // falsifiable part: if only one beat a day appears in the log, the platform coerced it.
-      schedules: [
-        { name: "nmg-heartbeat", cron: "*/30 * * * *", path: "/beat", method: "POST" },
-      ],
+      // NO `schedules` here, and this is not an oversight.
+      //
+      // The platform documents a `schedules` array in edgeone.json (cron, path, method, payload,
+      // timezone), and /beat exists to be its target. Deploying with it produced a project where
+      // EVERY function route answered 404 while the domain served a default page; the same commit
+      // without this block deployed correctly (A/B, 2026-10-31, deployment dp2sid88gf31 vs the
+      // schedules deployment). So the documented shape is not accepted as written, or the CLI drops
+      // the whole function when it meets it. Until that is understood, a schedule in this file
+      // trades liveness for an outage.
+      //
+      // The working alternative is a client-side watcher (scripts/watch-endpoint.mjs): it proves
+      // reachability from the client's side and needs no deploy. It cannot prove that the platform
+      // invoked us, which is what the schedule was for.
     },
     null,
     2,
