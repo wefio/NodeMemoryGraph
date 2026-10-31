@@ -49,13 +49,19 @@ function pass(what) {
   );
   // A slow-but-finishing call must not be cut: the deadline is a net, not a throttle.
   assert.equal(
-    await hardDeadline(async () => {
-      await sleep(30);
-      return "done";
-    }, 200, "x"),
+    await hardDeadline(
+      async () => {
+        await sleep(30);
+        return "done";
+      },
+      200,
+      "x",
+    ),
     "done",
   );
-  pass("the deadline passes values through, keeps the caller's error, and does not cut slow-but-finishing work");
+  pass(
+    "the deadline passes values through, keeps the caller's error, and does not cut slow-but-finishing work",
+  );
 }
 
 // 3. Stage age separates the two faults a name cannot.
@@ -98,11 +104,15 @@ function pass(what) {
   const settings = JSON.parse(
     fs.readFileSync(new URL("../dist/edgeone/edgeone.json", import.meta.url), "utf8"),
   );
-  const beat = (settings.schedules ?? []).find((entry) => entry.path === "/beat");
-  assert.ok(beat, "edgeone.json must declare the /beat schedule or the endpoint never ticks");
-  assert.equal(beat.method, "POST");
-  assert.match(beat.cron, /^\*\/30 \* \* \* \*$/, "the tick must be every 30 minutes");
-  pass("the built edgeone.json declares a 30-minute scheduled tick to /beat");
+  // The opposite assertion, and it is the one that protects the deployment: with a `schedules`
+  // block present, every function route 404'd (A/B on 2026-10-31). If someone adds one back, this
+  // test fails before the deploy does.
+  assert.equal(
+    settings.schedules,
+    undefined,
+    "edgeone.json must not declare schedules: deploying with one took every function route down",
+  );
+  pass("the built edgeone.json carries no schedules block (it took the deployment down once)");
 }
 
 // 6. Structural pin: inside the embedding client, every provider call must go through the single

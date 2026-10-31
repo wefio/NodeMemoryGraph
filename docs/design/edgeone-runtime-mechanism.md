@@ -87,15 +87,20 @@ about speed or memory. Two rows agreeing on RSS is weak evidence of the same con
 `edgeone.json` documents a `schedules` array that invokes a function route on a cron expression:
 `name`, `cron` (five fields, or six with seconds), `path`, `method`, `payload`, `timezone`. The same
 page shows an hourly example **and** a sentence that reads as a one-day minimum interval, so the
-interval is not established: the 30-minute tick this repository ships is the experiment that settles
-it (a single beat per day means the platform coerced the expression).
+interval is not established.
 
-| statement                                                                               | source                                             |
-| --------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| a cron-driven invocation exists and needs no external caller                            | official                                           |
-| the minimum interval is at least a minute                                               | official                                           |
-| whether 30 minutes is honoured                                                          | **unknown** - measured by whether the beats appear |
-| a schedule fires with no client request, so its log line proves the platform invoked us | official + reasoning                               |
+**Do not ship one until that is resolved.** An A/B on 2026-10-31 showed that deploying this array as
+documented left a project where no function route answered at all. The finding belongs here rather
+than in a bug tracker because it is a property of the artefact the platform reads.
+
+| statement                                                                                                                                                                                                                                                   | source                                             |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| a cron-driven invocation exists and needs no external caller                                                                                                                                                                                                | official                                           |
+| the minimum interval is at least a minute                                                                                                                                                                                                                   | official                                           |
+| whether 30 minutes is honoured                                                                                                                                                                                                                              | **unknown** - measured by whether the beats appear |
+| a schedule fires with no client request, so its log line proves the platform invoked us                                                                                                                                                                     | official + reasoning                               |
+| **a `schedules` block as documented took every function route down**: with it deployed, `/health`, `/add` and `/search` all answered 404 while the domain served the platform default page; the same commit without it deployed correctly (A/B, 2026-10-31) | measured                                           |
+| the route `/beat` itself works when no schedule points at it                                                                                                                                                                                                | measured                                           |
 
 ## 7. Deploy behaviour
 
