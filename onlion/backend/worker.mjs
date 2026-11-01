@@ -1540,6 +1540,9 @@ function searchAnswer({
   persistence,
 }) {
   const appended = collectAppended(appendedById, candidates, Math.min(topK, APPENDED_MAX_RECORDS));
+  // Dropped by the extraction that created this function, and CodeFactor caught it as an unused
+  // import rather than as the behaviour change it was: the page's inline byte count went missing.
+  persistence.inline_bytes = manifest.parts.reduce((sum, part) => sum + deltaBytes(part), 0);
   return {
     data: candidates,
     retrieval_mode: modes.has("records") ? "records" : "lexical",
