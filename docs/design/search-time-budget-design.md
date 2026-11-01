@@ -19,14 +19,15 @@ change twice.
 
 ## The phases
 
-| #   | phase                  | what bounds it                                                                                                                                           | owner                  |
-| --- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| 1   | read the request body  | its own body deadline                                                                                                                                    | `readJson`             |
-| 2   | read the user manifest | one object read, no dedicated bound                                                                                                                      | `readManifest`         |
-| 3   | read partitions        | a gate evaluated **before each partition**; when it trips, the rest is skipped and the answer is marked partial                                          | `readSearchCandidates` |
-| 3a  | one partition download | the object store's per-call timeout                                                                                                                      | `openPart`             |
-| 3b  | read the log tail      | a named budget, or whatever remains of the search budget when that is smaller                                                                            | `pendingForSearch`     |
-| 4   | read the query vector  | an **independent clock** started when the embedding client is built (or, for a write, the write clock), plus a deadline the caller enforces on each call | `embeddingClient`      |
+| #   | phase                   | what bounds it                                                                                                                                           | owner                  |
+| --- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| 1   | read the request body   | its own body deadline                                                                                                                                    | `readJson`             |
+| 0   | `/health` storage probe | `HEALTH_PROBE_MS`; a timeout is reported as `storage_probe: timeout` and the route still answers 200                                                     | `healthResponse`       |
+| 2   | read the user manifest  | one object read, no dedicated bound                                                                                                                      | `readManifest`         |
+| 3   | read partitions         | a gate evaluated **before each partition**; when it trips, the rest is skipped and the answer is marked partial                                          | `readSearchCandidates` |
+| 3a  | one partition download  | the object store's per-call timeout                                                                                                                      | `openPart`             |
+| 3b  | read the log tail       | a named budget, or whatever remains of the search budget when that is smaller                                                                            | `pendingForSearch`     |
+| 4   | read the query vector   | an **independent clock** started when the embedding client is built (or, for a write, the write clock), plus a deadline the caller enforces on each call | `embeddingClient`      |
 
 Two phases are not in this list because they are not bounded by us at all: the
 platform's invocation ceiling, and the client's patience. Both are external facts, owned

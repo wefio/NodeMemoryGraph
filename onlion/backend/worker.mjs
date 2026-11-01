@@ -1203,6 +1203,8 @@ const SEARCH_DEADLINE_MS = 25_000;
  *  successful embedding behind it - a user whose data was still in the log, so the partition loop
  *  never ran and the deadline that lives in it never applied. */
 const PENDING_READ_MS = 8_000;
+/** How long /health waits for its storage probe before answering anyway. */
+const HEALTH_PROBE_MS = 8_000;
 
 /** Features to embed and search per clause, bounded by `MAX_QUERY_FEATURES`.
  *
@@ -1868,8 +1870,22 @@ async function healthResponse(env, path) {
   // Deliberately no sqliteReady(): /health is the harness preflight, it is hit first, and it does
   // not read a database. Loading SQLite here made the cheapest route pay a wasm decode and
   // compile measured at 3.6-6.5 s per invocation on this platform.
-  await env.MEMORY.head("health/probe");
+  //
+  // The probe is bounded. Measured on the live endpoint 2026-11-01: four consecutive /health calls
+  // took 1.8 s, 2.8 s, 4.5 s and then did not answer inside 45 s - the same intermittent object
+  // store stall that turns a search into a 120 s kill. This route is the benchmark's preflight, so
+  // a slow bucket must not be able to hold it: the probe reports how long it took instead of
+  // deciding the run may not start.
+  const probeStarted = Date.now();
+  const storageProbe = await hardDeadline(
+    () => env.MEMORY.head("health/probe").then(() => "ok"),
+    Number(env.NMG_HEALTH_PROBE_MS) > 0 ? Number(env.NMG_HEALTH_PROBE_MS) : HEALTH_PROBE_MS,
+    "health_probe",
+  ).catch((error) => (error?.code === "embedding_deadline" ? "timeout" : "error"));
+  const storageProbeMs = Date.now() - probeStarted;
   return json({
+    storage_probe: storageProbe,
+    storage_probe_ms: storageProbeMs,
     status: "ok",
     service: "NodeMemoryGraph",
     storage: "R2",
