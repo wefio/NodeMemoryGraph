@@ -1078,6 +1078,10 @@ async function pendingForSearch(env, ctx, limit) {
   // how accepted data becomes invisible (I1). The listing below is bounded by MAX_PENDING_READ, so
   // never trusting the hint costs one small request.
   const waiting = await listPending(env.MEMORY, ctx.key, {
+    // Injected so the listing and each entry read carry a stage name: a stall there used to report
+    // `stage_isolate: null`, which excluded every phase in the table without naming the one that
+    // was actually running.
+    measure,
     limit: Math.min(limit, MAX_PENDING_READ),
     generation: ctx.manifest.generation ?? null,
     // Newest first: a streaming update has to be visible before it is folded, and taking

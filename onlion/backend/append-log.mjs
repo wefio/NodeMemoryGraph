@@ -184,7 +184,12 @@ export async function listPending(bucket, userKey, options = {}) {
       : filtered
         ? Math.max(MAX_PENDING_READ, limit * SCAN_FACTOR)
         : limit;
-  const objects = await listObjects(bucket, userKey, scan);
+  // Named, so a stall here is not "no stage at all". The 2026-11-01 windows spent 100+ s with
+  // `stage_isolate: null` and `live_databases: 0` - no measured region, no database - and the only
+  // I/O left on that path was this listing plus one read per entry. Injected rather than imported:
+  // this module stays free of the worker's dependencies, which a test enforces.
+  const track = options?.measure ?? ((_name, operation) => operation());
+  const objects = await track('pending_list', () => listObjects(bucket, userKey, scan));
   // A tail window is taken by name before any body is read: names sort in arrival order,
   // so the last `scan` keys are the newest entries without paying for the ones skipped.
   const candidates = newest && Number.isFinite(scan) ? objects.slice(-scan) : objects;
@@ -212,7 +217,7 @@ export async function listPending(bucket, userKey, options = {}) {
         // before its body is fetched: no read, no parse, no embedding downstream.
         if (skipRequestHash && skipRequestHash(hash)) return null;
         // A concurrent fold or reset may delete an entry between list and get.
-        const entry = await readLogEntry(bucket, userKey, name);
+        const entry = await track('pending_get', () => readLogEntry(bucket, userKey, name));
         if (!entry) return null;
         if (generation !== undefined && (entry.generation ?? null) !== (generation ?? null))
           return null;
