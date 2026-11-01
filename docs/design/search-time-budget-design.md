@@ -25,6 +25,7 @@ change twice.
 | 2   | read the user manifest | one object read, no dedicated bound                                                                                                                      | `readManifest`         |
 | 3   | read partitions        | a gate evaluated **before each partition**; when it trips, the rest is skipped and the answer is marked partial                                          | `readSearchCandidates` |
 | 3a  | one partition download | the object store's per-call timeout                                                                                                                      | `openPart`             |
+| 3b  | read the log tail      | a named budget, or whatever remains of the search budget when that is smaller                                                                            | `pendingForSearch`     |
 | 4   | read the query vector  | an **independent clock** started when the embedding client is built (or, for a write, the write clock), plus a deadline the caller enforces on each call | `embeddingClient`      |
 
 Two phases are not in this list because they are not bounded by us at all: the
@@ -75,12 +76,13 @@ once by a well-intentioned patch.
 One line per request is always written, with the route, status, elapsed time and whether
 SQLite was ready. A failure record adds the stage and a code.
 
-| what you see                                        | what it rules in                                                                | what it rules out                                                        |
-| --------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| no request line at all                              | the handler never finished — look at phase 1 and at the platform                | any phase above                                                          |
-| a 200 whose elapsed time exceeds the smallest knob  | the gate released another partition, or the embedding phase spent its own clock | a single phase hitting one bound                                         |
-| `stage` naming a download with a dependency timeout | phase 3a                                                                        | the embedding provider; its fields are absent from that record by design |
-| `partial` / `degraded`                              | the answer was shortened, and why                                               | that the store was healthy                                               |
+| what you see                                        | what it rules in                                                                   | what it rules out                                                        |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| no request line at all                              | the handler never finished — look at phase 1 and at the platform                   | any phase above                                                          |
+| a 200 whose elapsed time exceeds the smallest knob  | the gate released another partition, or the embedding phase spent its own clock    | a single phase hitting one bound                                         |
+| `stage` naming a download with a dependency timeout | phase 3a                                                                           | the embedding provider; its fields are absent from that record by design |
+| `partial` / `degraded`                              | the answer was shortened, and why                                                  | that the store was healthy                                               |
+| `stage_isolate: null` on a beat                     | the request is outside **every** measured region, so no phase above owns that time | any of the phases above — including embedding                            |
 
 Two log fields are read as a contradiction when they are not, because their **scopes
 differ**: the readiness flag is evaluated at the moment the line is written, while the

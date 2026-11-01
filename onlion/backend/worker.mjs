@@ -9,6 +9,7 @@ import {
   queueStatus,
   reportFailure,
   embeddingOperation,
+  hardDeadline,
   embeddingObservation,
   recentFailures,
   check,
@@ -1077,6 +1078,10 @@ async function pendingForSearch(env, ctx, limit) {
   // how accepted data becomes invisible (I1). The listing below is bounded by MAX_PENDING_READ, so
   // never trusting the hint costs one small request.
   const waiting = await listPending(env.MEMORY, ctx.key, {
+    // Injected so the listing and each entry read carry a stage name: a stall there used to report
+    // `stage_isolate: null`, which excluded every phase in the table without naming the one that
+    // was actually running.
+    measure,
     limit: Math.min(limit, MAX_PENDING_READ),
     generation: ctx.manifest.generation ?? null,
     // Newest first: a streaming update has to be visible before it is folded, and taking
@@ -1192,6 +1197,12 @@ const FOLD_BUDGET_MS = 20_000;
  *  page is built from the partitions already read and marked `partial`: fewer candidates for one
  *  question, instead of a request killed at the ceiling and no answer at all. */
 const SEARCH_DEADLINE_MS = 25_000;
+/** The log tail a search reads before answering. It is one list plus one object per entry (up to
+ *  `MAX_PENDING_READ`), on a path that used to be neither measured nor bounded: the 2026-11-01
+ *  window shows a request spending 100 s with `stage_isolate: null`, no SQLite ever opened and one
+ *  successful embedding behind it - a user whose data was still in the log, so the partition loop
+ *  never ran and the deadline that lives in it never applied. */
+const PENDING_READ_MS = 8_000;
 
 /** Features to embed and search per clause, bounded by `MAX_QUERY_FEATURES`.
  *
@@ -1392,6 +1403,61 @@ function unreadablePartition(error) {
     /ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up/i.test(String(error?.message ?? ""))
   );
 }
+/** The read path's budget, in one place: a tuning change must not be able to move one copy of it. */
+function searchDeadlineMs(env) {
+  const configured = Number(env.NMG_SEARCH_DEADLINE_MS);
+  return Number.isFinite(configured) && configured >= 0 ? configured : SEARCH_DEADLINE_MS;
+}
+/** The log tail, measured and bounded.
+ *
+ *  It is the only I/O on a search that no phase owned: the 2026-11-01 windows spent 100+ s with
+ *  `stage_isolate: null` and `live_databases: 0`, and every one of them ended 200 - no measured
+ *  region active, no database opened, one successful embedding behind it. An unreadable log now
+ *  costs the newest records rather than the answer, and it names itself when it fails.
+ */
+async function fusePendingBounded({
+  env,
+  key,
+  manifest,
+  features,
+  candidates,
+  client,
+  modes,
+  topK,
+  contributions,
+  appendOnly,
+  appendedById,
+  started,
+}) {
+  const budgetMs = Math.min(
+    Number(env.NMG_PENDING_READ_MS) > 0 ? Number(env.NMG_PENDING_READ_MS) : PENDING_READ_MS,
+    Math.max(2_000, searchDeadlineMs(env) - (Date.now() - started)),
+  );
+  try {
+    const fused = await measure("pending_read", () =>
+      hardDeadline(
+        () =>
+          fusePendingRecords({
+            env,
+            ctx: { key, manifest },
+            features,
+            candidates,
+            client,
+            modes,
+            topK,
+            contributions,
+            appendOnly,
+            appendedById,
+          }),
+        budgetMs,
+        "pending_read",
+      ),
+    );
+    return { candidates: fused, degraded: null };
+  } catch (error) {
+    return { candidates, degraded: error?.code ?? "pending_unavailable" };
+  }
+}
 async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, appendOnly, features, client, started, contributions, appendedById }) {
   const modes = new Set();
   let candidates = [];
@@ -1399,10 +1465,7 @@ async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, a
   /** Why the page is short, when it is: the error code of the first partition that could not be read. */
   let degraded = null;
   let skipped = 0;
-  const searchDeadline =
-    Number(env.NMG_SEARCH_DEADLINE_MS) >= 0
-      ? Number(env.NMG_SEARCH_DEADLINE_MS)
-      : SEARCH_DEADLINE_MS;
+  const searchDeadline = searchDeadlineMs(env);
     for (let i = 0; i < manifest.parts.length; i++) {
       if (Date.now() - started > searchDeadline) {
         partial = true;
@@ -1456,6 +1519,53 @@ async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, a
   return { candidates, modes, partial, degraded };
 }
 
+/** The answer shape, assembled in one place.
+ *
+ *  Extracted from `search` for the complexity gate, and it earns its keep: every field here is a
+ *  statement about what the page does and does not contain, so they read better together than
+ *  interleaved with the read itself.
+ */
+function searchAnswer({
+  candidates,
+  modes,
+  partial,
+  degraded,
+  started,
+  manifest,
+  clauses,
+  contributions,
+  hasAppendOnly,
+  appendedById,
+  topK,
+  persistence,
+}) {
+  const appended = collectAppended(appendedById, candidates, Math.min(topK, APPENDED_MAX_RECORDS));
+  // Dropped by the extraction that created this function, and CodeFactor caught it as an unused
+  // import rather than as the behaviour change it was: the page's inline byte count went missing.
+  persistence.inline_bytes = manifest.parts.reduce((sum, part) => sum + deltaBytes(part), 0);
+  return {
+    data: candidates,
+    retrieval_mode: modes.has("records") ? "records" : "lexical",
+    // A short page says it is short, whether a partition or the log tail was the reason.
+    partial: partial || Boolean(degraded),
+    ...(degraded ? { degraded } : {}),
+    timings: {
+      totalMs: Date.now() - started,
+      partitions: manifest.parts.length,
+      clauses: clauses.length,
+    },
+    clauses: clauses.map((clause, index) => ({
+      name: clause.name,
+      index,
+      appendOnly: clause.appendOnly === true,
+      contributed: contributions[index].contributed,
+      exclusive: contributions[index].exclusive,
+    })),
+    ...(hasAppendOnly ? { appended } : {}),
+    persistence,
+    storage_format: manifestFormat(manifest),
+  };
+}
 async function search(env, input) {
   const userId = textField(input.user_id ?? input.userId, "user_id");
   requestIdentity(userId, input.request_id);
@@ -1526,9 +1636,10 @@ async function search(env, input) {
     candidates.push(...pageCandidates);
     const modes = modesRead;
     const partial = partialRead;
-    const fused = await fusePendingRecords({
+    const pending = await fusePendingBounded({
       env,
-      ctx: { key: keyFor(userId), manifest },
+      key: keyFor(userId),
+      manifest,
       features,
       candidates,
       client,
@@ -1537,35 +1648,24 @@ async function search(env, input) {
       contributions,
       appendOnly,
       appendedById,
+      started,
     });
-    candidates = fused;
-    persistence.inline_bytes = manifest.parts.reduce((sum, p) => sum + deltaBytes(p), 0);
-    const appended = collectAppended(
-      appendedById,
+    candidates = pending.candidates;
+    const pendingDegraded = pending.degraded;
+    return searchAnswer({
       candidates,
-      Math.min(topK, APPENDED_MAX_RECORDS),
-    );
-    return {
-        data: candidates,
-        retrieval_mode: modes.has("records") ? "records" : "lexical",
-        partial,
-        ...(degraded ? { degraded } : {}),
-        timings: {
-          totalMs: Date.now() - started,
-          partitions: manifest.parts.length,
-          clauses: clauses.length,
-        },
-        clauses: clauses.map((clause, index) => ({
-          name: clause.name,
-          index,
-          appendOnly: clause.appendOnly === true,
-          contributed: contributions[index].contributed,
-          exclusive: contributions[index].exclusive,
-        })),
-        ...(hasAppendOnly ? { appended } : {}),
-        persistence,
-        storage_format: manifestFormat(manifest),
-    };
+      modes,
+      partial,
+      degraded: degraded ?? pendingDegraded,
+      started,
+      manifest,
+      clauses,
+      contributions,
+      hasAppendOnly,
+      appendedById,
+      topK,
+      persistence,
+    });
   }
   } catch (error) {
       if (error.code === "snapshot_changed" && manifestReads < 2) {

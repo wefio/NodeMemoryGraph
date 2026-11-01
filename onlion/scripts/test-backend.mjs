@@ -620,6 +620,9 @@ print(json.dumps(r))`,
     assert.ok(!("manifest_commit" in run.stages_ms));
     assert.equal(run.persistence.full_snapshot_saves, 0);
     assert.equal(run.persistence.inline_delta_saves, 0);
+    // Present and numeric on every page: a refactor once dropped this field, and nothing noticed
+    // until a linter reported the helper it used as unused. The count belongs to the page.
+    assert.equal(typeof run.persistence.inline_bytes, "number");
     assert.ok(!("partition_save" in run.stages_ms));
     assert.ok(!("sqlite_export" in run.stages_ms), "pure search must not export its SQLite image");
   }
