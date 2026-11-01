@@ -1408,6 +1408,56 @@ function searchDeadlineMs(env) {
   const configured = Number(env.NMG_SEARCH_DEADLINE_MS);
   return Number.isFinite(configured) && configured >= 0 ? configured : SEARCH_DEADLINE_MS;
 }
+/** The log tail, measured and bounded.
+ *
+ *  It is the only I/O on a search that no phase owned: the 2026-11-01 windows spent 100+ s with
+ *  `stage_isolate: null` and `live_databases: 0`, and every one of them ended 200 - no measured
+ *  region active, no database opened, one successful embedding behind it. An unreadable log now
+ *  costs the newest records rather than the answer, and it names itself when it fails.
+ */
+async function fusePendingBounded({
+  env,
+  key,
+  manifest,
+  features,
+  candidates,
+  client,
+  modes,
+  topK,
+  contributions,
+  appendOnly,
+  appendedById,
+  started,
+}) {
+  const budgetMs = Math.min(
+    Number(env.NMG_PENDING_READ_MS) > 0 ? Number(env.NMG_PENDING_READ_MS) : PENDING_READ_MS,
+    Math.max(2_000, searchDeadlineMs(env) - (Date.now() - started)),
+  );
+  try {
+    const fused = await measure("pending_read", () =>
+      hardDeadline(
+        () =>
+          fusePendingRecords({
+            env,
+            ctx: { key, manifest },
+            features,
+            candidates,
+            client,
+            modes,
+            topK,
+            contributions,
+            appendOnly,
+            appendedById,
+          }),
+        budgetMs,
+        "pending_read",
+      ),
+    );
+    return { candidates: fused, degraded: null };
+  } catch (error) {
+    return { candidates, degraded: error?.code ?? "pending_unavailable" };
+  }
+}
 async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, appendOnly, features, client, started, contributions, appendedById }) {
   const modes = new Set();
   let candidates = [];
@@ -1539,37 +1589,22 @@ async function search(env, input) {
     candidates.push(...pageCandidates);
     const modes = modesRead;
     const partial = partialRead;
-    // Measured and bounded. An unreadable log costs the newest records, not the answer, and the
-    // stage is now nameable: before this, a stall here reported `stage_isolate: null` because no
-    // measure wrapped it, which is why four windows of logs could not say where the time went.
-    const pendingBudgetMs = Math.min(
-      Number(env.NMG_PENDING_READ_MS) > 0 ? Number(env.NMG_PENDING_READ_MS) : PENDING_READ_MS,
-      Math.max(2_000, searchDeadlineMs(env) - (Date.now() - started)),
-    );
-    let pendingDegraded = null;
-    const fused = await measure("pending_read", () =>
-      hardDeadline(
-        () =>
-          fusePendingRecords({
-            env,
-            ctx: { key: keyFor(userId), manifest },
-            features,
-            candidates,
-            client,
-            modes,
-            topK,
-            contributions,
-            appendOnly,
-            appendedById,
-          }),
-        pendingBudgetMs,
-        "pending_read",
-      ),
-    ).catch((error) => {
-      pendingDegraded = error?.code ?? "pending_unavailable";
-      return candidates;
+    const pending = await fusePendingBounded({
+      env,
+      key: keyFor(userId),
+      manifest,
+      features,
+      candidates,
+      client,
+      modes,
+      topK,
+      contributions,
+      appendOnly,
+      appendedById,
+      started,
     });
-    candidates = fused;
+    candidates = pending.candidates;
+    const pendingDegraded = pending.degraded;
     persistence.inline_bytes = manifest.parts.reduce((sum, p) => sum + deltaBytes(p), 0);
     const appended = collectAppended(
       appendedById,

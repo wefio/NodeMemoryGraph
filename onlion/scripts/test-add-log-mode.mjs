@@ -126,7 +126,9 @@ try {
           !body.includes(forbidden),
           `the search must never ${forbidden}; it is a read`,
         );
-      for (const required of ["allowBackfill: false", "readOnly: true", "manifest_read", "fusePendingRecords"])
+      // The pending fusion moved into its own bounded helper (fusePendingBounded), so the
+      // requirement is that the search still reaches it - not that the call sits inline.
+      for (const required of ["allowBackfill: false", "readOnly: true", "manifest_read", "fusePendingBounded"])
         assert.ok(body.includes(required), `the search must contain ${required}`);
     }
     // The two budgets are what keep a request from being killed at the platform ceiling. A
