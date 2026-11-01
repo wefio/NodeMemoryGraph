@@ -1205,6 +1205,8 @@ const SEARCH_DEADLINE_MS = 25_000;
 const PENDING_READ_MS = 8_000;
 /** How long /health waits for its storage probe before answering anyway. */
 const HEALTH_PROBE_MS = 8_000;
+/** How long a search waits for the manifest before answering a partial page. */
+const MANIFEST_READ_MS = 8_000;
 
 /** Features to embed and search per clause, bounded by `MAX_QUERY_FEATURES`.
  *
@@ -1602,9 +1604,43 @@ async function search(env, input) {
   // was absorbed by the CAS retry loop; as a pure read the path retries itself with a fresh
   // manifest - and a 2026-10-30 15:26 /search 503 of 4.2 s is exactly the race this covered.
   let manifestReads = 0;
-  let manifest = (await measure("manifest_read", () =>
-    loadManifest(env.MEMORY, keyFor(userId), userId),
-  )).manifest;
+  // Bounded, because it is the first object read of every search and it was the last unbounded one.
+  // Measured on the live endpoint 2026-11-01: one MEMORY.head stalled for over 45 s on /health, and
+  // a search issued right after an Add stalled past 90 s with the manifest read as the only step
+  // left before the bounded log tail. A slow bucket degrades the page; it does not hold the request
+  // until the platform kills it.
+  let manifest;
+  try {
+    manifest = (
+      await measure("manifest_read", () =>
+        hardDeadline(
+          () => loadManifest(env.MEMORY, keyFor(userId), userId),
+          Number(env.NMG_MANIFEST_READ_MS) > 0
+            ? Number(env.NMG_MANIFEST_READ_MS)
+            : MANIFEST_READ_MS,
+          "manifest_read",
+        ),
+      )
+    ).manifest;
+  } catch (error) {
+    if (error?.code !== "embedding_deadline") throw error;
+    return searchAnswer({
+      candidates: [],
+      modes: new Set(),
+      partial: true,
+      degraded: "manifest_timeout",
+      started,
+      manifest: { parts: [], format: manifestFormat({ parts: [], format: "nmg-shards-v3" }) },
+      clauses,
+      contributions,
+      hasAppendOnly,
+      appendedById,
+      topK,
+      // The per-attempt counter is declared later, inside the attempt itself: nothing has been
+      // saved or changed when the manifest read is what failed.
+      persistence: { inline_delta_saves: 0, full_snapshot_saves: 0, changed_pages: 0 },
+    });
+  }
   // Loaded on the first partition, not up front: a user whose writes are still in the log has no
   // partitions at all (the harness's first questions are exactly that), and the manifest read is
   // the only thing a search needs for them. Measured before this: /health at 25 ms with
