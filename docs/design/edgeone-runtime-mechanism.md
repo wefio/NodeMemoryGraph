@@ -17,13 +17,13 @@ measurement or a new official document, never by inference from a single sample.
 
 ## 1. Invocation lifecycle
 
-| statement                                                                                                                                                         | source                                |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| Each invocation runs in a **fresh isolate**: `instance.seq` was 1 on every one of 40+ observed request lines, across containers with `uptime_s` from 1210 to 3731 | measured                              |
-| The **container is reused** for roughly 40–60 minutes; `uptime_s` grows across otherwise independent requests                                                     | measured                              |
-| A module-level variable therefore does **not** outlive one request in practice                                                                                    | measured (follows from the two above) |
-| There is **no documented** instance-reuse guarantee, reserved instance, or provisioned concurrency                                                                | official (absence)                    |
-| Cold start of this bundle costs **~2–5 s**; a warm container answers `/health` in ~25 ms                                                                          | measured                              |
+| statement                                                                                                                                                                                                                                | source                                |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| Each invocation runs in a **fresh isolate**: `instance.seq` was 1 on every one of 40+ observed request lines, across containers with `uptime_s` from 1210 to 3731                                                                        | measured                              |
+| The **container is reused**; the shortest window observed was 40–60 minutes and the longest so far is **22 hours** on one container (`uptime_s` 79 766) with RSS steady at 270–350 MB. Those bound the sample; they are not a reuse rule | measured                              |
+| A module-level variable therefore does **not** outlive one request in practice                                                                                                                                                           | measured (follows from the two above) |
+| There is **no documented** instance-reuse guarantee, reserved instance, or provisioned concurrency                                                                                                                                       | official (absence)                    |
+| Cold start of this bundle costs **~2–5 s**; a warm container answers `/health` in ~25 ms                                                                                                                                                 | measured                              |
 
 **Consequence.** Any cross-request cache, breaker or counter is, on this platform, a per-request
 construct. Code that relies on it must still be correct when an isolate happens to be reused —

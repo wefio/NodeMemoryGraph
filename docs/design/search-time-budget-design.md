@@ -76,12 +76,13 @@ once by a well-intentioned patch.
 One line per request is always written, with the route, status, elapsed time and whether
 SQLite was ready. A failure record adds the stage and a code.
 
-| what you see                                        | what it rules in                                                                | what it rules out                                                        |
-| --------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| no request line at all                              | the handler never finished — look at phase 1 and at the platform                | any phase above                                                          |
-| a 200 whose elapsed time exceeds the smallest knob  | the gate released another partition, or the embedding phase spent its own clock | a single phase hitting one bound                                         |
-| `stage` naming a download with a dependency timeout | phase 3a                                                                        | the embedding provider; its fields are absent from that record by design |
-| `partial` / `degraded`                              | the answer was shortened, and why                                               | that the store was healthy                                               |
+| what you see                                        | what it rules in                                                                   | what it rules out                                                        |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| no request line at all                              | the handler never finished — look at phase 1 and at the platform                   | any phase above                                                          |
+| a 200 whose elapsed time exceeds the smallest knob  | the gate released another partition, or the embedding phase spent its own clock    | a single phase hitting one bound                                         |
+| `stage` naming a download with a dependency timeout | phase 3a                                                                           | the embedding provider; its fields are absent from that record by design |
+| `partial` / `degraded`                              | the answer was shortened, and why                                                  | that the store was healthy                                               |
+| `stage_isolate: null` on a beat                     | the request is outside **every** measured region, so no phase above owns that time | any of the phases above — including embedding                            |
 
 Two log fields are read as a contradiction when they are not, because their **scopes
 differ**: the readiness flag is evaluated at the moment the line is written, while the
