@@ -152,11 +152,12 @@ one place to read the whole taxonomy.
 
 ## Index
 
-| #    | Record                                                                                             | Failure class                  |
-| ---- | -------------------------------------------------------------------------------------------------- | ------------------------------ |
-| 0001 | [The tool that checks the others is not itself checked](0001-tools-outside-the-type-check.md)      | unchecked tooling              |
-| 0002 | [The tree I verified was not the tree I pushed](0002-wrong-tree-verification.md)                   | wrong-tree verification        |
-| 0003 | [The checks I read were reading a mutant](0003-checks-read-a-live-mutant.md)                       | mutant-in-tree reading         |
-| 0004 | ["Flaky" was a clock boundary](0004-flaky-was-a-clock-boundary.md)                                 | mislabelled flake              |
-| 0005 | [Maintenance pressure that could not drain](0005-maintenance-pressure-cannot-drain.md)             | undrainable backlog            |
-| 0006 | [The submission fails before the first question](0006-concurrency-ceiling-on-the-live-endpoint.md) | submission concurrency ceiling |
+| #    | Record                                                                                                                          | Failure class                  |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| 0001 | [The tool that checks the others is not itself checked](0001-tools-outside-the-type-check.md)                                   | unchecked tooling              |
+| 0002 | [The tree I verified was not the tree I pushed](0002-wrong-tree-verification.md)                                                | wrong-tree verification        |
+| 0003 | [The checks I read were reading a mutant](0003-checks-read-a-live-mutant.md)                                                    | mutant-in-tree reading         |
+| 0004 | ["Flaky" was a clock boundary](0004-flaky-was-a-clock-boundary.md)                                                              | mislabelled flake              |
+| 0005 | [Maintenance pressure that could not drain](0005-maintenance-pressure-cannot-drain.md)                                          | undrainable backlog            |
+| 0006 | [The submission fails before the first question](0006-concurrency-ceiling-on-the-live-endpoint.md)                              | submission concurrency ceiling |
+| 0007 | [I deployed into a scored run, and a refactor dropped a field no test watched](0007-deployed-into-a-run-and-dropped-a-field.md) | rule not on the action path    |

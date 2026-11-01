@@ -102,12 +102,13 @@
 
 ## 索引
 
-| #    | 记录                                                                                               | Failure class                  |
-| ---- | -------------------------------------------------------------------------------------------------- | ------------------------------ |
-| 0001 | [检查别人的工具，自己没被检查](0001-tools-outside-the-type-check.zh-CN.md)                         | unchecked tooling              |
-| 0002 | [我验证的树，不是我推送的树](0002-wrong-tree-verification.zh-CN.md)                                | wrong-tree verification        |
-| 0003 | [我读到的检查，读的是 mutant](0003-checks-read-a-live-mutant.zh-CN.md)                             | mutant-in-tree reading         |
-| 0004 | ["flaky" 其实是一个时钟边界](0004-flaky-was-a-clock-boundary.zh-CN.md)                             | mislabelled flake              |
-| 0005 | [重平衡无法消耗的维护压力](0005-maintenance-pressure-cannot-drain.zh-CN.md)                        | undrainable backlog            |
-| 0006 | [The submission fails before the first question](0006-concurrency-ceiling-on-the-live-endpoint.md) | submission concurrency ceiling |
-| ---  | ----                                                                                               | -------------                  |
+| #    | 记录                                                                                                              | Failure class                  |
+| ---- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| 0001 | [检查别人的工具，自己没被检查](0001-tools-outside-the-type-check.zh-CN.md)                                        | unchecked tooling              |
+| 0002 | [我验证的树，不是我推送的树](0002-wrong-tree-verification.zh-CN.md)                                               | wrong-tree verification        |
+| 0003 | [我读到的检查，读的是 mutant](0003-checks-read-a-live-mutant.zh-CN.md)                                            | mutant-in-tree reading         |
+| 0004 | ["flaky" 其实是一个时钟边界](0004-flaky-was-a-clock-boundary.zh-CN.md)                                            | mislabelled flake              |
+| 0005 | [重平衡无法消耗的维护压力](0005-maintenance-pressure-cannot-drain.zh-CN.md)                                       | undrainable backlog            |
+| 0006 | [The submission fails before the first question](0006-concurrency-ceiling-on-the-live-endpoint.md)                | submission concurrency ceiling |
+| 0007 | [我在评分运行中做了部署，而一次重构丢了一个没人盯着的字段](0007-deployed-into-a-run-and-dropped-a-field.zh-CN.md) | 规则不在动作路径上             |
+| ---  | ----                                                                                                              | -------------                  |
