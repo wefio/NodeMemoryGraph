@@ -158,9 +158,11 @@ function pass(what) {
     "the pending read must be measured and bounded by hardDeadline",
   );
   assert.match(source, /const PENDING_READ_MS = \d+_\d+;/, "the pending read needs a named budget");
+  // The answer is assembled in searchAnswer now, so the assertion follows the property: a page is
+  // partial whenever anything degraded it, including the log tail.
   assert.match(
     source,
-    /partial: partial \|\| Boolean\(pendingDegraded\)/,
+    /partial: partial \|\| Boolean\(degraded\)/,
     "an unreadable log must mark the page partial",
   );
   pass("the pending read is measured, bounded and reports itself in the response");

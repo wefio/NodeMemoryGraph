@@ -1519,6 +1519,50 @@ async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, a
   return { candidates, modes, partial, degraded };
 }
 
+/** The answer shape, assembled in one place.
+ *
+ *  Extracted from `search` for the complexity gate, and it earns its keep: every field here is a
+ *  statement about what the page does and does not contain, so they read better together than
+ *  interleaved with the read itself.
+ */
+function searchAnswer({
+  candidates,
+  modes,
+  partial,
+  degraded,
+  started,
+  manifest,
+  clauses,
+  contributions,
+  hasAppendOnly,
+  appendedById,
+  topK,
+  persistence,
+}) {
+  const appended = collectAppended(appendedById, candidates, Math.min(topK, APPENDED_MAX_RECORDS));
+  return {
+    data: candidates,
+    retrieval_mode: modes.has("records") ? "records" : "lexical",
+    // A short page says it is short, whether a partition or the log tail was the reason.
+    partial: partial || Boolean(degraded),
+    ...(degraded ? { degraded } : {}),
+    timings: {
+      totalMs: Date.now() - started,
+      partitions: manifest.parts.length,
+      clauses: clauses.length,
+    },
+    clauses: clauses.map((clause, index) => ({
+      name: clause.name,
+      index,
+      appendOnly: clause.appendOnly === true,
+      contributed: contributions[index].contributed,
+      exclusive: contributions[index].exclusive,
+    })),
+    ...(hasAppendOnly ? { appended } : {}),
+    persistence,
+    storage_format: manifestFormat(manifest),
+  };
+}
 async function search(env, input) {
   const userId = textField(input.user_id ?? input.userId, "user_id");
   requestIdentity(userId, input.request_id);
@@ -1605,33 +1649,20 @@ async function search(env, input) {
     });
     candidates = pending.candidates;
     const pendingDegraded = pending.degraded;
-    persistence.inline_bytes = manifest.parts.reduce((sum, p) => sum + deltaBytes(p), 0);
-    const appended = collectAppended(
-      appendedById,
+    return searchAnswer({
       candidates,
-      Math.min(topK, APPENDED_MAX_RECORDS),
-    );
-    return {
-        data: candidates,
-        retrieval_mode: modes.has("records") ? "records" : "lexical",
-        partial: partial || Boolean(pendingDegraded),
-        ...(degraded ?? pendingDegraded ? { degraded: degraded ?? pendingDegraded } : {}),
-        timings: {
-          totalMs: Date.now() - started,
-          partitions: manifest.parts.length,
-          clauses: clauses.length,
-        },
-        clauses: clauses.map((clause, index) => ({
-          name: clause.name,
-          index,
-          appendOnly: clause.appendOnly === true,
-          contributed: contributions[index].contributed,
-          exclusive: contributions[index].exclusive,
-        })),
-        ...(hasAppendOnly ? { appended } : {}),
-        persistence,
-        storage_format: manifestFormat(manifest),
-    };
+      modes,
+      partial,
+      degraded: degraded ?? pendingDegraded,
+      started,
+      manifest,
+      clauses,
+      contributions,
+      hasAppendOnly,
+      appendedById,
+      topK,
+      persistence,
+    });
   }
   } catch (error) {
       if (error.code === "snapshot_changed" && manifestReads < 2) {
