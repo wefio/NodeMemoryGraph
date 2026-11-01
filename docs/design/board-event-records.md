@@ -170,3 +170,13 @@ evidence that these capabilities passed:
   count.
 - Undelivered notifications may coalesce per event while the original messages and history stay
   readable; different new notifications must not be mistaken for one version.
+
+## Concept adoption
+
+Reuse an existing owner and operation when they express the collaboration need.
+Prototype vocabulary is a reference shelf, not a requirement to create matching
+entities. Add semantics only for a concrete unsupported case, with a reproducible
+failure or acceptance scenario and a named owner. Preserve existing lifecycle,
+authority and compatibility boundaries; candidate concepts are not a committed backlog.
+The [concept reuse guide](../guides/board-concept-reuse.md) maps current operations
+and records concepts to revisit. Its catalog is not a protocol schema.

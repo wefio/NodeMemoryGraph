@@ -5,6 +5,11 @@
 Read this for temporary cross-Agent coordination or a repository in-flight
 registry. Ordinary single-Agent memory use does not require the board.
 
+For a collaboration need described with prototype vocabulary, use the
+[existing-operation mapping](../../../docs/guides/board-concept-reuse.md#use-the-existing-foundation)
+first. It records optional concepts separately; it does not authorize new protocol
+objects or turn an event association into executable work.
+
 ## Availability and identity
 
 The model-facing board and automatic wake polling are available by default so a

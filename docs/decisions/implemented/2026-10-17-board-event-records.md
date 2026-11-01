@@ -108,3 +108,19 @@ Documentation checks establish structure and links only; source tests and host
 integration establish their own narrower contracts. Deployment, live idle-Agent
 wakeup, natural collaboration outcomes and coordination benefits are separate
 from source validation. No shared service restart follows from this decision.
+
+## Selective concept adoption
+
+The DSH prototype offers useful distinctions beyond Ticket, Assignment and
+Session. Recording its vocabulary avoids losing those options; implementing the
+whole catalog would duplicate existing owners and introduce unsupported lifecycle
+promises. The user chose to reuse the available foundation first and revisit
+other concepts only when needed.
+
+The [event contract](../../design/board-event-records.md#concept-adoption) owns
+this extension rule. The [reuse guide](../../guides/board-concept-reuse.md) and
+board workflow make current operations discoverable. This is an implemented
+documentation and adoption-policy change, not new runtime functionality or a
+claim that general Assignment, input ownership or DAG scheduling is complete.
+Wholesale adoption and a mandatory implementation backlog are rejected; leaving
+concepts only in private conversation would make future reuse hard to recover.

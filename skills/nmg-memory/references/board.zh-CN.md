@@ -4,6 +4,9 @@
 
 临时跨 Agent 协作或仓库进行中登记表请读本参考。普通的单 Agent memory 操作不需要 board。
 
+需求使用原型词汇描述时，先查[现有操作映射](../../../docs/guides/board-concept-reuse.zh-CN.md#先使用已有基础)。
+候选概念另行记录；这不授权新增协议对象，也不把事件关联变成可执行任务。
+
 ## 可用性与身份
 
 面向模型的 board 和自动唤醒轮询默认可用，因此新 Agent 可以立即发现共享工作。只有当宿主明确要求单 Agent、仅记忆界面时，才设置 `NMG_ENABLE_COORDINATION=0`（也接受 `false`、`off` 和 `no`）。即使关闭模型侧界面，CLI board 操作仍可用于管理。
