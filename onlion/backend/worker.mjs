@@ -1636,7 +1636,9 @@ async function search(env, input) {
       hasAppendOnly,
       appendedById,
       topK,
-      persistence,
+      // The per-attempt counter is declared later, inside the attempt itself: nothing has been
+      // saved or changed when the manifest read is what failed.
+      persistence: { inline_delta_saves: 0, full_snapshot_saves: 0, changed_pages: 0 },
     });
   }
   // Loaded on the first partition, not up front: a user whose writes are still in the log has no
