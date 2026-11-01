@@ -25,6 +25,7 @@ change twice.
 | 2   | read the user manifest | one object read, no dedicated bound                                                                                                                      | `readManifest`         |
 | 3   | read partitions        | a gate evaluated **before each partition**; when it trips, the rest is skipped and the answer is marked partial                                          | `readSearchCandidates` |
 | 3a  | one partition download | the object store's per-call timeout                                                                                                                      | `openPart`             |
+| 3b  | read the log tail      | a named budget, or whatever remains of the search budget when that is smaller                                                                            | `pendingForSearch`     |
 | 4   | read the query vector  | an **independent clock** started when the embedding client is built (or, for a write, the write clock), plus a deadline the caller enforces on each call | `embeddingClient`      |
 
 Two phases are not in this list because they are not bounded by us at all: the
