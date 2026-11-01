@@ -6,8 +6,28 @@ const SCOPED=Symbol('nmg-memory-generation');
 const ROOTS=['users/','generations/'];
 const fingerprint=id=>createHash('sha256').update(id).digest('hex');
 const prefixFor=epoch=>epoch?`generations/${epoch}/`:'';
+/** How long a control-record read may take before the request is told storage is unavailable.
+ *
+ *  This read happens before any handler runs, so it was the last unbounded step on every memory
+ *  route: measured on 2026-11-01, a search issued right after an Add took over 60 s with every
+ *  other phase already bounded. A quick 503 the caller can retry beats holding the invocation until
+ *  the platform kills it. */
+const CONTROL_READ_MS = 8_000;
 async function control(bucket){
-  const object=await bucket.get(CONTROL);
+  const timeoutMs = Number(process.env.NMG_CONTROL_READ_MS) > 0
+    ? Number(process.env.NMG_CONTROL_READ_MS)
+    : CONTROL_READ_MS;
+  let timer;
+  const object = await Promise.race([
+    bucket.get(CONTROL),
+    new Promise((_resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new StorageError('storage_unavailable', 'The control record did not answer in time', 503)),
+        timeoutMs,
+      );
+      timer?.unref?.();
+    }),
+  ]).finally(() => clearTimeout(timer));
   return {object,state:object?await object.json():{epoch:null,active:null,completed:{}}};
 }
 async function save(bucket,object,state){
