@@ -146,4 +146,24 @@ function pass(what) {
   pass("every provider call inside the embedding client goes through one deadline-applying helper");
 }
 
+// 7. The pending read is the path that spent 100 s with stage_isolate null, so it must be both
+//    measured and bounded. Source check for the same reason as the embedding one: a bucket that
+//    stalls cannot be simulated here, and the failure was invisible precisely because nothing named
+//    the stage.
+{
+  const source = fs.readFileSync(new URL("../backend/worker.mjs", import.meta.url), "utf8");
+  assert.match(
+    source,
+    /measure\("pending_read"[\s\S]{0,80}?hardDeadline\(/,
+    "the pending read must be measured and bounded by hardDeadline",
+  );
+  assert.match(source, /const PENDING_READ_MS = \d+_\d+;/, "the pending read needs a named budget");
+  assert.match(
+    source,
+    /partial: partial \|\| Boolean\(pendingDegraded\)/,
+    "an unreadable log must mark the page partial",
+  );
+  pass("the pending read is measured, bounded and reports itself in the response");
+}
+
 process.stdout.write(`PASS: observability - ${passed.length} checks.\n`);

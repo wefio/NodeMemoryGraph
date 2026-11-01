@@ -9,6 +9,7 @@ import {
   queueStatus,
   reportFailure,
   embeddingOperation,
+  hardDeadline,
   embeddingObservation,
   recentFailures,
   check,
@@ -1192,6 +1193,12 @@ const FOLD_BUDGET_MS = 20_000;
  *  page is built from the partitions already read and marked `partial`: fewer candidates for one
  *  question, instead of a request killed at the ceiling and no answer at all. */
 const SEARCH_DEADLINE_MS = 25_000;
+/** The log tail a search reads before answering. It is one list plus one object per entry (up to
+ *  `MAX_PENDING_READ`), on a path that used to be neither measured nor bounded: the 2026-11-01
+ *  window shows a request spending 100 s with `stage_isolate: null`, no SQLite ever opened and one
+ *  successful embedding behind it - a user whose data was still in the log, so the partition loop
+ *  never ran and the deadline that lives in it never applied. */
+const PENDING_READ_MS = 8_000;
 
 /** Features to embed and search per clause, bounded by `MAX_QUERY_FEATURES`.
  *
@@ -1392,6 +1399,11 @@ function unreadablePartition(error) {
     /ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up/i.test(String(error?.message ?? ""))
   );
 }
+/** The read path's budget, in one place: a tuning change must not be able to move one copy of it. */
+function searchDeadlineMs(env) {
+  const configured = Number(env.NMG_SEARCH_DEADLINE_MS);
+  return Number.isFinite(configured) && configured >= 0 ? configured : SEARCH_DEADLINE_MS;
+}
 async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, appendOnly, features, client, started, contributions, appendedById }) {
   const modes = new Set();
   let candidates = [];
@@ -1399,10 +1411,7 @@ async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, a
   /** Why the page is short, when it is: the error code of the first partition that could not be read. */
   let degraded = null;
   let skipped = 0;
-  const searchDeadline =
-    Number(env.NMG_SEARCH_DEADLINE_MS) >= 0
-      ? Number(env.NMG_SEARCH_DEADLINE_MS)
-      : SEARCH_DEADLINE_MS;
+  const searchDeadline = searchDeadlineMs(env);
     for (let i = 0; i < manifest.parts.length; i++) {
       if (Date.now() - started > searchDeadline) {
         partial = true;
@@ -1526,17 +1535,35 @@ async function search(env, input) {
     candidates.push(...pageCandidates);
     const modes = modesRead;
     const partial = partialRead;
-    const fused = await fusePendingRecords({
-      env,
-      ctx: { key: keyFor(userId), manifest },
-      features,
-      candidates,
-      client,
-      modes,
-      topK,
-      contributions,
-      appendOnly,
-      appendedById,
+    // Measured and bounded. An unreadable log costs the newest records, not the answer, and the
+    // stage is now nameable: before this, a stall here reported `stage_isolate: null` because no
+    // measure wrapped it, which is why four windows of logs could not say where the time went.
+    const pendingBudgetMs = Math.min(
+      Number(env.NMG_PENDING_READ_MS) > 0 ? Number(env.NMG_PENDING_READ_MS) : PENDING_READ_MS,
+      Math.max(2_000, searchDeadlineMs(env) - (Date.now() - started)),
+    );
+    let pendingDegraded = null;
+    const fused = await measure("pending_read", () =>
+      hardDeadline(
+        () =>
+          fusePendingRecords({
+            env,
+            ctx: { key: keyFor(userId), manifest },
+            features,
+            candidates,
+            client,
+            modes,
+            topK,
+            contributions,
+            appendOnly,
+            appendedById,
+          }),
+        pendingBudgetMs,
+        "pending_read",
+      ),
+    ).catch((error) => {
+      pendingDegraded = error?.code ?? "pending_unavailable";
+      return candidates;
     });
     candidates = fused;
     persistence.inline_bytes = manifest.parts.reduce((sum, p) => sum + deltaBytes(p), 0);
@@ -1548,8 +1575,8 @@ async function search(env, input) {
     return {
         data: candidates,
         retrieval_mode: modes.has("records") ? "records" : "lexical",
-        partial,
-        ...(degraded ? { degraded } : {}),
+        partial: partial || Boolean(pendingDegraded),
+        ...(degraded ?? pendingDegraded ? { degraded: degraded ?? pendingDegraded } : {}),
         timings: {
           totalMs: Date.now() - started,
           partitions: manifest.parts.length,
