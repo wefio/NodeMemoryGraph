@@ -36,6 +36,8 @@ export {
 export type { QppActuationMode, SearchRecommendationMode } from "./integration/config.ts";
 export {
   prepareSearchSurface,
+  prepareAutomaticRecallSurface,
+  compactSearchInformationViews,
   prepareCompactSearchSurface,
   prepareEvidenceSurface,
   prepareRememberSurface,

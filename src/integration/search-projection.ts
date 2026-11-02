@@ -30,6 +30,7 @@ export interface CompactSearchCandidate {
 }
 
 export interface CompactSearchContext {
+  recallDisplayMode?: MemoryContext["recallDisplayMode"];
   candidates: CompactSearchCandidate[];
   logicalChainCount: number;
   activeGraphId: string | null;
@@ -46,6 +47,7 @@ export interface CompactSearchContext {
 /** Agent-facing search projection. Exact records and evidence remain behind `nmg get`. */
 export function compactSearchContext(context: MemoryContext): CompactSearchContext {
   return {
+    ...(context.recallDisplayMode ? { recallDisplayMode: context.recallDisplayMode } : {}),
     candidates: context.results.map((result) => ({
       id: result.memory.id,
       node: result.node.canonicalName,
@@ -53,7 +55,11 @@ export function compactSearchContext(context: MemoryContext): CompactSearchConte
       open: result.memory.resolution === "open" || result.memory.resolution === "reopened",
       external: (result.memory.markers ?? []).some((marker) => marker.kind === "external_source"),
       forgotten: (result.memory.markers ?? []).some((marker) => marker.kind === "forget"),
-      preview: searchPreview(result.memory),
+      preview:
+        context.recallDisplayMode === "full" &&
+        !result.memory.markers.some((marker) => marker.kind === "forget")
+          ? result.memory.statement.replace(/\s+/gu, " ").trim()
+          : searchPreview(result.memory),
       eventTime: result.memory.eventTime,
       expiresAt: result.memory.expiresAt ?? result.memory.validUntil,
       chains: logicalChainNames(result),

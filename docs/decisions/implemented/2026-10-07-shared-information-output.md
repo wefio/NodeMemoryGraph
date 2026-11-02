@@ -48,6 +48,18 @@ Contracts live at [`information-view.ts`](../../../src/core/information-view.ts)
 
 Deterministic regressions cover intact constraints, protected-label budgets and omissions, canonical deduplication, source/status/preview fingerprint changes, immutable prepared snapshots, reader-local AG confirmation, rewritten output, ordinary JSON/library consumption, complete board artifact identity, unchanged creation cursors after verdict updates, and cursor withholding after budget omission. Existing board claim/delivery/judgment tests must continue to pass; preparation itself performs no disclosure write.
 
+Automatic recall shares the independently budgeted candidate projection across
+Pi, OpenCode, DSH and WorkBuddy. Preparing or assembling that fragment does not
+write the semantic-memory disclosure ledger. The host hooks can still be
+followed by transformation, cancellation or transport failure, so they cannot
+justify suppressing the same candidate on a later turn. This deliberately
+accepts repeated previews until a final source-bound input witness is available.
+It also replaces marker-only injection deduplication with exact fragment matching
+in OpenCode and fences late or replaced preparations. The owning
+[context contract](../../design/state-spaces.md#unified-context-information-items)
+defines the budgets and host lifetime boundaries; explicit tool disclosure is
+outside this automatic-path change.
+
 ## Deferred
 
 Dedicated `working_state` replace/clear and captured-generation fencing are now implemented separately in the [bounded current-state slice](2026-10-08-ag-working-state.md), with an explicit session-frame adapter fallback. Host-confirmed output-to-ledger wiring, authorization/version rechecks, one combined dynamic-surface budget, semantic task identity beyond that fallback, other-host input selection and matched model-cost/quality evaluation remain open. Pi dedicated state selection/restoration is recorded separately in the [input-selection slice](2026-10-08-ag-working-state-input.md); final confirmation remains unsupported. No live LLM, embedding call or memory benchmark was run for this foundation. Deterministic tests do not establish context-growth savings or continuity benefits in a live host.
@@ -57,3 +69,27 @@ Dedicated `working_state` replace/clear and captured-generation fencing are now 
 - A codemode-only entry point or executor: rejected; ordinary tools and library data already provide the portable baseline.
 - Per-adapter formatting and early disclosure writes: rejected; shared preparation avoids format drift, while actual host exposure remains a separate boundary.
 - A universal short header or truncated state body: rejected; unnecessary wrapping costs tokens and truncation can lose the exact condition being maintained.
+
+- An additional LLM selector or a history-keyword-only gate: not selected for
+  contextual recall; deterministic reordering keeps the candidate page available.
+- Independent adapter truncation: rejected; shared preparation keeps source-bound
+  previews consistent with admitted output.
+
+## Contextual recall and display profiles
+
+Shared session-bound search reorders its retrieved page using the latest query
+and a bounded user-only context window. The initial score combines current term
+coverage (weight 2), compatible recent-topic coverage (0.35), and a reciprocal
+original-rank prior (0.15). The cache retains three prompts of at most 480 Unicode
+code points in each of 32 sessions; tokenization examines at most 4,000 UTF-16
+units per candidate. These are initial operating values, not relevance guarantees.
+No candidate is removed, so whole-page recall is preserved while smaller-cutoff
+quality remains an evaluation question.
+
+Automatic display defaults to ten candidates with 160-code-point statement
+previews. Full mode keeps statement text under the existing shared 16,000-character
+context budget; exact evidence remains behind get. Mode is session-local and
+daemon-memory-only, independent of ranking and context-cache eviction. The
+[owning design](../../design/recall-context-and-display.md) defines those boundaries;
+the operating reference owns switching commands. Natural noise reduction and
+downstream answer quality require separate held-out evidence.

@@ -421,6 +421,7 @@ export interface NmgGetParams {
 }
 
 export type NmgSessionActiveGraphParams =
+  | { action: "recallDisplay"; sessionId: string; mode?: "compact" | "full" }
   | {
       action: "observe";
       sessionId: string;
@@ -442,6 +443,7 @@ export type NmgSessionActiveGraphParams =
       sessionId: string;
       projectDir?: string;
       recall?: { prompt: string; scheduled: boolean; projectDir: string };
+      prompt?: string;
     }
   | {
       action: "disclose";
@@ -452,6 +454,7 @@ export type NmgSessionActiveGraphParams =
     };
 
 export type NmgSessionActiveGraphResult =
+  | { action: "recallDisplay"; mode: "compact" | "full" }
   | { action: "observe"; added: boolean; item: SessionActiveGraphItem }
   | {
       action: "snapshot" | "activate";

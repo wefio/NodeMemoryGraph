@@ -33,14 +33,15 @@ import { renderEventNotice, renderDiscussionNotice } from '../../../../src/integ
 import { isBoardDiscussionNotice } from '../../../../src/core/board-notifications.ts'
 import { canDeliverBoardEntry } from '../../../../src/integration/board-delivery.ts'
 import { isCoordinationEventNotice } from '../../../../src/core/coordination-events.ts'
-import { compactDisclosureEntries, compactSearchContext, memoryDisclosureEntries } from '../../../../src/integration/search-projection.ts'
+import { compactSearchContext, memoryDisclosureEntries } from '../../../../src/integration/search-projection.ts'
 import {
-  renderCompactSearchSurface,
+  prepareAutomaticRecallSurface,
   renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
 } from '../../../../src/integration/agent-surface.ts'
 import { loadPrompts, renderDisclosure } from '../../../../src/prompts/load.ts'
+import { RecallBudget } from '../../../../src/integration/recall-budget.ts'
 import { contextOnlineLearningEnabled } from '../../../../src/lab/context-router-online.ts'
 import { STATE_OPERATIONS, stateOperation, captureStateInvocation, renderStateOutput } from '../../../../src/integration/state.ts'
 import { renderLabOutput } from '../../../../src/integration/lab-capabilities.ts'
@@ -311,13 +312,14 @@ export function apply(ctx: Context): () => void {
   // front of the model for the whole turn rather than only the first step.
 
   const recallGenerations = new Map() // sessionId -> generation
+  let recallSequence = 0
   const sessionTokenTotals = new Map() // sessionId -> total estimated recall tokens
   const recallBatch = new Map() // sessionId -> recall[] (newest first, capped at MAX_RECALL_HISTORY)
   const MAX_RECALL_HISTORY = 5 // per-session recall rounds kept for the floating indicator
   const openSearches = new Map() // sessionId -> Promise that resolves once the stash is written
 
   function nextGeneration(sessionId) {
-    const generation = (recallGenerations.get(sessionId) || 0) + 1
+    const generation = ++recallSequence
     recallGenerations.set(sessionId, generation)
     return generation
   }
@@ -358,8 +360,9 @@ export function apply(ctx: Context): () => void {
       ? nmgPrompts.deferred_hint + ' Memory IDs: ' + deferred.join(',')
       : nmgPrompts.get_hint
     const forget = candidates.some((candidate) => candidate.forgotten)
-    return renderCompactSearchSurface(
+    return prepareAutomaticRecallSurface(
       {
+        ...recall,
         candidates,
         logicalChainCount: chainCount,
         activeGraphId: recall.activeGraphId || null,
@@ -371,22 +374,15 @@ export function apply(ctx: Context): () => void {
           next_step: nextStep,
           forget_hint: forget ? nmgPrompts.forget_hint : '',
         }),
+        postamble: recallFeedbackAffordance(recall.activeGraphId),
       },
     )
-  }
-
-  function recallBudget(signal) {
-    try {
-      return AbortSignal.any([signal, AbortSignal.timeout(1500)])
-    } catch {
-      return signal
-    }
   }
 
   async function autoRecall(query, sessionId, signal) {
     const limit = clampInt(process.env.NMG_AUTO_RECALL_LIMIT, 1, 50, 13)
     const tier = clampInt(process.env.NMG_AUTO_RECALL_TIER, 0, 3, 1)
-    const budget = recallBudget(signal)
+    const budget = signal
     try {
       const context = await daemonCall('search', {
         query,
@@ -428,46 +424,37 @@ export function apply(ctx: Context): () => void {
       // payload 只在用户消息进入时才有。多会话：每个 agent 独立缓存。
       lastAgents.set(String(agent.id), agent)
       const sessionId = String(agent.id)
+      const generation = nextGeneration(sessionId)
       const query = extractUserPrompt(message)
       if (!query) return
-      const generation = nextGeneration(sessionId)
       const run = (async () => {
+        const budget = new RecallBudget(1500)
         try {
-          await daemonCall('sessionActiveGraph', {
+          await budget.run('disclosure.begin', (signal) => daemonCall('sessionActiveGraph', {
             action: 'beginDisclosureTurn',
             sessionId,
-          })
-          // An empty/no-match search for this new turn must NOT clear the
-          // session's last successful recall snapshot — the floating indicator
-          // (and the model context out-of-band) should keep showing the most
-          // recent memory until a new successful recall overwrites it. Flickering
-          // to "暂无召回" on every fresh round that happens to find nothing is the
-          // bug we avoid by leaving the previous snapshot in place.
-          const recall = await autoRecall(query, sessionId, undefined)
+            prompt: query,
+            projectDir: workspaceRoot,
+          }, signal))
+          if (recallGenerations.get(sessionId) !== generation) return
+          // Keep historical snapshots for the indicator. Only this generation
+          // can contribute a fresh automatic fragment to model input.
+          const recall = await budget.run('search', (signal) => autoRecall(query, sessionId, signal))
+          if (recallGenerations.get(sessionId) !== generation) return
           if (!recall || !Array.isArray(recall.candidates) || recall.candidates.length === 0) {
             return
           }
-          const disclosure = await disclose(
-            sessionId,
-            recall.activeGraphId,
-            'header',
-            compactDisclosureEntries({
-              candidates: recall.candidates,
-              logicalChainCount: recall.logicalChainCount || 0,
-              activeGraphId: recall.activeGraphId || null,
-              deferredMemoryIds: recall.deferredMemoryIds || [],
-            }),
-          )
-          const freshIds = new Set(disclosure.freshMemoryIds)
+          // A context contribution has no final transport witness. Its source
+          // metadata describes only the budget-admitted preview, not disclosure.
+          const output = formatRecall(recall, recall.candidates)
+          const freshIds = new Set(output.included.flatMap((entry) =>
+            entry.source.kind === 'memory' ? [entry.source.memoryId] : []))
           const fresh = recall.candidates.filter((candidate) => freshIds.has(candidate.id))
           if (fresh.length === 0) return
-          const thisTokens =
-            recall.tokens != null
-              ? recall.tokens
-              : estimateTokens(fresh.map((c) => c.preview).join(' '))
+          const text = output.text
+          const thisTokens = estimateTokens(text)
           const sessionTotal = (sessionTokenTotals.get(sessionId) || 0) + thisTokens
           sessionTokenTotals.set(sessionId, sessionTotal)
-          const text = formatRecall(recall, fresh)
           const entry = {
             generation,
             text,
@@ -475,13 +462,14 @@ export function apply(ctx: Context): () => void {
             sessionTotal,
             candidates: fresh,
             activeGraphId: recall.activeGraphId,
-            nudgeShown: false,
             fedBack: false,
           }
           const history = recallBatch.get(sessionId)
           recallBatch.set(sessionId, [entry, ...(history || [])].slice(0, MAX_RECALL_HISTORY))
         } catch {
           // Keep the last successful snapshot on any recall failure.
+        } finally {
+          budget.close()
         }
       })()
       openSearches.set(sessionId, run)
@@ -493,11 +481,8 @@ export function apply(ctx: Context): () => void {
     }
   }
 
-  // Feedback affordance: recall output carries the ask, so every recall is
-  // allowed to be rated (the daemon owns staging/learning; this only attaches
-  // the ask and forwards feedback). Attached once at the first presentation of
-  // each recall snapshot — the DSH recall text is re-surfaced on later turns,
-  // so a per-snapshot flag stops it from nagging every turn.
+  // Feedback guidance participates in the same prepared budget. Repeated
+  // assembly within this turn returns identical text, not a new disclosure.
   function recallFeedbackAffordance(graphId) {
     if (!graphId || !contextOnlineLearningEnabled()) return ''
     return renderDisclosure(nmgPrompts.recall_feedback_affordance, { graph_id: String(graphId) })
@@ -513,12 +498,9 @@ export function apply(ctx: Context): () => void {
       const id = String(agent.id)
       const stack = recallBatch.get(id)
       const latest = Array.isArray(stack) ? stack[0] : stack
-      let recall = latest && latest.text ? latest.text : ''
-      if (latest && latest.text && latest.activeGraphId && !latest.nudgeShown && !latest.fedBack) {
-        latest.nudgeShown = true
-        recall = recall + '\n\n' + recallFeedbackAffordance(latest.activeGraphId)
-      }
-      return recall
+      // Historical snapshots remain available to the UI, but a new turn cannot
+      // inherit an old automatic injection after a failed/empty search.
+      return latest?.generation === recallGenerations.get(id) ? latest.text : ''
     } catch {
       return ''
     }

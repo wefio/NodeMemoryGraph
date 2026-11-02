@@ -110,6 +110,7 @@ import {
 import { readRelevanceModel } from "../lab/relevance-model.ts";
 import { normalizeRecallTriggers } from "../core/recall-triggers.ts";
 import { SessionRecallTrial, type SessionRecallPreparation } from "../core/session-recall.ts";
+import { RecallContextPolicy } from "../integration/recall-context-policy.ts";
 import {
   bindRunEntry,
   cancelRun,
@@ -229,6 +230,7 @@ export class NmgService {
   readonly #environment: NodeJS.ProcessEnv;
   readonly #labAuthority = new LabActivationAuthority();
   readonly #sessionRecall = new SessionRecallTrial();
+  readonly #recallContext = new RecallContextPolicy();
   readonly #reasoningWorkspaces: ReasoningWorkspaces;
   #labShadowController: ControllerPolicyChannel | undefined;
   /** Daemon-owned online learner for the context-use feedback loop (shared
@@ -1168,6 +1170,18 @@ export class NmgService {
     };
   }
 
+  #observeRecallTurn(
+    params: Extract<NmgSessionActiveGraphParams, { action: "beginDisclosureTurn" }>,
+  ): void {
+    const prompt = params.prompt ?? params.recall?.prompt;
+    if (prompt)
+      this.#recallContext.observe(
+        params.sessionId,
+        prompt,
+        resolve(params.projectDir ?? params.recall?.projectDir ?? process.cwd()),
+      );
+  }
+
   #sessionActiveGraph(params: NmgSessionActiveGraphParams): NmgMethodResult["sessionActiveGraph"] {
     if (params.action === "observe") {
       return {
@@ -1188,11 +1202,16 @@ export class NmgService {
       };
     }
     if (params.action === "beginDisclosureTurn") {
+      this.#observeRecallTurn(params);
       return {
         action: "beginDisclosureTurn",
         turn: this.#sessionActiveGraphs.beginDisclosureTurn(params.sessionId),
         ...this.#recallTurnMetadata(params),
       };
+    }
+    if (params.action === "recallDisplay") {
+      if (params.mode) this.#recallContext.setMode(params.sessionId, params.mode);
+      return { action: "recallDisplay", mode: this.#recallContext.mode(params.sessionId) };
     }
     if (params.action === "disclose") {
       return {
@@ -1207,6 +1226,7 @@ export class NmgService {
       };
     }
     const released = this.#sessionActiveGraphs.release(params.sessionId);
+    this.#recallContext.clear(params.sessionId);
     this.#labAuthority.disable("working_state", params.sessionId);
     this.#labAuthority.disable("recall_gate", params.sessionId);
     this.#sessionRecall.clear(params.sessionId);
@@ -1825,6 +1845,16 @@ export class NmgService {
     delete retrieval.recallRevision;
     delete retrieval.recallSource;
     const context = await this.#searchImpl(retrieval);
+    if (params.sessionId) {
+      context.results = this.#recallContext.rank(
+        params.sessionId,
+        resolve(params.projectDir ?? process.cwd()),
+        params.query,
+        context.results,
+      );
+    }
+    if (params.autoRecall)
+      context.recallDisplayMode = this.#recallContext.mode(params.sessionId ?? "");
     if (retrieval.persistTrace !== false) {
       this.#stageOnlineDecision(retrieval, context);
       this.#recordRecallInstance(retrieval, context);
@@ -3029,10 +3059,20 @@ function parseSessionActiveGraphParams(value: unknown): NmgSessionActiveGraphPar
     "activate",
     "release",
     "beginDisclosureTurn",
+    "recallDisplay",
     "disclose",
     "clearDisclosures",
   ] as const);
   const sessionId = requiredString(params, "sessionId");
+  if (action === "recallDisplay")
+    return {
+      action,
+      sessionId,
+      mode:
+        params.mode === undefined
+          ? undefined
+          : requiredEnum(params, "mode", ["compact", "full"] as const),
+    };
   if (action === "beginDisclosureTurn") {
     const recall = params.recall === undefined ? undefined : objectParams(params.recall);
     return {
@@ -3046,6 +3086,7 @@ function parseSessionActiveGraphParams(value: unknown): NmgSessionActiveGraphPar
             projectDir: requiredString(recall, "projectDir"),
           }
         : undefined,
+      prompt: optionalString(params, "prompt"),
     };
   }
   if (

@@ -159,6 +159,23 @@ function stateBoardCommand(action: "read" | "write"): CliCommandSpec {
 }
 
 export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
+  {
+    method: "sessionActiveGraph",
+    words: ["recall", "display"],
+    requiresResident: true,
+    usageLine: "nmg recall display --session-id ID [--mode compact|full] [--json]",
+    options: ["session-id", "mode"],
+    flags: [],
+    usageDetail:
+      "Read or set automatic recall display for this session in the resident daemon; restart or session release resets it.",
+    buildParams: (values) => ({
+      action: "recallDisplay",
+      sessionId: requiredOption(values, "session-id"),
+      ...(firstOption(values, "mode")
+        ? { mode: firstOption(values, "mode") as "compact" | "full" }
+        : {}),
+    }),
+  },
   stateAgCommand("read"),
   stateAgCommand("write"),
   stateBoardCommand("read"),

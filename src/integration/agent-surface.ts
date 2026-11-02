@@ -331,16 +331,38 @@ function searchCandidateLine(
  * and reference scope travel with each row even if neighbouring rows are omitted.
  */
 export function searchInformationViews(context: MemoryContext): InformationView[] {
-  const compact = compactSearchContext(context);
+  return compactSearchInformationViews(compactSearchContext(context), context.memoryReferences);
+}
+
+export function compactSearchInformationViews(
+  compact: CompactSearchContext,
+  references?: SearchSurfaceOptions["memoryReferences"],
+): InformationView[] {
   const labels = [
     "[candidate preview; not exact evidence]",
     degradedRetrievalNote(compact.retrieval),
     compact.activeGraphId ? `activeGraphId=${compact.activeGraphId}` : "",
   ].filter(Boolean);
-  const views: InformationView[] = compact.candidates.map((candidate) => ({
-    ...candidateInformationView(candidate, compact.activeGraphId, context.memoryReferences),
+  const displayed =
+    compact.recallDisplayMode === "full" ? compact.candidates : compact.candidates.slice(0, 10);
+  const views: InformationView[] = displayed.map((candidate) => ({
+    ...candidateInformationView(
+      compact.recallDisplayMode === "full"
+        ? candidate
+        : {
+            ...candidate,
+            preview: shortenRecallPreview(candidate.preview),
+          },
+      compact.activeGraphId,
+      references,
+    ),
     requiredLabels: labels,
   }));
+  if (displayed.length < compact.candidates.length)
+    views.push({
+      purpose: "diagnostic",
+      body: `Showing ${displayed.length} of ${compact.candidates.length} retrieved candidates in compact mode; remaining records stay available through nmg_get or full display.`,
+    });
   for (const tessera of compact.tesserae ?? []) {
     views.push({
       ...bookmarkInformationView(tessera),
@@ -354,6 +376,35 @@ export function searchInformationViews(context: MemoryContext): InformationView[
       requiredLabels: [degradedRetrievalNote(compact.retrieval)].filter(Boolean),
     });
   return views;
+}
+
+function shortenRecallPreview(text: string): string {
+  const characters = Array.from(text);
+  return characters.length <= 160 ? text : characters.slice(0, 159).join("") + "…";
+}
+
+/** One automatic context budget includes host notices and follow-up guidance.
+ * Preparation supplies source-bound candidates, never a delivery receipt.
+ */
+export function prepareAutomaticRecallSurface(
+  context: CompactSearchContext,
+  options: { preamble?: string; postamble?: string; maxCharacters?: number } = {},
+): PreparedInformationOutput {
+  return prepareInformationOutput(
+    [
+      { purpose: "diagnostic", body: options.preamble ?? "" },
+      ...compactSearchInformationViews(context),
+      {
+        purpose: "guidance",
+        body:
+          context.logicalChainCount > 0
+            ? `logical_chains=${context.logicalChainCount}; use nmg_get for exact evidence.`
+            : "",
+      },
+      { purpose: "guidance", body: options.postamble ?? "" },
+    ],
+    { format: "context", maxCharacters: options.maxCharacters },
+  );
 }
 
 function searchMemoryReference(

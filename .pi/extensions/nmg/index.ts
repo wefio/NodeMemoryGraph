@@ -194,6 +194,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   let latestRecallTiming: ReturnType<RecallBudget["timing"]> | undefined;
   const taskWindow = new SessionTaskWindow();
   const recallFlow = new SessionRecallFlow();
+  let automaticPreparation: symbol | undefined;
   const agentAttributionFlow = new AgentAttributionFlow(32);
   const qpp1Mode = configuredQpp1Mode();
   const qpp2Mode = configuredQpp2Mode();
@@ -529,6 +530,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   };
 
   observeRecallPreparation(pi, firstResponseTiming, async (event, ctx) => {
+    const preparation = Symbol();
+    automaticPreparation = preparation;
     const budget = new RecallBudget(undefined, ctx.signal);
     const sessionId = ctx.sessionManager.getSessionId();
     const partial = {
@@ -560,6 +563,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         entry.source.kind === "memory" ? [entry.source.memoryId] : [],
       );
     const surfaceResult = (output: PreparedInformationOutput) => {
+      if (
+        ctx.signal?.aborted ||
+        ctx.sessionManager.getSessionId() !== sessionId ||
+        automaticPreparation !== preparation
+      ) {
+        return { systemPrompt: composeNmgSystemPrompt(event.systemPrompt) };
+      }
       const context = partial.context;
       if (context) {
         const ids = new Set(includedMemoryIds(output));
@@ -1180,6 +1190,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async (event, ctx) => {
+    automaticPreparation = undefined;
     const sessionId = ctx.sessionManager.getSessionId();
     taskWindow.clear(sessionId);
     recallFlow.clear(sessionId);

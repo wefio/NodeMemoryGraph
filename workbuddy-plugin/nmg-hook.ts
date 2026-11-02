@@ -16,20 +16,17 @@
  * The hook is deliberately passive: it never starts a daemon and only talks to
  * a live HTTP lease (<dataDir>/nmg.sqlite.server.json with an alive pid), so a
  * stopped memory layer never delays a user turn. All failures are silent —
- * exit 0 always. Recall dedup is owned by the daemon's session AG disclosure
- * ledger, not a hook-local state file.
+ * exit 0 always. Prepared stdout is not a disclosure confirmation; this hook
+ * does not fold later recall on the assumption that stdout reached the model.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { compatibleLease, liveLease, rpcCall } from "../src/integration/lease-transport.ts";
-import { renderCompactSearchSurface } from "../src/integration/agent-surface.ts";
+import { prepareAutomaticRecallSurface } from "../src/integration/agent-surface.ts";
 import { RecallBudget } from "../src/integration/recall-budget.ts";
-import {
-  compactDisclosureEntries,
-  compactSearchContext,
-} from "../src/integration/search-projection.ts";
+import { compactSearchContext } from "../src/integration/search-projection.ts";
 import type { MemoryContext } from "../src/core/types.ts";
 
 interface HookPayload {
@@ -206,6 +203,8 @@ export async function recallHeaders(payload: HookPayload, dir = dataDir()): Prom
           {
             action: "beginDisclosureTurn",
             sessionId: recallSessionId,
+            prompt: query,
+            projectDir: payload.cwd,
           },
           signal,
         ),
@@ -232,40 +231,10 @@ export async function recallHeaders(payload: HookPayload, dir = dataDir()): Prom
     )) as MemoryContext;
     const compact = compactSearchContext(context);
     if (compact.candidates.length === 0) return "";
-    timelySurface = [RECALL_PREAMBLE, renderCompactSearchSurface(compact, { emptyText: "" })].join(
-      "\n",
-    );
-    const rawDisclosure = (await budget
-      .run("disclosure", (signal) =>
-        rpcCall(
-          lease,
-          "sessionActiveGraph",
-          {
-            action: "disclose",
-            sessionId: recallSessionId,
-            projectionId: compact.activeGraphId ?? undefined,
-            disclosure: "header",
-            entries: compactDisclosureEntries(compact),
-          },
-          signal,
-        ),
-      )
-      .catch(() => null)) as { freshMemoryIds?: unknown } | null;
-    const disclosure = {
-      freshMemoryIds: Array.isArray(rawDisclosure?.freshMemoryIds)
-        ? rawDisclosure.freshMemoryIds
-        : compact.candidates.map((candidate) => candidate.id),
-    };
-    const freshIds = new Set(disclosure.freshMemoryIds);
-    const fresh = compact.candidates.filter((candidate) => freshIds.has(candidate.id));
-    if (fresh.length === 0) return "";
-
-    const projected = {
-      ...compact,
-      candidates: fresh,
-    };
-    const surface = renderCompactSearchSurface(projected, { emptyText: "" });
-    return [RECALL_PREAMBLE, surface].join("\n");
+    timelySurface = prepareAutomaticRecallSurface(compact, { preamble: RECALL_PREAMBLE }).text;
+    // stdout admission has no final host-input witness. Never reserve/fold a
+    // disclosure here: the hook may exit without its output reaching a model.
+    return timelySurface;
   } catch {
     return timelySurface;
   } finally {

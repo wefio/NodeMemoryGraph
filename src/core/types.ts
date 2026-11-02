@@ -942,6 +942,8 @@ export interface TesseraHit {
 export const TESSERA_REF_MARKER = "tessera_ref";
 
 export interface MemoryContext {
+  /** Automatic presentation policy only; never changes candidate selection. */
+  recallDisplayMode?: "compact" | "full";
   results: MemorySearchResult[];
   /** Derived graph-scoped text selectors; canonical DTOs and record IDs stay unchanged. */
   memoryReferences?: Readonly<Record<string, string>>;

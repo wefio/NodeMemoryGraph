@@ -183,6 +183,24 @@ Search source entries are previews; withdrawn evidence also remains preview-only
 
 Automatic context uses the independently admissible candidate projection, which
 attaches preview, degraded-retrieval and graph-reference labels to each row.
+OpenCode, DSH and WorkBuddy use `prepareAutomaticRecallSurface` for the recall
+fragment, including its preamble and follow-up guidance, under the same 16,000
+character default. Pi combines those candidate views with AG, recovery and
+diagnostics in its existing shared context budget. Separate board-wake messages,
+host history and provider wrappers are outside the recall-fragment budget.
+
+These automatic paths do not commit `disclose` during preparation or context
+assembly. Their current host interfaces do not supply a final source-bound input
+witness: later transforms, cancellation or transport failure can still remove
+the fragment. A prepared `included` set is candidate metadata, not a ledger
+receipt. Explicit tool disclosure keeps its existing domain contract.
+OpenCode retains the exact prepared fragment for same-turn retries, invalidates
+it on a new turn, compaction or execution end, and rejects late preparations.
+DSH keeps historical snapshots for its UI but contributes only the current
+generation to model input. Pi excludes cancelled, replaced and foreign-session
+preparations. No automatic path folds future candidates solely because a prior
+fragment was prepared. Final transport confirmation remains unsupported.
+
 An explicit tool page's separate preamble, graph scope and logical-chain rows
 must not be independently omitted and then treated as that context projection.
 The view protocol does not replace `MemoryContext`, `RememberResult` or RPC data,
@@ -203,6 +221,10 @@ is not tied to Pi/codemode and introduces no pipeline, arbitrary code execution
 or implicit model call.
 
 ## Verification boundary
+
+Session-aware recall ordering and automatic display profiles are defined by
+[recall context and display](recall-context-and-display.md). They share this view
+protocol; candidate ranking and presentation remain separate responsibilities.
 
 Contract tests cover space isolation, direction/field rejection, binding/capacity
 rejection, existing view sources, short acknowledgements, CLI wiring and model
