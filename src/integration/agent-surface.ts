@@ -343,10 +343,26 @@ export function compactSearchInformationViews(
     degradedRetrievalNote(compact.retrieval),
     compact.activeGraphId ? `activeGraphId=${compact.activeGraphId}` : "",
   ].filter(Boolean);
-  const views: InformationView[] = compact.candidates.map((candidate) => ({
-    ...candidateInformationView(candidate, compact.activeGraphId, references),
+  const displayed =
+    compact.recallDisplayMode === "full" ? compact.candidates : compact.candidates.slice(0, 10);
+  const views: InformationView[] = displayed.map((candidate) => ({
+    ...candidateInformationView(
+      compact.recallDisplayMode === "full"
+        ? candidate
+        : {
+            ...candidate,
+            preview: shortenRecallPreview(candidate.preview),
+          },
+      compact.activeGraphId,
+      references,
+    ),
     requiredLabels: labels,
   }));
+  if (displayed.length < compact.candidates.length)
+    views.push({
+      purpose: "diagnostic",
+      body: `Showing ${displayed.length} of ${compact.candidates.length} retrieved candidates in compact mode; remaining records stay available through nmg_get or full display.`,
+    });
   for (const tessera of compact.tesserae ?? []) {
     views.push({
       ...bookmarkInformationView(tessera),
@@ -360,6 +376,11 @@ export function compactSearchInformationViews(
       requiredLabels: [degradedRetrievalNote(compact.retrieval)].filter(Boolean),
     });
   return views;
+}
+
+function shortenRecallPreview(text: string): string {
+  const characters = Array.from(text);
+  return characters.length <= 160 ? text : characters.slice(0, 159).join("") + "…";
 }
 
 /** One automatic context budget includes host notices and follow-up guidance.

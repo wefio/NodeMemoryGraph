@@ -203,6 +203,8 @@ export async function recallHeaders(payload: HookPayload, dir = dataDir()): Prom
           {
             action: "beginDisclosureTurn",
             sessionId: recallSessionId,
+            prompt: query,
+            projectDir: payload.cwd,
           },
           signal,
         ),

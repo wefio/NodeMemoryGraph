@@ -54,6 +54,4 @@
 
 ## 共享展示选项
 
-| 功能 | Gate／选项 | 默认值 | 含义 | 状态／owner |
-|---|---|---|---|---|
-| Long Task Board convention text | `TaskBoardSurfaceOptions.includeConventions=true` | OFF | library caller 显式请求较长的展示约定；普通 tool result 保留 entry identity 与协调状态，不重复注入约定 | 已实现的展示选项；不新增 tool 或 runtime capability；[共享信息输出决策](../../decisions/implemented/2026-10-07-shared-information-output.zh-CN.md) |
+黑板约定与自动 Recall 模式见[共享展示选项](feature-register/shared-display-options.zh-CN.md)。

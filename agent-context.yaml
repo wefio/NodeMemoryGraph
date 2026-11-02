@@ -296,6 +296,7 @@ routes:
       - src/integration/board-wake.ts
       - src/integration/session-recall-flow.ts
       - src/integration/session-task-window.ts
+      - src/integration/recall-context-policy.ts
       - src/integration/tool-observation.ts
     owners:
       - docs/design/session-memory-lifecycle-hooks-2026-08-10.md

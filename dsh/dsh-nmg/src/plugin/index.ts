@@ -433,6 +433,8 @@ export function apply(ctx: Context): () => void {
           await budget.run('disclosure.begin', (signal) => daemonCall('sessionActiveGraph', {
             action: 'beginDisclosureTurn',
             sessionId,
+            prompt: query,
+            projectDir: workspaceRoot,
           }, signal))
           if (recallGenerations.get(sessionId) !== generation) return
           // Keep historical snapshots for the indicator. Only this generation

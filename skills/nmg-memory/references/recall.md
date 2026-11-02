@@ -23,6 +23,21 @@ evidence, state the remaining uncertainty, or wait for a new user turn.
 
 ## Result fields and narrowing
 
+Automatic recall defaults to compact display. To read or switch the current
+session's daemon-local profile, use an already running compatible daemon:
+
+```text
+nmg recall display --session-id SESSION --json
+nmg recall display --session-id SESSION --mode full --json
+nmg recall display --session-id SESSION --mode compact --json
+```
+
+Use the same session ID the adapter uses for recall (WorkBuddy prefixes its hook
+session with `workbuddy-hook:`). Full means untruncated candidate statements within
+the context budget; get still loads exact evidence. Mode resets on daemon restart
+or session release, affects no other session, and does not change retrieval or
+contextual ordering. See [the contract](../../../docs/design/recall-context-and-display.md).
+
 `nmg search --compact-json` returns `candidates[].id` and top-level
 `activeGraphId`; `--json` returns `results[].memory.id` and `activeGraph.id`.
 Pass that graph ID to `nmg get --active-graph-id` to attribute exact-evidence use,

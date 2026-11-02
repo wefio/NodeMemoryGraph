@@ -222,6 +222,10 @@ or implicit model call.
 
 ## Verification boundary
 
+Session-aware recall ordering and automatic display profiles are defined by
+[recall context and display](recall-context-and-display.md). They share this view
+protocol; candidate ranking and presentation remain separate responsibilities.
+
 Contract tests cover space isolation, direction/field rejection, binding/capacity
 rejection, existing view sources, short acknowledgements, CLI wiring and model
 registration. Isolated Pi/MCP protocol integration and DSH real host-contribution

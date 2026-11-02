@@ -69,3 +69,27 @@ Dedicated `working_state` replace/clear and captured-generation fencing are now 
 - A codemode-only entry point or executor: rejected; ordinary tools and library data already provide the portable baseline.
 - Per-adapter formatting and early disclosure writes: rejected; shared preparation avoids format drift, while actual host exposure remains a separate boundary.
 - A universal short header or truncated state body: rejected; unnecessary wrapping costs tokens and truncation can lose the exact condition being maintained.
+
+- An additional LLM selector or a history-keyword-only gate: not selected for
+  contextual recall; deterministic reordering keeps the candidate page available.
+- Independent adapter truncation: rejected; shared preparation keeps source-bound
+  previews consistent with admitted output.
+
+## Contextual recall and display profiles
+
+Shared session-bound search reorders its retrieved page using the latest query
+and a bounded user-only context window. The initial score combines current term
+coverage (weight 2), compatible recent-topic coverage (0.35), and a reciprocal
+original-rank prior (0.15). The cache retains three prompts of at most 480 Unicode
+code points in each of 32 sessions; tokenization examines at most 4,000 UTF-16
+units per candidate. These are initial operating values, not relevance guarantees.
+No candidate is removed, so whole-page recall is preserved while smaller-cutoff
+quality remains an evaluation question.
+
+Automatic display defaults to ten candidates with 160-code-point statement
+previews. Full mode keeps statement text under the existing shared 16,000-character
+context budget; exact evidence remains behind get. Mode is session-local and
+daemon-memory-only, independent of ranking and context-cache eviction. The
+[owning design](../../design/recall-context-and-display.md) defines those boundaries;
+the operating reference owns switching commands. Natural noise reduction and
+downstream answer quality require separate held-out evidence.

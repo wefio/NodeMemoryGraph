@@ -54,6 +54,4 @@ Read the complete responsibility: [Explicit research probes](feature-register/ex
 
 ### Shared display options
 
-| Feature | Gate / option | Default | Meaning | Owner | Status |
-| --- | --- | --- | --- | --- | --- |
-| Long Task Board convention text | `TaskBoardSurfaceOptions.includeConventions=true` | off | Library callers explicitly request the long display conventions; ordinary tool results retain entry identity and coordination state without repeating them | `src/integration/agent-surface.ts`, `src/prompts/nmg-prompts.yaml`; [foundation decision](../../decisions/implemented/2026-10-07-shared-information-output.md) | implemented display option; no extra tool or runtime capability |
+Read [shared display options](feature-register/shared-display-options.md) for board conventions and automatic recall profiles.

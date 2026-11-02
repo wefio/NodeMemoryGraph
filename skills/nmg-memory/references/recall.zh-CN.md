@@ -10,6 +10,19 @@ Pi 对每个用户回合应用调用预算：最多三次 search，search/get �
 
 ## 结果字段与缩小范围
 
+自动 Recall 默认精简显示。已有兼容 daemon 运行时，可读取或切换当前会话的临时模式：
+
+```text
+nmg recall display --session-id SESSION --json
+nmg recall display --session-id SESSION --mode full --json
+nmg recall display --session-id SESSION --mode compact --json
+```
+
+会话 ID 应与适配层召回使用的一致（WorkBuddy hook 会加 `workbuddy-hook:` 前缀）。
+全文表示上下文预算内不截断候选正文，精确证据仍用 get 获取。
+daemon 重启或会话释放后恢复默认，不影响其他会话，也不改变检索或上下文重排。
+完整边界见[契约](../../../docs/design/recall-context-and-display.zh-CN.md)。
+
 `nmg search --compact-json` 返回 `candidates[].id` 和顶层 `activeGraphId`；`--json` 返回 `results[].memory.id` 和 `activeGraph.id`。把 graph ID 传给 `nmg get --active-graph-id`，以归因精确证据的实际使用，而不是归因搜索成功。
 
 需要时用 `--node`、`--scope` 或 `--source-actor user` 缩小范围。只有确实需要旧／已被替代状态时才用 `--include-historical`。从 `--max-tier 1` 和 `--limit 8` 开始，不要一次倾倒所有证据。

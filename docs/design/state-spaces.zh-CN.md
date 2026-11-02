@@ -169,6 +169,9 @@ Pi、MCP、DSH 注册 `nmg_state`，不注册独立 `nmg_board`；模型 Lab sch
 
 ## 验证边界
 
+会话感知的 Recall 排序与自动显示模式见[临近上下文与显示模式](recall-context-and-display.zh-CN.md)。
+它们复用本篇视图协议；候选排序与呈现分别承担职责。
+
 契约测试覆盖空间隔离、方向/字段拒绝、binding/容量拒绝、原有视图来源与短确认、
 CLI 接线及模型注册。Pi/MCP 隔离协议整合与 DSH 真实 host contribution 在模拟 Cordis
 服务上的隔离 HTTP 测试，分别约束各自接线；后者不证明真实 DSH GUI 已启动。

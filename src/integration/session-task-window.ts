@@ -117,7 +117,7 @@ function isSubstantiveTaskPrompt(prompt: string): boolean {
   );
 }
 
-function isTaskContinuation(prompt: string): boolean {
+export function isTaskContinuation(prompt: string): boolean {
   if (prompt.length > 100) return false;
   return /(?:\b(?:continue|again|retry|reload|try|proceed|go on|fix it|test it)\b|(?:继续|再试|重试|试试|开始吧|接着|改吧|修一下|好了|可以了|然后呢))/iu.test(
     prompt,
