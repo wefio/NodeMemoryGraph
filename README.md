@@ -2,599 +2,217 @@
 
 English | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
 
-> **Your agent may change. Your memory doesn't have to.**
+**Give your agent a memory that stays with you.**
 
-NMG is a local-first, long-term memory layer for AI agents. Durable memory lives
-in one SQLite file on your machine — not in someone's cloud.
+NMG is a local-first memory layer for AI agents. It saves useful facts,
+preferences, decisions, and their evidence so an agent can find them in a later
+session. The memory lives in SQLite on your machine and can be shared across
+supported agent tools.
+
+[Try the memory loop](#try-it) · [Connect your agent](#connect-your-agent) · [How it works](#architecture)
+
+## What can I use it for?
+
+- **Pick up where you left off.** Keep project decisions and constraints
+  available across sessions instead of explaining them again.
+- **Remember how you like to work.** Save an explicit preference once and let
+  an agent retrieve it when relevant.
+- **Check the source.** Search returns compact candidates; the agent can open a
+  selected memory and its supporting evidence before using it.
+- **Coordinate a task.** Agents can use the temporary Task Board to share
+  attributed work and handoffs alongside their longer-lived memory.
+
+NMG is a memory component, not an agent or a model. It does not guarantee that
+an agent will save or recall every useful detail, or that a remembered claim is
+true. Integrations need setup. See the [security boundary](#security-boundary).
+
+## What does it look like?
+
+A small example, adapted from the executable tutorial below:
 
 ```text
-No account.
-No hosted memory service.
-No subscription.
-No agent-platform lock-in.
-
-Just a local memory layer your agents can use.
+Remember:  The user prefers concise technical answers.
+Search:    How should answers be written?
+Candidate: The user prefers concise technical answers.  [memory ID]
+Get:       The user prefers concise technical answers.  [exact evidence]
 ```
 
-Many memory products need an account, an API key, a hosted service, or a
-dedicated agent platform — and some never leave the paper stage. NMG goes the
-other way:
+The candidate is a compact lead, not a proof. `get` opens the selected record
+and evidence. In a connected agent this happens through tools; you can also run
+the workflow yourself from the CLI. The exact IDs and output vary by run.
 
-- **Own the memory layer.** Agents come and go — Pi today, another harness
-  tomorrow. NMG exists independently of all of them; adapters are replaceable,
-  the store is not tied to any product. This is also why the multi-agent task
-  board passes memory _IDs_, not content: memory outlives any single agent.
-- **Local and private.** All durable memory lives in one SQLite file you can
-  back up by copying. Retrieval works with zero configuration (SQLite FTS5);
-  the optional semantic layer can use a bundled local model, a separately hosted
-  local service, or a free-tier cloud embedder — only the text to embed ever
-  leaves the memory process, never the store.
-- **Free.** No billing surface at all: FTS5 retrieval is built in, the local
-  embedding path costs nothing, and there is no account to upgrade.
-- **Real, not conceptual.** A CLI, a JSON-RPC daemon, an MCP server, working
-  adapters for four harnesses — and NMG is used daily across sessions as its
-  own development memory, not demonstrated once in a demo.
+## Try it
 
-**Honest boundary:** NMG is not plug-and-play yet. Native integrations need
-setup, and generic agents use the CLI + Skill path. But it is deliberately
-_agent-friendly to integrate_: if your agent can use a CLI, it can probably use
-NMG; if it can write plugins, it can integrate NMG itself from the stable
-JSON-RPC boundary.
+You need **Node.js 22.19 or newer** and a local checkout of this repository.
+From the checkout root:
 
-| Your setup | Path |
-|---|---|
-| [Pi](https://github.com/earendil-works/pi) | Native extension ([Try it](#try-it)) |
-| OpenCode v2 | Thin transport plugin ([opencode-plugin README](opencode-plugin/README.md)) |
-| Claude Code | Local MCP plugin ([Claude Code plugin](#claude-code-plugin)) |
-| DeepSeek Harness | Cordis plugin ([dsh/](dsh/README.md)) |
-| Any other agent | CLI + [Skill](skills/nmg-memory/SKILL.md) ([Agent-independent CLI](#agent-independent-cli), [Agent Skill](#agent-skill)) |
-| Custom harness | Build an adapter on the HTTP JSON-RPC boundary ([Headless control](#headless-pi-control)) |
+```sh
+npm ci
+npm run tutorial:first-recall
+```
 
-NMG stores mutable semantic memory over immutable evidence and retrieves a
-small, progressively deeper subset instead of flattening all history into one
-global prompt.
+The tutorial creates a private temporary SQLite store, remembers one preference,
+searches for it, and opens the exact record. It cleans up on exit; it does not
+call an LLM or embedding service or touch your normal NMG memory. In an
+interactive terminal it pauses between steps. For a non-interactive run, use
+`npm run tutorial:first-recall -- --non-interactive`.
+[See the walkthrough](docs/guides/first-recall.md) for the commands and their
+meaning.
 
-- Ordinary prompts load no dynamic long-term memory. Automatic retrieval
-  overfetches and type-reranks candidates before applying the final record budget.
-- Stable `stateKey` values identify one replaceable property—not a topic or
-  grouping tag—and automatically supersede the prior active value in the same
-  scope.
-- Typed node relations and multi-evidence derived memories support graph-aware
-  retrieval instead of treating every memory as an isolated chunk.
-- Duplicate nodes can be merged and over-broad nodes split without deleting
-  memories or evidence; source-to-target redirects preserve old addresses.
-- `nmg_search` returns compact result headers; `nmg_get` expands only selected
-  memory IDs into exact statements and source evidence.
-- Node-local access counts are accumulated and periodically rebuilt into
-  Huffman-derived block tiers, keeping likely memories shallow without deleting
-  cold history.
-- New or moved memories enter a persistent SQLite Delta and remain searchable
-  before leaf compaction. Dirty nodes rebuild locally; unchanged content-derived
-  leaf IDs retain their existing external embeddings.
-- Persisted vectors use Float32 BLOBs and are loaded into disposable contiguous
-  in-memory caches with geometric append capacity; SQLite remains authoritative.
-- Retrieval traces accumulate ambiguity, fallback, conflict, and co-retrieval
-  signals. Lab maintenance can propose evidence-backed links or node splits;
-  proposals require repeated observations and explicit acceptance before the
-  semantic graph changes.
-- Scope, validity intervals, conflicts, and superseded states remain
-  traceable instead of deleting earlier evidence.
-- Optional temporal/logical chains reuse existing memory IDs to preserve ordered
-  histories or explicitly supervised dependency DAGs. Retrieval can expand a
-  bounded neighbouring window without treating order as inferred truth.
-- Cloud sync is deferred. External embeddings are optional and served through
-  an OpenAI-compatible endpoint; execution isolation remains a Pi plugin concern.
-- An experimental framework-free differentiable controller uses a small lazy
-  UOp graph for node, edge, STOP/EXPAND, and Active Graph budget learning. It is
-  a Lab primitive and does not replace deterministic routing by default.
+### Connect your agent
+
+Send this prompt to your agent and let it set up NMG for its environment:
+
+```text
+Please install and connect Node Memory Graph (NMG) for me:
+https://github.com/wefio/NodeMemoryGraph
+
+First identify your current agent host, operating system, and existing setup.
+Use an existing persistent checkout if available; otherwise clone the repo to
+a suitable persistent directory. Read the repository README, the relevant
+adapter instructions, and skills/nmg-memory/SKILL.md. Choose the best supported
+integration for this environment.
+
+Install the required dependencies, build, and configure the integration while
+preserving existing settings and data. Use a native adapter or MCP when
+supported; otherwise use the CLI and Skill. Do not overwrite existing
+configuration or stop or restart a shared daemon that this setup did not start.
+
+Verify the memory loop with the repository's temporary-store tutorial, then
+check whether the current host can discover or call the configured tools.
+Report the install location, enabled capabilities, verification results, and
+any restart or action I need to complete. Do not treat a passing tutorial as
+proof that the host integration works.
+```
+
+If the agent cannot access the network or identify its host, it will need the
+repository location or environment details from you. The table below can help
+you choose an integration.
+
+### Adapters and capabilities
+
+| Environment | What you can use | Limits to know |
+| --- | --- | --- |
+| [Pi](#pi) | Save and search memory, open evidence, automatic recall, working state, Task Board and optional Lab | Automatic writes and recall follow the integration policy |
+| [OpenCode v2](opencode-plugin/README.md) | Memory tools, automatic recall, working state and Task Board | The first turn of a new service may lack project scope; some wake capabilities are limited |
+| [Claude Code / MCP](#claude-code-plugin) | Memory tools, working state, Task Board and optional Lab | Explicit MCP calls; no automatic per-turn recall or push wake |
+| [DeepSeek Harness](dsh/README.md) | Memory tools, automatic recall and Task Board | The legacy adapter and [web host package](dsh/dsh-nmg/README.md) differ in capabilities and setup |
+| [WorkBuddy](workbuddy-plugin/README.md) | Hook-based automatic recall; can combine MCP tools and Skill | The hook itself has no memory tools; hook and MCP session state differ |
+| Other tool-capable agents | [CLI + Skill](#agent-independent-cli) to save, search and open memory | The agent must run the CLI and read the Skill; automatic recall depends on the host |
+
+Adapters expose native tools and transport the calls. Pi, Claude MCP, DSH, and
+the benchmark bridge share the Agent Surface for compact search, exact evidence,
+remember follow-up, Task Board output, redaction, and logical-chain projection.
+Host-specific lifecycle, tool schemas and transport fallbacks remain in adapters.
+See the [capability matrix](docs/design/harness-capability-matrix.md) for details.
+Its legacy DSH automatic-recall entry differs from the current implementation;
+use the adapter source and instructions for that capability.
+
+### Pi
+
+For manual setup, install [Pi](https://github.com/earendil-works/pi), then from
+the NMG checkout:
+
+```sh
+npm run build
+pi install ./
+pi
+```
+
+Run `pi install ./` from the checkout root. The extension exposes
+`nmg_remember`, `nmg_search`, `nmg_get`, `nmg_state`, and `nmg_lab`.
+Tell the agent a preference or project constraint to remember, then ask about it
+in a later session. Automatic recall and writes are governed by the integration's
+rules; check results instead of assuming every turn is saved.
+
+## Claude Code plugin
+
+The repository includes a local MCP server. Install dependencies and configure
+your client's MCP settings using the [Claude/MCP setup](claude-plugins/nmg-memory/CLAUDE.md#adding-to-any-mcp-client).
+For Claude Code that guide shows a project `.mcp.json`; create it as described
+rather than assuming it exists in a fresh checkout. Start a new client session
+after configuration.
+
+## Agent-independent CLI
+
+The CLI lets a tool-capable agent use NMG without a native plugin. From a
+checkout, `npm run cli -- <command>` runs the source CLI; an installed package
+also exposes `nmg`.
+
+```sh
+npm run cli -- status
+npm run cli -- remember "The user prefers concise technical answers." --node "Response preferences" --type preference
+npm run cli -- search "How should answers be written?" --compact-json
+```
+
+Search returns candidate IDs. Use `get` on the IDs you select; when search
+returns an `activeGraphId`, pass it to `get` to retain disclosure attribution.
+The [first-recall walkthrough](docs/guides/first-recall.md) shows the complete
+flow. Run `npm run cli -- <command> --help` for current arguments. For graph
+inspection, `npm run cli -- graph --out memory-graph.html` exports a local HTML
+view of nodes and relationships.
+
+## Agent Skill
+
+The [NMG Skill](skills/nmg-memory/SKILL.md) teaches compatible agents when to
+search, open evidence and save durable information. Follow its installation
+instructions to link the whole Skill directory into your agent's configured
+skills location. For a generic agent this is a CLI-plus-Skill integration and
+may require setup.
 
 ## Architecture
 
 ```text
-Pi agent harness
-      │
-      │ before_agent_start + tools
-      ▼
-NMG Pi extension
-      │
-      │ persistent local HTTP client
-      ▼
-NMG daemon ── NMG core ── MemoryNode graph ── tiered MemoryRecord
-      │          │                    │
-      │     online router       vector embedding
-      │          └──────┬─────────────┘
-      └────────────── SQLite ──────────┘
-                    │
-             immutable HistoryRecord
+Agent / adapter
+    │  search · get · remember · state
+    │  JSON-RPC over local HTTP
+    ▼
+NMG daemon ── session working state
+    │
+    └── SQLite: memory, evidence, graph and Task Board
 ```
 
-See [docs/design/design.md](docs/design/design.md) for the decisions and roadmap.
+The adapter's client code sends JSON-RPC over HTTP to the daemon; the HTTP
+handler and memory service run in the daemon. The default Pi store is
+`~/.nmg/nmg.sqlite`; `NMG_DATA_DIR` selects another directory. Project-local
+STG data has its own location. The [concept map](docs/guides/concept-map.md)
+explains durable memory, session state and the evidence path. See the
+[design baseline](docs/design/design.md) for the full contract.
 
 ### Semantic memory contract
 
-- Facts, preferences, constraints, states, events, strategies, and
-  conversational evidence have distinct types and usage rules. Memory type,
-  scope, and influence permission are orthogonal: presentation preferences
-  cannot change facts, behavioural signals remain non-binding, and constraints
-  apply only inside their active scope.
-- Stable user-stated facts, preferences, constraints, and states are written
-  automatically; explicit writes remain available. Governed writes retain the
-  supporting message or a bounded exact excerpt by stable source identity;
-  ordinary conversation, cumulative transcripts, and transient tool output are
-  not copied into NMG.
-- Repeated outcome-linked episodes may consolidate into transferable
-  experience — situation, outcome, applicability, limitations, counterexamples,
-  evidence — but NMG never creates or silently updates a Skill, prompt,
-  runbook, script, or other behavioural artifact.
-
-## Claude Code plugin
-
-A local MCP plugin ships with the repository for zero-config Claude Code use:
-
-```
-claude-plugins/nmg-memory/
-├── .claude-plugin/plugin.json   # Plugin metadata
-└── agents/memory-copilot.ts     # MCP server (< 130 lines)
-```
-
-**How it works**
-
-The root `.mcp.json` registers `nmg` as a local MCP server. Claude Code
-auto-discovers it at session start and exposes three tools:
-
-| Tool           | Purpose                                                    |
-| -------------- | ---------------------------------------------------------- |
-| `nmg_search`   | Return compact memory headers (mid/node/type/tier/preview) |
-| `nmg_get`      | Load exact memory statements and source evidence           |
-| `nmg_remember` | Save durable facts/preferences/states/constraints/events   |
-
-Daemon lifecycle is automatic: the MCP server starts the NMG daemon when it
-launches and safely stops it on exit. If a daemon was already running (e.g.,
-from another Agent), it is reused and left untouched.
-
-**Output is purposefully compact** — tab-separated single-line result headers
-and excerpt-only evidence — to constrain token consumption.
-
-**Quick start**
-
-```powershell
-npm install
-```
-
-Start Claude Code inside this project as you normally would — the root
-`.mcp.json` is auto-discovered, so no explicit plugin install is required.
-After the first connection approval, NMG memory is available in every session
-under this project.
-
-## Try it
-
-Requirements: Node.js 22.19 or newer and Pi.
-
-```powershell
-npm install
-npm test
-npm run check
-pi install <path-to-node-memory-graph>
-pi
-```
-
-By default, the extension stores shared LTG and Task Board data in
-`~/.nmg/nmg.sqlite`. Set `NMG_DATA_DIR` to use another directory. Project-local
-`.nmg/` data is reserved for isolated STG sessions and controlled/headless runs.
-
-Pi provides [opt-in first-output timing](docs/decisions/implemented/2026-10-04-first-response-timing-is-opt-in.md)
-through `/nmg-latency on|off|status`; it records metadata only and does not change
-recall waiting policy. The hook contract defines slow-recall retention and
-host-event interpretation.
-
-For ongoing work, the maintained-state widget shows a labelled current-status
-preview; `/nmg state` reads the complete session state without searching history, and
-`/nmg state on|off` toggles only that preview.
-See the [daily work-status workflow](skills/nmg-memory/references/optional-capabilities.md#daily-work-status)
-for updates, evidence and restart boundaries. The state is provisional, not a
-completion certificate or a durable task store.
-
-The Pi adapter is deliberately thin. It lazily starts the local daemon over
-JSON-RPC/HTTP, reuses one connection for automatic recall and the default tool
-surface, and stops the daemon at session shutdown only when that adapter
-invocation started it.
-Pi, Claude MCP, DSH, and the benchmark bridge share one Agent Surface for
-compact search, exact evidence, remember follow-up, Task Board output,
-redaction, and logical-chain projection. Adapters retain only native tool
-schemas, lifecycle hooks, transport fallback, genuinely host-only actions, and
-official benchmark envelopes or audit fields.
-An already-running shared daemon is left untouched.
-Automatic recall stops waiting after five seconds total and preserves candidates returned before
-later phases time out. Use `/nmg recall timing` in Pi to inspect the latest phase durations.
-Explicit `nmg_search` is unchanged; [deadline details and limitations](docs/design/session-memory-lifecycle-hooks-2026-08-10.md#自动召回等待预算)
-are in the hook contract.
-The daemon is the single application-level writer for its SQLite database.
-Concurrent Agent turns may wait on embeddings or summaries in parallel, while
-their short synchronous SQLite phases are serialized by the daemon event loop;
-clients should not open independent writable stores against the same file.
-To avoid repeatedly injecting the same memory, the adapter keeps a
-session-local in-memory window for the last 12 turns (at most 128 memory
-references). Repeated unchanged content is folded to its stable ID; deeper
-disclosure, changed evidence, window expiry, or a different session permits
-reinjection. This cache is discarded at session shutdown and is never stored
-as LTG.
-
-The Pi extension keeps authoritative LTG in `NMG_DATA_DIR` or
-`~/.nmg/nmg.sqlite` and uses one `<project>/.nmg/stg.sqlite` for the current
-working directory's STG. Provisional rows are isolated by `sessionId`; shared
-LTG cache rows have no session owner. Set `NMG_PROJECT_DIR` only when the project
-root differs from Pi's working directory.
-
-By default, the model receives three durable-memory tools, one Lab capability
-entry point, the shared Task Board, and a typed write/use policy:
-
-- `nmg_remember`: save a typed long-term memory with scope, truth status,
-  event time, stable state identity, evidence role, and provenance.
-- `nmg_search`: retrieve compact headers and stable IDs from matching and
-  graph-adjacent nodes, with tier, scope, conflict, historical-state controls,
-  and the session-owned `activeGraphId` for follow-up attribution.
-- `nmg_get`: expand selected IDs into exact memory statements and bounded source
-  evidence. Passing the `activeGraphId` returned by `nmg_search` records those
-  selected IDs as actually used; another session cannot read or update that AG.
-- `nmg_lab`: list, lease, invoke, and disable optional session capabilities on
-  the existing daemon connection. Reasoning workspace, read-only graph reasoning,
-  and controller shadow are Agent-selectable; controlled/active actuation remains
-  receipt- and gate-protected.
-- `nmg_state`: read/write private AG working state or shared board coordination
-  through one space-specific entry. AG writers explicitly enable a bounded lease;
-  board operations retain their TTL, claim and independent-judgement lifecycle.
-  See [state spaces](docs/design/state-spaces.md).
-
-Set `NMG_ENABLE_COORDINATION=0` (also `false`, `off`, or `no`) to reject
-model-facing board operations and disable adapter wake polling; AG remains available. The daemon RPC
-and `nmg board ...` CLI remain available for administration. Board entries are
-temporary, attributed, task-scoped coordination data; they never enter LTG or
-semantic retrieval.
-
-Graph maintenance, QPP, and indexing remain core/CLI concerns. The adapter never opens SQLite or
-imports those implementations directly.
-
-Lab is an opt-in capability channel, not a dead-end staging area or separate
-client. Pi, MCP, DSH and CLI adapters all call the same daemon `lab` RPC. Agents
-may explicitly lease low-risk capabilities for the current session; leases expire,
-and output is provisional until governed memory write. `NMG_ENABLE_LAB_TOOLS=1`
-adds Pi's typed `nmg_reason` convenience tool, which delegates to that same RPC.
-Passing evaluation is required for default promotion, not explicit opt-in use.
-
-For one-off development inside this repository, disable automatic extension
-discovery and load NMG exactly once:
-
-```powershell
-pi --no-extensions --extension ./.pi/extensions/nmg/index.ts
-```
-
-Loading the package manifest, project-local extension, and an explicit
-`--extension` together can register duplicate tools and stall tool loops.
-
-## Agent-independent CLI
-
-The package includes a TypeScript `nmg` executable.
-The CLI is the agent-neutral fallback and administrative surface, especially
-for harnesses with no plugin or an incomplete adapter. Internal retrieval
-mechanisms do not each receive a dedicated command; they compose behind the
-stable `search/get/remember` surface unless explicit administration is needed.
-
-During repository development, use the equivalent npm command:
-
-```powershell
-npm run cli -- status
-npm run cli -- remember "User prefers concise answers" --node "Response preferences" --type preference
-npm run cli -- search "How should answers be written?"
-npm run cli -- get <memory-id>
-npm run cli -- retention candidates
-npm run cli -- retention archive <memory-id>
-npm run cli -- retention quarantine <memory-id> --recovery-days 30
-npm run cli -- retention restore <memory-id>
-npm run cli -- memory delete <memory-id>
-npm run cli -- topology proposals
-npm run cli -- topology assess <proposal-id>
-npm run cli -- topology review <proposal-id> --decision accept
-npm run cli -- topology actuate <proposal-id>
-npm run cli -- chain create --type logical --topic "Atlas migration"
-npm run cli -- chain edge add --chain <chain-id> --from <memory-id> --to <memory-id>
-npm run cli -- chain get --chain <chain-id>
-npm run cli -- chain edge remove --chain <chain-id> --from <memory-id> --to <memory-id>
-npm run cli -- chain remove --chain <chain-id> --memory <memory-id>
-npm run cli -- graph --out memory-graph.html
-npm run cli -- stg sync --project-dir . --scope project=nmg --limit 50
-npm run cli -- daemon start
-npm run cli -- daemon status
-npm run cli -- daemon stop
-```
-
-Installed packages expose the same commands directly as `nmg`; the published
-CLI runs precompiled JavaScript and does not type-strip files from
-`node_modules`. Use `--json`
-for the complete structured result, `--data-dir` to select an NMG data
-directory, or `--db` to select one SQLite file. `remember` requires a stable
-`--node` name; `--scope key=value` is repeatable. Pass `--project-dir` to
-`remember`, `search`, and `get` when they may touch isolated STG. `stg sync`
-copies a usage-ranked scoped LTG working set into that STG idempotently; LTG
-remains authoritative.
-
-CLI `remember` writes are attributed to submission channel `user` by default;
-adapter/RPC callers default to `agent` and should set `writeSource` explicitly
-when forwarding another channel. This is independent from `sourceActor`, which
-states who authored the evidence content. `nmg claim outcome` can retain an exact
-user/tool excerpt with `--evidence`, `--session-id`, and `--source-lineage`; its
-event then remains auditable even if the original harness transcript disappears.
-
-Project STG is also session-private. Pi supplies its session ID automatically;
-CLI callers may add `--session-id ID`. Without it, CLI uses a separate `cli`
-administrative session rather than reading any Pi session's STG.
-
-Memory chains are an administrative/harness surface, not an extra default Pi
-tool. `chain create/list/get`, member add/remove, and edge add/remove operate on
-LTG unless `--project-dir` is supplied. Project STG chains are automatically
-owned by `--session-id` (or the isolated `cli` session) and cannot be inspected
-or mutated by another session. Logical edges must be explicitly supplied; NMG
-does not infer causality from similarity or conversation order.
-
-`nmg graph` exports the node/relation projection as a single self-contained
-HTML file (default `nmg-graph.html`, override with `--out FILE`). It reads the
-database read-only — safe against a live daemon — and the page needs no server:
-force-directed canvas layout, drag/zoom, per-relation-type legend toggles,
-isolated-node highlighting, and a detail panel with each node's top statements.
-The view assets under `src/cli/graph/assets/` are plain templates
-(`template.html`, `graph.css`, `graph.js` exposing `NmgGraph.mount`) so the
-renderer can be reused with any `{nodes, edges}` payload.
-
-External evidence is opt-in and visibly marked:
-
-```text
-nmg remember "The upstream docs list version 2" --node "Upstream version" \
-  --external-source web:https://example.com/docs --content-hash sha256:... --json
-```
-
-External writes default to `truth=unverified`; Pi renders `[external]` and the
-source so the Agent can decide whether the current task requires re-checking.
-
-Use `--tiered-disclosure` to search L0 first and open deeper tiers only while
-QPP reports insufficient evidence. Pi automatic recall enables this gate by
-default. The AG result reports `tiersOpened`, `deepestTier`, and `deepEvidence`.
-
-`nmg daemon start` launches the language-neutral JSON-RPC-over-HTTP boundary
-on an OS-assigned loopback port. Requests and responses are JSON-RPC 2.0 over
-Node's built-in `http`/`fetch` (no third-party transport dependencies); the
-endpoint and a random local bearer token are recorded beside the selected
-SQLite database. The same implementation runs on Windows, macOS, and Linux.
-
-The service also carries administrative retention, deletion, merge, and split
-RPCs, plus reviewable topology-proposal list/assessment/review/actuation, so a
-running daemon remains the only database writer. These are CLI/admin
-capabilities, not extra model-facing Pi tools. Retention candidate selection is
-a dry run; moving a memory to L4/L5 or deleting its semantic interpretation
-requires an explicit command. `memory delete` retains immutable source history.
-
-The service rejects a second daemon for the same database, opens SQLite lazily,
-and removes stale process leases. Use the same `--data-dir` or `--db` for daemon
-and client commands. At a coordinated code-update boundary, `nmg daemon reload`
-drains accepted work and replaces a capable owner without clients racing to
-start a second one. Persistent memory/board data survives; volatile AG and writer
-leases are cleared. An older daemon without this capability is refused, not
-silently restarted. See [controlled reload](docs/design/daemon-lifecycle-design.md#controlled-code-reload).
-
-Node identity maintenance starts automatically on write: exact canonical names
-and case/spacing/punctuation-only variants of the same node kind reuse the
-existing node. Broader semantic merges are not performed from embedding
-similarity alone. They require accumulated evidence and use reversible
-transform/redirect records; the low-level merge/split RPCs remain an
-administrative recovery surface rather than routine user work.
-
-Pi bounds agent-directed recall per user turn independently of the AG content
-budget: three searches, five total search/get calls, no more than two searches
-without exact-evidence progression, and termination after two consecutive
-searches add no candidate IDs. A new user turn resets the guard. These limits
-prevent a compact AG from being built through an unbounded tool loop.
-
-## Agent Skill
-
-[`skills/nmg-memory/SKILL.md`](skills/nmg-memory/SKILL.md) lets other
-tool-capable Agents use the same lifecycle and progressive recall workflow.
-It is a small first-use card with on-demand reference pages: detailed write,
-recall, and operations guidance is read only after an Agent forgets an operation
-or encounters a special case. The normal path remains
-`status → start if needed → search → selected get → ownership-safe stop`.
-
-For first-time setup from a persistent local checkout, prefer a directory
-symbolic link from `~/.agents/skills/nmg-memory` (or the Agent's configured skills
-location) to `<CHECKOUT>/skills/nmg-memory`; on Windows, use a directory junction.
-Link the whole directory so the quick card and references follow source changes
-without a sync script. Keep the source available and confirm migration before
-replacing an existing installation or local modifications. See the
-[Skill installation rule](skills/nmg-memory/SKILL.md#installation).
-
-File changes follow the link immediately; instructions already loaded into a
-session are not retroactively replaced. In Pi, reload at an idle boundary or start
-a new session when refreshed discovery is needed.
-
-The natural-evidence reference describes passive real-use collection, fail-closed
-readiness audits, candidate calibration, matched validation, and rollbackable
-Agent-applied updates.
-
-SQLite FTS5 is the zero-configuration Pi retrieval path. Set
-`NMG_EMBED_BASE_URL` and `NMG_EMBED_MODEL` to add the external node/leaf semantic
-signal to the same budgeted Active Graph pipeline. If the endpoint fails or
-times out, Pi reports a degraded retrieval and continues with FTS5; hashing is
-kept only as an evaluation baseline. `NMG_EMBED_TIMEOUT_MS` controls the request
-timeout (10 seconds by default). The resumable `npm run index:embeddings`
-command builds that model's index.
-
-Set `NMG_EMBED_PROFILE` explicitly to `qwen3`, `bge-en`, or `plain`. The profile
-defines independent query and document templates, so NMG never infers an
-encoding contract from the model name. Custom providers can instead set
-`NMG_EMBED_QUERY_TEMPLATE` and `NMG_EMBED_DOCUMENT_TEMPLATE`; each template must
-contain `{text}`.
-
-The preprocessing contract is part of the persisted embedding index identity.
-Changing the profile, templates, dimensions, or relevant query instruction
-creates a new index instead of silently reusing incompatible vectors. The batch
-indexer uses SQLite missing/stale rows as a durable queue and reports pending
-node/leaf/record counts, dirty nodes, last success, and retryable failures.
-Run `npm run index:status` with the same embedding environment variables to
-inspect that state without contacting the provider.
-Pi activates a new semantic index only after its first successful complete
-build. Until then it remains on FTS5 and reports
-`reason=embedding_index_not_ready`, preventing partial profile/model switches.
-
-The automatic-write rule is intentionally narrow:
-
-- Save clear, stable user-stated facts, preferences, constraints, and states
-  that are likely to help in a later session.
-- Ask before saving ambiguous, inferred, uncertain, or current-task-only
-  information.
-- Never save casual chatter, duplicates, unverified model claims, credentials,
-  secrets, or sensitive personal data as semantic memory.
-- Give each replaceable property a stable `stateKey`; a new value in the same
-  canonical scope automatically supersedes the old state without deleting its
-  evidence. Use `nodeName` for a semantic group and `scope` for applicability;
-  do not reuse one broad state key for several related facts.
-- Preserve separately countable actions as separate memories and retain an exact
-  source excerpt: the statement is a retrieval summary, not the evidence itself.
-- Treat assistant-authored conversational evidence as unverified unless a user
-  or tool confirms it.
-- Obey constraints, adapt to preferences, use only the newest active state,
-  preserve event time, and describe conversational evidence as something that
-  was said rather than as independently verified truth.
-
-The prompt guides semantic selection, while the extension independently blocks
-high-confidence credential patterns, explicit do-not-retain requests, and
-current-turn-only instructions. This boundary does not depend on model quality.
+Facts, preferences, constraints, states and events have different meanings.
+NMG retains provenance and scopes memory so a preference does not become a fact
+or a global rule. Explicit writes are available; automatic writes depend on the
+integration and its policy. The [design](docs/design/design.md) owns the details.
 
 ## Headless Pi control
 
-NMG uses Pi's native RPC mode for automated Agent-to-Agent-style tests. This
-keeps the controller local and avoids adding an A2A server before cross-machine
-interoperability is needed.
-
-Inspect the configured model without making a model request:
-
-```powershell
-npm run pi:state
-```
-
-Send one prompt through a fresh headless Pi session:
-
-```powershell
-npm run pi:prompt -- "Remember that the RPC controller is used for NMG tests."
-```
-
-For bounded same-session lifecycle tests, call the helper directly with repeated
-`--turn` flags (one Pi child and one owned daemon for the whole dialogue):
-
-```powershell
-node --experimental-strip-types scripts/pi-control.ts prompt `
-  --turn "Recall one durable decision and load its exact evidence." `
-  --turn "Review the preceding retrieval if all feedback labels are observable."
-```
-
-Each invocation uses a new Pi session but shares the project's
-`.nmg/nmg.sqlite`, which makes cross-session memory tests straightforward.
-The headless helper also isolates Pi settings under `.nmg/pi-agent`, loads only
-the allow-listed benchmark credentials from the ignored repository `.env`, and
-defaults to a 90-second prompt timeout plus 12 tool calls. Override these with
-`NMG_PI_AGENT_DIR`, `NMG_PI_TIMEOUT_MS`, and `NMG_PI_MAX_TOOL_CALLS`. These are
-test-runner safety limits, not NMG retrieval limits.
-The controller defaults to `deepseek/deepseek-v4-flash` with thinking disabled,
-uses `--no-extensions`, and explicitly loads only the NMG extension and its
-default stable tool surface. This prevents unrelated global permission extensions from
-blocking non-interactive RPC tool calls. Set `NMG_PI_MODEL` to override the
-test model when needed.
-
-QPP actuation is split into three independent controls:
-
-- `NMG_QPP1_MODE=off|shadow|active` controls the learned first candidate-pool
-  allocation. It defaults to `shadow`; `active` may widen only an explicit
-  `nmg_search` that has no caller-specified limit. It is fail-safe before the
-  controller has attributable training: the planning probe is non-persistent
-  and an untrained 0.5 prior cannot change retrieval.
-- `NMG_QPP2_MODE=off|shadow|active` controls Fibonacci progressive inspection
-  and learned listwise folding within that candidate pool. It defaults to
-  `off`; `shadow` retains QPP telemetry without changing the visible result,
-  while `active` may continue to deeper evidence tiers and dynamically exposes
-  enough learned necessary headers to retain the configured listwise
-  probability mass. `NMG_QPP2_RETAINED_MASS` defaults to `0.98`. A flat score
-  distribution therefore stays wide; a steep distribution folds more.
-  Lower-necessity candidates are grouped as a folded directory, not deleted,
-  and an explicit caller `limit` disables learned folding. The full candidate
-  set remains in the Active Graph for exact `nmg_get`; top-1 is the only fixed
-  safety anchor. Learned folding is inert until attributable controller
-  training exists.
-- `NMG_SEARCH_RECOMMENDATION=off|advisory|guardrail` controls whether an
-  inadequate automatic recall recommends one deliberate `nmg_search` call to
-  the model. It defaults to `off`; `guardrail` emits a recommendation only
-  for hard failures such as empty, fallback-only, or very weak recall.
-
-Those switches select which retrieval capability may be used; they do not by
-themselves authorize a learned candidate to change product retrieval. The
-separate controller runtime channel is fail closed:
-
-- `NMG_CONTROLLER_RUNTIME_MODE=off|shadow|controlled|active` defaults to
-  `shadow`. `off` performs no learned scoring. `shadow` records decisions but
-  cannot allocate, fold, or rerank.
-- `controlled` is only for explicitly marked experiments. It requires a trained
-  state at `NMG_CONTROLLER_RUNTIME_STATE` and
-  `NMG_SHADOW_COLLECTION_ORIGIN=controlled`.
-- `active` is the production actuation boundary. It requires the same exact
-  trained state plus `NMG_CONTROLLER_ACTIVATION_RECEIPT`, a reviewed JSON
-  receipt binding the candidate SHA-256, feature-protocol version, retrieval,
-  controller, and product gate artifacts, and a distinct loadable prior
-  controller state as its rollback artifact. Missing, changed, incomplete, or
-  unloadable artifacts make the controller inert.
-
-The channel passes only typed numeric decisions to retrieval. Candidate policy,
-receipt contents, and controller protocol are never inserted into the Agent's
-answer context.
-
-NMG reports each module's scores, quality, and cost but does not choose an
-operator's policy or search for a preferred combination. Enabling QPP1, QPP2,
-or recommendations—and composing them—is an explicit user/operator decision.
-
-The normal QPP1 tier is capped at 20 records / 6,000 estimated tokens; a
-learned `expand` decision can promote the Active Graph to 50 records / 10,000
-estimated tokens for aggregation or multi-hop work. Automatic recall keeps its
-small fixed budget. The committed search remains the sole retrieval trace and
-may still be read with `nmg_get`. The legacy `NMG_CONTROLLER_SEARCH=1|0`
-continues to map to QPP1 `active|shadow` when `NMG_QPP1_MODE` is unset.
-Shadow events are written locally to
-`.nmg/evaluation/controller-shadow.jsonl` (or under `NMG_DATA_DIR`) with bounded
-size and rotation. They record deterministic and learned node order, candidate
-exposure, explicit `nmg_get` use, retrieval/controller latency, estimated
-context tokens, and completed-run token usage. These runtime files are ignored
-by Git.
-
-Optional human-labelled feedback can be attached to the latest retrieval:
-
-```text
-/nmg-shadow-feedback last success uncorrected
-```
-
-Use `failure`, `corrected`, or `unknown` as appropriate. NMG does not infer
-correctness from fluent model output.
+The repository includes local headless Pi helpers for development and evaluation:
+`npm run pi:state` inspects the configured model, and
+`npm run pi:prompt -- "Your prompt"` runs a fresh session. Pi QPP controls
+and their caller-specific defaults are documented in the
+[controller design](docs/design/retrieval-confidence-controller/confidence-and-trigger-design.md#caller-specific-activation)
+and [optional capabilities](skills/nmg-memory/references/optional-capabilities.md).
+These helpers are separate from the first-recall tutorial and may require a
+configured model.
 
 ## Results
 
-On the official OmniMemEval user-memory suite, NMG scores 66.57 nugget on
-BEAM 100K (LongMemEval / LoCoMo / PersonaMem v2 / HaluMem runs in progress),
-recorded with judge-model caveats in the official snapshot format:
-[docs/experiments/benchmark-results.md](docs/experiments/benchmark-results.md).
-
-Reproduction lives with the evaluation code, not here: dataset placement,
-matched-arm protocol, scoring, and per-suite commands are documented in
-[evals/README.md](evals/README.md) and each adapter's README under `evals/`.
-
-The fast agent-level regression (`npm run eval:agents`) runs fresh-process
-Writer/Reader Pi pairs against an isolated NMG database and currently passes
-6/6 cases; reports land under ignored `evals/results/`.
+Evaluation records and reproduction instructions live in [benchmark results](docs/experiments/benchmark-results.md)
+and the [evaluation guide](evals/README.md). Read each result with its dataset,
+judge and environment limits; a benchmark is not a guarantee for your tasks.
 
 ## Security boundary
 
-NMG is a memory component, not a sandbox. It does not execute arbitrary code or
-provide an execution backend. When isolation is needed, install and configure a
-Pi sandbox plugin independently; NMG only records provenance and results that Pi
-chooses to submit as memory evidence.
+The local store stays on your machine. If you configure an external embedding
+provider, text selected for embedding is sent to that provider; see
+[embedding configuration](skills/nmg-memory/references/embedding.md). NMG does
+not provide a sandbox or execute agent work in isolation. Configure your agent
+and its execution environment separately.
+
+## More
+
+- [First recall tutorial](docs/guides/first-recall.md) · [Concept map](docs/guides/concept-map.md)
+- [System design](docs/design/design.md) · [Documentation index](docs/README.md)
+- [Evaluation guide](evals/README.md) · [License](LICENSE)

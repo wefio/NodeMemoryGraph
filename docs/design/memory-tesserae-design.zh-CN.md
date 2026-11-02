@@ -151,6 +151,8 @@ memory-record 列，但不表示完全没有 schema 工作：实现创建 tesser
 改名及指纹迁移。`memory_id` 没有级联外键，独立查询也不按 memory 状态过滤。
 因此，仅携带 marker 并不给独立行带来 RAII、删除、退役或 acceptance 保证。
 
+旧版迁移：[契约](memory-tesserae-design/legacy-migration.zh-CN.md)。
+
 ### 3.5 主动写入；主动与被动召回
 
 - **写入（主动）：**本轮读取的 CLI 支持可重复的

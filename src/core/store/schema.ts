@@ -20,35 +20,81 @@ import { ensureCoordinationSchema } from "./coordination-schema.ts";
 
 type Row = Record<string, string | number | Uint8Array | null>;
 
-/**
- * Forward-migrate stores created before the anchors → tesserae rename (PR #19):
- * the old `anchors` table becomes `tesserae` in place so existing bookmarks and
- * their markers survive. Runs before the main idempotent DDL so the later
- * `CREATE TABLE IF NOT EXISTS tesserae` is a no-op against the renamed table.
- * FTS index and triggers are rebuilt under the new names; the old FTS5
- * external-content table is dropped because FTS5 content tables cannot be
- * renamed reliably. Existing `anchor_ref` markers are rewritten to
- * `tessera_ref` in place (the open-string markers channel, no schema change).
- */
+/** Merge legacy bookmarks and repair their references as one atomic migration. */
 export function migrateLegacyTesseraeTables(db: DatabaseSync): void {
   const tables = new Set(
     (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Row[]).map((row) =>
       String(row.name),
     ),
   );
-  if (tables.has("tesserae") || !tables.has("anchors")) return;
-  db.exec(`
-    DROP TRIGGER IF EXISTS anchors_fts_ai;
+  if (!tables.has("anchors") && !tables.has("tesserae")) return;
+  db.exec("SAVEPOINT nmg_tessera_migration");
+  try {
+    if (tables.has("anchors")) migrateAnchorRows(db, tables.has("tesserae"));
+    if (tables.has("memory_records")) repairAnchorMarkers(db);
+    db.exec("RELEASE nmg_tessera_migration");
+  } catch (error) {
+    db.exec("ROLLBACK TO nmg_tessera_migration; RELEASE nmg_tessera_migration");
+    throw error;
+  }
+}
+
+function migrateAnchorRows(db: DatabaseSync, hasTesserae: boolean): void {
+  if (hasTesserae) {
+    const columns = db.prepare("PRAGMA table_info(anchors)").all();
+    const expected = new Set(["id", "path", "snippet", "label", "kind", "memory_id", "created_at"]);
+    if (columns.some((column) => !expected.has(String(column.name))))
+      throw new Error(
+        "legacy anchors have unsupported columns; migration cannot safely merge them",
+      );
+    const conflict = db
+      .prepare(
+        `SELECT a.id FROM anchors a JOIN tesserae t ON t.id = a.id
+      WHERE a.path IS NOT t.path OR a.snippet IS NOT t.snippet OR a.label IS NOT t.label
+        OR a.kind IS NOT t.kind OR a.memory_id IS NOT t.memory_id OR a.created_at IS NOT t.created_at
+      LIMIT 1`,
+      )
+      .get();
+    if (conflict) throw new Error(`legacy anchor conflict for id ${String(conflict.id)}`);
+    db.exec(`INSERT INTO tesserae (id, path, snippet, label, kind, memory_id, created_at)
+      SELECT a.id, a.path, a.snippet, a.label, a.kind, a.memory_id, a.created_at
+      FROM anchors a WHERE NOT EXISTS (SELECT 1 FROM tesserae t WHERE t.id = a.id)`);
+  }
+  db.exec(`DROP TRIGGER IF EXISTS anchors_fts_ai;
     DROP TRIGGER IF EXISTS anchors_fts_ad;
     DROP TRIGGER IF EXISTS anchors_fts_au;
-    DROP TABLE IF EXISTS anchors_fts;
-    ALTER TABLE anchors RENAME TO tesserae;
-  `);
-  db.exec(`
-    UPDATE memory_records
-    SET markers_json = REPLACE(markers_json, '"anchor_ref"', '"tessera_ref"')
-    WHERE markers_json LIKE '%anchor_ref%';
-  `);
+    DROP TABLE IF EXISTS anchors_fts;`);
+  db.exec(hasTesserae ? "DROP TABLE anchors" : "ALTER TABLE anchors RENAME TO tesserae");
+}
+
+function repairAnchorMarkers(db: DatabaseSync): void {
+  const rows = db
+    .prepare(
+      `SELECT id, markers_json FROM memory_records
+    WHERE markers_json LIKE '%anchor_ref%' OR (markers_json LIKE '%tessera_ref%' AND markers_json LIKE '%anchorId%')`,
+    )
+    .all();
+  const update = db.prepare("UPDATE memory_records SET markers_json = ? WHERE id = ?");
+  for (const row of rows) {
+    const markers: unknown = JSON.parse(String(row.markers_json));
+    if (!Array.isArray(markers)) throw new Error(`invalid legacy markers for ${String(row.id)}`);
+    for (const marker of markers) repairAnchorMarker(marker);
+    update.run(JSON.stringify(markers), String(row.id));
+  }
+}
+
+function repairAnchorMarker(value: unknown): void {
+  if (!value || typeof value !== "object") return;
+  const marker = value as { kind?: unknown; attributes?: Record<string, unknown> };
+  if (marker.kind !== "anchor_ref" && marker.kind !== "tessera_ref") return;
+  const attributes = marker.attributes;
+  if (attributes && typeof attributes === "object" && "anchorId" in attributes) {
+    if ("tesseraId" in attributes && attributes.tesseraId !== attributes.anchorId)
+      throw new Error("legacy marker has conflicting bookmark IDs");
+    attributes.tesseraId = attributes.anchorId;
+    delete attributes.anchorId;
+  }
+  if (marker.kind === "anchor_ref") marker.kind = "tessera_ref";
 }
 
 export function migrate(db: DatabaseSync): void {

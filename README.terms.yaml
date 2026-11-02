@@ -11,8 +11,8 @@ terms:
   - term: honest boundary
     aliases: [诚实的边界]
     definition: >-
-      The README's own statement that NMG is not plug-and-play: native integrations need setup and generic agents use the CLI plus Skill path, while the stable JSON-RPC boundary makes self-integration possible; it is a scope statement, not a quality or readiness guarantee.
-      README 自述的边界：NMG 还不是开箱即用，原生集成需要安装配置、通用 agent 走 CLI 加 Skill 路径，而稳定的 JSON-RPC 边界使自行集成成为可能；它是范围声明，不是质量或就绪度保证。
+      The README's statement that integrations require setup and memory retrieval and truth are not guaranteed; it is a scope statement, not a readiness guarantee.
+      README 说明集成需要配置，且不保证记忆一定被找回或一定为真；它是范围声明，不是就绪度保证。
     owner: README.md
     anchor: Node Memory Graph (NMG)
     status: canonical
