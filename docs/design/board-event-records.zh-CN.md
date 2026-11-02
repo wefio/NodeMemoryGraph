@@ -176,3 +176,6 @@ board-wake owner，DSH host package 复用同一通知判定与输出，MCP／CL
 只有具体需求超出支持范围时，才凭可复现失败或验收场景扩展明确的 owner。
 保留现有生命周期、权威与兼容边界；候选概念不是承诺实施的待办。
 [概念复用指南](../guides/board-concept-reuse.zh-CN.md)映射当前操作并记录候选概念；清单不是协议 schema。
+
+[协作阶段草案](board-event-records/collaboration-phase.zh-CN.md)探讨范围内的活动边界与切换协调。
+它是讨论基础，不扩充本篇已接受契约。

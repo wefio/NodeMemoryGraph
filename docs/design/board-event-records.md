@@ -180,3 +180,7 @@ failure or acceptance scenario and a named owner. Preserve existing lifecycle,
 authority and compatibility boundaries; candidate concepts are not a committed backlog.
 The [concept reuse guide](../guides/board-concept-reuse.md) maps current operations
 and records concepts to revisit. Its catalog is not a protocol schema.
+
+The [collaboration phase draft](board-event-records/collaboration-phase.md) explores
+scoped activity boundaries and transition coordination. It is a discussion basis,
+not an extension of this accepted contract.
