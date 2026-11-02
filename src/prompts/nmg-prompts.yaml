@@ -82,7 +82,13 @@ state_description: >-
   eventCreate (event: title/summary/participants/resources/parentId/dependencies;
   participants use stable Agent IDs),
   eventUpdate (eventId and event: expectedRevision, kind, text; kind is note,
-  channel, relations, effect, close or reopen), eventSubscribe/eventUnsubscribe,
+  channel, relations, effect, close, reopen, phasePropose, phaseAgree, phaseSwitch
+  or phaseWithdraw). Phase changes also need expectedPhaseRevision and a unique
+  proposalId; propose adds target:discussion|execution and optional requiredApprovers
+  (default participants, always including proposer). Read the event between writes;
+  agree confirms the pending proposal, switch requires all named confirmations,
+  and only its proposer may withdraw it. Phase is scoped coordination, not a tool
+  permit or cancellation of running operations. Use eventSubscribe/eventUnsubscribe,
   or eventDelete (ended archive, no active effects/references). Channel data is
   event.channel {channelId,summary,state:active|ended|abandoned}; effect data is
   event.effect {id,resource,condition,state:active|released}. Participants may

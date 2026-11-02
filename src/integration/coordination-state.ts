@@ -77,6 +77,7 @@ export interface CoordinationEventSummary {
   updatedAt: string;
   channelCount: number;
   activeEffects: number;
+  collaboration?: CoordinationEvent["collaboration"];
 }
 export interface CoordinationStateResult {
   action:
@@ -103,6 +104,7 @@ export function coordinationSummary(event: CoordinationEvent): CoordinationEvent
     updatedAt: event.updatedAt,
     channelCount: event.channels.length,
     activeEffects: event.effects.filter((effect) => effect.state === "active").length,
+    ...(event.collaboration ? { collaboration: event.collaboration } : {}),
   };
 }
 function inputObject(value: unknown): Record<string, unknown> {
@@ -231,7 +233,7 @@ export function coordinationDirectoryViews(
         part: "record" as const,
       },
       requiredLabels: [`event=${event.id} r${event.revision} [${event.status}]`],
-      body: `${event.title}; channels=${event.channelCount}; activeEffects=${event.activeEffects}`,
+      body: `${event.title}; channels=${event.channelCount}; activeEffects=${event.activeEffects}${phaseLabel(event.collaboration)}`,
     })),
   ];
 }
@@ -288,7 +290,7 @@ export function prepareCoordinationSurface(
       requiredLabels: [
         `event=${result.event.id} r${result.event.revision} [${result.event.status}] [current reference] [preview]`,
       ],
-      body: `${result.event.title}; outcome=${result.event.outcome ?? "unspecified"}. Use event.historyOnly=true for history without repeating the full snapshot.`,
+      body: `${result.event.title}; outcome=${result.event.outcome ?? "unspecified"}${phaseLabel(result.event.collaboration)}. Use event.historyOnly=true for history without repeating the full snapshot.`,
     });
   views.push(...eventDetailViews(result));
   for (const change of result.changes ?? [])
@@ -314,4 +316,9 @@ export function prepareCoordinationSurface(
   if (result.nextRevision !== undefined && prepared.omitted.length === 0)
     return prepareInformationOutput([...views, { body: `nextRevision=${result.nextRevision}` }]);
   return prepared;
+}
+
+function phaseLabel(state: CoordinationEvent["collaboration"]): string {
+  if (!state) return "";
+  return `; phase=${state.phase ?? "unspecified"} phaseRevision=${state.phaseRevision}${state.pending ? ` pending=${state.pending.id}->${state.pending.target}` : ""} [coordination only; execution permits are host-owned]`;
 }

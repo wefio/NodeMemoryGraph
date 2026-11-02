@@ -119,8 +119,28 @@ other concepts only when needed.
 
 The [event contract](../../design/board-event-records.md#concept-adoption) owns
 this extension rule. The [reuse guide](../../guides/board-concept-reuse.md) and
-board workflow make current operations discoverable. This is an implemented
-documentation and adoption-policy change, not new runtime functionality or a
-claim that general Assignment, input ownership or DAG scheduling is complete.
+board workflow make current operations discoverable. The catalog records vocabulary;
+it does not establish general Assignment, input ownership or DAG scheduling.
 Wholesale adoption and a mandatory implementation backlog are rejected; leaving
 concepts only in private conversation would make future reuse hard to recover.
+
+## Phase agreement within an event
+
+Agents can otherwise start implementation from an unconfirmed discussion or
+interpret a redesign suggestion as an instruction to stop. Optional scoped phase
+declarations make the shared activity boundary observable. Existing event revisions,
+transactions, history, subscriptions and InformationView remain their owners;
+a separate scheduler or supervising role would duplicate these responsibilities.
+
+The [phase contract](../../design/board-event-records.md#scoped-collaboration-phase)
+separates phase version from event version and binds agreement to a unique proposal.
+Defaulting confirmation to participants is a conservative starting point; explicit
+affected-participant sets allow local coordination under the collaboration agreement.
+Those sets are declarations rather than verified organizational authority. Phase
+state remains absent on events that do not opt in, avoiding a global mode change.
+
+Execution permits, automatic roster activity and in-flight operation fencing remain
+outside this increment. The [draft](../../design/board-event-records/collaboration-phase.md)
+keeps those policy choices open. Domain/state tests exercise version checks,
+confirmation, withdrawal, persistence, local scope and disclosure; they do not prove
+live multi-Agent alignment or host enforcement.

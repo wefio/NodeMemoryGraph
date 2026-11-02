@@ -180,6 +180,15 @@ export function withCoordination<TBase extends Constructor>(Base: TBase) {
           throw new Error(
             "Only event participants may change this record; subscription alone does not grant authority",
           );
+        if (
+          change.kind === "phasePropose" &&
+          this.db
+            .prepare(
+              "SELECT 1 FROM coordination_event_changes WHERE event_id=? AND kind='phasePropose' AND json_extract(payload_json,'$.proposalId')=? LIMIT 1",
+            )
+            .get(current.id, change.proposalId)
+        )
+          throw new Error("Phase proposalId has already been used in this event");
         const next = applyCoordinationMutation(current, change, actor);
         this.checkCoordinationReferences(next);
         next.revision++;
@@ -479,7 +488,7 @@ export function withCoordination<TBase extends Constructor>(Base: TBase) {
           agentId: event.updatedBy,
           kind: "note",
           to: agentId,
-          content: `Event ${event.id} r${event.revision} [${event.status}] ${event.title}: ${text}`,
+          content: `Event ${event.id} r${event.revision} [${event.status}] ${event.title}${event.collaboration ? ` phase=${event.collaboration.phase ?? "unspecified"} phaseRevision=${event.collaboration.phaseRevision}` : ""}: ${text}`,
           expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
         },
         port,

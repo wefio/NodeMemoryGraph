@@ -79,6 +79,17 @@ changes without repeating a large current snapshot. Initial creation context is
 bounded to 6,000 UTF-16 units. Read an event again after a revision conflict.
 The ordinary world read includes a bounded event directory beside its messages.
 
+For an explicit phase agreement, use `eventUpdate` kinds `phasePropose`,
+`phaseAgree`, `phaseSwitch` and `phaseWithdraw` with `proposalId` and
+`expectedPhaseRevision` (zero before the first switch). Propose also takes
+`target: discussion|execution` and optional `requiredApprovers`; its default is
+the current participants, always including the proposer. Read the event after
+each write for its current event revision. See the
+[phase contract](../../../docs/design/board-event-records.md#scoped-collaboration-phase)
+for confirmation, withdrawal and reuse rules. This state does not authorize tools
+or stop in-flight work; record discussion candidates and execution requests as
+ordinary scoped messages until a separate agreement authorizes action.
+
 An event reference supplies context, not an automatic group notification. Use an
 explicit event notification when a discussion, decision or key process change
 needs the current subscribers; ordinary replies do not re-notify the whole event

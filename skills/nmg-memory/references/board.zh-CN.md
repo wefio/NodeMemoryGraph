@@ -40,6 +40,17 @@ nmg board resolve TASK_ID ENTRY_ID --agent scout-b \
   --resolution "work completed or deliberately abandoned" --json
 ```
 
+## 事件内的阶段协商
+
+显式协商阶段时，沿用 `eventUpdate`，使用 `phasePropose`、`phaseAgree`、
+`phaseSwitch`、`phaseWithdraw`，并提供 `proposalId`、`expectedPhaseRevision`
+（首次切换前为零）和当前事件 `expectedRevision`。
+提议另提供 `target: discussion|execution` 与可选 `requiredApprovers`；
+默认确认人为当前参与者，始终包含提议者。每次写入后重读事件获取当前修订。
+确认、撤回与提案 ID 复用规则见[阶段契约](../../../docs/design/board-event-records.zh-CN.md#范围级协作阶段)。
+阶段状态不授权工具，也不停止在途工作；讨论候选和执行请求先用关联范围的普通消息记录，
+实际行动等待另行约定的授权。
+
 ## 记忆边界
 
 Board 是 task-scoped 协作存储，不是语义搜索、STG、LTG 或共享 AG。每个 Agent 将相关条目读入自己的私有 AG。条目可记录 goal、blocker、question、result、handoff 和 decision；不得记录秘密或隐藏 chain-of-thought。条目会过期；只有通过独立且有证据的 `nmg remember` 调用，持久结论才进入长期记忆。
