@@ -183,6 +183,8 @@ and the independent query does not filter memory status. Marker carriage alone
 therefore gives no RAII, deletion, retirement or acceptance guarantee for the
 separate row.
 
+Legacy migration: [contract](memory-tesserae-design/legacy-migration.md).
+
 ### 3.5 Writing is active; recall is active + passive
 
 - **Write (active):** the inspected CLI supports repeatable
