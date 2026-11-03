@@ -111,10 +111,10 @@ try {
   db.close();
 }
 
-console.log(
+process.stdout.write(
   JSON.stringify(
     { revision, node: process.version, measuredAt: new Date().toISOString(), results },
     null,
     2,
-  ),
+  ) + "\n",
 );
