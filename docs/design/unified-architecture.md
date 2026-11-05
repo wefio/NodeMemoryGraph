@@ -18,8 +18,7 @@ The engine retains graph organization and memory meaning. [Graph activation and 
 ```mermaid
 flowchart TB
   Host[Harness host binding] --> Runtime[Shared Harness Runtime]
-  Runtime --> Client[Daemon client]
-  Client -->|HTTP JSON-RPC| Daemon[Local Daemon]
+  Runtime -->|HTTP JSON-RPC| Daemon[Local Daemon]
   Cloud[Cloud memory API] --> Engine[Memory engine]
   Daemon --> Engine
   Engine --> Port[Memory backend contract]

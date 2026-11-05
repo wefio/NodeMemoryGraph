@@ -18,8 +18,7 @@ SQLite 与原生对象存储是并行的记忆后端。对象后端直接保存�
 ```mermaid
 flowchart TB
   Host[Harness 宿主绑定] --> Runtime[共享 Harness Runtime]
-  Runtime --> Client[Daemon 客户端]
-  Client -->|HTTP JSON-RPC| Daemon[本地 Daemon]
+  Runtime -->|HTTP JSON-RPC| Daemon[本地 Daemon]
   Cloud[云端记忆 API] --> Engine[记忆引擎]
   Daemon --> Engine
   Engine --> Port[记忆后端合同]
