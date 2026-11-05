@@ -85,6 +85,48 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 or `exit_criteria`. On exit, delete or explicitly promote to durable Safety or
 Contract coverage.
 
+## Test pyramid
+
+The three layers are about the boundary a test crosses, not the folder it sits in:
+`tests/core` alone holds a pure ranking test, a store test on a real database file, and a
+test that starts the daemon. `tools/test-layers.ts` derives the layer from the test's own
+source. Spawning a process, or starting the built CLI through the daemon client, is
+end-to-end; opening a real database, temp directory or socket is integration; everything
+else is unit. A quoted `spawn(...)` in a comment or a fixture string describes the
+boundary without crossing it, so markers are matched on the code, not on the prose.
+
+| Layer | Crosses | Files | Cases | Wall clock |
+| --- | --- | --- | --- | --- |
+| Unit | nothing: in process, no real dependency | 155 | ~1100 | ~11 s |
+| Integration | a real database, temp directory or socket | 119 | ~970 | ~43 s |
+| End to end | a process boundary: the CLI or the daemon | 37 | ~295 | ~1 min |
+
+`npm run test:unit`, `test:integration` and `test:e2e` run one layer; `test:layers` prints
+the distribution. The end-to-end layer needs `npm run build` first, and says so when
+`dist/` is missing instead of failing obscurely.
+
+A layer's coverage is measured against the modules it should own, not against all of
+`src`. `npm run test:coverage:layers` runs the three tiers and assigns each module to the
+cheapest tier that reaches 90% of its lines:
+
+| Layer | Modules | Lines | Coverage |
+| --- | --- | --- | --- |
+| Unit | 35 | 7 020 | 96% |
+| Integration | 29 | 15 986 | 95% |
+| End to end | 1 | 169 | 96% |
+
+The end-to-end row is why all three layers stay. At line level it adds almost nothing that
+integration already reaches in process; what it covers is the boundary — exit codes,
+stdio, daemon lifecycle — which line coverage cannot see, and which is why mutation teeth
+exist. A module attributed to a tier below 90% is the gap worth reading, not the overall
+percentage: judging the unit tier by lines only a daemon can reach would reward faking
+I/O, and judging it by all of `src` would move the number whenever an unrelated end-to-end
+test changed.
+
+`tests/tools/test-layers.test.ts` keeps the partition honest: every test file lands in
+exactly one layer, an override that stopped mattering is reported, and the ownership rule
+is checked against a synthetic tree.
+
 Resource choice is independent of blocking classification. A narrow-verifier
 fixture asserting route-test failure may decline inapplicable shared checks while
 retaining real CLI, Git and route tests. Representative default-narrow coverage

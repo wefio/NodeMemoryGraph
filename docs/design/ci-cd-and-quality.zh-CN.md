@@ -62,6 +62,30 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 
 `agent:context:check` 会拒绝缺少 `reason`、`review_after` 或 `exit_criteria` 的 active guardrail。满足退出条件后必须删除，或明确晋升为长期 Safety/Contract 测试。
 
+## 测试金字塔
+
+三层取决于测试**跨过什么边界**，而不是它躺在哪个目录：`tests/core` 一个目录里就同时有纯排序测试、跑真实数据库文件的 store 测试，以及启动 daemon 的测试。`tools/test-layers.ts` 从测试自身的源码推导层：派生进程、或通过 daemon client 启动构建产物属于端到端；打开真实数据库、临时目录或 socket 属于集成；其余是单元。注释或 fixture 字符串里引用的 `spawn(...)` 只是在描述边界、并没有跨过它，所以标记只匹配代码，不匹配说明文字。
+
+| 层 | 跨过的边界 | 文件 | 用例 | 墙钟 |
+| --- | --- | --- | --- | --- |
+| 单元 | 无：同进程内，无真实依赖 | 155 | ~1100 | ~11s |
+| 集成 | 真实数据库、临时目录或 socket | 119 | ~970 | ~43s |
+| 端到端 | 进程边界：CLI 或 daemon | 37 | ~295 | ~1 分钟 |
+
+`npm run test:unit`、`test:integration`、`test:e2e` 各跑一层，`test:layers` 打印分布。端到端层需要先 `npm run build`；`dist/` 缺失时它直接说明原因，而不是报一个看不懂的失败。
+
+每层的覆盖率按**它该负责的模块**算，不按整个 `src` 算。`npm run test:coverage:layers` 依次跑三层，把每个模块判给达到其 90% 行覆盖的最便宜那一层：
+
+| 层 | 模块 | 行数 | 覆盖率 |
+| --- | --- | --- | --- |
+| 单元 | 35 | 7 020 | 96% |
+| 集成 | 29 | 15 986 | 95% |
+| 端到端 | 1 | 169 | 96% |
+
+端到端那一行正是三层都要留的理由：论行数，它几乎不增加集成层在同一进程内已经到达的部分；它覆盖的是边界——退出码、stdio、daemon 生命周期——这些是行覆盖率看不见的，也正是 mutation tooth 存在的原因。值得读的是被归到某一层却低于 90% 的模块，而不是整体百分比：用只有 daemon 能到达的行去要求单元层，只会奖励伪造 I/O；用整个 `src` 去要求它，则每有一个无关的端到端测试变化，这个数字就会晃。
+
+`tests/tools/test-layers.test.ts` 守住这条分界：每个测试文件恰好落在一层，失效的 override 会被报出来，归属规则用一棵合成目录树验证。
+
 测试资源按断言边界选择，与上述阻塞分类正交：只断言路由测试失败的 narrow verifier fixture 可声明不适用共享检查，同时保留真实 CLI、Git 和路由测试；默认 narrow 的代表测试仍验证共享检查执行（[决策](../decisions/implemented/2026-09-23-route-only-verifier-fixtures.md)）。
 
 ## 执行轨道

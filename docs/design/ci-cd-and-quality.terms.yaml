@@ -16,6 +16,15 @@ terms:
     owner: docs/design/ooo-execution-bootstrap.md
     anchor: "Checkable evidence for a conclusion"
     status: canonical
+  - term: test pyramid
+    aliases: [test layers, 测试金字塔, 测试分层]
+    definition: >-
+      Three test layers derived from the boundary a test crosses (unit crosses nothing, integration opens a real database, temp directory or socket, end to end crosses a process boundary), each commanded and measured separately so a tier is judged on the surface it can be thorough about rather than on all of `src`.
+      由测试跨过的边界推导出的三层（单元不跨边界，集成打开真实数据库、临时目录或 socket，端到端跨进程边界）；每层可单独运行与度量，使一层按它能做扎实的范围被评估，而不是按整个 `src`。
+    owner: docs/design/ci-cd-and-quality.md
+    anchor: Test pyramid
+    status: canonical
+
 references:
   - Repository Control Plane
   - contract
