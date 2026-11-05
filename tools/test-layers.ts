@@ -306,18 +306,24 @@ function sortedGaps(modules: Map<string, FileCoverage>, below: number): Array<[s
 /** How much of a module a tier must reach before the module counts as that tier's own. */
 const OWNERSHIP_TARGET = 90;
 
+/** The modules a tier reaches least, worst first. This is the actionable list, not the total. */
+function printGaps(modules: Map<string, FileCoverage>, limit: number): void {
+  const gaps = sortedGaps(modules, OWNERSHIP_TARGET);
+  if (gaps.length === 0) return;
+  for (const [name, pct] of gaps.slice(0, limit))
+    console.log(`    ${pct.toFixed(1).padStart(5)}%  ${name}`);
+  if (gaps.length > limit) console.log(`    ... ${gaps.length - limit} more`);
+}
+
 function reportSingleTier(tier: TierCoverage): void {
   const totals = lineTotals(tier.modules.values());
   console.log(
     `${tier.layer} coverage: ${percent(totals.covered, totals.total)} of ${totals.total} lines ` +
       `in ${tier.modules.size} modules (${tier.durationSeconds.toFixed(0)}s, exit ${tier.exitCode})`,
   );
-  const gaps = sortedGaps(tier.modules, OWNERSHIP_TARGET);
-  if (gaps.length > 0) {
+  if (sortedGaps(tier.modules, OWNERSHIP_TARGET).length > 0) {
     console.log(`  below ${OWNERSHIP_TARGET}%:`);
-    for (const [name, pct] of gaps.slice(0, 8))
-      console.log(`    ${pct.toFixed(1).padStart(5)}%  ${name}`);
-    if (gaps.length > 8) console.log(`    ... ${gaps.length - 8} more`);
+    printGaps(tier.modules, 8);
   }
 }
 
@@ -360,9 +366,7 @@ function reportOwnership(tiers: TierCoverage[]): void {
       `${layer.padEnd(12)} ${String(modules.size).padStart(6)}  ${String(totals.total).padStart(6)}  ` +
         `${percent(totals.covered, totals.total).padStart(8)}  ${gaps.length === 0 ? "-" : gaps.length}`,
     );
-    for (const [name, pct] of gaps.slice(0, 5))
-      console.log(`    ${pct.toFixed(1).padStart(5)}%  ${name}`);
-    if (gaps.length > 5) console.log(`    ... ${gaps.length - 5} more`);
+    printGaps(modules, 5);
   }
 }
 
