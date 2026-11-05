@@ -1,0 +1,441 @@
+// Which layer of the pyramid a test file belongs to, derived from what it crosses.
+//
+// The pyramid is about cost and isolation, not folder names, so the layer is read from the
+// test's own source: a test that spawns the product binary pays for a process boundary, a
+// test that opens a real SQLite file or a temp directory pays for the filesystem, and what
+// remains runs in process with nothing to fake. A folder-based table would be a second copy
+// of that fact, and `tests/core` alone holds all three (a pure ranking test, a store test on
+// a real database file, and a test that starts the CLI).
+//
+// Reading the source has one hole: a test that leaves the process through a helper reads as
+// unit. The unit tier therefore runs with `tests/helpers/unit-seal.ts` preloaded, which throws
+// on the boundary calls themselves, so the mistake fails instead of costing 40 s. What the seal
+// finds once, the override table below records.
+//
+// Modes:
+//   --list <layer>   print that layer's files, one per line
+//   --stats          files and share per layer
+//   --run <layer>    run the layer through `node --test`; other flags after the layer are
+//                    forwarded, so `--run unit --watch` is the inner loop
+//   --run <layer> --coverage
+//                    the same run under c8, reported over the modules that layer loads
+//   --check          fail when a file falls outside every layer, when an override points at
+//                    a file that moved, or when an override stopped mattering
+import { globSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
+import { dirname, join, resolve } from "node:path";
+
+export type TestLayer = "unit" | "integration" | "e2e";
+
+/** Cheapest first: this is the order the pyramid asks a developer to run. */
+export const LAYERS: readonly TestLayer[] = ["unit", "integration", "e2e"];
+
+/**
+ * A child process is the boundary that makes a test end-to-end. Everything the test asserts
+ * about the product now travels through argv, stdio and an exit code, so a failure there is
+ * a claim about the assembled product, not about a function.
+ *
+ * The daemon client is the same boundary reached indirectly: it starts the built CLI from
+ * `dist/`, so a test that never calls `spawn` itself still fails for want of a build. That
+ * reference lives in an import path, which is a string, so it is matched on the raw source
+ * rather than on the executable code below.
+ */
+const SPAWNS_PROCESS =
+  /\b(?:spawn|spawnSync|execFile|execFileSync|execSync|fork|connectDaemon)\s*\(/;
+
+/** Paths that mean "this test starts the product": the daemon client and the built CLI. */
+const STARTS_PRODUCT = /daemon-client|dist\/cli\/main\.js|bin\/nmg\.mjs/;
+
+/**
+ * A real dependency the test neither owns nor mocks: a database file, a temp directory, a
+ * listening socket. The assertions are still in process, which keeps the failure readable,
+ * but the setup can fail for reasons the code under test did not cause.
+ */
+const REAL_DEPENDENCY =
+  /(?:DatabaseSync|node:sqlite|mkdtemp|tmpdir\(\)|createServer|\.listen\(|writeFileSync|mkdirSync|rmSync|NmgStore|\/store\.ts|\/store\/)/;
+
+/**
+ * Deliberate exceptions, keyed by repository-relative path. Each one must say why the marker
+ * is wrong, because the alternative is a reviewer guessing whether the exception is load
+ * bearing. `--check` fails on a path that no longer exists, so the list cannot rot silently.
+ */
+export const OVERRIDES: ReadonlyMap<string, { layer: TestLayer; reason: string }> = new Map([
+  // Each of these crosses a process boundary through a helper, so the file itself never
+  // mentions it. The unit seal found them; without the entry the seal fails them again.
+  ["tests/evals/official/python.test.ts", { layer: "e2e", reason: "probes a Python runtime" }],
+  ["tests/evals/topology/bpid.test.ts", { layer: "e2e", reason: "runs the topology driver" }],
+  ["tests/evals/topology/run.test.ts", { layer: "e2e", reason: "runs the topology driver" }],
+  [
+    "tests/evals/resource-observability.test.ts",
+    { layer: "e2e", reason: "samples the process tree of a live daemon" },
+  ],
+  [
+    "tests/integration/ooo-post-commit-notification.test.ts",
+    { layer: "e2e", reason: "posts through the committed CLI" },
+  ],
+  ["tests/integration/ooo-verification.test.ts", { layer: "e2e", reason: "runs the verifier CLI" }],
+  ["tests/support/test-runtime.test.ts", { layer: "e2e", reason: "starts a real HTTP daemon" }],
+  [
+    "tests/tools/complexity-gate.test.ts",
+    { layer: "e2e", reason: "shells out to tsc for real complexity output" },
+  ],
+  [
+    "tests/tools/complexity-registration.test.ts",
+    { layer: "e2e", reason: "shells out to tsc for real complexity output" },
+  ],
+  ["tests/tools/test-groups.test.ts", { layer: "e2e", reason: "runs Node itself as a child" }],
+] as const);
+
+/** `tests/**\/*.test.ts`, repository-relative and forward-slashed on every platform. */
+export function collectTestFiles(root = process.cwd()): string[] {
+  return globSync("tests/**/*.test.ts", { cwd: root })
+    .map((file) => file.split("\\").join("/"))
+    .sort();
+}
+
+/**
+ * The layer of one test file. `path` is only consulted for the override table and the
+ * diagnostics; the decision itself comes from `source`.
+ */
+export function classifyTest(
+  path: string,
+  source: string,
+  overrides: ReadonlyMap<string, { layer: TestLayer; reason: string }> = OVERRIDES,
+): TestLayer {
+  const override = overrides.get(path);
+  if (override) return override.layer;
+  return derivedLayer(source);
+}
+
+/**
+ * What the test runs, minus what it merely mentions. A file that quotes `spawn(...)` in a
+ * comment or a fixture string is describing the boundary, not crossing it, and the guard test
+ * for this classifier does exactly that.
+ */
+function executedCode(source: string): string {
+  return source
+    .replace(/'(?:[^'\\\n]|\\.)*'/g, '""')
+    .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
+    .replace(/`(?:[^`\\]|\\.)*`/g, '""')
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/\/\/[^\n]*/g, " ");
+}
+
+/** What the source itself says, before any override has a say. */
+function derivedLayer(source: string): TestLayer {
+  if (STARTS_PRODUCT.test(source) || SPAWNS_PROCESS.test(executedCode(source))) return "e2e";
+  if (REAL_DEPENDENCY.test(executedCode(source))) return "integration";
+  return "unit";
+}
+
+export interface LayerReport {
+  files: string[];
+  /** How the decision was reached, for `--why`. */
+  evidence: Map<string, string>;
+}
+
+/** Classify every test file under `root`. */
+export function partitionTests(
+  root = process.cwd(),
+  overrides: ReadonlyMap<string, { layer: TestLayer; reason: string }> = OVERRIDES,
+): Map<TestLayer, LayerReport> {
+  const report = new Map<TestLayer, LayerReport>(
+    LAYERS.map((layer) => [layer, { files: [], evidence: new Map() }]),
+  );
+  for (const file of collectTestFiles(root)) {
+    const source = readFileSync(join(root, file), "utf8");
+    const layer = classifyTest(file, source, overrides);
+    const bucket = report.get(layer)!;
+    bucket.files.push(file);
+    const override = overrides.get(file);
+    bucket.evidence.set(
+      file,
+      override
+        ? `override: ${override.reason}`
+        : layer === "e2e"
+          ? "spawns a child process or starts the built daemon"
+          : layer === "integration"
+            ? "opens a real database, temp directory or socket"
+            : "no process, database or socket",
+    );
+  }
+  return report;
+}
+
+/** Problems worth failing on. Empty means the classification still describes the suite. */
+export function checkLayers(
+  root = process.cwd(),
+  overrides: ReadonlyMap<string, { layer: TestLayer; reason: string }> = OVERRIDES,
+): string[] {
+  const errors: string[] = [];
+  const report = partitionTests(root, overrides);
+  const files = collectTestFiles(root);
+  const classified = LAYERS.reduce((sum, layer) => sum + report.get(layer)!.files.length, 0);
+  if (classified !== files.length) {
+    errors.push(`partition covers ${classified} of ${files.length} test files`);
+  }
+
+  for (const [file, override] of overrides) {
+    if (!files.includes(file)) {
+      errors.push(`override for ${file} points at a file that no longer exists`);
+      continue;
+    }
+    const derived = derivedLayer(readFileSync(join(root, file), "utf8"));
+    if (derived === override.layer) {
+      errors.push(`override for ${file} is redundant: the source already reads as ${derived}`);
+    }
+  }
+  return errors;
+}
+
+function percent(part: number, whole: number): string {
+  return whole === 0 ? "0%" : `${Math.round((part / whole) * 100)}%`;
+}
+
+function printStats(root: string): void {
+  const report = partitionTests(root);
+  const total = LAYERS.reduce((sum, layer) => sum + report.get(layer)!.files.length, 0);
+  console.log(`layer        files  share`);
+  for (const layer of LAYERS) {
+    const files = report.get(layer)!.files.length;
+    console.log(`${layer.padEnd(12)} ${String(files).padStart(5)}  ${percent(files, total)}`);
+  }
+  console.log(`${"total".padEnd(12)} ${String(total).padStart(5)}`);
+}
+
+function runLayer(root: string, layer: TestLayer, forwarded: string[]): Promise<number> {
+  const report = partitionTests(root);
+  const files = report.get(layer)!.files;
+  if (files.length === 0) {
+    console.error(`no test files classified as ${layer}`);
+    return Promise.resolve(1);
+  }
+  const child = spawn(process.execPath, testArgs(layer, forwarded, files), {
+    cwd: root,
+    stdio: "inherit",
+  });
+  return new Promise((done) => {
+    child.on("close", (code, signal) => {
+      if (signal) console.error(`${layer} interrupted by ${signal}`);
+      done(code ?? 1);
+    });
+  });
+}
+
+/**
+ * The unit layer runs with the seal preloaded, so a test that leaves the process through a
+ * helper fails with the rule it broke instead of quietly costing 40 s and a daemon.
+ */
+export function testArgs(layer: TestLayer, forwarded: string[], files: string[]): string[] {
+  const args = ["--experimental-strip-types", "--test", "--test-concurrency=8"];
+  if (layer === "unit") args.push("--import", "./tests/helpers/unit-seal.ts");
+  return [...args, ...forwarded, ...files];
+}
+
+/** One file's line coverage, as c8 writes it into `coverage-summary.json`. */
+interface FileCoverage {
+  lines: { total: number; covered: number; pct: number };
+}
+
+type CoverageSummary = Record<string, FileCoverage>;
+
+/** c8's own entry point, resolved so the script does not depend on a shell shim. */
+function c8Entry(): string {
+  const require = createRequire(import.meta.url);
+  return join(dirname(require.resolve("c8/package.json")), "bin", "c8.js");
+}
+
+/** `src/...`, whatever the worktree path in front of it happens to be. */
+function moduleName(file: string): string {
+  const normal = file.split("\\").join("/");
+  const at = normal.indexOf("/src/");
+  return at >= 0 ? normal.slice(at + 1) : normal;
+}
+
+/** Modules with at least one instrumented line, keyed by repository-relative name. */
+function readSummary(directory: string): Map<string, FileCoverage> {
+  const file = join(directory, "coverage-summary.json");
+  if (!existsSync(file)) return new Map();
+  const parsed = JSON.parse(readFileSync(file, "utf8")) as CoverageSummary;
+  const modules = new Map<string, FileCoverage>();
+  for (const [path, coverage] of Object.entries(parsed)) {
+    if (path === "total" || coverage.lines.total === 0) continue;
+    const name = moduleName(path);
+    if (!name.startsWith("src/")) continue;
+    modules.set(name, coverage);
+  }
+  return modules;
+}
+
+interface TierCoverage {
+  layer: TestLayer;
+  modules: Map<string, FileCoverage>;
+  durationSeconds: number;
+  exitCode: number;
+}
+
+/** Run one layer under c8 and keep its per-module line counts. */
+async function coverLayer(
+  root: string,
+  layer: TestLayer,
+  forwarded: string[],
+  reportRoot: string,
+): Promise<TierCoverage> {
+  const report = partitionTests(root);
+  const files = report.get(layer)!.files;
+  const directory = join(root, reportRoot, layer);
+  rmSync(directory, { recursive: true, force: true });
+  const started = Date.now();
+  const child = spawn(
+    process.execPath,
+    [
+      c8Entry(),
+      "--reporter=json-summary",
+      `--report-dir=${directory}`,
+      process.execPath,
+      ...testArgs(layer, forwarded, files),
+    ],
+    { cwd: root, stdio: "inherit" },
+  );
+  const exitCode = await new Promise<number>((done) =>
+    child.on("close", (code) => done(code ?? 1)),
+  );
+  return {
+    layer,
+    modules: readSummary(directory),
+    durationSeconds: (Date.now() - started) / 1000,
+    exitCode,
+  };
+}
+
+/** Covered and total lines across a set of modules. */
+function lineTotals(modules: Iterable<FileCoverage>): { covered: number; total: number } {
+  let covered = 0;
+  let total = 0;
+  for (const module of modules) {
+    covered += module.lines.covered;
+    total += module.lines.total;
+  }
+  return { covered, total };
+}
+
+function sortedGaps(modules: Map<string, FileCoverage>, below: number): Array<[string, number]> {
+  return [...modules.entries()]
+    .filter(([, coverage]) => coverage.lines.pct < below)
+    .map(([name, coverage]): [string, number] => [name, coverage.lines.pct])
+    .sort((a, b) => a[1] - b[1]);
+}
+
+/** The line share below which a module in a tier's reach is worth naming. */
+const GAP_THRESHOLD = 90;
+
+/** The modules a tier reaches least, worst first. This is the actionable list, not the total. */
+function printGaps(modules: Map<string, FileCoverage>, limit: number): void {
+  const gaps = sortedGaps(modules, GAP_THRESHOLD);
+  if (gaps.length === 0) return;
+  for (const [name, pct] of gaps.slice(0, limit))
+    console.log(`    ${pct.toFixed(1).padStart(5)}%  ${name}`);
+  if (gaps.length > limit) console.log(`    ... ${gaps.length - limit} more`);
+}
+
+/** What one tier reaches, over the modules it loads. A reach number, not a score. */
+function reportSingleTier(tier: TierCoverage): void {
+  const totals = lineTotals(tier.modules.values());
+  console.log(
+    `${tier.layer} reach: ${percent(totals.covered, totals.total)} of ${totals.total} lines ` +
+      `in ${tier.modules.size} modules it loads (${tier.durationSeconds.toFixed(0)}s, exit ${tier.exitCode})`,
+  );
+  if (sortedGaps(tier.modules, GAP_THRESHOLD).length > 0) {
+    console.log(`  below ${GAP_THRESHOLD}%:`);
+    printGaps(tier.modules, 8);
+  }
+}
+
+/** Where the c8 summaries land; `coverage/` is already ignored by git. */
+const REPORT_DIR = "coverage/layers";
+
+/** The extra flag `--run` accepts, kept out of the `node --test` arguments. */
+const COVERAGE_FLAG = "--coverage";
+
+interface Invocation {
+  root: string;
+  /** The token after the flag, empty when the command takes none. */
+  argument: string;
+  rest: string[];
+}
+
+type Command = (invocation: Invocation) => Promise<number>;
+
+/** The layer a flag names, or `undefined` after reporting what it expected. */
+function readLayer(flag: string, argument: string): TestLayer | undefined {
+  if (LAYERS.includes(argument as TestLayer)) return argument as TestLayer;
+  console.error(`${flag} needs one of: ${LAYERS.join(", ")}`);
+  return undefined;
+}
+
+function checkCommand(root: string): number {
+  const errors = checkLayers(root);
+  for (const error of errors) console.error(error);
+  return errors.length === 0 ? 0 : 1;
+}
+
+function listCommand(root: string, argument: string): number {
+  const layer = readLayer("--list", argument);
+  if (!layer) return 1;
+  for (const file of partitionTests(root).get(layer)!.files) console.log(file);
+  return 0;
+}
+
+function whyCommand(root: string, argument: string): number {
+  const report = partitionTests(root);
+  for (const layer of LAYERS) {
+    const evidence = report.get(layer)!.evidence.get(argument);
+    if (evidence) {
+      console.log(`${argument}: ${layer} (${evidence})`);
+      return 0;
+    }
+  }
+  console.error(`${argument} is not a test file under tests/`);
+  return 1;
+}
+
+async function runCommand(root: string, argument: string, rest: string[]): Promise<number> {
+  const layer = readLayer("--run", argument);
+  if (!layer) return 1;
+  if (!rest.includes(COVERAGE_FLAG)) return runLayer(root, layer, rest);
+  const forwarded = rest.filter((value) => value !== COVERAGE_FLAG);
+  const tier = await coverLayer(root, layer, forwarded, REPORT_DIR);
+  reportSingleTier(tier);
+  return tier.exitCode;
+}
+
+const COMMANDS: Record<string, Command> = {
+  "--stats": async ({ root }) => {
+    printStats(root);
+    return 0;
+  },
+  "--check": async ({ root }) => checkCommand(root),
+  "--list": async ({ root, argument }) => listCommand(root, argument),
+  "--why": async ({ root, argument }) => whyCommand(root, argument),
+  "--run": async ({ root, argument, rest }) => runCommand(root, argument, rest),
+};
+
+const USAGE =
+  "usage: test-layers.ts --list <layer> | --run <layer> [--coverage] [node --test flags] | " +
+  "--stats | --check | --why <file>";
+
+async function main(argv: string[]): Promise<number> {
+  const [flag, argument = "", ...rest] = argv;
+  const command = COMMANDS[flag];
+  if (!command) {
+    console.error(USAGE);
+    return 1;
+  }
+  return command({ root: resolve(process.cwd()), argument, rest });
+}
+
+// Only run when invoked as a program, so the guard test can import the classifier.
+if (process.argv[1]?.replace(/\\/g, "/").endsWith("tools/test-layers.ts")) {
+  process.exit(await main(process.argv.slice(2)));
+}

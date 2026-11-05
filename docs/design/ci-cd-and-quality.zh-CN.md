@@ -62,6 +62,24 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 
 `agent:context:check` 会拒绝缺少 `reason`、`review_after` 或 `exit_criteria` 的 active guardrail。满足退出条件后必须删除，或明确晋升为长期 Safety/Contract 测试。
 
+## 测试金字塔
+
+三层取决于测试**跨过什么边界**，而不是它躺在哪个目录：`tests/core` 一个目录里就同时有纯排序测试、跑真实数据库文件的 store 测试，以及启动 daemon 的测试。`tools/test-layers.ts` 从测试自身的源码推导层：派生进程、或通过 daemon client 启动构建产物属于端到端；打开真实数据库、临时目录或 socket 属于集成；其余是单元。注释或 fixture 字符串里引用的 `spawn(...)` 只是在描述边界、并没有跨过它，所以标记只匹配代码，不匹配说明文字。
+
+| 层 | 跨过的边界 | 文件 | 用例 | 墙钟 |
+| --- | --- | --- | --- | --- |
+| 单元 | 无：同进程内，无真实依赖 | 134 | ~970 | ~5s |
+| 集成 | 真实数据库、临时目录或 socket | 130 | ~1060 | ~33s |
+| 端到端 | 进程边界：CLI 或 daemon | 47 | ~350 | ~35s |
+
+`npm run test:unit`、`test:integration`、`test:e2e` 各跑一层，`test:layers` 打印分布。端到端层需要先 `npm run build`；`dist/` 缺失时它直接说明原因，而不是报一个看不懂的失败。
+
+读源码有一个洞：测试自己没跨边界、但通过 helper 跨了，它仍然读作单元。所以单元层启动时预加载 `tests/helpers/unit-seal.ts`，对 `node:child_process`、`node:sqlite`、`node:net` 直接抛错——这类错误一秒内就以它破的规则失败。seal 只在测试 runner 的子进程里生效，runner 本身仍要能派生它们。有十个测试是通过 helper 跨边界的，在 override 表里逐条写明原因。
+
+`npm run test:flake -- --layer integration --runs 3` 重复跑一层并比对每个用例的结果，因为同一份代码时好时坏的测试，会教会所有人「跑到绿为止」。2026-11-05 实测：单元 0 个、端到端 0 个、集成 2 个——都在 `tests/extensions/nmg/index.test.ts`，分别是答案重叠归因与中文召回。每次运行都失败的用例记为 broken，不算 flake。
+
+`tests/tools/test-layers.test.ts` 守住这条分界：每个测试文件恰好落在一层，失效或指向已删除文件的 override 会被报出来。`tests/support/unit-seal.test.ts` 从外部证明 seal 有效——按它自己检验的规则，这个文件就属于端到端。
+
 测试资源按断言边界选择，与上述阻塞分类正交：只断言路由测试失败的 narrow verifier fixture 可声明不适用共享检查，同时保留真实 CLI、Git 和路由测试；默认 narrow 的代表测试仍验证共享检查执行（[决策](../decisions/implemented/2026-09-23-route-only-verifier-fixtures.md)）。
 
 ## 执行轨道
