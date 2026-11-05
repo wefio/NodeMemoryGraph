@@ -194,6 +194,39 @@ test("an event is exempt because it records an occurrence, not a position", () =
   );
 });
 
+test("refuses a pushed position that is now waiting on review or merge", () => {
+  const positions = [
+    // The module comment's own example: the bare noun has no trailing verb, so
+    // the `waiting for … to land` form does not see it.
+    "Pushed 16 commits, waiting for the PR.",
+    "PR #71 已推送，等待 review。",
+    "本地分支已合并，等待确认后再发布。",
+    "The gate is pending checks.",
+  ];
+  for (const statement of positions) {
+    assert.equal(
+      assessMemoryWrite({ statement, memoryType: "state" }).reason,
+      "coordination_state",
+      statement,
+    );
+  }
+});
+
+test("a wait on a person or a response is not a process position", () => {
+  const notPositions = [
+    "等待是重试循环的失败模式。",
+    "The user is waiting for a response before deciding.",
+    "用户偏好：等待回复时不要重复发送邮件。",
+  ];
+  for (const statement of notPositions) {
+    assert.deepEqual(
+      assessMemoryWrite({ statement, memoryType: "constraint" }),
+      { allowed: true, reason: "allowed" },
+      statement,
+    );
+  }
+});
+
 test("durable rules that merely touch process words stay allowed", () => {
   const durable = [
     "Merges require a green gate; the release order is staging then production.",

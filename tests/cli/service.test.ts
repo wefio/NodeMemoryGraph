@@ -1862,9 +1862,28 @@ test("CLI writes pass through the governed memory admission policy", async () =>
         statement: "Local main is 16 commits ahead of origin/main and unpushed.",
         nodeName: "Release flow",
         memoryType: "constraint",
+        sessionId: "sess-write-policy",
       }),
       { code: "WRITE_REJECTED", message: /coordination_state/u },
     );
+    // The refusal must leave a session-anchored row. That row is the only
+    // evidence a later "this should have been recorded" judgement can cite, so
+    // it is asserted here rather than by calling recordRejectedWrite directly.
+    const reader = new NmgStore(join(directory, "nmg.sqlite"));
+    try {
+      const event = reader
+        .memoryWriteEvents()
+        .find(
+          (item) =>
+            item.writeReason === "cli_rejected_constraint" &&
+            item.policyReason === "coordination_state",
+        );
+      assert.equal(event?.decision, "rejected");
+      assert.equal(event?.sessionId, "sess-write-policy");
+      assert.equal(event?.memoryId, null);
+    } finally {
+      reader.close();
+    }
     // Stating when the position stops being true is what makes it recordable.
     const bounded = await service.invoke("remember", {
       statement: "Local main is 16 commits ahead of origin/main and unpushed.",
