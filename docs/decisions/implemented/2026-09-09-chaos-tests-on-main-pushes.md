@@ -39,6 +39,34 @@ accepted only where the job cannot run.
 The suite itself is unchanged. `npm run test:chaos`, `verify:chaos` and the
 `chaos` route in `agent-context.yaml` stay blocking; only the CI trigger moves.
 
+### Amended 2026-11-05: run it when its inputs change
+
+The deferred alternative became the rule. On 2026-11-03 a store change
+(`9d474b34`, the legacy-tesserae migration) broke `chaos truncated active WAL`
+deterministically: the migration's rollback replaced the corruption error with
+`no such savepoint: nmg_tessera_migration`, so the test's expectation never
+matched. `main` stayed red until the fix landed on 2026-11-05.
+
+The 0.65% rate measures flakiness. It does not describe a deterministic
+regression, which fails every run until someone fixes it, and which is exactly
+the class a pull request can catch. The job now runs on `main` pushes and on
+pull requests whose diff touches `src/core/store/`, `src/core/schema.ts`,
+`src/core/types.ts` or `tests/chaos/`.
+
+### Amended 2026-11-05: a documentation-only change skips the code jobs
+
+A `changes` job reads the diff once and publishes `code` and `store`. A pull
+request whose every changed path is prose (`docs/`, `*.md`, `*.terms.yaml`,
+`README`, `AGENTS`, `LICENSE`, `CHANGELOG`) skips `static`, `tests`,
+`node-compat`, `onlion` and `research-tests`, and runs a `docs` job instead:
+`docs:check`, `glossary:check`, `rtm:check`, `agent:context:check`,
+`check:policy-words` and `tests/docs`. `skills/` and `tests/` are not prose for
+this purpose, because `tests/skills` and `tests/docs` validate them.
+
+`all-checks-passed` reads the same scope output, so a skipped code job is only
+accepted when the change really was documentation-only; a failed `changes` job
+fails the aggregate instead of reading as "nothing to check".
+
 ## Alternatives considered
 
 - **Keep it on every pull request.** Rejected: 1 failure in 153 runs, on `main`,
@@ -46,8 +74,9 @@ The suite itself is unchanged. `npm run test:chaos`, `verify:chaos` and the
 - **Make it non-blocking (`continue-on-error`) instead.** Rejected: a
   non-blocking job still consumes the runner and no longer gates `main` at all.
 - **Run it on pull requests whose diff touches chaos-relevant paths.**
-  Deferred. Running a check when its inputs change is the better mechanism, and
-  it is the natural upgrade if a chaos regression ever reaches `main`.
+  Deferred on 2026-09-09, adopted on 2026-11-05 after a deterministic store
+  regression reached `main` (see the amendments above). Running a check when its
+  inputs change is the better mechanism.
 - **Delete the chaos suite.** Rejected: it has found real defects (a SQLite
   handle left open when a migration failed, which pinned the file on Windows).
 - **Move the research characterization job instead.** Not applicable: it is
@@ -62,19 +91,33 @@ Verified as of 2026-09-09:
   reports green while a `main` push still requires a real success.
 - `npm run test:chaos`, `verify:chaos` and the `chaos` route are unchanged.
 
+Re-verified as of 2026-11-05, after the amendments:
+
+- The `changes` job publishes `code` and `store` from one diff read; a push
+  event sets both to `true` so `main` behaviour is unchanged.
+- `chaos` runs when `store` is `true`; the pull-request path was exercised by the
+  truncated-WAL fix itself, which touches `src/core/store/`.
+- A documentation-only diff selects the `docs` job and skips the code jobs;
+  `all-checks-passed` accepts a skipped code job only when `code` is `false`.
+- `main` carries no branch protection, so a skipped job cannot block a merge;
+  the aggregate is advisory and the jobs above are what actually report.
+
 ## Deferred
 
 - The window is 19 days and 145 runs. A longer window would firm up the 0.65%.
-- The affected-path trigger is not implemented.
 
 ## Consequences
 
-- A pull request no longer spends a Windows runner. A chaos regression can now
-  reach `main` before it is caught, and `main` can go red after a merge; the
-  affected-path trigger is the mitigation to build if that happens.
-- Pull-request wall clock does not change. The jobs run in parallel and the
-  product job (70–108 s) is the critical path, longer than chaos (58–101 s).
-  What this saves is runner minutes, not the time a pull request waits.
+- A pull request no longer spends a Windows runner unless it touches the store
+  or the chaos tests. The class that went red on `main` for three days is now
+  caught on the pull request that introduces it.
+- A documentation-only pull request no longer builds the product or runs the
+  coverage suite; it still runs every documentation contract, so prose cannot
+  land unchecked.
+- Pull-request wall clock does not change for code changes. The jobs run in
+  parallel and the product job (70–108 s) is the critical path, longer than
+  chaos (58–101 s). What this saves is runner minutes, not the time a pull
+  request waits.
 - A green `All checks passed` on a pull request now means "every check that was
-  required here ran and passed". That aggregate is weaker on a pull request
-  than on `main`, where chaos is still required.
+  required here ran and passed". The scope job decides what was required, so a
+  wrong scope decision is visible in that job's output rather than inferred.

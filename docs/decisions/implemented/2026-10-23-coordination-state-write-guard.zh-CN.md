@@ -18,7 +18,7 @@
 
 流程状态类陈述默认拒绝，唯一放行方式是调用方**说明它在什么时候不再成立**。
 
-- 新增评估原因 `coordination_state`，由一组很窄的模式匹配：`unpushed`/`unmerged`/`uncommitted`、`not yet pushed|merged`、`pending review|merge|push|approval`、`next step`、`N commits ahead of origin`、`waiting/blocked on … to land|merge`，以及对应的中文表述（未推送、尚未合并、待办/待定/待审、下一步、领先 origin、等…落地后再）。
+- 新增评估原因 `coordination_state`，由一组很窄的模式匹配：`unpushed`/`unmerged`/`uncommitted`、`not yet pushed|merged`、`pending review|merge|push|approval|checks|ci|gate`、`next step`、`N commits ahead of origin`、`waiting/blocked on … to land|merge`、`waiting/blocked/pending on|for <PR|review|merge|approval|CI|gate>`，以及对应的中文表述（未推送、尚未合并、已推送…等待 review/合入、待办/待定/待审、下一步、领先 origin、等…落地后再）。光秃的名词形式是必须的：模块注释里的典型例子「Pushed 16 commits, waiting for the PR」没有 `to land` 动词，第一版模式集把它放了过去。
 - 该规则的逃生口是 **`expiresAt` 而不是 `bypass`**：给断言一个终点，正是无期限记录所缺的信息。`bypass` 仍然可以覆盖——显式 unsafe 必须保持无条件，否则它就不再有审计意义。
 - `memoryType: "event"` 与临时词规则一样豁免：事件记录的是**有日期的一次发生**，不是当前状态。
 - 绝不匹配光秃秃的动词。「合并必须通过门禁」「发布顺序是暂存再生产」这类**只提到流程词汇的持久规则**照常放行。

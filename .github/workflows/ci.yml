@@ -15,8 +15,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cheap gate for the rest of the workflow. A documentation-only pull request
+  # does not pay for a build, the coverage suite or the Windows job; a change
+  # under src/core/store or tests/chaos runs the Windows chaos job on the pull
+  # request itself, which is the class that went red on main for three days
+  # (2026-11-05-chaos-on-main-pushes).
+  changes:
+    name: Change scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
+      store: ${{ steps.scope.outputs.store }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -eu
+          if [ "$EVENT_NAME" = "push" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "store=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only "$BASE_SHA"...HEAD > changed.txt
+          # Documentation-only means every changed path is prose. `skills/` and
+          # `tests/` are excluded from that set because tests/skills and
+          # tests/docs validate their contents.
+          if grep -qvE '^(docs/|README|AGENTS|LICENSE|CHANGELOG|.*\.md$|.*\.terms\.yaml$)' changed.txt ||
+             grep -qE '^(skills/|tests/)' changed.txt; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+          if grep -qE '^(src/core/store/|src/core/schema\.ts|src/core/types\.ts|tests/chaos/)' changed.txt; then
+            echo "store=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "store=false" >> "$GITHUB_OUTPUT"
+          fi
+
   static:
     name: Static and package contracts
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -41,6 +86,8 @@ jobs:
 
   onlion:
     name: Service backend (onlion)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -63,6 +110,8 @@ jobs:
 
   tests:
     name: Product tests and coverage
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -82,6 +131,8 @@ jobs:
     # a track that cannot be told apart from "never ran" is the failure mode this repository
     # forbids. Non-blocking is a branch-protection property, so the job now reports its real
     # result (a visible red check on the pull request) while the required aggregate stays green.
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -96,6 +147,8 @@ jobs:
 
   node-compat:
     name: Node 22 compatibility
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -112,9 +165,13 @@ jobs:
     name: Windows chaos tests
     # These reproduce Windows-specific EPERM file pins and WAL locking. One
     # supported runtime is enough here; Node compatibility is checked above.
-    # The job failed once in 153 runs, on main, so it runs on main pushes
-    # instead of every pull request: 2026-09-09-chaos-tests-on-main-pushes.
-    if: github.event_name == 'push'
+    # The job ran once in 153 runs on main and was then left out of pull
+    # requests (2026-09-09-chaos-tests-on-main-pushes). That decision covered a
+    # rare flake, not a deterministic regression: on 2026-11-03 a store change
+    # broke the truncated-WAL case and main stayed red for three days. It now
+    # also runs on a pull request that touches the store or the chaos tests.
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.store == 'true'
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -129,21 +186,64 @@ jobs:
           NMG_DAEMON_READY_TIMEOUT_MS: "60000"
         run: npm run verify:chaos
 
+  docs:
+    name: Documentation contracts
+    needs: changes
+    # A documentation-only pull request skips the build and the coverage suite,
+    # so the contracts that live inside verify:static still have to run here.
+    if: needs.changes.outputs.code == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run docs:check
+      - run: npm run glossary:check
+      - run: npm run rtm:check
+      - run: npm run agent:context:check
+      - run: npm run check:policy-words
+      - run: node --experimental-strip-types --test "tests/docs/**/*.test.ts"
+
   all-checks-passed:
     name: All checks passed
     if: ${{ always() }}
-    needs: [static, tests, node-compat, chaos]
+    needs: [changes, static, tests, node-compat, chaos, docs]
     runs-on: ubuntu-latest
     steps:
       - name: Verify required jobs
         env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          CODE_SCOPE: ${{ needs.changes.outputs.code }}
           STATIC_RESULT: ${{ needs.static.result }}
           TESTS_RESULT: ${{ needs.tests.result }}
           NODE_COMPAT_RESULT: ${{ needs.node-compat.result }}
           CHAOS_RESULT: ${{ needs.chaos.result }}
+          DOCS_RESULT: ${{ needs.docs.result }}
         run: |
-          test "$STATIC_RESULT" = success
-          test "$TESTS_RESULT" = success
-          test "$NODE_COMPAT_RESULT" = success
-          # chaos is skipped on pull requests and required on main pushes.
-          test "$CHAOS_RESULT" = success || test "$CHAOS_RESULT" = skipped
+          # Without the scope gate every other result is meaningless: a failed
+          # `changes` job must not be read as "nothing to check".
+          test "$CHANGES_RESULT" = success
+          if [ "$CODE_SCOPE" = "true" ]; then
+            test "$STATIC_RESULT" = success
+            test "$TESTS_RESULT" = success
+            test "$NODE_COMPAT_RESULT" = success
+            test "$DOCS_RESULT" = skipped
+          else
+            # Documentation-only: the code jobs must have been skipped, and the
+            # documentation contracts must actually have run.
+            test "$STATIC_RESULT" = skipped
+            test "$TESTS_RESULT" = skipped
+            test "$NODE_COMPAT_RESULT" = skipped
+            test "$DOCS_RESULT" = success
+          fi
+          # chaos is required on main pushes, and on a pull request only when the
+          # change touches the store or the chaos tests themselves.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            test "$CHAOS_RESULT" = success
+          else
+            test "$CHAOS_RESULT" = success || test "$CHAOS_RESULT" = skipped
+          fi
