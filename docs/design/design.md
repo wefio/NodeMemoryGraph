@@ -136,6 +136,8 @@ NMG follows these principles:
 
 ## Responsibility boundaries
 
+For the target separation into memory engine, parallel SQLite/native-object backends, local coordination, and shared Harness Runtime, read the [unified architecture draft](unified-architecture.md). Its [accepted direction](../decisions/implemented/2026-11-05-unified-architecture-direction.md) selects LanceDB for validation, not deployment. The boundaries below describe the current baseline until that refactor is implemented.
+
 | Component | Responsibilities |
 | --- | --- |
 | Base model | Identify candidate facts/preferences/constraints, summarize, reformulate queries, decide whether more evidence is needed, propose semantic relations or splits, and synthesize an answer. |

@@ -1,0 +1,34 @@
+# Separate memory backends, local coordination, and Harness integration
+
+[中文](2026-11-05-unified-architecture-direction.zh-CN.md) · [Terms used](2026-11-05-unified-architecture-direction.terms.yaml)
+
+**Status:** implemented
+**Approved:** explicit
+**Relates to:** [target architecture](../../design/unified-architecture.md), [shared session flows](2026-10-16-shared-session-flows.md)
+
+## Problem
+
+The combined store exposes memory and coordination responsibilities together. The cloud path persists SQLite snapshots in object storage, while host integration shares some session flows but still lacks one explicit Runtime boundary. Treating SQLite snapshots as the only object-storage design does not give NMG independent, replaceable backends.
+
+## Decision
+
+The accepted design direction has four boundaries: memory engine, replaceable memory backends, local SQLite coordination, and shared Harness Runtime with host bindings. This record implements the design-direction decision and publishes its owning design; it does not declare the backend refactor delivered.
+
+SQLite and native object storage implement the same domain storage contract. NMG retains graph organization and memory semantics. A backend can supply retrieval; preserving NMG's text/vector implementation is not a requirement. LanceDB is the first candidate to validate, with SlateDB as a fallback foundation. The [target design](../../design/unified-architecture.md) owns contracts and adoption gates. Candidate preference is not a validated library selection or a deployment commitment.
+
+## Alternatives considered
+
+- SQLite snapshots as the object backend: useful for reusing database behavior, but does not satisfy the requested independent native-object path. Keep the current format as a migration source.
+- Build all object transactions and indexes inside NMG: incurs recovery, compaction and retrieval maintenance before reuse has been exhausted. Prefer an existing engine that meets the domain contract.
+- Require the same retrieval implementation on every backend: preserves physical implementation rather than graph meaning and prevents reuse of available retrieval.
+- Choose SlateDB first: closer to a transactional KV foundation, but leaves more retrieval work; the user accepts backend-provided retrieval, so validate LanceDB first.
+- Extend collaboration into a distributed object store: adds remote coordination outside the requested local-only boundary.
+- Rewrite each host plugin separately: duplicates session policy instead of extending the existing shared-flow direction.
+
+## Consequences
+
+The common abstraction includes reads, queries, graph access and commits, not a generic object `put`. Library fit depends on whole-change atomicity and the deployment runtime. Backend-specific ranking is allowed while identity, visibility and graph semantics remain invariant. The local SQLite default and existing public tools remain in effect until implementation slices pass their gates.
+
+## Deferred
+
+Final library/SDK versions, atomic data representation, supported native runtime, benchmarks, migration rehearsals, database file separation and two-host Runtime integration need evidence. This decision does not authorize a production deployment or a user-database conversion.

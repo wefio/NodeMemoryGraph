@@ -58,6 +58,8 @@ NMG 遵循以下原则：
 
 ## 职责边界
 
+记忆引擎、并行 SQLite／原生对象后端、本地协作及共享 Harness Runtime 的目标划分见[统一架构草案](unified-architecture.zh-CN.md)。[已接受的方向](../decisions/implemented/2026-11-05-unified-architecture-direction.zh-CN.md)将 LanceDB 列为验证对象，不是部署选型。重构落地前，下表仍描述当前基线。
+
 | 组件 | 职责 |
 | --- | --- |
 | 基础模型 | 识别候选事实／偏好／约束，归纳信息，改写查询，判断是否需要更多证据，提出语义关系或拆分建议，并综合答案。 |
