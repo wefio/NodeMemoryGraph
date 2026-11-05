@@ -31,9 +31,13 @@ A coordination-state statement is refused unless the caller states when it stops
 being true.
 
 - New assessment reason `coordination_state`, matched by a narrow pattern set:
-  `unpushed`/`unmerged`/`uncommitted`, `not yet pushed|merged`, `pending review|merge|push|approval`,
+  `unpushed`/`unmerged`/`uncommitted`, `not yet pushed|merged`, `pending review|merge|push|approval|checks|ci|gate`,
   `next step`, `N commits ahead of origin`, `waiting/blocked on … to land|merge`,
-  and the Chinese counterparts (未推送、尚未合并、待办/待定/待审、下一步、领先 origin、等…落地后再).
+  `waiting/blocked/pending on|for <PR|review|merge|approval|CI|gate>`,
+  and the Chinese counterparts (未推送、尚未合并、已推送…等待 review/合入、待办/待定/待审、下一步、领先 origin、等…落地后再).
+  The bare-noun form is included because the canonical example in the module
+  comment — "Pushed 16 commits, waiting for the PR" — has no trailing `to land`
+  verb and was admitted by the first pattern set.
 - The escape hatch for this rule is `expiresAt`, not `bypass`: naming the end of
   the claim is the information an unbounded record lacks. `bypass` still overrides,
   because the explicit unsafe hatch must stay unconditional to remain auditable.

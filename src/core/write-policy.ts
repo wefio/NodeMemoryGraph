@@ -49,11 +49,20 @@ const TRANSIENT_PATTERNS = [
  */
 const COORDINATION_STATE_PATTERNS = [
   /\b(?:unpushed|unmerged|uncommitted|not yet (?:pushed|committed|merged|deployed))\b/i,
-  /\b(?:still )?pending (?:review|merge|push|approval|confirmation)\b/i,
+  /\b(?:still )?pending (?:review|merge|push|approval|confirmation|checks?|ci|gate)\b/i,
   /\b(?:the )?next step\b/i,
   /\b\d+ commits? ahead (?:of )?(?:origin|upstream|main|the remote)\b/i,
   /\b(?:waiting|blocked) (?:on|for) [^.]{0,40}\b(?:to land|to merge|to push|to confirm|to review)\b/i,
+  // A bare "waiting" is too broad (a retry loop waits, and a user waits for a
+  // response); the object must name a process position. This covers the
+  // comment's own example, "waiting for the PR", which the `to land` form above
+  // misses because the bare noun has no trailing verb.
+  /\b(?:waiting|blocked|pending)\s+(?:on|for)\s+(?:the\s+)?(?:pr|pull request|review|merge|approval|confirmation|ci|checks?|gate)\b/i,
   /(?:尚未|还没有|还没)(?:推送|提交|合并|部署|落地)/u,
+  // The pushed-and-waiting complement: the `未推送` form above covers the
+  // not-yet state, not the position of something already pushed that is now
+  // waiting on review or merge.
+  /已(?:推送|提交|合并|部署)[^。；;.]{0,20}(?:等待|等候|待)\s*(?:review|评审|复核|确认|合入|合并|落地|审)/iu,
   /未(?:推送|提交|合并|部署)/u,
   /待(?:办|定|审|确认|复核)/u,
   /下一步/u,
