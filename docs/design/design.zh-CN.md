@@ -58,7 +58,7 @@ NMG 遵循以下原则：
 
 ## 职责边界
 
-记忆引擎、并行 SQLite／原生对象后端、本地协作及共享 Harness Runtime 的目标划分见[统一架构草案](unified-architecture.zh-CN.md)。[已接受的方向](../decisions/implemented/2026-11-05-unified-architecture-direction.zh-CN.md)将 LanceDB 列为验证对象，不是部署选型。重构落地前，下表仍描述当前基线。
+记忆引擎、并行 SQLite／原生对象后端、本地协作及共享 Harness 集成层的目标划分见[统一架构草案](unified-architecture.zh-CN.md)。[已接受的方向](../decisions/implemented/2026-11-05-unified-architecture-direction.zh-CN.md)将 LanceDB 列为验证对象、pi durable 列为云端宿主，不代表已验证部署。重构落地前，下表仍描述当前基线。
 
 | 组件 | 职责 |
 | --- | --- |

@@ -7,7 +7,7 @@
 
 ## 目的与边界
 
-本设计划分四项职责：记忆引擎、可替换的记忆后端、仅本地的多 Agent 协作系统，以及 Harness 插件。它为后续实现定义目标合同，不代表可替换后端或共享 Harness Runtime 已经交付。
+本设计划分四项职责：记忆引擎、可替换的记忆后端、仅本地的多 Agent 协作系统，以及 Harness 插件。它为后续实现定义目标合同，不代表可替换后端或共享集成层已经交付。
 
 SQLite 与原生对象存储是并行的记忆后端。对象后端直接保存领域数据与索引，不使用 SQLite 文件、SQLite WASM 或 SQLite 查询执行器。LanceDB 是首个验证对象，是否采用取决于下述门槛。后端提供合适的检索时，无须保留既有检索实现。
 
@@ -17,8 +17,10 @@ SQLite 与原生对象存储是并行的记忆后端。对象后端直接保存�
 
 ```mermaid
 flowchart TB
-  Host[Harness 宿主绑定] --> Runtime[共享 Harness Runtime]
-  Runtime -->|HTTP JSON-RPC| Daemon[本地 Daemon]
+  Host[本地 Harness] --> Integration[NMG Harness 插件：共享集成层]
+  Durable[pi durable：云端 Harness] --> Integration
+  Integration -->|本地 HTTP JSON-RPC| Daemon[本地 Daemon]
+  Integration -->|认证 HTTP| Cloud[云端记忆 API]
   Cloud[云端记忆 API] --> Engine[记忆引擎]
   Daemon --> Engine
   Engine --> Port[记忆后端合同]
@@ -37,7 +39,7 @@ flowchart TB
 | 记忆引擎 | 准入、稳定身份、来源、作用域与驻留、版本替换、节点归属、图变换、沿图扩展、有界披露 | 持久化、物理索引、候选检索 |
 | 记忆后端 | 一致性读取、数据与索引持久化、原子提交、冲突检测、物理恢复、检索执行 | 记忆语义与权限判断 |
 | 协作服务 | 黑板／任务生命周期、认领、租约、运行事实、事件、订阅与投递回执 | 本地 SQLite 事务；通过明确能力交给宿主投递 |
-| Harness 插件 | 通过 Runtime 共享会话行为，以及原生宿主事件、工具注册与呈现 | 将记忆语义和协作状态转换交给 daemon |
+| Harness 插件 | 共享集成行为及宿主事件、工具和呈现 | 将记忆操作交给本地／云端服务；协作仅交给本地 daemon |
 
 后端可以提供文本、向量、混合检索或图访问原语。NMG 决定哪些关系成立，以及关系如何影响披露的上下文。后端不根据相似度推断图变更。图组织不要求底层是图数据库：明确保存节点、归属与边，并具备足够的查询和提交能力即可。
 
@@ -105,15 +107,13 @@ LanceDB 是首个候选，因为其嵌入式检索模型包含对象存储、过
 
 从组合 Store 中抽出协作所有权，形成面向本地 SQLite 的服务／存储边界。一项转换要求黑板变更、任务／运行事实及必要回执一起提交时，继续使用同一个本地事务。保留[事件合同](board-event-records.zh-CN.md)、[状态空间合同](state-spaces.zh-CN.md)及[Task-Unit 存储所有权](task-unit-semantics-obligations/lifecycle-and-integration-prerequisites/host-lifecycle-run-records-and-daemon-clients.zh-CN.md)。
 
-先拆接口和表的所有权，再决定是否拆数据库文件。通用远程记忆 API 不暴露协作数据库。任务结果只有经过明确且受治理的记忆写入，才能成为持久记忆。协作引用记忆操作时，使用稳定操作／引用与重试／对账机制，不暗示跨存储原子完成。session Active Graph 状态与披露继续由 daemon 的运行时负责，与共享 Task Board 分离。
+先拆接口和表的所有权，再决定是否拆数据库文件。通用远程记忆 API 不暴露协作数据库。任务结果只有经过明确且受治理的记忆写入，才能成为持久记忆。协作引用记忆操作时，使用稳定操作／引用与重试／对账机制，不暗示跨存储原子完成。session Active Graph 状态与披露归该 session 的本地或云端记忆服务负责，与共享 Task Board 分离。
 
-## 共享 Harness Runtime
+## 共享 Harness 集成层
 
-将既有[共享会话流程](../decisions/implemented/2026-10-16-shared-session-flows.zh-CN.md)、[Agent Surface](../../src/integration/agent-surface.ts)、[状态接口](../../src/integration/state.ts)和[租约传输](../../src/integration/lease-transport.ts)组合为宿主无关的 Runtime。它延伸现有薄适配器边界，不创建另一套工具 schema 或 daemon 工作流引擎。
+[Harness 集成设计](unified-architecture/harness-integration.zh-CN.md)拥有共享会话行为、宿主能力、pi durable 云端绑定、API 要求和恢复合同。它组合既有会话流程与工具界面；Harness 拥有 Agent 执行和持久调度。pi durable 是选定的云端宿主，兼容性仍须通过该设计的验证门槛。
 
-Runtime 负责召回流程、回合／会话隔离、披露与反馈、截止时间／取消、连接复用和生命周期清理。宿主绑定负责翻译原生事件、按共享定义注册原生工具 schema、注入上下文和渲染宿主 UI，不打开核心 Store。仅支持被动注入的 hook 可以实现能力子集；MCP 无须虚构回合前事件。
-
-能力声明描述宿主实际支持的行为：回合前拦截、上下文注入、工具结果观察、空闲唤醒及交互命令。不支持的能力必须明确，不能模拟成功。入队回执必须在宿主接受后产生，但不证明 Agent 已处理消息。保留[适配器指南](../../skills/nmg-memory/references/harness-adapters.zh-CN.md)的共享 daemon 非所有权、会话状态 fence 与允许的回退规则。[能力矩阵](harness-capability-matrix.zh-CN.md)继续拥有覆盖情况。
+本地插件连接 daemon；pi durable 插件连接经过认证的云端记忆 API。这是共享集成合同中的端点选择，不是另一个 Agent 循环。即使云端宿主支持自身的持久任务，NMG 协作仍然仅在本地。
 
 ## 验证与迁移门槛
 
@@ -123,10 +123,10 @@ Runtime 负责召回流程、回合／会话隔离、披露与反馈、截止时
 | LanceDB 适配 | 固定库／SDK 版本；证明完整变更的原子边界、重复更新、图查询及索引就绪 | 调整表示，再评估后备候选 |
 | 部署 | 在目标 Node／云端环境构建并启动，使用真实对象存储完成无在线模型的验证 | 明确选择受支持运行环境，或保持候选未定 |
 | 成本与检索 | 比较大量小命名空间和少量大空间、冷／热读取、频繁更新与并发写者；测质量、P95 延迟、请求数、传输字节、内存和压缩 | 调整分区／批量／缓存策略，或为该负载保留 SQLite |
-| Harness | 两种不同宿主通过 Runtime 验证取消、不支持能力、会话切换及拒绝唤醒投递 | 明确宿主合同差异，修正共享接缝 |
+| Harness | 本地宿主与 pi durable 通过共享集成层验证取消、会话切换、不支持能力、持久重放和拒绝投递 | 明确宿主合同差异，修正共享接缝 |
 | 数据迁移 | 检查身份／数量、证据、版本、图完整性与代表性查询覆盖；保留源和经过验证的回退路径 | 停止切换，继续使用源 |
 
-先实现合同和 SQLite 适配器，并以特征测试记录当前行为。在迁移全部功能前验证原生候选。随后接入有界记忆负载，拆清协作所有权，并将两种 Harness 绑定迁入 Runtime。每个切片保留单一权威写者；使用影子读取比较，避免无协调双写。
+先实现合同和 SQLite 适配器，并以特征测试记录当前行为。在迁移全部功能前验证原生候选。随后接入有界记忆负载，拆清协作所有权，并将本地宿主与 pi durable 接入共享集成层。每个切片保留单一权威写者；使用影子读取比较，避免无协调双写。
 
 迁移取得一致源快照或明确追赶边界，导入稳定 ID 与关系，追平写入，并在约束写者后按命名空间切换。保留受支持的幂等窗口，或在切换前明确排空未完成操作。保留源供回退；目标接收新写入后，回退需要经过验证的反向追赶或暂停写者，不能直接切回指针。格式转换不得删除唯一保留的证据。
 

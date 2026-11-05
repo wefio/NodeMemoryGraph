@@ -7,7 +7,7 @@
 
 ## Purpose and boundary
 
-This design defines target boundaries for the memory engine, replaceable memory backends, local multi-Agent coordination, and Harness plugins. Interchangeable backends and the shared Harness Runtime are not delivered by this document.
+This design defines target boundaries for the memory engine, replaceable memory backends, local multi-Agent coordination, and Harness plugins. Interchangeable backends and the shared integration layer are not delivered by this document.
 
 SQLite and native object storage are parallel memory backends. The object backend stores domain data and indexes without SQLite files, SQLite WASM, or a SQLite query executor. LanceDB is the first candidate to validate; choosing it is conditional on the gates below. Existing retrieval implementations need not be preserved when a backend supplies suitable retrieval.
 
@@ -17,8 +17,10 @@ The engine retains graph organization and memory meaning. [Graph activation and 
 
 ```mermaid
 flowchart TB
-  Host[Harness host binding] --> Runtime[Shared Harness Runtime]
-  Runtime -->|HTTP JSON-RPC| Daemon[Local Daemon]
+  Host[Local Harness] --> Integration[NMG Harness plugins: shared integration]
+  Durable[pi durable: cloud Harness] --> Integration
+  Integration -->|local HTTP JSON-RPC| Daemon[Local Daemon]
+  Integration -->|authenticated HTTP| Cloud[Cloud memory API]
   Cloud[Cloud memory API] --> Engine[Memory engine]
   Daemon --> Engine
   Engine --> Port[Memory backend contract]
@@ -37,7 +39,7 @@ The coordination database denotes ownership, not a required separate file. The c
 | Memory engine | Admission, stable identity, provenance, scope and residence, version replacement, node membership, graph transformations, graph expansion, bounded disclosure | Persistence, physical indexes, candidate retrieval |
 | Memory backend | Consistent reads, data and index persistence, atomic commits, conflict detection, physical recovery, retrieval execution | Memory meaning and permission decisions |
 | Coordination service | Board/task lifecycle, claims, leases, run facts, events, subscriptions and delivery receipts | Local SQLite transactions; host delivery through an explicit capability |
-| Harness plugins | Shared session behavior through a Runtime, plus native host events, tool registration and presentation | Memory semantics and coordination transitions to the daemon |
+| Harness plugins | Shared integration behavior plus host events, tools and presentation | Memory operations to the local/cloud service; coordination only to the local daemon |
 
 The backend may provide text, vector, hybrid, or graph access. NMG controls relations and their effect on disclosed context. Similarity does not authorize graph changes. Explicit nodes, memberships and edges with suitable lookup and commits suffice; a graph database is not required.
 
@@ -105,15 +107,13 @@ The existing [cloud adapter](../../onlion/backend/memory-service.ts) and [snapsh
 
 Extract coordination ownership into a local SQLite service/store boundary. Keep board mutations, task/run facts and required receipts in one local transaction when a transition requires them together. Preserve the [event contract](board-event-records.md), [state-space contract](state-spaces.md), and [task-unit storage ownership](task-unit-semantics-obligations/lifecycle-and-integration-prerequisites/host-lifecycle-run-records-and-daemon-clients.md).
 
-Split interfaces and table ownership before deciding whether to split database files. No generic remote memory API exposes a coordination database. A task result becomes durable memory only through an explicit governed memory write. When coordination refers to a memory operation, use a stable operation/reference and retry/reconciliation; do not imply cross-store atomic completion. Session Active Graph state and disclosure remain daemon-owned runtime responsibilities, distinct from the shared Task Board.
+Split interfaces and table ownership before deciding whether to split database files. No generic remote memory API exposes a coordination database. A task result becomes durable memory only through an explicit governed memory write. When coordination refers to a memory operation, use a stable operation/reference and retry/reconciliation; do not imply cross-store atomic completion. Session Active Graph state and disclosure belong to the session's memory service, local or cloud, distinct from the shared Task Board.
 
-## Shared Harness Runtime
+## Shared Harness integration
 
-Compose the existing [shared session flows](../decisions/implemented/2026-10-16-shared-session-flows.md), [Agent Surface](../../src/integration/agent-surface.ts), [state interface](../../src/integration/state.ts), and [lease transport](../../src/integration/lease-transport.ts) into a host-neutral Runtime. This extends the existing thin-adapter boundary rather than introducing another tool schema or daemon workflow engine.
+The [Harness integration design](unified-architecture/harness-integration.md) owns shared session behavior, host capabilities, pi durable cloud binding, API requirements and recovery. It composes existing session flows and tool surfaces; the Harness owns Agent execution and durable scheduling. pi durable is the selected cloud host, with compatibility subject to the design's validation gates.
 
-The Runtime owns recall flow, turn/session fencing, disclosure and feedback, deadlines/cancellation, connection reuse and lifecycle cleanup. A host binding translates native events, registers native tool schemas from the shared definitions, injects context and renders host UI. It never opens a core store. Hooks with only passive injection can implement a subset; MCP need not invent a before-turn event.
-
-Capabilities describe actual host behavior: before-turn interception, context injection, tool-result observation, idle wake and interactive commands. Unsupported capabilities remain explicit, not simulated successes. An enqueue receipt follows successful host acceptance and does not prove that an Agent processed the message. Preserve the [adapter recipe](../../skills/nmg-memory/references/harness-adapters.md)'s daemon non-ownership, session-state fences and permitted fallback rules. The [capability matrix](harness-capability-matrix.md) remains the coverage owner.
+Local plugins use the daemon; the pi durable plugin uses the authenticated cloud memory API. This is an endpoint choice within the shared integration contract, not a separate Agent loop. NMG coordination remains local even when the cloud host supports its own durable tasks.
 
 ## Validation and migration gates
 
@@ -123,10 +123,10 @@ Capabilities describe actual host behavior: before-turn interception, context in
 | LanceDB fit | Pin library/SDK versions; demonstrate the complete mutation's atomic boundary, repeated updates, graph lookup and index readiness | Revisit representation, then evaluate the fallback |
 | Deployment | Build and boot the intended Node/cloud target; exercise real object-store access without a live model | Choose an explicit supported runtime or keep the candidate unselected |
 | Cost and retrieval | Compare many small namespaces and fewer large ones, cold/warm reads, frequent updates and concurrent writers; measure quality, P95 latency, requests, transferred bytes, memory and compaction | Adjust partition/batch/cache policy or retain SQLite for that workload |
-| Harness | Exercise two distinct hosts through the Runtime, including cancellation, unsupported capabilities, session changes and rejected wake delivery | Keep host-specific contracts explicit and repair the shared seam |
+| Harness | Exercise a local host and pi durable through shared integration, including cancellation, session changes, unsupported capabilities, durable replay and rejected delivery | Keep host-specific contracts explicit and repair the shared seam |
 | Data migration | Check identity/counts, evidence, versions, graph integrity and representative query coverage; preserve the source and a tested rollback path | Stop cutover and continue on the source |
 
-Start with the contract, a SQLite adapter and characterization tests. Validate the native candidate before porting all features. Route a bounded workload through it, extract coordination ownership, then move two Harness bindings to the Runtime. Keep one authoritative writer per slice; compare through shadow reads, not uncoordinated dual writes.
+Start with the contract, a SQLite adapter and characterization tests. Validate the native candidate before porting all features. Route a bounded workload through it, extract coordination ownership, then migrate a local host and pi durable to shared integration. Keep one authoritative writer per slice; compare through shadow reads, not uncoordinated dual writes.
 
 Migration takes a consistent source snapshot or establishes a catch-up boundary, imports stable IDs and relations, catches up writes and cuts over one namespace with its writer fenced. Carry forward the supported idempotency window or explicitly drain outstanding operations before switching. Keep the source for rollback; once new writes reach the target, rollback needs a tested reverse catch-up or a writer pause, not a blind pointer switch. No format conversion deletes the only retained evidence.
 

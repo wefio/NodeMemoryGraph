@@ -8,13 +8,15 @@
 
 ## Problem
 
-The combined store exposes memory and coordination responsibilities together. The cloud path persists SQLite snapshots in object storage, while host integration shares some session flows but still lacks one explicit Runtime boundary. Treating SQLite snapshots as the only object-storage design does not give NMG independent, replaceable backends.
+The combined store exposes memory and coordination responsibilities together. The cloud path persists SQLite snapshots in object storage, while host integration shares some session flows but still lacks one explicit shared integration boundary. Treating SQLite snapshots as the only object-storage design does not give NMG independent, replaceable backends.
 
 ## Decision
 
-The accepted design direction has four boundaries: memory engine, replaceable memory backends, local SQLite coordination, and shared Harness Runtime with host bindings. This record implements the design-direction decision and publishes its owning design; it does not declare the backend refactor delivered.
+The accepted design direction has four boundaries: memory engine, replaceable memory backends, local SQLite coordination, and shared Harness integration with host bindings. This record implements the design-direction decision and publishes its owning design; it does not declare the backend refactor delivered.
 
 SQLite and native object storage implement the same domain storage contract. NMG retains graph organization and memory semantics. A backend can supply retrieval; preserving NMG's text/vector implementation is not a requirement. LanceDB is the first candidate to validate, with SlateDB as a fallback foundation. The [target design](../../design/unified-architecture.md) owns contracts and adoption gates. Candidate preference is not a validated library selection or a deployment commitment.
+
+pi durable is the selected cloud Harness. Its NMG binding shares integration behavior with local hosts and uses the authenticated cloud memory endpoint. The Harness owns durable execution; NMG owns memory semantics. The [Harness integration design](../../design/unified-architecture/harness-integration.md) owns recovery and external-effect contracts. This acceptance is not compatibility evidence; no cloud NMG coordination service is introduced.
 
 ## Alternatives considered
 
@@ -31,4 +33,4 @@ The common abstraction includes reads, queries, graph access and commits, not a 
 
 ## Deferred
 
-Final library/SDK versions, atomic data representation, supported native runtime, benchmarks, migration rehearsals, database file separation and two-host Runtime integration need evidence. This decision does not authorize a production deployment or a user-database conversion.
+Final library/SDK versions, atomic data representation, supported native runtime, benchmarks, migration rehearsals, database file separation, the cloud interactive API and local/pi durable integration need evidence. This decision does not authorize a production deployment or a user-database conversion.
