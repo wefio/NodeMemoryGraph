@@ -121,6 +121,12 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      - name: Test layer partition
+        run: node --experimental-strip-types tools/test-layers.ts --check
+      - name: Generated prompts, before the unit layer reads them
+        run: npm run prompts:generate
+      - name: Unit layer, with the process boundary sealed
+        run: npm run test:unit
       - name: Shared product verification contract
         run: npm run verify:product-ci
 

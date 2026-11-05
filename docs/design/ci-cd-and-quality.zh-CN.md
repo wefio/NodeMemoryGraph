@@ -74,7 +74,7 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 
 `npm run test:unit`、`test:integration`、`test:e2e` 各跑一层，`test:layers` 打印分布。端到端层需要先 `npm run build`；`dist/` 缺失时它直接说明原因，而不是报一个看不懂的失败。
 
-读源码有一个洞：测试自己没跨边界、但通过 helper 跨了，它仍然读作单元。所以单元层启动时预加载 `tests/helpers/unit-seal.ts`，对 `node:child_process`、`node:sqlite`、`node:net` 直接抛错——这类错误一秒内就以它破的规则失败。seal 只在测试 runner 的子进程里生效，runner 本身仍要能派生它们。有十个测试是通过 helper 跨边界的，在 override 表里逐条写明原因。
+读源码有一个洞：测试自己没跨边界、但通过 helper 跨了，它仍然读作单元。所以单元层启动时预加载 `tests/helpers/unit-seal.ts`，对 `node:child_process`、`node:sqlite`、`node:net` 直接抛错——这类错误一秒内就以它破的规则失败。seal 只在测试 runner 的子进程里生效，runner 本身仍要能派生它们。有十个测试是通过 helper 跨边界的，在 override 表里逐条写明原因。`tests` job 会跑 `--check` 与带 seal 的单元层，所以这条契约会让 PR 失败，而不只是本地。
 
 `npm run test:flake -- --layer integration --runs 3` 重复跑一层并比对每个用例的结果，因为同一份代码时好时坏的测试，会教会所有人「跑到绿为止」。2026-11-05 实测：单元 0 个、端到端 0 个、集成 2 个——都在 `tests/extensions/nmg/index.test.ts`，分别是答案重叠归因与中文召回。每次运行都失败的用例记为 broken，不算 flake。
 

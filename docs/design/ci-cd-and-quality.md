@@ -110,7 +110,9 @@ reads as unit. The unit tier is therefore started with `tests/helpers/unit-seal.
 preloaded, which throws on `node:child_process`, `node:sqlite` and `node:net`, so that
 mistake fails in a second with the rule it broke. The seal arms only inside the runner's
 child processes; the runner itself must still be able to spawn them. Ten tests cross a
-boundary through a helper and say so in the override table, each with its reason.
+boundary through a helper and say so in the override table, each with its reason. The `tests`
+job runs `--check` and the sealed unit tier, so the contract fails a pull request and not only
+a local run.
 
 `npm run test:flake -- --layer integration --runs 3` repeats a layer and compares per-test
 outcomes, because a test that answers differently on the same code teaches everyone to
