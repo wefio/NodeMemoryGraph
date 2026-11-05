@@ -315,12 +315,18 @@ function printGaps(modules: Map<string, FileCoverage>, limit: number): void {
   if (gaps.length > limit) console.log(`    ... ${gaps.length - limit} more`);
 }
 
-function reportSingleTier(tier: TierCoverage): void {
+/**
+ * What one tier reaches, over the modules it loads. This is a reach number, not the tier's own
+ * score: it includes modules the tier is not the right place to be thorough about, which is why
+ * `--coverage` reports the owned surface separately.
+ */
+function reportSingleTier(tier: TierCoverage, hint: boolean): void {
   const totals = lineTotals(tier.modules.values());
   console.log(
-    `${tier.layer} coverage: ${percent(totals.covered, totals.total)} of ${totals.total} lines ` +
-      `in ${tier.modules.size} modules (${tier.durationSeconds.toFixed(0)}s, exit ${tier.exitCode})`,
+    `${tier.layer} reach: ${percent(totals.covered, totals.total)} of ${totals.total} lines ` +
+      `in ${tier.modules.size} modules it loads (${tier.durationSeconds.toFixed(0)}s, exit ${tier.exitCode})`,
   );
+  if (hint) console.log("  owned surface: npm run test:coverage:layers");
   if (sortedGaps(tier.modules, OWNERSHIP_TARGET).length > 0) {
     console.log(`  below ${OWNERSHIP_TARGET}%:`);
     printGaps(tier.modules, 8);
@@ -357,7 +363,9 @@ export function assignOwnership(
 
 function reportOwnership(tiers: TierCoverage[]): void {
   const owned = assignOwnership(tiers);
-  console.log(`\nlayer        modules  lines   coverage  gaps below ${OWNERSHIP_TARGET}%`);
+  console.log(
+    `\nlayer        modules  lines   coverage  gaps below ${OWNERSHIP_TARGET}% (owned surface)`,
+  );
   for (const layer of LAYERS) {
     const modules = owned.get(layer)!;
     const totals = lineTotals(modules.values());
@@ -413,7 +421,7 @@ async function main(argv: string[]): Promise<number> {
     if (!rest.includes("--coverage")) return runLayer(root, layer, rest);
     const forwarded = rest.filter((value) => value !== "--coverage");
     const tier = await coverLayer(root, layer, forwarded, "coverage/layers");
-    reportSingleTier(tier);
+    reportSingleTier(tier, true);
     return tier.exitCode;
   }
   if (flag === "--coverage") {
@@ -421,7 +429,7 @@ async function main(argv: string[]): Promise<number> {
     for (const layer of LAYERS) {
       const tier = await coverLayer(root, layer, rest, "coverage/layers");
       tiers.push(tier);
-      reportSingleTier(tier);
+      reportSingleTier(tier, false);
     }
     reportOwnership(tiers);
     return tiers.some((tier) => tier.exitCode !== 0) ? 1 : 0;
