@@ -1,5 +1,21 @@
 import type { VectorEmbedder } from "./types.ts";
 
+/**
+ * Deterministic lexical feature hasher, not a semantic embedding model.
+ *
+ * Features are tokens and 2/3-grams hashed with FNV-1a into a fixed number of
+ * dimensions, so two texts are close only when they share literal features.
+ * Related text with no shared features — a paraphrase, a translation, a
+ * synonym — scores at collision-noise level: it can sit just under unrelated
+ * same-language filler, and its rank then depends on what that filler happens
+ * to collide with. The provider-backed embedders are the ones with learned
+ * similarity.
+ *
+ * Consequence for tests: no deterministic case may require a match to outrank
+ * unrelated same-language text on the basis of meaning rather than shared
+ * features. Such a case would be green or red for collision reasons, not for
+ * the behaviour it claims to guard.
+ */
 export class HashingVectorEmbedder implements VectorEmbedder {
   readonly dimensions: number;
   readonly model = "nmg-hashing-v1";
