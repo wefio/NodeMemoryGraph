@@ -378,67 +378,99 @@ function reportOwnership(tiers: TierCoverage[]): void {
   }
 }
 
-async function main(argv: string[]): Promise<number> {
-  const root = resolve(process.cwd());
-  const [flag, argument, ...rest] = argv;
+/** Where the c8 summaries land; `coverage/` is already ignored by git. */
+const REPORT_DIR = "coverage/layers";
 
-  if (flag === "--stats") {
+/** The extra flag `--run` accepts, kept out of the `node --test` arguments. */
+const COVERAGE_FLAG = "--coverage";
+
+interface Invocation {
+  root: string;
+  /** The token after the flag, empty when the command takes none. */
+  argument: string;
+  rest: string[];
+}
+
+type Command = (invocation: Invocation) => Promise<number>;
+
+/** The layer a flag names, or `undefined` after reporting what it expected. */
+function readLayer(flag: string, argument: string): TestLayer | undefined {
+  if (LAYERS.includes(argument as TestLayer)) return argument as TestLayer;
+  console.error(`${flag} needs one of: ${LAYERS.join(", ")}`);
+  return undefined;
+}
+
+function checkCommand(root: string): number {
+  const errors = checkLayers(root);
+  for (const error of errors) console.error(error);
+  return errors.length === 0 ? 0 : 1;
+}
+
+function listCommand(root: string, argument: string): number {
+  const layer = readLayer("--list", argument);
+  if (!layer) return 1;
+  for (const file of partitionTests(root).get(layer)!.files) console.log(file);
+  return 0;
+}
+
+function whyCommand(root: string, argument: string): number {
+  const report = partitionTests(root);
+  for (const layer of LAYERS) {
+    const evidence = report.get(layer)!.evidence.get(argument);
+    if (evidence) {
+      console.log(`${argument}: ${layer} (${evidence})`);
+      return 0;
+    }
+  }
+  console.error(`${argument} is not a test file under tests/`);
+  return 1;
+}
+
+async function runCommand(root: string, argument: string, rest: string[]): Promise<number> {
+  const layer = readLayer("--run", argument);
+  if (!layer) return 1;
+  if (!rest.includes(COVERAGE_FLAG)) return runLayer(root, layer, rest);
+  const forwarded = rest.filter((value) => value !== COVERAGE_FLAG);
+  const tier = await coverLayer(root, layer, forwarded, REPORT_DIR);
+  reportSingleTier(tier, true);
+  return tier.exitCode;
+}
+
+async function coverageCommand(root: string, rest: string[]): Promise<number> {
+  const tiers: TierCoverage[] = [];
+  for (const layer of LAYERS) {
+    const tier = await coverLayer(root, layer, rest, REPORT_DIR);
+    tiers.push(tier);
+    reportSingleTier(tier, false);
+  }
+  reportOwnership(tiers);
+  return tiers.some((tier) => tier.exitCode !== 0) ? 1 : 0;
+}
+
+const COMMANDS: Record<string, Command> = {
+  "--stats": async ({ root }) => {
     printStats(root);
     return 0;
-  }
-  if (flag === "--check") {
-    const errors = checkLayers(root);
-    for (const error of errors) console.error(error);
-    return errors.length === 0 ? 0 : 1;
-  }
-  if (flag === "--list") {
-    if (!LAYERS.includes(argument as TestLayer)) {
-      console.error(`--list needs one of: ${LAYERS.join(", ")}`);
-      return 1;
-    }
-    const report = partitionTests(root).get(argument as TestLayer)!;
-    for (const file of report.files) console.log(file);
-    return 0;
-  }
-  if (flag === "--why") {
-    const report = partitionTests(root);
-    for (const layer of LAYERS) {
-      const evidence = report.get(layer)!.evidence.get(argument);
-      if (evidence) {
-        console.log(`${argument}: ${layer} (${evidence})`);
-        return 0;
-      }
-    }
-    console.error(`${argument} is not a test file under tests/`);
+  },
+  "--check": async ({ root }) => checkCommand(root),
+  "--list": async ({ root, argument }) => listCommand(root, argument),
+  "--why": async ({ root, argument }) => whyCommand(root, argument),
+  "--run": async ({ root, argument, rest }) => runCommand(root, argument, rest),
+  "--coverage": async ({ root, rest }) => coverageCommand(root, rest),
+};
+
+const USAGE =
+  "usage: test-layers.ts --list <layer> | --run <layer> [--coverage] [node --test flags] | " +
+  "--coverage | --stats | --check | --why <file>";
+
+async function main(argv: string[]): Promise<number> {
+  const [flag, argument = "", ...rest] = argv;
+  const command = COMMANDS[flag];
+  if (!command) {
+    console.error(USAGE);
     return 1;
   }
-  if (flag === "--run") {
-    if (!LAYERS.includes(argument as TestLayer)) {
-      console.error(`--run needs one of: ${LAYERS.join(", ")}`);
-      return 1;
-    }
-    const layer = argument as TestLayer;
-    if (!rest.includes("--coverage")) return runLayer(root, layer, rest);
-    const forwarded = rest.filter((value) => value !== "--coverage");
-    const tier = await coverLayer(root, layer, forwarded, "coverage/layers");
-    reportSingleTier(tier, true);
-    return tier.exitCode;
-  }
-  if (flag === "--coverage") {
-    const tiers: TierCoverage[] = [];
-    for (const layer of LAYERS) {
-      const tier = await coverLayer(root, layer, rest, "coverage/layers");
-      tiers.push(tier);
-      reportSingleTier(tier, false);
-    }
-    reportOwnership(tiers);
-    return tiers.some((tier) => tier.exitCode !== 0) ? 1 : 0;
-  }
-  console.error(
-    "usage: test-layers.ts --list <layer> | --run <layer> [--coverage] [node --test flags] | " +
-      "--coverage | --stats | --check | --why <file>",
-  );
-  return 1;
+  return command({ root: resolve(process.cwd()), argument, rest });
 }
 
 // Only run when invoked as a program, so the guard test can import the classifier.
