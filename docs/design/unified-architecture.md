@@ -7,7 +7,7 @@
 
 ## Purpose and boundary
 
-This design defines target boundaries for the memory engine, replaceable memory backends, local multi-Agent coordination, and Harness plugins. Interchangeable backends and the shared integration layer are not delivered by this document.
+This design defines target boundaries for the memory engine, replaceable memory backends, local multi-Agent coordination, and Harness plugins. The [portable backend contract](unified-architecture/native-backends.md) owns the opt-in implementation slice and its limits.
 
 SQLite and native object storage are parallel memory backends. The object backend stores domain data and indexes without SQLite files, SQLite WASM, or a SQLite query executor. LanceDB is the first candidate to validate; choosing it is conditional on the gates below. Existing retrieval implementations need not be preserved when a backend supplies suitable retrieval.
 
@@ -131,4 +131,4 @@ Start with the contract, a SQLite adapter and characterization tests. Validate t
 
 Migration takes a consistent source snapshot or establishes a catch-up boundary, imports stable IDs and relations, catches up writes and cuts over one namespace with its writer fenced. Carry forward the supported idempotency window or explicitly drain outstanding operations before switching. Keep the source for rollback; once new writes reach the target, rollback needs a tested reverse catch-up or a writer pause, not a blind pointer switch. No format conversion deletes the only retained evidence.
 
-No native-backend benchmark, deployment smoke test, cross-representation transaction test or live Harness test ran for this design. Library selection, partition policy, file separation and performance targets remain gated.
+The [completion audit](completion-audit.md#portable-memory-backend-slice) records implementation evidence. Production library adoption, partition policy, file separation and performance targets remain gated.

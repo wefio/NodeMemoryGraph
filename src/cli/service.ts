@@ -28,6 +28,8 @@ import type {
   RelevanceModelLike,
 } from "../core/types.ts";
 import { NmgStore } from "../core/store.ts";
+import { PortableMemoryService } from "./portable-memory.ts";
+import type { MemoryBackendOptions } from "../core/memory/open.ts";
 import { parseBoardNotification } from "../core/board-notifications.ts";
 import {
   COORDINATION_OPERATIONS,
@@ -207,12 +209,15 @@ type ActiveGraphStorePart = {
   referenceTargets?: readonly MemoryReferenceTarget[];
 };
 export interface NmgServiceOptions {
+  /** Explicit opt-in. Legacy data is migrated separately, never silently reinterpreted. */
+  memoryBackend?: MemoryBackendOptions;
   dataDirectory?: string;
   databasePath?: string;
   environment?: NodeJS.ProcessEnv;
 }
 
 export class NmgService {
+  readonly #portableMemory: PortableMemoryService | undefined;
   /**
    * Concurrency contract:
    * - one resident service is the application-level writer for its LTG and
@@ -279,6 +284,9 @@ export class NmgService {
   >();
 
   constructor(options: NmgServiceOptions = {}) {
+    this.#portableMemory = options.memoryBackend
+      ? new PortableMemoryService(options.memoryBackend)
+      : undefined;
     const environment = options.environment ?? process.env;
     const databasePath = options.databasePath ? resolve(options.databasePath) : undefined;
     // Diagnostic artifacts (recall corpus, router state, controller shadow) live
@@ -434,20 +442,17 @@ export class NmgService {
   async invoke<M extends NmgMethod>(method: M, params?: unknown): Promise<NmgMethodResult[M]> {
     if (this.#closing)
       throw new NmgProtocolError("SHUTTING_DOWN", "the service is closing and takes no new work");
-    // The counter has to be the method callers use and the switch has to run inside it: splitting
-    // them into two methods only hid the same switch behind a new name, which the complexity gate
-    // counts as new code.
+    // Count the awaited application operation, including asynchronous backend publication.
     this.#inFlight += 1;
     try {
+      if (PortableMemoryService.handles(method))
+        return (await this.#invokeMemory(method, params)) as NmgMethodResult[M];
+      this.#portableMemory?.requireLocalMethod(method);
       switch (method) {
         case "hello":
           return this.#hello() as NmgMethodResult[M];
         case "status":
           return this.#status() as NmgMethodResult[M];
-        case "remember":
-          return this.#remember(parseRememberParams(params)) as NmgMethodResult[M];
-        case "rememberBatch":
-          return this.#rememberBatch(parseRememberBatchParams(params)) as NmgMethodResult[M];
         case "resolveRemember":
           return this.#resolveRemember(parseResolveRememberParams(params)) as NmgMethodResult[M];
         case "recordClaimOutcomes":
@@ -456,10 +461,6 @@ export class NmgService {
           ) as NmgMethodResult[M];
         case "recordFeedback":
           return this.#recordFeedback(parseRecordFeedbackParams(params)) as NmgMethodResult[M];
-        case "search":
-          return (await this.#search(parseSearchParams(params))) as NmgMethodResult[M];
-        case "get":
-          return this.#get(parseGetParams(params)) as NmgMethodResult[M];
         case "recordActiveGraphAttribution":
           return this.#recordActiveGraphAttribution(
             parseRecordActiveGraphAttributionParams(params),
@@ -486,11 +487,6 @@ export class NmgService {
               parsed.recoveryDays,
             ),
           } as NmgMethodResult[M];
-        }
-        case "deleteMemory": {
-          const parsed = parseDeleteMemoryParams(params);
-          const memory = this.#getStore().deleteMemory(parsed.memoryId);
-          return { deleted: memory !== null, memory } as NmgMethodResult[M];
         }
         case "exportMemories":
           return this.#getStore().exportMemories(
@@ -576,7 +572,7 @@ export class NmgService {
   /** Closes in the order the design asks for: stop taking new work, revoke the timers and signals
    *  that could start more of it, then close each store exactly once. A second call is a no-op, so
    *  a shutdown path that runs twice cannot close a store out from under a live reader. */
-  close(): void {
+  close(): void | Promise<void> {
     // A close that silently drops calls already accepted would lose writes that were answered as
     // accepted; the sequence is drain() first, and this refuses rather than pretending.
     if (this.#inFlight > 0) {
@@ -594,10 +590,57 @@ export class NmgService {
     this.#stgStores.clear();
     this.#sessionActiveGraphs.clear();
     for (const store of stores) if (store) store.close();
+    return this.#portableMemory?.close();
+  }
+
+  async #invokeMemory(method: NmgMethod, value: unknown): Promise<unknown> {
+    if (this.#portableMemory) return this.#invokePortable(method, value);
+    switch (method) {
+      case "remember":
+        return this.#remember(parseRememberParams(value));
+      case "rememberBatch":
+        return this.#rememberBatch(parseRememberBatchParams(value));
+      case "search":
+        return this.#search(parseSearchParams(value));
+      case "get":
+        return this.#get(parseGetParams(value));
+      case "deleteMemory": {
+        const parsed = parseDeleteMemoryParams(value);
+        const memory = this.#getStore().deleteMemory(parsed.memoryId);
+        return { deleted: memory !== null, memory };
+      }
+      default:
+        throw new NmgProtocolError("METHOD_NOT_FOUND", `unknown memory method: ${method}`);
+    }
+  }
+
+  async #invokePortable(method: NmgMethod, value: unknown): Promise<unknown> {
+    const memory = this.#portableMemory!;
+    const params = objectParams(value);
+    const operationId = optionalString(params, "operationId");
+    switch (method) {
+      case "remember":
+        return memory.remember(parseRememberParams(params), operationId);
+      case "rememberBatch":
+        return memory.rememberMany(parseRememberBatchParams(params).items, operationId);
+      case "search":
+        return memory.search(parseSearchParams(params));
+      case "get":
+        return memory.get(parseGetParams(params));
+      case "deleteMemory": {
+        const parsed = parseDeleteMemoryParams(params);
+        return memory.withdraw(parsed.memoryId, operationId, optionalString(params, "sessionId"));
+      }
+      default:
+        throw new NmgProtocolError(
+          "METHOD_NOT_FOUND",
+          `${method} is not a portable memory operation`,
+        );
+    }
   }
 
   #hello(): NmgHelloResult {
-    return {
+    const result: NmgHelloResult = {
       protocol: NMG_PROTOCOL_VERSION,
       service: "node-memory-graph",
       version: SERVICE_VERSION,
@@ -605,9 +648,23 @@ export class NmgService {
       methods: NMG_METHODS,
       catalogFingerprint: NMG_RPC_CATALOG_FINGERPRINT,
     };
+    return this.#portableMemory ? this.#portableMemory.hello(result) : result;
   }
 
   #status(): NmgStatusResult {
+    if (this.#portableMemory)
+      return {
+        ...this.#hello(),
+        process: { pid: process.pid, node: process.version },
+        storage: this.#portableMemory.storageStatus,
+        embedding: {
+          configured: false,
+          provider: null,
+          indexId: null,
+          health: null,
+          reason: "portable_memory_lexical",
+        },
+      };
     const exists = existsSync(this.databasePath);
     const embeddingClient = this.#configuredEmbeddingClient();
     const provider = this.#configuredProvider();

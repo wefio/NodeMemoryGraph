@@ -13,7 +13,7 @@
  * `task-semantics.ts` as pure functions over the same facts, and the board keeps the authoritative
  * current state: this records the *transitions* the board's current state cannot keep.
  */
-import type { NmgStore } from "../core/store.ts";
+import type { CoordinationPort } from "./coordination-port.ts";
 import type { TransactionPort } from "../core/store/base.ts";
 import type { TaskUnitDeclarationInput } from "./task-unit-declaration-store.ts";
 import type { TaskBoardEntry } from "../core/types.ts";
@@ -34,7 +34,7 @@ export function managedTransitionKind(verb: string): string {
 }
 
 /** One row of a run's own log, as the store returns it. */
-type RunFact = ReturnType<NmgStore["taskRunFacts"]>[number];
+type RunFact = ReturnType<CoordinationPort["taskRunFacts"]>[number];
 
 /**
  * The cancellation that applies to one task of this run, or null.
@@ -47,7 +47,11 @@ type RunFact = ReturnType<NmgStore["taskRunFacts"]>[number];
  *
  * A caller that names no task asks only about the run: a task-level cancellation is not its business.
  */
-export function taskCancellation(store: NmgStore, runId: string, taskId?: string): RunFact | null {
+export function taskCancellation(
+  store: CoordinationPort,
+  runId: string,
+  taskId?: string,
+): RunFact | null {
   const cancels = store.taskRunFacts(runId).filter((fact) => fact.kind === RUN_CANCELLED_FACT);
   const runLevel = cancels.find((fact) => !fact.taskId);
   if (runLevel) return runLevel;
@@ -60,7 +64,7 @@ export function taskCancellation(store: NmgStore, runId: string, taskId?: string
  *  when the caller decided to write. A write that names the task it belongs to is refused by that task's
  *  cancellation; one that names no task is refused only by a run-level cancellation. */
 export function managedWriteRefusal(
-  store: NmgStore,
+  store: CoordinationPort,
   runId: string,
   taskId?: string,
 ): string | null {
@@ -98,7 +102,7 @@ export interface ManagedWriteOutcome<T> {
  * that no run has bound costs one indexed lookup and no transaction of its own.
  */
 export function coordinatedEntryWrite<T>(
-  store: NmgStore,
+  store: CoordinationPort,
   request: {
     verb: string;
     entryId: string;
@@ -126,7 +130,7 @@ export function coordinatedEntryWrite<T>(
  * boundary rolls the whole thing back rather than leaving a verdict without its binding.
  */
 export function coordinatedBoardWrite<T>(
-  store: NmgStore,
+  store: CoordinationPort,
   request: ManagedWriteRequest<T>,
 ): ManagedWriteOutcome<T> {
   return store.coordinateRunWrite(request.runId, (port) => {
@@ -189,7 +193,7 @@ export interface EntryBindingRequest {
  * and attempt and would otherwise hide the disagreement.
  */
 export function bindRunEntry(
-  store: NmgStore,
+  store: CoordinationPort,
   request: EntryBindingRequest,
   port?: TransactionPort,
 ): { sequence: number; recorded: boolean } {
@@ -234,12 +238,12 @@ export function bindRunEntry(
 }
 
 /** Whether this run froze that task. Frozen is what a binding is a binding *to*. */
-function isFrozen(store: NmgStore, runId: string, taskId: string): boolean {
+function isFrozen(store: CoordinationPort, runId: string, taskId: string): boolean {
   return store.taskRunTasks(runId).some((task) => task.taskId === taskId);
 }
 
 /** The board entry a caller wants created, in the board's own creation shape. */
-export type NewBoardEntry = Parameters<NmgStore["putTaskBoardEntry"]>[0];
+export type NewBoardEntry = Parameters<CoordinationPort["putTaskBoardEntry"]>[0];
 
 /**
  * Create a board entry and adopt it into a run's frozen task in one transition.
@@ -250,7 +254,7 @@ export type NewBoardEntry = Parameters<NmgStore["putTaskBoardEntry"]>[0];
  * move it beside the run that believes it owns the transition.
  */
 export function createBoundEntry(
-  store: NmgStore,
+  store: CoordinationPort,
   request: {
     entry: NewBoardEntry;
     runId: string;
@@ -277,7 +281,7 @@ export function createBoundEntry(
 
 /** The binding already recorded for this task and attempt, if any. */
 function boundFact(
-  store: NmgStore,
+  store: CoordinationPort,
   runId: string,
   taskId: string,
   attempt: number,
@@ -317,7 +321,10 @@ export interface RunRegistrationRequest {
  * onto a different plan without becoming a different run); this wrapper exists so the surface's
  * entry point is named in the coordinator rather than in the transport.
  */
-export function registerRun(store: NmgStore, request: RunRegistrationRequest): { runId: string } {
+export function registerRun(
+  store: CoordinationPort,
+  request: RunRegistrationRequest,
+): { runId: string } {
   store.registerTaskRun(request);
   return { runId: request.runId };
 }
@@ -340,7 +347,7 @@ export interface RunPlanFreezeRequest {
  * permanently unready: this freeze is the last moment at which the plan is still only a proposal.
  */
 export function freezeRunPlan(
-  store: NmgStore,
+  store: CoordinationPort,
   request: RunPlanFreezeRequest,
 ): { runId: string; frozen: number } {
   const refusal = managedWriteRefusal(store, request.runId);
@@ -387,7 +394,7 @@ export interface RunCancellationRequest {
  * so a client that lost the response does not have to guess whether its cancel took.
  */
 export function cancelRun(
-  store: NmgStore,
+  store: CoordinationPort,
   request: RunCancellationRequest,
 ): { sequence: number; recorded: boolean } {
   if (!store.taskRunManifest(request.runId))
@@ -432,14 +439,14 @@ export interface RunBinding {
  */
 export interface RunStatus {
   runId: string;
-  manifest: ReturnType<NmgStore["taskRunManifest"]>;
-  tasks: ReturnType<NmgStore["taskRunTasks"]>;
-  facts: ReturnType<NmgStore["taskRunFacts"]>;
+  manifest: ReturnType<CoordinationPort["taskRunManifest"]>;
+  tasks: ReturnType<CoordinationPort["taskRunTasks"]>;
+  facts: ReturnType<CoordinationPort["taskRunFacts"]>;
   bindings: RunBinding[];
 }
 
 /** A read: it registers nothing, appends nothing and migrates nothing. */
-export function taskRunStatus(store: NmgStore, runId: string): RunStatus {
+export function taskRunStatus(store: CoordinationPort, runId: string): RunStatus {
   const facts = store.taskRunFacts(runId);
   const bindings: RunBinding[] = [];
   for (const fact of facts) {

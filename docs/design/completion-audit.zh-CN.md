@@ -33,6 +33,12 @@ Lab 不是单向的存放区。daemon 通过既有客户端 RPC 发布能力目�
 
 阅读完整职责：[需求矩阵](completion-audit/requirement-matrix.zh-CN.md)。
 
+## 可替换记忆后端切片
+
+[可替换配置](unified-architecture/native-backends.zh-CN.md)在统一异步领域接口后提供 SQLite 和原生 LanceDB 实现。确定性测试覆盖原子版本、固定读取快照、并发发布、证据、状态替换、会话隔离、删除、重试、命名空间隔离和服务路由。原生 S3 驱动连接 HTTP 对象协议夹具，覆盖重开、并发写者及写入拒绝。共享 Harness 绑定测试覆盖 generation 隔离、稳定 invocation 重试、取消、关闭与云端协作拒绝。本地 board／run 事务沿用既有 SQLite 契约测试。
+
+这是显式启用的库配置，不代表整个架构已经完成。真实 AWS／S3 兼容服务部署、成本与延迟基准、分支回收、迁移、云端交互 API 及具体 Harness 插件仍未验证或留待后续。默认记忆路径和 AML 路径不变。
+
 ## Agent 收敛反馈实现切片
 
 [反馈设计](agent-convergence-feedback-design.zh-CN.md)仍是 **partial**，不会因一次文档或实现 PR 而完成。`SessionFeedbackProvider` 与显式 RCP CLI 会话/任务目标把通过校验的、新记录的 receipt 送入临时的 AG 观察。受控测试覆盖真实失败检查、HTTP 投递、身份绑定、去重与失败隔离。它们不证明整体任务完成，也不证明自然 Agent 改善。

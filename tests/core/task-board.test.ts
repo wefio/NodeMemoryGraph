@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -7,6 +7,7 @@ import test from "node:test";
 import { NmgStore } from "../../src/core/store.ts";
 import { boardEntryView } from "../../src/core/board-entry-view.ts";
 import { prepareTaskBoardSurface } from "../../src/integration/agent-surface.ts";
+import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
 function withStore(run: (store: NmgStore) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-task-board-"));
@@ -15,7 +16,7 @@ function withStore(run: (store: NmgStore) => void): void {
     run(store);
   } finally {
     store.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 }
 
@@ -761,7 +762,7 @@ test("task board agent registry: register/heartbeat/discover with capability fil
     if (originalOnlineMs === undefined) delete process.env.NMG_AGENT_ONLINE_MS;
     else process.env.NMG_AGENT_ONLINE_MS = originalOnlineMs;
     store.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 

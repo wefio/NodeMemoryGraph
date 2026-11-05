@@ -8,6 +8,7 @@
 
 | Feature | Gate(s) | Default | Values / meaning | Location | Owner | Status |
 | --- | --- | --- | --- | --- | --- | --- |
+| Portable memory backend | `NmgServiceOptions.memoryBackend` library option | absent; existing memory path | `sqlite` or `lancedb`; explicit namespace/location, stable `operationId`, supported capability subset; local coordination stays SQLite | `src/core/memory`, `src/cli/portable-memory.ts` | [Backend contract](../unified-architecture/native-backends.md) | opt-in; native S3 protocol fixture verified, real provider deployment unverified |
 | Omni HTTP | `NMG_OMNI_API_URL` | off | Add/Search | client | evals | opt-in |
 | Board event records, Agent status | `board-events` | Shared board gate | Event history, direct/channel/event notices, invitations, opt-out, task-derived status | Store, CLI/hosts | [Contract](../board-event-records.md) | source verification ≠ deployment |
 | Automatic recall deadline and timing | No env gate; Pi `/nmg recall timing` reads diagnostics | ON | [Absolute waiting-budget contract](../session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.md); explicit search is not bounded by this automatic deadline | `src/integration/recall-budget.ts`, Pi and WorkBuddy adapters | shared integration | default-on |

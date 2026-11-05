@@ -180,6 +180,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-tui": "^0.99.1",
+    "@lancedb/lancedb": "0.41.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "node-domexception": "^1.0.0",
     "search-query-parser": "^1.6.0",

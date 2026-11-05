@@ -12,7 +12,7 @@ The combined store exposes memory and coordination responsibilities together. Th
 
 ## Decision
 
-The accepted design direction has four boundaries: memory engine, replaceable memory backends, local SQLite coordination, and shared Harness integration with host bindings. This record implements the design-direction decision and publishes its owning design; it does not declare the backend refactor delivered.
+The accepted direction has four boundaries: memory engine, replaceable memory backends, local SQLite coordination, and shared Harness integration with host bindings. The [portable backend profile](../../design/unified-architecture/native-backends.md) defines the bounded implementation; the complete target remains governed by its validation gates.
 
 SQLite and native object storage implement the same domain storage contract. NMG retains graph organization and memory semantics. A backend can supply retrieval; preserving NMG's text/vector implementation is not a requirement. LanceDB is the first candidate to validate, with SlateDB as a fallback foundation. The [target design](../../design/unified-architecture.md) owns contracts and adoption gates. Candidate preference is not a validated library selection or a deployment commitment.
 
@@ -32,8 +32,22 @@ Magpie is an additional gateway integration candidate. The [Magpie design](../..
 
 ## Consequences
 
+The opt-in Node implementation pins LanceDB 0.41.0 and stores domain entities and
+receipts together on a staged native branch. A conditional head revision publishes
+the complete branch. This avoids pretending that independent Lance table updates
+form a cross-table transaction. SQLite implements the same commit port using its
+own transaction and WAL snapshots. Native full-text retrieval is accepted for this
+profile. Conditional S3 publication is exercised through the native HTTP driver;
+provider deployment and cost validation remain separate gates.
+
+An explicit application option selects the backend. It does not convert existing
+databases or replace the default/AML path. Board/run transactions remain local;
+the run coordinator receives a narrow coordination port. Shared Harness endpoint
+binding owns session generation, method checks and stable invocation-derived
+write IDs; concrete host plugins retain the separate integration gates.
+
 The common abstraction includes reads, queries, graph access and commits, not a generic object `put`. Library fit depends on whole-change atomicity and the deployment runtime. Backend-specific ranking is allowed while identity, visibility and graph semantics remain invariant. The local SQLite default and existing public tools remain in effect until implementation slices pass their gates.
 
 ## Deferred
 
-Final library/SDK versions, atomic data representation, supported native runtime, benchmarks, migration rehearsals, database file separation, the cloud interactive API and local/pi durable integration need evidence. This decision does not authorize a production deployment or a user-database conversion.
+Production library adoption, provider/runtime deployment, benchmarks, branch collection and compaction, migration rehearsals, database file separation, the cloud interactive API and concrete host plugins need further evidence. This decision does not authorize a production deployment or a user-database conversion.
