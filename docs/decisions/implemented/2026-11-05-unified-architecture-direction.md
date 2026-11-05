@@ -27,6 +27,7 @@ Magpie is an additional gateway integration candidate. The [Magpie design](../..
 - Require the same retrieval implementation on every backend: preserves physical implementation rather than graph meaning and prevents reuse of available retrieval.
 - Choose SlateDB first: closer to a transactional KV foundation, but leaves more retrieval work; the user accepts backend-provided retrieval, so validate LanceDB first.
 - Extend collaboration into a distributed object store: adds remote coordination outside the requested local-only boundary.
+- Require separate local memory and coordination database files: adds configuration without a physical isolation requirement. Keep separate ownership in one local SQLite file by default.
 - Rewrite each host plugin separately: duplicates session policy instead of extending the existing shared-flow direction.
 - Treat Magpie hooks as a complete Harness adapter: the client still owns tools and execution, while completion notification is not durable. Keep a gateway-specific capability subset.
 
@@ -42,7 +43,9 @@ provider deployment and cost validation remain separate gates.
 
 An explicit application option selects the backend. It does not convert existing
 databases or replace the default/AML path. Board/run transactions remain local;
-the run coordinator receives a narrow coordination port. Shared Harness endpoint
+the run coordinator receives a narrow coordination port. The pure local SQLite
+profile defaults to the service database file for both responsibilities; interfaces
+and table ownership remain separate. Shared Harness endpoint
 binding owns session generation, method checks and stable invocation-derived
 write IDs; concrete host plugins retain the separate integration gates.
 
@@ -50,4 +53,4 @@ The common abstraction includes reads, queries, graph access and commits, not a 
 
 ## Deferred
 
-Production library adoption, provider/runtime deployment, benchmarks, branch collection and compaction, migration rehearsals, database file separation, the cloud interactive API and concrete host plugins need further evidence. This decision does not authorize a production deployment or a user-database conversion.
+Production library adoption, provider/runtime deployment, benchmarks, branch collection and compaction, migration rehearsals, the cloud interactive API and concrete host plugins need further evidence. This decision does not authorize a production deployment or a user-database conversion.

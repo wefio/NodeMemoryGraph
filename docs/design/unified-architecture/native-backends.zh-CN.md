@@ -17,27 +17,22 @@ flowchart TB
   Engine --> Contract[领域读取与原子提交]
   Contract --> SQLite[SQLite 后端]
   Contract --> Lance[Lance 原生后端]
-  SQLite --> DB[(SQLite)]
+  SQLite --> DB[(SQLite: 记忆与协作)]
   Lance --> Objects[(S3 对象或原生本地文件)]
   Shared -->|仅本地端点| Coordination[本地协作]
-  Coordination --> LocalDB[(本地 SQLite)]
+  Coordination --> DB
 ```
 
-显式库入口是 `NmgServiceOptions.memoryBackend`。省略时沿用既有记忆路径；不通过 CLI 开关或模型参数选择。使用新命名空间和存储位置，既有数据库不会被导入或转换。
+显式库入口是 `NmgServiceOptions.memoryBackend`。省略时沿用既有记忆路径；不通过 CLI 开关或模型参数选择。使用新的记忆命名空间，既有记忆数据不会被导入或转换。纯本地部署中，记忆与协作共用一个 SQLite 文件。
 
 ```typescript
 import { NmgService } from "./src/cli/service.ts";
 
 const service = new NmgService({
-  databasePath: "./coordination.sqlite",
+  databasePath: "./nmg.sqlite",
   memoryBackend: {
-    kind: "lancedb",
-    uri: "s3://my-bucket/nmg",
+    kind: "sqlite",
     namespace: "trusted-tenant",
-    storageOptions: {
-      aws_region: "us-east-1",
-      // 通过宿主凭据提供方或环境提供凭据。
-    },
   },
 });
 try {
@@ -52,7 +47,7 @@ try {
 }
 ```
 
-选择 `{ kind: "sqlite", path: "./memory.sqlite", namespace: "trusted-tenant" }` 使用并行的 SQLite 实现；Lance URI 也可使用本地目录以便开发。调用方负责命名空间认证和授权，命名空间或会话字段本身不是认证机制。凭据不得放入模型生成的工具参数。
+服务的 SQLite 后端默认使用 `databasePath`，后端的可选 `path` 是显式覆盖配置。同一文件内，记忆与协作仍分别拥有接口、表和事务。对象记忆选择 `{ kind: "lancedb", uri: "s3://my-bucket/nmg", namespace: "trusted-tenant" }`，协作仍使用本地 SQLite 文件。Lance URI 也可使用本地目录以便开发。通过 `storageOptions` 提供 S3 区域／端点选项，凭据由宿主提供方或环境提供。调用方负责命名空间认证和授权，命名空间或会话字段本身不是认证机制。凭据不得放入模型生成的工具参数。
 
 ## 发布与重试
 
@@ -66,7 +61,7 @@ SQLite 使用原生写事务和独立 WAL 快照读取。Lance 每个命名空�
 
 `HarnessConnection` 接收宿主拥有的端点及稳定会话／generation，绑定会话字段，从已持久化的 invocation／slot 标识派生写入 ID，检查端点公布的方法、传递取消信号，并拒绝云端协作。宿主提供认证、传输和持久化调用检查点。关闭绑定只约束该绑定。既有会话召回和任务流程继续共享；Pi durable、Magpie 绑定另行接入。
 
-本地 run 协调器依赖 `CoordinationPort`，其中仅包含 board／run 操作和事务边界。既有 SQLite 实现和表仍是权威来源。可替换记忆操作不打开协作数据库，显式的本地 board／run 操作才会打开。
+本地 run 协调器依赖 `CoordinationPort`，其中仅包含 board／run 操作和事务边界。既有 SQLite 实现和表仍是权威来源。可替换记忆操作不初始化协作表，显式的本地 board／run 操作才会初始化。使用 SQLite 记忆时，两组表共用一个文件；使用对象记忆时，仅协作使用该文件。
 
 此 API 支持 remember／batch、search、精确 get 和删除。`MemoryEngine` 还支持显式节点连边和有界图扩展。能力握手公布支持的子集。此配置不提供会话 AG、chain、文件 tesserae、向量检索、历史查询、merge／split、反馈和高级过滤；不支持的服务操作会明确报错。不提供自动迁移、云端交互 API 或原生 Worker／WASM 部署。既有 AML／快照路径不变。
 

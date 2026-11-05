@@ -44,7 +44,8 @@ The [portable profile](unified-architecture/native-backends.md) has SQLite and
 native LanceDB implementations behind one async domain port. Deterministic tests
 cover atomic revisions, pinned readers, concurrent publication, evidence, state
 replacement, session isolation, withdrawal, replay, namespace separation and
-service routing. The native S3 driver runs against an HTTP object-protocol
+service routing, including shared-file SQLite initialization in either order and
+reopening without mixing board content into memory search. The native S3 driver runs against an HTTP object-protocol
 fixture, including reopening, concurrent writers and rejected writes. Shared
 Harness binding tests cover generation isolation, stable invocation replay,
 cancellation, closure and refusal of cloud coordination. Local board/run

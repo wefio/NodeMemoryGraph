@@ -30,10 +30,10 @@ flowchart TB
   SQL --> LocalDB[(本地 SQLite)]
   Native --> Objects[(对象存储)]
   Daemon --> Coordination[本地协作服务]
-  Coordination --> CoordDB[(本地 SQLite 协作存储)]
+  Coordination --> LocalDB
 ```
 
-图中表示记忆集成关系，不表示模型流量路由。协作数据库表示职责归属，不要求立即拆成独立文件。云端 API 和记忆后端都不创建本地协作服务。传输层位于引擎之外；运行环境支持时，本地 daemon 也可以选择任一种记忆后端。
+图中表示记忆集成关系，不表示模型流量路由。纯本地 SQLite 记忆与协作共用一个数据库文件，各自拥有所属表；使用对象记忆时，协作留在本地 SQLite。云端 API 和记忆后端都不创建本地协作服务。传输层位于引擎之外；运行环境支持时，本地 daemon 也可以选择任一种记忆后端。
 
 | 模块 | 拥有的职责 | 委托的职责 |
 | --- | --- | --- |
@@ -108,7 +108,7 @@ LanceDB 是首个候选，因为其嵌入式检索模型包含对象存储、过
 
 从组合 Store 中抽出协作所有权，形成面向本地 SQLite 的服务／存储边界。一项转换要求黑板变更、任务／运行事实及必要回执一起提交时，继续使用同一个本地事务。保留[事件合同](board-event-records.zh-CN.md)、[状态空间合同](state-spaces.zh-CN.md)及[Task-Unit 存储所有权](task-unit-semantics-obligations/lifecycle-and-integration-prerequisites/host-lifecycle-run-records-and-daemon-clients.zh-CN.md)。
 
-先拆接口和表的所有权，再决定是否拆数据库文件。通用远程记忆 API 不暴露协作数据库。任务结果只有经过明确且受治理的记忆写入，才能成为持久记忆。协作引用记忆操作时，使用稳定操作／引用与重试／对账机制，不暗示跨存储原子完成。session Active Graph 状态与披露归该 session 的本地或云端记忆服务负责，与共享 Task Board 分离。
+接口与表的所有权分开，默认纯本地部署共用一个 SQLite 文件。共用文件不合并操作或事务的所有权。通用远程记忆 API 不暴露协作数据库。任务结果只有经过明确且受治理的记忆写入，才能成为持久记忆。协作引用记忆操作时，使用稳定操作／引用与重试／对账机制，不暗示跨存储原子完成。session Active Graph 状态与披露归该 session 的本地或云端记忆服务负责，与共享 Task Board 分离。
 
 ## 共享 Harness 集成层
 

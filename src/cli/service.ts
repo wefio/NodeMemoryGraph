@@ -209,8 +209,11 @@ type ActiveGraphStorePart = {
   referenceTargets?: readonly MemoryReferenceTarget[];
 };
 export interface NmgServiceOptions {
-  /** Explicit opt-in. Legacy data is migrated separately, never silently reinterpreted. */
-  memoryBackend?: MemoryBackendOptions;
+  /** Explicit opt-in. SQLite defaults to databasePath, shared with local coordination.
+   * Legacy memory data is migrated separately, never silently reinterpreted. */
+  memoryBackend?:
+    | { kind: "sqlite"; namespace: string; path?: string }
+    | Extract<MemoryBackendOptions, { kind: "lancedb" }>;
   dataDirectory?: string;
   databasePath?: string;
   environment?: NodeJS.ProcessEnv;
@@ -284,9 +287,6 @@ export class NmgService {
   >();
 
   constructor(options: NmgServiceOptions = {}) {
-    this.#portableMemory = options.memoryBackend
-      ? new PortableMemoryService(options.memoryBackend)
-      : undefined;
     const environment = options.environment ?? process.env;
     const databasePath = options.databasePath ? resolve(options.databasePath) : undefined;
     // Diagnostic artifacts (recall corpus, router state, controller shadow) live
@@ -300,6 +300,17 @@ export class NmgService {
         ? dirname(databasePath)
         : resolveNmgDataDir(environment);
     this.databasePath = databasePath ?? join(dataDirectory, "nmg.sqlite");
+    const memoryBackend = options.memoryBackend;
+    this.#portableMemory = memoryBackend
+      ? new PortableMemoryService(
+          memoryBackend.kind === "sqlite"
+            ? {
+                ...memoryBackend,
+                path: memoryBackend.path ? resolve(memoryBackend.path) : this.databasePath,
+              }
+            : memoryBackend,
+        )
+      : undefined;
     this.#dataDirectory = dataDirectory;
     this.#environment = environment;
     this.#reasoningWorkspaces = new ReasoningWorkspaces(join(dataDirectory, "lab", "reasoning"));

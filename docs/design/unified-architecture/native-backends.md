@@ -21,29 +21,25 @@ flowchart TB
   Engine --> Contract[Domain reads and atomic commits]
   Contract --> SQLite[SQLite backend]
   Contract --> Lance[Lance native backend]
-  SQLite --> DB[(SQLite)]
+  SQLite --> DB[(SQLite: memory and coordination)]
   Lance --> Objects[(S3 objects or native local files)]
   Shared -->|local endpoint only| Coordination[Local coordination]
-  Coordination --> LocalDB[(Local SQLite)]
+  Coordination --> DB
 ```
 
 The explicit library entry is `NmgServiceOptions.memoryBackend`. Omitting it keeps
 the existing memory path. It is not selected by a CLI flag or a model parameter.
-Use a new namespace/location; existing databases are not imported or converted.
+Use a new memory namespace; existing memory data is not imported or converted.
+Pure local deployment shares one SQLite file between memory and coordination.
 
 ```typescript
 import { NmgService } from "./src/cli/service.ts";
 
 const service = new NmgService({
-  databasePath: "./coordination.sqlite",
+  databasePath: "./nmg.sqlite",
   memoryBackend: {
-    kind: "lancedb",
-    uri: "s3://my-bucket/nmg",
+    kind: "sqlite",
     namespace: "trusted-tenant",
-    storageOptions: {
-      aws_region: "us-east-1",
-      // Supply credentials through the host's credential provider/environment.
-    },
   },
 });
 try {
@@ -58,10 +54,15 @@ try {
 }
 ```
 
-Choose `{ kind: "sqlite", path: "./memory.sqlite", namespace: "trusted-tenant" }`
-for the parallel SQLite implementation, or a filesystem directory as the Lance
-URI for native local development. The caller owns namespace authentication and
-authorization. A namespace or session field is not an authentication mechanism.
+The service's SQLite backend defaults to `databasePath`; the optional backend
+`path` is an explicit override. Separate interfaces and tables retain their own
+ownership and transactions within the shared file. For object memory, select
+`{ kind: "lancedb", uri: "s3://my-bucket/nmg", namespace: "trusted-tenant" }`;
+coordination still uses the local SQLite file. A filesystem directory as the
+Lance URI supports native local development. Supply S3 region/endpoint options
+through `storageOptions` and credentials through the host's provider/environment.
+The caller owns namespace authentication and authorization.
+A namespace or session field is not an authentication mechanism.
 Credentials never belong in model-authored tool arguments.
 
 ## Publication and retry
@@ -98,8 +99,9 @@ remain shared; Pi durable and Magpie bindings are separate work.
 
 The local run coordinator consumes `CoordinationPort`, containing only board/run
 operations and their transaction boundary. Its existing SQLite implementation
-and tables remain authoritative. Portable memory operations do not open that
-database; explicit local board/run operations do.
+and tables remain authoritative. Portable memory operations do not initialize
+coordination tables; explicit local board/run operations do. With SQLite memory,
+both table groups share one file; with object memory, only coordination uses it.
 
 This API supports remember/batch, search, exact get and withdrawal. `MemoryEngine`
 also supports explicit node links and bounded graph expansion. The capability

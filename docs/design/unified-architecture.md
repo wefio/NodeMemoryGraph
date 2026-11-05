@@ -30,10 +30,10 @@ flowchart TB
   SQL --> LocalDB[(Local SQLite)]
   Native --> Objects[(Object storage)]
   Daemon --> Coordination[Local coordination service]
-  Coordination --> CoordDB[(Local SQLite coordination store)]
+  Coordination --> LocalDB
 ```
 
-The diagram shows memory integration, not model traffic routing. The coordination database denotes ownership, not a required separate file. The cloud API and memory backends do not create coordination services. Transport stays outside the engine; a local daemon can select either backend if its runtime supports it.
+The diagram shows memory integration, not model traffic routing. Pure local SQLite memory and coordination share one database file with separate table ownership. Object memory leaves coordination in local SQLite. The cloud API and memory backends do not create coordination services. Transport stays outside the engine; a local daemon can select either backend if its runtime supports it.
 
 | Module | Owns | Delegates |
 | --- | --- | --- |
@@ -108,7 +108,7 @@ The existing [cloud adapter](../../onlion/backend/memory-service.ts) and [snapsh
 
 Extract coordination ownership into a local SQLite service/store boundary. Keep board mutations, task/run facts and required receipts in one local transaction when a transition requires them together. Preserve the [event contract](board-event-records.md), [state-space contract](state-spaces.md), and [task-unit storage ownership](task-unit-semantics-obligations/lifecycle-and-integration-prerequisites/host-lifecycle-run-records-and-daemon-clients.md).
 
-Split interfaces and table ownership before deciding whether to split database files. No generic remote memory API exposes a coordination database. A task result becomes durable memory only through an explicit governed memory write. When coordination refers to a memory operation, use a stable operation/reference and retry/reconciliation; do not imply cross-store atomic completion. Session Active Graph state and disclosure belong to the session's memory service, local or cloud, distinct from the shared Task Board.
+Separate interfaces and table ownership while sharing one SQLite file in the default pure local deployment. Sharing a file does not merge operation or transaction ownership. No generic remote memory API exposes a coordination database. A task result becomes durable memory only through an explicit governed memory write. When coordination refers to a memory operation, use a stable operation/reference and retry/reconciliation; do not imply cross-store atomic completion. Session Active Graph state and disclosure belong to the session's memory service, local or cloud, distinct from the shared Task Board.
 
 ## Shared Harness integration
 
