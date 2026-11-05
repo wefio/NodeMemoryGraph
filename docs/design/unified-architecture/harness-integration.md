@@ -1,4 +1,4 @@
-# Harness integration for local hosts and pi durable
+# Harness integration for local hosts, pi durable and Magpie
 
 [中文](harness-integration.zh-CN.md) · [Terms used](harness-integration.terms.yaml)
 
@@ -29,7 +29,11 @@ Local bindings use the local daemon contract. The pi durable binding uses a conf
 
 Preserve the [adapter recipe](../../../skills/nmg-memory/references/harness-adapters.md)'s daemon non-ownership, session-state fences and allowed fallback rules. Cloud-only bindings do not discover or start a local daemon, and do not advertise NMG board/run or local wake capabilities. Private session AG operations can be exposed only when the cloud service implements their ownership and fencing contract. Host-owned pi durable scheduling remains available independently.
 
-The [capability matrix](../harness-capability-matrix.md) owns delivered coverage. It gains a pi durable column only when an adapter is implemented with scoped evidence; the target design is not a claim of shipped coverage.
+The [capability matrix](../harness-capability-matrix.md) owns delivered coverage. It gains pi durable or Magpie columns only when adapters are implemented with scoped evidence; the target design is not a claim of shipped coverage.
+
+## Magpie gateway binding
+
+The [Magpie integration design](magpie-integration.md) adds a gateway candidate alongside native Harness bindings. It separates request-hook recall, best-effort completion observation and explicitly connected memory tools. Magpie remains a gateway; its client owns Agent execution. Identity, protocol coverage and coexistence with a native NMG plugin require validation before enabling this path.
 
 ## Cloud memory API
 

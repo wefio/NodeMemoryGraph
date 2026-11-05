@@ -19,6 +19,7 @@ The engine retains graph organization and memory meaning. [Graph activation and 
 flowchart TB
   Host[Local Harness] --> Integration[NMG Harness plugins: shared integration]
   Durable[pi durable: cloud Harness] --> Integration
+  Gateway[Magpie gateway: candidate] --> Integration
   Integration -->|local HTTP JSON-RPC| Daemon[Local Daemon]
   Integration -->|authenticated HTTP| Cloud[Cloud memory API]
   Cloud[Cloud memory API] --> Engine[Memory engine]
@@ -32,7 +33,7 @@ flowchart TB
   Coordination --> CoordDB[(Local SQLite coordination store)]
 ```
 
-The coordination database denotes ownership, not a required separate file. The cloud API and memory backends do not create coordination services. Transport stays outside the engine; a local daemon can select either backend if its runtime supports it.
+The diagram shows memory integration, not model traffic routing. The coordination database denotes ownership, not a required separate file. The cloud API and memory backends do not create coordination services. Transport stays outside the engine; a local daemon can select either backend if its runtime supports it.
 
 | Module | Owns | Delegates |
 | --- | --- | --- |
@@ -111,7 +112,7 @@ Split interfaces and table ownership before deciding whether to split database f
 
 ## Shared Harness integration
 
-The [Harness integration design](unified-architecture/harness-integration.md) owns shared session behavior, host capabilities, pi durable cloud binding, API requirements and recovery. It composes existing session flows and tool surfaces; the Harness owns Agent execution and durable scheduling. pi durable is the selected cloud host, with compatibility subject to the design's validation gates.
+The [Harness integration design](unified-architecture/harness-integration.md) owns shared session behavior, host capabilities, the pi durable binding, the Magpie gateway candidate, API requirements and recovery. It composes existing session flows and tool surfaces; the Harness owns Agent execution and durable scheduling. pi durable is the selected cloud host, with compatibility subject to the design's validation gates.
 
 Local plugins use the daemon; the pi durable plugin uses the authenticated cloud memory API. This is an endpoint choice within the shared integration contract, not a separate Agent loop. NMG coordination remains local even when the cloud host supports its own durable tasks.
 

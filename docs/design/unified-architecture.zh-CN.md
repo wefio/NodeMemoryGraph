@@ -19,6 +19,7 @@ SQLite 与原生对象存储是并行的记忆后端。对象后端直接保存�
 flowchart TB
   Host[本地 Harness] --> Integration[NMG Harness 插件：共享集成层]
   Durable[pi durable：云端 Harness] --> Integration
+  Gateway[Magpie 网关：候选] --> Integration
   Integration -->|本地 HTTP JSON-RPC| Daemon[本地 Daemon]
   Integration -->|认证 HTTP| Cloud[云端记忆 API]
   Cloud[云端记忆 API] --> Engine[记忆引擎]
@@ -32,7 +33,7 @@ flowchart TB
   Coordination --> CoordDB[(本地 SQLite 协作存储)]
 ```
 
-图中的协作数据库表示职责归属，不要求立即拆成独立文件。云端 API 和记忆后端都不创建本地协作服务。传输层位于引擎之外；运行环境支持时，本地 daemon 也可以选择任一种记忆后端。
+图中表示记忆集成关系，不表示模型流量路由。协作数据库表示职责归属，不要求立即拆成独立文件。云端 API 和记忆后端都不创建本地协作服务。传输层位于引擎之外；运行环境支持时，本地 daemon 也可以选择任一种记忆后端。
 
 | 模块 | 拥有的职责 | 委托的职责 |
 | --- | --- | --- |
@@ -111,7 +112,7 @@ LanceDB 是首个候选，因为其嵌入式检索模型包含对象存储、过
 
 ## 共享 Harness 集成层
 
-[Harness 集成设计](unified-architecture/harness-integration.zh-CN.md)拥有共享会话行为、宿主能力、pi durable 云端绑定、API 要求和恢复合同。它组合既有会话流程与工具界面；Harness 拥有 Agent 执行和持久调度。pi durable 是选定的云端宿主，兼容性仍须通过该设计的验证门槛。
+[Harness 集成设计](unified-architecture/harness-integration.zh-CN.md)拥有共享会话行为、宿主能力、pi durable 绑定、Magpie 网关候选、API 要求和恢复合同。它组合既有会话流程与工具界面；Harness 拥有 Agent 执行和持久调度。pi durable 是选定的云端宿主，兼容性仍须通过该设计的验证门槛。
 
 本地插件连接 daemon；pi durable 插件连接经过认证的云端记忆 API。这是共享集成合同中的端点选择，不是另一个 Agent 循环。即使云端宿主支持自身的持久任务，NMG 协作仍然仅在本地。
 

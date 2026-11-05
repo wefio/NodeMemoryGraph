@@ -18,6 +18,8 @@ SQLite 与原生对象存储实现同一份领域存储合同。NMG 保留图组
 
 pi durable 是选定的云端 Harness。其 NMG 绑定与本地宿主共享集成行为，使用认证云端记忆端点。Harness 拥有持久执行；NMG 拥有记忆语义。[Harness 集成设计](../../design/unified-architecture/harness-integration.zh-CN.md)拥有恢复与外部效果合同。接受方向不构成兼容性证据，也不引入云端 NMG 协作服务。
 
+Magpie 是额外的网关集成候选。[Magpie 设计](../../design/unified-architecture/magpie-integration.zh-CN.md)区分自动召回与显式工具接入，并将完成采集限制在宿主尽力通知的合同内。它不替代 Harness，也不表示完整原生插件能力覆盖。
+
 ## Alternatives considered
 
 - SQLite 快照作为对象后端：可以复用数据库行为，但不满足独立原生对象路径的要求；既有格式保留为迁移源。
@@ -26,6 +28,7 @@ pi durable 是选定的云端 Harness。其 NMG 绑定与本地宿主共享集�
 - 优先选择 SlateDB：更接近事务 KV 底座，但留下更多检索工作；用户接受后端提供检索，因此先验证 LanceDB。
 - 将协作扩展至分布式对象存储：引入超出仅本地要求的远程协调。
 - 分别重写每个宿主插件：重复会话策略，没有延伸既有共享流程方向。
+- 将 Magpie hook 当成完整 Harness 适配器：客户端仍拥有工具和执行，完成通知也不持久；保留网关专有能力子集。
 
 ## Consequences
 

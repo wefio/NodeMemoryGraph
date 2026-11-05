@@ -18,6 +18,8 @@ SQLite and native object storage implement the same domain storage contract. NMG
 
 pi durable is the selected cloud Harness. Its NMG binding shares integration behavior with local hosts and uses the authenticated cloud memory endpoint. The Harness owns durable execution; NMG owns memory semantics. The [Harness integration design](../../design/unified-architecture/harness-integration.md) owns recovery and external-effect contracts. This acceptance is not compatibility evidence; no cloud NMG coordination service is introduced.
 
+Magpie is an additional gateway integration candidate. The [Magpie design](../../design/unified-architecture/magpie-integration.md) separates automatic recall from explicit tool access and limits completion capture to the host's best-effort contract. It does not replace a Harness or establish full native-plugin capability coverage.
+
 ## Alternatives considered
 
 - SQLite snapshots as the object backend: useful for reusing database behavior, but does not satisfy the requested independent native-object path. Keep the current format as a migration source.
@@ -26,6 +28,7 @@ pi durable is the selected cloud Harness. Its NMG binding shares integration beh
 - Choose SlateDB first: closer to a transactional KV foundation, but leaves more retrieval work; the user accepts backend-provided retrieval, so validate LanceDB first.
 - Extend collaboration into a distributed object store: adds remote coordination outside the requested local-only boundary.
 - Rewrite each host plugin separately: duplicates session policy instead of extending the existing shared-flow direction.
+- Treat Magpie hooks as a complete Harness adapter: the client still owns tools and execution, while completion notification is not durable. Keep a gateway-specific capability subset.
 
 ## Consequences
 
