@@ -34,7 +34,14 @@ export function migrateLegacyTesseraeTables(db: DatabaseSync): void {
     if (tables.has("memory_records")) repairAnchorMarkers(db);
     db.exec("RELEASE nmg_tessera_migration");
   } catch (error) {
-    db.exec("ROLLBACK TO nmg_tessera_migration; RELEASE nmg_tessera_migration");
+    // A corrupt or truncated WAL can unwind the savepoint before this runs. A
+    // failing rollback would then replace the original cause with "no such
+    // savepoint", so keep the first failure: it is the one the caller can act on.
+    try {
+      db.exec("ROLLBACK TO nmg_tessera_migration; RELEASE nmg_tessera_migration");
+    } catch {
+      // The connection already unwound the savepoint; `error` stays the cause.
+    }
     throw error;
   }
 }
