@@ -8,7 +8,6 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   LAYERS,
-  assignOwnership,
   checkLayers,
   classifyTest,
   collectTestFiles,
@@ -83,33 +82,4 @@ test("an override moves a file, and the check reports one that stopped mattering
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
-
-test("a module belongs to the cheapest tier that reaches it", () => {
-  const coverage = (pct: number) => ({ lines: { total: 100, covered: pct, pct } });
-  const owned = assignOwnership([
-    {
-      layer: "unit",
-      modules: new Map([
-        ["src/a.ts", coverage(95)],
-        ["src/b.ts", coverage(40)],
-      ]),
-    },
-    {
-      layer: "integration",
-      modules: new Map([
-        ["src/b.ts", coverage(92)],
-        ["src/c.ts", coverage(20)],
-      ]),
-    },
-    { layer: "e2e", modules: new Map([["src/c.ts", coverage(88)]]) },
-  ]);
-
-  assert.deepEqual([...owned.get("unit")!.keys()], ["src/a.ts"], "unit keeps what it reaches");
-  assert.deepEqual([...owned.get("integration")!.keys()], ["src/b.ts"], "cheaper tier wins");
-  assert.deepEqual(
-    [...owned.get("e2e")!.keys()],
-    ["src/c.ts"],
-    "when no tier reaches the target, the furthest one owns it",
-  );
 });

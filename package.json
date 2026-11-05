@@ -147,7 +147,7 @@
     "test:integration": "node --experimental-strip-types tools/test-layers.ts --run integration",
     "test:e2e": "node --experimental-strip-types tools/test-layers.ts --run e2e",
     "test:layers": "node --experimental-strip-types tools/test-layers.ts --stats",
-    "test:coverage:layers": "node --experimental-strip-types tools/test-layers.ts --coverage",
+    "test:flake": "node --experimental-strip-types tools/test-flake.ts",
     "test:cg": "node --experimental-strip-types --test tests/core/autodiff.test.ts tests/core/differentiable-controller.test.ts tests/core/hierarchical-activation.test.ts tests/core/memory-graph-reasoner.test.ts tests/core/fork-merge.test.ts tests/core/robustness.test.ts",
     "glossary:check": "node --experimental-strip-types tools/glossary-check.ts",
     "check:policy-words": "node --experimental-strip-types tools/policy-word-check.ts",

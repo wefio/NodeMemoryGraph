@@ -7,22 +7,18 @@
 // of that fact, and `tests/core` alone holds all three (a pure ranking test, a store test on
 // a real database file, and a test that starts the CLI).
 //
-// Measured 2026-11-05 on the product suite (8-way concurrency). Case time is the sum of the
-// per-test durations, so it is bigger than the wall clock the suite actually takes:
-//
-//   unit         154 files   16 s    median file 0.12 s, 172 of 243 files under 0.5 s
-//   integration  122 files  154 s    real SQLite, temp dirs, local servers
-//   e2e           30 files  166 s    spawns a child process; five files are 40% of the suite
+// Reading the source has one hole: a test that leaves the process through a helper reads as
+// unit. The unit tier therefore runs with `tests/helpers/unit-seal.ts` preloaded, which throws
+// on the boundary calls themselves, so the mistake fails instead of costing 40 s. What the seal
+// finds once, the override table below records.
 //
 // Modes:
 //   --list <layer>   print that layer's files, one per line
-//   --stats          files, cases and case time per layer
+//   --stats          files and share per layer
 //   --run <layer>    run the layer through `node --test`; other flags after the layer are
 //                    forwarded, so `--run unit --watch` is the inner loop
 //   --run <layer> --coverage
 //                    the same run under c8, reported over the modules that layer loads
-//   --coverage       all three layers, then each module assigned to the cheapest layer that
-//                    reaches 90% of its lines, so a tier is judged on its own surface
 //   --check          fail when a file falls outside every layer, when an override points at
 //                    a file that moved, or when an override stopped mattering
 import { globSync, existsSync, readFileSync, rmSync } from "node:fs";
@@ -57,7 +53,7 @@ const STARTS_PRODUCT = /daemon-client|dist\/cli\/main\.js|bin\/nmg\.mjs/;
  * but the setup can fail for reasons the code under test did not cause.
  */
 const REAL_DEPENDENCY =
-  /(?:DatabaseSync|node:sqlite|mkdtemp|tmpdir\(\)|createServer|\.listen\(|writeFileSync|mkdirSync|rmSync)/;
+  /(?:DatabaseSync|node:sqlite|mkdtemp|tmpdir\(\)|createServer|\.listen\(|writeFileSync|mkdirSync|rmSync|NmgStore|\/store\.ts|\/store\/)/;
 
 /**
  * Deliberate exceptions, keyed by repository-relative path. Each one must say why the marker
@@ -65,8 +61,30 @@ const REAL_DEPENDENCY =
  * bearing. `--check` fails on a path that no longer exists, so the list cannot rot silently.
  */
 export const OVERRIDES: ReadonlyMap<string, { layer: TestLayer; reason: string }> = new Map([
-  // Example of the shape, kept empty until a real disagreement shows up:
-  // ["tests/core/example.test.ts", { layer: "integration", reason: "..." }],
+  // Each of these crosses a process boundary through a helper, so the file itself never
+  // mentions it. The unit seal found them; without the entry the seal fails them again.
+  ["tests/evals/official/python.test.ts", { layer: "e2e", reason: "probes a Python runtime" }],
+  ["tests/evals/topology/bpid.test.ts", { layer: "e2e", reason: "runs the topology driver" }],
+  ["tests/evals/topology/run.test.ts", { layer: "e2e", reason: "runs the topology driver" }],
+  [
+    "tests/evals/resource-observability.test.ts",
+    { layer: "e2e", reason: "samples the process tree of a live daemon" },
+  ],
+  [
+    "tests/integration/ooo-post-commit-notification.test.ts",
+    { layer: "e2e", reason: "posts through the committed CLI" },
+  ],
+  ["tests/integration/ooo-verification.test.ts", { layer: "e2e", reason: "runs the verifier CLI" }],
+  ["tests/support/test-runtime.test.ts", { layer: "e2e", reason: "starts a real HTTP daemon" }],
+  [
+    "tests/tools/complexity-gate.test.ts",
+    { layer: "e2e", reason: "shells out to tsc for real complexity output" },
+  ],
+  [
+    "tests/tools/complexity-registration.test.ts",
+    { layer: "e2e", reason: "shells out to tsc for real complexity output" },
+  ],
+  ["tests/tools/test-groups.test.ts", { layer: "e2e", reason: "runs Node itself as a child" }],
 ] as const);
 
 /** `tests/**\/*.test.ts`, repository-relative and forward-slashed on every platform. */
@@ -193,7 +211,7 @@ function runLayer(root: string, layer: TestLayer, forwarded: string[]): Promise<
     console.error(`no test files classified as ${layer}`);
     return Promise.resolve(1);
   }
-  const child = spawn(process.execPath, testArgs(forwarded, files), {
+  const child = spawn(process.execPath, testArgs(layer, forwarded, files), {
     cwd: root,
     stdio: "inherit",
   });
@@ -205,8 +223,14 @@ function runLayer(root: string, layer: TestLayer, forwarded: string[]): Promise<
   });
 }
 
-function testArgs(forwarded: string[], files: string[]): string[] {
-  return ["--experimental-strip-types", "--test", "--test-concurrency=8", ...forwarded, ...files];
+/**
+ * The unit layer runs with the seal preloaded, so a test that leaves the process through a
+ * helper fails with the rule it broke instead of quietly costing 40 s and a daemon.
+ */
+export function testArgs(layer: TestLayer, forwarded: string[], files: string[]): string[] {
+  const args = ["--experimental-strip-types", "--test", "--test-concurrency=8"];
+  if (layer === "unit") args.push("--import", "./tests/helpers/unit-seal.ts");
+  return [...args, ...forwarded, ...files];
 }
 
 /** One file's line coverage, as c8 writes it into `coverage-summary.json`. */
@@ -270,7 +294,7 @@ async function coverLayer(
       "--reporter=json-summary",
       `--report-dir=${directory}`,
       process.execPath,
-      ...testArgs(forwarded, files),
+      ...testArgs(layer, forwarded, files),
     ],
     { cwd: root, stdio: "inherit" },
   );
@@ -303,78 +327,28 @@ function sortedGaps(modules: Map<string, FileCoverage>, below: number): Array<[s
     .sort((a, b) => a[1] - b[1]);
 }
 
-/** How much of a module a tier must reach before the module counts as that tier's own. */
-const OWNERSHIP_TARGET = 90;
+/** The line share below which a module in a tier's reach is worth naming. */
+const GAP_THRESHOLD = 90;
 
 /** The modules a tier reaches least, worst first. This is the actionable list, not the total. */
 function printGaps(modules: Map<string, FileCoverage>, limit: number): void {
-  const gaps = sortedGaps(modules, OWNERSHIP_TARGET);
+  const gaps = sortedGaps(modules, GAP_THRESHOLD);
   if (gaps.length === 0) return;
   for (const [name, pct] of gaps.slice(0, limit))
     console.log(`    ${pct.toFixed(1).padStart(5)}%  ${name}`);
   if (gaps.length > limit) console.log(`    ... ${gaps.length - limit} more`);
 }
 
-/**
- * What one tier reaches, over the modules it loads. This is a reach number, not the tier's own
- * score: it includes modules the tier is not the right place to be thorough about, which is why
- * `--coverage` reports the owned surface separately.
- */
-function reportSingleTier(tier: TierCoverage, hint: boolean): void {
+/** What one tier reaches, over the modules it loads. A reach number, not a score. */
+function reportSingleTier(tier: TierCoverage): void {
   const totals = lineTotals(tier.modules.values());
   console.log(
     `${tier.layer} reach: ${percent(totals.covered, totals.total)} of ${totals.total} lines ` +
       `in ${tier.modules.size} modules it loads (${tier.durationSeconds.toFixed(0)}s, exit ${tier.exitCode})`,
   );
-  if (hint) console.log("  owned surface: npm run test:coverage:layers");
-  if (sortedGaps(tier.modules, OWNERSHIP_TARGET).length > 0) {
-    console.log(`  below ${OWNERSHIP_TARGET}%:`);
+  if (sortedGaps(tier.modules, GAP_THRESHOLD).length > 0) {
+    console.log(`  below ${GAP_THRESHOLD}%:`);
     printGaps(tier.modules, 8);
-  }
-}
-
-/**
- * A module belongs to the cheapest tier that reaches `OWNERSHIP_TARGET` of its lines; when no
- * tier does, it belongs to the tier that reaches furthest. Judging the unit tier by lines only
- * a daemon can reach would push it toward faking I/O, and judging it by the whole of `src`
- * would make the number move whenever an unrelated e2e test changed.
- */
-export function assignOwnership(
-  tiers: ReadonlyArray<{ layer: TestLayer; modules: Map<string, FileCoverage> }>,
-): Map<TestLayer, Map<string, FileCoverage>> {
-  const owned = new Map<TestLayer, Map<string, FileCoverage>>(LAYERS.map((l) => [l, new Map()]));
-  const everyModule = new Set<string>();
-  for (const tier of tiers) for (const name of tier.modules.keys()) everyModule.add(name);
-
-  for (const name of everyModule) {
-    const reached = tiers.map((tier) => ({ tier, coverage: tier.modules.get(name) }));
-    const eligible = reached.find(
-      (r) => r.coverage !== undefined && r.coverage.lines.pct >= OWNERSHIP_TARGET,
-    );
-    const chosen =
-      eligible ??
-      reached.reduce((best, current) =>
-        (current.coverage?.lines.pct ?? -1) > (best.coverage?.lines.pct ?? -1) ? current : best,
-      );
-    if (chosen.coverage) owned.get(chosen.tier.layer)!.set(name, chosen.coverage);
-  }
-  return owned;
-}
-
-function reportOwnership(tiers: TierCoverage[]): void {
-  const owned = assignOwnership(tiers);
-  console.log(
-    `\nlayer        modules  lines   coverage  gaps below ${OWNERSHIP_TARGET}% (owned surface)`,
-  );
-  for (const layer of LAYERS) {
-    const modules = owned.get(layer)!;
-    const totals = lineTotals(modules.values());
-    const gaps = sortedGaps(modules, OWNERSHIP_TARGET);
-    console.log(
-      `${layer.padEnd(12)} ${String(modules.size).padStart(6)}  ${String(totals.total).padStart(6)}  ` +
-        `${percent(totals.covered, totals.total).padStart(8)}  ${gaps.length === 0 ? "-" : gaps.length}`,
-    );
-    printGaps(modules, 5);
   }
 }
 
@@ -432,19 +406,8 @@ async function runCommand(root: string, argument: string, rest: string[]): Promi
   if (!rest.includes(COVERAGE_FLAG)) return runLayer(root, layer, rest);
   const forwarded = rest.filter((value) => value !== COVERAGE_FLAG);
   const tier = await coverLayer(root, layer, forwarded, REPORT_DIR);
-  reportSingleTier(tier, true);
+  reportSingleTier(tier);
   return tier.exitCode;
-}
-
-async function coverageCommand(root: string, rest: string[]): Promise<number> {
-  const tiers: TierCoverage[] = [];
-  for (const layer of LAYERS) {
-    const tier = await coverLayer(root, layer, rest, REPORT_DIR);
-    tiers.push(tier);
-    reportSingleTier(tier, false);
-  }
-  reportOwnership(tiers);
-  return tiers.some((tier) => tier.exitCode !== 0) ? 1 : 0;
 }
 
 const COMMANDS: Record<string, Command> = {
@@ -456,12 +419,11 @@ const COMMANDS: Record<string, Command> = {
   "--list": async ({ root, argument }) => listCommand(root, argument),
   "--why": async ({ root, argument }) => whyCommand(root, argument),
   "--run": async ({ root, argument, rest }) => runCommand(root, argument, rest),
-  "--coverage": async ({ root, rest }) => coverageCommand(root, rest),
 };
 
 const USAGE =
   "usage: test-layers.ts --list <layer> | --run <layer> [--coverage] [node --test flags] | " +
-  "--coverage | --stats | --check | --why <file>";
+  "--stats | --check | --why <file>";
 
 async function main(argv: string[]): Promise<number> {
   const [flag, argument = "", ...rest] = argv;

@@ -97,35 +97,31 @@ boundary without crossing it, so markers are matched on the code, not on the pro
 
 | Layer | Crosses | Files | Cases | Wall clock |
 | --- | --- | --- | --- | --- |
-| Unit | nothing: in process, no real dependency | 155 | ~1100 | ~11 s |
-| Integration | a real database, temp directory or socket | 119 | ~970 | ~43 s |
-| End to end | a process boundary: the CLI or the daemon | 37 | ~295 | ~1 min |
+| Unit | nothing: in process, no real dependency | 134 | ~970 | ~5 s |
+| Integration | a real database, temp directory or socket | 130 | ~1060 | ~33 s |
+| End to end | a process boundary: the CLI or the daemon | 47 | ~350 | ~35 s |
 
 `npm run test:unit`, `test:integration` and `test:e2e` run one layer; `test:layers` prints
 the distribution. The end-to-end layer needs `npm run build` first, and says so when
 `dist/` is missing instead of failing obscurely.
 
-A layer's coverage is measured against the modules it should own, not against all of
-`src`. `npm run test:coverage:layers` runs the three tiers and assigns each module to the
-cheapest tier that reaches 90% of its lines:
+Reading the source has one hole: a test that leaves the process through a helper still
+reads as unit. The unit tier is therefore started with `tests/helpers/unit-seal.ts`
+preloaded, which throws on `node:child_process`, `node:sqlite` and `node:net`, so that
+mistake fails in a second with the rule it broke. The seal arms only inside the runner's
+child processes; the runner itself must still be able to spawn them. Ten tests cross a
+boundary through a helper and say so in the override table, each with its reason.
 
-| Layer | Modules | Lines | Coverage |
-| --- | --- | --- | --- |
-| Unit | 35 | 7 020 | 96% |
-| Integration | 29 | 15 986 | 95% |
-| End to end | 1 | 169 | 96% |
-
-The end-to-end row is why all three layers stay. At line level it adds almost nothing that
-integration already reaches in process; what it covers is the boundary — exit codes,
-stdio, daemon lifecycle — which line coverage cannot see, and which is why mutation teeth
-exist. A module attributed to a tier below 90% is the gap worth reading, not the overall
-percentage: judging the unit tier by lines only a daemon can reach would reward faking
-I/O, and judging it by all of `src` would move the number whenever an unrelated end-to-end
-test changed.
+`npm run test:flake -- --layer integration --runs 3` repeats a layer and compares per-test
+outcomes, because a test that answers differently on the same code teaches everyone to
+re-run until green. Measured on 2026-11-05: unit 0 flaky, end to end 0, integration 2 — both
+in `tests/extensions/nmg/index.test.ts`, answer-overlap attribution and Chinese recall. A
+case that fails every run is reported as broken and is not a flake.
 
 `tests/tools/test-layers.test.ts` keeps the partition honest: every test file lands in
-exactly one layer, an override that stopped mattering is reported, and the ownership rule
-is checked against a synthetic tree.
+exactly one layer, and an override that stopped mattering or points at a missing file is
+reported. `tests/support/unit-seal.test.ts` proves the seal from outside it, which makes
+that file end-to-end by the rule it is testing.
 
 Resource choice is independent of blocking classification. A narrow-verifier
 fixture asserting route-test failure may decline inapplicable shared checks while
