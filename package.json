@@ -191,5 +191,8 @@
     "@google/genai@1.52.0": true,
     "protobufjs@7.6.5": true,
     "usearch@2.26.0": true
+  },
+  "overrides": {
+    "sharp": "0.35.5"
   }
 }

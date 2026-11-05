@@ -40,6 +40,8 @@ form a cross-table transaction. SQLite implements the same commit port using its
 own transaction and WAL snapshots. Native full-text retrieval is accepted for this
 profile. Conditional S3 publication is exercised through the native HTTP driver;
 provider deployment and cost validation remain separate gates.
+The dependency tree overrides `sharp` to 0.35.5 to address transitive native-image
+advisories; Lance embedding integrations need separate compatibility validation.
 
 An explicit application option selects the backend. It does not convert existing
 databases or replace the default/AML path. Board/run transactions remain local;
