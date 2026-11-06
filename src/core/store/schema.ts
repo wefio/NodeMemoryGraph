@@ -13,7 +13,7 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-import { ensureMemoryFts, MEMORY_FTS_SCHEMA } from "./fts-index.ts";
+import { ensureMemoryFts, MEMORY_FTS_SCHEMA, MEMORY_SURFACE_FTS_SCHEMA } from "./fts-index.ts";
 import { encodeVector, parseVector } from "./vector-codec.ts";
 import { TASK_UNIT_DECLARATION_SCHEMA } from "../../integration/task-unit-declaration-store.ts";
 import { ensureCoordinationSchema } from "./coordination-schema.ts";
@@ -534,12 +534,7 @@ export function migrate(db: DatabaseSync): void {
 
     ${MEMORY_FTS_SCHEMA}
 
-    CREATE VIRTUAL TABLE IF NOT EXISTS memory_surface_fts USING fts5(
-      content,
-      content = '',
-      contentless_delete = 1,
-      tokenize = 'trigram'
-    );
+    ${MEMORY_SURFACE_FTS_SCHEMA}
 
     CREATE TABLE IF NOT EXISTS state_key_aliases (
       alias_key TEXT NOT NULL,

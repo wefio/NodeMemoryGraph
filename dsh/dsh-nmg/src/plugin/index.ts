@@ -21,7 +21,7 @@
 // they are injected: cordis starts this plugin only after `tools`, `subprocess`
 // and `sandboxPolicy` are bound in composition.
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { connect } from 'node:net'
@@ -43,10 +43,24 @@ import {
 import { loadPrompts, renderDisclosure } from '../../../../src/prompts/load.ts'
 import { RecallBudget } from '../../../../src/integration/recall-budget.ts'
 import { contextOnlineLearningEnabled } from '../../../../src/lab/context-router-online.ts'
-import { STATE_OPERATIONS, stateOperation, captureStateInvocation, renderStateOutput } from '../../../../src/integration/state.ts'
+import { STATE_OPERATIONS, STATE_AG_FIELDS, stateOperation, captureStateInvocation, renderStateOutput } from '../../../../src/integration/state.ts'
 import { renderLabOutput } from '../../../../src/integration/lab-capabilities.ts'
 
 const nmgPrompts = loadPrompts()
+
+/** daemon 回了一个**领域**错误（请求格式对、规则不允许），不是"连不上"。 */
+class NmgRpcError extends Error {
+  readonly rpc = true
+  constructor(message: string) {
+    super(message)
+    this.name = 'NmgRpcError'
+  }
+}
+
+/** 跨会话/过期的 activeGraphId 与 get 的组合会撞这个 —— 丢掉 id 重试即可。 */
+function isForeignActiveGraph(message: string): boolean {
+  return /active graph .* (belongs to another session|does not exist)/i.test(message)
+}
 
 export const inject = ['tools', 'subprocess', 'sandboxPolicy', 'systemPrompt', 'timer']
 
@@ -80,10 +94,34 @@ export function apply(ctx: Context): () => void {
     'C:\\Documents\\GitHub\\NodeMemoryGraph'
   const binPath = workspaceRoot.replace(/[\\/]+$/, '') + '\\bin\\nmg.mjs'
 
+  // 裸名 'node' 只有在 PATH 正确时才解析得出来。Windows 上把 User 作用域的变量
+  // （NVM_HOME / NVM_SYMLINK）写进 Machine PATH，进程拿到的就是没展开的字面量
+  // `%NVM_SYMLINK%` —— 这不是目录，于是 spawn('node') 直接 ENOENT。
+  // 所以：先问宿主，再按常见安装位置探**绝对路径**，最后才退回裸名。
+  const NODE_CANDIDATES = [
+    process.env.NMG_NODE_BIN,
+    process.env.NVM_SYMLINK && join(process.env.NVM_SYMLINK, 'node.exe'),
+    'C:\\nvm4w\\nodejs\\node.exe',
+    'C:\\Program Files\\nodejs\\node.exe',
+    'C:\\Program Files (x86)\\nodejs\\node.exe',
+  ].filter((p): p is string => typeof p === 'string' && p.length > 0)
+
   let nodePromise
   function resolveNode() {
     if (nodePromise === undefined) {
-      nodePromise = subprocess.resolveExecutable('node').catch(() => 'node')
+      nodePromise = (async () => {
+        try {
+          return await subprocess.resolveExecutable('node')
+        } catch {}
+        for (const candidate of NODE_CANDIDATES) {
+          try {
+            if (statSync(candidate).isFile()) return candidate
+          } catch {}
+        }
+        // 宿主是 Electron 时 execPath 是 Electron 本体，带着这个环境变量才当 node 用。
+        if (process.versions.electron) return process.execPath
+        return 'node'
+      })()
     }
     return nodePromise
   }
@@ -148,11 +186,23 @@ export function apply(ctx: Context): () => void {
         signal,
       })
       const text = await response.text()
+      // daemon 拒绝请求时带 HTTP 4xx **并且**给标准 JSON-RPC error 体。必须先把这种
+      // "领域拒绝"和"连不上"分开 —— 否则 !response.ok 抢先降级到 CLI 兜底，一个能修的
+      // 错误（缺 stateKey 之类）就变成看不懂的 spawn ENOENT。
+      let parsed: any
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        parsed = undefined
+      }
+      if (parsed && typeof parsed === 'object' && parsed.error) {
+        throw new NmgRpcError(parsed.error.message || 'nmg ' + method + ' error')
+      }
       if (!response.ok) throw new Error(text || 'nmg ' + method + ' failed (' + response.status + ')')
-      const parsed = JSON.parse(text)
-      if (parsed.error) throw new Error(parsed.error.message || 'nmg ' + method + ' error')
+      if (parsed === undefined) throw new Error('nmg ' + method + ': non-JSON response')
       return parsed.result
     } catch (error) {
+      if (error instanceof NmgRpcError) throw error
       if (propagateFailure || (error && error.name === 'AbortError')) throw error
       daemon = null
       return null
@@ -207,6 +257,13 @@ export function apply(ctx: Context): () => void {
   // ── one-shot CLI fallback ──────────────────────────────────────────────────
   async function runNmg(args, signal) {
     const node = await resolveNode()
+    // 子进程也继承坏 PATH 的话，nmg CLI 内部再 spawn 任何东西照样 ENOENT ——
+    // 把 node 自己所在目录顶到 PATH 最前，整条链就都对了。
+    const nodeDir = node.includes('/') || node.includes('\\') ? node.slice(0, Math.max(node.lastIndexOf('/'), node.lastIndexOf('\\'))) : ''
+    const env: Record<string, string> = {}
+    if (nodeDir) env.PATH = nodeDir + ';' + (process.env.PATH ?? '')
+    // Electron 宿主：execPath 就是 Electron 本体，必须显式声明按 node 运行。
+    if (node === process.execPath && process.versions.electron) env.ELECTRON_RUN_AS_NODE = '1'
     const handle = subprocess.spawn({
       argv: [node, binPath].concat(args),
       cwd: workspaceRoot,
@@ -217,6 +274,7 @@ export function apply(ctx: Context): () => void {
       },
       graceMs: 8000,
       signal,
+      ...(Object.keys(env).length ? { env: { ...process.env, ...env } } : {}),
     })
     const outcome = await handle.done
     const stdout = handle.collected.stdout ? handle.collected.stdout.readFrom(0).text : ''
@@ -271,7 +329,8 @@ export function apply(ctx: Context): () => void {
     try {
       const raw = await daemonCall(method, params, signal)
       if (raw != null) return { ok: true, data: project ? project(raw) : raw }
-    } catch {
+    } catch (error) {
+      if (error instanceof NmgRpcError) return { ok: false, error: 'NMG ' + method + ': ' + error.message }
       return { ok: false, error: 'NMG call aborted' }
     }
     return nmgJson(cliArgs, signal)
@@ -287,7 +346,8 @@ export function apply(ctx: Context): () => void {
       return raw == null
         ? { ok: false, error: 'NMG daemon is unavailable for ' + method }
         : { ok: true, data: raw }
-    } catch {
+    } catch (error) {
+      if (error instanceof NmgRpcError) return { ok: false, error: 'NMG ' + method + ': ' + error.message }
       return { ok: false, error: 'NMG call aborted' }
     }
   }
@@ -318,6 +378,24 @@ export function apply(ctx: Context): () => void {
   const MAX_RECALL_HISTORY = 5 // per-session recall rounds kept for the floating indicator
   const openSearches = new Map() // sessionId -> Promise that resolves once the stash is written
 
+  // Activity ledger for the right-pane tab: what the adapter did for a session —
+  // automatic recalls, explicit searches, evidence reads. In-memory only; the
+  // daemon owns the durable traces, this is the live session view.
+  const activityLog = new Map() // sessionId -> entry[] (newest first)
+  const MAX_ACTIVITY = 60
+  let lastActiveSessionId = ''
+  function recordActivity(sessionId, entry) {
+    if (!sessionId) return
+    const id = String(sessionId)
+    lastActiveSessionId = id
+    const list = activityLog.get(id) || []
+    activityLog.set(id, [{ at: new Date().toISOString(), ...entry }, ...list].slice(0, MAX_ACTIVITY))
+  }
+  function activityFor(sessionId) {
+    if (!sessionId) return []
+    return activityLog.get(String(sessionId)) || []
+  }
+
   function nextGeneration(sessionId) {
     const generation = ++recallSequence
     recallGenerations.set(sessionId, generation)
@@ -325,13 +403,20 @@ export function apply(ctx: Context): () => void {
   }
 
   async function disclose(sessionId, activeGraphId, disclosure, entries) {
-    const decision = await daemonCall('sessionActiveGraph', {
-      action: 'disclose',
-      sessionId,
-      projectionId: activeGraphId || undefined,
-      disclosure,
-      entries,
-    })
+    // disclose 只是"这轮已经给过谁"的去重账，daemon 拒绝（例如老版本要 contentHash）
+    // 不该拖垮整次检索 —— 兜底成"全部当新的"，效果与之前一致。
+    let decision: any
+    try {
+      decision = await daemonCall('sessionActiveGraph', {
+        action: 'disclose',
+        sessionId,
+        projectionId: activeGraphId || undefined,
+        disclosure,
+        entries,
+      })
+    } catch {
+      decision = null
+    }
     return decision && Array.isArray(decision.freshMemoryIds)
       ? decision
       : { freshMemoryIds: entries.map((entry) => entry.memoryId), foldedMemoryIds: [] }
@@ -466,6 +551,12 @@ export function apply(ctx: Context): () => void {
           }
           const history = recallBatch.get(sessionId)
           recallBatch.set(sessionId, [entry, ...(history || [])].slice(0, MAX_RECALL_HISTORY))
+          recordActivity(sessionId, {
+            kind: 'recall',
+            candidates: fresh.length,
+            tokens: thisTokens,
+            activeGraphId: recall.activeGraphId || null,
+          })
         } catch {
           // Keep the last successful snapshot on any recall failure.
         } finally {
@@ -512,12 +603,21 @@ export function apply(ctx: Context): () => void {
   // first, capped) so the pill can show the latest recall's candidates and page
   // through earlier recalls, or null when the session has never recalled.
   function recallDataFor(sessionId) {
-    if (!sessionId) return null
+    // The browser's idea of "current session" and the host's agent id are not
+    // guaranteed to be the same string, so fall back to the session that most
+    // recently produced activity instead of showing an empty pane.
+    const requested = sessionId ? String(sessionId) : ''
+    const id = requested && (recallBatch.has(requested) || activityLog.has(requested))
+      ? requested
+      : lastActiveSessionId
+    if (!id) return null
+    const activity = activityFor(id)
     try {
-      const stack = recallBatch.get(String(sessionId))
+      const stack = recallBatch.get(id)
       const list = Array.isArray(stack) ? stack : (stack ? [stack] : [])
-      if (list.length === 0) return null
+      if (list.length === 0) return activity.length ? { session: id, recalls: [], activity } : null
       return {
+        session: id,
         recalls: list.map((snapshot) => ({
           generation: snapshot.generation,
           tokens: snapshot.tokens,
@@ -531,6 +631,7 @@ export function apply(ctx: Context): () => void {
             preview: c.preview,
           })),
         })),
+        activity,
       }
     } catch {
       return null
@@ -545,6 +646,7 @@ export function apply(ctx: Context): () => void {
         sessionTokenTotals.delete(id)
         recallBatch.delete(id)
         openSearches.delete(id)
+        activityLog.delete(id)
         wakeBatch.delete(id)
         lastAgents.delete(id)
         void daemonCall('sessionActiveGraph', { action: 'release', sessionId: id })
@@ -1087,6 +1189,12 @@ export function apply(ctx: Context): () => void {
       const forget = data.results.some((result) =>
         (result.memory.markers || []).some((marker) => marker.kind === 'forget'),
       )
+      recordActivity(sessionId, {
+        kind: 'search',
+        query: String(args.query || ''),
+        candidates: data.results.length,
+        activeGraphId: (r.data.activeGraph && r.data.activeGraph.id) || null,
+      })
       return [renderSearchSurface(data, {
         preamble: renderDisclosure(nmgPrompts.search_disclosure, {}),
         postamble: renderDisclosure(nmgPrompts.search_disclosure_metadata, {
@@ -1122,7 +1230,17 @@ export function apply(ctx: Context): () => void {
       if (args.activeGraphId) argv.push('--active-graph-id', args.activeGraphId)
       if (args.graphHops != null) argv.push('--graph-hops', String(args.graphHops))
       argv.push('--project-dir', workspaceRoot, '--session-id', sessionId, '--json')
-      const r = await invoke('get', params, argv, exec.signal, null)
+      let r = await invoke('get', params, argv, exec.signal, null)
+      // 上一轮 search 拿到的 activeGraphId 属于**上一轮**的 session（DSH 每轮新 agent id），
+      // 直接带进来会被 daemon 拒。丢掉 id 重试一次：证据照给，只是不记"这次用了"的账。
+      if (!r.ok && args.activeGraphId && isForeignActiveGraph(String(r.error))) {
+        delete params.activeGraphId
+        const retryArgv = ['get'].concat(ids)
+        if (args.graphHops != null) retryArgv.push('--graph-hops', String(args.graphHops))
+        retryArgv.push('--project-dir', workspaceRoot, '--session-id', sessionId, '--json')
+        r = await invoke('get', params, retryArgv, exec.signal, null)
+        if (r.ok) (r as { staleActiveGraph?: boolean }).staleActiveGraph = true
+      }
       if (!r.ok) return r.error
       const disclosure = await disclose(
         sessionId,
@@ -1135,6 +1253,12 @@ export function apply(ctx: Context): () => void {
       const forget = visible.results.some((result) =>
         (result.memory.markers || []).some((marker) => marker.kind === 'forget'),
       )
+      recordActivity(sessionId, {
+        kind: 'get',
+        requested: ids.length,
+        candidates: visible.results.length,
+        memoryIds: visible.results.map((result) => result.memory.id).slice(0, 8),
+      })
       return [renderEvidenceSurface(visible, {
         preamble: renderDisclosure(nmgPrompts.get_disclosure, {}),
         postamble: renderDisclosure(nmgPrompts.get_disclosure_metadata, {
@@ -1280,7 +1404,7 @@ export function apply(ctx: Context): () => void {
       if (!args.statement || !args.nodeName) {
         return 'nmg_remember save requires statement and nodeName.'
       }
-      const params: Record<string, any> = { statement: args.statement, nodeName: args.nodeName, projectDir: workspaceRoot }
+      const params: Record<string, any> = { statement: args.statement, nodeName: args.nodeName, projectDir: workspaceRoot, sessionId }
       if (args.tesserae && Array.isArray(args.tesserae)) params.tesserae = args.tesserae
       if (args.memoryType) params.memoryType = args.memoryType
       if (args.recallTriggers) params.recallTriggers = args.recallTriggers
@@ -1349,10 +1473,16 @@ export function apply(ctx: Context): () => void {
     },
     output: textOutput,
     async execute(args, exec) {
-      const operation = stateOperation(args)
+      // AG 空间只认 STATE_AG_FIELDS 里的键。工具 schema 是 board/ag 共用的一张表，
+      // 模型照着 schema 给 ag 带上 limit/kind 之类就会撞上 "Unsupported AG state field"。
+      // 既然这些字段在 ag 语义下本来也无效，就地按空间裁掉，别把参数校验错误丢给模型。
+      const scoped = args.space === 'ag'
+        ? Object.fromEntries(Object.entries(args).filter(([key]) => (STATE_AG_FIELDS as readonly string[]).includes(key)))
+        : args
+      const operation = stateOperation(scoped)
       const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
       const result = args.space === 'ag'
-        ? await executeAgState(args, operation, sessionId, exec.signal)
+        ? await executeAgState(scoped, operation, sessionId, exec.signal)
         : await executeBoardState(args, operation, sessionId, exec.signal)
       return result.ok ? renderStateOutput(result.data) : result.error
     },
