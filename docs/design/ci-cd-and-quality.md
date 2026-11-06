@@ -85,6 +85,46 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 or `exit_criteria`. On exit, delete or explicitly promote to durable Safety or
 Contract coverage.
 
+## Test pyramid
+
+The three layers are about the boundary a test crosses, not the folder it sits in:
+`tests/core` alone holds a pure ranking test, a store test on a real database file, and a
+test that starts the daemon. `tools/test-layers.ts` derives the layer from the test's own
+source. Spawning a process, or starting the built CLI through the daemon client, is
+end-to-end; opening a real database, temp directory or socket is integration; everything
+else is unit. A quoted `spawn(...)` in a comment or a fixture string describes the
+boundary without crossing it, so markers are matched on the code, not on the prose.
+
+| Layer | Crosses | Files | Cases | Wall clock |
+| --- | --- | --- | --- | --- |
+| Unit | nothing: in process, no real dependency | 134 | ~970 | ~5 s |
+| Integration | a real database, temp directory or socket | 130 | ~1060 | ~33 s |
+| End to end | a process boundary: the CLI or the daemon | 47 | ~350 | ~35 s |
+
+`npm run test:unit`, `test:integration` and `test:e2e` run one layer; `test:layers` prints
+the distribution. The end-to-end layer needs `npm run build` first, and says so when
+`dist/` is missing instead of failing obscurely.
+
+Reading the source has one hole: a test that leaves the process through a helper still
+reads as unit. The unit tier is therefore started with `tests/helpers/unit-seal.ts`
+preloaded, which throws on `node:child_process`, `node:sqlite` and `node:net`, so that
+mistake fails in a second with the rule it broke. The seal arms only inside the runner's
+child processes; the runner itself must still be able to spawn them. Ten tests cross a
+boundary through a helper and say so in the override table, each with its reason. The `tests`
+job runs `--check` and the sealed unit tier, so the contract fails a pull request and not only
+a local run.
+
+`npm run test:flake -- --layer integration --runs 3` repeats a layer and compares per-test
+outcomes, because a test that answers differently on the same code teaches everyone to
+re-run until green. Measured on 2026-11-05: unit 0 flaky, end to end 0, integration 2 — both
+in `tests/extensions/nmg/index.test.ts`, answer-overlap attribution and Chinese recall. A
+case that fails every run is reported as broken and is not a flake.
+
+`tests/tools/test-layers.test.ts` keeps the partition honest: every test file lands in
+exactly one layer, and an override that stopped mattering or points at a missing file is
+reported. `tests/support/unit-seal.test.ts` proves the seal from outside it, which makes
+that file end-to-end by the rule it is testing.
+
 Resource choice is independent of blocking classification. A narrow-verifier
 fixture asserting route-test failure may decline inapplicable shared checks while
 retaining real CLI, Git and route tests. Representative default-narrow coverage
