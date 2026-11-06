@@ -9,8 +9,16 @@ export const MEMORY_FTS_SCHEMA = `
     content = '', contentless_delete = 1, tokenize = 'unicode61'
   );`;
 
+export const MEMORY_SURFACE_FTS_SCHEMA = `
+  CREATE VIRTUAL TABLE IF NOT EXISTS memory_surface_fts USING fts5(
+    content,
+    content = '',
+    contentless_delete = 1,
+    tokenize = 'trigram'
+  );`;
+
 const FORMATS = [
-  ["fts_text_format", "unicode61-han-bigram-recall-trigger-surface-trigram-v3"],
+  ["fts_text_format", "unicode61-han-bigram-recall-trigger-surface-trigram-v4"],
   ["fts_storage_format", "contentless-registry-v1"],
 ] as const;
 
@@ -132,19 +140,29 @@ export function ensureMemoryFts(db: DatabaseSync): void {
 
   db.exec("SAVEPOINT nmg_fts_migration");
   try {
-    const link = memoryFtsLink(db);
-    const oldRows = db
-      .prepare(
-        `SELECT ${link.id} AS memory_id, f.rowid
+    // FTS5 segment ids live in the `%_data` shadow table and grow without bound.
+    // Once one passes 2^53, reading the index throws, so keeping the old rowid
+    // order is best-effort; both indexes are dropped either way so their shadow
+    // tables start from a clean id space.
+    let oldIds = new Map<string, number>();
+    let nextRowid = 0;
+    try {
+      const link = memoryFtsLink(db);
+      const oldRows = db
+        .prepare(
+          `SELECT ${link.id} AS memory_id, f.rowid
       FROM memory_fts f ${link.join} ORDER BY f.rowid`,
-      )
-      .all();
-    const oldIds = new Map(oldRows.map((row) => [String(row.memory_id), Number(row.rowid)]));
-    let nextRowid = oldRows.reduce((max, row) => Math.max(max, Number(row.rowid)), 0);
+        )
+        .all();
+      oldIds = new Map(oldRows.map((row) => [String(row.memory_id), Number(row.rowid)]));
+      nextRowid = oldRows.reduce((max, row) => Math.max(max, Number(row.rowid)), 0);
+    } catch {
+      // An overflowed index cannot be read; the rebuild below restores the order.
+    }
     ensureRegistryRowid(db);
     const source = documents(db);
-    db.exec(`DROP TABLE memory_fts; ${MEMORY_FTS_SCHEMA}
-      DELETE FROM memory_surface_fts;
+    db.exec(`DROP TABLE IF EXISTS memory_fts; ${MEMORY_FTS_SCHEMA}
+      DROP TABLE IF EXISTS memory_surface_fts; ${MEMORY_SURFACE_FTS_SCHEMA}
       UPDATE memory_fts_registry SET lexical_rowid = NULL;`);
     for (const document of source) {
       indexMemoryFts(db, document, oldIds.get(document.memoryId) ?? ++nextRowid);
