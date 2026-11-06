@@ -5,6 +5,37 @@ import type { RecallBudget } from "./recall-budget.ts";
 
 export type QueryEmbeddingClient = Pick<EmbeddingClient, "embedQueries" | "indexId">;
 
+/** Create once per search request. Only query vectors are shared across stores;
+ * index health, scopes, results and automatic deadlines are checked on each use.
+ */
+export function requestQueryEmbeddingClient(
+  client: QueryEmbeddingClient | undefined,
+): QueryEmbeddingClient | undefined {
+  if (!client) return undefined;
+  const pending = new Map<string, Promise<number[][]>>();
+  return {
+    indexId: client.indexId,
+    async embedQueries(texts) {
+      const key = JSON.stringify(texts);
+      let result = pending.get(key);
+      if (!result) {
+        result = Promise.resolve().then(() => client.embedQueries(texts));
+        pending.set(key, result);
+      }
+      try {
+        const vectors = await result;
+        if (vectors.length !== texts.length || vectors.some((v) => !v.length)) {
+          pending.delete(key);
+        }
+        return vectors.map((vector) => vector.slice());
+      } catch (error) {
+        pending.delete(key);
+        throw error;
+      }
+    },
+  };
+}
+
 type SearchOptions = Exclude<Parameters<NmgStore["searchContext"]>[1], undefined>;
 
 export async function searchMemoryContext(

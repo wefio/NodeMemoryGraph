@@ -18,7 +18,7 @@ InformationView 每检查一个候选的预算，就重新拼接完整的已纳�
 
 契约继续归属[状态展示](../../design/state-spaces.zh-CN.md#统一上下文信息项)
 和[检索证据组装](../../design/design/progressive-retrieval.zh-CN.md#证据组装)。
-现有渲染证据 token 估算器和精确证据渲染器保持原样；本次没有新增独立渲染器、预算或缓存。
+现有渲染证据 token 估算器和精确证据渲染器保持原样；该组装变更没有新增独立渲染器或预算。
 
 ## 考虑过的替代方案
 
@@ -36,3 +36,17 @@ InformationView 每检查一个候选的预算，就重新拼接完整的已纳�
 [离线测量](../../experiments/retrieval/infrastructure-performance-2026-10-26.zh-CN.md)
 记录了输出哈希和重复运行，证明本地成本下降；独立的 LME 全量成对检查证明
 500 题的 recall@20 与输出保持不变。两者均不证明召回提升或完整答题、判分管道提速。
+
+## 请求内查询准备扩展
+
+daemon 搜索可能针对多个 Store 或重复语义子句调用共享检索入口。
+此前每个健康的混合检索分支都会再次对同一文本生成向量。
+现在只在本次调用内复用查询准备，保留新鲜的 Store 读取和现有自动期限；
+失败与空响应仍可重试。这避免进程级缓存的失效、租户边界与保留成本，
+不合并不同查询，也不改变 provider 批次语义。
+[检索契约](../../design/design/progressive-retrieval.zh-CN.md#请求内查询准备)拥有生命周期与排除项。
+
+[成对测量](../../experiments/retrieval/request-preparation-2026-10-28.zh-CN.md)
+记录 provider 调用数、模拟等待时间与候选严格一致性。
+测试覆盖经 `NmgService` 使用真实本地 HTTP provider、读取之间删除、并发消费者、重试和取消。
+此次扩展尚未测量真实云端 provider 或完整 recall benchmark；上文 500 题 LME 证据属于此前的组装变更。
