@@ -38,7 +38,26 @@ to use it explicitly for one suitable task.
 
 Read the complete responsibility: [Requirement matrix](completion-audit/requirement-matrix.md).
 
+## Portable memory backend slice
+
+The [portable profile](unified-architecture/native-backends.md) has SQLite and
+native LanceDB implementations behind one async domain port. Deterministic tests
+cover atomic revisions, pinned readers, concurrent publication, evidence, state
+replacement, session isolation, withdrawal, replay, namespace separation and
+service routing, including shared-file SQLite initialization in either order and
+reopening without mixing board content into memory search. The native S3 driver runs against an HTTP object-protocol
+fixture, including reopening, concurrent writers and rejected writes. Shared
+Harness binding tests cover generation isolation, stable invocation replay,
+cancellation, closure and refusal of cloud coordination. Local board/run
+transactions retain their existing SQLite contract tests.
+
+This is an opt-in library profile, not completion of the whole architecture.
+Real AWS/S3-compatible provider deployment, cost/latency benchmarks, branch
+collection, migration, cloud interactive API, and concrete Harness plugins remain
+unverified or deferred. The default memory and AML paths are unchanged.
+
 ## Agent convergence feedback implementation slice
+
 
 The [feedback design](agent-convergence-feedback-design.md) remains **partial**,
 not completed by a documentation or implementation PR. `SessionFeedbackProvider`

@@ -309,6 +309,17 @@ routes:
       blocking: [check, test:product, build]
       advisory: []
 
+  - id: harness-connection
+    paths:
+      - src/integration/harness-connection.ts
+    owners:
+      - docs/design/unified-architecture/native-backends.md
+      - docs/design/unified-architecture/harness-integration.md
+    tests: [tests/integration/harness-connection.test.ts]
+    verify:
+      blocking: [check, test:product, build]
+      advisory: []
+
   - id: ooo-execution
     paths:
       - src/integration/ooo-board.ts
@@ -327,6 +338,7 @@ routes:
       - src/integration/ooo-patch-session.ts
       - src/integration/task-advisers.ts
       - src/integration/task-coordinator.ts
+      - src/integration/coordination-port.ts
       - src/integration/task-unit-declaration-store.ts
       - src/integration/task-semantics-interleavings.ts
       - src/integration/task-semantics-model.ts

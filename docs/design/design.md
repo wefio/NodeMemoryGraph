@@ -136,6 +136,8 @@ NMG follows these principles:
 
 ## Responsibility boundaries
 
+For the target separation into memory engine, parallel SQLite/native-object backends, local coordination, and shared Harness integration, read the [unified architecture draft](unified-architecture.md). The [portable backend contract](unified-architecture/native-backends.md) defines the explicit library profile; default tools retain the baseline below. pi durable remains the selected cloud host, subject to integration and deployment validation.
+
 | Component | Responsibilities |
 | --- | --- |
 | Base model | Identify candidate facts/preferences/constraints, summarize, reformulate queries, decide whether more evidence is needed, propose semantic relations or splits, and synthesize an answer. |
