@@ -102,6 +102,29 @@ test("CLI exact get preserves Active Graph disclosure attribution", () => {
   );
 });
 
+test("CLI forwards session processing reports to the shared board state", () => {
+  const command = NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === "state write board")!;
+  assert.deepEqual(
+    command.buildParams({
+      flags: new Set(),
+      options: new Map([
+        ["agent", ["reviewer"]],
+        ["session-id", ["session-1"]],
+        ["activity-json", ['{"state":"busy","capabilities":["manual-coordination"]}']],
+      ]),
+      positionals: ["agentActivity"],
+    }),
+    {
+      action: "write",
+      space: "board",
+      operation: "agentActivity",
+      agentId: "reviewer",
+      sessionId: "session-1",
+      activity: { state: "busy", capabilities: ["manual-coordination"] },
+    },
+  );
+});
+
 test("CLI search exposes bounded chain disclosure without leaking storage details", () => {
   const search = NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === "search")!;
   assert.deepEqual(

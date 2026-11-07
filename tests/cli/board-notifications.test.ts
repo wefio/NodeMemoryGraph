@@ -213,16 +213,19 @@ test("event invitation selects current subscribers, excludes opt-outs and does n
     assert.deepEqual(await subscriptions(service, "late"), []);
   }));
 
-test("unread channel reminders coalesce, preserve source messages and do not create a wake-chain cap", async () =>
+test("unread channel replies retain every source and do not create a wake-chain cap", async () =>
   fixture(async (service) => {
     await post(service, "a", "Join", { notification: invite });
-    await post(service, "a", "First update");
+    const first = await post(service, "a", "First update");
     const newest = await post(service, "a", "Second update");
     const pending = (await inbox(service, "b")).filter(
       (e) => e.notificationSourceId && !e.invitation,
     );
-    assert.equal(pending.length, 1);
-    assert.equal(pending[0]?.notificationSourceId, newest.id);
+    assert.equal(pending.length, 2);
+    assert.deepEqual(
+      new Set(pending.map((entry) => entry.notificationSourceId)),
+      new Set([first.id, newest.id]),
+    );
     for (let i = 0; i < 40; i++) {
       const entry = await post(service, "a", `Real discussion round ${i}`);
       const notice = (await inbox(service, "b")).find((e) => e.notificationSourceId === entry.id)!;

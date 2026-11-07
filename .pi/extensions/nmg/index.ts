@@ -65,13 +65,15 @@ import {
   type BoardWakeConfig,
   type BoardWakeState,
   collectWakeCandidates,
-  deliverBoardWake,
-  filterUndelivered,
   loadWakeState as loadWakeStateShared,
   readWakeConfig as readWakeConfigShared,
   wakeBudgetGate,
   writeWakeConfig as writeWakeConfigShared,
 } from "../../../src/integration/board-wake.ts";
+import {
+  deliverBoardWakeBatch,
+  reportHarnessActivity,
+} from "../../../src/integration/board-wake-batch.ts";
 import {
   loadOrCreateAgentIdentity,
   renameAgentIdentity,
@@ -2423,6 +2425,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       ),
       eventId: Type.Optional(Type.String()),
       event: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+      activity: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
       text: Type.Optional(Type.String()),
     }),
     async execute(id, args, signal, onUpdate, ctx) {
@@ -2502,12 +2505,19 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   // Live session gate: a captured ctx goes stale after session replacement/
   // reload; isIdle and getSessionId on a stale ctx throw, which must never
   // crash the host. Returns the session id, or "" to skip this tick.
-  const liveSessionId = (): string => {
+  const liveWakeObservation = (): {
+    sessionId: string;
+    state: "busy" | "idle" | "unknown";
+  } | null => {
     try {
-      if (latestAgentCtx?.isIdle && !latestAgentCtx.isIdle()) return "";
-      return latestAgentCtx?.sessionManager.getSessionId() ?? "";
+      const sessionId = latestAgentCtx?.sessionManager.getSessionId();
+      if (!sessionId) return null;
+      return {
+        sessionId,
+        state: latestAgentCtx?.isIdle ? (latestAgentCtx.isIdle() ? "idle" : "busy") : "unknown",
+      };
     } catch {
-      return ""; // stale ctx — skip this tick, retry later
+      return null;
     }
   };
 
@@ -2516,11 +2526,21 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     const state = loadWakeState();
     const now = Date.now();
     if (!wakeBudgetGate(config, state, now)) return;
-    const sessionId = liveSessionId();
-    if (!sessionId) return;
+    const observation = liveWakeObservation();
+    if (!observation) return;
+    const { sessionId, state: observed } = observation;
     const identity = loadOrCreateAgentIdentity(sessionId, "pi");
     const agentId = identity.id;
     const agentName = identity.agentName;
+    await reportHarnessActivity(
+      wakeInvoke,
+      agentId,
+      sessionId,
+      observed,
+      observed === "unknown"
+        ? ["batch-enqueue"]
+        : ["batch-enqueue", "processing-observation", "idle-boundary"],
+    );
     // System-layer identity heartbeat (A2A AgentCard local edition): refresh
     // this agent's registry row each tick so discover() can find it. Never
     // wakes an LLM — the registry is read on demand via discover. Capabilities
@@ -2543,23 +2563,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         sessionId,
       });
       if (candidates.length === 0) return;
-      const fresh = await filterUndelivered(wakeInvoke, candidates, { agentId, sessionId });
-      if (fresh.length === 0) return;
-      const rank: Record<string, number> = {
-        question: 0,
-        blocker: 1,
-        handoff: 2,
-        goal: 3,
-        note: 4,
-        decision: 5,
-        result: 6,
-      };
-      fresh.sort(
-        (left, right) =>
-          (rank[left.kind] ?? 9) - (rank[right.kind] ?? 9) ||
-          String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? "")),
-      );
-      await deliverBoardWake({
+      await deliverBoardWakeBatch({
         invoke: wakeInvoke,
         sendWake: (message: string) => pi.sendUserMessage(message),
         config,
@@ -2568,7 +2572,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         now,
         agentId,
         sessionId,
-        entry: fresh[0]!,
+        entries: candidates,
       });
     } catch {
       // daemon unavailable or transient failure — retry next tick

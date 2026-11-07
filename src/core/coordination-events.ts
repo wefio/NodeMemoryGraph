@@ -1,4 +1,11 @@
 import { containsSecret } from "./write-policy.ts";
+import {
+  applyPhaseMutation,
+  isPhaseMutation,
+  parsePhaseMutation,
+  type PhaseMutation,
+  type CollaborationState,
+} from "./coordination-phases.ts";
 
 export const EVENT_NOTICE_CHANNEL = "__nmg_event_updates__";
 export function isCoordinationEventNotice(entry: {
@@ -47,6 +54,7 @@ export interface CoordinationEvent {
   startedAt: string;
   updatedAt: string;
   endedAt: string | null;
+  collaboration?: CollaborationState;
 }
 export interface CoordinationEventChange {
   revision: number;
@@ -57,6 +65,7 @@ export interface CoordinationEventChange {
   createdAt: string;
 }
 export type CoordinationMutation =
+  | PhaseMutation
   | { kind: "note" | "close" | "reopen"; text: string; outcome?: string }
   | { kind: "channel"; text: string; channel: CoordinationChannel }
   | {
@@ -83,6 +92,7 @@ export interface UpdateCoordinationEvent {
   change: CoordinationMutation;
 }
 export interface AgentWorkStatus {
+  sessions?: import("./agent-activity.ts").AgentSessionActivity[];
   agentId: string;
   activity: "idle" | "working";
   statusNote: string;
@@ -126,6 +136,8 @@ function oneOf<T extends string>(value: unknown, choices: readonly T[], field: s
 export function parseCoordinationMutation(value: unknown): CoordinationMutation {
   const data = object(value),
     text = coordinationText(data.text, "event text");
+  if (typeof data.kind === "string" && data.kind.startsWith("phase"))
+    return parsePhaseMutation(data, text);
   const kind = oneOf(
     data.kind,
     ["note", "close", "reopen", "channel", "relations", "effect"] as const,
@@ -198,7 +210,9 @@ export function applyCoordinationMutation(
   actor: string,
 ): CoordinationEvent {
   const next = structuredClone(event);
-  if (change.kind === "channel") {
+  if (isPhaseMutation(change)) {
+    applyPhaseMutation(next, change, actor);
+  } else if (change.kind === "channel") {
     if (next.status === "ended" && change.channel.state === "active")
       throw new Error("Reopen event before activating a channel");
     next.channels = next.channels.filter(

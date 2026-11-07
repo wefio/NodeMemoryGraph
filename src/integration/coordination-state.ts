@@ -1,4 +1,5 @@
 import type { NmgStore } from "../core/store.ts";
+import { parseAgentActivity, type AgentSessionActivity } from "../core/agent-activity.ts";
 import {
   coordinationNames,
   coordinationText,
@@ -56,7 +57,7 @@ export function renderEventNotice(entry: { content: string; eventId?: string }):
   });
 }
 
-export const COORDINATION_READ_OPERATIONS = ["eventRead", "agentStatus"] as const;
+export const COORDINATION_READ_OPERATIONS = ["eventRead", "agentStatus", "agentActivity"] as const;
 export const COORDINATION_WRITE_OPERATIONS = [
   "eventCreate",
   "eventUpdate",
@@ -64,6 +65,7 @@ export const COORDINATION_WRITE_OPERATIONS = [
   "eventUnsubscribe",
   "eventDelete",
   "agentStatus",
+  "agentActivity",
 ] as const;
 export const COORDINATION_OPERATIONS: ReadonlySet<string> = new Set([
   ...COORDINATION_READ_OPERATIONS,
@@ -77,6 +79,7 @@ export interface CoordinationEventSummary {
   updatedAt: string;
   channelCount: number;
   activeEffects: number;
+  collaboration?: CoordinationEvent["collaboration"];
 }
 export interface CoordinationStateResult {
   action:
@@ -93,6 +96,7 @@ export interface CoordinationStateResult {
   subscribed?: boolean;
   deleted?: boolean;
   agentStatus?: AgentWorkStatus;
+  agentActivity?: AgentSessionActivity;
 }
 export function coordinationSummary(event: CoordinationEvent): CoordinationEventSummary {
   return {
@@ -103,6 +107,7 @@ export function coordinationSummary(event: CoordinationEvent): CoordinationEvent
     updatedAt: event.updatedAt,
     channelCount: event.channels.length,
     activeEffects: event.effects.filter((effect) => effect.state === "active").length,
+    ...(event.collaboration ? { collaboration: event.collaboration } : {}),
   };
 }
 function inputObject(value: unknown): Record<string, unknown> {
@@ -126,6 +131,16 @@ export function executeCoordinationState(
   const actor = coordinationText(params.agentId, "agentId", 200),
     data = inputObject(params.event);
   const id = () => coordinationText(params.eventId, "eventId", 200);
+  if (operation === "agentActivity") {
+    const session = coordinationText(params.sessionId, "sessionId", 200);
+    return {
+      action: operation,
+      agentActivity:
+        params.action === "write"
+          ? store.reportAgentActivity(actor, session, parseAgentActivity(params.activity))
+          : store.readAgentActivity(actor, session),
+    };
+  }
   if (operation === "agentStatus")
     return {
       action: operation,
@@ -231,7 +246,7 @@ export function coordinationDirectoryViews(
         part: "record" as const,
       },
       requiredLabels: [`event=${event.id} r${event.revision} [${event.status}]`],
-      body: `${event.title}; channels=${event.channelCount}; activeEffects=${event.activeEffects}`,
+      body: `${event.title}; channels=${event.channelCount}; activeEffects=${event.activeEffects}${phaseLabel(event.collaboration)}`,
     })),
   ];
 }
@@ -244,6 +259,13 @@ export function agentStatusViews(status: AgentWorkStatus): InformationView[] {
         `${status.statusNote ? `Note: ${status.statusNote}\n` : ""}${status.tasks.map((task) => `${task.taskId} #${task.entryId}${task.eventId ? ` event=${task.eventId}` : ""}: ${task.summary}`).join("\n")}` ||
         "No registered active tasks.",
     },
+    ...(status.sessions ?? []).map((session): InformationView => ({
+      source: { kind: "agent", agentId: status.agentId, sessionId: session.sessionId },
+      requiredLabels: [
+        `agent=${status.agentId} session=${session.sessionId} processing=${session.state}`,
+      ],
+      body: JSON.stringify(session),
+    })),
   ];
 }
 function eventDetailViews(result: CoordinationStateResult): InformationView[] {
@@ -274,6 +296,18 @@ export function prepareCoordinationSurface(
   result: CoordinationStateResult,
 ): PreparedInformationOutput {
   const views: InformationView[] = [];
+  if (result.agentActivity)
+    views.push({
+      source: {
+        kind: "agent",
+        agentId: result.agentActivity.agentId,
+        sessionId: result.agentActivity.sessionId,
+      },
+      requiredLabels: [
+        `agent=${result.agentActivity.agentId} session=${result.agentActivity.sessionId} processing=${result.agentActivity.state}`,
+      ],
+      body: JSON.stringify(result.agentActivity),
+    });
   if (result.events) views.push(...coordinationDirectoryViews(result.events));
   if (result.agentStatus) views.push(...agentStatusViews(result.agentStatus));
   if (result.event)
@@ -288,7 +322,7 @@ export function prepareCoordinationSurface(
       requiredLabels: [
         `event=${result.event.id} r${result.event.revision} [${result.event.status}] [current reference] [preview]`,
       ],
-      body: `${result.event.title}; outcome=${result.event.outcome ?? "unspecified"}. Use event.historyOnly=true for history without repeating the full snapshot.`,
+      body: `${result.event.title}; outcome=${result.event.outcome ?? "unspecified"}${phaseLabel(result.event.collaboration)}. Use event.historyOnly=true for history without repeating the full snapshot.`,
     });
   views.push(...eventDetailViews(result));
   for (const change of result.changes ?? [])
@@ -314,4 +348,9 @@ export function prepareCoordinationSurface(
   if (result.nextRevision !== undefined && prepared.omitted.length === 0)
     return prepareInformationOutput([...views, { body: `nextRevision=${result.nextRevision}` }]);
   return prepared;
+}
+
+function phaseLabel(state: CoordinationEvent["collaboration"]): string {
+  if (!state) return "";
+  return `; phase=${state.phase ?? "unspecified"} phaseRevision=${state.phaseRevision}${state.pending ? ` pending=${state.pending.id}->${state.pending.target}` : ""} [coordination only; execution permits are host-owned]`;
 }

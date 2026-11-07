@@ -169,3 +169,19 @@ board-wake owner，DSH host package 复用同一通知判定与输出，MCP／CL
 既有会话订阅保留；显式订阅或邀请登记稳定 Agent 的频道关联，不从历史会话猜身份。
 参数与操作示例见 [黑板操作参考](../../skills/nmg-memory/references/board.md)。
 运行时验证范围与未验证项仍由 [完成台账](completion-audit.md) 记录，源码交付不等于部署或重启。
+
+## 概念吸纳
+
+### 范围级协作阶段
+
+可选阶段声明与版本化切换见[范围级阶段协商](board-event-records/phase-agreement.zh-CN.md)。
+
+[活动与批次契约](board-event-records/agent-activity-and-batches.zh-CN.md)定义会话忙碌报告、能力并集及保留来源的投递。
+
+已有 owner 和操作能表达协作需求时，优先复用。原型词汇是参考清单，不要求创建对应实体。
+只有具体需求超出支持范围时，才凭可复现失败或验收场景扩展明确的 owner。
+保留现有生命周期、权威与兼容边界；候选概念不是承诺实施的待办。
+[概念复用指南](../guides/board-concept-reuse.zh-CN.md)映射当前操作并记录候选概念；清单不是协议 schema。
+
+[协作阶段草案](board-event-records/collaboration-phase.zh-CN.md)探讨范围内的活动边界与切换协调。
+它是讨论基础，不扩充本篇已接受契约。

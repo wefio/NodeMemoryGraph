@@ -181,13 +181,8 @@ function writeNotice(
   port: TransactionPort,
 ): void {
   const selected = [...scopes].sort();
-  if (!invite && selected.length === 1 && selected[0] === "channel")
-    coalesceNotices(
-      db,
-      writer,
-      "notification_channel_id=? AND [to]=? AND notification_invitation=0 AND notification_scopes_json='[\"channel\"]'",
-      [source.taskId, actor],
-    );
+  // Keep each discussion source pending. Wake preparation combines them under
+  // one budget without retiring a reply before the recipient can see it.
   const label = invite
     ? "Invitation; channel subscription registered (you may leave)"
     : "Discussion update";

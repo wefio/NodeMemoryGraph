@@ -30,7 +30,7 @@ import type {
 import { NmgStore } from "../core/store.ts";
 import { PortableMemoryService } from "./portable-memory.ts";
 import type { MemoryBackendOptions } from "../core/memory/open.ts";
-import { parseBoardNotification } from "../core/board-notifications.ts";
+import { parseBoardNotification, MAX_BOARD_DELIVERY_ENTRIES } from "../core/board-notifications.ts";
 import {
   COORDINATION_OPERATIONS,
   executeCoordinationState,
@@ -3337,6 +3337,54 @@ function parseBoardNotificationParams(value: unknown) {
     throw new NmgProtocolError("INVALID_PARAMS", (error as Error).message);
   }
 }
+function parseTaskBoardPut(
+  base: { taskId: string; agentId: string },
+  params: Record<string, unknown>,
+): TaskBoardParamsOf<"put"> {
+  const expiresAt = optionalString(params, "expiresAt");
+  if (expiresAt && Number.isNaN(Date.parse(expiresAt))) {
+    throw new NmgProtocolError("INVALID_PARAMS", "expiresAt must be an ISO timestamp");
+  }
+  const ttlSeconds = optionalInteger(params, "ttlSeconds", 60, 2_592_000);
+  if (expiresAt && ttlSeconds !== undefined) {
+    throw new NmgProtocolError("INVALID_PARAMS", "use expiresAt or ttlSeconds, not both");
+  }
+  return {
+    ...base,
+    action: "put",
+    content: requiredString(params, "content"),
+    kind: optionalEnum(params, "kind", TASK_BOARD_KINDS),
+    sourceSessionId: optionalString(params, "sourceSessionId"),
+    eventId: optionalString(params, "eventId"),
+    notification: parseBoardNotificationParams(params.notification),
+    to: optionalString(params, "to"),
+    ttlSeconds,
+    expiresAt,
+    adopt: optionalAdoption(params.adopt),
+  };
+}
+
+function parseTaskBoardDelivery(
+  agentId: string,
+  params: Record<string, unknown>,
+): TaskBoardParamsOf<"recordDelivery"> {
+  const entryIds = optionalStringArray(params, "entryIds");
+  if (entryIds && (entryIds.length > MAX_BOARD_DELIVERY_ENTRIES || params.entryId !== undefined))
+    throw new NmgProtocolError(
+      "INVALID_PARAMS",
+      `Use entryId or 1..${MAX_BOARD_DELIVERY_ENTRIES} entryIds`,
+    );
+  return {
+    action: "recordDelivery",
+    agentId,
+    sessionId: requiredString(params, "sessionId"),
+    ...(entryIds
+      ? { entryIds: [...new Set(entryIds)] }
+      : { entryId: requiredString(params, "entryId") }),
+    source: optionalString(params, "source"),
+  };
+}
+
 function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
   const params = objectParams(value);
   const action = requiredEnum(params, "action", [
@@ -3405,6 +3453,9 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
       agentId,
       agentName: requiredString(params, "agentName"),
       limit: optionalInteger(params, "limit", 1, 200),
+      ...(action === "readDirected"
+        ? { pendingForSession: optionalString(params, "pendingForSession") }
+        : {}),
     };
   }
   if (action === "listSubscriptions") {
@@ -3423,15 +3474,7 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
       entryIds: optionalStringArray(params, "entryIds") ?? [],
     };
   }
-  if (action === "recordDelivery") {
-    return {
-      action,
-      agentId,
-      sessionId: requiredString(params, "sessionId"),
-      entryId: requiredString(params, "entryId"),
-      source: optionalString(params, "source"),
-    };
-  }
+  if (action === "recordDelivery") return parseTaskBoardDelivery(agentId, params);
   if (action === "unsubscribe" || action === "subscribe") {
     return {
       action,
@@ -3445,33 +3488,14 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
     taskId: requiredString(params, "taskId"),
     agentId,
   };
-  if (action === "put") {
-    const expiresAt = optionalString(params, "expiresAt");
-    if (expiresAt && Number.isNaN(Date.parse(expiresAt))) {
-      throw new NmgProtocolError("INVALID_PARAMS", "expiresAt must be an ISO timestamp");
-    }
-    const ttlSeconds = optionalInteger(params, "ttlSeconds", 60, 2_592_000);
-    if (expiresAt && ttlSeconds !== undefined) {
-      throw new NmgProtocolError("INVALID_PARAMS", "use expiresAt or ttlSeconds, not both");
-    }
-    return {
-      ...base,
-      action,
-      content: requiredString(params, "content"),
-      kind: optionalEnum(params, "kind", TASK_BOARD_KINDS),
-      sourceSessionId: optionalString(params, "sourceSessionId"),
-      eventId: optionalString(params, "eventId"),
-      notification: parseBoardNotificationParams(params.notification),
-      to: optionalString(params, "to"),
-      ttlSeconds,
-      expiresAt,
-      adopt: optionalAdoption(params.adopt),
-    };
-  }
+  if (action === "put") return parseTaskBoardPut(base, params);
   if (TASK_BOARD_READ_STYLE.has(action)) {
     return {
       ...base,
       action: action as "read" | "readPreviews",
+      ...(action === "read"
+        ? { pendingForSession: optionalString(params, "pendingForSession") }
+        : {}),
       afterCursor: optionalString(params, "afterCursor"),
       limit: optionalInteger(params, "limit", 1, 200),
       includeResolved: optionalBoolean(params, "includeResolved"),
@@ -3746,10 +3770,13 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
   },
   recordDelivery: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"recordDelivery">;
-    store.recordTaskBoardDelivery({
-      entryId: p.entryId,
-      sessionId: p.sessionId,
-      source: p.source,
+    store.writeTransaction(() => {
+      for (const entryId of p.entryIds ?? [p.entryId!])
+        store.recordTaskBoardDelivery({
+          entryId,
+          sessionId: p.sessionId,
+          source: p.source,
+        });
     });
     return { action: "recordDelivery", recorded: true };
   },

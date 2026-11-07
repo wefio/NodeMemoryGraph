@@ -37,12 +37,14 @@ import {
 } from "../src/integration/agent-surface.ts";
 import {
   collectWakeCandidates,
-  deliverBoardWake,
-  filterUndelivered,
   loadWakeState,
   readWakeConfig,
   wakeBudgetGate,
 } from "../src/integration/board-wake.ts";
+import {
+  deliverBoardWakeBatch,
+  reportHarnessActivity,
+} from "../src/integration/board-wake-batch.ts";
 import {
   configuredAutoRecallLimit,
   configuredAutoRecallTier,
@@ -1071,6 +1073,12 @@ export default {
             description:
               "Event create/mutation payload; updates require expectedRevision, kind and text.",
           },
+          activity: {
+            type: "object",
+            additionalProperties: true,
+            description:
+              "Session processing report for agentActivity: state busy/idle/unknown, optional capabilities and ttlSeconds.",
+          },
           text: { type: "string" },
           reason: { type: "string" },
           ttlSeconds: { type: "integer", minimum: 60, maximum: 86400 },
@@ -1253,23 +1261,29 @@ export default {
     // machine-wide, so each tick selects from a small pool of recently-idle
     // sessions (never subagent children). NMG_WAKE_PROJECT narrows the pool to
     // one project directory when set.
+    let wakePoolOffset = 0;
     const wakePool = (): Array<{ sessionId: string; projectDir: string }> => {
       const scope = process.env.NMG_WAKE_PROJECT?.trim().toLowerCase();
       const now = Date.now();
-      return [...sessions.entries()]
+      const eligible = [...sessions.entries()]
         .filter(([sessionId, record]) => {
           if (record.child || record.lastPromptAt === 0) return false;
-          // Idle now, and not racing a session that just went idle.
+          // Let the shared activity reports decide whether this session can receive.
           return (
-            record.lastIdleAt >= record.lastPromptAt &&
-            now - record.lastIdleAt > 1_000 &&
-            sessionId.length > 0
+            now - Math.max(record.lastIdleAt, record.lastPromptAt) > 1_000 && sessionId.length > 0
           );
         })
         .filter(([, record]) => !scope || record.projectDir.toLowerCase() === scope)
         .sort((left, right) => right[1].lastIdleAt - left[1].lastIdleAt)
-        .slice(0, WAKE_POOL_SIZE)
         .map(([sessionId, record]) => ({ sessionId, projectDir: record.projectDir }));
+      if (!eligible.length) return [];
+      const count = Math.min(WAKE_POOL_SIZE, eligible.length);
+      const start = wakePoolOffset % eligible.length;
+      wakePoolOffset = (start + count) % eligible.length;
+      return Array.from(
+        { length: count },
+        (_, offset) => eligible[(start + offset) % eligible.length]!,
+      );
     };
 
     const scanBoardWake = async (): Promise<void> => {
@@ -1279,44 +1293,35 @@ export default {
       if (!wakeBudgetGate(config, state, now)) return;
       for (const target of wakePool()) {
         const identity = loadOrCreateAgentIdentity(target.sessionId, "opencode");
+        const observed = sessions.get(target.sessionId)!;
+        await reportHarnessActivity(
+          invoke,
+          identity.id,
+          target.sessionId,
+          observed.lastIdleAt >= observed.lastPromptAt ? "idle" : "busy",
+          ["batch-enqueue", "processing-observation", "idle-boundary"],
+        );
         const candidates = await collectWakeCandidates(invoke, {
           agentId: identity.id,
           agentName: identity.agentName,
           sessionId: target.sessionId,
         });
         if (candidates.length === 0) continue;
-        const fresh = await filterUndelivered(invoke, candidates, {
-          agentId: identity.id,
-          sessionId: target.sessionId,
-        });
-        if (fresh.length === 0) continue;
-        const rank: Record<string, number> = {
-          question: 0,
-          blocker: 1,
-          handoff: 2,
-          goal: 3,
-          note: 4,
-          decision: 5,
-          result: 6,
-        };
-        fresh.sort(
-          (left, right) =>
-            (rank[left.kind] ?? 9) - (rank[right.kind] ?? 9) ||
-            String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? "")),
-        );
-        await deliverBoardWake({
+        const delivered = await deliverBoardWakeBatch({
           invoke,
-          sendWake: (message) =>
-            ctx.session.prompt?.({ sessionID: target.sessionId, text: message }),
+          sendWake: async (message) => {
+            if (!ctx.session.prompt) throw new Error("OpenCode session prompt is unavailable");
+            await ctx.session.prompt({ sessionID: target.sessionId, text: message });
+          },
           config,
           state,
           dataDir,
           now,
           agentId: identity.id,
           sessionId: target.sessionId,
-          entry: fresh[0]!,
+          entries: candidates,
         });
-        return; // one wake per tick — same budget discipline as pi
+        if (delivered.length > 0) return; // Charge at most one accepted wake per tick.
       }
     };
 

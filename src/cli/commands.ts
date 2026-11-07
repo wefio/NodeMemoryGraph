@@ -126,6 +126,7 @@ function stateBoardCommand(action: "read" | "write"): CliCommandSpec {
     options: [
       ...Object.keys(STATE_BOARD_OPTIONS),
       "event-json",
+      "activity-json",
       "notification-json",
       "limit",
       "ttl-seconds",
@@ -140,6 +141,9 @@ function stateBoardCommand(action: "read" | "write"): CliCommandSpec {
         ...(firstOption(values, "event-json") === undefined
           ? {}
           : { event: JSON.parse(firstOption(values, "event-json")!) as unknown }),
+        ...(firstOption(values, "activity-json") === undefined
+          ? {}
+          : { activity: JSON.parse(firstOption(values, "activity-json")!) as unknown }),
         ...(firstOption(values, "notification-json") === undefined
           ? {}
           : { notification: JSON.parse(firstOption(values, "notification-json")!) as unknown }),

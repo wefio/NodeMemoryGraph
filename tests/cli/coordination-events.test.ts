@@ -7,6 +7,61 @@ import { NmgService } from "../../src/cli/service.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 stripProviderEnv();
 
+test("shared service commits a confirmed scoped phase and discloses it on ordinary board reads", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "nmg-phase-api-"));
+  const service = new NmgService({ dataDirectory: dir });
+  const base = { space: "board", agentId: "a", taskId: "default" } as const;
+  try {
+    const created = await service.invoke("state", {
+      ...base,
+      action: "write",
+      operation: "eventCreate",
+      event: { title: "Scoped execution" },
+    });
+    if (!("event" in created.result) || !created.result.event) throw Error("Missing event");
+    const eventId = created.result.event.id;
+    const change = (event: Record<string, unknown>) =>
+      service.invoke("state", {
+        ...base,
+        action: "write",
+        operation: "eventUpdate",
+        eventId,
+        event,
+      });
+    await change({
+      expectedRevision: 1,
+      kind: "phasePropose",
+      text: "Begin scoped implementation",
+      proposalId: "start",
+      target: "execution",
+      expectedPhaseRevision: 0,
+    });
+    await change({
+      expectedRevision: 2,
+      kind: "phaseSwitch",
+      text: "Commit agreement",
+      proposalId: "start",
+      expectedPhaseRevision: 0,
+    });
+    const world = await service.invoke("state", { ...base, action: "read" });
+    assert.match(world.information!.text, /phase=execution phaseRevision=1/);
+    await assert.rejects(
+      change({
+        expectedRevision: 3,
+        kind: "phasePropose",
+        text: "Stale phase",
+        proposalId: "stale",
+        target: "discussion",
+        expectedPhaseRevision: 0,
+      }),
+      /Phase revision changed/,
+    );
+  } finally {
+    service.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("shared state exposes coarse event history beside world communication with direction fences", async () => {
   const dir = mkdtempSync(join(tmpdir(), "nmg-event-api-"));
   const service = new NmgService({ dataDirectory: dir });

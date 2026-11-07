@@ -441,6 +441,12 @@ server.registerTool(
         .describe(
           "Event create/mutation payload; mutations require expectedRevision, kind and text.",
         ),
+      activity: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe(
+          "Session processing report for agentActivity: state busy/idle/unknown, optional capabilities and ttlSeconds.",
+        ),
       text: z.string().optional(),
       agentName: z.string().optional(),
       taskId: z.string().optional().describe(nmgPrompts.board_task_id_parameter_description),

@@ -294,6 +294,7 @@ routes:
       - src/integration/agent-attribution.ts
       - src/integration/agent-identity.ts
       - src/integration/board-wake.ts
+      - src/integration/board-wake-batch.ts
       - src/integration/session-recall-flow.ts
       - src/integration/session-task-window.ts
       - src/integration/recall-context-policy.ts

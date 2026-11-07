@@ -5,7 +5,12 @@ import { join } from "node:path";
 import test from "node:test";
 
 import type { MemoryContext } from "../../src/core/types.ts";
+import { NmgService } from "../../src/cli/service.ts";
+import type { NmgMethod } from "../../src/cli/protocol.ts";
 import { liveLease, runHook } from "../../workbuddy-plugin/nmg-hook.ts";
+import { stripProviderEnv } from "../helpers/test-env.ts";
+
+stripProviderEnv();
 
 function writeLease(directory: string, overrides: Record<string, unknown> = {}): void {
   mkdirSync(directory, { recursive: true });
@@ -153,5 +158,69 @@ test("WorkBuddy hook rejects incompatible and non-loopback leases before recall"
     globalThis.fetch = originalFetch;
     rmSync(incompatible, { recursive: true, force: true });
     rmSync(nonLoopback, { recursive: true, force: true });
+  }
+});
+
+test("WorkBuddy confirms a reply batch only after the output sink accepts it", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-workbuddy-batch-"));
+  writeLease(directory);
+  writeFileSync(join(directory, "board-wake.json"), JSON.stringify({ cooldownMs: 0, budget: 0 }));
+  const service = new NmgService({
+    databasePath: join(directory, "fixture.sqlite"),
+    environment: {},
+  });
+  const originalFetch = globalThis.fetch;
+  const receipts: unknown[] = [];
+  globalThis.fetch = (async (_input, init) => {
+    const body = JSON.parse(String(init?.body)) as {
+      method: NmgMethod;
+      params: Record<string, unknown>;
+    };
+    const result = await service.invoke(body.method, body.params);
+    if (body.method === "taskBoard" && body.params.action === "recordDelivery")
+      receipts.push(body.params);
+    return jsonRpc(result);
+  }) as typeof fetch;
+  const payload = { hook_event_name: "UserPromptSubmit", session_id: "receiver", prompt: "" };
+  const options = { dir: directory, environment: { NMG_AGENT_ID: "receiver" } };
+  try {
+    for (let i = 0; i < 8; i++)
+      await service.invoke("taskBoard", {
+        action: "put",
+        taskId: "discussion",
+        kind: "question",
+        agentId: `author-${i}`,
+        to: "receiver",
+        content: `Reply ${i}`,
+      });
+    const preview = await runHook(payload, options);
+    assert.match(preview, /Reply 0/);
+    assert.equal(receipts.length, 0);
+    await assert.rejects(
+      runHook(payload, {
+        ...options,
+        writeOutput: async () => {
+          throw Error("stdout failed");
+        },
+      }),
+      /stdout failed/,
+    );
+    assert.equal(receipts.length, 0);
+    const sent: string[] = [];
+    await runHook(payload, {
+      ...options,
+      writeOutput: async (text) => {
+        assert.equal(receipts.length, 0);
+        sent.push(text);
+      },
+    });
+    assert.deepEqual(sent, [preview]);
+    assert.equal(receipts.length, 1);
+    assert.equal((receipts[0] as { entryIds: string[] }).entryIds.length, 8);
+    assert.equal(await runHook(payload, options), "");
+  } finally {
+    globalThis.fetch = originalFetch;
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
   }
 });

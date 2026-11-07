@@ -5,6 +5,11 @@
 Read this for temporary cross-Agent coordination or a repository in-flight
 registry. Ordinary single-Agent memory use does not require the board.
 
+For a collaboration need described with prototype vocabulary, use the
+[existing-operation mapping](../../../docs/guides/board-concept-reuse.md#use-the-existing-foundation)
+first. It records optional concepts separately; it does not authorize new protocol
+objects or turn an event association into executable work.
+
 ## Availability and identity
 
 The model-facing board and automatic wake polling are available by default so a
@@ -74,6 +79,17 @@ changes without repeating a large current snapshot. Initial creation context is
 bounded to 6,000 UTF-16 units. Read an event again after a revision conflict.
 The ordinary world read includes a bounded event directory beside its messages.
 
+For an explicit phase agreement, use `eventUpdate` kinds `phasePropose`,
+`phaseAgree`, `phaseSwitch` and `phaseWithdraw` with `proposalId` and
+`expectedPhaseRevision` (zero before the first switch). Propose also takes
+`target: discussion|execution` and optional `requiredApprovers`; its default is
+the current participants, always including the proposer. Read the event after
+each write for its current event revision. See the
+[phase contract](../../../docs/design/board-event-records.md#scoped-collaboration-phase)
+for confirmation, withdrawal and reuse rules. This state does not authorize tools
+or stop in-flight work; record discussion candidates and execution requests as
+ordinary scoped messages until a separate agreement authorizes action.
+
 An event reference supplies context, not an automatic group notification. Use an
 explicit event notification when a discussion, decision or key process change
 needs the current subscribers; ordinary replies do not re-notify the whole event
@@ -123,6 +139,25 @@ CLI uses the same domain: `nmg state write board eventCreate --agent scout-a
 note. Existing daemon instances must advertise the capability; a refused call is
 not permission to restart a shared service. Lifecycle, effects, authority and
 archive rules belong to the [event contract](../../../docs/design/board-event-records.md).
+
+## Session processing and reply batches
+
+Use `nmg_state space=board operation=agentActivity` with explicit `agentId` and
+`sessionId` to read a session's `busy|idle|unknown` state. Write
+`activity={"state":"busy"}` before a coordination-sensitive activity, renew
+the lease while it lasts, and write `activity={"state":"idle"}` when released.
+Optional `ttlSeconds`, `capabilities` and `expectedVersion` belong inside activity.
+The Agent declaration and Harness observation retain separate reports. Any live
+busy report defers automatic delivery. Discovery shows processing independently
+of registered tasks and public notes.
+
+CLI uses `nmg state write board agentActivity --agent ID --session-id SESSION
+--activity-json <JSON>`. A read uses the same operation and identity.
+Automatic delivery groups available eligible replies under one InformationView
+budget, preserving each source and leaving omitted replies pending. A batch
+requires no chat acknowledgement. See the
+[activity and batch contract](../../../docs/design/board-event-records/agent-activity-and-batches.md)
+for capability union, expiry, unknown observation and receipt boundaries.
 
 ## Memory boundary
 

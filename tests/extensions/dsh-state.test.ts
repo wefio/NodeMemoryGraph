@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, basename } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { httpHandler } from "../../src/cli/http-server.ts";
@@ -11,10 +11,91 @@ import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
 
+test("DSH batches twelve peers for eight recipients and drains busy recipients on idle", async () => {
+  await withHost(true, async ({ service, agents, wake, directory, requests }) => {
+    const routingId = `dsh:${basename(directory)}`;
+    const received = new Map<string, string[]>();
+    for (let i = 0; i < 8; i++) {
+      const id = `recipient-${i}`;
+      received.set(id, []);
+      agents.set(id, {
+        id,
+        status: i < 2 ? "running" : "idle",
+        send: async (message) => {
+          received.get(id)!.push(message.content.map((part) => part.text).join(""));
+        },
+      });
+    }
+    await service.invoke("taskBoard", {
+      action: "subscribe",
+      taskId: "discussion",
+      agentId: routingId,
+      sessionId: "dsh",
+    });
+    await service.invoke("state", {
+      space: "board",
+      action: "write",
+      operation: "agentActivity",
+      agentId: routingId,
+      sessionId: "recipient-1",
+      activity: { state: "busy" },
+    });
+    for (let i = 0; i < 12; i++)
+      await service.invoke("taskBoard", {
+        action: "put",
+        taskId: "discussion",
+        agentId: `peer-${i}`,
+        kind: "note",
+        content: `Distinct reply from peer-${i}.`,
+      });
+    await wake();
+    for (let i = 0; i < 8; i++) {
+      const messages = received.get(`recipient-${i}`)!;
+      assert.equal(messages.length, i < 2 ? 0 : 1);
+      if (i >= 2)
+        for (let peer = 0; peer < 12; peer++)
+          assert.ok(messages[0]!.includes(`Distinct reply from peer-${peer}.`));
+    }
+    agents.get("recipient-0")!.status = "idle";
+    agents.get("recipient-1")!.status = "idle";
+    await wake();
+    assert.equal(
+      received.get("recipient-1")!.length,
+      0,
+      "explicit board busy survives a native idle observation",
+    );
+    await service.invoke("state", {
+      space: "board",
+      action: "write",
+      operation: "agentActivity",
+      agentId: routingId,
+      sessionId: "recipient-1",
+      activity: { state: "idle" },
+    });
+    await wake();
+    for (const messages of received.values()) assert.equal(messages.length, 1);
+    const receipts = requests.filter(
+      (request) => request.method === "taskBoard" && request.params.action === "recordDelivery",
+    );
+    assert.equal(receipts.length, 8);
+    assert.ok(
+      receipts.every(
+        (request) =>
+          Array.isArray(request.params.entryIds) && request.params.entryIds.length === 12,
+      ),
+    );
+  });
+});
+
 type HostTool = {
   name: string;
   parameters: { properties: Record<string, { enum?: string[] }> };
   execute(args: Record<string, unknown>, context: unknown): Promise<unknown>;
+};
+type WakeHostAgent = {
+  id: string;
+  status: "idle" | "running";
+  send(message: { content: Array<{ text: string }> }): Promise<void>;
 };
 
 async function withHost(
@@ -26,6 +107,9 @@ async function withHost(
     subprocessCalls: () => number;
     inbox: (text: string) => void;
     recall: () => string;
+    wake: () => Promise<void>;
+    agents: Map<string, WakeHostAgent>;
+    directory: string;
   }) => Promise<void>,
 ) {
   const directory = mkdtempSync(join(tmpdir(), "nmg-dsh-state-"));
@@ -74,6 +158,8 @@ async function withHost(
     const tools = new Map<string, HostTool>();
     const events = new Map<string, (payload: unknown) => void>();
     const contributions = new Map<string, (context: unknown) => string>();
+    const agents = new Map<string, WakeHostAgent>();
+    let wake = async () => {};
     dispose = plugin.apply({
       tools: {
         register(tool: HostTool) {
@@ -101,7 +187,12 @@ async function withHost(
         events.set(name, handler);
         return () => {};
       },
-      interval() {
+      get(name: string) {
+        if (name === "agents") return { list: () => [...agents.values()] };
+        return undefined;
+      },
+      interval(callback: () => Promise<void>) {
+        wake = callback;
         return () => {};
       },
       timeout() {
@@ -114,6 +205,9 @@ async function withHost(
       },
     });
     await run({
+      wake: () => wake(),
+      agents,
+      directory,
       tools,
       service,
       requests,

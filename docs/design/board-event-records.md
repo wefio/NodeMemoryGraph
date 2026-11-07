@@ -170,3 +170,24 @@ evidence that these capabilities passed:
   count.
 - Undelivered notifications may coalesce per event while the original messages and history stay
   readable; different new notifications must not be mistaken for one version.
+
+## Concept adoption
+
+### Scoped collaboration phase
+
+See the [scoped phase agreement](board-event-records/phase-agreement.md) for optional phase declarations and versioned transitions.
+
+The [activity and batch contract](board-event-records/agent-activity-and-batches.md)
+defines session busy reports, capability union and source-preserving delivery.
+
+Reuse an existing owner and operation when they express the collaboration need.
+Prototype vocabulary is a reference shelf, not a requirement to create matching
+entities. Add semantics only for a concrete unsupported case, with a reproducible
+failure or acceptance scenario and a named owner. Preserve existing lifecycle,
+authority and compatibility boundaries; candidate concepts are not a committed backlog.
+The [concept reuse guide](../guides/board-concept-reuse.md) maps current operations
+and records concepts to revisit. Its catalog is not a protocol schema.
+
+The [collaboration phase draft](board-event-records/collaboration-phase.md) explores
+scoped activity boundaries and transition coordination. It is a discussion basis,
+not an extension of this accepted contract.

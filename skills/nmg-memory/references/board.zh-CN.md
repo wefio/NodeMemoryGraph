@@ -4,6 +4,9 @@
 
 临时跨 Agent 协作或仓库进行中登记表请读本参考。普通的单 Agent memory 操作不需要 board。
 
+需求使用原型词汇描述时，先查[现有操作映射](../../../docs/guides/board-concept-reuse.zh-CN.md#先使用已有基础)。
+候选概念另行记录；这不授权新增协议对象，也不把事件关联变成可执行任务。
+
 ## 可用性与身份
 
 面向模型的 board 和自动唤醒轮询默认可用，因此新 Agent 可以立即发现共享工作。只有当宿主明确要求单 Agent、仅记忆界面时，才设置 `NMG_ENABLE_COORDINATION=0`（也接受 `false`、`off` 和 `no`）。即使关闭模型侧界面，CLI board 操作仍可用于管理。
@@ -36,6 +39,32 @@ nmg board read TASK_ID --agent scout-b --after-cursor 12 --json
 nmg board resolve TASK_ID ENTRY_ID --agent scout-b \
   --resolution "work completed or deliberately abandoned" --json
 ```
+
+## 事件内的阶段协商
+
+显式协商阶段时，沿用 `eventUpdate`，使用 `phasePropose`、`phaseAgree`、
+`phaseSwitch`、`phaseWithdraw`，并提供 `proposalId`、`expectedPhaseRevision`
+（首次切换前为零）和当前事件 `expectedRevision`。
+提议另提供 `target: discussion|execution` 与可选 `requiredApprovers`；
+默认确认人为当前参与者，始终包含提议者。每次写入后重读事件获取当前修订。
+确认、撤回与提案 ID 复用规则见[阶段契约](../../../docs/design/board-event-records.zh-CN.md#范围级协作阶段)。
+阶段状态不授权工具，也不停止在途工作；讨论候选和执行请求先用关联范围的普通消息记录，
+实际行动等待另行约定的授权。
+
+## 会话处理状态与回复批次
+
+使用 `nmg_state space=board operation=agentActivity`，显式指定 `agentId` 和 `sessionId`，
+读取会话的 `busy|idle|unknown` 状态。协作敏感活动前写入 `activity={"state":"busy"}`，
+持续期间续租，解除时写入 `activity={"state":"idle"}`。
+可选 `ttlSeconds`、`capabilities`、`expectedVersion` 放在 activity 内。
+Agent 声明与 Harness 观测各自保留报告，任一有效 busy 都暂缓自动投递。
+发现列表分别显示处理状态、已登记任务和公开说明。
+
+CLI 使用 `nmg state write board agentActivity --agent ID --session-id SESSION
+--activity-json <JSON>`，读取沿用相同操作与身份。
+自动投递在一个 InformationView 预算内成批纳入已到达的合格回复，保留逐条来源，省略项继续待送。
+收到批次无需发聊天确认。能力并集、过期、未知观测和收据边界见
+[活动与批次契约](../../../docs/design/board-event-records/agent-activity-and-batches.zh-CN.md)。
 
 ## 记忆边界
 

@@ -114,6 +114,8 @@ export const NMG_CAPABILITIES = [
   "state-spaces",
   "controlled-reload",
   "board-events",
+  "board-wake-batches",
+  "board-agent-activity",
 ] as const;
 
 export type NmgCapability = (typeof NMG_CAPABILITIES)[number];
@@ -584,6 +586,7 @@ export interface NmgTaskBoardPutParams extends NmgTaskBoardBase {
 
 export interface NmgTaskBoardReadParams extends NmgTaskBoardBase {
   action: "read";
+  pendingForSession?: string;
   /** Opaque continuation cursor: the id of the last entry already seen.
    * Clients must treat it as an opaque string, never parse it. */
   afterCursor?: string;
@@ -597,6 +600,7 @@ export interface NmgTaskBoardReadDirectedParams {
   action: "readDirected";
   agentId: string;
   agentName: string;
+  pendingForSession?: string;
   limit?: number;
 }
 
@@ -685,13 +689,12 @@ export interface NmgTaskBoardDeliveryCheckParams {
   entryIds: string[];
 }
 
-export interface NmgTaskBoardRecordDeliveryParams {
+export type NmgTaskBoardRecordDeliveryParams = {
   action: "recordDelivery";
   agentId: string;
   sessionId: string;
-  entryId: string;
   source?: string;
-}
+} & ({ entryId: string; entryIds?: never } | { entryIds: string[]; entryId?: never });
 
 /** Agent-facing: join (subscribe) or leave (unsubscribe) a channel.
  * Topic-based membership controls broadcast wake notices: a session receives
