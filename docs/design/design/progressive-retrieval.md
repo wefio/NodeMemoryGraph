@@ -160,8 +160,9 @@ Plain-text protocols can call
 after selection. It labels every valid dated row for a recognized temporal
 query; otherwise it labels only rows with recognized relative-time expressions.
 Unknown or invalid time does not produce a label, and an existing timestamp
-prefix is not duplicated. ISO dates and timestamps retain their full precision
-and supplied offset rather than being truncated to a calendar day.
+prefix is not duplicated. Values are stored as one
+[canonical UTC instant](core-data-model.md#core-data-model), so a label carries
+full precision rather than a truncated calendar day.
 
 The English/Chinese recognition patterns live in one
 [product-owned policy](../../../src/integration/temporal-evidence-policy.json),

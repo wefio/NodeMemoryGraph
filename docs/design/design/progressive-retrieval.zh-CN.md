@@ -68,7 +68,7 @@ daemon 一次搜索内，相同 embedding 批次共享向量，不共享 Store �
 
 ### 时间证据展示
 
-[历史时间、写入时间与有效期](core-data-model.zh-CN.md#核心数据模型)保持分离。共享 Agent Surface 在精简检索与精确证据元数据中保留 `eventTime`，本地 OmniMemEval 桥使用同一界面。纯文本协议可以在选出结果后调用 [`renderTemporalEvidence`](../../../src/integration/temporal-evidence.ts)：识别到时间查询时，为每条具有有效时间的记录加标签；否则只为含已识别相对时间表达的记录加标签。未知或无效时间不产生标签，已有时间戳前缀不重复添加。ISO 日期和时间戳保留完整精度与原始时区偏移，不截断为日历日期。
+[历史时间、写入时间与有效期](core-data-model.zh-CN.md#核心数据模型)保持分离。共享 Agent Surface 在精简检索与精确证据元数据中保留 `eventTime`，本地 OmniMemEval 桥使用同一界面。纯文本协议可以在选出结果后调用 [`renderTemporalEvidence`](../../../src/integration/temporal-evidence.ts)：识别到时间查询时，为每条具有有效时间的记录加标签；否则只为含已识别相对时间表达的记录加标签。未知或无效时间不产生标签，已有时间戳前缀不重复添加。取值以[规范 UTC 时刻](core-data-model.zh-CN.md#核心数据模型)存储，因此标签携带完整精度，不截断为日历日期。
 
 中英文识别模式只有一份[产品层策略](../../../src/integration/temporal-evidence-policy.json)，由 TypeScript 渲染器消费，并由 Python 适配器安装器复制。这是确定性的展示启发式，不是完整时间推理或召回门；它不读取数据集类别或金标答案，不改变存储文本、embedding、候选成员、分数、排序或预算。结构化元数据不因是否展示标签而丢失。协议字段别名属于 [AML 边界](../../../evals/omnimemeval/README.zh-CN.md#集成边界)，不属于存储层。[决策记录](../../decisions/implemented/2026-10-22-shared-temporal-evidence.zh-CN.md)说明复用与兼容性的理由。
 

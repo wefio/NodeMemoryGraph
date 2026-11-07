@@ -429,6 +429,8 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
       "max-tier",
       "limit",
       "graph-hops",
+      "from",
+      "to",
       "chain-max-chains",
       "chain-hops",
       "chain-memory-hops",
@@ -449,6 +451,8 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   --max-tier N               Deepest tier 0..3
   --limit N                  Return 1..50 records
   --graph-hops N             Expand 0..3 graph hops
+  --from DATE                Earliest event time (date or phrase, inclusive)
+  --to DATE                  Latest event time (date or phrase, inclusive day)
   --chain-max-chains N       Expand at most 1..8 MMR-selected chains
   --chain-hops N             Follow 0..1 chain-intersection hops
   --chain-memory-hops N      Follow 0..8 logical DAG memory hops
@@ -1299,6 +1303,8 @@ function searchParams(values: OptionValues): NmgSearchParams {
     maxTier: numericOption(values, "max-tier"),
     limit: numericOption(values, "limit"),
     graphHops: numericOption(values, "graph-hops"),
+    eventTimeFrom: firstOption(values, "from"),
+    eventTimeTo: firstOption(values, "to"),
     expandChains: values.flags.has("no-chain-expansion") ? false : undefined,
     chainExpansionMaxChains: numericOption(values, "chain-max-chains"),
     chainExpansionMaxHops: numericOption(values, "chain-hops"),

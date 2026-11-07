@@ -44,6 +44,8 @@ Pass that graph ID to `nmg get --active-graph-id` to attribute exact-evidence us
 not retrieval success.
 
 Narrow by `--node`, `--scope` or `--source-actor user` when relevant.
+Bound event time with `--from`/`--to` (a date, or a phrase such as `上周三`; a
+date covers its whole day), or write `time:2026-01-01..2026-06-30` in the query.
 Use `--include-historical` only for old/superseded state. Start with `--max-tier 1`
 and `--limit 8`, not a full evidence dump.
 

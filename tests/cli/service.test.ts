@@ -207,6 +207,48 @@ test("service applies NMG_GRAPH_HOPS as a default while explicit search params w
   }
 });
 
+test("search accepts a structured event-time window and refuses an unusable bound", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-event-window-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    await service.invoke("remember", {
+      statement: "September client meeting in Tokyo",
+      nodeName: "Trip log",
+      eventTime: "2026年9月19日",
+    });
+    await service.invoke("remember", {
+      statement: "October conference in Tokyo",
+      nodeName: "Trip log",
+      eventTime: "2026-10-13",
+    });
+    const september = await service.invoke("search", {
+      query: "Tokyo",
+      eventTimeFrom: "2026-09-01",
+      eventTimeTo: "2026-09-30",
+    });
+    assert.deepEqual(
+      september.results.map((result) => result.memory.statement),
+      ["September client meeting in Tokyo"],
+    );
+    // The bound covers its whole day, so the record dated that day is inside.
+    const singleDay = await service.invoke("search", {
+      query: "Tokyo",
+      eventTimeFrom: "2026-10-13",
+      eventTimeTo: "2026-10-13",
+    });
+    assert.deepEqual(
+      singleDay.results.map((result) => result.memory.statement),
+      ["October conference in Tokyo"],
+    );
+    await assert.rejects(service.invoke("search", { query: "Tokyo", eventTimeFrom: "傍晚" }), {
+      code: "INVALID_PARAMS",
+    });
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
 test("Lab RPC is session scoped and reasoning workspaces are daemon owned", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-lab-"));
   const service = new NmgService({

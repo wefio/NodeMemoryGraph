@@ -21,6 +21,7 @@ import nmgExtension, {
   SKILLOPT_POLICY_CHANNELS,
 } from "../../../.pi/extensions/nmg/index.ts";
 import { loadPrompts } from "../../../src/prompts/load.ts";
+import { SEARCH_TOOL_PARAMETERS } from "../../../src/integration/tool-contract.ts";
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
 import { NmgStore } from "../../../src/core/store.ts";
 import type { MemoryContext } from "../../../src/core/types.ts";
@@ -43,6 +44,20 @@ stripProviderEnv();
  */
 function carriedStateMessage(result: { message?: { content: string } }): string {
   return result.message ? result.message.content : "";
+}
+
+/** Every host must expose the shared retrieval contract; the table is the one
+ *  description of what a search accepts, and this is where Pi is held to it. */
+function assertSearchContract(
+  tools: Map<string, { parameters?: { properties?: Record<string, unknown> } }>,
+): void {
+  const properties = tools.get("nmg_search")?.parameters?.properties ?? {};
+  for (const parameter of SEARCH_TOOL_PARAMETERS) {
+    assert.ok(
+      Object.hasOwn(properties, parameter.name),
+      `nmg_search must expose ${parameter.name}`,
+    );
+  }
 }
 
 function extensionHarness() {
@@ -950,6 +965,7 @@ test("tool parameter descriptions come from the prompt source of truth", () => {
       tools.get("nmg_search")?.parameters?.properties?.query?.description,
       prompts.search_query_parameter_description,
     );
+    assertSearchContract(tools);
     assert.equal(
       tools.get("nmg_remember")?.parameters?.properties?.evidence?.description,
       prompts.evidence_parameter_description,

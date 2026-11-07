@@ -12,6 +12,7 @@
 import type { Constructor } from "./store-ctor.ts";
 import { randomUUID } from "node:crypto";
 import { extractEventWindow } from "./advanced-query.ts";
+import { eventTimeMillis, eventWindowEnd, eventWindowStart } from "../event-time.ts";
 import { applyRelevanceGate } from "../relevance-gate.ts";
 import { notExpired } from "./clock.ts";
 import { applyLearnedGate, rerankByRelevance } from "../learned-gate.ts";
@@ -207,6 +208,15 @@ function rankLexicalCandidates(
   );
 }
 
+/** `interpretTemporalQuery: false` drops the phrase-inferred window, so a retry
+ *  keeps only an explicit `time:` filter. */
+function interpretEventWindow(
+  query: string,
+  options: SearchOptions,
+): { from?: string; to?: string } {
+  return options.interpretTemporalQuery === false ? {} : extractEventWindow(query);
+}
+
 export function withRetrieval<TBase extends Constructor>(Base: TBase) {
   return class extends Base {
     // Base-class and cross-cluster members (resolved at assembly time)
@@ -265,7 +275,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       // candidate SQL — not post-query — so out-of-window memories never
       // compete for the top-k slots. Explicit time: filters parsed upstream
       // (SearchOptions.eventTimeFrom/To) take precedence.
-      const temporal = extractEventWindow(query);
+      const temporal = interpretEventWindow(query, options);
       if (temporal.from || temporal.to) {
         options = {
           ...options,
@@ -2032,6 +2042,15 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
 
       const maxTier = options.maxTier ?? 1;
       const limit = Math.max(1, Math.min(options.limit ?? 8, 50));
+      // Canonical inclusive window bounds. A date-only bound must cover its whole
+      // day (or month, or year), and the candidate SQL below compares
+      // `event_time` as TEXT, so both sides share one fixed-width UTC shape.
+      const windowFrom = options.eventTimeFrom
+        ? (eventWindowStart(options.eventTimeFrom) ?? options.eventTimeFrom)
+        : null;
+      const windowTo = options.eventTimeTo
+        ? (eventWindowEnd(options.eventTimeTo) ?? options.eventTimeTo)
+        : null;
       const nodeName = options.nodeName ? this.resolveActiveNodeName(options.nodeName) : null;
       const retrievalMode = options.retrievalMode ?? "legacy";
       const ftsIds =
@@ -2153,10 +2172,10 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           options.sessionId ?? null,
           options.sessionId ?? null,
           options.sessionId ?? null,
-          options.eventTimeFrom ?? null,
-          options.eventTimeFrom ?? null,
-          options.eventTimeTo ?? null,
-          options.eventTimeTo ?? null,
+          windowFrom,
+          windowFrom,
+          windowTo,
+          windowTo,
           ...scopeParams,
           // ORDER BY placeholders follow every WHERE filter.
           ...(forcedCandidateIds.length === 0 && retrievalMode === "hybrid" ? ftsIds : []),
@@ -2208,10 +2227,8 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       if (decayHalfLife !== undefined && decayHalfLife > 0 && !options.eventTimeTo) {
         const nowMs = Date.now();
         for (const result of filtered) {
-          const eventMs = result.memory.eventTime
-            ? Date.parse(result.memory.eventTime)
-            : Number.NaN;
-          if (Number.isNaN(eventMs)) continue;
+          const eventMs = eventTimeMillis(result.memory.eventTime);
+          if (eventMs === null) continue;
           const ageDays = Math.max(0, (nowMs - eventMs) / 86_400_000);
           result.combinedScore *= Math.pow(0.5, ageDays / decayHalfLife);
         }
@@ -2230,11 +2247,11 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       // Conditional boost: only applied when the query carries an event-time
       // window (never for plain current-value queries), so it cannot skew
       // ordinary retrieval.
-      const asOfMs = options.eventTimeTo ? Date.parse(String(options.eventTimeTo)) : null;
+      const asOfMs = windowTo ? Date.parse(windowTo) : null;
       if (asOfMs !== null && !Number.isNaN(asOfMs) && filtered.length > 1) {
         for (const result of filtered) {
-          const eventMs = result.memory.eventTime ? Date.parse(result.memory.eventTime) : null;
-          if (eventMs === null || Number.isNaN(eventMs)) continue;
+          const eventMs = eventTimeMillis(result.memory.eventTime);
+          if (eventMs === null) continue;
           const distDays = Math.abs(eventMs - asOfMs) / 86_400_000;
           // Linear decay over a 2-year horizon: records within ~2 years of the
           // as-of moment get up to TEMPORAL_ASOF_BOOST; older records get none.
@@ -2276,7 +2293,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             keepBest(result);
             continue;
           }
-          const target = this.resolveSupersessionTarget(result.memory.id, options.eventTimeTo);
+          const target = this.resolveSupersessionTarget(result.memory.id, windowTo ?? undefined);
           if (!target || String(target.id) === result.memory.id) {
             // An orphaned stale row is never a current answer. It remains
             // recoverable through includeHistorical; for an as-of query the

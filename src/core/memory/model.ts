@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { normalizeEventTime, resolveEventTime } from "../event-time.ts";
 import { normalizeClaims } from "../claims.ts";
 import { recallTriggerMarkers } from "../recall-triggers.ts";
 import { assertTemporalValidity } from "../semantic-domain.ts";
@@ -43,7 +44,13 @@ export function validateMemoryInput(input: MemoryInput): void {
   });
   if (!assessment.allowed) throw new Error(`Memory write rejected: ${assessment.reason}`);
   validateMemoryStructure(input);
-  assertTemporalValidity(input);
+  // Resolve date phrases before the timestamp guard, so "上周三" and "2026年11月6日"
+  // are accepted as the instants they name while genuine garbage is still refused.
+  assertTemporalValidity({
+    eventTime: resolveEventTime(input.eventTime),
+    validFrom: resolveEventTime(input.validFrom),
+    validUntil: resolveEventTime(input.validUntil),
+  });
 }
 
 function validateMemoryStructure(input: MemoryInput): void {
@@ -99,6 +106,12 @@ export function newNode(input: MemoryInput, id: string, now: string): MemoryNode
   };
 }
 
+/** The write instant as a Date; relative phrases resolve against it. */
+function writeClock(now: string): Date {
+  const clock = new Date(now);
+  return Number.isFinite(clock.getTime()) ? clock : new Date();
+}
+
 export function newMemory(
   input: MemoryInput,
   id: string,
@@ -112,15 +125,24 @@ export function newMemory(
     ...(input.unsafe ? [{ kind: "write_bypass", attributes: { policy: "unsafe" } }] : []),
   ]);
   const external = markers.some((marker) => marker.kind === "external_source");
+  // One canonical shape on the way in: `event_time` is compared as TEXT by the
+  // candidate SQL, and the write clock is a canonical ISO instant, so every
+  // writer (daemon, CLI, STG import, benchmark loader) lands in the same form.
+  // A phrase that resolves against the write clock is resolved once, here, so a
+  // replay cannot drift with the reading clock. An unparseable phrase keeps the
+  // agent's words for evidence, but never reaches `valid_from`.
+  const eventTime = normalizeEventTime(input.eventTime, writeClock(now));
+  const timed = { ...input, eventTime: eventTime ?? input.eventTime ?? undefined };
+  const orderable = { ...input, eventTime: eventTime ?? undefined };
   return {
     id,
     nodeId,
     evidenceId: historyId,
     evidenceIds: [historyId],
     statement: input.statement.trim(),
-    ...semanticFields(input),
+    ...semanticFields(timed),
     ...claimFields(input),
-    ...timeFields(input, now),
+    ...timeFields(orderable, now),
     ...residenceFields(input, now),
     truthStatus: input.truthStatus ?? (external ? "unverified" : "asserted"),
     markers,

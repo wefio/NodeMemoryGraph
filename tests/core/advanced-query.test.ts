@@ -47,10 +47,11 @@ test("parseAdvancedQuery extracts state key and time range", () => {
   const parsed = parseAdvancedQuery("航班 time:2026-01-01..2026-06-30 state:travel_pref");
   assert.equal(parsed.semantic, "航班");
   assert.deepEqual(parsed.filters.stateKeys, ["travel_pref"]);
-  assert.equal(parsed.filters.eventTimeFrom, "2026-01-01");
-  assert.equal(parsed.filters.eventTimeTo, "2026-06-30");
+  // Bounds are canonical inclusive UTC instants: the upper side covers its day.
+  assert.equal(parsed.filters.eventTimeFrom, "2026-01-01T00:00:00.000Z");
+  assert.equal(parsed.filters.eventTimeTo, "2026-06-30T23:59:59.999Z");
+  assert.equal(parsed.filters.eventTimeSource, "explicit");
 });
-
 test("parseAdvancedQuery collects -exclusions and strips them", () => {
   const parsed = parseAdvancedQuery("餐厅 -快餐 -外卖");
   assert.equal(parsed.semantic, "餐厅");
@@ -102,39 +103,86 @@ test("extractEventWindow: as of <date> → inclusive through that day", () => {
   const w = extractEventWindow(
     "What is Martin Mark's current mental health status as of Mar 10, 2029?",
   );
-  assert.equal(w.to, "2029-03-11");
+  assert.equal(w.to, "2029-03-10T23:59:59.999Z");
   assert.equal(w.from, undefined);
 });
 
 test("extractEventWindow: on <date> → that exact day", () => {
   const w = extractEventWindow("What sports activity did Donald engage in on September 13, 2029?");
-  assert.equal(w.from, "2029-09-13");
-  assert.equal(w.to, "2029-09-14");
+  assert.equal(w.from, "2029-09-13T00:00:00.000Z");
+  assert.equal(w.to, "2029-09-13T23:59:59.999Z");
 });
 
 test("extractEventWindow: from <d1> to <d2> → range", () => {
   const w = extractEventWindow(
     "How did Karen's motivation evolve from February 28, 2035, to February 28, 2036?",
   );
-  assert.equal(w.from, "2035-02-28");
-  assert.equal(w.to, "2036-02-29");
+  assert.equal(w.from, "2035-02-28T00:00:00.000Z");
+  assert.equal(w.to, "2036-02-28T23:59:59.999Z");
 });
 
 test("extractEventWindow: ISO date + after", () => {
-  assert.deepEqual(extractEventWindow("events after 2029-05-20"), { from: "2029-05-20" });
+  assert.deepEqual(extractEventWindow("events after 2029-05-20"), {
+    from: "2029-05-20T00:00:00.000Z",
+  });
 });
 
 test("extractEventWindow: no date → empty", () => {
   assert.deepEqual(extractEventWindow("What is the person's name?"), {});
 });
 
+test("extractEventWindow: Chinese relative day, asked with intent", () => {
+  const now = new Date("2026-11-07T10:00:00+08:00");
+  assert.deepEqual(extractEventWindow("上周三我干了什么", now), {
+    from: "2026-10-28T00:00:00.000Z",
+    to: "2026-10-28T23:59:59.999Z",
+  });
+  assert.deepEqual(extractEventWindow("我昨天去了哪里", now), {
+    from: "2026-11-06T00:00:00.000Z",
+    to: "2026-11-06T23:59:59.999Z",
+  });
+});
+
+test("extractEventWindow: Chinese absolute date needs temporal intent", () => {
+  const now = new Date("2026-11-07T10:00:00+08:00");
+  // 之前 closes the window on that day rather than spanning it.
+  assert.deepEqual(extractEventWindow("3月10号之前发生了什么", now), {
+    to: "2026-03-10T23:59:59.999Z",
+  });
+  // A statement that merely mentions a date is not a query about it.
+  assert.deepEqual(extractEventWindow("把 2026年11月6日 的会议记下来", now), {});
+});
+
+test("extractEventWindow: Chinese range and bare month", () => {
+  const now = new Date("2026-11-07T10:00:00+08:00");
+  assert.deepEqual(extractEventWindow("从3月1日到3月5日的行程", now), {
+    from: "2026-03-01T00:00:00.000Z",
+    to: "2026-03-05T23:59:59.999Z",
+  });
+  assert.deepEqual(extractEventWindow("上个月买了什么", now), {
+    from: "2026-10-01T00:00:00.000Z",
+    to: "2026-10-31T23:59:59.999Z",
+  });
+});
+
 test("parseAdvancedQuery: explicit time: wins over natural language", () => {
   const p = parseAdvancedQuery("mental health time:2029-01-01..2029-06-30 as of Mar 10, 2029");
-  assert.equal(p.filters.eventTimeFrom, "2029-01-01");
-  assert.equal(p.filters.eventTimeTo, "2029-06-30");
+  assert.equal(p.filters.eventTimeFrom, "2029-01-01T00:00:00.000Z");
+  assert.equal(p.filters.eventTimeTo, "2029-06-30T23:59:59.999Z");
+  assert.equal(p.filters.eventTimeSource, "explicit");
 });
 
 test("parseAdvancedQuery: applies natural date", () => {
   const p = parseAdvancedQuery("What is the status as of Mar 10, 2029?");
-  assert.equal(p.filters.eventTimeTo, "2029-03-11");
+  assert.equal(p.filters.eventTimeTo, "2029-03-10T23:59:59.999Z");
+  assert.equal(p.filters.eventTimeSource, "natural");
+});
+
+test("parseAdvancedQuery: Chinese single day becomes both bounds", () => {
+  const p = parseAdvancedQuery(
+    "什么时候去的东京 2026年9月19日",
+    new Date("2026-11-07T10:00:00+08:00"),
+  );
+  assert.equal(p.filters.eventTimeFrom, "2026-09-19T00:00:00.000Z");
+  assert.equal(p.filters.eventTimeTo, "2026-09-19T23:59:59.999Z");
 });

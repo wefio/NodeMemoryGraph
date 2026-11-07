@@ -1,3 +1,4 @@
+import { normalizeEventTime } from "./event-time.ts";
 import type { MemoryScope } from "./types.ts";
 
 export interface TemporalValidity {
@@ -29,18 +30,25 @@ export function validityIntervalsOverlap(left: TemporalValidity, right: Temporal
   return a.start < b.end && b.start < a.end;
 }
 
-/** Reject malformed or empty/reversed explicit validity ranges at ingestion. */
+/** Reject malformed or empty/reversed explicit validity ranges at ingestion.
+ *  Date phrases ("2026年11月6日", "上周三") are resolved first, so a stated day
+ *  is accepted as the instant it names while genuine garbage is still refused. */
 export function assertTemporalValidity(value: TemporalValidity): void {
+  const resolved = {
+    eventTime: normalizeEventTime(value.eventTime) ?? value.eventTime,
+    validFrom: normalizeEventTime(value.validFrom) ?? value.validFrom,
+    validUntil: normalizeEventTime(value.validUntil) ?? value.validUntil,
+  };
   for (const [name, timestamp] of [
-    ["eventTime", value.eventTime],
-    ["validFrom", value.validFrom],
-    ["validUntil", value.validUntil],
+    ["eventTime", resolved.eventTime],
+    ["validFrom", resolved.validFrom],
+    ["validUntil", resolved.validUntil],
   ] as const) {
     if (timestamp !== undefined && timestamp !== null && !Number.isFinite(Date.parse(timestamp))) {
       throw new Error(`${name} must be a valid timestamp`);
     }
   }
-  const interval = temporalInterval(value);
+  const interval = temporalInterval(resolved);
   if (!interval) throw new Error("validFrom must be earlier than validUntil");
 }
 

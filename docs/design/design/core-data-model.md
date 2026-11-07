@@ -55,6 +55,10 @@ inside it. Preserve known historical time independently of display policy and
 keep stored statements/evidence unmodified. Read-boundary labels follow
 [temporal evidence presentation](progressive-retrieval.md#temporal-evidence-presentation).
 
+`eventTime` takes a date phrase, resolved once against the write clock into the
+canonical UTC instant the column stores; see
+[the event-time decision](../../decisions/implemented/2026-11-07-event-time-retrieval-canonical.md).
+
 An unresolved structure is represented on the record itself, not as a new
 memory type. `resolution` is `resolved` by default and may be `open` or
 `reopened`; open records carry `openedAt` and one or more

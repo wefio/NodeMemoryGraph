@@ -157,6 +157,7 @@ import {
   configuredStgSyncPolicy,
 } from "../integration/config.ts";
 import { applyAdvancedFilters, parseAdvancedQuery } from "../core/store/advanced-query.ts";
+import { eventWindowEnd, eventWindowStart } from "../core/event-time.ts";
 import {
   NMG_CAPABILITIES,
   NMG_METHODS,
@@ -2087,16 +2088,48 @@ export class NmgService {
     };
     const runOne = async (store: NmgStore, raw: string): Promise<MemoryContext> => {
       const { semantic, filters } = parseAdvancedQuery(raw);
+      // An event-time window belongs in candidate generation, not in a post-filter
+      // over the top-k: a selective window that only filtered afterwards let
+      // out-of-window memories occupy the slots and returned nothing.
+      const windowed: SearchOptions = {
+        ...searchOptions,
+        ...(filters.eventTimeFrom ? { eventTimeFrom: filters.eventTimeFrom } : {}),
+        ...(filters.eventTimeTo ? { eventTimeTo: filters.eventTimeTo } : {}),
+      };
+      const narrowed = (context: MemoryContext): MemoryContext => {
+        context.results = applyAdvancedFilters(context.results, filters);
+        return context;
+      };
       const ctx = await searchMemoryContext(
         store,
         embedding,
         semantic,
-        searchOptions,
+        windowed,
         this.#embeddingDegradedReason(),
         budget,
       );
-      ctx.results = applyAdvancedFilters(ctx.results, filters);
-      return ctx;
+      // A window inferred from the query text is a hint, not a constraint: when
+      // it leaves nothing (most memories carry no event_time), retry unwindowed
+      // rather than answer "no memory" to a question that does have one.
+      if (ctx.results.length === 0 && filters.eventTimeSource === "natural") {
+        const unwindowed = { ...filters };
+        delete unwindowed.eventTimeFrom;
+        delete unwindowed.eventTimeTo;
+        delete unwindowed.eventTimeSource;
+        const widened = await searchMemoryContext(
+          store,
+          embedding,
+          semantic,
+          { ...searchOptions, interpretTemporalQuery: false },
+          this.#embeddingDegradedReason(),
+          budget,
+        );
+        if (widened.results.length > 0) {
+          widened.results = applyAdvancedFilters(widened.results, unwindowed);
+          return widened;
+        }
+      }
+      return narrowed(ctx);
     };
     const searchAcross = async (store: NmgStore, raw: string) => {
       this.#syncStgWorkingSet(store, options.scope);
@@ -2994,6 +3027,21 @@ function recallSearchSource(value: unknown): NmgSearchParams["recallSource"] {
   };
 }
 
+/** A window bound must resolve: silently dropping one would answer a different
+ *  question than the caller asked. */
+function eventTimeBound(params: Record<string, unknown>, name: string): string | undefined {
+  const raw = optionalString(params, name);
+  if (raw === undefined) return undefined;
+  const resolved = name === "eventTimeFrom" ? eventWindowStart(raw) : eventWindowEnd(raw);
+  if (!resolved) {
+    throw new NmgProtocolError(
+      "INVALID_PARAMS",
+      `${name} must be a date or a resolvable date phrase`,
+    );
+  }
+  return raw;
+}
+
 function parseSearchParams(value: unknown): NmgSearchParams {
   const params = objectParams(value);
   return {
@@ -3009,6 +3057,8 @@ function parseSearchParams(value: unknown): NmgSearchParams {
     scope: optionalScope(params, "scope"),
     sourceActor: optionalEnum(params, "sourceActor", MEMORY_ACTORS),
     includeHistorical: optionalBoolean(params, "includeHistorical"),
+    eventTimeFrom: eventTimeBound(params, "eventTimeFrom"),
+    eventTimeTo: eventTimeBound(params, "eventTimeTo"),
     maxTier: optionalInteger(params, "maxTier", 0, 3) as MemoryTier | undefined,
     limit: optionalInteger(params, "limit", 1, 50),
     graphHops: optionalInteger(params, "graphHops", 0, 3),

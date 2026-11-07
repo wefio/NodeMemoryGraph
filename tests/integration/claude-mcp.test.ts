@@ -8,6 +8,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { connectDaemon, invokeDaemon } from "../../src/cli/daemon-client.ts";
 import { NmgStore } from "../../src/core/store.ts";
+import { SEARCH_TOOL_PARAMETERS } from "../../src/integration/tool-contract.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 // The spawned MCP server inherits this process's environment; drop any ambient
@@ -96,6 +97,16 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     assert.match(JSON.stringify(search.inputSchema), /recallCue/u);
     assert.match(JSON.stringify(search.inputSchema), /recallRevision/u);
     assert.doesNotMatch(JSON.stringify(search.inputSchema), /recallSource/u);
+    // The shared retrieval contract, projected into this host's schema.
+    const searchProperties = Object.keys(
+      (search.inputSchema as { properties?: Record<string, unknown> }).properties ?? {},
+    );
+    for (const parameter of SEARCH_TOOL_PARAMETERS) {
+      assert.ok(
+        searchProperties.includes(parameter.name),
+        `nmg_search must expose ${parameter.name}`,
+      );
+    }
     assert.match(JSON.stringify(board.inputSchema), /eventId/u);
     const event = await client.callTool({
       name: "nmg_state",

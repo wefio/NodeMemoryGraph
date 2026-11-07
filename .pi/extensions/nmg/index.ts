@@ -60,6 +60,7 @@ import {
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import { memoryDisclosureEntries } from "../../../src/integration/search-projection.ts";
 import { PI_BOARD_ACTIONS, PI_REMEMBER_ACTIONS } from "../../../src/integration/tool-contract.ts";
+import { searchParameterDescription } from "../../../src/integration/tool-contract.ts";
 import type { TaskBoardToolResult } from "../../../src/integration/tool-contract.ts";
 import {
   type BoardWakeConfig,
@@ -2083,8 +2084,22 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       ),
       limit: Type.Optional(Type.Number({ minimum: 1, maximum: 50 })),
       scope: Type.Optional(Type.Record(Type.String(), Type.String())),
+      sourceActor: Type.Optional(
+        Type.Union([
+          Type.Literal("user"),
+          Type.Literal("assistant"),
+          Type.Literal("system"),
+          Type.Literal("tool"),
+        ]),
+      ),
       includeHistorical: Type.Optional(Type.Boolean()),
       graphHops: Type.Optional(Type.Number({ minimum: 0, maximum: 3 })),
+      eventTimeFrom: Type.Optional(
+        Type.String({ description: searchParameterDescription("eventTimeFrom") }),
+      ),
+      eventTimeTo: Type.Optional(
+        Type.String({ description: searchParameterDescription("eventTimeTo") }),
+      ),
       secondPass: Type.Optional(Type.Boolean()),
       initialEvidenceTarget: Type.Optional(Type.Number({ minimum: 1, maximum: 50 })),
       strongHitTopGap: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),

@@ -21,6 +21,7 @@ import {
   SUPERSEDE_PREFILTER_MAX_TERMS,
 } from "./graph-policy.ts";
 import { nowMs, PerfTimer, SECTION } from "../perf.ts";
+import { resolveEventTime } from "../event-time.ts";
 import { normalizeClaims } from "../claims.ts";
 import { serializeScope } from "../scope.ts";
 import {
@@ -231,8 +232,11 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
     }): MemoryRecord {
       const createdAt = new Date().toISOString();
       const validFrom = input.validFrom ?? createdAt;
+      // Relative phrases resolve against the write instant, once: the stored
+      // value is the canonical instant every later window and ordering compares.
+      const eventTime = resolveEventTime(input.eventTime, new Date(createdAt));
       assertTemporalValidity({
-        eventTime: input.eventTime,
+        eventTime,
         validFrom,
         validUntil: input.validUntil,
       });
@@ -270,7 +274,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         statement: requireText(input.statement, "memory statement"),
         memoryType: input.memoryType ?? "fact",
         stateKey: input.stateKey ?? null,
-        eventTime: input.eventTime ?? null,
+        eventTime: eventTime ?? null,
         sourceActor: input.sourceActor ?? "user",
         truthStatus: input.truthStatus ?? "asserted",
         confidence: claimRollup ? claimRollup.confidence : (input.confidence ?? null),
