@@ -19,6 +19,7 @@ import {
 import type { NmgStateResult } from "../../../src/cli/protocol.ts";
 import { memoryDisclosureEntries } from "../../../src/integration/search-projection.ts";
 import { COMMON_REMEMBER_ACTIONS } from "../../../src/integration/tool-contract.ts";
+import { searchParameterDescription } from "../../../src/integration/tool-contract.ts";
 import {
   renderEvidenceSurface,
   renderRememberSurface,
@@ -70,7 +71,11 @@ server.registerTool(
       maxTier: z.number().int().min(0).max(3).optional(),
       graphHops: z.number().int().min(0).max(3).optional(),
       nodeName: z.string().optional(),
+      sourceActor: z.enum(["user", "assistant", "system", "tool"]).optional(),
       includeHistorical: z.boolean().optional(),
+      scope: z.record(z.string(), z.string()).optional(),
+      eventTimeFrom: z.string().optional().describe(searchParameterDescription("eventTimeFrom")),
+      eventTimeTo: z.string().optional().describe(searchParameterDescription("eventTimeTo")),
       secondPass: z.boolean().optional(),
     },
   },

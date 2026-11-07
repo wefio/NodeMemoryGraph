@@ -25,7 +25,7 @@ daemon 重启或会话释放后恢复默认，不影响其他会话，也不改�
 
 `nmg search --compact-json` 返回 `candidates[].id` 和顶层 `activeGraphId`；`--json` 返回 `results[].memory.id` 和 `activeGraph.id`。把 graph ID 传给 `nmg get --active-graph-id`，以归因精确证据的实际使用，而不是归因搜索成功。
 
-需要时用 `--node`、`--scope` 或 `--source-actor user` 缩小范围。只有确实需要旧／已被替代状态时才用 `--include-historical`。从 `--max-tier 1` 和 `--limit 8` 开始，不要一次倾倒所有证据。
+需要时用 `--node`、`--scope` 或 `--source-actor user` 缩小范围。用 `--from`／`--to` 限定事件时间（日期或 `上周三` 这类短语；只写日期时覆盖当天整天），也可以在查询里写 `time:2026-01-01..2026-06-30`。只有确实需要旧／已被替代状态时才用 `--include-historical`。从 `--max-tier 1` 和 `--limit 8` 开始，不要一次倾倒所有证据。
 
 ## 升级顺序
 

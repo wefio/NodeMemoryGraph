@@ -21,15 +21,17 @@ try {
     for (const message of messages) {
       const row = response.memories.find(row => row.raw_content === message.content);
       assert.ok(row, message.content);
-      assert.equal(row.event_time, message.chat_time ?? null);
-      assert.equal(row.created_at, message.chat_time);
+      // event_time is stored in one canonical UTC form (see the event-time decision).
+      assert.equal(row.event_time, message.chat_time ? new Date(message.chat_time).toISOString() : null);
+      // created_at is the AML alias of event_time, not write time.
+      assert.equal(row.created_at, message.chat_time ? new Date(message.chat_time).toISOString() : undefined);
       assert.ok(row.stored_at);
       assert.equal(service.store.getMemory(row.id).statement, message.content);
     }
   }
-  assert.equal(ordinary.memories.find(row => row.event_time === '2023-01-21').content, messages[1].content);
-  assert.match(ordinary.memories.find(row => row.event_time === messages[0].chat_time).content, /^\[Timestamp: 2023-01-20T23:30:00-05:00\]/);
-  assert.match(temporal.memories.find(row => row.event_time === '2023-01-21').content, /^\[Timestamp: 2023-01-21\]/);
+  assert.equal(ordinary.memories.find(row => row.event_time === '2023-01-21T00:00:00.000Z').content, messages[1].content);
+  assert.match(ordinary.memories.find(row => row.event_time === new Date(messages[0].chat_time).toISOString()).content, /^\[Timestamp: 2023-01-21T04:30:00.000Z\]/);
+  assert.match(temporal.memories.find(row => row.event_time === '2023-01-21T00:00:00.000Z').content, /^\[Timestamp: 2023-01-21T00:00:00.000Z\]/);
   assert.equal(temporal.memories.find(row => row.event_time === null).content, messages[2].content);
   mkdirSync('.runtime/verification', { recursive: true });
   writeFileSync('.runtime/verification/native-temporal.json', JSON.stringify({ status: 'passed', mode: 'offline-native-sqlite-no-provider', ordinary, temporal }, null, 2));

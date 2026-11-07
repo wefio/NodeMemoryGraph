@@ -520,10 +520,18 @@ export interface SearchOptions {
   sessionId?: string;
   nodeName?: string;
   scope?: MemoryScope;
+  /** Inclusive lower bound on memory event_time for candidate generation —
+   *  enforced in the candidate SQL, not post-query. Accepts a date phrase
+   *  ("2029-03-11", "2029年3月11日"); it is widened to the grain's start. */
   eventTimeFrom?: string;
-  /** Inclusive upper bound (ISO day "2029-03-11") on memory event_time for
-   *  candidate generation — enforced in the candidate SQL, not post-query. */
+  /** Inclusive upper bound on memory event_time for candidate generation —
+   *  enforced in the candidate SQL, not post-query. Accepts a date phrase; a
+   *  day-only value covers that whole day, which is what "as of Mar 10" means. */
   eventTimeTo?: string;
+  /** Interpret a date phrase inside the query text as the event-time window
+   *  (`as of Mar 10`, `上周三`). Set false to retry a query whose inferred
+   *  window left nothing, keeping only explicit `time:` filters. */
+  interpretTemporalQuery?: boolean;
   /** Restrict retrieval to memories attributed to one actor. */
   sourceActor?: MemoryActor;
   includeHistorical?: boolean;

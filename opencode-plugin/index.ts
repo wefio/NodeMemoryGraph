@@ -73,6 +73,10 @@ import {
 } from "../src/integration/state.ts";
 import { assembleBoardStateParams, resolveBoardOperation } from "./state-args.ts";
 import { COMMON_REMEMBER_ACTIONS } from "../src/integration/tool-contract.ts";
+import {
+  SEARCH_REQUIRED_PARAMETERS,
+  searchParameterProperties,
+} from "../src/integration/tool-contract.ts";
 import type { TaskBoardToolResult } from "../src/integration/tool-contract.ts";
 import {
   isMemorableToolResult,
@@ -516,15 +520,11 @@ export default {
       input: {
         type: "object",
         properties: {
+          // Shared retrieval contract; only the prompt-enriched query text is local.
+          ...searchParameterProperties(),
           query: { type: "string", description: prompts.search_query_parameter_description },
-          limit: { type: "integer", minimum: 1, maximum: 50 },
-          maxTier: { type: "integer", minimum: 0, maximum: 3 },
-          nodeName: { type: "string" },
-          scope: { type: "object", additionalProperties: { type: "string" } },
-          includeHistorical: { type: "boolean" },
-          graphHops: { type: "integer", minimum: 0, maximum: 3 },
         },
-        required: ["query"],
+        required: [...SEARCH_REQUIRED_PARAMETERS],
         additionalProperties: false,
       },
       execute: async (args, context) => {
@@ -541,8 +541,11 @@ export default {
           maxTier: args.maxTier ?? 3,
           nodeName: args.nodeName,
           scope: args.scope,
+          sourceActor: args.sourceActor,
           includeHistorical: args.includeHistorical === true,
           graphHops: args.graphHops,
+          eventTimeFrom: args.eventTimeFrom,
+          eventTimeTo: args.eventTimeTo,
           projectDir: projectDirectory(sessionId),
           sessionId,
         })) as MemoryContext;

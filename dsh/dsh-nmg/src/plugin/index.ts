@@ -28,6 +28,10 @@ import { connect } from 'node:net'
 import type { Context } from '@deepseek-ai/cordis'
 import { coordinationEnabled as configuredCoordinationEnabled } from '../../../../src/integration/config.ts'
 import { COMMON_REMEMBER_ACTIONS } from '../../../../src/integration/tool-contract.ts'
+import {
+  SEARCH_REQUIRED_PARAMETERS,
+  searchParameterProperties,
+} from '../../../../src/integration/tool-contract.ts'
 import { stateRequiresBoardEvents } from '../../../../src/integration/state.ts'
 import { collectWakeCandidates, maybeBroadcastToWorld as broadcastWakeEntry } from '../../../../src/integration/board-wake.ts'
 import { enqueueBoardWakeBatch, reportHarnessActivity } from '../../../../src/integration/board-wake-batch.ts'
@@ -310,6 +314,52 @@ export function apply(ctx: Context): () => void {
     const out = {}
     for (const key of Object.keys(scope || {})) out[key] = String(scope[key])
     return out
+  }
+
+  // The daemon RPC and the CLI fallback carry the same request, so both are
+  // assembled from one place: a field added here reaches either transport.
+  function searchParamsFor(args, sessionId) {
+    const params = {
+      query: args.query,
+      projectDir: workspaceRoot,
+      sessionId,
+      recallCue: args.recallCue,
+      recallRevision: args.recallRevision,
+    }
+    const optional = [
+      ['limit', args.limit],
+      ['maxTier', args.maxTier],
+      ['graphHops', args.graphHops],
+      ['nodeName', args.nodeName],
+      ['sourceActor', args.sourceActor],
+      ['eventTimeFrom', args.eventTimeFrom],
+      ['eventTimeTo', args.eventTimeTo],
+    ]
+    for (const [key, value] of optional) {
+      if (value != null) params[key] = value
+    }
+    if (args.includeHistorical) params.includeHistorical = true
+    if (args.scope) params.scope = coerceScope(args.scope)
+    return params
+  }
+
+  function searchArgvFor(args, tail) {
+    const argv = ['search', args.query]
+    const optional = [
+      ['--limit', args.limit],
+      ['--max-tier', args.maxTier],
+      ['--graph-hops', args.graphHops],
+      ['--node', args.nodeName],
+      ['--source-actor', args.sourceActor],
+      ['--from', args.eventTimeFrom],
+      ['--to', args.eventTimeTo],
+    ]
+    for (const [flag, value] of optional) {
+      if (value != null) argv.push(flag, String(value))
+    }
+    if (args.includeHistorical) argv.push('--include-historical')
+    for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1])
+    return [...argv, ...tail]
   }
 
   function projectDaemonStatus(raw) {
@@ -875,39 +925,20 @@ export function apply(ctx: Context): () => void {
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Focused recall query.' },
+        // Shared retrieval contract; host-only fields follow it.
+        ...searchParameterProperties(),
         recallCue: { type: 'string', description: nmgPrompts.search_recall_cue_parameter_description },
         recallRevision: { type: 'integer', minimum: 1, description: nmgPrompts.search_recall_revision_parameter_description },
-        limit: { type: 'integer', description: 'Return 1..50 records (default 8).' },
-        maxTier: { type: 'integer', description: 'Deepest memory tier 0..3.' },
-        graphHops: { type: 'integer', description: 'Graph expansion 0..3.' },
-        nodeName: { type: 'string', description: 'Restrict to one semantic node.' },
-        sourceActor: { type: 'string', enum: ['user', 'assistant', 'system', 'tool'], description: 'Restrict evidence actor.' },
-        includeHistorical: { type: 'boolean', description: 'Include inactive/superseded memories.' },
-        scope: { type: 'object', additionalProperties: true, description: 'Applicability scope, e.g. {"project":"nmg"}.' },
       },
-      required: ['query'],
+      required: [...SEARCH_REQUIRED_PARAMETERS],
     },
     output: textOutput,
     async execute(args, exec) {
       const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-      const params: Record<string, unknown> = { query: args.query, projectDir: workspaceRoot, sessionId, recallCue: args.recallCue, recallRevision: args.recallRevision }
-      if (args.limit != null) params.limit = args.limit
-      if (args.maxTier != null) params.maxTier = args.maxTier
-      if (args.graphHops != null) params.graphHops = args.graphHops
-      if (args.nodeName) params.nodeName = args.nodeName
-      if (args.sourceActor) params.sourceActor = args.sourceActor
-      if (args.includeHistorical) params.includeHistorical = true
-      if (args.scope) params.scope = coerceScope(args.scope)
-      const argv = ['search', args.query]
-      if (args.limit != null) argv.push('--limit', String(args.limit))
-      if (args.maxTier != null) argv.push('--max-tier', String(args.maxTier))
-      if (args.graphHops != null) argv.push('--graph-hops', String(args.graphHops))
-      if (args.nodeName) argv.push('--node', args.nodeName)
-      if (args.sourceActor) argv.push('--source-actor', args.sourceActor)
-      if (args.includeHistorical) argv.push('--include-historical')
-      for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1])
-      argv.push('--project-dir', workspaceRoot, '--session-id', sessionId, '--json')
+      const params = searchParamsFor(args, sessionId)
+      const argv = searchArgvFor(args, [
+        '--project-dir', workspaceRoot, '--session-id', sessionId, '--json',
+      ])
       const r = await invoke('search', params, argv, exec.signal, null)
       if (!r.ok) return r.error
       const disclosure = await disclose(

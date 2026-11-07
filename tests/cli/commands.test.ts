@@ -147,6 +147,21 @@ test("CLI search exposes bounded chain disclosure without leaking storage detail
   );
 });
 
+test("CLI search passes structured event-time bounds through", () => {
+  const search = NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === "search")!;
+  assert.deepEqual(
+    search.buildParams({
+      flags: new Set(),
+      options: new Map([
+        ["from", ["上周三"]],
+        ["to", ["2026-10-13"]],
+      ]),
+      positionals: ["Tokyo"],
+    }),
+    { query: "Tokyo", eventTimeFrom: "上周三", eventTimeTo: "2026-10-13" },
+  );
+});
+
 test("CLI exposes complete memory-chain member and edge operations", () => {
   const byName = (name: string) => NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === name)!;
   const scoped = new Map([

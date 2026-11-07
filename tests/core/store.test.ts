@@ -367,7 +367,9 @@ test("events and conversation evidence preserve time, actor, and truth status", 
       truthStatus: "unverified",
     });
 
-    assert.equal(event.memory.eventTime, "2023-01-08T00:00:00Z");
+    // Stored in canonical form: same instant, fixed width, so TEXT comparison
+    // against a window bound stays chronological.
+    assert.equal(event.memory.eventTime, "2023-01-08T00:00:00.000Z");
     assert.equal(assistantEvidence.memory.sourceActor, "assistant");
     assert.equal(assistantEvidence.memory.truthStatus, "unverified");
   });

@@ -76,3 +76,106 @@ export interface TaskBoardToolResult {
   }>;
   suppressed?: boolean;
 }
+
+/** One retrieval parameter, described once in JSON Schema. */
+export interface SearchParameterContract {
+  name: string;
+  /** Spread into an adapter's own schema object. An adapter may enrich the
+   *  prose from the prompt catalog, but not the type or the bound. */
+  schema: Readonly<Record<string, unknown>>;
+  required?: boolean;
+}
+
+/**
+ * What a memory search accepts, independent of host.
+ *
+ * Every adapter projects this table into its native schema library — JSON
+ * Schema, TypeBox (`Type.Unsafe`), zod (`z.string()`) — so a retrieval
+ * capability reaches all of them or none. Host-only fields (`recallCue`,
+ * `secondPass`, `queries`) stay in the adapter: they describe a host's own
+ * turn machinery, not what the store can be asked.
+ */
+export const SEARCH_TOOL_PARAMETERS: readonly SearchParameterContract[] = [
+  {
+    name: "query",
+    required: true,
+    schema: { type: "string", description: "Focused recall query." },
+  },
+  {
+    name: "limit",
+    schema: {
+      type: "integer",
+      minimum: 1,
+      maximum: 50,
+      description: "Return 1..50 records (default 8).",
+    },
+  },
+  {
+    name: "maxTier",
+    schema: { type: "integer", minimum: 0, maximum: 3, description: "Deepest memory tier 0..3." },
+  },
+  {
+    name: "graphHops",
+    schema: { type: "integer", minimum: 0, maximum: 3, description: "Graph expansion 0..3." },
+  },
+  {
+    name: "nodeName",
+    schema: { type: "string", description: "Restrict to one semantic node." },
+  },
+  {
+    name: "sourceActor",
+    schema: {
+      type: "string",
+      enum: ["user", "assistant", "system", "tool"],
+      description: "Restrict evidence actor.",
+    },
+  },
+  {
+    name: "includeHistorical",
+    schema: { type: "boolean", description: "Include inactive/superseded memories." },
+  },
+  {
+    name: "scope",
+    schema: {
+      type: "object",
+      additionalProperties: { type: "string" },
+      description: 'Applicability scope, e.g. {"project":"nmg"}.',
+    },
+  },
+  {
+    name: "eventTimeFrom",
+    schema: {
+      type: "string",
+      description:
+        'Earliest event time to return, inclusive. A date ("2026-01-01") or a phrase ("上个月", "上周三"); a date covers its whole day.',
+    },
+  },
+  {
+    name: "eventTimeTo",
+    schema: {
+      type: "string",
+      description:
+        'Latest event time to return, inclusive. "as of" style: a date covers that whole day.',
+    },
+  },
+];
+
+export const SEARCH_REQUIRED_PARAMETERS: readonly string[] = SEARCH_TOOL_PARAMETERS.filter(
+  (parameter) => parameter.required,
+).map((parameter) => parameter.name);
+
+/** JSON Schema `properties` object for the shared retrieval parameters. */
+export function searchParameterProperties(): Record<string, Record<string, unknown>> {
+  return Object.fromEntries(
+    SEARCH_TOOL_PARAMETERS.map((parameter) => [parameter.name, { ...parameter.schema }]),
+  );
+}
+
+/** The contract's own description, for a schema library that cannot take JSON
+ *  Schema verbatim (zod). */
+export function searchParameterDescription(name: string): string {
+  const found = SEARCH_TOOL_PARAMETERS.find((parameter) => parameter.name === name);
+  const description = found?.schema.description;
+  if (typeof description !== "string") throw new Error(`unknown search parameter: ${name}`);
+  return description;
+}

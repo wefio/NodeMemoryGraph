@@ -46,6 +46,34 @@ export default {
       return t.length <= max ? t : t.slice(0, max - 1) + '…'
     }
 
+    // One request shape for both transports: the daemon RPC and the CLI
+    // fallback cannot drift apart, and the tool handler stays a call site.
+    function searchRequest(args) {
+      const params = { query: args.query, projectDir: workspaceRoot }
+      const argv = ['search', args.query]
+      const fields = [
+        ['limit', '--limit', args.limit],
+        ['maxTier', '--max-tier', args.maxTier],
+        ['graphHops', '--graph-hops', args.graphHops],
+        ['nodeName', '--node', args.nodeName],
+        ['sourceActor', '--source-actor', args.sourceActor],
+        ['eventTimeFrom', '--from', args.eventTimeFrom],
+        ['eventTimeTo', '--to', args.eventTimeTo],
+      ]
+      for (const [key, flag, value] of fields) {
+        if (value == null || value === '') continue
+        params[key] = value
+        argv.push(flag, String(value))
+      }
+      if (args.includeHistorical) {
+        params.includeHistorical = true
+        argv.push('--include-historical')
+      }
+      if (args.scope) params.scope = coerceScope(args.scope)
+      for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1])
+      return { params, argv: [...argv, '--project-dir', workspaceRoot, '--compact-json'] }
+    }
+
     function clampInt(raw, min, max, fallback) {
       const value = Number(raw)
       return Number.isFinite(value) ? Math.max(min, Math.min(max, Math.floor(value))) : fallback
@@ -390,30 +418,16 @@ export default {
           nodeName: { type: 'string', description: 'Restrict to one semantic node.' },
           sourceActor: { type: 'string', enum: ['user', 'assistant', 'system', 'tool'], description: 'Restrict evidence actor.' },
           includeHistorical: { type: 'boolean', description: 'Include inactive/superseded memories.' },
-          scope: { type: 'object', additionalProperties: true, description: 'Applicability scope, e.g. {"project":"nmg"}.' },
+          scope: { type: 'object', additionalProperties: { type: 'string' }, description: 'Applicability scope, e.g. {"project":"nmg"}.' },
+          eventTimeFrom: { type: 'string', description: 'Earliest event time to return, inclusive. A date ("2026-01-01") or a phrase ("上个月", "上周三"); a date covers its whole day.' },
+          eventTimeTo: { type: 'string', description: 'Latest event time to return, inclusive. A date covers that whole day ("as of 2026-06-30").' },
         },
         required: ['query'],
       },
       output: textOutput,
       async execute(args, exec) {
-        const params = { query: args.query, projectDir: workspaceRoot }
-        if (args.limit != null) params.limit = args.limit
-        if (args.maxTier != null) params.maxTier = args.maxTier
-        if (args.graphHops != null) params.graphHops = args.graphHops
-        if (args.nodeName) params.nodeName = args.nodeName
-        if (args.sourceActor) params.sourceActor = args.sourceActor
-        if (args.includeHistorical) params.includeHistorical = true
-        if (args.scope) params.scope = coerceScope(args.scope)
-        const argv = ['search', args.query]
-        if (args.limit != null) argv.push('--limit', String(args.limit))
-        if (args.maxTier != null) argv.push('--max-tier', String(args.maxTier))
-        if (args.graphHops != null) argv.push('--graph-hops', String(args.graphHops))
-        if (args.nodeName) argv.push('--node', args.nodeName)
-        if (args.sourceActor) argv.push('--source-actor', args.sourceActor)
-        if (args.includeHistorical) argv.push('--include-historical')
-        for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1])
-        argv.push('--project-dir', workspaceRoot, '--compact-json')
-        const r = await invoke('search', params, argv, exec.signal, projectCompact)
+        const request = searchRequest(args)
+        const r = await invoke('search', request.params, request.argv, exec.signal, projectCompact)
         if (!r.ok) return r.error
         const data = r.data
         const candidates = Array.isArray(data.candidates) ? data.candidates : []

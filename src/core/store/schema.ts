@@ -14,6 +14,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import { ensureMemoryFts, MEMORY_FTS_SCHEMA, MEMORY_SURFACE_FTS_SCHEMA } from "./fts-index.ts";
+import { normalizeEventTime } from "../event-time.ts";
 import { encodeVector, parseVector } from "./vector-codec.ts";
 import { TASK_UNIT_DECLARATION_SCHEMA } from "../../integration/task-unit-declaration-store.ts";
 import { ensureCoordinationSchema } from "./coordination-schema.ts";
@@ -725,7 +726,43 @@ export function migrate(db: DatabaseSync): void {
     INSERT OR IGNORE INTO leaf_block_status(node_id, dirty, updated_at)
     SELECT id, 1, updated_at FROM memory_nodes WHERE status = 'active';
   `);
+  normalizeStoredEventTimes(db);
   ensureMemoryFts(db);
+}
+
+// GLOB wildcards: `?` is one character, `*` is any run — not LIKE's `_`/`%`.
+const CANONICAL_INSTANT = "????-??-??T??:??:??.???Z";
+
+/** One-time repair of event times written before canonicalization. Candidate
+ *  SQL compares `event_time` and `valid_from` as TEXT, so mixed shapes
+ *  (`2026-10-13`, `2026-09-19T21:31:55+08:00`) sort against each other wrongly
+ *  and silently drop out of a window. Already-canonical rows are skipped by the
+ *  GLOB filters, which makes reopening the store a no-op. */
+function normalizeStoredEventTimes(db: DatabaseSync): void {
+  const clock = new Date();
+  for (const [table, column] of [
+    ["memory_records", "event_time"],
+    ["memory_records", "valid_from"],
+  ] as const) {
+    let rows: Array<Record<string, unknown>>;
+    try {
+      rows = db
+        .prepare(
+          `SELECT id, ${column} AS value FROM ${table}
+            WHERE ${column} IS NOT NULL AND ${column} NOT GLOB ?`,
+        )
+        .all(CANONICAL_INSTANT) as Array<Record<string, unknown>>;
+    } catch {
+      // A read-only or partially created database owns no rows to repair.
+      continue;
+    }
+    if (rows.length === 0) continue;
+    const update = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`);
+    for (const row of rows) {
+      const canonical = normalizeEventTime(String(row.value), clock);
+      if (canonical) update.run(canonical, String(row.id));
+    }
+  }
 }
 
 export function ensureMemoryColumns(db: DatabaseSync): void {

@@ -26,7 +26,10 @@ search_description: >-
   headers (memory id, node, type, match terms, event date, preview) plus an
   activeGraphId. Exact records and source evidence are loaded via nmg_get.
   The store only contains what was explicitly saved - it is not a live
-  source. Advanced syntax: key:value filters (type:preference,constraint
+  source. A date phrase in the query ("as of Mar 10, 2029", "上周三", "3月10号之前")
+  bounds the event-time window; time:from..to or the eventTimeFrom/eventTimeTo
+  parameters are the explicit form.
+  Advanced syntax: key:value filters (type:preference,constraint
   node:"Conversation ..." state:key time:2026-01-01..2026-06-30), -term
   exclusions, and quoted phrases.
 

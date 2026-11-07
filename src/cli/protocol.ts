@@ -379,6 +379,11 @@ export interface NmgSearchParams {
   scope?: MemoryScope;
   sourceActor?: MemoryActor;
   includeHistorical?: boolean;
+  /** Inclusive bounds on memory event_time for candidate generation. A date
+   *  phrase is widened to its grain ("2026-06-30" covers that whole day); a
+   *  phrase that resolves to no instant is rejected, not ignored. */
+  eventTimeFrom?: string;
+  eventTimeTo?: string;
   maxTier?: MemoryTier;
   limit?: number;
   graphHops?: number;
