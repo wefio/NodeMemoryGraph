@@ -1,0 +1,13 @@
+version: 2
+terms:
+  - term: relevance-model offline probe
+    aliases: [相似度探针, 离线探针]
+    definition: >-
+      A manual script that measures the learned relevance model outside a live session, either across languages on a public sentence-pair dataset or against this store's recorded retrieval traces. It reports a method and its inputs; it is not a production measurement and is not wired into any gate.
+  - term: frozen split manifest
+    aliases: [冻结划分清单, semrel seed]
+    definition: >-
+      A committed JSON file naming the exact sentence pairs a probe run scores, so a rerun samples the same rows without re-deriving the split from the dataset.
+references:
+  - src/lab/relevance-model.ts
+  - evals/topology/bpid-neural-probe.ts
