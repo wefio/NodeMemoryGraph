@@ -43,7 +43,8 @@ try {
   const temporal = await service.search(['When was the diagram shared?'], 20);
   const dated = temporal.memories.find(row => row.event_time);
   assert.ok(dated);
-  assert.deepEqual(dated.content[0], { type: 'text', text: '[Timestamp: 2023-01-20T23:30:00-05:00]' });
+  // Stored event times are canonical UTC instants; the label carries that form.
+  assert.deepEqual(dated.content[0], { type: 'text', text: '[Timestamp: 2023-01-21T04:30:00.000Z]' });
   assert.deepEqual(dated.content.slice(1), originals[0]);
   assert.deepEqual(JSON.parse(dated.raw_content), originals[0], 'raw_content is the original evidence, not the prefixed view');
   const unknown = temporal.memories.find(row => row.event_time === null);
