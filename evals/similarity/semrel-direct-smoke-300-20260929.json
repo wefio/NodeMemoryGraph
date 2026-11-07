@@ -1,0 +1,105 @@
+{
+  "measuredAt": "2026-09-29T12:56:36.475Z",
+  "dataset": "SemRel/SemRel2024",
+  "datasetRevision": "ef5c383d1b87eb8feccde3dfb7f95e42b1b050dd",
+  "datasetFingerprint": "e7bb5f488c0a5746134560405cfcc6dc0beee6403ca64c19732aa64dd5a6ef63",
+  "license": "Not specified in the upstream dataset card; this probe emits metrics only and does not redistribute rows or weights.",
+  "protocol": {
+    "localMemoryDatasetUsed": false,
+    "trainingSplit": "sampled official train rows from training languages only",
+    "validationSplit": "sampled official dev rows from training languages only; used only to select one global hybrid weight",
+    "heldOutLanguages": ["afr"],
+    "evaluationSplit": "sampled official test rows; Spanish hidden-label rows are counted and excluded",
+    "programBaselines": [
+      "existing word-set Jaccard from src/core/store/search-ranking.ts",
+      "mean cosine over Unicode character 1-4-gram count vectors",
+      "equal mean of the two program scores"
+    ],
+    "hybrid": {
+      "formula": "(1 - neuralWeight) * programComposite + neuralWeight * neuralMlp",
+      "neuralWeight": 0,
+      "selection": "grid search in 0.1 increments, maximizing macro Spearman on official dev splits from training languages"
+    },
+    "neural": "CPU MLP from src/lab/relevance-model.ts, trained with RankNet on pair-feature comparisons; no embedding model",
+    "neuralFeatures": 17,
+    "hiddenUnits": 8,
+    "parameterCount": 153,
+    "parameterBytesFloat32": 612,
+    "epochs": 1,
+    "trainingComparisons": 216,
+    "trainingMs": 22,
+    "finalLoss": 0.6822522878646851,
+    "trainLanguages": ["eng"],
+    "trainRows": 300,
+    "validationRows": 250,
+    "sampledRowsBySplit": {
+      "eng/train": {
+        "sampled": 300,
+        "total": 5500
+      },
+      "eng/dev": {
+        "sampled": 250,
+        "total": 250
+      },
+      "eng/test": {
+        "sampled": 300,
+        "total": 2600
+      },
+      "afr/test": {
+        "sampled": 300,
+        "total": 375
+      }
+    },
+    "testRows": 600
+  },
+  "macroSpearman": {
+    "existingWordJaccard": {
+      "languages": 2,
+      "value": 0.7323306824468525
+    },
+    "characterNgramCosine": {
+      "languages": 2,
+      "value": 0.7733387285867861
+    },
+    "programComposite": {
+      "languages": 2,
+      "value": 0.7794813533669221
+    },
+    "neuralMlp": {
+      "languages": 2,
+      "value": 0.6701345023351314
+    },
+    "hybrid": {
+      "languages": 2,
+      "value": 0.7794813533669221
+    }
+  },
+  "perLanguage": [
+    {
+      "language": "eng",
+      "role": "seen-language",
+      "rows": 300,
+      "hiddenLabelRows": 0,
+      "spearman": {
+        "existingWordJaccard": 0.7218484625902377,
+        "characterNgramCosine": 0.7774297595389453,
+        "programComposite": 0.7766187755387057,
+        "neuralMlp": 0.6639353498014597,
+        "hybrid": 0.7766187755387057
+      }
+    },
+    {
+      "language": "afr",
+      "role": "zero-shot-language",
+      "rows": 300,
+      "hiddenLabelRows": 0,
+      "spearman": {
+        "existingWordJaccard": 0.7428129023034674,
+        "characterNgramCosine": 0.769247697634627,
+        "programComposite": 0.7823439311951386,
+        "neuralMlp": 0.676333654868803,
+        "hybrid": 0.7823439311951386
+      }
+    }
+  ]
+}

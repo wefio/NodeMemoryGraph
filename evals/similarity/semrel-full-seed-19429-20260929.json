@@ -1,0 +1,374 @@
+{
+  "measuredAt": "2026-09-29T13:03:43.176Z",
+  "dataset": "SemRel/SemRel2024",
+  "datasetRevision": "ef5c383d1b87eb8feccde3dfb7f95e42b1b050dd",
+  "datasetFingerprint": "d2f7eb94a0666a013fbe03a550588c09455d51f44db98d05093bfa4885d507dd",
+  "license": "Not specified in the upstream dataset card; this probe emits metrics only and does not redistribute rows or weights.",
+  "protocol": {
+    "localMemoryDatasetUsed": false,
+    "dataAccess": "Pinned SemRel Parquet files downloaded with @huggingface/hub and decoded locally with hyparquet; no datasets-server rows endpoint",
+    "trainingSplit": "sampled official train rows from training languages only",
+    "validationSplit": "sampled official dev rows from training languages only; used only to select one global hybrid weight",
+    "heldOutLanguages": ["afr", "arb", "hin", "ind", "pan"],
+    "evaluationSplit": "sampled official test rows; Spanish hidden-label rows are counted and excluded",
+    "programBaselines": [
+      "existing word-set Jaccard from src/core/store/search-ranking.ts",
+      "mean cosine over Unicode character 1-4-gram count vectors",
+      "equal mean of the two program scores"
+    ],
+    "hybrid": {
+      "formula": "(1 - neuralWeight) * programComposite + neuralWeight * neuralMlp",
+      "neuralWeight": 0.2,
+      "selection": "grid search in 0.1 increments, maximizing macro Spearman on official dev splits from training languages"
+    },
+    "neural": "CPU MLP from src/lab/relevance-model.ts, trained with RankNet on pair-feature comparisons; no embedding model",
+    "neuralFeatures": 17,
+    "hiddenUnits": 8,
+    "parameterCount": 153,
+    "parameterBytesFloat32": 612,
+    "epochs": 40,
+    "trainingComparisons": 9936,
+    "trainingMs": 12451,
+    "finalLoss": 0.22995777428150177,
+    "trainLanguages": ["amh", "eng", "esp", "hau", "mar", "tel", "kin", "arq", "ary"],
+    "trainRows": 15054,
+    "validationRows": 1390,
+    "sampledRowsBySplit": {
+      "amh/train": {
+        "sampled": 992,
+        "total": 992
+      },
+      "eng/train": {
+        "sampled": 5500,
+        "total": 5500
+      },
+      "esp/train": {
+        "sampled": 1562,
+        "total": 1562
+      },
+      "hau/train": {
+        "sampled": 1736,
+        "total": 1736
+      },
+      "mar/train": {
+        "sampled": 1155,
+        "total": 1155
+      },
+      "tel/train": {
+        "sampled": 1146,
+        "total": 1146
+      },
+      "kin/train": {
+        "sampled": 778,
+        "total": 778
+      },
+      "arq/train": {
+        "sampled": 1261,
+        "total": 1261
+      },
+      "ary/train": {
+        "sampled": 924,
+        "total": 924
+      },
+      "amh/dev": {
+        "sampled": 95,
+        "total": 95
+      },
+      "eng/dev": {
+        "sampled": 250,
+        "total": 250
+      },
+      "esp/dev": {
+        "sampled": 140,
+        "total": 140
+      },
+      "hau/dev": {
+        "sampled": 212,
+        "total": 212
+      },
+      "mar/dev": {
+        "sampled": 293,
+        "total": 293
+      },
+      "tel/dev": {
+        "sampled": 130,
+        "total": 130
+      },
+      "kin/dev": {
+        "sampled": 102,
+        "total": 102
+      },
+      "arq/dev": {
+        "sampled": 97,
+        "total": 97
+      },
+      "ary/dev": {
+        "sampled": 71,
+        "total": 71
+      },
+      "amh/test": {
+        "sampled": 171,
+        "total": 171
+      },
+      "eng/test": {
+        "sampled": 2600,
+        "total": 2600
+      },
+      "esp/test": {
+        "sampled": 600,
+        "total": 600
+      },
+      "hau/test": {
+        "sampled": 603,
+        "total": 603
+      },
+      "mar/test": {
+        "sampled": 298,
+        "total": 298
+      },
+      "tel/test": {
+        "sampled": 297,
+        "total": 297
+      },
+      "kin/test": {
+        "sampled": 222,
+        "total": 222
+      },
+      "arq/test": {
+        "sampled": 583,
+        "total": 583
+      },
+      "ary/test": {
+        "sampled": 426,
+        "total": 426
+      },
+      "afr/test": {
+        "sampled": 375,
+        "total": 375
+      },
+      "arb/test": {
+        "sampled": 595,
+        "total": 595
+      },
+      "hin/test": {
+        "sampled": 968,
+        "total": 968
+      },
+      "ind/test": {
+        "sampled": 360,
+        "total": 360
+      },
+      "pan/test": {
+        "sampled": 634,
+        "total": 634
+      }
+    },
+    "testRows": 8132
+  },
+  "macroSpearman": {
+    "existingWordJaccard": {
+      "languages": 13,
+      "value": 0.4978768250256768
+    },
+    "characterNgramCosine": {
+      "languages": 13,
+      "value": 0.5535047658304536
+    },
+    "programComposite": {
+      "languages": 13,
+      "value": 0.5615588238731883
+    },
+    "neuralMlp": {
+      "languages": 13,
+      "value": 0.5567328877359338
+    },
+    "hybrid": {
+      "languages": 13,
+      "value": 0.5677915165776553
+    }
+  },
+  "perLanguage": [
+    {
+      "language": "amh",
+      "role": "seen-language",
+      "rows": 171,
+      "hiddenLabelRows": 0,
+      "spearman": {
+        "existingWordJaccard": 0.6430668179968919,
+        "characterNgramCosine": 0.7048531096623811,
+        "programComposite": 0.7010119417603248,
+        "neuralMlp": 0.678052560990752,
+        "hybrid": 0.69924260379544
+      }
+    },
+    {
+      "language": "eng",
+      "role": "seen-language",
+      "rows": 2600,
+      "hiddenLabelRows": 0,
+      "spearman": {
+        "existingWordJaccard": 0.741451736938964,
+        "characterNgramCosine": 0.772196691747988,
+        "programComposite": 0.7824879326804817,
+        "neuralMlp": 0.7763352028753145,
+        "hybrid": 0.7827604312664938
+      }
+    },
+    {
+      "language": "esp",
+      "role": "seen-language",
+      "rows": 0,
+      "hiddenLabelRows": 600,
+      "spearman": {
+        "existingWordJaccard": null,
+        "characterNgramCosine": null,
+        "programComposite": null,
+        "neuralMlp": null,
+        "hybrid": null
+      }
+    },
+    {
+      "language": "hau",
+      "role": "seen-language",
+      "rows": 603,
+      "hiddenLabelRows": 0,
+      "spearman": {
+        "existingWordJaccard": 0.41747215264637555,
+        "characterNgramCosine": 0.4718762168556149,
+        "programComposite": 0.4898420652687325,
+        "neuralMlp": 0.515894255383957,
+        "hybrid": 0.5012553174902012
+      }
+    },
+    {
+      "language": "mar",
+      "role": "seen-language",
+      "rows": 298,
+      "hiddenLabelRows": 0,
+      "spearman": {
+        "existingWordJaccard": 0.6410132167775495,
+        "characterNgramCosine": 0.7131076408263444,
+        "programComposite": 0.7330567775486707,
+        "neuralMlp": 0.7334432630125425,
+        "hybrid": 0.7402312541878684
+      }
+    },
+    {
+      "language": "tel",
+      "role": "seen-language",
+      "rows": 297,
+      "hiddenLabelRows": 0,
+      "spearman": {
+        "existingWordJaccard": 0.7093129138903468,
+        "characterNgramCosine": 0.751068366325792,
+        "programComposite": 0.7689636822652184,
+        "neuralMlp": 0.7770719890277571,
+        "hybrid": 0.7796150124313718
+      }
+    },
+    {
+      "language": "kin",
+      "role": "seen-language",
+      "rows": 222,
+      "hiddenLabelRows": 0,
+      "spearman": {
+        "existingWordJaccard": 0.3544693599578653,
+        "characterNgramCosine": 0.4524325195118543,
+        "programComposite": 0.4366430085210348,
+        "neuralMlp": 0.4558262957437276,
+        "hybrid": 0.44794827863367886
+      }
+    },
+    {
+      "language": "arq",
+      "role": "seen-language",
+      "rows": 583,
+      "hiddenLabelRows": 0,
+      "spearman": {
+        "existingWordJaccard": 0.39816421273035124,
+        "characterNgramCosine": 0.5662624392903817,
+        "programComposite": 0.5447486578181974,
+        "neuralMlp": 0.4501272443087555,
+        "hybrid": 0.5560158379824985
+      }
+    },
+    {
+      "language": "ary",
+      "role": "seen-language",
+      "rows": 426,
+      "hiddenLabelRows": 0,
+      "spearman": {
+        "existingWordJaccard": 0.6247429320710887,
+        "characterNgramCosine": 0.5329656472245153,
+        "programComposite": 0.6079087086339793,
+        "neuralMlp": 0.6253949612782523,
+        "hybrid": 0.6098386978415885
+      }
+    },
+    {
+      "language": "afr",
+      "role": "zero-shot-language",
+      "rows": 375,
+      "hiddenLabelRows": 0,
+      "spearman": {
+        "existingWordJaccard": 0.7352632173827562,
+        "characterNgramCosine": 0.7632905520242488,
+        "programComposite": 0.7736681366875992,
+        "neuralMlp": 0.7766261491714738,
+        "hybrid": 0.7766672595663411
+      }
+    },
+    {
+      "language": "arb",
+      "role": "zero-shot-language",
+      "rows": 595,
+      "hiddenLabelRows": 0,
+      "spearman": {
+        "existingWordJaccard": 0.36621383343534986,
+        "characterNgramCosine": 0.4965924595467993,
+        "programComposite": 0.49705887504606694,
+        "neuralMlp": 0.4977094176732146,
+        "hybrid": 0.5152049995628736
+      }
+    },
+    {
+      "language": "hin",
+      "role": "zero-shot-language",
+      "rows": 968,
+      "hiddenLabelRows": 0,
+      "spearman": {
+        "existingWordJaccard": 0.5875729901982772,
+        "characterNgramCosine": 0.6631627374332165,
+        "programComposite": 0.6626566986421623,
+        "neuralMlp": 0.6627776972752758,
+        "hybrid": 0.6720789255171086
+      }
+    },
+    {
+      "language": "ind",
+      "role": "zero-shot-language",
+      "rows": 360,
+      "hiddenLabelRows": 0,
+      "spearman": {
+        "existingWordJaccard": 0.5204210562841024,
+        "characterNgramCosine": 0.46701402032986666,
+        "programComposite": 0.5191802314128519,
+        "neuralMlp": 0.5070967190391872,
+        "hybrid": 0.5178435964467141
+      }
+    },
+    {
+      "language": "pan",
+      "role": "zero-shot-language",
+      "rows": 634,
+      "hiddenLabelRows": 0,
+      "spearman": {
+        "existingWordJaccard": -0.26676571497611956,
+        "characterNgramCosine": -0.15926044498310696,
+        "programComposite": -0.216962005933871,
+        "neuralMlp": -0.2188282152130709,
+        "hybrid": -0.217412499212661
+      }
+    }
+  ]
+}
