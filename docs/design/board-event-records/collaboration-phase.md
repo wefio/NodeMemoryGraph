@@ -140,10 +140,74 @@ their later commits, remains an integration choice. A displayed phase supports
 coordination; enforcement claims require actual execution-entry and in-flight
 operation support. Notifications alone do not establish that support.
 
+## Scoped input batches and wake coordination
+
+The draft adds an input-delivery layer alongside phase agreement. A collaboration
+turn can consume several available replies from one scope. The intended unit is
+a recipient's bounded input batch. Batch size, scheduling delay and storage shape
+remain open choices.
+
+A batch groups eligible updates by recipient and collaboration scope, retaining
+channel boundaries within an event. Source messages keep their IDs, authors and
+owner-defined order. A useful batch signature contains the recipient/session,
+scope, selected message IDs, an upper source cursor or revision boundary, and the
+phase version observed during preparation. Channel cursors and event revisions
+retain their separate meanings. This signature describes a finite observation.
+Messages arriving after its boundary remain eligible for a later batch.
+
+### Coalescing and scheduling
+
+A coalesced reminder can retain a pending source range. At preparation time the
+reader expands eligible source messages in that range, subject to the shared
+budget. This lets consecutive replies remain jointly discoverable even when an
+older reminder was retired. Expired or unavailable history needs an explicit gap
+indicator so the recipient can judge whether more context is needed.
+
+For a recipient and scope, one pending wake can accumulate updates while the
+Agent is busy. The Harness prepares a batch at the next supported processing
+boundary. Once prepared/enqueued, that batch has a fixed identity and content.
+Later arrivals extend subsequent work rather than rewriting an accepted fragment.
+Host capabilities determine whether a queued wake can be updated before this
+boundary. Immediate idle delivery can consume currently available messages without
+waiting for every participant or requiring everyone to reply.
+
+Scope grouping still respects direct recipients, subscriptions and suppression.
+Independent scopes can progress separately. Work-item claiming and serial handoff
+keep their existing owner and ordering rules. Ordinary discussion can be read as
+one batch even when its messages arrived separately.
+
+### Budget, receipts and phase boundaries
+
+The shared source owner selects eligible records. InformationView preparation
+admits their source-labelled content under one batch budget. Per-message identity
+remains available when several rows share one host envelope. Content excluded by
+the budget remains pending, with continuation information when it fits.
+
+Prepared, host-enqueued, acknowledged/read and acted-on are separate observations.
+Receipts name only the source entries actually admitted and accepted by the host.
+Reading a directory or sending a range-only reminder cannot advance past unseen
+messages. An acknowledgement of one entry cannot consume a sibling reply, a later
+arrival or an entire scope. The retry path uses retained source identities and
+rechecks current delivery eligibility. A delivery failure keeps the affected
+entries eligible for retry. Existing retention rules determine how far recovery
+can reach after a restart.
+
+A batch exposes the current scope phase and its version. Where a source message
+has an originating phase version, preserve it. Legacy messages can have unknown
+phase provenance. A phase change during preparation requires a fresh phase check
+and an explicit choice to rebuild or surface the stale context before action.
+Batch delivery itself grants neither phase agreement nor an execution permit.
+
+These mechanisms reduce fragmented processing and duplicate wake requests. They
+still allow participants to publish new replies and explicit notifications under
+the existing notification contract. Semantic intent, including whether a new
+message needs a response, remains a separate collaboration concern.
+
 ## Suggested increment and questions to test
 
 A first design increment can concentrate on scoped phase, transition proposals,
-confirmations, version checks, retained requests and InformationView disclosure.
+confirmations, version checks, retained requests, scoped input batches and
+InformationView disclosure.
 It need not introduce a general scheduler, a new management role, or every DSH
 entity. Execution enforcement can be integrated by host capability with its limits
 visible; this draft does not select a default enforcement level or migration policy.
@@ -159,8 +223,19 @@ Use concrete collaboration scenarios to settle the remaining choices:
   an explicit destination when the phase changes.
 - Participants leaving, restarting, or proposing competing switches do not turn
   missing confirmation into permission.
+- B and C reply before A's next processing boundary. A receives both eligible
+  replies in one source-labelled batch when the budget permits.
+- Retiring an old reminder retains a discoverable path to the source replies.
+  Budget omissions and expired history stay visible as distinct conditions.
+- While A is busy, repeated scope updates accumulate behind one pending wake.
+  Updates after a prepared boundary remain available to the next batch.
+- Failed enqueue, retry, acknowledgement of one reply and unsubscribe do not
+  incorrectly consume other eligible replies.
+- A phase switch during batch preparation leaves the recipient able to identify
+  the applicable phase version and any stale source context.
 
 These are design probes, not a frozen acceptance suite. Open questions include
 scope identity, authority inheritance, agreement rules, proposal replacement,
-permit lifetime, restart recovery, and behavior for hosts without enforcement.
+permit lifetime, batch assembly boundaries, partial receipt recovery, restart
+recovery, and behavior for hosts without enforcement.
 Refine the smallest useful semantics from those cases before fixing APIs or storage.

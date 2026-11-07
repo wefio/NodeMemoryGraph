@@ -96,6 +96,10 @@ by default does not turn them into an all-hands discussion notification.
 
 ### Autonomous collaboration and receipt-loop protection
 
+The scoped input-batch draft explores shared reading boundaries and wake scheduling
+for several available replies. It records the proposed extension separately from
+the notification behavior here. [Input-batch draft](collaboration-phase.md#scoped-input-batches-and-wake-coordination)
+
 No hard cap is placed on automatic wake-chain length, on a fixed number of rounds or on the
 number of event notifications, and no round is required to be resumed by a human. A quota or
 human-recovery threshold that would cut off ordinary self-organising collaboration may not be

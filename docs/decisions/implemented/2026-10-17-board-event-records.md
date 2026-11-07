@@ -144,3 +144,17 @@ outside this increment. The [draft](../../design/board-event-records/collaborati
 keeps those policy choices open. Domain/state tests exercise version checks,
 confirmation, withdrawal, persistence, local scope and disclosure; they do not prove
 live multi-Agent alignment or host enforcement.
+
+## Scoped input-batch design extension
+
+The collaboration draft includes source-bounded input batches and per-scope wake
+coordination. Agents can respond to an incomplete set of available replies when
+an adapter chooses only the first fresh entry. Coalescing a reminder while carrying
+only its latest source also leaves earlier replies dependent on a separate read.
+Both behaviors motivate retaining a pending source range and preparing several
+eligible replies at a shared processing boundary.
+
+The collaboration draft owns the candidate semantics. This addition records the agreed design direction.
+Runtime batch delivery, concurrent wake coordination and failure recovery require
+their own implementation and tests. Batch delivery is distinct from phase agreement.
+[Input-batch draft](../../design/board-event-records/collaboration-phase.md#scoped-input-batches-and-wake-coordination)
