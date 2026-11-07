@@ -94,6 +94,11 @@ state_description: >-
   event.effect {id,resource,condition,state:active|released}. Participants may
   update records; only an effect owner can release it. agentStatus reads default
   idle/task associations or writes a public note via text; presence is separate.
+  agentActivity reads this session's processing state or writes activity
+  {state:busy|idle|unknown,capabilities?:string[],ttlSeconds?:number,expectedVersion?:string}.
+  Agent declarations and Harness observations have separate leases. Any live busy
+  report keeps automatic reply batches pending. Capabilities are a union of
+  available features and remain distinct from task ownership and execution permission.
   put may carry notification {key,scopes:[direct|channel|event],recipients?:stable
   Agent IDs,invite?:boolean}. Reuse key only for retries of the same notice.
   Explicit notification messages use default kind=note; task handoffs are separate.

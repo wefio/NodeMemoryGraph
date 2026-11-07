@@ -93,8 +93,8 @@ Discussion notifications use original message identities rather than a process
 revision for every chat reply. Invitation enrollment and outbox publication commit
 with the message. Minimal author/key/hash/source tombstones survive message TTL
 so retry cannot rejoin a departed invitee; withdrawing a route retires its queued
-alerts without withdrawing another still-valid route. Pending reminders coalesce
-without deleting source discussions. Explicit notices use note messages, keeping
+alerts without withdrawing another still-valid route. Pending channel replies retain
+source-linked notices for batch delivery. Explicit notices use note messages, keeping
 claimable work separate. Bounded, source-labelled wake previews do not impose a
 conversation-round limit.
 
@@ -139,22 +139,39 @@ affected-participant sets allow local coordination under the collaboration agree
 Those sets are declarations rather than verified organizational authority. Phase
 state remains absent on events that do not opt in, avoiding a global mode change.
 
-Execution permits, automatic roster activity and in-flight operation fencing remain
-outside this increment. The [draft](../../design/board-event-records/collaboration-phase.md)
+Execution permits and in-flight operation fencing remain additional mechanisms.
+The [draft](../../design/board-event-records/collaboration-phase.md)
 keeps those policy choices open. Domain/state tests exercise version checks,
 confirmation, withdrawal, persistence, local scope and disclosure; they do not prove
 live multi-Agent alignment or host enforcement.
 
-## Scoped input-batch design extension
+## Shared activity and reply batches
 
-The collaboration draft includes source-bounded input batches and per-scope wake
-coordination. Agents can respond to an incomplete set of available replies when
-an adapter chooses only the first fresh entry. Coalescing a reminder while carrying
-only its latest source also leaves earlier replies dependent on a separate read.
-Both behaviors motivate retaining a pending source range and preparing several
-eligible replies at a shared processing boundary.
+Selecting one fresh reply fragments a discussion that already has several replies.
+Channel reminders therefore preserve individual pending sources and share one
+budgeted delivery envelope. Pending eligibility precedes pagination, allowing
+delivered rows to remain readable without hiding later replies. Round-robin
+scope ordering allows another discussion into the same bounded preparation.
 
-The collaboration draft owns the candidate semantics. This addition records the agreed design direction.
-Runtime batch delivery, concurrent wake coordination and failure recovery require
-their own implementation and tests. Batch delivery is distinct from phase agreement.
-[Input-batch draft](../../design/board-event-records/collaboration-phase.md#scoped-input-batches-and-wake-coordination)
+Busy is an independent blackboard semantic. Agent declarations and Harness
+observations have separate leases, with busy taking precedence and capabilities
+forming a union. This preserves a useful declaration even when native observation
+is unavailable and prevents a Harness idle observation from cancelling Agent busy.
+Per-Harness coordination policies would spread the shared semantics across
+adapters. Requiring common support would lose capabilities that some hosts offer.
+Unknown observation remains visible and permits delivery through an available
+output mechanism. Lease defaults are 180 seconds with a 3,600-second maximum.
+
+The [activity and batch contract](../../design/board-event-records/agent-activity-and-batches.md)
+owns the behavior. The initial transport frame admits at most 200 sources into
+the existing 16,000-character context budget. Receipts follow actual host acceptance
+and cover admitted sources only. Vector receipt writes are transactional. Local
+singleflight prevents overlapping adapter ticks from submitting the same session
+concurrently. Phase snapshots are rechecked before dispatch. Host/daemon crash
+recovery retains at-least-once semantics.
+
+Controlled fixtures cover 64 authors and 240 pending replies across pages, eight
+DSH recipients receiving 12-author batches, independent Agent busy declarations,
+phase changes during preparation, receipt rollback and WorkBuddy output failure.
+These fixtures measure protocol and adapter boundaries. Live Harness UI behavior
+and natural collaboration outcomes retain their separate validation scope.

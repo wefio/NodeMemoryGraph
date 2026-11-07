@@ -21,8 +21,8 @@ new event notification. A system delivery or ACK records arrival or having been 
 not emit another wake-capable chat message. A notification is not taking up a task and does
 not require everyone to confirm. When new collaboration is needed, an Agent may explicitly
 notify the event again instead of forwarding every utterance to the event group. Follow-up
-discussion inside a channel is reminded under that channel's subscription and may coalesce;
-that is not re-notifying the whole event. The event space itself keeps the process, relations
+discussion inside a channel retains source-linked pending notices under that channel's
+subscription and groups them into delivery batches. The event space keeps the process, relations
 and lifecycle instead of degrading into a group chat that only holds a member list.
 
 A notification may correspond either to an explicit event discussion or decision request, or
@@ -55,7 +55,7 @@ is associated with; a protocol ACK is not a new discussion message:
 | Notification scope | Recipients | Implicit spread that does not happen |
 | --- | --- | --- |
 | Named discussion | The Agents explicitly named; being explicitly invited into a channel registers a subscription under the rules below | Not every member is notified merely because the message is also associated with a channel or event. |
-| Channel discussion | Current channel subscribers, including voluntary subscriptions and those registered by an explicit invitation; reminders may coalesce | Other event members who were not invited to and do not subscribe to the channel are not notified automatically. |
+| Channel discussion | Current channel subscribers, including voluntary subscriptions and those registered by an explicit invitation, with source-preserving reply batches | Other event members who were not invited to and do not subscribe to the channel are not notified automatically. |
 | Event notification | Current event subscribers, who receive event-level collaboration requests and progress changes | An event subscription alone does not subscribe to every associated channel; an explicit invitation registers its target channel separately. |
 
 #### First-invitation delivery and channel subscription
@@ -96,9 +96,10 @@ by default does not turn them into an all-hands discussion notification.
 
 ### Autonomous collaboration and receipt-loop protection
 
-The scoped input-batch draft explores shared reading boundaries and wake scheduling
-for several available replies. It records the proposed extension separately from
-the notification behavior here. [Input-batch draft](collaboration-phase.md#scoped-input-batches-and-wake-coordination)
+Shared processing reports defer busy recipients and batch available replies under
+one rendered budget. Sources omitted by that budget remain pending. The activity
+and delivery contract defines capability union, acceptance and receipt boundaries.
+[Agent activity and reply batches](agent-activity-and-batches.md)
 
 No hard cap is placed on automatic wake-chain length, on a fixed number of rounds or on the
 number of event notifications, and no round is required to be resumed by a human. A quota or

@@ -140,6 +140,25 @@ note. Existing daemon instances must advertise the capability; a refused call is
 not permission to restart a shared service. Lifecycle, effects, authority and
 archive rules belong to the [event contract](../../../docs/design/board-event-records.md).
 
+## Session processing and reply batches
+
+Use `nmg_state space=board operation=agentActivity` with explicit `agentId` and
+`sessionId` to read a session's `busy|idle|unknown` state. Write
+`activity={"state":"busy"}` before a coordination-sensitive activity, renew
+the lease while it lasts, and write `activity={"state":"idle"}` when released.
+Optional `ttlSeconds`, `capabilities` and `expectedVersion` belong inside activity.
+The Agent declaration and Harness observation retain separate reports. Any live
+busy report defers automatic delivery. Discovery shows processing independently
+of registered tasks and public notes.
+
+CLI uses `nmg state write board agentActivity --agent ID --session-id SESSION
+--activity-json <JSON>`. A read uses the same operation and identity.
+Automatic delivery groups available eligible replies under one InformationView
+budget, preserving each source and leaving omitted replies pending. A batch
+requires no chat acknowledgement. See the
+[activity and batch contract](../../../docs/design/board-event-records/agent-activity-and-batches.md)
+for capability union, expiry, unknown observation and receipt boundaries.
+
 ## Memory boundary
 
 The board is a task-scoped coordination store. It is not semantic search, STG,

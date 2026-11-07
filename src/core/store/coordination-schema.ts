@@ -3,6 +3,12 @@ import type { DatabaseSync } from "node:sqlite";
 /** Additive, idempotent migration; event history is not ordinary board TTL state. */
 export function ensureCoordinationSchema(db: DatabaseSync): void {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS board_agent_activity (
+      agent_id TEXT NOT NULL, session_id TEXT NOT NULL, source TEXT NOT NULL,
+      expires_at TEXT NOT NULL, report_json TEXT NOT NULL,
+      PRIMARY KEY(agent_id,session_id,source)
+    );
+    CREATE INDEX IF NOT EXISTS idx_board_agent_activity_expiry ON board_agent_activity(expires_at);
     CREATE TABLE IF NOT EXISTS coordination_events (
       id TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('active','ended')),
       revision INTEGER NOT NULL CHECK(revision > 0), updated_at TEXT NOT NULL,

@@ -2,6 +2,8 @@ import type { TaskBoardEntry, TaskBoardKind } from "./types.ts";
 import { coordinationNames, coordinationText } from "./coordination-events.ts";
 
 export type BoardNotificationScope = "direct" | "channel" | "event";
+export const BROADCAST_PREFIX = "[NMG board 协作广播]";
+export const MAX_BOARD_DELIVERY_ENTRIES = 200;
 export interface BoardNotificationRequest {
   /** Stable across retries of the same invitation/notification, scoped to its author. */
   key: string;

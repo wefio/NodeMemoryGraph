@@ -18,6 +18,13 @@ import {
 
 import type { BoardMessageInput } from "../board-notifications.ts";
 import {
+  projectAgentActivity,
+  parseAgentActivity,
+  type AgentActivityInput,
+  type AgentActivityReport,
+  type AgentSessionActivity,
+} from "../agent-activity.ts";
+import {
   boardNoticeInactive,
   coalesceNotices,
   retireBoardNoticeScope,
@@ -361,6 +368,62 @@ export function withCoordination<TBase extends Constructor>(Base: TBase) {
       });
     }
 
+    readAgentActivity(
+      agentId: string,
+      sessionId: string,
+      now = new Date().toISOString(),
+    ): AgentSessionActivity {
+      const actor = coordinationText(agentId, "agentId", 200);
+      const session = coordinationText(sessionId, "sessionId", 200);
+      const rows = this.db
+        .prepare(
+          "SELECT report_json FROM board_agent_activity WHERE agent_id=? AND session_id=? AND expires_at>? ORDER BY source",
+        )
+        .all(actor, session, now);
+      return projectAgentActivity(
+        actor,
+        session,
+        rows.map((row) => JSON.parse(String(row.report_json)) as AgentActivityReport),
+      );
+    }
+
+    reportAgentActivity(
+      agentId: string,
+      sessionId: string,
+      value: AgentActivityInput,
+    ): AgentSessionActivity {
+      const input = parseAgentActivity(value);
+      const actor = coordinationText(agentId, "agentId", 200);
+      const session = coordinationText(sessionId, "sessionId", 200);
+      return this.writeTransaction(() => {
+        const now = new Date().toISOString();
+        this.db.prepare("DELETE FROM board_agent_activity WHERE expires_at<=?").run(now);
+        const previous = this.db
+          .prepare(
+            "SELECT report_json FROM board_agent_activity WHERE agent_id=? AND session_id=? AND source=?",
+          )
+          .get(actor, session, input.source);
+        const report = previous
+          ? (JSON.parse(String(previous.report_json)) as AgentActivityReport)
+          : undefined;
+        if (input.expectedVersion !== undefined && input.expectedVersion !== report?.version)
+          throw Error("Agent activity version changed");
+        const next: AgentActivityReport = {
+          source: input.source,
+          state: input.state,
+          capabilities: input.capabilities ?? report?.capabilities ?? [],
+          version: randomUUID(),
+          expiresAt: new Date(Date.now() + input.ttlSeconds * 1000).toISOString(),
+        };
+        this.db
+          .prepare(
+            "INSERT INTO board_agent_activity(agent_id,session_id,source,expires_at,report_json) VALUES(?,?,?,?,?) ON CONFLICT(agent_id,session_id,source) DO UPDATE SET expires_at=excluded.expires_at,report_json=excluded.report_json",
+          )
+          .run(actor, session, input.source, next.expiresAt, JSON.stringify(next));
+        return this.readAgentActivity(actor, session, now);
+      });
+    }
+
     setAgentStatusNote(input: { agentId: string; text: string }): AgentWorkStatus {
       const actor = coordinationText(input.agentId, "agentId", 200),
         text = coordinationText(input.text, "status note", 500, true);
@@ -391,6 +454,12 @@ export function withCoordination<TBase extends Constructor>(Base: TBase) {
         .all(now, agentId, now, agentId);
       return {
         agentId,
+        sessions: this.db
+          .prepare(
+            "SELECT DISTINCT session_id FROM board_agent_activity WHERE agent_id=? AND expires_at>? ORDER BY session_id",
+          )
+          .all(agentId, now)
+          .map((row) => this.readAgentActivity(agentId, String(row.session_id), now)),
         activity: rows.length ? "working" : "idle",
         statusNote: String(note?.status_note ?? ""),
         taskCount: Number(rows[0]?.total ?? 0),

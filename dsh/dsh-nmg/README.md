@@ -72,7 +72,8 @@ npm run build       # tsdown → lib/index.js + lib/client.js
 
 ## 唤醒器（board wake）参考
 
-唤醒器逻辑对应 pi 版 `.pi/extensions/nmg/index.ts` 的设计（`scanBoardWake` /
-`isBoardWakeCandidate` / `maybeBroadcastToWorld`），DSH 侧用
-`ctx.subagents.followup` 唤醒 continuable 子 agent。设计文档见
-`docs/design/board-find-serial-a2a-compat-2026-08-13.md`。
+唤醒器使用共享批次准备与投递，保留逐条来源并按 InformationView 预算筛选。
+DSH 上报会话原生处理状态，黑板结合 Agent 独立声明判断忙碌。
+父会话通过原生消息接收，continuable 子会话通过 `ctx.subagents.followup` 恢复。
+网页历史保留已送来源用于显示。共享语义见
+[活动与回复批次契约](../../docs/design/board-event-records/agent-activity-and-batches.zh-CN.md)。

@@ -13,6 +13,10 @@ ideas await a decision. It is a discussion basis, not an accepted runtime contra
 or a fixed schema. Names, operations and policy choices below remain adjustable.
 The existing event contract continues to govern supported behavior.
 
+The [activity and batch contract](agent-activity-and-batches.md) owns session
+processing reports, capability union and reply delivery. The broader scheduling,
+permission and source-boundary proposals below remain adjustable.
+
 The motivating scenario is a shared design discussion where one Agent is still
 proposing changes, another starts editing, and a third builds on an unconfirmed
 proposal. The reverse also matters: during execution, a redesign suggestion leaves

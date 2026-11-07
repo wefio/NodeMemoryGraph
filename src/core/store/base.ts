@@ -38,6 +38,7 @@ import type {
 } from "../types.ts";
 import { TASK_BOARD_VERDICTS, WORLD_BOARD_ID } from "../types.ts";
 import { boardEntryView } from "../board-entry-view.ts";
+import { BROADCAST_PREFIX } from "../board-notifications.ts";
 import { currentlyValid, notExpired } from "./clock.ts";
 import { histogramAdd } from "../perf.ts";
 import { Router } from "../router.ts";
@@ -483,12 +484,15 @@ export class NmgStoreBase {
 
   readTaskBoard(input: {
     taskId: string;
+    agentId?: string;
+    pendingForSession?: string;
     afterCursor?: string;
     limit?: number;
     includeResolved?: boolean;
     now?: string;
   }): { entries: TaskBoardEntry[]; nextCursor: string | null } {
     const now = input.now ?? new Date().toISOString();
+    const pending = pendingWakeRead(input, now, false);
     this.pruneExpiredTaskBoardEntries(now, input.taskId);
     // The cursor is the opaque id of the last entry the caller already saw.
     // Resolve it to its (created_at, id) ordering position; entries strictly
@@ -513,6 +517,7 @@ export class NmgStoreBase {
          WHERE task_id = ?
            AND (created_at > ? OR (created_at = ? AND id > ?))
            AND (? = 1 OR status = 'open')
+           ${pending.sql}
          ORDER BY created_at ASC, id ASC LIMIT ?`,
       )
       .all(
@@ -521,6 +526,7 @@ export class NmgStoreBase {
         afterCreatedAt,
         afterId,
         input.includeResolved ? 1 : 0,
+        ...pending.args,
         Math.max(1, Math.min(input.limit ?? 50, 200)),
       ) as Row[];
     const rawEntries = rows.map(mapTaskBoardEntry);
@@ -537,10 +543,12 @@ export class NmgStoreBase {
   readDirectedTaskBoard(input: {
     agentId: string;
     agentName: string;
+    pendingForSession?: string;
     limit?: number;
     now?: string;
   }): TaskBoardEntry[] {
     const now = input.now ?? new Date().toISOString();
+    const pending = pendingWakeRead(input, now, true);
     this.pruneExpiredTaskBoardEntries(now);
     const targets = [...new Set([input.agentId.trim(), input.agentName.trim()].filter(Boolean))];
     if (targets.length === 0) return [];
@@ -549,9 +557,15 @@ export class NmgStoreBase {
       .prepare(
         `SELECT * FROM task_board_entries
          WHERE status = 'open' AND expires_at > ? AND [to] IN (${placeholders})
+           ${pending.sql}
          ORDER BY created_at ASC, id ASC LIMIT ?`,
       )
-      .all(now, ...targets, Math.max(1, Math.min(input.limit ?? 50, 200))) as Row[];
+      .all(
+        now,
+        ...targets,
+        ...pending.args,
+        Math.max(1, Math.min(input.limit ?? 50, 200)),
+      ) as Row[];
     const entries = rows.map(mapTaskBoardEntry);
     const ackMap = this.taskBoardAckMap(entries.map((entry) => entry.id));
     for (const entry of entries) entry.ackedBy = ackMap.get(entry.id) ?? [];
@@ -3050,6 +3064,36 @@ function mapTaskBoardEntry(row: Row): TaskBoardEntry {
  *  and an absent nullable column has no value to invent. */
 function optionalText(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value);
+}
+
+/** Filter before LIMIT so delivered, silent, self-authored or leased rows do
+ * not permanently occupy the first wake page. Ordinary reads retain history. */
+function pendingWakeRead(
+  input: { pendingForSession?: string; agentId?: string },
+  now: string,
+  directed: boolean,
+): { sql: string; args: string[] } {
+  if (!input.pendingForSession) return { sql: "", args: [] };
+  if (!input.agentId) throw Error("Pending wake reads require agentId");
+  return {
+    sql: `AND notification_origin=0
+      AND (kind IN ('handoff','question','blocker') OR coordination_notice=1 OR notification_source_id IS NOT NULL)
+      AND (serial_state IS NULL OR serial_state!='pending')
+      AND (claim_expires_at IS NULL OR claim_expires_at<=?)
+      AND ((source_session_id IS NULL AND agent_id!=?) OR (source_session_id IS NOT NULL AND source_session_id!=?))
+      AND content NOT LIKE ?
+      AND NOT EXISTS (SELECT 1 FROM task_board_deliveries d WHERE d.entry_id=task_board_entries.id AND d.session_id=?)
+      AND NOT EXISTS (SELECT 1 FROM task_board_acks a WHERE a.entry_id=task_board_entries.id AND a.agent_id=?)
+      ${directed ? "" : "AND [to] IS NULL"}`,
+    args: [
+      now,
+      input.agentId,
+      input.pendingForSession,
+      BROADCAST_PREFIX + "%",
+      input.pendingForSession,
+      input.agentId,
+    ],
+  };
 }
 
 /** The handle options for one open: a read-only factory gets a handle that cannot write, which is a

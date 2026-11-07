@@ -26,6 +26,17 @@ import { pathToFileURL } from "node:url";
 import { compatibleLease, liveLease, rpcCall } from "../src/integration/lease-transport.ts";
 import { prepareAutomaticRecallSurface } from "../src/integration/agent-surface.ts";
 import { RecallBudget } from "../src/integration/recall-budget.ts";
+import {
+  collectWakeCandidates,
+  readWakeConfig,
+  wakeBudgetGate,
+  type BoardWakeState,
+} from "../src/integration/board-wake.ts";
+import {
+  preparePendingBoardWake,
+  recordBoardWakeBatchDelivery,
+  reportHarnessActivity,
+} from "../src/integration/board-wake-batch.ts";
 import { compactSearchContext } from "../src/integration/search-projection.ts";
 import type { MemoryContext } from "../src/core/types.ts";
 
@@ -85,20 +96,9 @@ const RECALL_MAX_TIER = 1;
 const RECALL_GRAPH_HOPS = 1;
 const RECALL_QUERY_CHARS = 400;
 
-const WORLD_BOARD_ID = "default";
 const FALSE_LIKE = new Set(["0", "false", "off", "no"]);
 const BROADCAST_PREFIX = "[NMG board 协作广播]";
 const WAKE_KINDS = new Set(["question", "blocker", "handoff"]);
-const KIND_RANK: Readonly<Record<string, number>> = { question: 0, blocker: 1, handoff: 2 };
-const KIND_LABEL: Readonly<Record<string, string>> = {
-  question: "问题",
-  blocker: "阻塞",
-  handoff: "交接",
-  goal: "目标",
-  note: "记录",
-  decision: "决定",
-  result: "结果",
-};
 
 function dataDir(): string {
   return process.env.NMG_DATA_DIR?.trim() || join(homedir(), ".nmg");
@@ -265,101 +265,70 @@ export function isBoardWakeCandidate(
   );
 }
 
-/** Poll the task board for one undelivered open entry and format its wake
- * notice. Returns "" when there is nothing to say (or wake is off). */
+/** Prepared output and its host-acceptance confirmation. */
+interface HookBoardBatch {
+  text: string;
+  confirm?: () => Promise<void>;
+}
+
+async function prepareHookBoardWake(
+  payload: HookPayload,
+  dir: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<HookBoardBatch> {
+  const config = readWakeConfig(dir);
+  const statePath = join(dir, "workbuddy-board-wake-state.json");
+  const state: BoardWakeState = readJson(statePath) ?? {
+    budgetDate: "",
+    budgetUsed: 0,
+    lastWakeAt: 0,
+  };
+  const now = Date.now();
+  if (!wakeBudgetGate(config, state, now)) return { text: "" };
+  const lease = await compatibleLease(dir);
+  if (!lease) return { text: "" };
+  const { sessionId, agentId } = agentIdentity(payload, environment);
+  const rpc = (method: string, params: unknown) => rpcCall(lease, method, params);
+  await reportHarnessActivity(rpc, agentId, sessionId, "unknown", ["stdout-context"]);
+  const candidates = await collectWakeCandidates(rpc, { agentId, agentName: agentId, sessionId });
+  const batch = await preparePendingBoardWake({
+    invoke: rpc,
+    entries: candidates,
+    dataDir: dir,
+    agentId,
+    sessionId,
+  });
+  if (!batch.entries.length) return { text: "" };
+  return {
+    text: batch.information.text,
+    confirm: async () => {
+      await recordBoardWakeBatchDelivery(rpc, batch.entries, agentId, sessionId);
+      state.budgetUsed += 1;
+      state.lastWakeAt = now;
+      writeJson(statePath, state);
+    },
+  };
+}
+
+/** Preparation-only callers can inspect text without recording host delivery. */
 export async function pollBoardWake(
   payload: HookPayload,
   dir = dataDir(),
   environment = process.env,
 ): Promise<string> {
-  const config = readJson(join(dir, "board-wake.json")) ?? {};
-  if (config.enabled === false) return "";
-
-  const statePath = join(dir, "workbuddy-board-wake-state.json");
-  const state = readJson(statePath) ?? { budgetDate: "", budgetUsed: 0, lastWakeAt: 0 };
-  const now = Date.now();
-  const cooldownMs =
-    config.cooldownMs === 0 ? 0 : Math.max(30_000, Number(config.cooldownMs) || 600_000);
-  if (cooldownMs > 0 && now - Number(state.lastWakeAt || 0) < cooldownMs) return "";
-  const budget = config.budget === 0 ? 0 : Math.max(1, Number(config.budget) || 8);
-  const today = new Date(now).toISOString().slice(0, 10);
-  if (state.budgetDate !== today) {
-    state.budgetDate = today;
-    state.budgetUsed = 0;
-  }
-  if (budget > 0 && state.budgetUsed >= budget) return "";
-
-  const lease = await compatibleLease(dir);
-  if (!lease) return "";
-  const { sessionId, agentId } = agentIdentity(payload, environment);
-  const rpc = (method: string, params: unknown) => rpcCall(lease, method, params);
-
-  const candidates: WakeEntry[] = [];
-  const collect = (taskId: string, entries: readonly WakeEntry[] | undefined) => {
-    for (const entry of entries ?? []) {
-      if (isBoardWakeCandidate(entry, { sessionId, agentId, now })) {
-        candidates.push({ ...entry, taskId });
-      }
-    }
-  };
-  const world = await rpc("taskBoard", { action: "read", taskId: WORLD_BOARD_ID, agentId });
-  collect(WORLD_BOARD_ID, world?.entries);
-  const subs = await rpc("taskBoard", { action: "listSubscriptions", agentId, sessionId });
-  for (const board of subs?.subscriptions ?? []) {
-    if (!board.taskId || board.taskId === WORLD_BOARD_ID) continue;
-    const read = await rpc("taskBoard", { action: "read", taskId: board.taskId, agentId });
-    collect(board.taskId, read?.entries);
-  }
-  if (candidates.length === 0) return "";
-
-  const freshList = [];
-  for (const taskId of new Set(candidates.map((candidate) => candidate.taskId))) {
-    const check = await rpc("taskBoard", {
-      action: "deliveryCheck",
-      taskId,
-      agentId,
-      sessionId,
-      entryIds: candidates.filter((candidate) => candidate.taskId === taskId).map((c) => c.id),
-    });
-    if (check?.suppressed) continue;
-    const delivered = new Set(check?.delivered ?? []);
-    const acked = new Set(check?.acked ?? []);
-    for (const candidate of candidates) {
-      if (candidate.taskId === taskId && !delivered.has(candidate.id) && !acked.has(candidate.id)) {
-        freshList.push(candidate);
-      }
-    }
-  }
-  if (freshList.length === 0) return "";
-
-  freshList.sort(
-    (left, right) =>
-      (KIND_RANK[left.kind] ?? 9) - (KIND_RANK[right.kind] ?? 9) ||
-      String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? "")),
-  );
-  const pick = freshList[0];
-  // Receipt first: at-least-once notification beats a lost dedup write.
-  await rpc("taskBoard", {
-    action: "recordDelivery",
-    entryId: pick.id,
-    sessionId,
-    agentId,
-    source: "wake",
-  }).catch(() => {});
-  state.budgetUsed += 1;
-  state.lastWakeAt = now;
-  writeJson(statePath, state);
-
-  const excerpt = pick.content.length > 140 ? `${pick.content.slice(0, 140)}…` : pick.content;
-  const label = KIND_LABEL[pick.kind] ?? "条目";
-  return `[NMG board] 你订阅的频道 ${pick.taskId} 有新${label}：#${pick.sequence} — ${excerpt}（open，可认领）。需要的话用 nmg_board read 查看详情、claim 认领处理。`;
+  return (await prepareHookBoardWake(payload, dir, environment)).text;
 }
 
 export async function runHook(
   payload: HookPayload,
-  options: { dir?: string; environment?: NodeJS.ProcessEnv } = {},
+  options: {
+    dir?: string;
+    environment?: NodeJS.ProcessEnv;
+    writeOutput?: (text: string) => Promise<void>;
+  } = {},
 ): Promise<string> {
   const output: string[] = [];
+  let confirmBoard: (() => Promise<void>) | undefined;
   const dir = options.dir ?? dataDir();
   const environment = options.environment ?? process.env;
   const coordinationEnabled = !FALSE_LIKE.has(
@@ -371,11 +340,21 @@ export async function runHook(
     if (recall) output.push(recall);
     if (coordinationEnabled) {
       await reportAgentPresence(payload, dir, environment).catch(() => false);
-      const notice = await pollBoardWake(payload, dir, environment).catch(() => "");
-      if (notice) output.push(notice);
+      const batch = await prepareHookBoardWake(payload, dir, environment).catch(
+        () => ({ text: "" }) as HookBoardBatch,
+      );
+      if (batch.text) {
+        output.push(batch.text);
+        confirmBoard = batch.confirm;
+      }
     }
   }
-  return output.join("\n");
+  const text = output.join("\n");
+  if (text && options.writeOutput) {
+    await options.writeOutput(text);
+    await confirmBoard?.();
+  }
+  return text;
 }
 
 async function runFromStdin(): Promise<void> {
@@ -384,8 +363,12 @@ async function runFromStdin(): Promise<void> {
   for await (const chunk of process.stdin) input += chunk;
   try {
     const payload = JSON.parse(input || "{}");
-    const output = await runHook(payload);
-    if (output) process.stdout.write(output);
+    await runHook(payload, {
+      writeOutput: (text) =>
+        new Promise<void>((done, reject) => {
+          process.stdout.write(text, (error) => (error ? reject(error) : done()));
+        }),
+    });
   } catch {
     // A hook must never break the session: stay silent on malformed input.
   }

@@ -51,6 +51,21 @@ nmg board resolve TASK_ID ENTRY_ID --agent scout-b \
 阶段状态不授权工具，也不停止在途工作；讨论候选和执行请求先用关联范围的普通消息记录，
 实际行动等待另行约定的授权。
 
+## 会话处理状态与回复批次
+
+使用 `nmg_state space=board operation=agentActivity`，显式指定 `agentId` 和 `sessionId`，
+读取会话的 `busy|idle|unknown` 状态。协作敏感活动前写入 `activity={"state":"busy"}`，
+持续期间续租，解除时写入 `activity={"state":"idle"}`。
+可选 `ttlSeconds`、`capabilities`、`expectedVersion` 放在 activity 内。
+Agent 声明与 Harness 观测各自保留报告，任一有效 busy 都暂缓自动投递。
+发现列表分别显示处理状态、已登记任务和公开说明。
+
+CLI 使用 `nmg state write board agentActivity --agent ID --session-id SESSION
+--activity-json <JSON>`，读取沿用相同操作与身份。
+自动投递在一个 InformationView 预算内成批纳入已到达的合格回复，保留逐条来源，省略项继续待送。
+收到批次无需发聊天确认。能力并集、过期、未知观测和收据边界见
+[活动与批次契约](../../../docs/design/board-event-records/agent-activity-and-batches.zh-CN.md)。
+
 ## 记忆边界
 
 Board 是 task-scoped 协作存储，不是语义搜索、STG、LTG 或共享 AG。每个 Agent 将相关条目读入自己的私有 AG。条目可记录 goal、blocker、question、result、handoff 和 decision；不得记录秘密或隐藏 chain-of-thought。条目会过期；只有通过独立且有证据的 `nmg remember` 调用，持久结论才进入长期记忆。

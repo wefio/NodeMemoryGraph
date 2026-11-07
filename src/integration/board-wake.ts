@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { boardEntryView } from "../core/board-entry-view.ts";
 import { WORLD_BOARD_ID } from "../core/types.ts";
 import type { TaskBoardToolEntry, TaskBoardToolResult } from "./tool-contract.ts";
-import { isBoardDiscussionNotice } from "../core/board-notifications.ts";
+import { isBoardDiscussionNotice, BROADCAST_PREFIX } from "../core/board-notifications.ts";
+export { BROADCAST_PREFIX } from "../core/board-notifications.ts";
 import { isCoordinationEventNotice } from "../core/coordination-events.ts";
 import { renderEventNotice, renderDiscussionNotice } from "./coordination-state.ts";
 import { canDeliverBoardEntry, type BoardDeliveryCheck } from "./board-delivery.ts";
@@ -110,7 +111,6 @@ export const WORLD_BROADCAST_SESSION = "world-broadcast";
  * another entry). Entries carrying it are never re-broadcast — otherwise a
  * broadcast wakes a session, which broadcasts the broadcast, recursively
  * flooding the world channel (observed live: #12→#13→#16…). */
-export const BROADCAST_PREFIX = "[NMG board 协作广播]";
 
 /** Broadcasts are transient pull notices: they announce another entry and must
  * not outlive it. RAII: give them a short TTL so an unanswered broadcast is
@@ -206,7 +206,7 @@ export function isBoardWakeCandidate(
  * daemon transport (lease RPC or CLI fallback). */
 export async function collectWakeCandidates(
   invoke: (method: string, params: unknown) => Promise<unknown>,
-  input: { agentId: string; agentName: string; sessionId: string },
+  input: { agentId: string; agentName: string; sessionId: string; subscriptionSessionId?: string },
 ): Promise<WakeCandidate[]> {
   const candidates: WakeCandidate[] = [];
   const candidateIds = new Set<string>();
@@ -226,12 +226,16 @@ export async function collectWakeCandidates(
     action: "read",
     taskId: WORLD_BOARD_ID,
     agentId,
+    pendingForSession: sessionId,
+    limit: 200,
   })) as TaskBoardToolResult;
   collect(WORLD_BOARD_ID, world.entries);
   const directed = (await invoke("taskBoard", {
     action: "readDirected",
     agentId,
     agentName,
+    pendingForSession: sessionId,
+    limit: 200,
   })) as { action: "readDirected"; entries: TaskBoardToolEntry[] };
   for (const entry of directed.entries ?? []) {
     const taskId = entry.taskId?.trim();
@@ -245,13 +249,15 @@ export async function collectWakeCandidates(
   const subs = (await invoke("taskBoard", {
     action: "listSubscriptions",
     agentId,
-    sessionId,
+    sessionId: input.subscriptionSessionId ?? sessionId,
   })) as { action: "listSubscriptions"; subscriptions: Array<{ taskId: string }> };
   for (const board of subs.subscriptions ?? []) {
     const read = (await invoke("taskBoard", {
       action: "read",
       taskId: board.taskId,
       agentId,
+      pendingForSession: sessionId,
+      limit: 200,
     })) as TaskBoardToolResult;
     collect(board.taskId, read.entries);
   }

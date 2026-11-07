@@ -176,6 +176,8 @@ board-wake owner，DSH host package 复用同一通知判定与输出，MCP／CL
 
 可选阶段声明与版本化切换见[范围级阶段协商](board-event-records/phase-agreement.zh-CN.md)。
 
+[活动与批次契约](board-event-records/agent-activity-and-batches.zh-CN.md)定义会话忙碌报告、能力并集及保留来源的投递。
+
 已有 owner 和操作能表达协作需求时，优先复用。原型词汇是参考清单，不要求创建对应实体。
 只有具体需求超出支持范围时，才凭可复现失败或验收场景扩展明确的 owner。
 保留现有生命周期、权威与兼容边界；候选概念不是承诺实施的待办。

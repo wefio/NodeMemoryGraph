@@ -69,6 +69,8 @@ export async function requireBoardEventCapability(
   const hello = (await readHello()) as { capabilities?: string[] } | null;
   if (!hello?.capabilities?.includes("board-events"))
     throw new Error("NMG daemon does not advertise board-events");
+  if (params.operation === "agentActivity" && !hello.capabilities.includes("board-agent-activity"))
+    throw new Error("NMG daemon does not advertise board-agent-activity");
 }
 
 export const STATE_OPERATIONS = [

@@ -1,4 +1,5 @@
 import type { NmgStore } from "../core/store.ts";
+import { parseAgentActivity, type AgentSessionActivity } from "../core/agent-activity.ts";
 import {
   coordinationNames,
   coordinationText,
@@ -56,7 +57,7 @@ export function renderEventNotice(entry: { content: string; eventId?: string }):
   });
 }
 
-export const COORDINATION_READ_OPERATIONS = ["eventRead", "agentStatus"] as const;
+export const COORDINATION_READ_OPERATIONS = ["eventRead", "agentStatus", "agentActivity"] as const;
 export const COORDINATION_WRITE_OPERATIONS = [
   "eventCreate",
   "eventUpdate",
@@ -64,6 +65,7 @@ export const COORDINATION_WRITE_OPERATIONS = [
   "eventUnsubscribe",
   "eventDelete",
   "agentStatus",
+  "agentActivity",
 ] as const;
 export const COORDINATION_OPERATIONS: ReadonlySet<string> = new Set([
   ...COORDINATION_READ_OPERATIONS,
@@ -94,6 +96,7 @@ export interface CoordinationStateResult {
   subscribed?: boolean;
   deleted?: boolean;
   agentStatus?: AgentWorkStatus;
+  agentActivity?: AgentSessionActivity;
 }
 export function coordinationSummary(event: CoordinationEvent): CoordinationEventSummary {
   return {
@@ -128,6 +131,16 @@ export function executeCoordinationState(
   const actor = coordinationText(params.agentId, "agentId", 200),
     data = inputObject(params.event);
   const id = () => coordinationText(params.eventId, "eventId", 200);
+  if (operation === "agentActivity") {
+    const session = coordinationText(params.sessionId, "sessionId", 200);
+    return {
+      action: operation,
+      agentActivity:
+        params.action === "write"
+          ? store.reportAgentActivity(actor, session, parseAgentActivity(params.activity))
+          : store.readAgentActivity(actor, session),
+    };
+  }
   if (operation === "agentStatus")
     return {
       action: operation,
@@ -246,6 +259,13 @@ export function agentStatusViews(status: AgentWorkStatus): InformationView[] {
         `${status.statusNote ? `Note: ${status.statusNote}\n` : ""}${status.tasks.map((task) => `${task.taskId} #${task.entryId}${task.eventId ? ` event=${task.eventId}` : ""}: ${task.summary}`).join("\n")}` ||
         "No registered active tasks.",
     },
+    ...(status.sessions ?? []).map((session): InformationView => ({
+      source: { kind: "agent", agentId: status.agentId, sessionId: session.sessionId },
+      requiredLabels: [
+        `agent=${status.agentId} session=${session.sessionId} processing=${session.state}`,
+      ],
+      body: JSON.stringify(session),
+    })),
   ];
 }
 function eventDetailViews(result: CoordinationStateResult): InformationView[] {
@@ -276,6 +296,18 @@ export function prepareCoordinationSurface(
   result: CoordinationStateResult,
 ): PreparedInformationOutput {
   const views: InformationView[] = [];
+  if (result.agentActivity)
+    views.push({
+      source: {
+        kind: "agent",
+        agentId: result.agentActivity.agentId,
+        sessionId: result.agentActivity.sessionId,
+      },
+      requiredLabels: [
+        `agent=${result.agentActivity.agentId} session=${result.agentActivity.sessionId} processing=${result.agentActivity.state}`,
+      ],
+      body: JSON.stringify(result.agentActivity),
+    });
   if (result.events) views.push(...coordinationDirectoryViews(result.events));
   if (result.agentStatus) views.push(...agentStatusViews(result.agentStatus));
   if (result.event)

@@ -57,6 +57,7 @@ export interface TaskBoardDirectoryEntry {
 }
 
 export interface TaskBoardAgentEntry {
+  sessions?: AgentWorkStatus["sessions"];
   id?: string;
   agentName: string;
   description?: string | null;
@@ -604,6 +605,7 @@ function discoveryViews(agents: readonly TaskBoardAgentEntry[]): InformationView
             statusNote: agent.statusNote ?? "",
             tasks: agent.tasks ?? [],
             taskCount: agent.taskCount ?? 0,
+            sessions: agent.sessions,
           })
         : []),
     ]),

@@ -1181,7 +1181,7 @@ const TARGETS: readonly Target[] = [
         // The wire drops an adoption request: the entry is created, the caller is told the put
         // succeeded, and no run manages it - the silent divergence the epoch rule exists for.
         name: "the-wire-drops-an-adoption-request",
-        derive: { within: "parseTaskBoardParams", operator: "replace-property", property: "adopt" },
+        derive: { within: "parseTaskBoardPut", operator: "replace-property", property: "adopt" },
         to: "undefined",
         expect:
           "adoption is part of the transition that creates the entry, so a refusal leaves no entry",

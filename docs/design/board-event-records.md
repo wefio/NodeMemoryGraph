@@ -177,6 +177,9 @@ evidence that these capabilities passed:
 
 See the [scoped phase agreement](board-event-records/phase-agreement.md) for optional phase declarations and versioned transitions.
 
+The [activity and batch contract](board-event-records/agent-activity-and-batches.md)
+defines session busy reports, capability union and source-preserving delivery.
+
 Reuse an existing owner and operation when they express the collaboration need.
 Prototype vocabulary is a reference shelf, not a requirement to create matching
 entities. Add semantics only for a concrete unsupported case, with a reproducible

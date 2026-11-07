@@ -157,6 +157,28 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     assert.match(textOf(exact), /stable Active Graph session/u);
     assert.match(textOf(exact), new RegExp(memoryId, "u"));
 
+    const busy = await client.callTool({
+      name: "nmg_state",
+      arguments: {
+        space: "board",
+        action: "write",
+        operation: "agentActivity",
+        activity: { state: "busy", capabilities: ["manual-coordination"] },
+      },
+    });
+    assert.match(textOf(busy), /processing=busy/);
+    assert.match(textOf(busy), /manual-coordination/);
+    const idle = await client.callTool({
+      name: "nmg_state",
+      arguments: {
+        space: "board",
+        action: "write",
+        operation: "agentActivity",
+        activity: { state: "idle" },
+      },
+    });
+    assert.match(textOf(idle), /processing=idle/);
+
     const roster = await client.callTool({
       name: "nmg_state",
       arguments: {

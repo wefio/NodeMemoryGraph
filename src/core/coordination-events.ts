@@ -92,6 +92,7 @@ export interface UpdateCoordinationEvent {
   change: CoordinationMutation;
 }
 export interface AgentWorkStatus {
+  sessions?: import("./agent-activity.ts").AgentSessionActivity[];
   agentId: string;
   activity: "idle" | "working";
   statusNote: string;

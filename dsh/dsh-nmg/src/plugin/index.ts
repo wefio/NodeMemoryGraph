@@ -29,10 +29,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import { coordinationEnabled as configuredCoordinationEnabled } from '../../../../src/integration/config.ts'
 import { COMMON_REMEMBER_ACTIONS } from '../../../../src/integration/tool-contract.ts'
 import { stateRequiresBoardEvents } from '../../../../src/integration/state.ts'
-import { renderEventNotice, renderDiscussionNotice } from '../../../../src/integration/coordination-state.ts'
-import { isBoardDiscussionNotice } from '../../../../src/core/board-notifications.ts'
-import { canDeliverBoardEntry } from '../../../../src/integration/board-delivery.ts'
-import { isCoordinationEventNotice } from '../../../../src/core/coordination-events.ts'
+import { collectWakeCandidates, maybeBroadcastToWorld as broadcastWakeEntry } from '../../../../src/integration/board-wake.ts'
+import { enqueueBoardWakeBatch, reportHarnessActivity } from '../../../../src/integration/board-wake-batch.ts'
 import { compactSearchContext, memoryDisclosureEntries } from '../../../../src/integration/search-projection.ts'
 import {
   prepareAutomaticRecallSurface,
@@ -657,19 +655,9 @@ export function apply(ctx: Context): () => void {
   }
 
   // ── board wake loop (the "waker") ──────────────────────────────────────────
-  // NMG task-board waker: a host-side timer that polls the daemon for work
-  // addressed to THIS DSH session — directed `to=` entries plus the world
-  // channel (`default`) broadcast — records a delivery receipt for each fresh
-  // entry so it never re-wakes, and surfaces the pending batch to the model as
-  // native runtime context (`nmg:board-wake`, order 85, before recall at 90).
-  //
-  // The daemon only provides primitives (readDirected / read / deliveryCheck /
-  // recordDelivery / registerAgent / heartbeat); the loop itself is the
-  // client's job — this package is that client.
-  //
-  // Claim ≠ notify: the waker only NOTIFIES ("通知决定谁知道"). Taking over
-  // work ("claim 决定谁工作") is the model's call via `nmg_state action=write space=board operation=claim`, so we
-  // never auto-claim — we surface entries and let the model decide.
+  // Native status observations are reported to the board's session activity
+  // owner. Shared batch dispatch reads that owner and preserves per-source
+  // delivery identities. The web pill retains an independent display history.
 
   const hostSessionId = (process.env.DSH_SESSION_ID || '').trim() || 'dsh'
   const projectName = workspaceRoot.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || 'dsh'
@@ -677,19 +665,6 @@ export function apply(ctx: Context): () => void {
   const WAKE_AGENT_NAME = projectName // display label; renaming never loses routing
   const WAKE_WORLD_TASK = 'default' // the world channel is always scanned
   const WAKE_MAX_ENTRIES = 50
-  // 对齐 NMG 唤醒器参考实现 (kimi-plugin/nmg-hook.mjs isBoardWakeCandidate)：
-  // 只有 actionable 种类会唤醒——推送 note/result/decision/goal 是"确认风暴"
-  // (3f9d62b notify-only-is-silent)。广播 meta 条目永不唤醒 (ed51a8f)。
-  const WAKE_KINDS = new Set(['question', 'blocker', 'handoff'])
-  const KIND_RANK = { question: 0, blocker: 1, handoff: 2 }
-  const BROADCAST_PREFIX = '[NMG board 协作广播]'
-  // 照抄 pi 版 (.pi/extensions/nmg/index.ts) 的世界广播设计：
-  // - WORLD_BROADCAST_SESSION: 哨兵投递回执，每个条目最多广播一次（(entry, sentinel) 去重）
-  // - BROADCAST_KINDS: 协作类才值得广播公告；note/result/decision 静默（世界频道保持安静）
-  // - BROADCAST_TTL_SECONDS: RAII——广播是临时 pull 公告，TTL 回收而不是永久 open 死状态
-  const WORLD_BROADCAST_SESSION = 'world-broadcast'
-  const BROADCAST_KINDS = new Set(['question', 'blocker', 'handoff'])
-  const BROADCAST_TTL_SECONDS = 86_400
   const WAKE_INTERVAL_MS = clampInt(process.env.NMG_BOARD_WAKE_INTERVAL_SEC, 5, 3600, 30) * 1000
 
   const wakeBatch = new Map() // sessionId -> entry[] (deduped, newest first)
@@ -699,13 +674,6 @@ export function apply(ctx: Context): () => void {
 
   function wakeEntryKey(entry) {
     return entry && entry.id ? String(entry.id) : ''
-  }
-
-  function wakeEntryLine(entry) {
-    return (
-      '#' + (entry.id || '?') + ' [' + entry.kind + '/' + entry.status + '] ' +
-      (entry.agentId || '?') + ': ' + truncate(entry.content, 200)
-    )
   }
 
   function loadWakeConfig() {
@@ -730,24 +698,6 @@ export function apply(ctx: Context): () => void {
   // 唤醒候选判定，对齐 nmg-hook.mjs isBoardWakeCandidate：open && actionable
   // kind && 无活跃 claim && 非定向他人 && 非串行排队 && 非广播 meta。
   // 自回声（ownEcho）判断依赖具体会话，移到 per-agent delivery 阶段做。
-  function isWakeCandidate(entry, extraTargets) {
-    const now = Date.now()
-    const liveClaim =
-      entry.claimExpiresAt != null && new Date(entry.claimExpiresAt).getTime() > now
-    const addressedToOther =
-      entry.to != null && entry.to !== WAKE_AGENT_ID && entry.to !== WAKE_AGENT_NAME && !(extraTargets && extraTargets.has(entry.to))
-    const serialQueued = entry.serialState === 'pending'
-    return (
-      entry.status === 'open' &&
-      !entry.notificationOrigin &&
-      (WAKE_KINDS.has(entry.kind) || isCoordinationEventNotice(entry) || isBoardDiscussionNotice(entry)) &&
-      !liveClaim &&
-      !addressedToOther &&
-      !serialQueued &&
-      !String(entry.content || '').startsWith(BROADCAST_PREFIX)
-    )
-  }
-
   // 条目被 claim/resolve 后从所有会话的 wake batch 移除（谁处理的都可能）。
   function removeWakeEntry(entryId) {
     for (const [key, list] of wakeBatch) {
@@ -763,342 +713,128 @@ export function apply(ctx: Context): () => void {
   // 回执去重（每条目至多一次），ownEcho 过滤（sourceSessionId === 本会话）阻止
   // 广播者被自己的帖子唤醒。广播条目本身（带 BROADCAST_PREFIX）绝不重播——
   // 否则广播唤醒会话、会话再广播，递归刷屏（实测 #12→#13→#16…）。
-  async function maybeBroadcastToWorld(entry, agentId, sessionId) {
-    if (!entry || String(entry.content || '').startsWith(BROADCAST_PREFIX)) return false
-    if (!BROADCAST_KINDS.has(entry.kind)) return false
-    const worldCheck = await daemonCall('taskBoard', {
-      action: 'deliveryCheck',
-      taskId: WAKE_WORLD_TASK,
-      agentId,
-      sessionId: WORLD_BROADCAST_SESSION,
-      entryIds: [wakeEntryKey(entry)],
-    })
-    if (worldCheck && Array.isArray(worldCheck.delivered) && worldCheck.delivered.includes(wakeEntryKey(entry))) return false
-    const excerpt = String(entry.content || '').length > 140 ? String(entry.content || '').slice(0, 140) + '…' : String(entry.content || '')
-    const label = entry.kind === 'question' ? '问题' : entry.kind === 'blocker' ? '阻塞' : '交接'
-    const broadcast =
-      '[NMG board 协作广播] 频道 ' + (entry.taskId || '?') + ' 有 #' + (entry.id || '?') +
-      ' 未认领的' + label + '（open）：' + excerpt +
-      '。有空的 agent 可用 nmg_state space=board action=read taskId=' + (entry.taskId || '?') + ' 查看详情、action=write operation=claim 认领处理。'
-    await daemonCall('taskBoard', {
-      action: 'put',
-      taskId: WAKE_WORLD_TASK,
-      agentId,
-      sourceSessionId: sessionId,
-      kind: 'handoff',
-      content: broadcast,
-      ttlSeconds: BROADCAST_TTL_SECONDS,
-    })
-    await daemonCall('taskBoard', {
-      action: 'recordDelivery',
-      entryId: wakeEntryKey(entry),
-      sessionId: WORLD_BROADCAST_SESSION,
-      agentId,
-      source: 'wake-broadcast',
-    })
-    return true
-  }
-
   async function boardWakeOnce() {
-    // "再叫一遍"：daemon 不可用（没起/僵尸）→ 自动 kill + restart
     const endpoint = await ensureDaemon()
     if (!endpoint) {
       wakeAgentRegistered = false
       return
     }
     try {
-      // 配置门：读 <dataDir>/board-wake.json。enabled 显式 false 时停摆；无配置
-      // 文件时默认开启（DSH 适配器是用户主动装的双面宿主包，不同于 NMG 本体
-      // 保守默认 off）。intervalMs 可覆盖轮询间隔（当前配置 30000 与默认一致）。
       loadWakeConfig()
       if (wakeConfig && wakeConfig.enabled === false) return
-
-      // Register on first contact / after a daemon restart (upsert + last_seen).
       if (!wakeAgentRegistered) {
         await daemonCall('taskBoard', {
           action: 'registerAgent',
           id: WAKE_AGENT_ID,
           agentName: WAKE_AGENT_NAME,
-          description: 'DSH NMG adapter (NodeMemoryGraph host package)',
+          description: 'DSH NMG adapter',
           capabilities: 'dsh-nmg',
           supportedInterfaces: 'dsh-harness',
         })
         wakeAgentRegistered = true
       }
-      // Heartbeat keeps last_seen_at fresh (online window = 10 min).
       await daemonCall('taskBoard', { action: 'heartbeat', id: WAKE_AGENT_ID })
-
-      // Collect candidates: directed inbox + world channel + subscribed channels.
-      const candidates = []
-      const seen = new Set()
-      const collect = (taskId, entries) => {
-        for (const entry of entries || []) {
-          const key = wakeEntryKey(entry)
-          if (!key || seen.has(key)) continue
-          seen.add(key)
-          candidates.push(taskId == null ? entry : { ...entry, taskId })
-        }
-      }
-      // Continuable subagents: enumerate the live parents' children, then read
-      // each child's directed inbox. A child may be cold (persisted, no live
-      // Agent), so delivery below goes through subagents.followup, which
-      // cold-resumes when needed.
-      //
-      // Ensure lastAgents has all live agents before enumeration: at cold start
-      // no `agent/inbox/inserted` event has fired yet, so lastAgents is empty
-      // and the loop below would skip every child. Use the agents registry's
-      // list() to seed lastAgents with every live agent (including the main
-      // session), bridging the startup window without waiting for a user message.
       const agentsService = ctx.get('agents')
-      if (agentsService && typeof agentsService.list === 'function') {
-        for (const agent of agentsService.list()) {
+      if (agentsService && typeof agentsService.list === 'function')
+        for (const agent of agentsService.list())
           if (agent && agent.id) lastAgents.set(String(agent.id), agent)
-        }
-      }
-      // Resolve the optional subagents service per tick (not at apply time):
-      // dsh-subagent may mount after this plugin, and ctx.get() is a point-in-
-      // time lookup — a captured constant would stay undefined forever.
       const subagents = ctx.get('subagents')
-      const childTargets = new Set()
-      const childMap = new Map()
+      const children = new Map()
       if (subagents && typeof subagents.listChildren === 'function') {
-        for (const [parentSessionId, parent] of lastAgents) {
-          if (!parent) continue
-          let children
-          try { children = await subagents.listChildren(parentSessionId) } catch { continue }
-          for (const child of children || []) {
-            if (!child || child.kind !== 'child' || child.mode !== 'continuable') continue
-            const childId = String(child.id)
-            childTargets.add(childId)
-            childMap.set(childId, parent)
-            const childDirected = await daemonCall('taskBoard', {
-              action: 'readDirected',
-              agentId: childId,
-              agentName: childId,
-              limit: WAKE_MAX_ENTRIES,
-            })
-            collect(null, childDirected && childDirected.entries)
-          }
-        }
-      }
-      // or display name, across all named boards (no subscribe needed first).
-      const directed = await daemonCall('taskBoard', {
-        action: 'readDirected',
-        agentId: WAKE_AGENT_ID,
-        agentName: WAKE_AGENT_NAME,
-        limit: WAKE_MAX_ENTRIES,
-      })
-      collect(null, directed && directed.entries)
-
-      // World-channel broadcast + subscribed named channels.
-      const world = await daemonCall('taskBoard', {
-        action: 'read',
-        taskId: WAKE_WORLD_TASK,
-        agentId: WAKE_AGENT_ID,
-        limit: WAKE_MAX_ENTRIES,
-      })
-      collect(WAKE_WORLD_TASK, world && world.entries)
-      const subs = await daemonCall('taskBoard', {
-        action: 'listSubscriptions',
-        agentId: WAKE_AGENT_ID,
-        sessionId: hostSessionId,
-      })
-      for (const board of (subs && Array.isArray(subs.subscriptions) && subs.subscriptions) || []) {
-        if (!board.taskId || board.taskId === WAKE_WORLD_TASK) continue
-        const read = await daemonCall('taskBoard', {
-          action: 'read',
-          taskId: board.taskId,
-          agentId: WAKE_AGENT_ID,
-          limit: WAKE_MAX_ENTRIES,
-        })
-        collect(board.taskId, read && read.entries)
-      }
-
-      const mine = candidates.filter((entry) => isWakeCandidate(entry, childTargets))
-
-      // 世界广播公告：独立于"唤醒谁"，对每个新的协作类条目（question/blocker/
-      // handoff，非广播自身）广播到 world 频道一次，让其他 agent 看到并认领。
-      // 与 pi 原版一致（.pi/extensions/nmg/index.ts:1731）：ownEcho 过滤只阻止
-      // 广播者唤醒自己，广播本身仍无条件触发——自己发的协作条目也要让 others
-      // 注意到。dedup 靠 WORLD_BROADCAST_SESSION 哨兵回执（每条目至多一次）。
-      if (wakeConfig && wakeConfig.worldBroadcast) {
-        for (const entry of mine) {
+        for (const [sessionId, parent] of lastAgents) {
+          let list
           try {
-            await maybeBroadcastToWorld(entry, WAKE_AGENT_ID, hostSessionId)
+            list = await subagents.listChildren(sessionId)
           } catch {
-            // best-effort: 广播失败不打断唤醒循环
+            continue
           }
+          for (const child of list || [])
+            if (child && child.kind === 'child' && child.mode === 'continuable')
+              children.set(String(child.id), parent)
         }
       }
-
-      if (mine.length === 0) return
-
-      // 多会话：对每个活跃 agent 分别做自回声过滤、投递回执（delivery
-      // receipt 按 sessionId 区分）、入队和主动唤醒——同一 host 的多个 DSH
-      // 会话各自独立收到黑板条目，互不抢占。
-      for (const [agentSessionId, agent] of lastAgents) {
-        if (!agent || typeof agent.send !== 'function') continue
-
-        // per-agent 自回声：条目是当前会话自己放的（或 agentId 是项目身份
-        // 且无 sourceSession）→ 不催自己。
-        const theirs = mine.filter((entry) => {
-          if (childTargets.has(String(entry.to || ''))) return false
-          const ownEcho =
-            (entry.sourceSessionId === agentSessionId && entry.agentId === WAKE_AGENT_ID) ||
-            entry.sourceSessionId === agentSessionId ||
-            (entry.sourceSessionId == null && entry.agentId === WAKE_AGENT_ID)
-          return !ownEcho
-        })
-        if (theirs.length === 0) continue
-
-        // Delivery receipt + suppression: skip entries this agent already
-        // received/acked, or on a suppressed channel.
-        const fresh = []
-        for (const taskId of new Set(theirs.map((c) => c.taskId))) {
-          const group = theirs.filter((c) => c.taskId === taskId)
-          const check = await daemonCall('taskBoard', {
-            action: 'deliveryCheck',
-            agentId: WAKE_AGENT_ID,
-            sessionId: agentSessionId,
-            taskId: taskId || WAKE_WORLD_TASK,
-            entryIds: group.map(wakeEntryKey),
-          })
-          if (check && check.suppressed) continue
-          for (const entry of group) {
-            if (canDeliverBoardEntry(check, wakeEntryKey(entry))) fresh.push(entry)
-          }
-        }
-        if (fresh.length === 0) continue
-
-        // 只推最高优先级一个（question > blocker > handoff，再按创建时间）——
-        // 与 nmg-hook.mjs 一致，避免一次把多个条目塞进上下文造成刷屏。
-        fresh.sort(
-          (left, right) =>
-            (KIND_RANK[left.kind] ?? 9) - (KIND_RANK[right.kind] ?? 9) ||
-            String(left.createdAt || '').localeCompare(String(right.createdAt || '')),
-        )
-        const pick = fresh[0]
-
-        // 先把条目推入 wake batch（context 数据源，模型无论何时醒来都能看到
-        // 待办列表），再主动唤醒 agent。发送成功后才写 delivery receipt
-        // （at-least-once 通知去重），避免 send 失败（agent 已 dispose）时写
-        // 回执但消息没入队导致条目"已送达但未通知"下轮不重试。
-        pushWakeEntry(pick, agentSessionId)
-        if (await wakeAgent(agent, pick)) {
-          await daemonCall('taskBoard', {
-            action: 'recordDelivery',
-            agentId: WAKE_AGENT_ID,
-            sessionId: agentSessionId,
-            entryId: wakeEntryKey(pick),
-            source: 'wake',
-          })
-        }
-      }
-
-      // Continuable child delivery: wake through subagents.followup (cold
-      // resumes a persisted child), and only record the delivery receipt after
-      // the inbox accepted the message so a failed resume retries next tick.
-      for (const [childId, parent] of childMap) {
-        const theirs = mine.filter((entry) => String(entry.to || '') === childId && entry.sourceSessionId !== childId)
-        if (theirs.length === 0) continue
-        const fresh = []
-        for (const taskId of new Set(theirs.map((c) => c.taskId))) {
-          const group = theirs.filter((c) => c.taskId === taskId)
-          const check = await daemonCall('taskBoard', {
-            action: 'deliveryCheck',
-            agentId: childId,
-            sessionId: childId,
-            taskId: taskId || WAKE_WORLD_TASK,
-            entryIds: group.map(wakeEntryKey),
-          })
-          if (check && check.suppressed) continue
-          for (const entry of group) {
-            if (canDeliverBoardEntry(check, wakeEntryKey(entry))) fresh.push(entry)
-          }
-        }
-        if (fresh.length === 0) continue
-        fresh.sort(
-          (left, right) =>
-            (KIND_RANK[left.kind] ?? 9) - (KIND_RANK[right.kind] ?? 9) ||
-            String(left.createdAt || '').localeCompare(String(right.createdAt || '')),
-        )
-        const pick = fresh[0]
-        try {
-          await subagents.followup(
-            parent,
-            childId,
-            [{ type: 'text', text: wakeMessageText(pick) }],
-            { source: { kind: 'plugin', plugin: '@nmg/dsh-nmg' }, signal: AbortSignal.timeout(5000) },
-          )
-        } catch {
+      // The host exposes running/idle through Agent.status. Pending replies stay
+      // in the daemon while busy, so the next idle poll can read one bounded batch.
+      for (const [sessionId, agent] of lastAgents) {
+        if (!agent || typeof agent.send !== 'function' || children.has(sessionId)) continue
+        if (!(await observeHostActivity(sessionId, WAKE_AGENT_ID, agent, ['batch-enqueue'])))
           continue
-        }
-        await daemonCall('taskBoard', {
-          action: 'recordDelivery',
-          agentId: childId,
-          sessionId: childId,
-          entryId: wakeEntryKey(pick),
-          source: 'wake',
+        await deliverHostBatch(sessionId, WAKE_AGENT_ID, WAKE_AGENT_NAME, async (text) => {
+          await agent.send(
+            {
+              id: randomUUID(),
+              role: 'user',
+              content: [{ type: 'text', text }],
+              source: { kind: 'plugin', plugin: '@nmg/dsh-nmg' },
+            },
+            'next-turn',
+            true,
+          )
         })
-        pushWakeEntry(pick, childId)
+      }
+      for (const [childId, parent] of children) {
+        const live = lastAgents.get(childId)
+        if (!(await observeHostActivity(childId, childId, live, ['resume', 'batch-enqueue'])))
+          continue
+        await deliverHostBatch(
+          childId,
+          childId,
+          childId,
+          async (text) => {
+            await subagents.followup(parent, childId, [{ type: 'text', text }], {
+              source: { kind: 'plugin', plugin: '@nmg/dsh-nmg' },
+              signal: AbortSignal.timeout(5000),
+            })
+          },
+          true,
+        )
       }
     } catch {
-      // A transient daemon/network error must never throw into the timer. Reset
-      // the flag so a daemon restart re-registers cleanly on the next tick.
       wakeAgentRegistered = false
     }
   }
 
-  function wakeMessageText(entry) {
-    if (isBoardDiscussionNotice(entry)) return renderDiscussionNotice(entry)
-    if (isCoordinationEventNotice(entry)) return renderEventNotice(entry)
-    return (
-      '[NMG board] 新黑板条目 #' + (entry.id || '?') + ' [' + entry.kind + '] ' +
-      (entry.taskId || '?') + ' by ' + (entry.agentId || '?') + ':\n' +
-      truncate(entry.content, 400)
-    )
-  }
-
-  // 构造一条 user-role 唤醒消息（MessageSource kind=plugin，与 dsh 生态一致）
-  // 并推给指定 agent 会话。发送失败静默——context 兜底仍会展示。
-  //
-  // 不再手工判断 agent.status：本机 agent.send(input, 'next-turn', true) 的
-  // 原生队列已自带"空闲立即唤醒、忙则排进 next-turn 队列、当前 turn 跑完后
-  // 自动再取"的语义（dsh-agent-loop wakeDriver + kick() finally 的
-  // wakeRequested/hasPending 再唤醒）。这里直接 send 即可，由 native 队列
-  // 承担"没东西就发出去，有东西就等待"。内容直接携带黑板待办详情（纯展示，
-  // 不带强制工具指令），模型看完自主决定是否用 nmg_state space=board 处理。
-  async function wakeAgent(agent, entry) {
-    if (!agent || typeof agent.send !== 'function') return false
+  async function observeHostActivity(sessionId, agentId, agent, capabilities) {
     try {
-      await agent.send(
-        {
-          id: randomUUID(),
-          role: 'user',
-          content: [{ type: 'text', text: wakeMessageText(entry) }],
-          source: { kind: 'plugin', plugin: '@nmg/dsh-nmg' },
-        },
-        'next-turn',
-        true,
-      )
+      const status = agent && agent.status
+      const state = status === 'running' ? 'busy' : status === 'idle' ? 'idle' : 'unknown'
+      const reported =
+        state === 'unknown'
+          ? capabilities
+          : capabilities.concat(['processing-observation', 'idle-boundary'])
+      await reportHarnessActivity(daemonCall, agentId, sessionId, state, reported)
       return true
     } catch {
       return false
     }
   }
 
-  function wakeTextFor(agent) {
-    if (!agent) return ''
+  async function deliverHostBatch(sessionId, agentId, agentName, sendWake, directedOnly = false) {
     try {
-      const batch = wakeBatch.get(String(agent.id))
-      if (!Array.isArray(batch) || batch.length === 0) return ''
-      const lines = batch.map(wakeEntryLine)
-      if (batch.some(entry => !isBoardDiscussionNotice(entry) && !isCoordinationEventNotice(entry)))
-        lines.push('Use nmg_state action=write space=board operation=claim (claim=接手), operation=resolve to close.')
-      lines.push('Discussion/event notices need no claim or chat confirmation; channel subscriptions can be left.')
-      return 'NMG board wake (' + batch.length + ' pending):\n' + lines.join('\n')
+      const entries = await collectWakeCandidates(daemonCall, {
+        agentId,
+        agentName,
+        sessionId,
+        subscriptionSessionId: directedOnly ? undefined : hostSessionId,
+      })
+      const eligible = directedOnly
+        ? entries.filter((entry) => String(entry.to || '') === sessionId)
+        : entries
+      const delivered = await enqueueBoardWakeBatch({
+        invoke: daemonCall,
+        sendWake,
+        entries: eligible,
+        agentId,
+        sessionId,
+        dataDir: workspaceRoot,
+      })
+      for (const entry of delivered) {
+        pushWakeEntry(entry, sessionId)
+        if (wakeConfig && wakeConfig.worldBroadcast)
+          await broadcastWakeEntry({ invoke: daemonCall, entry, agentId, sessionId })
+      }
     } catch {
-      return ''
+      /* a failed recipient remains pending without blocking other agents */
     }
   }
 
@@ -1450,6 +1186,7 @@ export function apply(ctx: Context): () => void {
         notification: { type: 'object', additionalProperties: true, description: 'Explicit notice: key, scopes [direct|channel|event], optional recipients (stable IDs); invite:true enrolls invitees and sender in taskId. Reuse key for retries.' },
         eventId: { type: 'string' },
         event: { type: 'object', additionalProperties: true, description: 'Event payload; mutation requires expectedRevision, kind and text.' },
+        activity: { type: 'object', additionalProperties: true, description: 'Session processing report for agentActivity: state busy/idle/unknown, optional capabilities and ttlSeconds.' },
         text: { type: 'string' },
         digest: { type: 'string' }, ref: { type: 'string' }, summary: { type: 'string' },
         verdict: { type: 'string', enum: ['accepted', 'rejected', 'undecidable'] },
@@ -1621,16 +1358,6 @@ export function apply(ctx: Context): () => void {
     text: (assembleContext) => recallTextFor(assembleContext && assembleContext.agent),
   })
 
-  // Board wake surfaces as a second native context contribution, ordered before
-  // recall (85 < 90) so pending work reads ahead of memory.
-  const boardWakeContextDisposer = coordinationEnabled
-    ? systemPrompt.context({
-        name: 'nmg:board-wake',
-        order: 85,
-        text: (assembleContext) => wakeTextFor(assembleContext && assembleContext.agent),
-      })
-    : undefined
-
   // ── webServer route: persistent host→browser channel ───────────────────────
   // Persistent (host-composition) packages have no harness.handle/host.call RPC
   // (that is the dynamic Cordis Runner's channel). The sanctioned way for the
@@ -1732,7 +1459,6 @@ export function apply(ctx: Context): () => void {
   ]
   if (coordinationEnabled) {
     disposers.push(
-      boardWakeContextDisposer,
       wakeServiceDisposer,
       wakeTimerDisposer,
       initialWakeDisposer,
