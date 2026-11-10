@@ -49,6 +49,12 @@ remain the owners of mutation semantics. Implementation can reuse their methods
 and projections rather than maintaining parallel behavior. Independent state
 registrations converge on state, while Lab retains other experimental capabilities.
 
+Pi supplies both the stable Agent ID and current display name for inbox addressing.
+The tool already owns this identity, so requiring the model to repeat the name
+creates an avoidable parameter failure and can lose routing after a rename.
+The rename control path consumes the requested new name before ordinary board
+operations receive the host identity.
+
 This choice adds no persistence layer and establishes no token or model-continuity
 benefit. An operation acknowledgement is not collaboration acceptance, factual
 support or proof of final model input. Documentation checks establish document

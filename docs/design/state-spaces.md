@@ -46,6 +46,11 @@ reads, discovery, publication, subscription, leases, delivery, independent verdi
 and closure; it is not generic object `set`. Omitting board `taskId` selects shared
 world channel `default`.
 
+Pi binds `readInbox` to the session's stable Agent ID and current display name
+before transport. Tool callers can omit `agentName`, including after a runtime
+rename. The `rename` operation takes the requested new display name through its
+own control path. Administrative RPC callers supply their addressing fields.
+
 The additive `state` RPC advertises capability `state-spaces`. Results preserve
 `action/space/operation`, the domain owner's `result` and, when applicable,
 `PreparedInformationOutput`; they do not define another state-view protocol.
