@@ -35,6 +35,7 @@ import {
 import { stateRequiresBoardEvents } from '../../../../src/integration/state.ts'
 import { collectWakeCandidates, maybeBroadcastToWorld as broadcastWakeEntry } from '../../../../src/integration/board-wake.ts'
 import { enqueueBoardWakeBatch, reportHarnessActivity } from '../../../../src/integration/board-wake-batch.ts'
+import { loadOrCreateAgentIdentity, renameAgentIdentity } from '../../../../src/integration/agent-identity.ts'
 import { compactSearchContext, memoryDisclosureEntries } from '../../../../src/integration/search-projection.ts'
 import {
   prepareAutomaticRecallSurface,
@@ -83,7 +84,7 @@ function estimateTokens(text) {
   return Math.ceil(cjk + latin / 4)
 }
 
-export function apply(ctx: Context): () => void {
+export function apply(ctx: Context): () => Promise<void> {
   const tools = ctx.tools
   const subprocess = ctx.subprocess
   const sandboxPolicy = ctx.sandboxPolicy
@@ -686,18 +687,35 @@ export function apply(ctx: Context): () => void {
     }
   }
 
-  function onAgentDisposed(payload) {
+  async function onAgentDisposed(payload) {
     try {
       if (payload && payload.agent) {
         const id = String(payload.agent.id)
+        disposedAgents.add(payload.agent)
+        if (lastAgents.has(id) && lastAgents.get(id) !== payload.agent) return
         recallGenerations.delete(id)
         sessionTokenTotals.delete(id)
         recallBatch.delete(id)
         openSearches.delete(id)
         activityLog.delete(id)
         wakeBatch.delete(id)
-        lastAgents.delete(id)
-        void daemonCall('sessionActiveGraph', { action: 'release', sessionId: id })
+        if (lastAgents.get(id) === payload.agent) lastAgents.delete(id)
+        const retirements = [...boardRegistrations.entries()]
+          .filter(
+            ([sessionId, record]) =>
+              (sessionId === id && record.owner === payload.agent) ||
+              record.parentId === id,
+          )
+          .map(([sessionId, record]) =>
+            retireBoardRegistration(sessionId, record),
+          )
+        await Promise.allSettled([
+          ...retirements,
+          daemonCall('sessionActiveGraph', {
+            action: 'release',
+            sessionId: id,
+          }),
+        ])
       }
     } catch {
       // cleanup is best-effort
@@ -710,15 +728,23 @@ export function apply(ctx: Context): () => void {
   // delivery identities. The web pill retains an independent display history.
 
   const hostSessionId = (process.env.DSH_SESSION_ID || '').trim() || 'dsh'
-  const projectName = workspaceRoot.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || 'dsh'
-  const WAKE_AGENT_ID = 'dsh:' + projectName // stable routing key (never the session id)
-  const WAKE_AGENT_NAME = projectName // display label; renaming never loses routing
+  const projectName =
+    workspaceRoot
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .pop() || 'dsh'
+  const legacyAdapterId = 'dsh:' + projectName
   const WAKE_WORLD_TASK = 'default' // the world channel is always scanned
   const WAKE_MAX_ENTRIES = 50
-  const WAKE_INTERVAL_MS = clampInt(process.env.NMG_BOARD_WAKE_INTERVAL_SEC, 5, 3600, 30) * 1000
+  const WAKE_INTERVAL_MS =
+    clampInt(process.env.NMG_BOARD_WAKE_INTERVAL_SEC, 5, 3600, 30) * 1000
 
   const wakeBatch = new Map() // sessionId -> entry[] (deduped, newest first)
-  let wakeAgentRegistered = false
+  let legacyPresenceRetired = false
+  const boardRegistrations = new Map()
+  const presenceWrites = new Map()
+  const disposedAgents = new WeakSet()
+  let hostDisposed = false
   let wakeConfig = null // <dataDir>/board-wake.json (enabled/intervalMs/budget/cooldownMs)
   const lastAgents = new Map() // 已注册的活跃 agent 实例（key=String(agent.id)），供定时器按会话唤醒用
 
@@ -729,8 +755,13 @@ export function apply(ctx: Context): () => void {
   function loadWakeConfig() {
     try {
       const home = process.env.USERPROFILE || process.env.HOME || ''
-      const dataDir = (process.env.NMG_DATA_DIR || join(home, '.nmg')).replace(/[\\/]+$/, '')
-      wakeConfig = JSON.parse(readFileSync(join(dataDir, 'board-wake.json'), 'utf8'))
+      const dataDir = (process.env.NMG_DATA_DIR || join(home, '.nmg')).replace(
+        /[\\/]+$/,
+        '',
+      )
+      wakeConfig = JSON.parse(
+        readFileSync(join(dataDir, 'board-wake.json'), 'utf8'),
+      )
     } catch {
       wakeConfig = null
     }
@@ -742,138 +773,272 @@ export function apply(ctx: Context): () => void {
     if (!key) return
     const existing = wakeBatch.get(targetSessionId) || []
     if (existing.some((e) => wakeEntryKey(e) === key)) return
-    wakeBatch.set(targetSessionId, [entry].concat(existing).slice(0, WAKE_MAX_ENTRIES))
+    wakeBatch.set(
+      targetSessionId,
+      [entry].concat(existing).slice(0, WAKE_MAX_ENTRIES),
+    )
   }
 
-  // 唤醒候选判定，对齐 nmg-hook.mjs isBoardWakeCandidate：open && actionable
-  // kind && 无活跃 claim && 非定向他人 && 非串行排队 && 非广播 meta。
-  // 自回声（ownEcho）判断依赖具体会话，移到 per-agent delivery 阶段做。
-  // 条目被 claim/resolve 后从所有会话的 wake batch 移除（谁处理的都可能）。
+  // A resolved or claimed source leaves the display history of every session.
   function removeWakeEntry(entryId) {
     for (const [key, list] of wakeBatch) {
-      const next = list.filter((entry) => wakeEntryKey(entry) !== String(entryId))
+      const next = list.filter(
+        (entry) => wakeEntryKey(entry) !== String(entryId),
+      )
       if (next.length) wakeBatch.set(key, next)
       else wakeBatch.delete(key)
     }
   }
 
-  // 照抄 pi 版 maybeBroadcastToWorld (.pi/extensions/nmg/index.ts:2609)：
-  // 为一条 open 协作条目在世界频道发 pull 广播公告，让其他 agent 注意到并能
-  // 认领。广播是广播风格（pull 公告，绝不定向）；WORLD_BROADCAST_SESSION 哨兵
-  // 回执去重（每条目至多一次），ownEcho 过滤（sourceSessionId === 本会话）阻止
-  // 广播者被自己的帖子唤醒。广播条目本身（带 BROADCAST_PREFIX）绝不重播——
-  // 否则广播唤醒会话、会话再广播，递归刷屏（实测 #12→#13→#16…）。
-  async function boardWakeOnce() {
-    const endpoint = await ensureDaemon()
-    if (!endpoint) {
-      wakeAgentRegistered = false
-      return
+  async function preparePresenceOwner(signal) {
+    const hello = await daemonCall('hello', {}, signal, true)
+    if (!hello || !hello.capabilities?.includes('board-agent-presence'))
+      throw new Error('NMG daemon does not advertise board-agent-presence')
+    if (!legacyPresenceRetired) {
+      await retireBoardRegistration(legacyAdapterId, { agentId: legacyAdapterId })
+      legacyPresenceRetired = true
     }
+  }
+
+  function writeSessionPresence(sessionId, write) {
+    const previous = presenceWrites.get(sessionId) || Promise.resolve()
+    const next = previous.catch(() => {}).then(write)
+    const tracked = next.finally(() => {
+      if (presenceWrites.get(sessionId) === tracked)
+        presenceWrites.delete(sessionId)
+    })
+    presenceWrites.set(sessionId, tracked)
+    return tracked
+  }
+
+  function retireBoardRegistration(sessionId, record) {
+    return writeSessionPresence(sessionId, () =>
+      withdrawBoardRegistration(sessionId, record),
+    )
+  }
+
+  async function withdrawBoardRegistration(sessionId, record) {
+    const result = await daemonCall(
+      'taskBoard',
+      {
+        action: 'unregisterAgent',
+        id: record.agentId,
+        presenceToken: record.token,
+      },
+      undefined,
+      true,
+    )
+    if (!result || result.action !== 'unregisterAgent' || result.id !== record.agentId)
+      throw new Error('NMG presence withdrawal was not confirmed')
+    if (boardRegistrations.get(sessionId) === record)
+      boardRegistrations.delete(sessionId)
+  }
+
+  function targetIsLive(target) {
+    const owner = target.parent || target.agent
+    return (
+      !hostDisposed &&
+      owner &&
+      !disposedAgents.has(owner) &&
+      lastAgents.get(String(owner.id)) === owner
+    )
+  }
+
+  function registerBoardTarget(target, signal) {
+    return writeSessionPresence(target.sessionId, () =>
+      publishBoardTarget(target, signal),
+    )
+  }
+
+  async function publishBoardTarget(target, signal) {
+    if (!targetIsLive(target))
+      throw new Error('DSH Agent endpoint is unavailable')
+    const { sessionId } = target
+    const owner = target.parent || target.agent
+    const identity = loadOrCreateAgentIdentity(sessionId, 'dsh', sessionId)
+    let record = boardRegistrations.get(sessionId)
+    if (!record || record.owner !== owner) {
+      record = {
+        owner,
+        parentId: target.parent ? String(target.parent.id) : null,
+        agentId: identity.id,
+        token: randomUUID(),
+      }
+      boardRegistrations.set(sessionId, record)
+    }
+    const result = await daemonCall(
+      'taskBoard',
+      {
+        action: 'registerAgent',
+        id: identity.id,
+        agentName: identity.agentName,
+        description: 'DSH Agent session in ' + projectName,
+        capabilities: 'dsh-nmg',
+        supportedInterfaces: 'dsh-harness',
+        presenceToken: record.token,
+      },
+      signal,
+      true,
+    )
+    if (!result || result.action !== 'registerAgent' || result.id !== identity.id)
+      throw new Error('NMG session registration was not confirmed')
+    if (!targetIsLive(target)) {
+      await withdrawBoardRegistration(sessionId, record)
+      throw new Error('DSH Agent session ended during registration')
+    }
+    return identity
+  }
+
+  async function readContinuableChildren() {
+    const children = new Map()
+    const subagents = ctx.get('subagents')
+    if (
+      !subagents ||
+      typeof subagents.listChildren !== 'function' ||
+      typeof subagents.followup !== 'function'
+    )
+      return children
+    for (const [sessionId, parent] of lastAgents) {
+      let list
+      try {
+        list = await subagents.listChildren(sessionId)
+      } catch {
+        continue
+      }
+      for (const child of list || [])
+        if (child && child.kind === 'child' && child.mode === 'continuable')
+          children.set(String(child.id), parent)
+    }
+    return children
+  }
+
+  async function readBoardTargets() {
+    const service = ctx.get('agents')
+    if (service && typeof service.list === 'function') {
+      const current = service.list()
+      lastAgents.clear()
+      for (const agent of current)
+        if (agent && agent.id && !disposedAgents.has(agent))
+          lastAgents.set(String(agent.id), agent)
+    }
+    const children = await readContinuableChildren()
+    const targets = []
+    for (const [sessionId, agent] of lastAgents)
+      if (typeof agent.send === 'function' && !children.has(sessionId))
+        targets.push({ sessionId, agent })
+    for (const [sessionId, parent] of children)
+      targets.push({ sessionId, agent: lastAgents.get(sessionId), parent })
+    return targets
+  }
+
+  async function deliverBoardTarget(target) {
+    try {
+      const identity = await registerBoardTarget(target)
+      const capabilities = target.parent
+        ? ['resume', 'batch-enqueue']
+        : ['batch-enqueue']
+      if (
+        !(await observeHostActivity(
+          target.sessionId,
+          identity.id,
+          target.agent,
+          capabilities,
+        ))
+      )
+        return
+      if (wakeConfig && wakeConfig.enabled === false) return
+      await deliverHostBatch(
+        target.sessionId,
+        identity.id,
+        identity.agentName,
+        async (text) => {
+          if (target.parent) {
+            await ctx
+              .get('subagents')
+              .followup(
+                target.parent,
+                target.sessionId,
+                [{ type: 'text', text }],
+                {
+                  source: { kind: 'plugin', plugin: '@nmg/dsh-nmg' },
+                  signal: AbortSignal.timeout(5000),
+                },
+              )
+          } else {
+            await target.agent.send(
+              {
+                id: randomUUID(),
+                role: 'user',
+                content: [{ type: 'text', text }],
+                source: { kind: 'plugin', plugin: '@nmg/dsh-nmg' },
+              },
+              'next-turn',
+              true,
+            )
+          }
+        },
+      )
+    } catch {
+      // One unavailable native endpoint leaves its sources pending.
+    }
+  }
+
+  async function boardWakeOnce() {
+    if (hostDisposed) return
     try {
       loadWakeConfig()
-      if (wakeConfig && wakeConfig.enabled === false) return
-      if (!wakeAgentRegistered) {
-        await daemonCall('taskBoard', {
-          action: 'registerAgent',
-          id: WAKE_AGENT_ID,
-          agentName: WAKE_AGENT_NAME,
-          description: 'DSH NMG adapter',
-          capabilities: 'dsh-nmg',
-          supportedInterfaces: 'dsh-harness',
-        })
-        wakeAgentRegistered = true
-      }
-      await daemonCall('taskBoard', { action: 'heartbeat', id: WAKE_AGENT_ID })
-      const agentsService = ctx.get('agents')
-      if (agentsService && typeof agentsService.list === 'function')
-        for (const agent of agentsService.list())
-          if (agent && agent.id) lastAgents.set(String(agent.id), agent)
-      const subagents = ctx.get('subagents')
-      const children = new Map()
-      if (subagents && typeof subagents.listChildren === 'function') {
-        for (const [sessionId, parent] of lastAgents) {
-          let list
-          try {
-            list = await subagents.listChildren(sessionId)
-          } catch {
-            continue
-          }
-          for (const child of list || [])
-            if (child && child.kind === 'child' && child.mode === 'continuable')
-              children.set(String(child.id), parent)
-        }
-      }
-      // The host exposes running/idle through Agent.status. Pending replies stay
-      // in the daemon while busy, so the next idle poll can read one bounded batch.
-      for (const [sessionId, agent] of lastAgents) {
-        if (!agent || typeof agent.send !== 'function' || children.has(sessionId)) continue
-        if (!(await observeHostActivity(sessionId, WAKE_AGENT_ID, agent, ['batch-enqueue'])))
-          continue
-        await deliverHostBatch(sessionId, WAKE_AGENT_ID, WAKE_AGENT_NAME, async (text) => {
-          await agent.send(
-            {
-              id: randomUUID(),
-              role: 'user',
-              content: [{ type: 'text', text }],
-              source: { kind: 'plugin', plugin: '@nmg/dsh-nmg' },
-            },
-            'next-turn',
-            true,
-          )
-        })
-      }
-      for (const [childId, parent] of children) {
-        const live = lastAgents.get(childId)
-        if (!(await observeHostActivity(childId, childId, live, ['resume', 'batch-enqueue'])))
-          continue
-        await deliverHostBatch(
-          childId,
-          childId,
-          childId,
-          async (text) => {
-            await subagents.followup(parent, childId, [{ type: 'text', text }], {
-              source: { kind: 'plugin', plugin: '@nmg/dsh-nmg' },
-              signal: AbortSignal.timeout(5000),
-            })
-          },
-          true,
-        )
-      }
+      const targets = await readBoardTargets()
+      if (!targets.length && !boardRegistrations.size && legacyPresenceRetired)
+        return
+      if (targets.length && !(await ensureDaemon())) return
+      await preparePresenceOwner()
+      const active = new Set(targets.map((target) => target.sessionId))
+      await Promise.allSettled(
+        [...boardRegistrations.entries()]
+          .filter(([sessionId]) => !active.has(sessionId))
+          .map(([sessionId, record]) =>
+            retireBoardRegistration(sessionId, record),
+          ),
+      )
+      for (const target of targets) await deliverBoardTarget(target)
     } catch {
-      wakeAgentRegistered = false
+      // Recheck native endpoints and the owner on the next tick.
     }
   }
 
   async function observeHostActivity(sessionId, agentId, agent, capabilities) {
     try {
       const status = agent && agent.status
-      const state = status === 'running' ? 'busy' : status === 'idle' ? 'idle' : 'unknown'
+      const state =
+        status === 'running' ? 'busy' : status === 'idle' ? 'idle' : 'unknown'
       const reported =
         state === 'unknown'
           ? capabilities
           : capabilities.concat(['processing-observation', 'idle-boundary'])
-      await reportHarnessActivity(daemonCall, agentId, sessionId, state, reported)
+      await reportHarnessActivity(
+        daemonCall,
+        agentId,
+        sessionId,
+        state,
+        reported,
+      )
       return true
     } catch {
       return false
     }
   }
 
-  async function deliverHostBatch(sessionId, agentId, agentName, sendWake, directedOnly = false) {
+  async function deliverHostBatch(sessionId, agentId, agentName, sendWake) {
     try {
       const entries = await collectWakeCandidates(daemonCall, {
         agentId,
         agentName,
         sessionId,
-        subscriptionSessionId: directedOnly ? undefined : hostSessionId,
       })
-      const eligible = directedOnly
-        ? entries.filter((entry) => String(entry.to || '') === sessionId)
-        : entries
       const delivered = await enqueueBoardWakeBatch({
         invoke: daemonCall,
         sendWake,
-        entries: eligible,
+        entries,
         agentId,
         sessionId,
         dataDir: workspaceRoot,
@@ -881,7 +1046,12 @@ export function apply(ctx: Context): () => void {
       for (const entry of delivered) {
         pushWakeEntry(entry, sessionId)
         if (wakeConfig && wakeConfig.worldBroadcast)
-          await broadcastWakeEntry({ invoke: daemonCall, entry, agentId, sessionId })
+          await broadcastWakeEntry({
+            invoke: daemonCall,
+            entry,
+            agentId,
+            sessionId,
+          })
       }
     } catch {
       /* a failed recipient remains pending without blocking other agents */
@@ -1221,11 +1391,10 @@ export function apply(ctx: Context): () => void {
         text: { type: 'string' },
         digest: { type: 'string' }, ref: { type: 'string' }, summary: { type: 'string' },
         verdict: { type: 'string', enum: ['accepted', 'rejected', 'undecidable'] },
-        agentName: { type: 'string' },
+        agentName: { type: 'string', description: 'New display name for rename; other operations use the native session identity.' },
         taskId: { type: 'string', description: 'Task channel; omit for the shared world channel.' },
         content: { type: 'string', description: 'Entry text (put).' },
         kind: { type: 'string', enum: ['goal', 'note', 'question', 'result', 'handoff', 'decision', 'blocker'], description: 'Entry kind (put).' },
-        agentId: { type: 'string', description: 'Writer/reader identity (default "dsh").' },
         entryId: { type: 'string', description: 'Entry to resolve/claim/release.' },
         resolution: { type: 'string', description: 'Resolution note (resolve).' },
         reason: { type: 'string', description: 'Reason for acknowledge/subscribe/unsubscribe.' },
@@ -1248,10 +1417,11 @@ export function apply(ctx: Context): () => void {
         ? Object.fromEntries(Object.entries(args).filter(([key]) => (STATE_AG_FIELDS as readonly string[]).includes(key)))
         : args
       const operation = stateOperation(scoped)
-      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
+      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id).trim() : ''
+      if (!sessionId) throw new Error('NMG state requires a native DSH Agent session')
       const result = args.space === 'ag'
         ? await executeAgState(scoped, operation, sessionId, exec.signal)
-        : await executeBoardState(args, operation, sessionId, exec.signal)
+        : await executeBoardState(args, operation, exec.agent, exec.signal)
       return result.ok ? renderStateOutput(result.data) : result.error
     },
   }
@@ -1285,14 +1455,45 @@ export function apply(ctx: Context): () => void {
     return invokeState(params, signal)
   }
 
-  async function executeBoardState(args, operation, sessionId, signal) {
+  async function executeBoardState(args, operation, agent, signal) {
     if (!coordinationEnabled) throw new Error('Board coordination is disabled')
-    const agentId = stateRequiresBoardEvents({ ...args, operation }) ? WAKE_AGENT_ID : args.agentId || WAKE_AGENT_ID
-    return invokeState({
-      ...args, operation, taskId: args.taskId || WAKE_WORLD_TASK,
-      sessionId, sourceSessionId: sessionId, agentId, id: agentId,
-      agentName: args.agentName || agentId,
-    }, signal)
+    if (hostDisposed) throw new Error('DSH adapter has been disposed')
+    const sessionId = String(agent.id)
+    if (disposedAgents.has(agent))
+      throw new Error('DSH Agent session has ended')
+    lastAgents.set(sessionId, agent)
+    await preparePresenceOwner(signal)
+    const previous = boardRegistrations.get(sessionId)
+    const parent = previous?.parentId
+      ? lastAgents.get(previous.parentId)
+      : undefined
+    const identity = await registerBoardTarget(
+      { sessionId, agent, parent },
+      signal,
+    )
+    const requestedName = String(args.agentName || '').trim()
+    if (operation === 'rename' && !requestedName)
+      throw new Error('rename requires agentName')
+    const result = await invokeState(
+      {
+        ...args,
+        operation,
+        taskId: args.taskId || WAKE_WORLD_TASK,
+        sessionId,
+        sourceSessionId: sessionId,
+        agentId: identity.id,
+        id: identity.id,
+        agentName: operation === 'rename' ? requestedName : identity.agentName,
+      },
+      signal,
+    )
+    if (operation === 'rename' && result.ok)
+      renameAgentIdentity({
+        anchor: sessionId,
+        id: identity.id,
+        agentName: requestedName,
+      })
+    return result
   }
 
   const daemonTool = {
@@ -1462,10 +1663,8 @@ export function apply(ctx: Context): () => void {
     : undefined
 
   // ── wake timer + startup ───────────────────────────────────────────────────
-  // Single host-side timer polls the daemon for board entries every
-  // WAKE_INTERVAL_MS. The first poll also registers the agent and starts the
-  // heartbeat cycle. If the daemon is not running at startup, the timer keeps
-  // trying — the first successful poll registers the agent cleanly.
+  // Poll native endpoints and reconcile their presence before shared delivery.
+  // An empty host does not start a daemon or publish an Agent identity.
   //
   // Cordis-native timers (ctx.interval / ctx.timeout) instead of the Node
   // globals: they return disposers, are auto-released with the fiber on
@@ -1499,10 +1698,13 @@ export function apply(ctx: Context): () => void {
   if (wakeRouteDisposer) disposers.push(wakeRouteDisposer)
 
   // Return the cordis dispose-time cleanup for this plugin contribution.
-  return () => {
+  return async () => {
+    hostDisposed = true
     for (const dispose of disposers) {
       if (typeof dispose === 'function') dispose()
     }
+    await Promise.allSettled([...boardRegistrations.entries()]
+      .map(([sessionId, record]) => retireBoardRegistration(sessionId, record)))
     recallGenerations.clear()
     sessionTokenTotals.clear()
     recallBatch.clear()

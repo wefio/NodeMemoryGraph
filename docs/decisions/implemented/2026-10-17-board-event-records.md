@@ -175,3 +175,28 @@ DSH recipients receiving 12-author batches, independent Agent busy declarations,
 phase changes during preparation, receipt rollback and WorkBuddy output failure.
 These fixtures measure protocol and adapter boundaries. Live Harness UI behavior
 and natural collaboration outcomes retain their separate validation scope.
+
+## Native endpoint identity and presence
+
+A project-wide DSH identity mixes adapter lifetime with Agent availability and
+collapses several sessions into one subscriber. It also gives ordinary tools,
+event mutations and wake delivery different identity rules. DSH therefore binds
+all of these paths to the native Agent/session. Shared recipient selection and
+pending notices lead directly to the corresponding native enqueue or resume.
+
+Presence gains an explicit withdrawal operation. A soft withdrawal retains
+historical authorship, notes and outstanding work. Deleting registry records
+would discard that context, while waiting only for the heartbeat window would
+keep a normally closed session visible. Registration-generation tokens fence
+late heartbeats and withdrawals. Per-session write ordering handles overlapping
+adapter lifecycle callbacks. Failed withdrawals retry while the adapter lives.
+
+The existing project identity is retired when the updated adapter activates.
+Historical roles and subscriptions retain their original owner because choosing
+an arbitrary native session would grant it another participant's scope. The
+capability check makes the added lifecycle explicit to older daemon owners.
+Controlled integration covers empty hosts, native disposal, plugin disposal,
+independent subscriptions, direct recipients, display-name routing, continuable
+children and withdrawal recovery. Live DSH GUI and abrupt process failure remain
+separate validation surfaces. The [presence contract](../../design/board-event-records/agent-activity-and-batches.md#presence-and-native-sessions)
+owns the resulting behavior.

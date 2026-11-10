@@ -11,9 +11,210 @@ import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
 
+test("DSH exposes actual sessions and withdraws them when their native endpoint disappears", async () => {
+  await withHost(true, async ({ service, agents, wake, directory, disposeAgent, stop }) => {
+    const legacyId = `dsh:${basename(directory)}`;
+    await service.invoke("taskBoard", {
+      action: "registerAgent",
+      id: legacyId,
+      agentName: "Legacy adapter",
+    });
+    const roster = async () => {
+      const result = await service.invoke("taskBoard", {
+        action: "discover",
+        agentId: "observer",
+        taskId: "default",
+      });
+      if (result.action !== "discover") throw Error("Missing roster");
+      return result.agents.map((agent) => agent.id);
+    };
+    await wake();
+    assert.deepEqual(await roster(), []);
+    agents.set("actual-session", { id: "actual-session", status: "idle", send: async () => {} });
+    await wake();
+    assert.deepEqual(await roster(), ["actual-session"]);
+    await disposeAgent(agents.get("actual-session")!);
+    assert.deepEqual(await roster(), []);
+    agents.clear();
+    await wake();
+    assert.deepEqual(await roster(), []);
+    agents.set("replacement", { id: "replacement", status: "idle", send: async () => {} });
+    await wake();
+    assert.deepEqual(await roster(), ["replacement"]);
+    agents.clear();
+    await wake();
+    assert.deepEqual(await roster(), []);
+    agents.set("last-session", { id: "last-session", status: "idle", send: async () => {} });
+    await wake();
+    await stop();
+    assert.deepEqual(await roster(), []);
+  });
+});
+
+test("DSH directs a notice to one native recipient and keeps channel subscriptions independent", async () => {
+  await withHost(true, async ({ service, agents, wake, tools, requests }) => {
+    const received = new Map<string, string[]>();
+    for (const id of ["session-a", "session-b"]) {
+      received.set(id, []);
+      agents.set(id, {
+        id,
+        status: "idle",
+        send: async (message) => {
+          received.get(id)!.push(message.content.map((part) => part.text).join(""));
+        },
+      });
+    }
+    const state = tools.get("nmg_state")!;
+    const execution = { agent: agents.get("session-a"), signal: new AbortController().signal };
+    await state.execute(
+      {
+        space: "board",
+        action: "write",
+        operation: "subscribe",
+        taskId: "discussion",
+        agentId: "forged",
+      },
+      execution,
+    );
+    await state.execute(
+      {
+        space: "board",
+        action: "write",
+        operation: "rename",
+        agentName: "DSH reviewer",
+      },
+      execution,
+    );
+    await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "discussion",
+      agentId: "peer",
+      kind: "note",
+      content: "Channel reply",
+    });
+    await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "private",
+      agentId: "peer",
+      kind: "question",
+      to: "session-b",
+      content: "Only session B",
+    });
+    await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "private",
+      agentId: "peer",
+      kind: "question",
+      to: "DSH reviewer",
+      content: "By current display name",
+    });
+    const inbox = await state.execute(
+      { space: "board", action: "read", operation: "readInbox" },
+      execution,
+    );
+    assert.match(String(inbox), /By current display name/);
+    await wake();
+    assert.equal(received.get("session-a")!.length, 1);
+    assert.match(received.get("session-a")![0]!, /Channel reply/);
+    assert.match(received.get("session-a")![0]!, /By current display name/);
+    assert.doesNotMatch(received.get("session-a")![0]!, /Only session B/);
+    assert.equal(received.get("session-b")!.length, 1);
+    assert.match(received.get("session-b")![0]!, /Only session B/);
+    assert.doesNotMatch(received.get("session-b")![0]!, /Channel reply/);
+    assert.doesNotMatch(received.get("session-b")![0]!, /By current display name/);
+    const subscription = requests.find((request) => request.params.operation === "subscribe")!;
+    assert.equal(subscription.params.agentId, "session-a");
+    assert.equal(subscription.params.sessionId, "session-a");
+    assert.equal(
+      requests.some((request) => request.method === "taskBoard" && request.params.action === "put"),
+      false,
+    );
+  });
+});
+
+test("DSH requires a native actor and resumes a continuable child under its own identity", async () => {
+  await withHost(true, async ({ service, agents, children, resumed, wake, tools }) => {
+    const state = tools.get("nmg_state")!;
+    await assert.rejects(
+      state.execute(
+        { space: "board", action: "read" },
+        {
+          signal: new AbortController().signal,
+        },
+      ),
+      /native DSH Agent session/,
+    );
+    const parentMessages: string[] = [];
+    agents.set("parent", {
+      id: "parent",
+      status: "idle",
+      send: async (message) => {
+        parentMessages.push(message.content.map((part) => part.text).join(""));
+      },
+    });
+    children.set("parent", [{ id: "child", kind: "child", mode: "continuable" }]);
+    await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "child-work",
+      agentId: "peer",
+      kind: "question",
+      to: "child",
+      content: "Resume child only",
+    });
+    await wake();
+    assert.deepEqual(parentMessages, []);
+    assert.equal(resumed.get("child")?.length, 1);
+    const roster = await service.invoke("taskBoard", {
+      action: "discover",
+      agentId: "observer",
+      taskId: "default",
+    });
+    assert.ok(roster.action === "discover");
+    assert.deepEqual(new Set(roster.agents.map((agent) => agent.id)), new Set(["parent", "child"]));
+  });
+});
+
+test("DSH retries a failed presence withdrawal on a later empty-host poll", async (t) => {
+  for (const failureMode of ["error", "missing-response"])
+    await withHost(true, async ({ service, agents, wake }) => {
+      agents.set("retiring-session", {
+        id: "retiring-session",
+        status: "idle",
+        send: async () => {},
+      });
+      await wake();
+      const invoke = service.invoke.bind(service);
+      let failures = 1;
+      t.mock.method(service, "invoke", (async (method, params) => {
+        const request = params as { action?: string; id?: string };
+        if (
+          method === "taskBoard" &&
+          request.action === "unregisterAgent" &&
+          request.id === "retiring-session" &&
+          failures > 0
+        ) {
+          failures--;
+          if (failureMode === "error") throw new Error("temporary withdrawal failure");
+          return undefined;
+        }
+        return invoke(method, params);
+      }) as typeof service.invoke);
+      agents.clear();
+      await wake();
+      assert.equal(failures, 0);
+      await wake();
+      const result = await service.invoke("taskBoard", {
+        action: "discover",
+        taskId: "default",
+        agentId: "observer",
+      });
+      assert.ok(result.action === "discover");
+      assert.deepEqual(result.agents, []);
+    });
+});
+
 test("DSH batches twelve peers for eight recipients and drains busy recipients on idle", async () => {
-  await withHost(true, async ({ service, agents, wake, directory, requests }) => {
-    const routingId = `dsh:${basename(directory)}`;
+  await withHost(true, async ({ service, agents, wake, requests }) => {
     const received = new Map<string, string[]>();
     for (let i = 0; i < 8; i++) {
       const id = `recipient-${i}`;
@@ -26,17 +227,18 @@ test("DSH batches twelve peers for eight recipients and drains busy recipients o
         },
       });
     }
-    await service.invoke("taskBoard", {
-      action: "subscribe",
-      taskId: "discussion",
-      agentId: routingId,
-      sessionId: "dsh",
-    });
+    for (const id of agents.keys())
+      await service.invoke("taskBoard", {
+        action: "subscribe",
+        taskId: "discussion",
+        agentId: id,
+        sessionId: id,
+      });
     await service.invoke("state", {
       space: "board",
       action: "write",
       operation: "agentActivity",
-      agentId: routingId,
+      agentId: "recipient-1",
       sessionId: "recipient-1",
       activity: { state: "busy" },
     });
@@ -68,7 +270,7 @@ test("DSH batches twelve peers for eight recipients and drains busy recipients o
       space: "board",
       action: "write",
       operation: "agentActivity",
-      agentId: routingId,
+      agentId: "recipient-1",
       sessionId: "recipient-1",
       activity: { state: "idle" },
     });
@@ -97,6 +299,7 @@ type WakeHostAgent = {
   status: "idle" | "running";
   send(message: { content: Array<{ text: string }> }): Promise<void>;
 };
+type WakeChild = { id: string; kind: "child"; mode: "continuable" };
 
 async function withHost(
   coordination: boolean,
@@ -109,6 +312,10 @@ async function withHost(
     recall: () => string;
     wake: () => Promise<void>;
     agents: Map<string, WakeHostAgent>;
+    children: Map<string, WakeChild[]>;
+    resumed: Map<string, string[]>;
+    disposeAgent: (agent: WakeHostAgent) => Promise<void>;
+    stop: () => Promise<void>;
     directory: string;
   }) => Promise<void>,
 ) {
@@ -119,6 +326,7 @@ async function withHost(
     USERPROFILE: directory,
     HOME: directory,
     NMG_ENABLE_COORDINATION: coordination ? "1" : "0",
+    NMG_AGENT_ID: "dsh-host-process",
   };
   const previous = new Map(Object.keys(environment).map((key) => [key, process.env[key]]));
   Object.assign(process.env, environment);
@@ -134,7 +342,7 @@ async function withHost(
     });
     void httpHandler(service, "fixture-token")(request, response);
   });
-  let dispose: (() => void) | undefined;
+  let dispose: (() => Promise<void>) | undefined;
   let subprocessCalls = 0;
   try {
     await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
@@ -153,12 +361,14 @@ async function withHost(
       resolve(import.meta.dirname, "../../dsh/dsh-nmg/src/plugin/index.ts"),
     ).href;
     const plugin = (await import(path)) as {
-      apply(context: unknown): () => void;
+      apply(context: unknown): () => Promise<void>;
     };
     const tools = new Map<string, HostTool>();
     const events = new Map<string, (payload: unknown) => void>();
     const contributions = new Map<string, (context: unknown) => string>();
     const agents = new Map<string, WakeHostAgent>();
+    const children = new Map<string, WakeChild[]>();
+    const resumed = new Map<string, string[]>();
     let wake = async () => {};
     dispose = plugin.apply({
       tools: {
@@ -189,6 +399,19 @@ async function withHost(
       },
       get(name: string) {
         if (name === "agents") return { list: () => [...agents.values()] };
+        if (name === "subagents")
+          return {
+            listChildren: async (parentId: string) => children.get(parentId) ?? [],
+            followup: async (
+              _parent: WakeHostAgent,
+              childId: string,
+              parts: Array<{ text: string }>,
+            ) => {
+              const messages = resumed.get(childId) ?? [];
+              messages.push(parts.map((part) => part.text).join(""));
+              resumed.set(childId, messages);
+            },
+          };
         return undefined;
       },
       interval(callback: () => Promise<void>) {
@@ -207,6 +430,15 @@ async function withHost(
     await run({
       wake: () => wake(),
       agents,
+      children,
+      resumed,
+      disposeAgent: async (agent) => {
+        await events.get("agent/disposed")!({ agent });
+      },
+      stop: async () => {
+        await dispose?.();
+        dispose = undefined;
+      },
       directory,
       tools,
       service,
@@ -220,7 +452,7 @@ async function withHost(
       recall: () => contributions.get("nmg:recall")!({ agent: { id: "dsh-recall" } }),
     });
   } finally {
-    dispose?.();
+    await dispose?.();
     await new Promise<void>((done) => server.close(() => done()));
     service.close();
     rmSync(directory, { recursive: true, force: true });
@@ -344,7 +576,8 @@ test("DSH forwards event objects and pins mutation identity to its registered ac
     const request = requests.find(
       (r) => r.method === "state" && r.params.operation === "eventCreate",
     )!;
-    assert.notEqual(request.params.agentId, "spoofed");
+    assert.equal(request.params.agentId, "host-session");
+    assert.equal(request.params.sessionId, "host-session");
     const listed = await service.invoke("state", {
       action: "read",
       space: "board",
