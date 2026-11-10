@@ -1224,6 +1224,8 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
     }
   }
 
+  ensureTaskBoardPresenceSchema(db);
+
   // ── Memory chains: static ordered-reference DAG forests over memory_records ──
   // A chain is a small, independent, internally-acyclic sequence of memory
   // references; node reuse gives cross-chain intersection (a memory may belong
@@ -1456,6 +1458,21 @@ export function ensureRetrievalTraceColumns(db: DatabaseSync): void {
     if (!existing.has(name))
       db.exec(`ALTER TABLE retrieval_traces ADD COLUMN ${name} ${definition}`);
   }
+}
+
+function ensureTaskBoardPresenceSchema(db: DatabaseSync): void {
+  const existing = new Set(
+    (db.prepare("PRAGMA table_info(task_board_agents)").all() as Row[]).map((row) =>
+      String(row.name),
+    ),
+  );
+  const additions: Array<[string, string]> = [
+    ["is_online", "INTEGER NOT NULL DEFAULT 1"],
+    ["presence_token", "TEXT"],
+  ];
+  for (const [name, definition] of additions)
+    if (!existing.has(name))
+      db.exec(`ALTER TABLE task_board_agents ADD COLUMN ${name} ${definition}`);
 }
 
 /** Aggregate tier of the summary-routing signal: per-node counters of how

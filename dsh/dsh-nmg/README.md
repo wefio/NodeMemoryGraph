@@ -73,6 +73,11 @@ npm run build       # tsdown → lib/index.js + lib/client.js
 ## 唤醒器（board wake）参考
 
 唤醒器使用共享批次准备与投递，保留逐条来源并按 InformationView 预算筛选。
+名册登记实际 Agent／会话，宿主进程通过健康检查诊断。工具调用与投递使用同一身份，
+各会话分别订阅频道并定向收件。空宿主及已退出会话撤出在线发现。
+旧项目身份的历史和订阅保留原 owner，按需通过领域操作交接到具体会话。
+更新后的适配器使用 daemon 的 `board-agent-presence` 能力，涉及本包源码的更新先按
+上述构建流程生成 `lib/`，再在安全的会话边界加载新版本。
 DSH 上报会话原生处理状态，黑板结合 Agent 独立声明判断忙碌。
 父会话通过原生消息接收，continuable 子会话通过 `ctx.subagents.followup` 恢复。
 网页历史保留已送来源用于显示。共享语义见

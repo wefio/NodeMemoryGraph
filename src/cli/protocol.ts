@@ -116,6 +116,7 @@ export const NMG_CAPABILITIES = [
   "board-events",
   "board-wake-batches",
   "board-agent-activity",
+  "board-agent-presence",
 ] as const;
 
 export type NmgCapability = (typeof NMG_CAPABILITIES)[number];
@@ -742,12 +743,21 @@ export interface NmgTaskBoardRegisterAgentParams {
   capabilities?: string;
   skills?: string;
   supportedInterfaces?: string;
+  presenceToken?: string;
 }
 
 /** System-layer heartbeat: refresh last_seen_at for a stable id. */
 export interface NmgTaskBoardHeartbeatParams {
   action: "heartbeat";
   id: string;
+  presenceToken?: string;
+}
+
+/** Withdraw a registration generation without deleting its identity or work. */
+export interface NmgTaskBoardUnregisterAgentParams {
+  action: "unregisterAgent";
+  id: string;
+  presenceToken?: string;
 }
 
 /** Runtime rename: change the display agent_name for a stable id (routing key
@@ -790,6 +800,7 @@ export type NmgTaskBoardParams =
   | NmgTaskBoardListSubscriptionsParams
   | NmgTaskBoardRegisterAgentParams
   | NmgTaskBoardHeartbeatParams
+  | NmgTaskBoardUnregisterAgentParams
   | NmgTaskBoardRenameParams
   | NmgTaskBoardDiscoverParams;
 
@@ -1093,7 +1104,7 @@ export type NmgMethodResult = {
         subscriptions: Array<{ taskId: string; subscribedAt: string }>;
       }
     | {
-        action: "registerAgent" | "heartbeat" | "rename";
+        action: "registerAgent" | "heartbeat" | "unregisterAgent" | "rename";
         agentName: string;
         id: string;
       }

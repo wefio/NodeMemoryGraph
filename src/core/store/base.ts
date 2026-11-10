@@ -999,14 +999,15 @@ export class NmgStoreBase {
     capabilities?: string;
     skills?: string;
     supportedInterfaces?: string;
+    presenceToken?: string;
   }): void {
     const now = new Date().toISOString();
     this.db
       .prepare(
         `INSERT INTO task_board_agents(
            id, agent_name, description, version, url, capabilities, skills,
-           supported_interfaces, last_seen_at, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           supported_interfaces, presence_token, is_online, last_seen_at, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            agent_name = excluded.agent_name,
            description = excluded.description,
@@ -1015,6 +1016,8 @@ export class NmgStoreBase {
            capabilities = excluded.capabilities,
            skills = excluded.skills,
            supported_interfaces = excluded.supported_interfaces,
+           presence_token = excluded.presence_token,
+           is_online = 1,
            last_seen_at = excluded.last_seen_at`,
       )
       .run(
@@ -1026,6 +1029,7 @@ export class NmgStoreBase {
         input.capabilities ?? null,
         input.skills ?? null,
         input.supportedInterfaces ?? null,
+        input.presenceToken ?? null,
         now,
         now,
       );
@@ -1033,10 +1037,19 @@ export class NmgStoreBase {
 
   /** System-layer heartbeat: refresh last_seen so the agent stays online.
    * Keyed by the stable id (never the mutable display name). */
-  heartbeatTaskBoardAgent(input: { id: string }): void {
+  heartbeatTaskBoardAgent(input: { id: string; presenceToken?: string }): void {
     this.db
-      .prepare("UPDATE task_board_agents SET last_seen_at = ? WHERE id = ?")
-      .run(new Date().toISOString(), input.id);
+      .prepare(
+        "UPDATE task_board_agents SET last_seen_at = ? WHERE id = ? AND is_online=1 AND presence_token IS ?",
+      )
+      .run(new Date().toISOString(), input.id, input.presenceToken ?? null);
+  }
+
+  /** Withdraw presence while retaining identity, notes and historical attribution. */
+  unregisterTaskBoardAgent(input: { id: string; presenceToken?: string }): void {
+    this.db
+      .prepare("UPDATE task_board_agents SET is_online=0 WHERE id=? AND presence_token IS ?")
+      .run(input.id, input.presenceToken ?? null);
   }
 
   /** Runtime rename: change the display agent_name for a stable id (the id is
@@ -1062,7 +1075,7 @@ export class NmgStoreBase {
     const since = new Date(Date.now() - onlineMs).toISOString();
     let sql =
       "SELECT id, agent_name, description, capabilities, last_seen_at " +
-      "FROM task_board_agents WHERE last_seen_at >= ?";
+      "FROM task_board_agents WHERE is_online=1 AND last_seen_at >= ?";
     const args: Array<string | number | null> = [since];
     if (input.capabilities) {
       sql += " AND capabilities LIKE ?";

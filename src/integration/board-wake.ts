@@ -206,7 +206,7 @@ export function isBoardWakeCandidate(
  * daemon transport (lease RPC or CLI fallback). */
 export async function collectWakeCandidates(
   invoke: (method: string, params: unknown) => Promise<unknown>,
-  input: { agentId: string; agentName: string; sessionId: string; subscriptionSessionId?: string },
+  input: { agentId: string; agentName: string; sessionId: string },
 ): Promise<WakeCandidate[]> {
   const candidates: WakeCandidate[] = [];
   const candidateIds = new Set<string>();
@@ -249,7 +249,7 @@ export async function collectWakeCandidates(
   const subs = (await invoke("taskBoard", {
     action: "listSubscriptions",
     agentId,
-    sessionId: input.subscriptionSessionId ?? sessionId,
+    sessionId,
   })) as { action: "listSubscriptions"; subscriptions: Array<{ taskId: string }> };
   for (const board of subs.subscriptions ?? []) {
     const read = (await invoke("taskBoard", {

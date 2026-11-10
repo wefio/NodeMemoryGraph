@@ -22,9 +22,14 @@ const cachedIdentities = new Map<string, AgentIdentity>();
  * because each has its own anchor directory. Survives reload (session-boundary
  * fix): the identity file is re-read, so id and name persist across a host
  * restart. `hostPrefix` namespaces the process-level fallback anchor
- * (<hostPrefix>:<pid>) so two adapters cannot route through the same row. */
-export function loadOrCreateAgentIdentity(sessionId: string, hostPrefix = "agent"): AgentIdentity {
-  const anchor = process.env.NMG_AGENT_ID?.trim() || sessionId || `${hostPrefix}:${process.pid}`;
+ * (<hostPrefix>:<pid>) so two adapters cannot route through the same row.
+ * A harness with native multi-Agent identities supplies the explicit anchor
+ * to bind each native Agent independently of process-level configuration. */
+export function loadOrCreateAgentIdentity(
+  sessionId: string,
+  hostPrefix = "agent",
+  anchor = process.env.NMG_AGENT_ID?.trim() || sessionId || `${hostPrefix}:${process.pid}`,
+): AgentIdentity {
   const cachedIdentity = cachedIdentities.get(anchor);
   if (cachedIdentity) return cachedIdentity;
   const dir = join(resolveNmgDataDir(), "agents", anchor);

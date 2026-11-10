@@ -3379,6 +3379,35 @@ function parseStgPurgeSessionParams(value: unknown): NmgStgPurgeSessionParams {
 const TASK_BOARD_READ_STYLE = new Set<string>(["read", "readPreviews"]);
 const TASK_BOARD_DIRECTED_STYLE = new Set<string>(["readDirected", "readInbox"]);
 const TASK_BOARD_ACK_STYLE = new Set<string>(["acknowledge", "veto"]);
+const TASK_BOARD_REGISTRY_STYLE = new Set<string>([
+  "registerAgent",
+  "heartbeat",
+  "unregisterAgent",
+  "rename",
+]);
+const TASK_BOARD_SUBSCRIPTION_STYLE = new Set<string>(["unsubscribe", "subscribe"]);
+
+function parseTaskBoardRegistry(
+  action: "registerAgent" | "heartbeat" | "unregisterAgent" | "rename",
+  params: Record<string, unknown>,
+): NmgTaskBoardParams {
+  const id = requiredString(params, "id");
+  if (action === "registerAgent")
+    return {
+      action,
+      id,
+      agentName: requiredString(params, "agentName"),
+      description: optionalString(params, "description"),
+      version: optionalString(params, "version"),
+      url: optionalString(params, "url"),
+      capabilities: optionalString(params, "capabilities"),
+      skills: optionalString(params, "skills"),
+      supportedInterfaces: optionalString(params, "supportedInterfaces"),
+      presenceToken: optionalString(params, "presenceToken"),
+    };
+  if (action === "rename") return { action, id, agentName: requiredString(params, "agentName") };
+  return { action, id, presenceToken: optionalString(params, "presenceToken") };
+}
 
 function parseBoardNotificationParams(value: unknown) {
   try {
@@ -3457,33 +3486,16 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
     "unsubscribe",
     "subscribe",
     "registerAgent",
+    "unregisterAgent",
     "heartbeat",
     "rename",
     "discover",
   ] as const);
-  if (action === "registerAgent") {
-    return {
-      action,
-      id: requiredString(params, "id"),
-      agentName: requiredString(params, "agentName"),
-      description: optionalString(params, "description"),
-      version: optionalString(params, "version"),
-      url: optionalString(params, "url"),
-      capabilities: optionalString(params, "capabilities"),
-      skills: optionalString(params, "skills"),
-      supportedInterfaces: optionalString(params, "supportedInterfaces"),
-    };
-  }
-  if (action === "heartbeat") {
-    return { action, id: requiredString(params, "id") };
-  }
-  if (action === "rename") {
-    return {
-      action,
-      id: requiredString(params, "id"),
-      agentName: requiredString(params, "agentName"),
-    };
-  }
+  if (TASK_BOARD_REGISTRY_STYLE.has(action))
+    return parseTaskBoardRegistry(
+      action as "registerAgent" | "heartbeat" | "unregisterAgent" | "rename",
+      params,
+    );
   const agentId = requiredString(params, "agentId");
   if (action === "discover") {
     return {
@@ -3525,9 +3537,9 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
     };
   }
   if (action === "recordDelivery") return parseTaskBoardDelivery(agentId, params);
-  if (action === "unsubscribe" || action === "subscribe") {
+  if (TASK_BOARD_SUBSCRIPTION_STYLE.has(action)) {
     return {
-      action,
+      action: action as "unsubscribe" | "subscribe",
       agentId,
       sessionId: requiredString(params, "sessionId"),
       taskId: requiredString(params, "taskId"),
@@ -3905,18 +3917,24 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
       capabilities: p.capabilities,
       skills: p.skills,
       supportedInterfaces: p.supportedInterfaces,
+      presenceToken: p.presenceToken,
     });
     return { action: "registerAgent", agentName: p.agentName, id: p.id };
   },
   heartbeat: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"heartbeat">;
-    store.heartbeatTaskBoardAgent({ id: p.id });
+    store.heartbeatTaskBoardAgent({ id: p.id, presenceToken: p.presenceToken });
     return { action: "heartbeat", agentName: "", id: p.id };
   },
   rename: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"rename">;
     store.renameTaskBoardAgent({ id: p.id, agentName: p.agentName });
     return { action: "rename", agentName: p.agentName, id: p.id };
+  },
+  unregisterAgent: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"unregisterAgent">;
+    store.unregisterTaskBoardAgent({ id: p.id, presenceToken: p.presenceToken });
+    return { action: "unregisterAgent", agentName: "", id: p.id };
   },
   discover: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"discover">;

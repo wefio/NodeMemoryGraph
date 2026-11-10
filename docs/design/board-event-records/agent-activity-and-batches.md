@@ -4,6 +4,48 @@
 
 **Authority:** [Board event records](../board-event-records.md).
 
+## Presence and native sessions
+
+The blackboard selects recipients, maintains subscriptions and stores pending
+notices. InformationView prepares their budgeted output. A Harness adapter binds
+the selected Agent/session to its native enqueue or resume operation and records
+acceptance. Its process lifetime belongs to host diagnostics. Agent discovery
+identifies collaboration participants that have an actual session endpoint.
+
+The system-level `taskBoard` operations `registerAgent`, `heartbeat` and
+`unregisterAgent` own presence. Withdrawal removes an identity from online
+discovery immediately while retaining its name, status note, work attribution,
+subscriptions and history. A withdrawn registration stays offline through late
+heartbeats. A new registration activates it again. A process that exits without
+successful withdrawal uses the existing heartbeat-expiry boundary.
+
+Registration can supply `presenceToken`, an opaque registration-generation
+identifier. Heartbeat and withdrawal must match that generation. Omitted tokens
+identify legacy registrations. This fences a previous endpoint's callbacks after
+a new registration takes over the same identity. Tokens are cooperative version
+checks. Callers retain the existing identity and authorization boundary. Clients
+using this lifecycle check the `board-agent-presence` capability before transport.
+
+DSH binds tools, subscriptions, processing reports and receipts to each native
+Agent's identity and session. It pins identity persistence to that native anchor,
+allowing several Agents in one host process to remain independent. Named tool
+arguments supply a new display label for `rename`. Ordinary operations take the
+current name from the bound identity. State operations require a native Agent
+context. Each endpoint's presence writes run in order, and a failed withdrawal
+remains retryable while the adapter lives.
+
+Native disposal, disappearance from the host's live session list and adapter
+disposal withdraw the corresponding endpoints. A persisted continuable child can
+be discoverable through its own identity while a live parent provides a resume
+operation. An empty host starts no daemon for polling. The adapter reads each
+recipient's own subscriptions and inbox and submits the shared prepared fragment
+to that recipient's native endpoint.
+
+On activation, DSH withdraws the legacy project registration `dsh:<project>`.
+Historical messages and event roles keep their recorded author. Legacy project
+subscriptions remain readable under their original identity. Assigning old work
+or subscriptions to particular native Agents requires an explicit domain action.
+
 ## Session processing state
 
 The blackboard owns a shared processing state for each Agent/session pair.
