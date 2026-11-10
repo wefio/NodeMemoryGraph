@@ -24,6 +24,7 @@ import { loadPrompts } from "../../../src/prompts/load.ts";
 import { SEARCH_TOOL_PARAMETERS } from "../../../src/integration/tool-contract.ts";
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
 import { NmgStore } from "../../../src/core/store.ts";
+import { renameAgentIdentity } from "../../../src/integration/agent-identity.ts";
 import type { MemoryContext } from "../../../src/core/types.ts";
 import { ControllerRuntime } from "../../../src/lab/controller-runtime.ts";
 import { CONTROLLER_FEATURE_PROTOCOL_VERSION } from "../../../src/lab/controller-protocol.ts";
@@ -1425,6 +1426,42 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       [boardPut.details.entry.id],
     );
     assert.match(boardRead.content[0].text, /Agent B should verify the parser tests/u);
+    {
+      renameAgentIdentity({ anchor: "agent-b", id: "agent-b", agentName: "Inbox reviewer" });
+      const store = new NmgStore(join(directory, "nmg.sqlite"));
+      const directed = {
+        taskId: "atlas-inbox",
+        agentId: "agent-a",
+        kind: "question" as const,
+        content: "Review the inbox identity binding.",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      };
+      const byId = store.putTaskBoardEntry({ ...directed, to: "agent-b" });
+      const byName = store.putTaskBoardEntry({ ...directed, to: "Inbox reviewer" });
+      store.close();
+      const inbox = (await tools
+        .get("nmg_state")!
+        .execute(
+          "board-inbox",
+          { action: "read", space: "board", operation: "readInbox" },
+          undefined,
+          undefined,
+          { sessionManager: secondSessionManager },
+        )) as { details: { entries: Array<{ id: string }> } };
+      assert.ok(inbox.details.entries.some((entry) => entry.id === byId.id));
+      assert.ok(inbox.details.entries.some((entry) => entry.id === byName.id));
+      const boundInbox = (await tools
+        .get("nmg_state")!
+        .execute(
+          "board-inbox-bound-identity",
+          { action: "read", space: "board", operation: "readInbox", agentName: "Other agent" },
+          undefined,
+          undefined,
+          { sessionManager: secondSessionManager },
+        )) as { details: { entries: Array<{ id: string }> } };
+      assert.ok(boundInbox.details.entries.some((entry) => entry.id === byName.id));
+      renameAgentIdentity({ anchor: "agent-b", id: "agent-b", agentName: "agent-b" });
+    }
     // Reading writes a delivery receipt for open, non-own-echo entries: session
     // B has now 'read' the handoff, so the wake loop will not re-push it.
     // (Cross-agent feedback, world #9: already-read entries must not re-wake.)

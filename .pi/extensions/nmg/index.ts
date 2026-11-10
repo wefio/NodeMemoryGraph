@@ -2351,6 +2351,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         ...params,
         taskId,
         agentId,
+        agentName,
         sourceSessionId: sessionId,
       })) as TaskBoardToolResult;
       const entries = result.entries ?? (result.entry ? [result.entry] : []);

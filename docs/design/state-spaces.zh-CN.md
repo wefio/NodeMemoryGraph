@@ -41,6 +41,10 @@ AG 支持 `read/status` 和 `enable/disable/replace/clear`。board 保留领域�
 发布、订阅、租约、交付、独立裁定和关闭操作，不退化为通用对象的 `set`。
 省略 board 的 `taskId` 使用共享 world 频道 `default`。
 
+Pi 在传输前为 `readInbox` 绑定会话的稳定 Agent ID 和当前显示名。
+工具调用方可以省略 `agentName`，运行时改名后也沿用当前身份。
+`rename` 操作通过自己的控制路径接收请求的新显示名。管理 RPC 调用方提供寻址字段。
+
 RPC `state` 是增量能力 `state-spaces`。返回保留 `action/space/operation`、原 owner
 的 `result`，以及适用时的 `PreparedInformationOutput`；不是另一套状态视图。
 不支持该能力的 daemon 明确拒绝，不静默回退成别的 RPC。
