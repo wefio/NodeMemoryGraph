@@ -45,7 +45,8 @@ without an offset, `YYYY/M/D`, `YYYY.M.D`, `2026年11月6日[ 14:30]`, `11月6�
 大前天/明天/后天`, `本周X/上周X/下周X`, `本月/上个月/去年/明年`, `N天前`,
 `两周以前`, `3个月前`, `刚才`, plus `today/yesterday/N days ago/last month`.
 
-Writes resolve once, against the write clock: `newMemory` (portable plan) and
+Writes resolve once, against the explicit source clock when supplied, otherwise
+the write clock: `newMemory` (portable plan) and
 `addMemory` (store) both store the canonical instant, so a replay cannot drift
 with the reading clock. `assertTemporalValidity` resolves before it judges, so a
 stated day is accepted while genuine garbage (`傍晚`) is still refused. A phrase
@@ -85,9 +86,27 @@ Reads consume the column, in the layer that can filter:
   supersession resolution and the post-filter all compare canonical instants
   through `eventTimeMillis`.
 
-`migrate` repairs the store once: rows whose `event_time` or `valid_from` is not
-canonical are rewritten in place, and already-canonical rows are skipped by a
-GLOB guard, so reopening a store is a no-op. Unparseable text is left untouched.
+`migrate` repairs complete absolute dates in noncanonical `event_time` or
+`valid_from` values. A GLOB guard skips canonical rows. Relative, year-omitted
+and unparseable text stays untouched: the opening clock cannot supply missing
+source evidence. Temporal SQL bounds require canonical stored instants.
+
+### Historical replay correction
+
+Resolving once prevents reading-clock drift, but using ingestion time for a
+historical source still permanently anchors the wrong date. The
+[source-clock contract](../../design/design/event-time-source-clocks.md)
+adds an explicit source anchor and zone to existing writes, while preserving
+actual ingestion timestamps. We chose per-item input over a global clock or a
+rewritten `createdAt`: imports can mix source dates and concurrent live writes.
+An owner capability check prevents older daemons from silently dropping the
+new fields. Migration and ranking leave unanchored source phrases unresolved.
+
+Isolated regressions cover different ingestion dates and host zones, source
+offsets, DST, elapsed hours, invalid contexts, old-owner rejection, batch
+isolation, reopen, temporal SQL bounds and the actual CLI/Pi/MCP/DSH/OpenCode
+entry points. They do not establish deployment or improved benchmark scores.
+Already-misresolved canonical records require source-backed correction.
 
 ## Alternatives considered
 
@@ -113,8 +132,8 @@ to be `2029-09-14` (the next day, meant to be exclusive) and is now
 inclusion set is unchanged, and `as of` now includes the whole named day instead
 of stopping at its midnight.
 
-Every write of a non-canonical timestamp is rewritten once on the next store
-open. Nothing rewrites `created_at`, `expires_at` or history rows.
+Every resolvable complete absolute timestamp is rewritten once on the next
+store open. Nothing rewrites `created_at`, `expires_at` or history rows.
 
 Chinese date mentions inside paraphrased statements stay unbound, which is the
 cost of the intent gate: `把 2026年11月6日 的会议记下来` searches by wording only.

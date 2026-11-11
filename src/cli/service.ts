@@ -157,7 +157,7 @@ import {
   configuredStgSyncPolicy,
 } from "../integration/config.ts";
 import { applyAdvancedFilters, parseAdvancedQuery } from "../core/store/advanced-query.ts";
-import { eventWindowEnd, eventWindowStart } from "../core/event-time.ts";
+import { eventWindowEnd, eventWindowStart, resolveWriteEventTime } from "../core/event-time.ts";
 import {
   NMG_CAPABILITIES,
   NMG_METHODS,
@@ -2736,6 +2736,8 @@ function parseRememberParams(value: unknown): NmgRememberParams {
     memoryType: optionalEnum(params, "memoryType", MEMORY_TYPES),
     stateKey: optionalString(params, "stateKey"),
     eventTime: optionalString(params, "eventTime"),
+    referenceTime: optionalString(params, "referenceTime"),
+    timeZone: optionalString(params, "timeZone"),
     sourceActor: optionalEnum(params, "sourceActor", MEMORY_ACTORS),
     truthStatus: optionalEnum(params, "truthStatus", TRUTH_STATUSES),
     evidence: optionalString(params, "evidence"),
@@ -2766,6 +2768,14 @@ function parseRememberParams(value: unknown): NmgRememberParams {
     throw new NmgProtocolError(
       "INVALID_PARAMS",
       "state memories require stateKey naming one replaceable property within scope (not a topic/group)",
+    );
+  }
+  try {
+    resolveWriteEventTime(parsed.eventTime, parsed);
+  } catch (error) {
+    throw new NmgProtocolError(
+      "INVALID_PARAMS",
+      error instanceof Error ? error.message : String(error),
     );
   }
   return parsed;

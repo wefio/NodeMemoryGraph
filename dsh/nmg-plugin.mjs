@@ -18,6 +18,7 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { appendRememberTimeContext } from '../src/integration/tool-contract.ts'
 
 export default {
   name: 'nmg',
@@ -243,6 +244,11 @@ export default {
     async function daemonCall(method, params, signal) {
       const endpoint = resolveDaemon()
       if (!endpoint) return null
+      if (method === 'remember' && (params.referenceTime !== undefined || params.timeZone !== undefined)) {
+        const hello = await daemonCall('hello', {}, signal)
+        if (!hello?.capabilities?.includes('event-time-reference'))
+          throw new Error('NMG daemon does not advertise event-time-reference')
+      }
       try {
         const response = await fetch('http://' + endpoint.host + ':' + endpoint.port + '/', {
           method: 'POST',
@@ -308,8 +314,8 @@ export default {
       try {
         const raw = await daemonCall(method, params, signal)
         if (raw != null) return { ok: true, data: project ? project(raw) : raw }
-      } catch {
-        return { ok: false, error: 'NMG call aborted' }
+      } catch (error) {
+        return { ok: false, error: error?.message || 'NMG call aborted' }
       }
       return nmgJson(cliArgs, signal)
     }
@@ -498,6 +504,8 @@ export default {
           truthStatus: { type: 'string', enum: ['asserted', 'inferred', 'unverified', 'verified'], description: 'Truth status.' },
           evidence: { type: 'string', description: 'Exact supporting source excerpt.' },
           eventTime: { type: 'string', description: 'ISO event time when it differs from write time.' },
+          referenceTime: { type: 'string', description: 'Source ISO timestamp with Z/offset anchoring eventTime, for historical replay.' },
+          timeZone: { type: 'string', description: "Source IANA time zone; defaults to referenceTime's offset." },
           tier: { type: 'integer', description: 'Initial tier 0..3.' },
           importance: { type: 'number', description: 'Importance 0..1.' },
           residence: { type: 'string', enum: ['ltg', 'stg'], description: 'ltg (durable) or stg (session/task-local).' },
@@ -533,6 +541,7 @@ export default {
         if (args.writeReason) argv.push('--write-reason', args.writeReason)
         for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1])
         argv.push('--project-dir', workspaceRoot, '--json')
+        appendRememberTimeContext(args, params, argv)
         const r = await invoke('remember', params, argv, exec.signal, null)
         if (!r.ok) return r.error
         const m = r.data.memory || {}

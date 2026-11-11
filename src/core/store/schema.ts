@@ -14,7 +14,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import { ensureMemoryFts, MEMORY_FTS_SCHEMA, MEMORY_SURFACE_FTS_SCHEMA } from "./fts-index.ts";
-import { normalizeEventTime } from "../event-time.ts";
+import { CANONICAL_EVENT_TIME_GLOB, normalizeAbsoluteEventTime } from "../event-time.ts";
 import { encodeVector, parseVector } from "./vector-codec.ts";
 import { TASK_UNIT_DECLARATION_SCHEMA } from "../../integration/task-unit-declaration-store.ts";
 import { ensureCoordinationSchema } from "./coordination-schema.ts";
@@ -731,7 +731,6 @@ export function migrate(db: DatabaseSync): void {
 }
 
 // GLOB wildcards: `?` is one character, `*` is any run — not LIKE's `_`/`%`.
-const CANONICAL_INSTANT = "????-??-??T??:??:??.???Z";
 
 /** One-time repair of event times written before canonicalization. Candidate
  *  SQL compares `event_time` and `valid_from` as TEXT, so mixed shapes
@@ -739,7 +738,6 @@ const CANONICAL_INSTANT = "????-??-??T??:??:??.???Z";
  *  and silently drop out of a window. Already-canonical rows are skipped by the
  *  GLOB filters, which makes reopening the store a no-op. */
 function normalizeStoredEventTimes(db: DatabaseSync): void {
-  const clock = new Date();
   for (const [table, column] of [
     ["memory_records", "event_time"],
     ["memory_records", "valid_from"],
@@ -751,7 +749,7 @@ function normalizeStoredEventTimes(db: DatabaseSync): void {
           `SELECT id, ${column} AS value FROM ${table}
             WHERE ${column} IS NOT NULL AND ${column} NOT GLOB ?`,
         )
-        .all(CANONICAL_INSTANT) as Array<Record<string, unknown>>;
+        .all(CANONICAL_EVENT_TIME_GLOB) as Array<Record<string, unknown>>;
     } catch {
       // A read-only or partially created database owns no rows to repair.
       continue;
@@ -759,7 +757,7 @@ function normalizeStoredEventTimes(db: DatabaseSync): void {
     if (rows.length === 0) continue;
     const update = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`);
     for (const row of rows) {
-      const canonical = normalizeEventTime(String(row.value), clock);
+      const canonical = normalizeAbsoluteEventTime(String(row.value));
       if (canonical) update.run(canonical, String(row.id));
     }
   }

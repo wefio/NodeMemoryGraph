@@ -53,6 +53,6 @@
 
 Read the complete responsibility: [Explicit research probes](feature-register/explicit-research-probes.md).
 
-### Shared display options
+### Shared options
 
-Read [shared display options](feature-register/shared-display-options.md) for board conventions and automatic recall profiles.
+[Board/recall display](feature-register/shared-display-options.md) · [Event clocks](feature-register/event-time-source-clocks.md).

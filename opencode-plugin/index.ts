@@ -712,6 +712,15 @@ export default {
             enum: ["constraint", "event", "fact", "preference", "state", "strategy"],
           },
           eventTime: { type: "string" },
+          referenceTime: {
+            type: "string",
+            description:
+              "Source ISO timestamp with Z/offset anchoring eventTime, for historical replay.",
+          },
+          timeZone: {
+            type: "string",
+            description: "Source IANA time zone; defaults to referenceTime's offset.",
+          },
           expiresAt: { type: "string" },
           truthStatus: {
             type: "string",
@@ -923,6 +932,8 @@ export default {
             : undefined,
           memoryType: args.memoryType,
           eventTime: args.eventTime,
+          referenceTime: args.referenceTime,
+          timeZone: args.timeZone,
           expiresAt: args.expiresAt,
           truthStatus: args.truthStatus,
           sourceActor,

@@ -13,6 +13,7 @@ import { join } from "node:path";
 
 import { assertDaemonProtocol } from "../cli/daemon-client.ts";
 import type { NmgHelloResult } from "../cli/protocol.ts";
+import { requiresEventTimeReference } from "../cli/protocol.ts";
 
 export interface HttpLease {
   transport?: "http";
@@ -67,6 +68,15 @@ export async function rpcCall(
   params: unknown,
   signal?: AbortSignal,
 ) {
+  if (
+    params !== null &&
+    typeof params === "object" &&
+    requiresEventTimeReference(method, params as Record<string, unknown>)
+  ) {
+    const hello = (await rpcCall(lease, "hello", {}, signal)) as NmgHelloResult;
+    if (!hello?.capabilities?.includes("event-time-reference"))
+      throw new Error("NMG daemon does not advertise event-time-reference");
+  }
   const response = await fetch(`http://${lease.host}:${lease.port}/`, {
     method: "POST",
     headers: {

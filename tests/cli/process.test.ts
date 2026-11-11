@@ -17,6 +17,33 @@ stripProviderEnv();
 const root = resolve(import.meta.dirname, "../..");
 const launcher = resolve(root, "bin/nmg.mjs");
 
+test("CLI historical writes pass an explicit source clock without replacing ingestion time", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-historical-"));
+  try {
+    const before = Date.now();
+    const result = runLauncher([
+      "remember",
+      "HistoricalCliMarker 我昨天买了辆车",
+      "--node",
+      "历史",
+      "--event-time",
+      "昨天",
+      "--reference-time",
+      "2025-05-10T00:30:00+08:00",
+      "--time-zone",
+      "Asia/Shanghai",
+      "--data-dir",
+      directory,
+      "--json",
+    ]) as { memory: { eventTime: string; createdAt: string }; history: { createdAt: string } };
+    assert.equal(result.memory.eventTime, "2025-05-09T00:00:00.000Z");
+    assert.ok(Date.parse(result.memory.createdAt) >= before);
+    assert.ok(Date.parse(result.history.createdAt) >= before);
+  } finally {
+    removeTempDirectory(directory);
+  }
+});
+
 test("the launcher imports the built CLI the daemon client refuses to start without", () => {
   // `src/cli/daemon-client.ts` refuses to spawn when `<root>/dist/cli/main.js` is absent,
   // which is what turns an unbuilt checkout into a named failure instead of a 10s timeout.

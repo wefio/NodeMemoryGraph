@@ -84,6 +84,7 @@ export const NMG_CAPABILITIES = [
   "hello",
   "status",
   "remember",
+  "event-time-reference",
   "batch-remember",
   "resolve-remember",
   "claim-outcome-posterior",
@@ -120,6 +121,25 @@ export const NMG_CAPABILITIES = [
 ] as const;
 
 export type NmgCapability = (typeof NMG_CAPABILITIES)[number];
+
+/** A same-epoch owner must explicitly support source clocks before receiving them. */
+export function requiresEventTimeReference(
+  method: string,
+  params: Record<string, unknown>,
+): boolean {
+  if (method === "remember")
+    return params.referenceTime !== undefined || params.timeZone !== undefined;
+  return (
+    method === "rememberBatch" &&
+    Array.isArray(params.items) &&
+    params.items.some(
+      (item) =>
+        item !== null &&
+        typeof item === "object" &&
+        requiresEventTimeReference("remember", item as Record<string, unknown>),
+    )
+  );
+}
 
 export interface NmgRpcDescriptor {
   /** Additive same-epoch methods are callable only when hello advertises this. */
@@ -245,6 +265,8 @@ export interface NmgRememberParams {
   memoryType?: MemoryType;
   stateKey?: string;
   eventTime?: string;
+  referenceTime?: string;
+  timeZone?: string;
   sourceActor?: MemoryActor;
   truthStatus?: TruthStatus;
   evidence?: string;

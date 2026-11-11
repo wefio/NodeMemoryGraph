@@ -1628,6 +1628,15 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         }),
       ),
       eventTime: Type.Optional(Type.String()),
+      referenceTime: Type.Optional(
+        Type.String({
+          description:
+            "Source ISO timestamp with Z/offset anchoring eventTime, for historical replay.",
+        }),
+      ),
+      timeZone: Type.Optional(
+        Type.String({ description: "Source IANA time zone; defaults to referenceTime's offset." }),
+      ),
       sourceActor: Type.Optional(
         Type.Union(
           [

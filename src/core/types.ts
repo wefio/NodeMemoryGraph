@@ -321,6 +321,10 @@ export interface RememberInput {
   memoryType?: MemoryType;
   stateKey?: string;
   eventTime?: string;
+  /** Source timestamp used only to resolve eventTime; ISO datetime with Z/offset. */
+  referenceTime?: string;
+  /** Source calendar zone. Defaults to referenceTime's offset when supplied. */
+  timeZone?: string;
   sourceActor?: MemoryActor;
   truthStatus?: TruthStatus;
   confidence?: number;

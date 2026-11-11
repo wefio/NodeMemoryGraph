@@ -27,7 +27,8 @@ import { randomUUID } from 'node:crypto'
 import { connect } from 'node:net'
 import type { Context } from '@deepseek-ai/cordis'
 import { coordinationEnabled as configuredCoordinationEnabled } from '../../../../src/integration/config.ts'
-import { COMMON_REMEMBER_ACTIONS } from '../../../../src/integration/tool-contract.ts'
+import { appendRememberTimeContext, COMMON_REMEMBER_ACTIONS } from '../../../../src/integration/tool-contract.ts'
+import { requiresEventTimeReference } from '../../../../src/cli/protocol.ts'
 import {
   SEARCH_REQUIRED_PARAMETERS,
   searchParameterProperties,
@@ -178,9 +179,18 @@ export function apply(ctx: Context): () => Promise<void> {
     return daemon
   }
 
+  async function requireSourceClockOwner(method, params, signal) {
+    if (requiresEventTimeReference(method, params)) {
+      const hello = await daemonCall('hello', {}, signal, true)
+      if (!hello?.capabilities?.includes('event-time-reference'))
+        throw new NmgRpcError('NMG daemon does not advertise event-time-reference')
+    }
+  }
+
   async function daemonCall(method, params, signal?, propagateFailure = false) {
     const endpoint = resolveDaemon()
     if (!endpoint) return null
+    await requireSourceClockOwner(method, params, signal)
     try {
       const response = await fetch('http://' + endpoint.host + ':' + endpoint.port + '/', {
         method: 'POST',
@@ -1246,6 +1256,8 @@ export function apply(ctx: Context): () => Promise<void> {
         truthStatus: { type: 'string', enum: ['asserted', 'inferred', 'unverified', 'verified'], description: 'Truth status.' },
         evidence: { type: 'string', description: 'Exact supporting source excerpt.' },
         eventTime: { type: 'string', description: 'ISO event time when it differs from write time.' },
+        referenceTime: { type: 'string', description: 'Source ISO timestamp with Z/offset anchoring eventTime, for historical replay.' },
+        timeZone: { type: 'string', description: "Source IANA time zone; defaults to referenceTime's offset." },
         tier: { type: 'integer', description: 'Initial tier 0..3.' },
         importance: { type: 'number', description: 'Importance 0..1.' },
         residence: { type: 'string', enum: ['ltg', 'stg'], description: 'ltg (durable) or stg (session/task-local).' },
@@ -1369,6 +1381,7 @@ export function apply(ctx: Context): () => Promise<void> {
       if (args.writeReason) argv.push('--write-reason', args.writeReason)
       for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1])
       argv.push('--project-dir', workspaceRoot, '--json')
+      appendRememberTimeContext(args, params, argv)
       const r = await invoke('remember', params, argv, exec.signal, null)
       if (!r.ok) return r.error
       return renderRememberSurface(r.data)
