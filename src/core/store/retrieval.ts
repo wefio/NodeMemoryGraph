@@ -12,7 +12,12 @@
 import type { Constructor } from "./store-ctor.ts";
 import { randomUUID } from "node:crypto";
 import { extractEventWindow } from "./advanced-query.ts";
-import { eventTimeMillis, eventWindowEnd, eventWindowStart } from "../event-time.ts";
+import {
+  CANONICAL_EVENT_TIME_GLOB,
+  eventTimeMillis,
+  eventWindowEnd,
+  eventWindowStart,
+} from "../event-time.ts";
 import { applyRelevanceGate } from "../relevance-gate.ts";
 import { notExpired } from "./clock.ts";
 import { applyLearnedGate, rerankByRelevance } from "../learned-gate.ts";
@@ -205,6 +210,23 @@ function rankLexicalCandidates(
     results,
     (result) => result.combinedScore,
     (result) => `${result.memory.statement} ${result.evidence.content.slice(0, 500)}`,
+  );
+}
+
+/** A successor materialized outside the candidate pool retains the same filters. */
+function matchesMaterializedCandidate(
+  candidate: MemorySearchResult | undefined,
+  scope: SearchOptions["scope"],
+  from: string | null,
+  to: string | null,
+): candidate is MemorySearchResult {
+  if (!candidate || !matchesScope(candidate.memory.scope, scope)) return false;
+  if (from === null && to === null) return true;
+  const timestamp = eventTimeMillis(candidate.memory.eventTime);
+  return (
+    timestamp !== null &&
+    (from === null || timestamp >= Date.parse(from)) &&
+    (to === null || timestamp <= Date.parse(to))
   );
 }
 
@@ -2153,8 +2175,8 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
            AND (? = 1 OR m.status IN ('active', 'disputed', 'superseded'))
            AND ((? IS NOT NULL AND (m.session_id IS NULL OR m.session_id = ?)) OR (? IS NULL AND m.session_id IS NULL))
            AND ${notExpired("m")}
-           AND (? IS NULL OR m.event_time >= ?)
-           AND (? IS NULL OR m.event_time <= ?)
+           AND (? IS NULL OR (m.event_time GLOB '${CANONICAL_EVENT_TIME_GLOB}' AND m.event_time >= ?))
+           AND (? IS NULL OR (m.event_time GLOB '${CANONICAL_EVENT_TIME_GLOB}' AND m.event_time <= ?))
            ${scopeClause}
          ORDER BY ${candidateOrder} m.tier ASC, m.importance DESC,
                   m.access_count DESC, m.created_at DESC
@@ -2313,7 +2335,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
               options.sessionId ?? null,
               Boolean(options.eventTimeTo),
             )[0];
-          if (!materialized || !matchesScope(materialized.memory.scope, options.scope)) {
+          if (!matchesMaterializedCandidate(materialized, options.scope, windowFrom, windowTo)) {
             if (options.eventTimeTo) keepBest(result);
             continue;
           }
@@ -2367,7 +2389,9 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
              SELECT id, node_id, status, event_time, created_at, depth
              FROM lineage
              WHERE depth > 0 AND status = 'active'
-             ORDER BY COALESCE(event_time, created_at) DESC, created_at DESC, depth DESC
+             ORDER BY CASE WHEN event_time GLOB '${CANONICAL_EVENT_TIME_GLOB}'
+                           THEN event_time ELSE created_at END DESC,
+                      created_at DESC, depth DESC
              LIMIT 1`,
           )
           .get(memoryId) as Row | undefined;
@@ -2378,7 +2402,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
            SELECT id, node_id, status, event_time, created_at, depth
            FROM lineage
            WHERE status IN ('active', 'disputed', 'superseded')
-             AND (event_time IS NULL OR event_time <= ?)
+             AND (event_time IS NULL OR (event_time GLOB '${CANONICAL_EVENT_TIME_GLOB}' AND event_time <= ?))
            ORDER BY CASE WHEN event_time IS NULL THEN 1 ELSE 0 END,
                     event_time DESC, created_at DESC, depth DESC
            LIMIT 1`,

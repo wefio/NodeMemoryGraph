@@ -64,6 +64,25 @@ test("real OpenCode registration forwards event payloads and public status to pr
     assert.match(JSON.stringify(state.input), /eventUpdate/);
     assert.match(JSON.stringify(state.input), /notification/);
     const context = { sessionID: "event-test-session" };
+    const remember = tools.get("remember")!;
+    assert.match(JSON.stringify(remember.input), /referenceTime/);
+    assert.match(JSON.stringify(remember.input), /timeZone/);
+    await remember.execute(
+      {
+        statement: "OpenCodeHistoricalClockMarker",
+        nodeName: "历史",
+        eventTime: "昨天",
+        referenceTime: "2025-05-10T00:30:00+08:00",
+        timeZone: "Asia/Shanghai",
+      },
+      context,
+    );
+    const dated = await service.invoke("search", {
+      query: "OpenCodeHistoricalClockMarker",
+      projectDir: process.cwd(),
+      sessionId: context.sessionID,
+    });
+    assert.equal(dated.results[0]?.memory.eventTime, "2025-05-09T00:00:00.000Z");
     const created = await state.execute(
       {
         action: "write",

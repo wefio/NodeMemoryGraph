@@ -15,6 +15,22 @@ export const COMMON_REMEMBER_ACTIONS = [
 
 export const PI_REMEMBER_ACTIONS = [...COMMON_REMEMBER_ACTIONS] as const;
 
+/** Keep source-clock fields intact in both RPC and CLI fallback transports. */
+export function appendRememberTimeContext(
+  input: Record<string, unknown>,
+  params: Record<string, unknown>,
+  argv: string[],
+): void {
+  for (const [key, flag] of [
+    ["referenceTime", "--reference-time"],
+    ["timeZone", "--time-zone"],
+  ] as const) {
+    if (input[key] === undefined) continue;
+    params[key] = input[key];
+    argv.push(flag, String(input[key]));
+  }
+}
+
 export const COMMON_BOARD_ACTIONS = [
   "put",
   "read",

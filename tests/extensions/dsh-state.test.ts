@@ -11,6 +11,29 @@ import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
 
+test("DSH remember exposes and forwards the historical event clock to its HTTP owner", async () => {
+  await withHost(false, async ({ tools, service, requests }) => {
+    const remember = tools.get("nmg_remember")!;
+    assert.ok(remember.parameters.properties.referenceTime);
+    assert.ok(remember.parameters.properties.timeZone);
+    await remember.execute(
+      {
+        statement: "DshHistoricalClockMarker",
+        nodeName: "历史",
+        eventTime: "昨天",
+        referenceTime: "2025-05-10T00:30:00+08:00",
+        timeZone: "Asia/Shanghai",
+      },
+      { agent: { id: "historical-session" } },
+    );
+    const saved = requests.find((request) => request.method === "remember")!;
+    assert.equal(saved.params.referenceTime, "2025-05-10T00:30:00+08:00");
+    assert.equal(saved.params.timeZone, "Asia/Shanghai");
+    const result = await service.invoke("search", { query: "DshHistoricalClockMarker" });
+    assert.equal(result.results[0]?.memory.eventTime, "2025-05-09T00:00:00.000Z");
+  });
+});
+
 test("DSH exposes actual sessions and withdraws them when their native endpoint disappears", async () => {
   await withHost(true, async ({ service, agents, wake, directory, disposeAgent, stop }) => {
     const legacyId = `dsh:${basename(directory)}`;

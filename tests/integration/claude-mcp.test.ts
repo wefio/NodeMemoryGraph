@@ -7,6 +7,7 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { connectDaemon, invokeDaemon } from "../../src/cli/daemon-client.ts";
+import type { NmgMethodResult } from "../../src/cli/protocol.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { SEARCH_TOOL_PARAMETERS } from "../../src/integration/tool-contract.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
@@ -144,10 +145,18 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
         statement: "The MCP adapter test uses a stable Active Graph session.",
         nodeName: "MCP adapter test",
         memoryType: "fact",
+        eventTime: "昨天",
+        referenceTime: "2025-05-10T00:30:00+08:00",
+        timeZone: "Asia/Shanghai",
       },
     });
     const memoryId = /Saved ([0-9a-f-]+)/u.exec(textOf(saved))?.[1];
     assert.ok(memoryId);
+    const clockOwner = await connectDaemon(resolve(dataDir, "nmg.sqlite"));
+    const dated = (await invokeDaemon(clockOwner, "get", {
+      memoryIds: [memoryId],
+    })) as NmgMethodResult["get"];
+    assert.equal(dated.results[0]?.memory.eventTime, "2025-05-09T00:00:00.000Z");
     const recalled = await client.callTool({
       name: "nmg_search",
       arguments: { query: "stable Active Graph session", limit: 4 },

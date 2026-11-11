@@ -46,6 +46,7 @@ export class PortableMemoryService {
         "hello",
         "status",
         "remember",
+        "event-time-reference",
         "batch-remember",
         "search",
         "get",

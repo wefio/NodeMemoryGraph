@@ -1056,6 +1056,9 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
         sourceActor: "user",
         evidence: "Atlas must use SQLite for offline operation.",
         writeReason: "Durable project constraint",
+        eventTime: "昨天",
+        referenceTime: "2025-05-10T00:30:00+08:00",
+        timeZone: "Asia/Shanghai",
       },
       undefined,
       undefined,
@@ -1064,13 +1067,14 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       content: Array<{ text: string }>;
       details: {
         history: { sourceMessageId: string; content: string };
-        memory: { id: string; writeSource: string };
+        memory: { id: string; writeSource: string; eventTime: string };
       };
     };
     assert.match(remember.content[0].text, /saved/i);
     assert.equal(remember.details.history.sourceMessageId, "user-atlas-storage");
     assert.equal(remember.details.history.content, "Atlas must use SQLite for offline operation.");
     assert.equal(remember.details.memory.writeSource, "agent");
+    assert.equal(remember.details.memory.eventTime, "2025-05-09T00:00:00.000Z");
 
     // Real HTTP daemon + loaded Pi factory: write scope stays outside model
     // arguments, and the view plus per-user-turn carriage read the native state.

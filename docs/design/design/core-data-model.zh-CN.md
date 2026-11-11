@@ -44,7 +44,7 @@ ProjectionRevision (immutable exposure and feedback boundary)
 
 `MemoryRecord.eventTime` 是陈述所表示事件的历史时间，可以未知。`MemoryRecord.createdAt` 与 `HistoryRecord.createdAt` 记录保留／写入时间，均不能替代缺失的历史时间。`validFrom`／`validUntil` 描述有效期，而不是发生时间。原始导入话语可以用经过校验的消息／会话时间作为 `eventTime`：这标记话语时间，不一定是话语所提事件的发生时间。已知历史时间的保留独立于展示策略，存储的陈述与证据保持原样。读取边界上的标签遵循[时间证据展示](progressive-retrieval.zh-CN.md#时间证据展示)。
 
-`eventTime` 接受日期短语，在写入时以写入时钟为锚解析成该列存储的规范 UTC 时刻；见[事件时间决策](../../decisions/implemented/2026-11-07-event-time-retrieval-canonical.zh-CN.md)。
+`eventTime` 日期短语在写入时规范化；来源锚点与兼容性见[来源时钟契约](event-time-source-clocks.zh-CN.md)。
 
 未解决的结构在记录本身上表示，而不是作为一种新的记忆类型。`resolution` 默认是 `resolved`，可以是 `open` 或 `reopened`；open 记录携带 `openedAt` 与一个或多个 `relatedMemoryIds`。这些相关 ID 是可归因锚点，不是推断出的图边。Open 记录保持被索引，并被同时排除在 LTG 基于热度的保留候选与 STG 过期之外。显式 `resolve` 把它们恢复正常保留；显式 `reopen` 把已归档记录恢复到可检索索引。每次转换都追加到 `memory_resolution_events`，保留原因与锚点，且不重写来源历史。
 

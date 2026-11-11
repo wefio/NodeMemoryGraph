@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveNmgDataDir } from "../src/cli/data-path.ts";
+import { appendRememberTimeContext } from "../src/integration/tool-contract.ts";
 import {
   compatibleLease,
   dropCompatibleLease,
@@ -165,6 +166,7 @@ function rememberArgv(params: Record<string, unknown>): string[] {
   if (typeof params.eventTime === "string" && params.eventTime.trim()) {
     argv.push("--event-time", params.eventTime.trim());
   }
+  appendRememberTimeContext(params, {}, argv);
   if (Number.isFinite(params.tier)) argv.push("--tier", String(params.tier));
   if (Number.isFinite(params.importance)) argv.push("--importance", String(params.importance));
   if (typeof params.writeReason === "string" && params.writeReason.trim()) {

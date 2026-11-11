@@ -21,7 +21,7 @@ import {
   SUPERSEDE_PREFILTER_MAX_TERMS,
 } from "./graph-policy.ts";
 import { nowMs, PerfTimer, SECTION } from "../perf.ts";
-import { resolveEventTime } from "../event-time.ts";
+import { resolveWriteEventTime } from "../event-time.ts";
 import { normalizeClaims } from "../claims.ts";
 import { serializeScope } from "../scope.ts";
 import {
@@ -205,6 +205,8 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       memoryType?: MemoryRecord["memoryType"];
       stateKey?: string;
       eventTime?: string;
+      referenceTime?: string;
+      timeZone?: string;
       sourceActor?: MemoryRecord["sourceActor"];
       truthStatus?: MemoryRecord["truthStatus"];
       confidence?: number;
@@ -232,9 +234,9 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
     }): MemoryRecord {
       const createdAt = new Date().toISOString();
       const validFrom = input.validFrom ?? createdAt;
-      // Relative phrases resolve against the write instant, once: the stored
-      // value is the canonical instant every later window and ordering compares.
-      const eventTime = resolveEventTime(input.eventTime, new Date(createdAt));
+      // Resolve once against the source clock, or the live write instant.
+      // Ingestion metadata always retains the actual write instant.
+      const eventTime = resolveWriteEventTime(input.eventTime, input, new Date(createdAt));
       assertTemporalValidity({
         eventTime,
         validFrom,
@@ -409,6 +411,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
     }
 
     rememberInner(input: RememberInput, manageTransaction = true): RememberResult {
+      resolveWriteEventTime(input.eventTime, input);
       const memoryType = input.memoryType ?? "fact";
       if (memoryType === "state" && !input.stateKey?.trim()) {
         throw new Error("state memories require a stable stateKey");
@@ -548,6 +551,8 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           memoryType,
           stateKey,
           eventTime: input.eventTime,
+          referenceTime: input.referenceTime,
+          timeZone: input.timeZone,
           sourceActor: input.sourceActor,
           truthStatus: input.truthStatus,
           confidence: input.confidence,

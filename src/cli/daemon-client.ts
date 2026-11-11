@@ -15,6 +15,7 @@ import {
 } from "./lifecycle.ts";
 import {
   NMG_OPTIONAL_METHOD_CAPABILITIES,
+  requiresEventTimeReference,
   NMG_PROTOCOL_VERSION,
   type NmgCapability,
   type NmgHelloResult,
@@ -228,6 +229,20 @@ function requiresBoardEvents(method: NmgMethod, params: Record<string, unknown>)
     : method === "taskBoard" && (params.eventId !== undefined || params.notification !== undefined);
 }
 
+function assertParameterCapabilities(
+  connection: DaemonConnection,
+  method: NmgMethod,
+  params: Record<string, unknown>,
+): void {
+  if (
+    requiresEventTimeReference(method, params) &&
+    !connection.capabilities.has("event-time-reference")
+  )
+    throw new NmgDaemonCapabilityError(method, "event-time-reference");
+  if (requiresBoardEvents(method, params) && !connection.capabilities.has("board-events"))
+    throw new NmgDaemonCapabilityError(method, "board-events");
+}
+
 export async function invokeDaemon(
   connection: DaemonConnection,
   method: NmgMethod,
@@ -242,8 +257,7 @@ export async function invokeDaemon(
   await adoptReplacedEndpoint(connection, options.signal);
   options.signal?.throwIfAborted();
   assertDaemonCapability(connection.capabilities, method, connection.methods);
-  if (requiresBoardEvents(method, params) && !connection.capabilities.has("board-events"))
-    throw new NmgDaemonCapabilityError(method, "board-events");
+  assertParameterCapabilities(connection, method, params);
   const captured =
     method === "lab"
       ? await captureWorkingStateInvocation(params, (sessionId) =>

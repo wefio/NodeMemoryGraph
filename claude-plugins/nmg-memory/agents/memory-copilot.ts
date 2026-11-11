@@ -199,6 +199,14 @@ server.registerTool(
         .describe(nmgPrompts.recall_triggers_parameter_description),
       stateKey: z.string().optional(),
       eventTime: z.string().optional(),
+      referenceTime: z
+        .string()
+        .optional()
+        .describe("Source ISO timestamp with Z/offset anchoring eventTime, for historical replay."),
+      timeZone: z
+        .string()
+        .optional()
+        .describe("Source IANA time zone; defaults to referenceTime's offset."),
       sourceActor: z.enum(ACTORS).optional(),
       truthStatus: z.enum(TRUTH).optional(),
       evidence: z.string().optional(),

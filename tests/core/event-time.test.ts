@@ -139,6 +139,8 @@ test("reopening a store repairs event times written before canonicalization", ()
       ["legacy-offset", "2026-09-19T21:31:55+08:00"],
       ["legacy-canonical", "2026-09-19T13:31:55.000Z"],
       ["legacy-garbage", "傍晚"],
+      ["legacy-relative", "昨天"],
+      ["legacy-yearless", "11月6日"],
     ] as const) {
       db.prepare(
         `INSERT INTO history_records (id, session_id, role, content, created_at)
@@ -165,13 +167,16 @@ test("reopening a store repairs event times written before canonicalization", ()
     assert.equal(read("legacy-canonical").t, "2026-09-19T13:31:55.000Z");
     // Unparseable text keeps the author's words: repair never rewrites meaning.
     assert.equal(read("legacy-garbage").t, "傍晚");
+    assert.equal(read("legacy-relative").t, "昨天");
+    assert.equal(read("legacy-relative").v, "昨天");
+    assert.equal(read("legacy-yearless").t, "11月6日");
     // The guard must skip repaired rows, or every open rewrites the whole table.
     const stale = db
       .prepare(
         "SELECT COUNT(*) AS n FROM memory_records WHERE event_time NOT GLOB '????-??-??T??:??:??.???Z'",
       )
       .get() as { n: number };
-    assert.equal(stale.n, 1, "only the unparseable row stays outside the canonical form");
+    assert.equal(stale.n, 3, "unanchored and unparseable values keep their source text");
   } finally {
     db.close();
   }

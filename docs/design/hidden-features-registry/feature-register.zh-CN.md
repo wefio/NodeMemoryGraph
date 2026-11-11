@@ -53,6 +53,6 @@
 
 完整职责见[显式研究探针](feature-register/explicit-research-probes.zh-CN.md)。
 
-## 共享展示选项
+## 共享选项
 
-黑板约定与自动 Recall 模式见[共享展示选项](feature-register/shared-display-options.zh-CN.md)。
+[黑板与 Recall 展示](feature-register/shared-display-options.zh-CN.md) · [事件来源时钟](feature-register/event-time-source-clocks.zh-CN.md)。
