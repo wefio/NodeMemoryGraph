@@ -67,8 +67,8 @@ provider, not a requirement for unfinished native wiring.
 | Adapter and source entry | NMG gap to close | Candidate combined NMG behavior |
 | --- | --- | --- |
 | [Pi](../../../.pi/extensions/nmg/index.ts) | Broad native coverage, but prepared per-turn working state has no final input confirmation. | Keep native recall/tools/witnesses/wake. At the gateway boundary, check the labelled current state/disclosure and repair missing context through shared preparation where authorized. Do not claim an already-covered tool or recall as a new capability. |
-| [DSH](../../../dsh/dsh-nmg/src/plugin/index.ts) | NMG state carriage, general observation and attribution flush are unwired. Native prompt refresh and final tool notifications passed core-service probes; status/turn/session events are source-confirmed. | Wire `systemPrompt.context`, `tools/result` and committed-answer attribution natively. Test cancellation/generations and real wake. Magpie retains independent request-bound equivalents. |
-| [OpenCode v2](../../../opencode-plugin/index.ts) | State carriage is unwired. `session.get` supplied directory before a prompt in a private API probe. Witness mapping and fresh plugin activation remain unverified. | Extend `ctx.session.hook("context")`; obtain scope through an authorized native session lookup and verify SDK timing. Preserve existing observation/attribution. Magpie is an alternative provider, not a prerequisite. |
+| [DSH](../../../dsh/dsh-nmg/src/plugin/index.ts) | Complete state carriage, tool observation/nudges and committed-turn diagnostic attribution use native hooks. Installed-core and private fixture checks cover this slice; live wake and lifecycle edges remain unverified. | Keep native ownership where selected and validate remaining boundaries. Magpie retains independently usable request-bound equivalents. |
+| [OpenCode v2](../../../opencode-plugin/index.ts) | Native state carriage and first-turn scope lookup pass an installed-host loopback run with NMG tools. Witness lineage and live wake remain unverified. | Keep native context/tool/event paths where selected. Magpie remains a full alternative provider and can repair authorized request-time gaps after shared handoff validation. |
 | [WorkBuddy hook](../../../workbuddy-plugin/nmg-hook.ts) + [tool path](../../../workbuddy-plugin/README.md) | Hook recall and MCP tools use separate AG sessions. No demonstrated continuous state carriage, general tool observations or automatic attribution. | Bind hook/MCP/gateway state, then support recall-to-get, maintained-state carriage, request-visible observations, diagnostic attribution and pending-board context. Supply MCP tools if absent. Keep hook recall when selected; no duplicate injection. |
 | [MCP-only clients](../../../claude-plugins/nmg-memory/agents/memory-copilot.ts) | Missing recall, state carriage, automatic attribution and request-time board delivery. Feedback is named in the action enum but lacks labels/dispatch. | Gateway supplies request-triggered parts; shared tool wiring must complete feedback and provide reads/writes/state. Bind both paths to one authorized session. Other providers can supply lifecycle events. |
 
@@ -170,7 +170,7 @@ latency, cost and failure-mode measurements.
 Keep the [GUI-first delivery order](magpie-operations.md#delivery-order-and-acceptance).
 
 Validate the NMG gaps in the adapter table using shared contract cases. Prioritize
-native state carriage for DSH/OpenCode, hook-to-tool continuity for WorkBuddy,
+DSH/OpenCode lifecycle and wake boundaries, hook-to-tool continuity for WorkBuddy,
 missing tools for partial clients, and request-triggered NMG features for
 MCP-only clients. Pi supplies a reference behavior where covered. Trace/usage
 joins are a separate observability task and do not pass the NMG parity gate.

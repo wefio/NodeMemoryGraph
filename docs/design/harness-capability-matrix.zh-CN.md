@@ -35,16 +35,16 @@
 
 | 能力 | Pi | OpenCode | WorkBuddy | MCP | DSH |
 |---|---|---|---|---|---|
-| 自动召回（按准入回合暂存头行） | full | full* | full | none | full |
+| 自动召回（按准入回合暂存头行） | full | full | full | none | full |
 | 记忆工具（`nmg_search`/`get`/`remember`，共享 Agent Surface） | full | full | none | partial | full |
 | 工作状态（`space=ag`，带调用栅栏） | full | full | none | full | full |
-| 工具结果观察 + 弱完成提醒 | full | full | partial | none | none |
-| 归因落盘 + 代理身份心跳 | full | full | partial | partial | partial |
+| 工具结果观察 + 弱完成提醒 | full | full | partial | none | full |
+| 归因落盘 + 代理身份心跳 | full | full | partial | partial | full |
 | Board 唤醒（轮询 → 定向/世界投递） | full | partial | partial | none | partial |
 | 交互控制台（`/nmg`） | full | partial | none | none | none |
 | 传输：lease 快路径、CLI 兜底、共享 daemon 不接管 | full | full | partial | partial | full |
 
-`*` 语义可用，无附加限定；限定说明列在该行对应的全量语义之下。
+Pi、OpenCode 与 DSH 的工作状态承载复用完整正文 InformationView 投影。准备始终未确认，各宿主通过原生通道承载。
 
 ## 协调能力扩展
 
@@ -65,8 +65,7 @@ MCP／CLI 提供显式读取，不提供主动唤醒；订阅边界由[事件契
 
 ## 各适配器部分项
 
-- **OpenCode** — `*`：新起进程的首回合在第一个映射事件提供项目目录前，
-  召回搜索不限项目（次回合起精确）；归因落盘粒度为每次执行（
+- **OpenCode** — 首回合召回前通过原生 `session.get` 查询会话目录和子会话身份，回退到 `ctx.location.directory`，`NMG_PROJECT_DIR` 显式覆盖。查询失败且没有任何目录时，作用域保持不可用。归因落盘粒度为每次执行（
   `session.execution.succeeded`）而非真正的空闲信号；当前 NMG 绑定尚未建立
   `claim_outcome` 见证路径（缺见证时以 `provenance_degraded` 降级，不证明宿主限制）；wake 循环
   经共享 `board-wake.ts` 接线（最近会话池投递）但未做 live smoke；客户端
@@ -82,10 +81,7 @@ MCP／CLI 提供显式读取，不提供主动唤醒；订阅边界由[事件契
   标签参数与处理分支，属于实现缺口，不是 MCP 协议限制。
   工作状态沿共享带栅栏 state API；board 使用即心跳，读取写入投递回
   执。
-- **DSH** — 宿主包注册共享记忆／state 工具，通过 inbox 事件与
-  `systemPrompt.context` 召回，登记真实会话并定向唤醒。专用工作状态承载、
-  通用工具结果观察及答案归因落盘尚未在 NMG 实现中接线。宿主已有上下文与
-  生命周期入口，先评估并测试原生实现，再判断这些功能是否需要 Magpie。
+- **DSH** — 宿主包在原生请求准入时准备状态与召回，经 `systemPrompt.context` 承载。`tools/result` 接共享 AG 观察和 commit 提醒。已提交 `assistant/message` 与完成的 `turn/end` 每回合落一次诊断答案重合，取消、外部和重复事件不产生归因。桌面生命周期边界与真实唤醒单独保留验证门槛。
 
 ## 维护
 
@@ -98,16 +94,16 @@ MCP／CLI 提供显式读取，不提供主动唤醒；订阅边界由[事件契
 
 ## 原生宿主能力核实
 
-[OpenCode 适配器决策](../decisions/implemented/2026-10-17-opencode-adapter.zh-CN.md)已提供本矩阵最初的运行证据。[原生插件核实记录](../experiments/runtime/native-plugin-capabilities-2026-11-12.zh-CN.md)补充固定 DSH 合同、已安装核心包探测和 OpenCode 私有 API 结果，分别记录源码／包版本，不用 API 存在覆盖历史 smoke 证据。这些结论用于分类实现工作，不提升上表已交付单元格。
+[OpenCode 适配器决策](../decisions/implemented/2026-10-17-opencode-adapter.zh-CN.md)已提供本矩阵最初的运行证据。[原生插件核实记录](../experiments/runtime/native-plugin-capabilities-2026-11-12.zh-CN.md)补充固定 DSH 合同、已安装核心包探测和 OpenCode 私有 API 结果，分别记录源码／包版本，不用 API 存在覆盖历史 smoke 证据。已安装核心包及本地模拟模型验证下表的有界原生接线，未覆盖全部生命周期边界或生产部署。
 
 | NMG 行为 | DSH 原生路径与分类 | OpenCode 原生路径与分类 |
 | --- | --- | --- |
-| 维护状态承载 | **可原生接线。** 已有 `systemPrompt.context` 和准入刷新，已安装 prompt 刷新／撤销探测通过，NMG 专用状态承载未接线。 | **可原生接线。** 既有 `ctx.session.hook("context")` 已承载暂存召回，将共享状态准备接入并测试独立承载规则。 |
-| 工具结果观察／提醒 | **可原生接线。** `tools/result` 通知最终成功／错误结果，已安装服务探测通过，NMG 筛选／AG 写入仍需接线。 | **已接线。** `ctx.tool.hook("execute.after")` 进入共享观察／提醒逻辑。 |
-| 诊断归因 | **原生入口已确认，集成待验证。** `agent/turn-stopping`、`agent/status`、已提交会话事件和 assistant stream 提供边界，测试最终事件选择、取消和去重。 | **已按 execution 完成接线。** 原始 smoke 验证该路径，不证明真正空闲或正确性。 |
-| 首回合作用域 | 当前包绑定真实 Agent／会话身份，进一步作用域变化需要原生映射检查。 | **原生查询可用。** 私有 `session.get` 在 prompt 前返回 location。召回前调用对应授权路径属于 NMG 集成工作，SDK 映射／截止时间行为待验证。 |
+| 维护状态承载 | **可原生接线。** 已有 `systemPrompt.context` 和准入刷新，已安装 prompt 刷新／撤销探测通过，NMG 在准入时准备完整 owner 状态并经该通道承载。 | **已接线并运行验证。** Prompt 准入准备完整 owner 状态，`context` 独立于召回承载。真实已安装宿主已向本地模拟模型发送状态。 |
+| 工具结果观察／提醒 | **可原生接线。** `tools/result` 通知最终成功／错误结果，已安装服务探测通过，NMG 使用共享筛选、AG 写入与弱完成提醒。 | **已接线。** `ctx.tool.hook("execute.after")` 进入共享观察／提醒逻辑。 |
+| 诊断归因 | **已接线到提交后的回合完成。** `session/event` 提供已提交答案与完成的 `turn/end`。已安装核心包运行与取消／去重 fixture 验证该有界路径。 | **已按 execution 完成接线。** 原始 smoke 验证该路径，不证明真正空闲或正确性。 |
+| 首回合作用域 | 当前包绑定真实 Agent／会话身份，进一步作用域变化需要原生映射检查。 | **已接线并运行验证。** 原生 SDK `session.get` 在召回前返回 location。已安装宿主运行验证首回合作用域，截止时间测试拒绝迟到准备。 |
 | 黑板唤醒与忙碌 | **原生路径存在且部分接线。** Agent status 与 `send`／`followup`／`steer`，私有 fixture 覆盖 NMG 投递，真实宿主入队／子会话恢复仍需运行验证。 | **原生投递路径已接线，真实行为待验证。** 已有 `ctx.session.prompt` 和 execution 事件，队列／空闲语义待测试，网关流量不替代它们。 |
-| fork／reset／压缩隔离 | **集成待验证。** 生命周期创建来源区分 startup／resume／clear／compact，需映射 NMG incarnation／frame fence。 | **集成待验证。** 已有 fork／compact／session API，压缩已接线，API 列表不建立事件时序、重连与代次映射。 |
+| fork／reset／压缩隔离 | **集成待验证。** 生命周期创建来源区分 startup／resume／clear／compact，需映射 NMG incarnation／frame fence。 | **集成待验证。** 已安装宿主与本地模拟模型验证手动压缩及后续状态承载。fork／重连代次和中断／自动压缩仍待验证。 |
 | Claim outcome 见证 | **语义／lineage 待验证。** 已有原生工具身份，但结果不因此自动成为合格 claim 见证。 | **实现／验证待完成。** NMG handler 缺见证映射，已有工具／日志 API 是候选，不证明宿主做不到。 |
 | 最终 provider 输入收据 | **待验证。** Prompt 投影和日志提交不建立最终 provider 接收。 | **待验证。** 可变 context 与执行成功不建立最终 provider 接收。 |
 

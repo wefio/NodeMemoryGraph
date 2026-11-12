@@ -58,8 +58,7 @@ The [native capability audit](../../experiments/runtime/native-plugin-capabiliti
 reuses the original OpenCode matrix and smoke record. DSH core-service probes
 confirm dynamic context and final tool notifications; OpenCode's private API
 returns a session directory before a prompt. Native parity work therefore stays
-independent of gateway deployment. Fresh OpenCode plugin activation, native
-lifecycle edge cases and combined NMG behavior retain their validation gates.
+independent of gateway deployment. Installed OpenCode activation, hooks, Code Mode tools and state carriage are exercised against a loopback model. DSH state carriage and committed-turn attribution are exercised with installed core services. Native lifecycle edges, live wake and composed-provider handoffs retain separate validation gates.
 
 ## Alternatives considered
 

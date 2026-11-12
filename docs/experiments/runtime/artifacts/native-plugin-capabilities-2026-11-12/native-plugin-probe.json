@@ -1,5 +1,14 @@
 {
-  "measuredAt": "2026-11-12T09:22:16.353Z",
+  "measuredAt": "2026-11-12T14:40:09.058Z",
+  "nmgSourceSha256": {
+    "opencode-plugin/index.ts": "fbe8b8a6d0cafff672799dd3d98c8f561429d1d5e8aa6f3f214179ac2090e439",
+    "dsh/dsh-nmg/src/plugin/index.ts": "4c4165fe7f37a870b08c69fc2ac078046dc687705c132e2e05f262b38958e71b",
+    "dsh/dsh-nmg/src/plugin/native-events.ts": "6390dac61de8134b480b02e5fd85a30f01d9908bd5a032e096063d4e771dc276",
+    "docs/experiments/runtime/native-plugin-probe.mjs": "e5e8797f3c5b3cbac0e24f9a7743f9432f79ad5bc3d3db169c94f4727045b216",
+    "docs/experiments/runtime/opencode-hook-exercise.mjs": "ab7afbae9d99fde31d7e11972d160242a86515459a4d7170651ed48e5c077fed",
+    "docs/experiments/runtime/dsh-nmg-exercise.mjs": "c39a8a685a53120729621b1e04e27ed470417f5315641c9eabc315a291fe3634",
+    "docs/experiments/runtime/native-nmg-fixture.mjs": "840fc39a61f96b7131a714a22096b72fa606ca52fd766a52f4231f7acf41b11f"
+  },
   "dsh": {
     "versions": {
       "dsh-system-prompt": {
@@ -15,6 +24,16 @@
         "sha256": "7b59cf82c2784c25bdce4e3e24e5e5303b02b9f1003efacf50255492d17baf8b"
       }
     },
+    "nmg": {
+      "checks": [
+        "NMG native tool execution",
+        "admission and real context assembly",
+        "complete maintained state",
+        "recall and exact get",
+        "completed-turn diagnostic attribution"
+      ],
+      "modelCalls": 0
+    },
     "checks": [
       "dynamic context refresh",
       "context selection by supplied assembly identity",
@@ -23,7 +42,6 @@
     ],
     "notTested": [
       "native Agent lifecycle",
-      "end-to-end NMG state carriage",
       "desktop bundle loading",
       "model/provider calls"
     ]
@@ -38,10 +56,478 @@
     },
     "openapiPath": "/openapi.json",
     "plugin": {
-      "status": "not-observed",
-      "configured": true,
-      "listedPlugins": 0,
-      "reason": "Standalone API session/config queries did not produce a synthetic plugin setup receipt. Inference-time activation is unverified."
+      "namespaces": [
+        "app",
+        "location",
+        "options",
+        "agent",
+        "aisdk",
+        "command",
+        "credential",
+        "event",
+        "experimental",
+        "generate",
+        "model",
+        "provider",
+        "integration",
+        "mcp",
+        "permission",
+        "plugin",
+        "reference",
+        "rpc",
+        "skill",
+        "storage",
+        "tool",
+        "vcs",
+        "websearch",
+        "worktree",
+        "session",
+        "shell"
+      ],
+      "hooks": [
+        "session.prompt",
+        "session.context",
+        "session.compaction",
+        "tool.execute.after"
+      ],
+      "events": [
+        {
+          "name": "prompt",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "keys": [
+            "sessionID",
+            "messageID",
+            "prompt",
+            "metadata",
+            "delivery"
+          ]
+        },
+        {
+          "name": "context",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "keys": [
+            "sessionID",
+            "model",
+            "system",
+            "messages",
+            "options",
+            "agent",
+            "tools"
+          ]
+        },
+        {
+          "name": "execute.after",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "tool": "nmg_search",
+          "keys": [
+            "tool",
+            "sessionID",
+            "agent",
+            "messageID",
+            "id",
+            "input",
+            "status",
+            "result"
+          ]
+        },
+        {
+          "name": "execute.after",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "tool": "nmg_get",
+          "keys": [
+            "tool",
+            "sessionID",
+            "agent",
+            "messageID",
+            "id",
+            "input",
+            "status",
+            "result"
+          ]
+        },
+        {
+          "name": "execute.after",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "tool": "nmg_state",
+          "keys": [
+            "tool",
+            "sessionID",
+            "agent",
+            "messageID",
+            "id",
+            "input",
+            "status",
+            "result"
+          ]
+        },
+        {
+          "name": "execute.after",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "tool": "nmg_state",
+          "keys": [
+            "tool",
+            "sessionID",
+            "agent",
+            "messageID",
+            "id",
+            "input",
+            "status",
+            "result"
+          ]
+        },
+        {
+          "name": "execute.after",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "tool": "execute",
+          "keys": [
+            "tool",
+            "sessionID",
+            "agent",
+            "messageID",
+            "id",
+            "input",
+            "status",
+            "result"
+          ]
+        },
+        {
+          "name": "context",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "keys": [
+            "sessionID",
+            "model",
+            "system",
+            "messages",
+            "options",
+            "agent",
+            "tools"
+          ]
+        },
+        {
+          "name": "prompt",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "keys": [
+            "sessionID",
+            "messageID",
+            "prompt",
+            "metadata",
+            "delivery"
+          ]
+        },
+        {
+          "name": "context",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "keys": [
+            "sessionID",
+            "model",
+            "system",
+            "messages",
+            "options",
+            "agent",
+            "tools"
+          ]
+        },
+        {
+          "name": "compaction",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "keys": [
+            "sessionID",
+            "model",
+            "system",
+            "messages",
+            "options",
+            "agent",
+            "tools"
+          ]
+        },
+        {
+          "name": "prompt",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "keys": [
+            "sessionID",
+            "messageID",
+            "prompt",
+            "metadata",
+            "delivery"
+          ]
+        },
+        {
+          "name": "context",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "keys": [
+            "sessionID",
+            "model",
+            "system",
+            "messages",
+            "options",
+            "agent",
+            "tools"
+          ]
+        }
+      ],
+      "toolCalls": 0,
+      "sessionMethods": [
+        "hook",
+        "create",
+        "get",
+        "remove",
+        "switchAgent",
+        "switchModel",
+        "prompt",
+        "generate",
+        "command",
+        "compact",
+        "synthetic",
+        "interrupt",
+        "update",
+        "move",
+        "wait",
+        "context"
+      ],
+      "toolMethods": [
+        "reload",
+        "list",
+        "transform",
+        "hook"
+      ],
+      "eventMethods": [
+        "subscribe"
+      ],
+      "locationKeys": [
+        "directory",
+        "workspaceID",
+        "project"
+      ],
+      "toolTransform": true,
+      "sessionLookup": {
+        "keys": [
+          "id",
+          "projectID",
+          "model",
+          "cost",
+          "tokens",
+          "outcome",
+          "time",
+          "title",
+          "location"
+        ],
+        "directory": "C:\\Users\\LEGION\\AppData\\Local\\Temp\\nmg-opencode-audit-h4xdUh"
+      },
+      "status": "registered"
+    },
+    "exercise": {
+      "compactionHook": true,
+      "calls": [
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "stream",
+            "stream_options",
+            "store"
+          ],
+          "stateMarker": false,
+          "toolResult": false,
+          "maintainedState": false,
+          "exactEvidence": false,
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": true,
+          "toolResult": false,
+          "maintainedState": false,
+          "exactEvidence": false,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": true,
+          "toolResult": true,
+          "maintainedState": false,
+          "exactEvidence": true,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": true,
+          "toolResult": true,
+          "maintainedState": true,
+          "exactEvidence": true,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": false,
+          "toolResult": true,
+          "maintainedState": false,
+          "exactEvidence": true,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": false,
+          "toolResult": true,
+          "maintainedState": false,
+          "exactEvidence": true,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": true,
+          "toolResult": true,
+          "maintainedState": true,
+          "exactEvidence": true,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": true
+        }
+      ],
+      "outcome": "succeeded",
+      "nmgMethods": [
+        "hello",
+        "sessionActiveGraph",
+        "state",
+        "search",
+        "get"
+      ]
     },
     "sessionLocationBeforePrompt": true,
     "operations": [
@@ -762,9 +1248,8 @@
       }
     ],
     "notTested": [
-      "model/provider calls",
-      "registered hook invocation during inference",
-      "NMG end-to-end lifecycle",
+      "live external model/provider",
+      "fork/reset/reconnect generations and live idle wake",
       "desktop frontend"
     ]
   }

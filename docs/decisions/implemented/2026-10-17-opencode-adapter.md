@@ -33,9 +33,7 @@ and directory packages alike).
   `src/integration/lease-transport.ts` (JSON-RPC over the active lease HTTP
   port), with the one-shot CLI as the fallback; the plugin never owns,
   starts, or stops the daemon.
-- Tools register under the Code Mode `nmg` namespace, so hosts surface them
-  as `nmg_search`, `nmg_state`, and companions, schema-checked by the tool
-  contract row in `tests/integration/tool-contract.test.ts`.
+- Tools register with explicit `nmg_` names in the Code Mode catalog. The verified SDK does not apply an `options.namespace` prefix. The shared tool-contract tests and installed-host probe exercise the resulting names.
 - Automatic recall is staged at `prompt` admission (bounded by the ~1.5 s
   prompt budget) and delivered by mutable `messages` in the `context` hook as
   a system-role parts array; a string payload crashes provider lowering.
@@ -49,16 +47,13 @@ and directory packages alike).
   `registerAgent` heartbeat with an `opencode`-namespaced identity anchor,
   and injection teardown. A missing session row is treated as a root session
   (`child: false`); a `parentID` event upgrades it stickily.
-- Project directory mapping comes from any event carrying
-  `event.location.directory` (`session.inbox.delivered`,
-  `session.tool.called`); the CSV-covering executor contexts carry no
-  directory, and `NMG_PROJECT_DIR` remains the explicit override.
+- Before recall, native `session.get` supplies the session directory and child status. The plugin location is a fallback; mapped events update scope and `NMG_PROJECT_DIR` remains the explicit override. Lookup shares the prompt deadline, so late results cannot change current scope.
+- The same prompt preparation reads complete maintained state through `contextStateViews`, independently of recall success. InformationView admits state and recall under one budget, without claiming final transport confirmation.
 
 Localization notes recorded for the matrix page: the plugin event stream of
 2.0.32 (`session.execution.succeeded`/`failed`, `session.retry.scheduled`,
 `session.inbox.*`) replaces the pi-era `session.created`/`session.idle`
-symbols; `ctx.tool.transform` with `{ namespace: "nmg", codemode: true }` is
-the verified tool-registration call; the service-level plugin module cache
+symbols; `ctx.tool.transform` uses `{ codemode: true }` and explicitly named tools; the service-level plugin module cache
 means plugin code edits only reach a fresh server (per `opencode run
 --standalone`, or the next shared-service restart).
 
@@ -69,6 +64,8 @@ runs confirmed: setup and hooks fire on fresh servers, injected recall
 headers reach the model, `nmg_search`/`nmg_state` calls through Code Mode
 work end to end against the live lease, and `execution.succeeded` writes
 `~/.nmg/agents/<session>/identity.json`.
+
+The [November native audit](../../experiments/runtime/native-plugin-capabilities-2026-11-12.md) exercises a real installed 2.0.32 HTTP host against a loopback model and private NMG service. It validates hook activation, Code Mode search/get/state, first-turn project scope and subsequent complete state carriage. This bounded run neither uses an external model nor upgrades a shared host.
 
 ## Alternatives considered
 
@@ -89,12 +86,8 @@ work end to end against the live lease, and `execution.succeeded` writes
 
 - The capability matrix (`docs/design/harness-capability-matrix.md`) gets the
   opencode column from this record plus the smoke above; OpenCode is
-  complete on the core recall/tool/attribution paths, partial where the host
-  has no event or directory signal.
-- Known partials: the first turn of a fresh server has no
-  `session.location` yet, so its recall searches are unscoped until the
-  first event maps the directory (second turn onward); attribution flush
-  granularity is per execution rather than true idle; the TUI `/nmg` console
+  complete on the core recall/tool/attribution paths, partial where exact native lifecycle semantics remain unverified.
+- Known partials: if both native lookup and fallback directory are unavailable, recall lacks project scope; attribution flush granularity is per execution rather than true idle; the TUI `/nmg` console
   and the wake loop are wired but not live-smoked here (wake logic is shared
   with pi and covered by `tests/integration/session-flows.test.ts`).
 - Plugin code changes on an installed host only take effect for a fresh

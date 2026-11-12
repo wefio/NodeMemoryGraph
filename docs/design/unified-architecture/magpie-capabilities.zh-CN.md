@@ -39,8 +39,8 @@ OTLP 导出需要配置 collector。当原生 transcript 追踪已覆盖某 agen
 | 适配器与源码入口 | 待补齐的 NMG 缺口 | 候选组合行为 |
 | --- | --- | --- |
 | [Pi](../../../.pi/extensions/nmg/index.ts) | 原生覆盖较完整，但准备好的逐回合工作状态没有最终输入确认。 | 保留原生召回／工具／见证／唤醒，在网关边界检查带标记的当前状态与披露，获准时通过共享准备修复缺失上下文，不把已有工具或召回算成新增能力。 |
-| [DSH](../../../dsh/dsh-nmg/src/plugin/index.ts) | NMG 状态承载、通用观察与归因落盘未接线。原生 prompt 刷新和最终工具通知通过核心服务探测，status／turn／session 事件经源码确认。 | 原生接入 `systemPrompt.context`、`tools/result` 和已提交答案归因，测试取消／代次与真实唤醒。Magpie 保留独立请求边界等价路径。 |
-| [OpenCode v2](../../../opencode-plugin/index.ts) | 状态承载未接线，私有 API 探测中 `session.get` 在 prompt 前返回目录；见证映射与本轮插件激活仍未验证。 | 扩展 `ctx.session.hook("context")`，经授权原生会话查询取得作用域并验证 SDK 时序，保留已有观察／归因。Magpie 是可选提供方，不是前置条件。 |
+| [DSH](../../../dsh/dsh-nmg/src/plugin/index.ts) | 完整状态承载、工具观察／提醒及提交后的回合诊断归因已接原生 hook。已安装核心包与私有 fixture 覆盖该切片，真实唤醒和生命周期边界仍待验证。 | 选中原生提供方时保留其所有权，继续验证剩余边界。Magpie 保留可独立使用的请求级等价实现。 |
+| [OpenCode v2](../../../opencode-plugin/index.ts) | 原生状态承载和首回合 SDK 目录查询已接线。真实已安装宿主与本地模拟模型已验证激活、hook、Code Mode NMG search／get／state 及后续状态承载。见证 lineage 和真实唤醒仍待验证。 | 选中原生提供方时保留上下文／工具／事件路径。Magpie 保持完整备选提供方，共享交接验证后可修复获准的请求级缺口。 |
 | [WorkBuddy hook](../../../workbuddy-plugin/nmg-hook.ts) 与[工具路径](../../../workbuddy-plugin/README.md) | Hook 召回与 MCP 工具的 AG 会话分离，未证明连续状态承载、通用工具观察或自动归因。 | 绑定 hook／MCP／网关状态后，接续召回到 get、维护状态承载、请求可见观察、诊断归因与待处理黑板上下文。没有 MCP 工具时补上；选择 hook 召回时不重复注入。 |
 | [仅 MCP 客户端](../../../claude-plugins/nmg-memory/agents/memory-copilot.ts) | 缺召回、状态承载、自动归因与请求时黑板投递，反馈在动作枚举中有名称，但缺标签参数／处理分支。 | 网关补请求触发部分，共享工具接线补完整反馈及读写／state，共用同一授权会话，其他提供方继续补生命周期事件。 |
 
@@ -94,4 +94,4 @@ Magpie rerank 端点是可用上游传输，不表示 NMG 已有 reranker，也�
 
 保留 [GUI 优先的交付顺序](magpie-operations.zh-CN.md#交付顺序与验收)。
 
-通过共享合同用例验证表中的 NMG 缺口，优先验证 DSH／OpenCode 的原生状态承载、WorkBuddy 的 hook 到工具接续、部分客户端的缺失工具，以及仅 MCP 客户端的请求触发 NMG 功能。Pi 在已覆盖部分提供参考行为。Trace／用量关联是独立观测任务，不通过 NMG 功能对齐验收。
+通过共享合同用例验证表中的 NMG 缺口，继续验证 DSH／OpenCode 的生命周期与唤醒、WorkBuddy 的 hook 到工具接续、部分客户端的缺失工具，以及仅 MCP 客户端的请求触发 NMG 功能。Pi 在已覆盖部分提供参考行为。Trace／用量关联是独立观测任务，不通过 NMG 功能对齐验收。

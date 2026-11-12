@@ -4,76 +4,67 @@
 
 ## 问题与结论
 
-DSH、OpenCode 的哪些 NMG 缺口能原生补齐，哪些确实需要网关？既有[适配器矩阵](../../design/harness-capability-matrix.zh-CN.md)与 [OpenCode 决策](../../decisions/implemented/2026-10-17-opencode-adapter.zh-CN.md)是起点，不应当作缺失规范重建。
+DSH、OpenCode 的哪些 NMG 缺口能原生补齐？两者都提供原生上下文、工具及生命周期接口。两个适配器已接完整工作状态承载。DSH 还接上最终工具结果观察、弱 commit 提醒与已提交完成回合的诊断归因。OpenCode 在首回合召回前查询会话目录，并以显式 `nmg_` 名称注册工具。
 
-两者都提供核心 NMG 集成所需的原生路径。本次未发现证据表明工作状态承载、记忆工具、工具结果观察、诊断归因或黑板访问必须依赖 Magpie。这不表示 NMG 对应接线已实现或端到端验证，剩余问题涉及集成、时序与证据语义。
+Magpie 保持完整独立插件目标，原生路径不依赖网关部署。[既有能力矩阵](../../design/harness-capability-matrix.zh-CN.md)拥有源码覆盖情况，[OpenCode 决策](../../decisions/implemented/2026-10-17-opencode-adapter.zh-CN.md)保留原始集成证据。
 
 ## 目标与证据强度
 
 | 目标 | 证据 | 限制 |
 | --- | --- | --- |
-| NMG | `970e70ee` 源码与 20 项通过的适配器 fixture 测试 | 测试执行 NMG 适配器、模拟宿主入口及私有 HTTP 服务，不是真实桌面宿主 |
-| DSH 源码 | 公开提交 `687f282e8625c6b8d11ff58211a90524be2e4317`，checkout 清单为 `0.2.1-rc.2` | 源码审查与已安装包探测分别记录 |
-| DSH 已安装核心包 | `dsh-system-prompt`、`dsh-tools`、`dsh-agent` `0.2.1-rc.5`，产物记录模块 SHA-256 | 只运行 prompt／tool 服务，未运行桌面 bundle 和完整 Agent 循环 |
-| OpenCode | 已安装 CLI 版本文件 `2.0.32`，记录二进制 SHA-256，执行私有 `api --standalone` 请求 | CLI 的 API 描述服务器操作，不等于完整进程内插件 SDK |
-| 历史 OpenCode 运行 | 10 月 17 日决策记录真实 2.0.32 召回注入、Code Mode 工具和执行结束归因 | 本次未重跑依赖真实 provider 的流程 |
+| NMG 适配器 | 28 项针对性 fixture 通过，另有共享工具合同与传输测试 | fixture 模拟宿主回调，不能建立全部原生生命周期顺序 |
+| DSH 源码 | 公开提交 `687f282e8625c6b8d11ff58211a90524be2e4317`，checkout 清单 `0.2.1-rc.2` | 源码版本与已安装版本分别记录 |
+| 已安装 DSH 核心包 | prompt／tools／Agent 包 `0.2.1-rc.5`，产物记录模块 SHA-256 | 真实 Cordis、prompt、tools 服务，Agent／会话事件为合成；未运行完整 Agent 循环、桌面或外部模型 |
+| 已安装 OpenCode | CLI `2.0.32`，记录二进制 SHA-256；私有 HTTP 宿主加载实际 NMG 插件、私有 NMG 服务与本地模拟模型 | 三个准入 prompt、原生手动压缩及确定性工具循环；未调用外部供应商，未验证 GUI 或真实空闲唤醒 |
 
-尝试的 GitHub 路径未取得 OpenCode 2.0.32 的准确源码／SDK，没有以当前或 v1 SDK 替代。DSH 已安装声明也确认所审查的原生事件名，但不因名字相同就认定版本相同。
+[产物](artifacts/native-plugin-capabilities-2026-11-12/native-plugin-probe.json)记录源码哈希、包版本、已测项和未验证边界。源码审查不是运行证据。本地模拟模型收据只支持该次运行，不能授权生产披露收据。
 
-## DSH 原生合同
+## DSH 原生运行
 
-固定源码提供以下具体路径：
+固定源码提供[上下文装配](https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/core/system-prompt/src/index.ts)、[请求准入与刷新](https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/core/agent-loop/src/agent.ts)、[最终工具通知](https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/core/tools/src/index.ts)及[已提交会话事件](https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/core/session/src/index.ts)。
 
-| NMG 行为 | 原生路径 | 分类 |
-| --- | --- | --- |
-| 维护状态进入模型上下文 | [`SystemPrompt.context`](https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/core/system-prompt/src/index.ts)，由 [Agent 循环](https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/core/agent-loop/src/agent.ts)在请求准入刷新 | 原生路径可用，NMG 专用状态准备／承载仍需接线和测试 |
-| 工具结果进入 AG 与完成提醒 | [`tools/result`](https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/core/tools/src/index.ts)携带执行身份通知最终结果，包括错误；前／后执行 waterfall 是独立入口 | 原生结果路径可用，NMG 观察筛选与 lineage 映射属于实现工作 |
-| 诊断答案归因 | [`agent/turn-stopping`、`agent/status`、`agent/assistant-stream`](https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/core/agent/src/runtime-types.ts)与 [`session/event`](https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/core/session/src/index.ts) | 原生边界存在，归因落盘前选择已提交答案事件并验证取消／续接回合 |
-| 忙闲与定向唤醒 | Agent status、`send`、`followup`、`steer`、销毁及原生会话身份 | NMG 已接入部分路径，无须从网关静默推断空闲 |
-| clear／compact／resume 隔离 | Agent 创建来源包括 startup／resume／clear／compact，提供会话日志和生命周期事件 | 映射到 NMG generation／fence 需要端到端验证 |
+已安装服务验证动态上下文刷新、按传入身份选择装配、撤销贡献，以及冻结后的最终成功／错误工具通知。NMG 联调还通过真实原生工具启用／替换状态，准入请求，装配完整状态与召回，搜索／精确读取证据并落盘完成回合的诊断归因。这是合成 Agent 事件下的服务合同验证，未运行完整原生执行循环。
 
-已安装 prompt／tool 探测通过四项检查：动态上下文刷新、按传入装配身份选择内容、撤销贡献、最终成功／错误结果冻结通知。身份检查不等于认证或租户隔离测试，也不证明 NMG 状态已发给真实模型。上述 Agent 生命周期事件经过审查，没有在服务级探测中运行。
+适配器在 inbox 到达时启动召回，在请求准入时等待有界准备。原生循环在提交模型可见内容前刷新同步 `systemPrompt.context` 贡献。共享 `contextStateViews` 与 InformationView 保留完整状态，独立于召回结果。最终 `tools/result` 走共享观察筛选与 commit 提醒。已提交 `assistant/message` 只在完成的 `turn/end` 上归因，取消、外部会话与重复结束事件不产生归因。诊断重合不是正确性或训练反馈。
 
-## OpenCode 原生合同与实际 API
+## OpenCode 激活与 hook 联调
 
-既有 NMG 绑定使用 `ctx.session.hook("prompt"|"context"|"compaction")`、`ctx.tool.transform`、`ctx.tool.hook("execute.after")`、事件订阅和 `ctx.session.prompt`。10 月 17 日记录提供历史运行证据，将此适配器的上下文 hook 称为 `llm` hook 不准确。
+初次仅 API 的会话／配置查询没有 setup 回执，以 2 退出。使用不存在 provider 的 CLI 探索超时。两者都不能建立插件支持或不支持的结论。成功联调使用新的私有 HTTP 宿主，在会话实际运行时激活插件。
 
-私有 CLI 服务还实际返回以下 API：
+已安装 SDK 提供 `session.get`、`wait`、`context`、`prompt`，以及 prompt／context／compaction hook。联调记录实际 prompt、context 与 `execute.after` 回调。本地模拟模型通过 Code Mode 调用 `tools.nmg_search`、`tools.nmg_get` 和 `tools.nmg_state`。下一个准入 prompt 将完整工作状态带入后续模型请求。宿主把注入 system 块转换成转义的 `system-update` 正文，收据检查明确识别此形式。
 
-- `session.get` 返回 `Session.Info`，包含必需的 `location` 及可选 parent／fork／outcome 字段。
-- 存在 `session.context`、`session.prompt`、`session.compact`、`session.fork` 和 `event.subscribe`，会话日志端点标为 experimental。
-- 创建合成会话后，在任何 prompt 之前通过 `session.get` 读回目录。因此晚到的事件映射是 NMG 查询实现的限制，不证明 OpenCode 无法提供首回合作用域。插件 SDK 映射及截止时间行为仍需测试。
+SDK 不给新增工具应用 `options.namespace` 前缀，因此 NMG 显式注册 `nmg_search`、`nmg_get`、`nmg_remember` 和 `nmg_state`。原生 `session.get` 在召回前提供首回合作用域，插件 location 回退，显式项目配置覆盖。截止时间测试阻止迟到查询修改当前作用域。可选召回超时仍保留已准入的完整状态。
 
-私有 config API 确认合成插件配置存在，但仅 API 的会话／配置查询没有产生插件 setup 回执，插件列表为空。这没有复现推理期间的插件激活。保留的探测以 **2** 退出，如实保留不完整结果，不是完整通过的插件 smoke。另一次使用不存在 provider 的探索性 CLI run 超时，没有提供更多证据，不宣称该尝试完成推理或触发 hook。
+已安装宿主验证 prompt、context、工具完成及手动压缩 hook。原生压缩后，下一个 prompt 将当前完整工作状态带入本地模拟接收端。取消与迟到准备拒绝另有 fixture 覆盖。中断／自动压缩、fork 和重连时序仍待验证。
 
-## 实际限制与未确认问题
+## 限制与剩余验证门槛
 
-| 观测 | 排除的方式 | 仍可采用的路径 |
-| --- | --- | --- |
-| DSH context text 回调同步返回字符串 | 在该回调本身等待 daemon I/O | 在获准原生边界异步准备，再提供有界快照；测试刷新与取消时序 |
-| DSH `agent/request` 替换冻结调用配置，不能修改 messages | 用该 hook 任意改写未入日志的消息 | 内容走有日志的 `SystemPrompt.context` 通道 |
-| DSH 最终结果通知是观察，监听失败被隔离 | 把 `tools/result` 当授权否决入口 | 门禁走前执行策略及其受支持语义 |
-| 既有 OpenCode 2.0.32 smoke 未观察到 `session.created`／`session.idle` 通知 | 依赖这两个确切事件名完成初始化／收尾 | 查询会话信息并使用 execution 事件，队列／空闲／重连的精确语义仍待验证 |
-| 准备上下文与执行成功不提供正确性见证 | 将其当作最终 provider 投递、记忆正确性或正向反馈证明 | 分开保存投递证据、诊断重合与显式受支持反馈 |
+| 边界 | 已确认限制或剩余问题 |
+| --- | --- |
+| DSH 同步 context 回调 | 不能在此等待 daemon I/O；应在异步准入准备并提供有界快照 |
+| DSH `agent/request` | 替换调用配置，不修改 messages；内容走有日志的上下文通道 |
+| DSH `tools/result` | 观察最终结果，不是授权否决入口 |
+| OpenCode 执行完成 | 不建立真正空闲；历史证据未观察到 `session.created` 或 `session.idle` |
+| Claim outcome | 原生工具身份本身不建立合格 lineage 或正确性见证 |
+| 原生生命周期 | fork／reset／重连代次、真实空闲唤醒和桌面加载需要独立运行证据 |
+| 最终投递 | 上下文准备仍未确认；本地模拟接收端是实验见证，不是通用最终发送 API |
 
-不从缺少 NMG handler 推断核心功能做不到。Claim outcome lineage、fork／reset／重连代次、真实空闲唤醒、取消与最终输入收据保留集成验证门槛。存在 HTTP API 不证明存在等价插件方法或对应回调时序。
+不从缺少 NMG handler 推断宿主无法实现功能。Magpie／原生组合仍需认证会话交接、共享预算和选定的单一效果所有者。
 
-## 复现与使用
+## 复现
 
 使用明确安装路径运行保留的[探测脚本](native-plugin-probe.mjs)：
 
 ```text
-node docs/experiments/runtime/native-plugin-probe.mjs --dsh-package <dsh/package.json> --opencode-bin <opencode-cli.exe> --output <evidence-directory>
+node docs/experiments/runtime/native-plugin-probe.mjs --dsh-package <dsh/package.json> --opencode-bin <opencode-cli.exe> --output <evidence-directory> --exercise-hooks
 ```
 
-脚本使用真实已安装 DSH 服务和私有 OpenCode 配置，记录元数据／合成标记并清理一次性配置，不重启共享 daemon、不改线上配置、不调用真实 provider。退出 0 要求有合成插件注册回执，退出 2 保留部分证据，其他失败保持非零。
+命令拥有私有宿主配置、本地监听器和私有 NMG 存储，完成后关闭自有资源。不重启共享宿主、不改生产配置、不使用外部模型／向量凭据。不带 `--exercise-hooks` 时，API-only 证据可以保持不完整并以 2 退出。完整联调只在断言通过后退出 0，失败保持非零。保留元数据和合成标记摘要，不保存供应商凭据或完整模型请求。
 
-[结果](artifacts/native-plugin-capabilities-2026-11-12/native-plugin-probe.json)记录版本、模块／二进制摘要及已测／未验证范围。[选定 API 片段](artifacts/native-plugin-capabilities-2026-11-12/opencode-contract.json)记录 schema 摘要并有意省略无关 schema，不替代 SDK。
-
-适配器 fixture 执行命令如下：
+针对性合同测试：
 
 ```text
 node --experimental-strip-types --test tests/integration/automatic-recall-opencode.test.ts tests/integration/coordination-opencode.test.ts tests/integration/opencode-board-args.test.ts tests/extensions/dsh-state.test.ts
 ```
 
-20 项全部通过，只支持既有 NMG 接线及回归覆盖。[归属矩阵](../../design/harness-capability-matrix.zh-CN.md#原生宿主能力核实)负责分类缺口，Magpie 设计消费该分类，同时保持插件完整、可独立使用的目标。
+[选定 API 片段](artifacts/native-plugin-capabilities-2026-11-12/opencode-contract.json)有意省略无关定义，不替代 SDK。[Magpie 设计](../../design/unified-architecture/magpie-integration.zh-CN.md)消费这些原生结论，同时保留完整独立插件与组合会话验证。

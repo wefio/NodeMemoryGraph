@@ -61,6 +61,7 @@ import {
 import { SessionRecallFlow } from "../src/integration/session-recall-flow.ts";
 import { RecallBudget } from "../src/integration/recall-budget.ts";
 import { prepareInformationOutput } from "../src/integration/information-output.ts";
+import { contextStateViews } from "../src/integration/context-information.ts";
 import type { PreparedInformationOutput } from "../src/core/information-view.ts";
 import { SessionTaskWindow } from "../src/integration/session-task-window.ts";
 import {
@@ -150,6 +151,11 @@ interface SessionPromptApi {
   hook: (name: string, handler: (event: never) => unknown) => Promise<unknown>;
   prompt?: (input: { sessionID: string; text: string }) => Promise<unknown>;
   context?: (input: { sessionID: string }) => Promise<unknown>;
+  get?: (input: { sessionID: string }) => Promise<{
+    id: string;
+    parentID?: string;
+    location?: { directory?: string };
+  }>;
 }
 
 interface HostEvent {
@@ -159,6 +165,7 @@ interface HostEvent {
 }
 
 interface PluginContext {
+  location?: { directory?: string };
   session: SessionPromptApi;
   event: { subscribe: (input?: { signal?: AbortSignal }) => AsyncIterable<HostEvent> };
   tool: {
@@ -238,6 +245,17 @@ export default {
       }
     >();
     const preparations = new Map<string, AbortController>();
+    const stageInjection = (
+      sessionId: string,
+      pending: { output: PreparedInformationOutput; context?: MemoryContext },
+    ) => {
+      pendingInjections.set(sessionId, pending);
+      while (pendingInjections.size > PENDING_INJECTIONS_CAP) {
+        const oldest = pendingInjections.keys().next().value;
+        if (oldest === undefined) break;
+        pendingInjections.delete(oldest);
+      }
+    };
     const cancelRecall = (sessionId: string) => {
       preparations.get(sessionId)?.abort();
       preparations.delete(sessionId);
@@ -256,7 +274,9 @@ export default {
     const projectDirectory = (sessionId: string): string | undefined => {
       const override = process.env.NMG_PROJECT_DIR?.trim();
       if (override) return override;
-      return sessions.get(sessionId)?.projectDir?.trim() || undefined;
+      return (
+        sessions.get(sessionId)?.projectDir?.trim() || ctx.location?.directory?.trim() || undefined
+      );
     };
 
     const rememberSession = (sessionId: string, directory: string, child: boolean): void => {
@@ -272,6 +292,16 @@ export default {
         if (oldest === undefined) break;
         sessions.delete(oldest);
       }
+    };
+
+    const scopedSessions = new Set<string>();
+    const resolveNativeSession = async (sessionId: string, signal: AbortSignal): Promise<void> => {
+      if (scopedSessions.has(sessionId) || !ctx.session.get) return;
+      const session = await ctx.session.get({ sessionID: sessionId }).catch(() => undefined);
+      signal.throwIfAborted();
+      if (session?.id !== sessionId) return;
+      rememberSession(sessionId, session.location?.directory ?? "", Boolean(session.parentID));
+      scopedSessions.add(sessionId);
     };
 
     // ---- Automatic recall + nudge staging (prompt hook) --------------------
@@ -301,8 +331,28 @@ export default {
       return context.results?.length ? context : undefined;
     };
 
-    const stagePromptRecall = async (event: PromptHookEvent, signal: AbortSignal) => {
+    const readStateViews = async (sessionId: string, signal: AbortSignal) => {
+      const state = (await invoke("state", { action: "read", space: "ag", sessionId }).catch(
+        () => undefined,
+      )) as NmgStateResult | undefined;
+      signal.throwIfAborted();
+      try {
+        return state?.space === "ag" && state.result.action === "snapshot"
+          ? contextStateViews(state.result.snapshot, sessionId)
+          : [];
+      } catch {
+        // Foreign or malformed owner state never becomes model input.
+        return [];
+      }
+    };
+
+    const stagePromptRecall = async (
+      event: PromptHookEvent,
+      signal: AbortSignal,
+      retainState: (output: PreparedInformationOutput) => void,
+    ) => {
       const sessionId = String(event?.sessionID ?? "");
+      await resolveNativeSession(sessionId, signal);
       const prompt = textOfPrompt(event?.prompt);
       const turnKey = event?.messageID ? `message:${event.messageID}` : `prompt:${Date.now()}`;
       recallFlow.beginTurn(sessionId, turnKey);
@@ -322,6 +372,8 @@ export default {
       const decision =
         handshake?.action === "beginDisclosureTurn" ? handshake.sessionRecall?.decision : undefined;
       signal.throwIfAborted();
+      const base = await readStateViews(sessionId, signal);
+      retainState(prepareInformationOutput(base, { format: "context" }));
       const request = taskWindow.prepare(sessionId, prompt, decision);
       const context = request
         ? await recallHeaders(sessionId, request).catch(() => undefined)
@@ -333,7 +385,10 @@ export default {
             postamble: nudge,
           })
         : prepareInformationOutput([{ purpose: "guidance", body: nudge }], { format: "context" });
-      return { output, context };
+      return {
+        output: prepareInformationOutput([...base, ...output.views], { format: "context" }),
+        context,
+      };
     };
 
     const preparePromptRecall = async (event: PromptHookEvent, sessionId: string) => {
@@ -343,15 +398,13 @@ export default {
       preparations.set(sessionId, controller);
       try {
         const pending = await budget.run("automatic.context", (signal) =>
-          stagePromptRecall(event, signal),
+          stagePromptRecall(event, signal, (output) => {
+            if (preparations.get(sessionId) === controller && output.text)
+              stageInjection(sessionId, { output });
+          }),
         );
         if (preparations.get(sessionId) !== controller || !pending.output.text) return;
-        pendingInjections.set(sessionId, pending);
-        while (pendingInjections.size > PENDING_INJECTIONS_CAP) {
-          const oldest = pendingInjections.keys().next().value;
-          if (oldest === undefined) break;
-          pendingInjections.delete(oldest);
-        }
+        stageInjection(sessionId, pending);
       } catch {
         // A cancelled or late preparation never becomes an injection.
       } finally {
@@ -1181,14 +1234,13 @@ export default {
 
     let registered: Promise<unknown>;
     const registerTools = (editor: ToolEditor): void => {
-      editor.add(searchTool());
-      editor.add(getTool());
-      editor.add(rememberTool());
-      editor.add(stateTool());
+      for (const tool of [searchTool(), getTool(), rememberTool(), stateTool()]) {
+        editor.add({ ...tool, name: `nmg_${tool.name}` });
+      }
     };
     try {
-      // namespace+nodemode lands these as nmg_<name> in the Code Mode catalog.
-      registered = ctx.tool.transform(registerTools, { namespace: "nmg", codemode: true });
+      // Names are explicit: this SDK does not apply an options.namespace prefix.
+      registered = ctx.tool.transform(registerTools, { codemode: true });
     } catch {
       // Defensive: if this v2 build rejects transform options, register plain.
       registered = ctx.tool.transform(registerTools);
@@ -1369,6 +1421,7 @@ export default {
         attribution.clear(sessionId);
       }
       sessions.clear();
+      scopedSessions.clear();
     };
   },
 };

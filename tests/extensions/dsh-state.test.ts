@@ -340,6 +340,8 @@ async function withHost(
     disposeAgent: (agent: WakeHostAgent) => Promise<void>;
     stop: () => Promise<void>;
     directory: string;
+    emit: (name: string, ...args: unknown[]) => Promise<unknown>;
+    admit: () => Promise<unknown>;
   }) => Promise<void>,
 ) {
   const directory = mkdtempSync(join(tmpdir(), "nmg-dsh-state-"));
@@ -387,7 +389,7 @@ async function withHost(
       apply(context: unknown): () => Promise<void>;
     };
     const tools = new Map<string, HostTool>();
-    const events = new Map<string, (payload: unknown) => void>();
+    const events = new Map<string, (...args: unknown[]) => unknown>();
     const contributions = new Map<string, (context: unknown) => string>();
     const agents = new Map<string, WakeHostAgent>();
     const children = new Map<string, WakeChild[]>();
@@ -416,7 +418,7 @@ async function withHost(
           return () => {};
         },
       },
-      on(name: string, handler: (payload: unknown) => void) {
+      on(name: string, handler: (...args: unknown[]) => unknown) {
         events.set(name, handler);
         return () => {};
       },
@@ -450,7 +452,19 @@ async function withHost(
         },
       },
     });
+    let turn = 0;
     await run({
+      emit: async (name, ...args) => {
+        assert.ok(events.has(name), `Missing native ${name} hook`);
+        return events.get(name)!(...args);
+      },
+      admit: async () => {
+        assert.ok(events.has("agent/request"), "Missing native request admission hook");
+        return events.get("agent/request")!(
+          { agent: { id: "dsh-recall" }, turn, signal: new AbortController().signal },
+          async () => ({ model: "offline-probe" }),
+        );
+      },
       wake: () => wake(),
       agents,
       children,
@@ -467,11 +481,15 @@ async function withHost(
       service,
       requests,
       subprocessCalls: () => subprocessCalls,
-      inbox: (text) =>
-        events.get("agent/inbox/inserted")!({
+      inbox: (text) => {
+        const payload = {
           agent: { id: "dsh-recall" },
           message: { content: [{ type: "text", text }] },
-        }),
+          turn: ++turn,
+        };
+        events.get("agent/inbox/inserted")!(payload);
+        events.get("agent/inbox/claimed")?.(payload);
+      },
       recall: () => contributions.get("nmg:recall")!({ agent: { id: "dsh-recall" } }),
     });
   } finally {
@@ -491,6 +509,100 @@ const context = {
   signal: new AbortController().signal,
 };
 const ag = { space: "ag" };
+
+test("DSH admits complete maintained state into its native context even without matching memories", async () => {
+  await withHost(false, async ({ tools, inbox, admit, recall, requests }) => {
+    const state = tools.get("nmg_state")!;
+    const owner = { agent: { id: "dsh-recall" } };
+    await state.execute(
+      { ...ag, action: "write", operation: "enable", reason: "native context" },
+      owner,
+    );
+    await state.execute(
+      {
+        ...ag,
+        action: "write",
+        operation: "replace",
+        text: "Native DSH state.\nKeep the final invariant.",
+      },
+      owner,
+    );
+    inbox("No prior memories are required for this turn.");
+    assert.deepEqual(await admit(), { model: "offline-probe" });
+    assert.match(recall(), /<nmg_state\b/);
+    assert.match(recall(), /Keep the final invariant/);
+    assert.equal(
+      requests.some((request) => request.params.action === "disclose"),
+      false,
+    );
+    await state.execute({ ...ag, action: "write", operation: "clear" }, owner);
+    inbox("The next turn must not carry the cleared state.");
+    await admit();
+    assert.doesNotMatch(recall(), /Keep the final invariant/);
+  });
+});
+
+test("DSH observes native final tool results and flushes diagnostic attribution only at a completed turn", async () => {
+  await withHost(false, async ({ emit, tools, service, requests }) => {
+    const owner = { agent: { id: "dsh-owner" }, signal: new AbortController().signal };
+    await emit("agent/inbox/claimed", { ...owner, turn: 1, message: { content: "Atlas storage" } });
+    await emit(
+      "tools/result",
+      { ...owner, name: "bash", callId: "native-test", arguments: { command: "npm test" } },
+      { isError: false, content: [{ type: "text", text: "Native regression tests passed." }] },
+    );
+    assert.ok(
+      requests.some((request) => request.params.action === "observe"),
+      JSON.stringify(requests),
+    );
+    const snapshot = await service.invoke("sessionActiveGraph", {
+      action: "activate",
+      sessionId: "dsh-owner",
+    });
+    assert.match(JSON.stringify(snapshot), /Native regression tests passed/);
+    await service.invoke("remember", {
+      statement: "Atlas uses SQLite storage.",
+      nodeName: "Atlas",
+    });
+    await tools.get("nmg_search")!.execute({ query: "Atlas SQLite storage" }, owner);
+    const before = requests.filter(
+      (request) => request.method === "recordActiveGraphAttribution",
+    ).length;
+    await emit(
+      "session/event",
+      { id: "dsh-owner" },
+      {
+        type: "assistant/message",
+        data: {
+          turn: 1,
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Atlas uses SQLite storage." }],
+          },
+        },
+      },
+    );
+    await emit(
+      "session/event",
+      { id: "dsh-owner" },
+      { type: "turn/end", data: { turn: 1, reason: { kind: "completed" } } },
+    );
+    const recorded = requests.filter(
+      (request) => request.method === "recordActiveGraphAttribution",
+    );
+    assert.equal(recorded.length, before + 1);
+    assert.equal(recorded.at(-1)?.params.sessionId, "dsh-owner");
+    await emit(
+      "session/event",
+      { id: "dsh-owner" },
+      { type: "turn/end", data: { turn: 1, reason: { kind: "completed" } } },
+    );
+    assert.equal(
+      requests.filter((request) => request.method === "recordActiveGraphAttribution").length,
+      recorded.length,
+    );
+  });
+});
 
 test("DSH automatic context is budgeted and unconfirmed; a new empty turn excludes its old snapshot", async () => {
   await withHost(false, async ({ service, requests, inbox, recall }) => {
@@ -514,6 +626,89 @@ test("DSH automatic context is budgeted and unconfirmed; a new empty turn exclud
     assert.equal(recall(), text, "repeated context assembly preserves the prepared fragment");
     inbox("");
     assert.equal(recall(), "");
+  });
+});
+
+test("DSH keeps cancelled answers, repeated closers and foreign turns out of diagnostic attribution", async () => {
+  await withHost(false, async ({ emit, tools, service, requests }) => {
+    await service.invoke("remember", {
+      statement: "Atlas uses SQLite storage.",
+      nodeName: "Atlas",
+    });
+    const owner = { agent: { id: "dsh-answer" } };
+    for (const [turn, reason] of [
+      [1, "aborted"],
+      [2, "completed"],
+    ] as const) {
+      await emit("agent/inbox/claimed", {
+        ...owner,
+        turn,
+        message: { content: [{ type: "text", text: "Atlas SQLite" }] },
+      });
+      await tools.get("nmg_search")!.execute({ query: "Atlas SQLite storage" }, owner);
+      const count = requests.filter(
+        (request) => request.method === "recordActiveGraphAttribution",
+      ).length;
+      const message = {
+        role: "assistant",
+        content: [{ type: "text", text: "Atlas uses SQLite storage." }],
+      };
+      await emit(
+        "session/event",
+        { id: "foreign" },
+        { type: "assistant/message", data: { turn, message } },
+      );
+      await emit(
+        "session/event",
+        { id: "foreign" },
+        { type: "turn/end", data: { turn, reason: { kind: "completed" } } },
+      );
+      await emit(
+        "session/event",
+        { id: "dsh-answer" },
+        { type: "assistant/message", data: { turn, message } },
+      );
+      await emit(
+        "session/event",
+        { id: "dsh-answer" },
+        { type: "turn/end", data: { turn, reason: { kind: reason } } },
+      );
+      assert.equal(
+        requests.filter((request) => request.method === "recordActiveGraphAttribution").length,
+        count + (reason === "completed" ? 1 : 0),
+      );
+    }
+    const count = requests.filter((request) => request.params.action === "observe").length;
+    await emit(
+      "tools/result",
+      { ...owner, name: "nmg_get", arguments: {} },
+      { content: "Error shown by an NMG tool", isError: true },
+    );
+    assert.equal(requests.filter((request) => request.params.action === "observe").length, count);
+  });
+});
+
+test("DSH carries a weak commit reminder for one turn and does not infer success from a failed commit", async () => {
+  await withHost(false, async ({ emit, recall }) => {
+    const agent = { id: "dsh-recall" };
+    const signal = new AbortController().signal;
+    const result = { content: [{ type: "text", text: "Commit completed." }] };
+    const exec = { agent, name: "shell", arguments: { command: "git commit -m native-probe" } };
+    const admit = async () => {
+      await emit("agent/inbox/inserted", {
+        agent,
+        message: { content: [{ type: "text", text: "Continue the current task." }] },
+      });
+      await emit("agent/request", { agent, signal }, async () => ({ model: "offline" }));
+    };
+    await emit("tools/result", exec, { ...result, isError: true });
+    await admit();
+    assert.doesNotMatch(recall(), /A code commit or task completion was just detected/);
+    await emit("tools/result", exec, { ...result, isError: false });
+    await admit();
+    assert.match(recall(), /A code commit or task completion was just detected/);
+    await admit();
+    assert.doesNotMatch(recall(), /A code commit or task completion was just detected/);
   });
 });
 

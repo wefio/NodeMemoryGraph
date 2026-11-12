@@ -10,12 +10,15 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { promisify } from "node:util";
+import { exerciseOpenCodeHooks } from "./opencode-hook-exercise.mjs";
+import { exerciseDshNmg } from "./dsh-nmg-exercise.mjs";
 
 const { values } = parseArgs({
   options: {
     "dsh-package": { type: "string" },
     "opencode-bin": { type: "string" },
     output: { type: "string" },
+    "exercise-hooks": { type: "boolean", default: false },
   },
 });
 assert.ok(
@@ -119,6 +122,7 @@ async function probeDsh(packagePath) {
     ]);
     return {
       versions,
+      nmg: values["exercise-hooks"] ? await exerciseDshNmg(ctx, renderContextSnapshot) : undefined,
       checks: [
         "dynamic context refresh",
         "context selection by supplied assembly identity",
@@ -127,7 +131,7 @@ async function probeDsh(packagePath) {
       ],
       notTested: [
         "native Agent lifecycle",
-        "end-to-end NMG state carriage",
+        ...(values["exercise-hooks"] ? [] : ["end-to-end NMG state carriage"]),
         "desktop bundle loading",
         "model/provider calls",
       ],
@@ -207,18 +211,29 @@ async function probeOpenCode(binary) {
       `
 import { writeFileSync } from "node:fs";
 export default { id: "nmg-native-capability-probe", async setup(ctx) {
-  const record = { namespaces: Object.keys(ctx), hooks: [] };
+  const record = { namespaces: Object.keys(ctx), hooks: [], events: [], toolCalls: 0 };
   const save = () => writeFileSync(${JSON.stringify(pluginReceipt)}, JSON.stringify(record));
   save();
   try {
   record.sessionMethods = Object.keys(ctx.session);
   record.toolMethods = Object.keys(ctx.tool); record.eventMethods = Object.keys(ctx.event);
+  record.locationKeys = Object.keys(ctx.location);
   for (const name of ["prompt", "context", "compaction"]) {
-    await ctx.session.hook(name, () => undefined); record.hooks.push("session." + name);
+    await ctx.session.hook(name, async (event) => {
+      record.events.push({ name, sessionID: event.sessionID, keys: Object.keys(event) });
+      if (name === "prompt") {
+        const session = await ctx.session.get({ sessionID: event.sessionID });
+        record.sessionLookup = { keys: Object.keys(session), directory: session.location?.directory ?? session.data?.location?.directory };
+      }
+      if (name === "context") event.messages.push({ role: "system", content: [{ type: "text", text: "NmgNativeHookStateMarker" }] });
+      save();
+    }); record.hooks.push("session." + name);
   }
-  await ctx.tool.hook("execute.after", () => undefined); record.hooks.push("tool.execute.after");
+  await ctx.tool.hook("execute.after", event => {
+    record.events.push({ name: "execute.after", sessionID: event.sessionID, tool: event.tool, keys: Object.keys(event) }); save();
+  }); record.hooks.push("tool.execute.after");
   await ctx.tool.transform(editor => editor.add({ name: "audit", description: "Offline synthetic probe",
-    input: { type: "object", properties: {} }, execute: async () => ({ content: "synthetic-only" })
+    input: { type: "object", properties: {} }, execute: async () => { record.toolCalls++; save(); return { content: "NmgNativeToolResultMarker" }; }
   }), { namespace: "nmg_native_probe", codemode: true });
   record.toolTransform = true;
   save();
@@ -308,6 +323,15 @@ export default { id: "nmg-native-capability-probe", async setup(ctx) {
       entry.info?.plugins?.includes(pluginDirectory),
     );
     assert.ok(configured, "Private config must contain the synthetic plugin");
+    const exercise = values["exercise-hooks"]
+      ? await exerciseOpenCodeHooks({
+          binary,
+          directory,
+          environment: privateEnvironment(directory),
+          output,
+          pluginReceipt,
+        })
+      : undefined;
     let plugin;
     try {
       await access(pluginReceipt);
@@ -336,6 +360,7 @@ export default { id: "nmg-native-capability-probe", async setup(ctx) {
       info: doc.info,
       openapiPath: "/openapi.json",
       plugin,
+      exercise,
       sessionLocationBeforePrompt: true,
       operations: Object.entries(doc.paths).flatMap(([path, methods]) =>
         Object.entries(methods).map(([method, operation]) => ({
@@ -345,9 +370,10 @@ export default { id: "nmg-native-capability-probe", async setup(ctx) {
         })),
       ),
       notTested: [
-        "model/provider calls",
-        "registered hook invocation during inference",
-        "NMG end-to-end lifecycle",
+        ...(exercise
+          ? ["live external model/provider"]
+          : ["model/provider calls", "registered hook invocation during inference"]),
+        "fork/reset/reconnect generations and live idle wake",
         "desktop frontend",
       ],
     };
@@ -358,6 +384,19 @@ export default { id: "nmg-native-capability-probe", async setup(ctx) {
 
 const result = {
   measuredAt: new Date().toISOString(),
+  nmgSourceSha256: Object.fromEntries(
+    await Promise.all(
+      [
+        "opencode-plugin/index.ts",
+        "dsh/dsh-nmg/src/plugin/index.ts",
+        "dsh/dsh-nmg/src/plugin/native-events.ts",
+        "docs/experiments/runtime/native-plugin-probe.mjs",
+        "docs/experiments/runtime/opencode-hook-exercise.mjs",
+        "docs/experiments/runtime/dsh-nmg-exercise.mjs",
+        "docs/experiments/runtime/native-nmg-fixture.mjs",
+      ].map(async (path) => [path, await digest(resolve(import.meta.dirname, "../../..", path))]),
+    ),
+  ),
   dsh: await probeDsh(values["dsh-package"]),
   opencode: await probeOpenCode(resolve(values["opencode-bin"])),
 };
