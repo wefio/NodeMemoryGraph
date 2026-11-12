@@ -9,7 +9,7 @@
 
 Magpie 是模型网关边界上的额外集成候选，不是 Agent 执行器；客户端 Harness 继续拥有工具声明、执行和后续推理回合。此绑定可以为 Magpie 后面的客户端提供召回，不要求每个客户端都实现原生 NMG 插件，也不替代 pi durable 云端宿主。
 
-[社区插件仓库](https://github.com/magpie-community/plugins#gateway-hooks)说明异步 Bun 网关 hook。[已发布宿主合同](https://github.com/yetone/magpie/blob/v0.1.1273/docs/subsystems/gateway-request-hooks.md)定义用于修改上下文的 `onRequest(body, ctx)`，以及有界、尽力而为的完成观察 `onResponse(reply, ctx)`。`ctx.state` 仅存活于一次请求，不是持久对话状态。网关拒绝 hook 修改工具、工具选择、模型或 stream 设置。实现时固定目标 Magpie 版本并核对合同；示例记忆插件不构成 NMG 兼容性证据。
+[社区插件仓库](https://github.com/magpie-community/plugins#gateway-hooks)说明异步 Bun 网关 hook。[目标宿主合同](https://github.com/yetone/magpie/blob/v0.1.3545/docs/subsystems/gateway-request-hooks.md)定义用于修改上下文的 `onRequest(body, ctx)`，以及有界、尽力而为的完成观察 `onResponse(reply, ctx)`。`ctx.state` 仅存活于一次请求，不是持久对话状态。网关拒绝 hook 修改工具、工具选择、模型或 stream 设置。[接口与适配器映射](magpie-capabilities.zh-CN.md)将源码核对固定在 Magpie `0.1.3545`，区分公开接口与平台内部信息，给出具体互补路径。示例记忆插件不构成 NMG 兼容性证据。
 
 异步 NMG 服务调用使用 `magpie.hooks` 包。同步网关 middleware 的运行环境不同，不能将它当成该服务客户端。[工具插件](https://github.com/magpie-community/plugins#tools-for-every-agent)通过 Magpie 的 MCP 服务暴露工具；客户端也可以直接连接 NMG MCP 端点。两种方式都不把执行所有权交给网关 hook。安装与发布是独立工作，本设计不交付它们。
 
@@ -73,4 +73,4 @@ Magpie 的 origin、agent、session 和工作目录元数据有助于准入和�
 - 插件重载、实际 Magpie／Bun 目标启动、配置的本地／云端连通性，以及测试设置时不导出对话。
 - 按[面板验收切片](magpie-operations.zh-CN.md#交付顺序与验收)验证管理指标、时间段／重试分类、管理凭据处理与向量索引切换。
 
-准确包布局、目标版本、origin／session 保证、协议支持子集和 MCP 会话映射仍待验证。本设计增加一个集成候选，不代表已安装插件或已交付能力。
+包布局、目标版本运行行为、origin／session 保证、协议支持子集和 MCP 会话映射仍待验证。本设计增加一个集成候选，不代表已安装插件或已交付能力。

@@ -59,8 +59,11 @@ Request hooks run before routing, retain state for one request and receive
 selected metadata rather than client credentials. Completion callbacks are
 best-effort observations.
 
-The [page contract](https://github.com/magpie-community/plugins#pages) offers
-declared bridge reads and an optional host service. A static page has no direct
+The [versioned page contract](https://github.com/yetone/magpie/blob/v0.1.3545/internal/plugin/page.go) offers
+declared bridge reads and an optional host service for an independent page.
+It also supports panels in existing Usage, Agents, Settings and provider pages,
+and provider/agent menu entries that open the plugin page. Panel transport needs
+separate validation. A static page has no direct
 network access. Custom NMG reads/settings therefore need a supported host
 service or a separately validated upstream bridge extension. Do not invent an
 unrestricted page RPC. The
@@ -68,6 +71,12 @@ unrestricted page RPC. The
 shows a combined hooks/page/service package; it supplies a layout example, not
 an NMG implementation dependency. A proposed `magpie-plugin/` can keep the
 page, host transport and hooks together; packaging remains a validation item.
+
+Use the [interface and adapter map](magpie-capabilities.md) to select the data
+path. Aggregate usage comes from declared page bridge reads. An individual
+request join uses caller tracing and validated OTLP export. The separate
+synchronous `onUsage` observer has no session/request ID and cannot substitute
+for that join or serve as the sole durable ledger.
 
 ## Metric meanings
 
@@ -119,14 +128,18 @@ for every UI poll. Portable backends report supported metrics explicitly.
 
 ## Embedding model and key settings
 
-The page selects from NMG-supported embedding providers, with a model ID and
-optional endpoint/profile. A chat model list alone does not establish embedding
-support. The initial settings path can use existing NMG provider adapters.
-Reusing a Magpie provider/account is an optional later path that needs a real
-embedding endpoint and an authorized credential reference.
+The page offers direct NMG embedding providers and a Magpie gateway route, with
+a model ID and optional endpoint/profile. Magpie `0.1.3545` exposes
+`/v1/embeddings` and `/v1/rerank`; the existing NMG OpenAI embedding client is
+a concrete reuse candidate. Validate protocol compatibility and vector/index
+identity before enabling it. Pin compatible provider/model routing so fallback
+cannot mix vector spaces. A chat model list or the public `providers:list`
+bridge does not supply an embedding-model catalog.
 
-NMG owns the effective configuration and credential storage. The form submits
-a new key through an authenticated operator write, then clears it; later reads
+NMG owns its effective configuration and credential storage. For a gateway
+route, store a restricted gateway credential while Magpie retains its upstream
+vendor credentials. For a direct provider, NMG owns the provider credential.
+The form submits a new key through an authenticated operator write, then clears it; later reads
 return only configured/masked state. Plugin options hold nonsecret endpoint
 and display settings, not an extra plaintext key copy. Key import from Magpie's
 private files is not part of the design. The precise secure-storage mechanism
@@ -163,6 +176,12 @@ the gateway can own bounded recall. These are per-session choices. Sharing a
 validated disclosure identity can suppress duplicate injection when both paths
 are present; two independent caches or a text hash do not establish that join.
 Missing host capabilities remain unknown; available capabilities can combine.
+
+The [adapter map](magpie-capabilities.md#complement-existing-nmg-adapters)
+identifies Pi as the first trace-join candidate and MCP-only clients as the
+first candidates for added automatic recall. Pi already observes usage and
+provider timing. DSH legacy also has pre-step recall; the DSH host package,
+OpenCode and WorkBuddy retain their own native preparation paths.
 
 Request hooks cannot assume the final routed provider is known before routing.
 Start with configured bounded context, then use validated budget/usage hints

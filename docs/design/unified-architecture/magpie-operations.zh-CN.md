@@ -48,7 +48,9 @@ Host 服务负责页面传输和端点认证，不另开记忆数据库、不复
 
 2026-11-12 在本机观察到 Magpie `0.1.3545`。[对应版本的请求 hook 合同](https://github.com/yetone/magpie/blob/v0.1.3545/docs/subsystems/gateway-request-hooks.md)作为首个实现目标，不表示 NMG 绑定已经可用。请求 hook 在路由前执行，只保留单次请求状态，接收部分元数据，不接收客户端凭据。完成回调是尽力观察。
 
-[页面合同](https://github.com/magpie-community/plugins#pages)提供声明过的 bridge 读取和可选 host 服务。静态插件页不能直接联网；自定义 NMG 读取和设置，需要受支持的 host 服务，或另行验证的上游 bridge 扩展，不能假设存在任意页面 RPC。[Nowledge Mem 清单](https://github.com/magpie-community/plugins/blob/main/packages/nowledge-mem/package.json)提供 hooks／page／service 同包的布局示例，不成为 NMG 实现依赖。拟议的 `magpie-plugin/` 可以将页面、host 传输与 hook 放在一起，打包方式仍需验证。
+[固定版本页面合同](https://github.com/yetone/magpie/blob/v0.1.3545/internal/plugin/page.go)提供声明过的 bridge 读取和独立页面的可选 host 服务，也支持在已有 Usage、Agents、Settings 和供应商页面嵌入面板，以及从供应商／Agent 菜单打开插件页。面板传输需要独立验证。静态插件页不能直接联网；自定义 NMG 读取和设置，需要受支持的 host 服务，或另行验证的上游 bridge 扩展，不能假设存在任意页面 RPC。[Nowledge Mem 清单](https://github.com/magpie-community/plugins/blob/main/packages/nowledge-mem/package.json)提供 hooks／page／service 同包的布局示例，不成为 NMG 实现依赖。拟议的 `magpie-plugin/` 可以将页面、host 传输与 hook 放在一起，打包方式仍需验证。
+
+按[接口与适配器映射](magpie-capabilities.zh-CN.md)选择数据路径：聚合用量来自声明过的页面 bridge，单次请求关联使用调用方追踪和已验证的 OTLP 导出。独立的同步 `onUsage` 观察器没有 session／请求 ID，不能替代该关联，也不能单独承担持久账本。
 
 ## 统计口径
 
@@ -77,9 +79,9 @@ NMG 当前 `status` 已提供服务／embedding 健康及主 SQLite 文件大小
 
 ## 向量模型和 key 设置
 
-页面从 NMG 支持的 embedding provider 中选择，填写模型 ID 及可选端点／profile。聊天模型列表不证明向量能力。首版可以使用现有 NMG provider 适配器；复用 Magpie 供应商／账号作为后续可选路径，需要确认真实 embedding 端点与获准的凭据引用。
+页面提供直连 NMG embedding provider 和 Magpie 网关路由，填写模型 ID 及可选端点／profile。Magpie `0.1.3545` 已暴露 `/v1/embeddings` 和 `/v1/rerank`，现有 NMG OpenAI embedding client 是具体复用候选。启用前验证协议兼容性和向量／索引身份，固定兼容的 provider/model 路由，防止 fallback 混入不同向量空间。聊天模型列表和公开 `providers:list` bridge 都不提供向量模型目录。
 
-有效配置和凭据存储由 NMG 负责。表单通过认证的管理写入提交新 key 后清空，后续读取只返回已配置／脱敏状态。插件 options 保存非敏感端点和展示选项，不多存一份明文 key；不从 Magpie 私有文件导入 key。具体安全存储方式留待实现选定，管理设置不暴露为模型工具。
+NMG 拥有自身有效配置和凭据存储。网关路由保存受限网关凭据，上游供应商凭据继续归 Magpie；直连 provider 的凭据归 NMG。表单通过认证的管理写入提交新 key 后清空，后续读取只返回已配置／脱敏状态。插件 options 保存非敏感端点和展示选项，不多存一份明文 key；不从 Magpie 私有文件导入 key。具体安全存储方式留待实现选定，管理设置不暴露为模型工具。
 
 现有环境变量配置明确显示来源。操作方先看到哪一来源生效，再选择托管配置；保存表单不能静默宣称覆盖了正在生效的环境变量。变更携带期望配置修订，防止两页互相覆盖。
 
@@ -96,6 +98,8 @@ NMG 当前 `status` 已提供服务／embedding 健康及主 SQLite 文件大小
 | NMG | 检索证据、InformationView 预算、披露身份与索引状态 | 不从响应成功推断正确性或记忆有效 |
 
 已有原生集成的客户端，建议原生层负责召回，网关提供观测和 GUI；没有原生适配的明确绑定客户端，网关可以负责有界召回。这是逐会话选择。两路同时存在时，验证过的披露身份可以用于抑制重复注入；独立缓存或文本哈希不能证明它们是同一次操作。缺失能力保持未知，可用能力可以组合。
+
+[适配器映射](magpie-capabilities.zh-CN.md#与现有-nmg-适配器互补)将 Pi 列为首个 trace 关联候选，将仅 MCP 客户端列为新增自动召回的首批候选。Pi 已有 usage 和 provider 耗时观测，DSH 旧适配器也有 pre-step 召回；DSH 宿主包、OpenCode 和 WorkBuddy 保留各自原生准备路径。
 
 请求 hook 不能假设路由前已经知道最终供应商。先采用配置过的有界上下文，再使用已验证的预算／用量提示。后续可以用输入、缓存和延迟成本调整预算，但这本身不证明召回变好或节省了 token。Magpie 的内部辅助调用可能绕过 hook，其分类和用量覆盖需要单独宿主证据。
 

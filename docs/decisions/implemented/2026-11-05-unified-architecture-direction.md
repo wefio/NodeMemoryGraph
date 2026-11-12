@@ -26,6 +26,13 @@ gateway observations alongside native bindings. It keeps store/configuration
 ownership in the shared service so another UI can reuse it. The draft does not
 establish delivered metrics, an operator API, or a working Magpie adapter.
 
+The [versioned interface map](../../design/unified-architecture/magpie-capabilities.md)
+grounds that draft in Magpie `0.1.3545` source and each native adapter's wiring.
+It favors gateway embedding transport over copying upstream keys, Pi for the
+first trace join, and MCP-only clients for added automatic recall. Native
+lifecycle ownership stays intact. Source review does not replace runtime
+integration evidence.
+
 ## Alternatives considered
 
 - SQLite snapshots as the object backend: useful for reusing database behavior, but does not satisfy the requested independent native-object path. Keep the current format as a migration source.

@@ -33,7 +33,7 @@ Adapters compared:
 
 | Capability | Pi | OpenCode | WorkBuddy | MCP | DSH |
 |---|---|---|---|---|---|
-| Automatic recall (staged headers per admitted turn) | full | full* | full | none | none |
+| Automatic recall (staged headers per admitted turn) | full | full* | full | none | partial |
 | Memory tools (`nmg_search`/`get`/`remember`) on the shared Agent Surface | full | full | none | full | full |
 | Working state (`space=ag` with the invocation fence) | full | full | none | full | none |
 | Tool-result observation + weak completion nudge | full | full | partial | none | none |
@@ -89,10 +89,11 @@ The [event contract](board-event-records.md) owns subscription boundaries.
 - **DSH** — five model-visible tools (`nmg_search`, `nmg_get`,
   `nmg_remember`, `nmg_board`, `nmg_daemon status`) over the shared
   transport (lease fast path with the one-shot CLI fallback). The CLI
-  fallback path performs ordinary search without the learning side, there is
-  no automatic recall, presence registration, observation, attribution, wake,
-  or console by design: DSH exposes explicit preparation and search
-  parameters.
+  fallback path performs ordinary search without the learning side.
+  `agent/pre-step` calls `onPreStep` for turn admission and fresh-candidate
+  injection into the entering decision. This is partial automatic recall,
+  distinct from the host package's inbox preparation. Presence registration,
+  observation, attribution, wake and console are not wired in this legacy path.
 
 ## Maintenance
 

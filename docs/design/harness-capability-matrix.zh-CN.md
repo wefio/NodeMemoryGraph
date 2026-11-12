@@ -32,7 +32,7 @@
 
 | 能力 | Pi | OpenCode | WorkBuddy | MCP | DSH |
 |---|---|---|---|---|---|
-| 自动召回（按准入回合暂存头行） | full | full* | full | none | none |
+| 自动召回（按准入回合暂存头行） | full | full* | full | none | partial |
 | 记忆工具（`nmg_search`/`get`/`remember`，共享 Agent Surface） | full | full | none | full | full |
 | 工作状态（`space=ag`，带调用栅栏） | full | full | none | full | none |
 | 工具结果观察 + 弱完成提醒 | full | full | partial | none | none |
@@ -79,8 +79,10 @@ MCP／CLI 提供显式读取，不提供主动唤醒；订阅边界由[事件契
   执。
 - **DSH** — 五个模型可见工具（`nmg_search`、`nmg_get`、`nmg_remember`、
   `nmg_board`、`nmg_daemon status`），走共享传输（lease 快路径 + 一次性
-  CLI 兜底）。CLI 兜底路径执行普通搜索、不带学习面；按设计没有自动召回、
-  在场登记、观察、归因、唤醒或控制台：DSH 暴露显式准备与搜索参数。
+  CLI 兜底）。CLI 兜底路径执行普通搜索、不带学习面。
+  `agent/pre-step` 调用 `onPreStep`，执行回合准入并向进入执行的 decision
+  注入新候选，属于 partial 自动召回，与宿主包的 inbox 准备路径不同。
+  旧路径未接线在场登记、观察、归因、唤醒和控制台。
 
 ## 维护
 
