@@ -77,5 +77,25 @@
       "Creates a rollbackable candidate only after readiness",
       "Applies a source or configuration update only after held-out matched quality and cost gates pass"
     ]
+  },
+  {
+    "name": "native_adapter_onboarding",
+    "prompt": "OpenCode 已经加载了 NMG 插件，也能看到 nmg_search 和 nmg_state。还需要再装一套 MCP、每次先跑 CLI，或者接 Magpie 才能正常用吗？我也想知道 DSH 用哪个包。",
+    "expected": [
+      "Uses the existing native tools rather than duplicating the same operation through MCP and CLI",
+      "Routes installation and loading to the native adapter usage reference",
+      "Identifies the current DSH host package as the integration target",
+      "Keeps Magpie a complete independent plugin target without claiming an implemented session handoff"
+    ]
+  },
+  {
+    "name": "native_working_state_continuity",
+    "prompt": "我在 DSH 用 nmg_state 写了当前进度，只返回 updated。下一轮会带上状态吗？如果 OpenCode 压缩了呢？不要重启正在共享的服务。",
+    "expected": [
+      "Explains complete-state enable and replace through nmg_state rather than Lab",
+      "Distinguishes a terse write receipt from next-turn carriage and final provider confirmation",
+      "Uses the verified DSH admission and OpenCode prompt/context behavior including manual compaction recovery",
+      "Preserves the shared daemon and distinguishes tested paths from fork/reconnect and live-wake gaps"
+    ]
   }
 ]

@@ -32,6 +32,8 @@ DSH 目标是当前宿主包，历史 preset 不作为并行功能对齐目标�
 
 [原生能力核实](../../experiments/runtime/native-plugin-capabilities-2026-11-12.zh-CN.md)复用既有 OpenCode 矩阵与 smoke 记录。DSH 核心服务探测确认动态上下文及最终工具通知，OpenCode 私有 API 在 prompt 前返回会话目录，因此原生功能对齐独立于网关部署。已安装 OpenCode 的插件激活、hook、Code Mode 工具及状态承载通过本地模拟模型验证。DSH 状态承载与提交后回合归因通过已安装核心服务验证。原生生命周期边界、真实唤醒及提供方组合交接保留各自验证门槛。
 
+NMG 使用 Skill 将 DSH／OpenCode 的安装、原生工具使用及激活检查指向[原生使用指南](../../../skills/nmg-memory/references/native-adapters.zh-CN.md)，适配器开发仍由既有合同参考负责。操作指引据此对齐已验证的原生路径，不把 Magpie 草案绑定当成已安装的先决条件。
+
 ## Alternatives considered
 
 - 强制把本地记忆和协作拆成两个数据库文件：没有物理隔离要求时会增加配置；默认在一个本地 SQLite 文件中保持独立所有权。

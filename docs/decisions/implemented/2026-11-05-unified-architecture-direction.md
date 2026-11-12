@@ -60,6 +60,8 @@ confirm dynamic context and final tool notifications; OpenCode's private API
 returns a session directory before a prompt. Native parity work therefore stays
 independent of gateway deployment. Installed OpenCode activation, hooks, Code Mode tools and state carriage are exercised against a loopback model. DSH state carriage and committed-turn attribution are exercised with installed core services. Native lifecycle edges, live wake and composed-provider handoffs retain separate validation gates.
 
+The NMG usage Skill routes DSH/OpenCode installation, native tool use and activation checks to a [native operating guide](../../../skills/nmg-memory/references/native-adapters.md). Adapter development stays in its existing contract reference. This keeps operating instructions aligned with verified native paths without presenting Magpie's draft binding as an installed prerequisite.
+
 ## Alternatives considered
 
 - SQLite snapshots as the object backend: useful for reusing database behavior, but does not satisfy the requested independent native-object path. Keep the current format as a migration source.
