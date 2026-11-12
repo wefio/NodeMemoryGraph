@@ -54,6 +54,13 @@ unverified host paths and demonstrated host restrictions. DSH/OpenCode native
 context and tool/event hooks remain implementation candidates. A missing NMG
 connection does not establish that the host needs a gateway to provide it.
 
+The [native capability audit](../../experiments/runtime/native-plugin-capabilities-2026-11-12.md)
+reuses the original OpenCode matrix and smoke record. DSH core-service probes
+confirm dynamic context and final tool notifications; OpenCode's private API
+returns a session directory before a prompt. Native parity work therefore stays
+independent of gateway deployment. Fresh OpenCode plugin activation, native
+lifecycle edge cases and combined NMG behavior retain their validation gates.
+
 ## Alternatives considered
 
 - SQLite snapshots as the object backend: useful for reusing database behavior, but does not satisfy the requested independent native-object path. Keep the current format as a migration source.

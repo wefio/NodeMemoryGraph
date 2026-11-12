@@ -108,8 +108,49 @@ The [event contract](board-event-records.md) owns subscription boundaries.
 
 ## Maintenance
 
+See [native host findings](#native-host-capability-findings) before treating an
+unwired row as a host restriction.
+
 When the shared layer gains a capability ([the flow modules](../decisions/implemented/2026-10-16-shared-session-flows.md)),
 or an adapter wires one for the first time, move the cell here instead of
 growing a per-adapter prose list. A cell change without its wiring change (or
 vice versa) fails review; the row definitions stay judgement-light on
 purpose, with the rationale in the linked decision records.
+
+## Native host capability findings
+
+The [OpenCode adapter decision](../decisions/implemented/2026-10-17-opencode-adapter.md)
+already supplies the original runtime evidence behind this matrix. The
+[native plugin audit](../experiments/runtime/native-plugin-capabilities-2026-11-12.md)
+adds pinned DSH contracts, installed-core probes and OpenCode private API results.
+It records source/package versions separately and does not overwrite historical
+smoke evidence with API availability. These findings classify implementation
+work; they do not promote the delivered cells above.
+
+| NMG behavior | DSH native path and classification | OpenCode native path and classification |
+| --- | --- | --- |
+| Maintained-state carriage | **Can wire natively.** `systemPrompt.context` and admission refresh exist; installed prompt refresh/disposal passed. NMG dedicated state carriage is not wired. | **Can wire natively.** Existing `ctx.session.hook("context")` carries staged recall; extend shared state preparation into this path and test its distinct carriage rules. |
+| Tool-result observation/nudges | **Can wire natively.** `tools/result` emits final success/error results; installed-service probe passed. NMG filtering/AG writes still need wiring. | **Already wired.** `ctx.tool.hook("execute.after")` feeds shared observation/nudge logic. |
+| Diagnostic attribution | **Native entry points confirmed; integration needs validation.** `agent/turn-stopping`, `agent/status`, committed session events and assistant stream provide boundaries. Test final-event selection, cancellation and deduplication. | **Already wired at execution completion.** The original smoke verifies the path; it is not a proof of true idle or correctness. |
+| First-turn scope | Current package binds actual Agent/session identity; further scope changes require native mapping checks. | **Native lookup available.** The private `session.get` returned location before any prompt. Calling the corresponding authorized path before recall is an NMG integration task; SDK mapping/deadline behavior remains to verify. |
+| Board wake and busy | **Native paths exist and are partly wired.** Agent status plus `send`/`followup`/`steer`; private fixtures cover NMG delivery. Live host enqueue and child-resume still need runtime validation. | **Native delivery path wired; live behavior needs validation.** `ctx.session.prompt` and execution events exist; queue/idle semantics remain to test. Gateway traffic is not a substitute. |
+| Fork/reset/compaction fencing | **Needs integration validation.** Lifecycle creation source distinguishes startup/resume/clear/compact; map these to NMG incarnation/frame fences. | **Needs integration validation.** Fork/compact/session APIs exist and compaction is wired; event ordering, reconnect and generation mapping are not established by API listing. |
+| Claim-outcome witnesses | **Needs semantic/lineage validation.** Native tool identity exists; that alone does not make a result an admissible claim witness. | **Needs implementation/validation.** The NMG handler lacks the witness mapping. Existing tools/log APIs are candidates; no host impossibility is established. |
+| Final provider-input receipt | **Unverified.** Prompt projection and log commits do not establish final provider receipt. | **Unverified.** Mutable context and successful execution do not establish final provider receipt. |
+
+The following are confirmed restrictions of particular entry points, not proof
+that whole NMG features are impossible:
+
+- DSH context text providers are synchronous. Prepare asynchronously elsewhere
+  and expose a bounded snapshot through the supported context channel.
+- DSH `agent/request` replaces call configuration, not messages. Content uses
+  logged context channels. `tools/result` observes rather than vetoes; an
+  execution gate belongs in the pre-execute policy path.
+- The historical OpenCode 2.0.32 run did not emit `session.created` or
+  `session.idle`. Do not rely on those names. Session lookup and execution
+  events offer native alternatives; exact lifecycle equivalence remains a test.
+
+No reviewed evidence establishes a DSH/OpenCode core NMG feature that must be
+outsourced to Magpie. The complete Magpie plugin remains an independent
+provider. Composition can select native or gateway providers after their shared
+contracts and handoffs are validated.

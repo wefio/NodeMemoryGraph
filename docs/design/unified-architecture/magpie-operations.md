@@ -211,6 +211,10 @@ recall hook path.
 | 3: complete plugin and NMG parity | Full plugin tools, recall/state carriage, attribution and request-time board delivery | Standalone plugin and per-adapter end-to-end cases, trusted handoff, tool continuations, deduplication and cancellation; host limits stay explicit |
 | 4: optional capture | Separately enabled completion capture | Existing consent/source-time rules; partial/lost replies do not imply durable capture or positive feedback |
 
+DSH/OpenCode native completion follows the [verified matrix](../harness-capability-matrix.md#native-host-capability-findings)
+as a separate track. It can proceed alongside the full Magpie plugin. Neither
+the GUI nor gateway installation is a prerequisite for native feature parity.
+
 Slice 1 does not imply an admin configuration API already exists. Slices 1 and
 2 form the initial GUI scope; gateway integration can follow without blocking
 that work. Slice 3 covers [every adapter's NMG gaps](magpie-capabilities.md#complement-existing-nmg-adapters),

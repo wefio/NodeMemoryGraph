@@ -34,13 +34,13 @@ OTLP 导出需要配置 collector。当原生 transcript 追踪已覆盖某 agen
 
 下表所有网关贡献都要求客户端模型流量实际经过 Magpie，直连流量和只切换配置的用法不在覆盖内。仅匹配显示名不能关联会话。
 
-缺口描述 NMG 接线，不描述宿主做不到。按[矩阵定义](../harness-capability-matrix.zh-CN.md#行与列)区分尚未实现、宿主路径待验证与宿主明确限制。DSH 只指当前宿主包，历史 preset 不作为功能对齐目标。DSH／OpenCode 的现有原生上下文／工具／事件 hook 合适时优先使用。Magpie 保留完整实现，作为可独立使用的提供方，不成为原生接线未完成的必需前提。
+缺口描述 NMG 接线，不描述宿主做不到。按[矩阵核实结果](../harness-capability-matrix.zh-CN.md#原生宿主能力核实)区分尚未实现、宿主路径待验证与宿主明确限制。DSH 只指当前宿主包，历史 preset 不作为功能对齐目标。DSH／OpenCode 的现有原生上下文／工具／事件 hook 合适时优先使用。Magpie 保留完整实现，作为可独立使用的提供方，不成为原生接线未完成的必需前提。
 
 | 适配器与源码入口 | 待补齐的 NMG 缺口 | 候选组合行为 |
 | --- | --- | --- |
 | [Pi](../../../.pi/extensions/nmg/index.ts) | 原生覆盖较完整，但准备好的逐回合工作状态没有最终输入确认。 | 保留原生召回／工具／见证／唤醒，在网关边界检查带标记的当前状态与披露，获准时通过共享准备修复缺失上下文，不把已有工具或召回算成新增能力。 |
-| [DSH](../../../dsh/dsh-nmg/src/plugin/index.ts) | NMG 状态承载、通用工具观察与归因落盘尚未接线。已有上下文和原生会话入口，进一步事件路径待验证。 | 经原生 `systemPrompt.context` 实现状态承载，验证原生事件用于观察／归因。Magpie 可在同一共享合同下独立提供请求边界等价路径，保留原生销毁／忙碌／唤醒。 |
-| [OpenCode v2](../../../opencode-plugin/index.ts) | 已有 state 工具、观察及归因，专用状态承载未接线；作用域取得和 claim 见证需要实现／验证，不应判为宿主做不到。 | 优先扩展原生 `llm` 上下文和工具／事件 hook，按宿主验证作用域及见证获取。Magpie 提供另一条绑定上下文路径，HTTP 成功不替代缺失的 claim 证据。 |
+| [DSH](../../../dsh/dsh-nmg/src/plugin/index.ts) | NMG 状态承载、通用观察与归因落盘未接线。原生 prompt 刷新和最终工具通知通过核心服务探测，status／turn／session 事件经源码确认。 | 原生接入 `systemPrompt.context`、`tools/result` 和已提交答案归因，测试取消／代次与真实唤醒。Magpie 保留独立请求边界等价路径。 |
+| [OpenCode v2](../../../opencode-plugin/index.ts) | 状态承载未接线，私有 API 探测中 `session.get` 在 prompt 前返回目录；见证映射与本轮插件激活仍未验证。 | 扩展 `ctx.session.hook("context")`，经授权原生会话查询取得作用域并验证 SDK 时序，保留已有观察／归因。Magpie 是可选提供方，不是前置条件。 |
 | [WorkBuddy hook](../../../workbuddy-plugin/nmg-hook.ts) 与[工具路径](../../../workbuddy-plugin/README.md) | Hook 召回与 MCP 工具的 AG 会话分离，未证明连续状态承载、通用工具观察或自动归因。 | 绑定 hook／MCP／网关状态后，接续召回到 get、维护状态承载、请求可见观察、诊断归因与待处理黑板上下文。没有 MCP 工具时补上；选择 hook 召回时不重复注入。 |
 | [仅 MCP 客户端](../../../claude-plugins/nmg-memory/agents/memory-copilot.ts) | 缺召回、状态承载、自动归因与请求时黑板投递，反馈在动作枚举中有名称，但缺标签参数／处理分支。 | 网关补请求触发部分，共享工具接线补完整反馈及读写／state，共用同一授权会话，其他提供方继续补生命周期事件。 |
 

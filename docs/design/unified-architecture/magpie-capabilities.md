@@ -58,7 +58,7 @@ that coverage. Matching a display name alone cannot join sessions.
 
 Gaps describe NMG wiring, not host inability. Separate missing implementation,
 unverified host paths and explicit host restrictions under the
-[matrix definitions](../harness-capability-matrix.md#rows-and-columns).
+[matrix findings](../harness-capability-matrix.md#native-host-capability-findings).
 DSH means the current host package; the historical preset is not a parity target.
 For DSH/OpenCode, use existing native context/tool/event hooks first where they
 fit. Magpie retains its complete implementation as an independently usable
@@ -67,8 +67,8 @@ provider, not a requirement for unfinished native wiring.
 | Adapter and source entry | NMG gap to close | Candidate combined NMG behavior |
 | --- | --- | --- |
 | [Pi](../../../.pi/extensions/nmg/index.ts) | Broad native coverage, but prepared per-turn working state has no final input confirmation. | Keep native recall/tools/witnesses/wake. At the gateway boundary, check the labelled current state/disclosure and repair missing context through shared preparation where authorized. Do not claim an already-covered tool or recall as a new capability. |
-| [DSH](../../../dsh/dsh-nmg/src/plugin/index.ts) | NMG state carriage, general tool observation and attribution flush are not wired. Context and native session entry points exist; further event paths need validation. | Implement state carriage through native `systemPrompt.context`; verify native events for observation/attribution. Magpie can independently provide request-bound equivalents under the same shared contracts. Preserve native disposal, busy and wake. |
-| [OpenCode v2](../../../opencode-plugin/index.ts) | State tools, observations and attribution exist. Dedicated state carriage is not wired; scope lookup and claim witnesses need implementation/validation, not a declaration of host inability. | Extend native `llm` context and tool/event hooks first. Validate scope and witness acquisition against the host. Magpie supplies an alternate bound context path; HTTP success never substitutes for missing claim evidence. |
+| [DSH](../../../dsh/dsh-nmg/src/plugin/index.ts) | NMG state carriage, general observation and attribution flush are unwired. Native prompt refresh and final tool notifications passed core-service probes; status/turn/session events are source-confirmed. | Wire `systemPrompt.context`, `tools/result` and committed-answer attribution natively. Test cancellation/generations and real wake. Magpie retains independent request-bound equivalents. |
+| [OpenCode v2](../../../opencode-plugin/index.ts) | State carriage is unwired. `session.get` supplied directory before a prompt in a private API probe. Witness mapping and fresh plugin activation remain unverified. | Extend `ctx.session.hook("context")`; obtain scope through an authorized native session lookup and verify SDK timing. Preserve existing observation/attribution. Magpie is an alternative provider, not a prerequisite. |
 | [WorkBuddy hook](../../../workbuddy-plugin/nmg-hook.ts) + [tool path](../../../workbuddy-plugin/README.md) | Hook recall and MCP tools use separate AG sessions. No demonstrated continuous state carriage, general tool observations or automatic attribution. | Bind hook/MCP/gateway state, then support recall-to-get, maintained-state carriage, request-visible observations, diagnostic attribution and pending-board context. Supply MCP tools if absent. Keep hook recall when selected; no duplicate injection. |
 | [MCP-only clients](../../../claude-plugins/nmg-memory/agents/memory-copilot.ts) | Missing recall, state carriage, automatic attribution and request-time board delivery. Feedback is named in the action enum but lacks labels/dispatch. | Gateway supplies request-triggered parts; shared tool wiring must complete feedback and provide reads/writes/state. Bind both paths to one authorized session. Other providers can supply lifecycle events. |
 

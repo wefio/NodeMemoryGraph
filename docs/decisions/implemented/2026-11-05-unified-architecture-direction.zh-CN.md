@@ -30,6 +30,8 @@ Magpie 补齐其他适配器的角色不缩减自身插件界面。插件目标�
 
 DSH 目标是当前宿主包，历史 preset 不作为并行功能对齐目标。缺口分析区分 NMG 接线未完成、宿主路径待验证和已证明宿主限制。DSH／OpenCode 原生上下文与工具／事件 hook 仍是实现候选，缺少 NMG 接线不证明宿主需要网关才能提供该能力。
 
+[原生能力核实](../../experiments/runtime/native-plugin-capabilities-2026-11-12.zh-CN.md)复用既有 OpenCode 矩阵与 smoke 记录。DSH 核心服务探测确认动态上下文及最终工具通知，OpenCode 私有 API 在 prompt 前返回会话目录，因此原生功能对齐独立于网关部署。新一轮 OpenCode 插件激活、原生生命周期边界及 NMG 组合行为继续保留验证门槛。
+
 ## Alternatives considered
 
 - 强制把本地记忆和协作拆成两个数据库文件：没有物理隔离要求时会增加配置；默认在一个本地 SQLite 文件中保持独立所有权。

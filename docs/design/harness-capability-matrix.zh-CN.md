@@ -89,7 +89,32 @@ MCP／CLI 提供显式读取，不提供主动唤醒；订阅边界由[事件契
 
 ## 维护
 
+将未接线单元格当成宿主限制前，先看[原生宿主核实](#原生宿主能力核实)。
+
 共享层新增能力（[流转模块](../decisions/implemented/2026-10-16-shared-session-flows.zh-CN.md)），
 或某适配器首次接线某项能力时，在这里移动单元格，而不是增长各适配器的散
 文清单。单元格变动与其接线变动不同步（或反之）无法通过评审；行定义保持
 低判断密度，理由由链接的决策记录承载。
+
+## 原生宿主能力核实
+
+[OpenCode 适配器决策](../decisions/implemented/2026-10-17-opencode-adapter.zh-CN.md)已提供本矩阵最初的运行证据。[原生插件核实记录](../experiments/runtime/native-plugin-capabilities-2026-11-12.zh-CN.md)补充固定 DSH 合同、已安装核心包探测和 OpenCode 私有 API 结果，分别记录源码／包版本，不用 API 存在覆盖历史 smoke 证据。这些结论用于分类实现工作，不提升上表已交付单元格。
+
+| NMG 行为 | DSH 原生路径与分类 | OpenCode 原生路径与分类 |
+| --- | --- | --- |
+| 维护状态承载 | **可原生接线。** 已有 `systemPrompt.context` 和准入刷新，已安装 prompt 刷新／撤销探测通过，NMG 专用状态承载未接线。 | **可原生接线。** 既有 `ctx.session.hook("context")` 已承载暂存召回，将共享状态准备接入并测试独立承载规则。 |
+| 工具结果观察／提醒 | **可原生接线。** `tools/result` 通知最终成功／错误结果，已安装服务探测通过，NMG 筛选／AG 写入仍需接线。 | **已接线。** `ctx.tool.hook("execute.after")` 进入共享观察／提醒逻辑。 |
+| 诊断归因 | **原生入口已确认，集成待验证。** `agent/turn-stopping`、`agent/status`、已提交会话事件和 assistant stream 提供边界，测试最终事件选择、取消和去重。 | **已按 execution 完成接线。** 原始 smoke 验证该路径，不证明真正空闲或正确性。 |
+| 首回合作用域 | 当前包绑定真实 Agent／会话身份，进一步作用域变化需要原生映射检查。 | **原生查询可用。** 私有 `session.get` 在 prompt 前返回 location。召回前调用对应授权路径属于 NMG 集成工作，SDK 映射／截止时间行为待验证。 |
+| 黑板唤醒与忙碌 | **原生路径存在且部分接线。** Agent status 与 `send`／`followup`／`steer`，私有 fixture 覆盖 NMG 投递，真实宿主入队／子会话恢复仍需运行验证。 | **原生投递路径已接线，真实行为待验证。** 已有 `ctx.session.prompt` 和 execution 事件，队列／空闲语义待测试，网关流量不替代它们。 |
+| fork／reset／压缩隔离 | **集成待验证。** 生命周期创建来源区分 startup／resume／clear／compact，需映射 NMG incarnation／frame fence。 | **集成待验证。** 已有 fork／compact／session API，压缩已接线，API 列表不建立事件时序、重连与代次映射。 |
+| Claim outcome 见证 | **语义／lineage 待验证。** 已有原生工具身份，但结果不因此自动成为合格 claim 见证。 | **实现／验证待完成。** NMG handler 缺见证映射，已有工具／日志 API 是候选，不证明宿主做不到。 |
+| 最终 provider 输入收据 | **待验证。** Prompt 投影和日志提交不建立最终 provider 接收。 | **待验证。** 可变 context 与执行成功不建立最终 provider 接收。 |
+
+以下是具体入口的明确限制，不证明整个 NMG 功能做不到：
+
+- DSH context text provider 是同步的，应在其他入口异步准备，经受支持上下文通道提供有界快照。
+- DSH `agent/request` 替换调用配置，不修改 messages；内容使用有日志的上下文通道。`tools/result` 只观察不否决，执行门禁属于前执行策略路径。
+- 历史 OpenCode 2.0.32 运行不发出 `session.created` 或 `session.idle`，不能依赖这两个名字；会话查询和 execution 事件提供原生替代，精确生命周期等价性仍需测试。
+
+现有证据未建立必须交给 Magpie 才能完成的 DSH／OpenCode 核心 NMG 功能。完整 Magpie 插件保持独立提供方，验证共享合同和交接后，组合可以选择原生或网关提供方。

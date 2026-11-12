@@ -59,8 +59,8 @@ remains independently usable. Track capability, enablement and operation
 ownership separately, and test standalone providers as well as combinations.
 
 Record each gap as missing NMG implementation, an unverified host path or an
-explicit host restriction. Existing native extension points are candidates for
-implementation, especially DSH/OpenCode context and tool/event hooks. Native
+explicit host restriction using the [owning matrix](../harness-capability-matrix.md#native-host-capability-findings).
+DSH/OpenCode context and tool/event contracts provide native paths. Native
 work and complete Magpie support can proceed independently; unfinished native
 wiring does not make a gateway necessary.
 
