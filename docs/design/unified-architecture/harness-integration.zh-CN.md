@@ -31,6 +31,8 @@ Harness 的对话／检查点存储与 NMG 记忆存储各有所有者和事务�
 
 [能力矩阵](../harness-capability-matrix.zh-CN.md)拥有已交付覆盖情况。只有适配器实现且具备有范围的证据后，才增加 pi durable 或 Magpie 列；目标设计不表示已发货能力。
 
+候选方案见[声明驱动的适配器能力装配](adapter-capability-assembly.zh-CN.md)。
+
 ## Magpie 网关绑定
 
 [Magpie 集成设计](magpie-integration.zh-CN.md)在原生 Harness 绑定之外增加一个网关候选，区分请求 hook 召回、尽力完成观察及明确连接的记忆工具。Magpie 仍是网关，其客户端拥有 Agent 执行。启用此路径前，身份、协议覆盖和与原生 NMG 插件共存的行为需要验证。

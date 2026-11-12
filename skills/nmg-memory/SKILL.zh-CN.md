@@ -8,7 +8,7 @@
 
 首次从持久本地 checkout 安装时，优先将整个 Skill 目录链接到 Agent 的 skills 目录（Windows 使用目录 junction）。保留源目录；替换已有安装或本地修改前先确认迁移。链接不需要周期性同步脚本。
 
-Skill 提供操作指引；原生工具和自动上下文还需要宿主适配器。DSH／OpenCode 的安装、加载和日常使用见[原生适配器使用指南](references/native-adapters.zh-CN.md)。优先复用已连接的 NMG 工具；下文 CLI 示例是 shell 替代路径，不需要在每次原生工具调用后再执行一遍。
+Skill 提供操作指引，工具和自动上下文取决于已连接的适配器。各宿主连接的安装、加载和日常使用见[适配器使用指南](references/adapter-usage.zh-CN.md)。优先复用已连接的 NMG 工具；下文 CLI 示例是 shell 替代路径，不需要在每次工具调用后再执行一遍。
 
 ## 职责与边界
 
@@ -52,7 +52,7 @@ Skill 提供操作指引；原生工具和自动上下文还需要宿主适配�
 | 多步工作的持续状态、进度展示或状态恢复 | [日常工作状态](references/optional-capabilities.zh-CN.md#日常工作状态) |
 | 非默认 QPP／controller／STG／topology／ANN 或 Lab | [可选能力](references/optional-capabilities.zh-CN.md) |
 | 自然证据收集与受 gate 控制的更新 | [自然证据循环](references/natural-evidence.zh-CN.md) |
-| 安装、加载或使用 DSH／OpenCode，排查原生上下文 | [原生适配器使用指南](references/native-adapters.zh-CN.md) |
+| 安装、加载、使用或排查 NMG 适配器与工具连接 | [适配器使用指南](references/adapter-usage.zh-CN.md) |
 | 开发或扩展 Harness 适配器 | [Harness 适配器](references/harness-adapters.zh-CN.md) |
 
 常规临时 AG／board 操作使用 `nmg_state`。仅当普通 memory/state 操作不足时才使用 Lab，并复用现有 daemon。启用或调用前先阅读对应参考及 `nmg lab list`；只有 `agentMayEnable=true` 的能力才可由 Agent 自行启用。`controlled`／`active` 模式需要独立授权；不得绕过拒绝。

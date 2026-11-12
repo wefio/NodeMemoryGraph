@@ -1,15 +1,16 @@
 # NMG Memory MCP server
 
+[English](CLAUDE.md) · [术语](CLAUDE.terms.yaml)
+
 持久记忆工具加上任务板，通过 MCP stdio 提供：
 
 - `nmg_search` — 紧凑的记忆头（mid/node/type/tier/preview）
 - `nmg_get` — 精确的记忆陈述与来源证据
 - `nmg_remember` — 保存事实/偏好/约束/状态/事件
   （`boardSource` 标明该记忆是从某条看板条目提炼而来）
-- `nmg_board` — 任务板频道：put/read/resolve/acknowledge/claim/
-  release/subscribe/unsubscribe；`discover` 列出在线 agent，`put` 带
-  `to=<agent name>` 执行定向投递。不给 taskId 即共享世界频道（大厅），
-  读它会列出活跃的具名频道。
+- `nmg_state` — 通过 `space=ag|board` 提供显式 AG 工作状态和 Task Board；
+  黑板操作负责发现、订阅与回复。
+- `nmg_lab` — 已列出的可选能力，不用于普通状态更新。
 
 看板身份：`NMG_AGENT_ID` / `NMG_SESSION_ID` 环境变量优先；否则该 server
 用自己的 pid（`mcp:<pid>`），它在同一宿主会话内稳定。
@@ -18,8 +19,7 @@
 读取 open 条目会写入投递回执，因此唤醒循环绝不会重复推送本会话已经看过的
 内容。
 
-MCP server 自动管理本地 daemon（HTTP 上的 JSON-RPC；连接时启动，退出时安全
-停止，已在运行时直接复用）。
+MCP server 自动管理本地 daemon（HTTP 上的 JSON-RPC；连接时确保可用，退出时只停止自己启动的进程，复用兼容已有 owner）。
 
 要求：Node.js ≥ 22.19，在项目中跑过 `npm install`。
 
@@ -57,18 +57,14 @@ NMG_AGENT_PERF=1 node --experimental-strip-types claude-plugins/nmg-memory/agent
 - **VS Code / Cursor / Codex**：加到编辑器的 MCP 配置文件。
 - **任何兼容 MCP 的客户端**：同样的 JSON 块，同样的 stdio 协议。
 
-在重新启动客户端之后，重新启动它。三个 NMG 工具会自动出现。首次连接可能
-需要一次性批准。
+重新加载客户端连接，再检查实际工具列表。首次连接可能需要客户端批准。单独 MCP 不增加自动召回、状态承载或空闲唤醒。
 
-**替代方案——全局安装**：要让 NMG 跨所有项目可用、不受 cwd 限制，把 `args`
-写成绝对路径，并且为 `--experimental-strip-types` 提供一个
-`--experimental-strip-types`，指向插件的 `CLAUDE.md` 目录。
+客户端可能从不同工作目录启动时，在 `args` 数组使用 `agents/memory-copilot.ts` 的绝对路径，并保留 `--experimental-strip-types` 为独立参数。其他客户端可以为同一 stdio 字段采用不同配置格式。
+
+日常工具、状态和 hook 组合见[适配器使用指南](../../skills/nmg-memory/references/adapter-usage.zh-CN.md#claude-code-与其他-mcp-客户端)。
 
 ## 故障排查
 
-- 工具不见了？MCP server 很可能连接失败。检查 Node.js 版本、`npm install`，
-  并在存在过期 daemon 锁文件时删掉它
-  （`rm .nmg/nmg.sqlite.server.json`）。
-- 搜索结果为空？数据库可能还没有被写入。任意一次 `nmg_remember` 调用就会
-  填充它。
-- 运行 `npx claude mcp list`（Claude Code）或 `node bin/nmg.mjs daemon status --json`（终端）来检查 daemon 与嵌入健康度。
+- 工具缺失时，检查 Node 版本、依赖、绝对脚本路径与客户端日志，再检查 daemon 兼容性；不删除存活 lease 或替换共享 owner。
+- 搜索为空是合法结果。先检查存储选择和查询，不为让测试返回数据而编造记忆。
+- 使用客户端连接日志，并在 checkout 中执行 `node bin/nmg.mjs daemon status --json` 检查实际连接与 daemon 健康。

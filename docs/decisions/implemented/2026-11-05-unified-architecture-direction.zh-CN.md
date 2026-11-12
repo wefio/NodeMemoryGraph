@@ -32,7 +32,9 @@ DSH 目标是当前宿主包，历史 preset 不作为并行功能对齐目标�
 
 [原生能力核实](../../experiments/runtime/native-plugin-capabilities-2026-11-12.zh-CN.md)复用既有 OpenCode 矩阵与 smoke 记录。DSH 核心服务探测确认动态上下文及最终工具通知，OpenCode 私有 API 在 prompt 前返回会话目录，因此原生功能对齐独立于网关部署。已安装 OpenCode 的插件激活、hook、Code Mode 工具及状态承载通过本地模拟模型验证。DSH 状态承载与提交后回合归因通过已安装核心服务验证。原生生命周期边界、真实唤醒及提供方组合交接保留各自验证门槛。
 
-NMG 使用 Skill 将 DSH／OpenCode 的安装、原生工具使用及激活检查指向[原生使用指南](../../../skills/nmg-memory/references/native-adapters.zh-CN.md)，适配器开发仍由既有合同参考负责。操作指引据此对齐已验证的原生路径，不把 Magpie 草案绑定当成已安装的先决条件。
+NMG 使用 Skill 将全部已交付适配器及 CLI／MCP 连接的安装、使用和激活检查指向[适配器使用指南](../../../skills/nmg-memory/references/adapter-usage.zh-CN.md)，适配器开发仍由既有合同参考负责。操作指引据此对齐已验证的原生路径，不把 Magpie 草案绑定当成已安装的先决条件。
+
+[能力装配候选草案](../../design/unified-architecture/adapter-capability-assembly.zh-CN.md)探索由可执行实现支撑的声明驱动共享接线和覆盖情况生成，减少手工遗漏适配器。它不替换当前绑定，也不构成装配运行时已交付。
 
 ## Alternatives considered
 

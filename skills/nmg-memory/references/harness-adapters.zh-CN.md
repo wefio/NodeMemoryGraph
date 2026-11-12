@@ -2,7 +2,7 @@
 
 [English](harness-adapters.md) · [术语](harness-adapters.terms.yaml)
 
-NMG 为各类 Harness 提供轻量适配器（Pi、Claude Code MCP、DeepSeek Harness，以及可安装的 WorkBuddy hook）。本文供开发或扩展适配器时阅读。DSH／OpenCode 的安装、加载和日常使用见[原生适配器使用指南](native-adapters.zh-CN.md)。
+NMG 为各类 Harness 提供轻量适配器（Pi、Claude Code MCP、DeepSeek Harness，以及 WorkBuddy／Kimi hook 和 OpenCode v2 插件）。本文供开发或扩展适配器时阅读。各已交付接入方式的安装、加载和日常使用见[适配器使用指南](adapter-usage.zh-CN.md)。
 
 仓库同时提供 `opencode-plugin/` 中的 OpenCode v2 薄适配器。跨宿主的具体能力覆盖见[适配器能力矩阵](../../../docs/design/harness-capability-matrix.zh-CN.md)，不能从存在插件推断所有能力都已端到端接入。
 
@@ -66,7 +66,7 @@ AG 替换或清除必须携带该租约所捕获的 binding，且该元数据不
 
 当前 DSH 目标是双面宿主包 [`dsh/dsh-nmg/`](../../../dsh/dsh-nmg/README.md)。
 构建、profile 安装、原生上下文行为和激活检查见
-[DSH 使用指南](native-adapters.zh-CN.md#deepseek-harness)。历史 preset 不是第二个集成目标或回退路径。
+[DSH 使用指南](adapter-usage.zh-CN.md#deepseek-harness)。历史 preset 不是第二个集成目标或回退路径。
 
 ## 手动 CLI 路径
 

@@ -141,7 +141,7 @@ Pi 通过独立的[携带合同](../../../docs/decisions/implemented/2026-10-08-
 
 启用 AG writer，再通过 `nmg_state` 或上面的常驻 daemon `nmg state write ag` CLI，用完整当前文本替换。文本仍是临时状态；进度事实由引用的任务／仓库证据负责。重启后缺失的状态只能根据那些证据重建，不能从缓存显示恢复。
 
-DSH／OpenCode 的原生状态承载及激活检查见[原生适配器使用指南](native-adapters.zh-CN.md#日常使用)。两者复用共享状态准备，准入与重试行为由各自宿主接线决定。
+各接入方式的状态读写、自动承载与激活边界见[适配器使用指南](adapter-usage.zh-CN.md#日常使用)。Pi、DSH 和 OpenCode 有原生承载路径；MCP／CLI 的状态读写本身不提供自动承载，WorkBuddy／Kimi hook 也不增加状态 writer。
 
 Pi 展示与携带使用同一快照的只读 widget。它会在启动／重载及 state 工具返回时刷新，不执行空闲轮询、不额外搜索，也不会每次模型调用读取 snapshot。Widget 预览六行来源文本；超过时明确提示使用 `/nmg state`。`/nmg state` 读取并通知全部获准文本；`/nmg state on|off` 只切换预览，不写入状态、携带内容或模型／session 历史。这两个动作都属于 `/nmg` 交互菜单，因此没有顶层 `/nmg-state` 命令。带通知 UI 的 RPC 客户端无需终端 widget，也可以使用该命令。Owner 读取失败时显示 unavailable，而不是旧进度；过期或切换 session 的响应会被忽略。任务完成后禁用 writer 租约但保留最终状态供读取；只有明确要丢弃状态时才清除。
 

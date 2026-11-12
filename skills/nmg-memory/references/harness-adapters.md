@@ -3,12 +3,12 @@
 [中文](harness-adapters.zh-CN.md) · [Terms used](harness-adapters.terms.yaml)
 
 NMG ships a thin adapter per harness (Pi, Claude Code MCP, DeepSeek Harness,
-plus the installable WorkBuddy hook in `workbuddy-plugin/` and the OpenCode v2
+plus event hooks in `workbuddy-plugin/` and `kimi-plugin/`, and the OpenCode v2
 plugin in `opencode-plugin/`). This reference is the recipe for writing one.
 Per-adapter coverage of the capability surface is compared in the
 [harness capability matrix](../../../docs/design/harness-capability-matrix.md).
 Read it when developing or extending an adapter. For installation, loading and
-daily DSH/OpenCode use, read [native adapter usage](native-adapters.md).
+daily use of any shipped connection, read [adapter usage](adapter-usage.md).
 
 ## The stable contract
 
@@ -152,7 +152,7 @@ Never let a slow or unavailable memory layer block the user turn.
 
 The current DSH target is the dual-face host package at
 [`dsh/dsh-nmg/`](../../../dsh/dsh-nmg/README.md). Use the
-[DSH operating guide](native-adapters.md#deepseek-harness) for build, profile
+[DSH operating guide](adapter-usage.md#deepseek-harness) for build, profile
 installation, native context behavior and activation checks. The historical
 preset is not a second integration target or fallback.
 

@@ -83,7 +83,7 @@
     "prompt": "OpenCode 已经加载了 NMG 插件，也能看到 nmg_search 和 nmg_state。还需要再装一套 MCP、每次先跑 CLI，或者接 Magpie 才能正常用吗？我也想知道 DSH 用哪个包。",
     "expected": [
       "Uses the existing native tools rather than duplicating the same operation through MCP and CLI",
-      "Routes installation and loading to the native adapter usage reference",
+      "Routes installation and loading to the adapter usage reference",
       "Identifies the current DSH host package as the integration target",
       "Keeps Magpie a complete independent plugin target without claiming an implemented session handoff"
     ]
@@ -96,6 +96,26 @@
       "Distinguishes a terse write receipt from next-turn carriage and final provider confirmation",
       "Uses the verified DSH admission and OpenCode prompt/context behavior including manual compaction recovery",
       "Preserves the shared daemon and distinguishes tested paths from fork/reconnect and live-wake gaps"
+    ]
+  },
+  {
+    "name": "choose_existing_adapter",
+    "prompt": "我用 Pi、同事用 WorkBuddy，还有人用 Kimi。我们都只装了 nmg-memory Skill，怎么分别接入工具和事件？能不能共用相同 activeGraphId？",
+    "expected": [
+      "Routes each host to the general adapter usage guide and its setup owner",
+      "Distinguishes Pi native integration from WorkBuddy and Kimi hook plus MCP combinations",
+      "Does not claim that a Kimi hook supplies automatic memory recall or maintained-state carriage",
+      "Does not reuse hook or unrelated MCP AG projection handles across sessions"
+    ]
+  },
+  {
+    "name": "codex_plugin_vs_nmg_delivery",
+    "prompt": "Codex 也有插件，为什么把它归成 MCP-only？NMG 有现成的 Codex 插件包吗？",
+    "expected": [
+      "Recognizes Codex plugin support using official documentation",
+      "Separates platform extension capability from this repository's shipped NMG packaging and binding",
+      "Identifies current reusable NMG MCP and Skill components without inventing a verified plugin install command",
+      "Does not treat missing NMG hooks as proof that the host cannot support them"
     ]
   }
 ]

@@ -247,9 +247,10 @@ or the resident-daemon `nmg state write ag` CLI above. The text remains provisio
 referenced task/repository evidence owns progress facts. Missing state after a
 restart is rebuilt only from that evidence, not restored from a cached display.
 
-For native DSH/OpenCode state carriage and activation checks, use the
-[native adapter guide](native-adapters.md#daily-use). Their state output uses the
-same shared preparation, with host-specific admission and retry behavior.
+For each connection's state read/write, automatic carriage and activation limits,
+use [adapter usage](adapter-usage.md#daily-use). Pi, DSH and OpenCode have native
+carriage paths. MCP/CLI state access alone does not provide automatic carriage,
+and WorkBuddy/Kimi hooks do not add a state writer.
 
 Pi displays a read-only widget from the same snapshot used for carriage.
 It refreshes on startup/reload and state-tool results, without idle polling, extra

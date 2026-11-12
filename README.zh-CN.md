@@ -79,17 +79,19 @@ skills/nmg-memory/SKILL.md，再选择当前环境支持的最佳接入方式。
 | 环境 | 可以使用什么 | 需要知道的限制 |
 | --- | --- | --- |
 | [Pi](#pi) | 记忆的保存、搜索与证据展开；自动召回；工作状态、任务板和可选 Lab | 自动写入与召回受集成策略约束 |
-| [OpenCode v2](opencode-plugin/README.md) | 记忆工具、自动召回、工作状态与任务板 | 新服务的首轮搜索可能还没有项目作用域；部分唤醒能力有限制 |
+| [OpenCode v2](opencode-plugin/README.md) | 记忆工具、自动召回、工作状态与任务板 | 可用时由原生查询提供首回合作用域；部分唤醒能力仍有限制 |
 | [Claude Code / MCP](#claude-code-插件) | 记忆工具、工作状态、任务板和可选 Lab | 通过 MCP 显式调用；没有自动逐轮召回或推送唤醒 |
-| [DeepSeek Harness](dsh/README.md) | 记忆工具、自动召回和任务板 | 旧版适配器与 [Web 宿主包](dsh/dsh-nmg/README.md)的能力和接入方式不同 |
+| [DeepSeek Harness](dsh/dsh-nmg/README.md) | 记忆工具、自动召回、工作状态承载和任务板 | 使用当前宿主包；生命周期与真实唤醒验证范围有限 |
+| [Codex](skills/nmg-memory/references/adapter-usage.zh-CN.md#codex) | 可复用 NMG MCP 工具与 Skill，Codex 本身也支持插件包 | 专用 NMG Codex 打包与 hook 尚未交付 |
 | [WorkBuddy](workbuddy-plugin/README.zh-CN.md) | Hook 自动召回；可组合 MCP 工具与 Skill | Hook 自身不提供记忆工具；Hook 与 MCP 的会话状态不同 |
+| [Kimi Code CLI](kimi-plugin/README.zh-CN.md) | MCP 工具加可选提醒、在场登记和 prompt 时黑板轮询 | 只装 hook 没有记忆工具、自动召回或状态承载 |
 | 其他可调用工具的 Agent | [CLI + Skill](#agent-无关-cli) 保存、搜索并展开记忆 | 需要 Agent 能执行 CLI 并读取 Skill；自动召回取决于宿主 |
 
 适配器负责宿主工具和传输。Pi、Claude MCP、DSH 和 benchmark 桥共用 Agent Surface，
 提供精简搜索、精确证据、remember 后续操作、任务板输出、脱敏和逻辑链投影；
 宿主特定的生命周期、工具 schema 和传输回退仍属于各自适配器。更多边界见
-[适配能力矩阵](docs/design/harness-capability-matrix.zh-CN.md)；其中旧版 DSH 自动召回
-条目与当前实现不一致，以适配器源码和说明为准。
+[适配能力矩阵](docs/design/harness-capability-matrix.zh-CN.md)。各连接的安装和日常操作见
+[适配器使用指南](skills/nmg-memory/references/adapter-usage.zh-CN.md)。
 
 ### Pi
 

@@ -33,6 +33,7 @@ Adapters compared:
 | OpenCode v2 | `opencode-plugin/` | [adapter decision](../decisions/implemented/2026-10-17-opencode-adapter.md) |
 | WorkBuddy hook | `workbuddy-plugin/nmg-hook.ts` | installable hook in `workbuddy-plugin/README.md` |
 | Claude code (MCP stdio) | `claude-plugins/nmg-memory/agents/memory-copilot.ts` | [MCP plugin card](../../claude-plugins/nmg-memory/CLAUDE.md) |
+| Kimi Code hook | `kimi-plugin/nmg-hook.mjs` | [Hook setup](../../kimi-plugin/README.md); tools connect separately through MCP |
 | DeepSeek Harness | `dsh/dsh-nmg/src/plugin/index.ts` | Current [host package](../../dsh/dsh-nmg/README.md) and [installation recipe](../../skills/nmg-memory/references/harness-adapters.md#deepseek-harness-repository-package) |
 
 DSH has one current integration target here: the host package. The older
@@ -41,31 +42,35 @@ adapter target. It is excluded from the comparison and Magpie parity plan.
 
 ## Matrix
 
-| Capability | Pi | OpenCode | WorkBuddy | MCP | DSH |
-|---|---|---|---|---|---|
-| Automatic recall (staged headers per admitted turn) | full | full | full | none | full |
-| Memory tools (`nmg_search`/`get`/`remember`) on the shared Agent Surface | full | full | none | partial | full |
-| Working state (`space=ag` with the invocation fence) | full | full | none | full | full |
-| Tool-result observation + weak completion nudge | full | full | partial | none | full |
-| Attribution flush + agent identity heartbeat | full | full | partial | partial | full |
-| Board wake (poll → directed/world delivery) | full | partial | partial | none | partial |
-| Interactive console (`/nmg`) | full | partial | none | none | none |
-| Transport: lease fast path, CLI fallback, shared-daemon non-ownership | full | full | partial | partial | full |
+| Capability | Pi | OpenCode | WorkBuddy | MCP | DSH | Kimi |
+|---|---|---|---|---|---|---|
+| Automatic recall (staged headers per admitted turn) | full | full | full | none | full | none |
+| Memory tools (`nmg_search`/`get`/`remember`) on the shared Agent Surface | full | full | none | partial | full | none |
+| Working state (`space=ag` with the invocation fence) | full | full | none | full | full | none |
+| Tool-result observation + weak completion nudge | full | full | partial | none | full | partial |
+| Attribution flush + agent identity heartbeat | full | full | partial | partial | full | partial |
+| Board wake (poll → directed/world delivery) | full | partial | partial | none | partial | partial |
+| Interactive console (`/nmg`) | full | partial | none | none | none | none |
+| Transport: lease fast path, CLI fallback, shared-daemon non-ownership | full | full | partial | partial | full | partial |
 
 Maintained-state carriage uses the same complete-body InformationView projection in Pi, OpenCode and DSH. Preparation remains unconfirmed; its native transport differs by host.
 
 ## Coordination extension
 
+WorkBuddy and Kimi columns describe their hook alone; connected MCP tools add
+the separately listed MCP surface. Kimi has no automatic memory search or state
+carriage in its hook. A pre-execution reminder is not a successful-tool observation.
+
 DSH refers to the same host package in both tables. These rows describe source
 wiring, not deployment or a live idle-Agent/model test. `board-events` gates additive event/notification
 fields; an older owner must refuse them rather than silently drop them.
 
-| Capability | Pi | OpenCode | WorkBuddy | MCP | DSH |
-|---|---|---|---|---|---|
-| Event records and public task status | full | full | none | full | full |
-| Direct/channel/event notification payload and invite-driven channel enrollment | full | full | none | full | full |
-| Discussion/event wake emission and enqueue-before-receipt | full | partial | none | none | partial |
-| Unified working state through `nmg_state` | full | full | none | full | full |
+| Capability | Pi | OpenCode | WorkBuddy | MCP | DSH | Kimi |
+|---|---|---|---|---|---|---|
+| Event records and public task status | full | full | none | full | full | none |
+| Direct/channel/event notification payload and invite-driven channel enrollment | full | full | none | full | full | none |
+| Discussion/event wake emission and enqueue-before-receipt | full | partial | none | none | partial | none |
+| Unified working state through `nmg_state` | full | full | none | full | full | none |
 
 OpenCode and the DSH host package have private HTTP registration/forwarding
 fixtures. Shared wake tests cover successful/rejected enqueue, no world
@@ -89,6 +94,7 @@ The [event contract](board-event-records.md) owns subscription boundaries.
   observation, working state, memory tools (they are left to the CLI/Skill
   path), attribution, and a console are not wired; the transport has no CLI
   fallback.
+- **Kimi** — The event hook reports presence and polls for a board notice on user input, plus completion-keyword/pre-commit reminders. It does not search memory, expose memory/state tools, observe final tool results or flush answer attribution. Explicit tools come from a separate MCP connection; prompt-time polling is not idle wake. These are missing hook implementations, not claims about Kimi platform limits.
 - **MCP** — the server starts its own daemon subprocess when none is running,
   reuses an existing daemon, and stops only what it started. There is no CLI
   fallback (the server guarantees its lease) and no turn-level observation,
