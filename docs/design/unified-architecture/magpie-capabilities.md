@@ -15,11 +15,10 @@ adapters: memory operations, automatic recall, working state, disclosure,
 attribution/feedback and coordination. Usage, tracing and GUI are additional
 Magpie features; they do not close an NMG capability gap by themselves.
 
-The interface review targets Magpie `0.1.3545`, observed locally on 2026-11-12.
-The versioned sources below establish available interfaces, not a working NMG
-integration. No plugin loading, collector export, real model request or combined
-NMG/Magpie session was exercised. NMG source links describe wiring rather than
-deployment. The [operations plan](magpie-operations.md) owns delivery slices.
+Target: Magpie `0.1.3545`, observed locally on 2026-11-12. Versioned sources
+establish interfaces, not integration. Plugin loading, collector export, model
+requests and combined sessions were not tested. NMG links describe wiring,
+not deployment. The [operations plan](magpie-operations.md) owns delivery slices.
 
 ## Choose the interface by observation
 
@@ -57,12 +56,19 @@ All gateway contributions below require the client's model traffic to actually
 pass through Magpie. Direct traffic and switch-only configurations are outside
 that coverage. Matching a display name alone cannot join sessions.
 
+Gaps describe NMG wiring, not host inability. Separate missing implementation,
+unverified host paths and explicit host restrictions under the
+[matrix definitions](../harness-capability-matrix.md#rows-and-columns).
+DSH means the current host package; the historical preset is not a parity target.
+For DSH/OpenCode, use existing native context/tool/event hooks first where they
+fit. Magpie retains its complete implementation as an independently usable
+provider, not a requirement for unfinished native wiring.
+
 | Adapter and source entry | NMG gap to close | Candidate combined NMG behavior |
 | --- | --- | --- |
 | [Pi](../../../.pi/extensions/nmg/index.ts) | Broad native coverage, but prepared per-turn working state has no final input confirmation. | Keep native recall/tools/witnesses/wake. At the gateway boundary, check the labelled current state/disclosure and repair missing context through shared preparation where authorized. Do not claim an already-covered tool or recall as a new capability. |
-| [DSH host package](../../../dsh/dsh-nmg/src/plugin/index.ts) | State tools exist; recall context alone does not establish maintained AG-state carriage, general tool-result observation or answer-attribution flush. | Carry the current working-state projection with the native binding. Add request-visible tool-result observations and answer-overlap diagnostics using shared flows and their evidence limits. Keep native session disposal, busy and wake. |
-| [DSH legacy](../../../dsh/nmg-plugin.mjs) | Pre-step recall and memory tools exist; unified state/event tools, working-state carriage and lifecycle feedback are missing. | Supply missing shared tools through an explicitly connected MCP path, gateway state carriage and pending-board delivery on a request. Use the same disclosure/budget flow and diagnostic attribution. Prefer the host package where supported; do not infer idle wake. |
-| [OpenCode v2](../../../opencode-plugin/index.ts) | State tools, tool observations and attribution exist. Dedicated state carriage is not established here; first-turn scope depends on event mapping, and claim outcomes lack native witness support. | Test gateway state carriage and context restoration. Use trusted cwd/session metadata to resolve scope before recall only when available in time. Preserve native execution events and witnesses; gateway success cannot repair unsupported claim evidence. |
+| [DSH](../../../dsh/dsh-nmg/src/plugin/index.ts) | NMG state carriage, general tool observation and attribution flush are not wired. Context and native session entry points exist; further event paths need validation. | Implement state carriage through native `systemPrompt.context`; verify native events for observation/attribution. Magpie can independently provide request-bound equivalents under the same shared contracts. Preserve native disposal, busy and wake. |
+| [OpenCode v2](../../../opencode-plugin/index.ts) | State tools, observations and attribution exist. Dedicated state carriage is not wired; scope lookup and claim witnesses need implementation/validation, not a declaration of host inability. | Extend native `llm` context and tool/event hooks first. Validate scope and witness acquisition against the host. Magpie supplies an alternate bound context path; HTTP success never substitutes for missing claim evidence. |
 | [WorkBuddy hook](../../../workbuddy-plugin/nmg-hook.ts) + [tool path](../../../workbuddy-plugin/README.md) | Hook recall and MCP tools use separate AG sessions. No demonstrated continuous state carriage, general tool observations or automatic attribution. | Bind hook/MCP/gateway state, then support recall-to-get, maintained-state carriage, request-visible observations, diagnostic attribution and pending-board context. Supply MCP tools if absent. Keep hook recall when selected; no duplicate injection. |
 | [MCP-only clients](../../../claude-plugins/nmg-memory/agents/memory-copilot.ts) | Missing recall, state carriage, automatic attribution and request-time board delivery. Feedback is named in the action enum but lacks labels/dispatch. | Gateway supplies request-triggered parts; shared tool wiring must complete feedback and provide reads/writes/state. Bind both paths to one authorized session. Other providers can supply lifecycle events. |
 
@@ -164,7 +170,7 @@ latency, cost and failure-mode measurements.
 Keep the [GUI-first delivery order](magpie-operations.md#delivery-order-and-acceptance).
 
 Validate the NMG gaps in the adapter table using shared contract cases. Prioritize
-working-state carriage for DSH/OpenCode, hook-to-tool continuity for WorkBuddy,
-missing tools for legacy/partial clients, and request-triggered NMG features for
+native state carriage for DSH/OpenCode, hook-to-tool continuity for WorkBuddy,
+missing tools for partial clients, and request-triggered NMG features for
 MCP-only clients. Pi supplies a reference behavior where covered. Trace/usage
 joins are a separate observability task and do not pass the NMG parity gate.

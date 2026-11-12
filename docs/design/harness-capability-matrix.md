@@ -18,6 +18,13 @@ shared layer and daemon RPC — the boundary rule in the design baseline decides
 what the wiring is allowed to fork, so this page evaluates coverage, not
 implementation quality.
 
+`none` means NMG wiring is absent, not that the Harness cannot support it.
+For gap analysis, distinguish missing implementation, an unverified host path,
+and an explicit host restriction. Only the last supports a claim of inability,
+and it needs a versioned host contract or a scoped reproducer. Existing DSH and
+OpenCode context/tool/event hooks establish useful extension paths; unconnected
+NMG behavior remains implementation or verification work.
+
 Adapters compared:
 
 | Adapter | Code | Contract home |
@@ -26,19 +33,22 @@ Adapters compared:
 | OpenCode v2 | `opencode-plugin/` | [adapter decision](../decisions/implemented/2026-10-17-opencode-adapter.md) |
 | WorkBuddy hook | `workbuddy-plugin/nmg-hook.ts` | installable hook in `workbuddy-plugin/README.md` |
 | Claude code (MCP stdio) | `claude-plugins/nmg-memory/agents/memory-copilot.ts` | [MCP plugin card](../../claude-plugins/nmg-memory/CLAUDE.md) |
-| DeepSeek Harness (legacy) | `dsh/nmg-plugin.mjs` | [dsh README](../../dsh/README.md) |
-| DeepSeek Harness host package | `dsh/dsh-nmg/src/plugin/index.ts` | [host package](../../dsh/dsh-nmg/README.md); extension table below |
+| DeepSeek Harness | `dsh/dsh-nmg/src/plugin/index.ts` | Current [host package](../../dsh/dsh-nmg/README.md) and [installation recipe](../../skills/nmg-memory/references/harness-adapters.md#deepseek-harness-repository-package) |
+
+DSH has one current integration target here: the host package. The older
+`dsh/nmg-plugin.mjs` preset is historical integration code, not a second current
+adapter target. It is excluded from the comparison and Magpie parity plan.
 
 ## Matrix
 
 | Capability | Pi | OpenCode | WorkBuddy | MCP | DSH |
 |---|---|---|---|---|---|
-| Automatic recall (staged headers per admitted turn) | full | full* | full | none | partial |
-| Memory tools (`nmg_search`/`get`/`remember`) on the shared Agent Surface | full | full | none | full | full |
-| Working state (`space=ag` with the invocation fence) | full | full | none | full | none |
+| Automatic recall (staged headers per admitted turn) | full | full* | full | none | full |
+| Memory tools (`nmg_search`/`get`/`remember`) on the shared Agent Surface | full | full | none | partial | full |
+| Working state (`space=ag` with the invocation fence) | full | full | none | full | full |
 | Tool-result observation + weak completion nudge | full | full | partial | none | none |
-| Attribution flush + agent identity heartbeat | full | full | partial | partial | none |
-| Board wake (poll → directed/world delivery) | full | partial | partial | none | none |
+| Attribution flush + agent identity heartbeat | full | full | partial | partial | partial |
+| Board wake (poll → directed/world delivery) | full | partial | partial | none | partial |
 | Interactive console (`/nmg`) | full | partial | none | none | none |
 | Transport: lease fast path, CLI fallback, shared-daemon non-ownership | full | full | partial | partial | full |
 
@@ -46,17 +56,16 @@ Adapters compared:
 
 ## Coordination extension
 
-The DSH column above is the legacy adapter, not the separate host package.
-These rows distinguish them and describe source wiring, not deployment or a
-live idle-Agent/model test. `board-events` gates additive event/notification
+DSH refers to the same host package in both tables. These rows describe source
+wiring, not deployment or a live idle-Agent/model test. `board-events` gates additive event/notification
 fields; an older owner must refuse them rather than silently drop them.
 
-| Capability | Pi | OpenCode | WorkBuddy | MCP | DSH legacy | DSH host package |
-|---|---|---|---|---|---|---|
-| Event records and public task status | full | full | none | full | none | full |
-| Direct/channel/event notification payload and invite-driven channel enrollment | full | full | none | full | none | full |
-| Discussion/event wake emission and enqueue-before-receipt | full | partial | none | none | none | partial |
-| Unified working state through `nmg_state` | full | full | none | full | none | full |
+| Capability | Pi | OpenCode | WorkBuddy | MCP | DSH |
+|---|---|---|---|---|---|
+| Event records and public task status | full | full | none | full | full |
+| Direct/channel/event notification payload and invite-driven channel enrollment | full | full | none | full | full |
+| Discussion/event wake emission and enqueue-before-receipt | full | partial | none | none | partial |
+| Unified working state through `nmg_state` | full | full | none | full | full |
 
 OpenCode and the DSH host package have private HTTP registration/forwarding
 fixtures. Shared wake tests cover successful/rejected enqueue, no world
@@ -70,8 +79,9 @@ The [event contract](board-event-records.md) owns subscription boundaries.
   the first mapped event supplies the project directory (second turn onward is
   exact); the attribution flush granularity is per execution
   (`session.execution.succeeded`) rather than a true idleness signal, and
-  `claim_outcome` is unsupported (missing witness becomes a
-  `provenance_degraded` marker); the wake loop wires through the shared
+  this NMG binding does not establish the `claim_outcome` witness path (missing
+  witness becomes `provenance_degraded`, not proof of a host restriction);
+  the wake loop wires through the shared
   `board-wake.ts` loop with a recent-session pool but was not live-smoked, and
   the client-side TUI module is registered on the client side only.
 - **WorkBuddy** — the hook is passive: hint injection (compact recall headers
@@ -84,16 +94,17 @@ The [event contract](board-event-records.md) owns subscription boundaries.
 - **MCP** — the server starts its own daemon subprocess when none is running,
   reuses an existing daemon, and stops only what it started. There is no CLI
   fallback (the server guarantees its lease) and no turn-level observation,
-  attribution, wake loop, or console; working state uses the shared fenced state API; board use heartbeats and
+  attribution, wake loop, or console. The remember action enum includes feedback,
+  but its labels and dispatch are missing from this NMG server implementation;
+  this is an implementation gap, not an MCP protocol restriction.
+  Working state uses the shared fenced state API; board use heartbeats and
   reads write delivery receipts.
-- **DSH** — five model-visible tools (`nmg_search`, `nmg_get`,
-  `nmg_remember`, `nmg_board`, `nmg_daemon status`) over the shared
-  transport (lease fast path with the one-shot CLI fallback). The CLI
-  fallback path performs ordinary search without the learning side.
-  `agent/pre-step` calls `onPreStep` for turn admission and fresh-candidate
-  injection into the entering decision. This is partial automatic recall,
-  distinct from the host package's inbox preparation. Presence registration,
-  observation, attribution, wake and console are not wired in this legacy path.
+- **DSH** — the host package registers shared memory/state tools and uses inbox
+  events plus `systemPrompt.context` for recall. It registers actual sessions
+  and provides directed wake delivery. Dedicated working-state carriage, general
+  tool-result observation and answer-attribution flush are not wired in this
+  NMG implementation. Context and lifecycle entry points exist; assess and test
+  native implementation before treating Magpie as required for these features.
 
 ## Maintenance
 

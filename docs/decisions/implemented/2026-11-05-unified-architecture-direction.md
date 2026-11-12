@@ -42,6 +42,18 @@ either MCP or Magpie to become a complete Harness and allows their supported
 handoffs to supply a broader flow. The model is a design direction; combined
 runtime coverage still requires integration evidence.
 
+Magpie's role in filling another adapter's gaps does not reduce its own plugin
+surface. The plugin targets complete standalone NMG integration within supported
+host interfaces. Composition selects enabled providers and effect owners while
+preserving their overlapping implementations. This separates plugin completeness
+from session deduplication; both standalone and composed behavior need evidence.
+
+The DSH target is its current host package; the historical preset is not a
+parallel parity target. Gap analysis separates unfinished NMG wiring from
+unverified host paths and demonstrated host restrictions. DSH/OpenCode native
+context and tool/event hooks remain implementation candidates. A missing NMG
+connection does not establish that the host needs a gateway to provide it.
+
 ## Alternatives considered
 
 - SQLite snapshots as the object backend: useful for reusing database behavior, but does not satisfy the requested independent native-object path. Keep the current format as a migration source.

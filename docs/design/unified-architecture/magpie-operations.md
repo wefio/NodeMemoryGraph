@@ -208,7 +208,7 @@ recall hook path.
 | 0: host contract | Pin Magpie/Bun, page/service loading, bridge reads and identity fields | Isolated target startup; page can reach only its configured authenticated service; record unavailable host fields |
 | 1: read panel | Store snapshots, existing health, new durable recall/search counters and reported gateway usage | Counts match fixtures; unknown/stale/gaps are visible; reload/restart does not fabricate history; a retry is not a new user turn |
 | 2: settings | Provider/model/key form, effective-source display and candidate-index activation | Masked reads; invalid/revision-conflicting settings fail; model generations never mix; failure preserves a usable mode |
-| 3: NMG feature parity | Shared tools, recall/state carriage, attribution and request-time board delivery across bindings | Shared end-to-end cases per adapter, trusted handoff, tool continuations, duplicate suppression and cancellation; unsupported cases remain explicit |
+| 3: complete plugin and NMG parity | Full plugin tools, recall/state carriage, attribution and request-time board delivery | Standalone plugin and per-adapter end-to-end cases, trusted handoff, tool continuations, deduplication and cancellation; host limits stay explicit |
 | 4: optional capture | Separately enabled completion capture | Existing consent/source-time rules; partial/lost replies do not imply durable capture or positive feedback |
 
 Slice 1 does not imply an admin configuration API already exists. Slices 1 and

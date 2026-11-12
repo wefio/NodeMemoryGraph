@@ -51,6 +51,19 @@ end-to-end contract cases across providers. GUI, usage and transport tracing
 are independent enhancements and do not count as closing these feature gaps.
 Match operation semantics and evidence quality, not interface appearance.
 
+A provider's implementation is independent of its selection in a session.
+Complete providers can overlap. Selecting native recall or tools does not trim
+the Magpie plugin to a residual subset; its
+[standalone surface](magpie-integration.md#complete-plugin-and-per-session-activation)
+remains independently usable. Track capability, enablement and operation
+ownership separately, and test standalone providers as well as combinations.
+
+Record each gap as missing NMG implementation, an unverified host path or an
+explicit host restriction. Existing native extension points are candidates for
+implementation, especially DSH/OpenCode context and tool/event hooks. Native
+work and complete Magpie support can proceed independently; unfinished native
+wiring does not make a gateway necessary.
+
 The target is the greatest verified coverage the connected set can provide.
 Retain stronger native capabilities and explicit remaining gaps. A CLI/Skill
 instruction can enable explicit action but cannot create an automatic event.

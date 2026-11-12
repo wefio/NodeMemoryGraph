@@ -26,6 +26,10 @@ Magpie 是额外的网关集成候选。[Magpie 设计](../../design/unified-arc
 
 能力覆盖由客户端已连接的原生适配器、MCP、hook、CLI／Skill 与 Magpie 共同组成。[共享组合模型](../../design/unified-architecture/harness-integration.zh-CN.md#组合各接入点的能力)按操作分配提供方并保留明确缺口，避免要求 MCP 或 Magpie 独自成为完整 Harness，允许通过受支持交接组成覆盖更广的流程。这是设计方向，组合运行覆盖仍需联调证据。
 
+Magpie 补齐其他适配器的角色不缩减自身插件界面。插件目标是在受支持宿主接口内提供完整、可独立使用的 NMG 集成。组合只选择启用提供方与效果所有者，保留重叠实现，将插件完整性与会话去重分开；独立与组合行为都需要证据。
+
+DSH 目标是当前宿主包，历史 preset 不作为并行功能对齐目标。缺口分析区分 NMG 接线未完成、宿主路径待验证和已证明宿主限制。DSH／OpenCode 原生上下文与工具／事件 hook 仍是实现候选，缺少 NMG 接线不证明宿主需要网关才能提供该能力。
+
 ## Alternatives considered
 
 - 强制把本地记忆和协作拆成两个数据库文件：没有物理隔离要求时会增加配置；默认在一个本地 SQLite 文件中保持独立所有权。

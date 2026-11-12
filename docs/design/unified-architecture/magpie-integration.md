@@ -13,13 +13,39 @@ The [community plugin repository](https://github.com/magpie-community/plugins#ga
 
 Use a `magpie.hooks` package for asynchronous NMG service calls. The synchronous gateway middleware has a different runtime and must not be treated as that service client. A [tools plugin](https://github.com/magpie-community/plugins#tools-for-every-agent) exposes tools through Magpie's MCP server; alternatively the client can use NMG's MCP endpoint directly. Neither approach transfers execution ownership to the gateway hook. Installation and publication are separate work, not delivered by this design.
 
+## Complete plugin and per-session activation
+
+The target Magpie plugin implements the complete shared NMG Agent Surface and
+all NMG integration behaviors its supported host interfaces can provide. Its
+feature set is not limited to gaps in today's other adapters. Overlapping
+capabilities remain implemented and independently usable.
+
+Without a native NMG adapter, the plugin's gateway hooks and client-connected
+tools path together provide memory search/exact get, governed remember lifecycle
+and feedback, fenced AG/board state, recall, working-state carriage, supported
+attribution and request-time coordination delivery. This standalone profile
+needs an authorized NMG service and a supported client tool connection; a native
+NMG plugin or separate direct NMG MCP installation is not a prerequisite.
+Optional capabilities retain their existing enablement and endpoint rules.
+
+With other adapters connected, select which provider handles each operation.
+Selecting native recall suppresses duplicate Magpie recall for that binding;
+it does not remove Magpie's recall implementation. The same distinction applies
+to tools, state carriage and feedback. Provider capability, session enablement
+and the selected operation owner are separate facts.
+
+Staged delivery can leave this target incomplete, but that incompleteness stays
+explicit. Validate the plugin standalone and with each supported adapter.
+Unavailable native lifecycle signals remain declared host limitations rather
+than a reason to omit otherwise implementable shared NMG features.
+
 ## Capability split
 
 | Path | Intended capability | Boundary |
 | --- | --- | --- |
 | Gateway request hook | Bounded automatic recall and context injection | Observes model requests, not a complete Harness lifecycle |
 | Completion hook | Optional observation/capture after a completed reply | Best-effort notification, not a durable queue or proof of memory use |
-| Magpie tools plugin or NMG MCP | Explicit search, exact get and governed remember | Requires an actual client tool connection and authorized session binding |
+| Plugin-owned tools path, or selected direct NMG MCP | Complete shared Agent Surface: search/get, remember lifecycle/feedback and AG/board state | Requires a client tool connection, authorized binding and endpoint support |
 | Plugin operations page | Store statistics, recall/search activity, token accounting, embedding model/key settings and connection test | Shared operator APIs; no duplicate memory database, model loop or task scheduler |
 
 Reuse NMG shared admission, query normalization, budgets and Agent Surface projections where their prerequisites hold. The binding translates supported request envelopes into those inputs and patches only the allowed context fields. Test Chat, Responses, Anthropic and Gemini separately; unsupported envelopes pass through without memory changes. Do not infer support from Magpie's ability to proxy a protocol.
@@ -70,7 +96,7 @@ Best-effort capture reports only confirmed acceptance; it does not promise compl
 
 Select one side-effect owner for each admitted recall/delivery operation. Capture and explicit tools can have different owners. A capable native preparation path can supply recall while Magpie observes; MCP-only clients can combine gateway recall and MCP tools under the [shared handoff](magpie-capabilities.md#mcp-plus-magpie-as-one-session). Share a verifiable disclosure identity when paths coexist; two independent process-local deduplication caches are not sufficient. Do not add the same explicit tools through both Magpie and direct NMG MCP without a deliberate name/ownership choice.
 
-Gateway integration does not advertise idle wake, interactive host commands, durable checkpoints or NMG task coordination solely because the gateway can observe traffic. Local board access, if separately requested, needs its own supported client/session contract; it is outside the first Magpie memory integration slice. The [capability matrix](../harness-capability-matrix.md) records a Magpie column only after delivered behavior has scoped evidence.
+Gateway traffic alone does not establish idle wake, native commands, durable checkpoints or task coordination. Planned board access uses the plugin's connected tools and shared service under a supported client/session contract and the local-only endpoint boundary. The [capability matrix](../harness-capability-matrix.md) records a Magpie column only after delivered behavior has scoped evidence.
 
 ## Validation and open implementation work
 
@@ -82,6 +108,7 @@ Use a fake NMG service and recorded protocol fixtures before live deployment. Re
 - Streaming completion, partial/failed replies, dropped completion notifications and capture-off read-only behavior.
 - Native-plugin coexistence, duplicate request handling, withdrawal rechecks and no inferred positive feedback.
 - Composed gateway/MCP flows, trusted session binding, cross-entry exact reads and budget continuity; disconnect/reconnect does not repeat accepted effects.
+- Standalone plugin coverage without a native NMG adapter or separate direct NMG MCP install, plus each composed profile; selecting another provider does not remove plugin capability.
 - Tool schema and Agent Surface parity, argument validation, actual MCP client/session binding and unknown write outcomes.
 - Plugin reload and real target Magpie/Bun startup, configured local/cloud connectivity, and settings changes without conversation export during tests.
 - Operations metrics, period/retry classification, operator credential handling and embedding index transitions under the [panel acceptance slices](magpie-operations.md#delivery-order-and-acceptance).
