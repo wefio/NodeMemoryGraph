@@ -20,6 +20,8 @@ pi durable 是选定的云端 Harness。其 NMG 绑定与本地宿主共享集�
 
 Magpie 是额外的网关集成候选。[Magpie 设计](../../design/unified-architecture/magpie-integration.zh-CN.md)区分自动召回与显式工具接入，并将完成采集限制在宿主尽力通知的合同内。它不替代 Harness，也不表示完整原生插件能力覆盖。
 
+后续[管理面板草案](../../design/unified-architecture/magpie-operations.zh-CN.md)借用 Magpie 现有 UI 展示 NMG 统计和向量设置，再将网关观测与原生绑定组合。库／配置继续归共享服务，使其他 UI 也能复用。草案不表示指标、管理 API 或 Magpie 适配器已交付。
+
 ## Alternatives considered
 
 - 强制把本地记忆和协作拆成两个数据库文件：没有物理隔离要求时会增加配置；默认在一个本地 SQLite 文件中保持独立所有权。

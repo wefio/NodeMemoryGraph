@@ -20,6 +20,12 @@ pi durable is the selected cloud Harness. Its NMG binding shares integration beh
 
 Magpie is an additional gateway integration candidate. The [Magpie design](../../design/unified-architecture/magpie-integration.md) separates automatic recall from explicit tool access and limits completion capture to the host's best-effort contract. It does not replace a Harness or establish full native-plugin capability coverage.
 
+The follow-up [operations-panel draft](../../design/unified-architecture/magpie-operations.md)
+uses Magpie's existing UI for NMG statistics and embedding settings, then adds
+gateway observations alongside native bindings. It keeps store/configuration
+ownership in the shared service so another UI can reuse it. The draft does not
+establish delivered metrics, an operator API, or a working Magpie adapter.
+
 ## Alternatives considered
 
 - SQLite snapshots as the object backend: useful for reusing database behavior, but does not satisfy the requested independent native-object path. Keep the current format as a migration source.

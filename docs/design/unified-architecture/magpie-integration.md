@@ -20,11 +20,28 @@ Use a `magpie.hooks` package for asynchronous NMG service calls. The synchronous
 | Gateway request hook | Bounded automatic recall and context injection | Observes model requests, not a complete Harness lifecycle |
 | Completion hook | Optional observation/capture after a completed reply | Best-effort notification, not a durable queue or proof of memory use |
 | Magpie tools plugin or NMG MCP | Explicit search, exact get and governed remember | Requires an actual client tool connection and authorized session binding |
-| Optional plugin settings page | Endpoint configuration, recall/capture switches and connection test | No memory database, model loop or task scheduler |
+| Plugin operations page | Store statistics, recall/search activity, token accounting, embedding model/key settings and connection test | Shared operator APIs; no duplicate memory database, model loop or task scheduler |
 
 Reuse NMG shared admission, query normalization, budgets and Agent Surface projections where their prerequisites hold. The binding translates supported request envelopes into those inputs and patches only the allowed context fields. Test Chat, Responses, Anthropic and Gemini separately; unsupported envelopes pass through without memory changes. Do not infer support from Magpie's ability to proxy a protocol.
 
 Gateway-only recall provides self-contained, bounded authorized context using shared evidence projection after internal search/get. It must not instruct the model to call tools that the client has not connected. Compact headers plus follow-up IDs are appropriate only when the client's exact-get tool connection is established. Keep tool-call/result pairing, role boundaries and the original user text intact. Recalled evidence remains source material, not a new user instruction. Injecting evidence is not evidence that the model used or endorsed it.
+
+## Operations panel and complementary observations
+
+The [operations and cooperation plan](magpie-operations.md) proposes a Magpie-hosted
+GUI first, followed by gateway recall. It owns metric definitions, setting/key
+ownership, candidate-index switching and delivery slices. Existing native NMG
+users can use the page before gateway recall is enabled. NMG supplies store
+facts and memory lifecycle events; Magpie supplies only gateway observations
+that its supported interfaces expose. A platform-visible field is not
+automatically a hook-visible field. Missing data remains unknown.
+
+Native bindings and the gateway contribute complementary capabilities. Choose
+the automatic recall owner per bound session, then join available observations
+through validated correlation identifiers. Keep gateway request activity
+distinct from complete Harness execution state, and prevent NMG background
+model requests from recursively triggering gateway recall. The first page
+does not require duplicate tools or a second coordination layer.
 
 ## Identity, scope and consent
 
@@ -65,5 +82,6 @@ Use a fake NMG service and recorded protocol fixtures before live deployment. Re
 - Native-plugin coexistence, duplicate request handling, withdrawal rechecks and no inferred positive feedback.
 - Tool schema and Agent Surface parity, argument validation, actual MCP client/session binding and unknown write outcomes.
 - Plugin reload and real target Magpie/Bun startup, configured local/cloud connectivity, and settings changes without conversation export during tests.
+- Operations metrics, period/retry classification, operator credential handling and embedding index transitions under the [panel acceptance slices](magpie-operations.md#delivery-order-and-acceptance).
 
 The exact package layout, target release, origin/session guarantees, supported protocol subset and MCP session mapping remain to be validated. This design adds an integration candidate, not an installed plugin or a shipped capability.
