@@ -36,9 +36,10 @@ facts and memory lifecycle events; Magpie supplies only gateway observations
 that its supported interfaces expose. A platform-visible field is not
 automatically a hook-visible field. Missing data remains unknown.
 
-Native bindings and the gateway contribute complementary capabilities. Choose
-the automatic recall owner per bound session, then join available observations
-through validated correlation identifiers. Keep gateway request activity
+Compose the gateway with the session's connected native, MCP, hook and CLI/Skill
+capabilities under the shared [composition model](harness-integration.md#compose-capabilities-across-connected-entry-points).
+Select providers per operation, then join state and observations through trusted
+bindings and validated correlation identifiers. Keep gateway request activity
 distinct from complete Harness execution state, and prevent NMG background
 model requests from recursively triggering gateway recall. The first page
 does not require duplicate tools or a second coordination layer.
@@ -67,7 +68,7 @@ Best-effort capture reports only confirmed acceptance; it does not promise compl
 
 ## Coexistence with native adapters
 
-Select one automatic recall/capture owner per Harness session. A client using a native NMG plugin or the pi durable binding can exclude that session from Magpie hooks. Share a verifiable disclosure key when both paths must coexist; two independent process-local deduplication caches are not sufficient. Do not add the same explicit tools through both Magpie and direct NMG MCP without a deliberate name/ownership choice.
+Select one side-effect owner for each admitted recall/delivery operation. Capture and explicit tools can have different owners. A capable native preparation path can supply recall while Magpie observes; MCP-only clients can combine gateway recall and MCP tools under the [shared handoff](magpie-capabilities.md#mcp-plus-magpie-as-one-session). Share a verifiable disclosure identity when paths coexist; two independent process-local deduplication caches are not sufficient. Do not add the same explicit tools through both Magpie and direct NMG MCP without a deliberate name/ownership choice.
 
 Gateway integration does not advertise idle wake, interactive host commands, durable checkpoints or NMG task coordination solely because the gateway can observe traffic. Local board access, if separately requested, needs its own supported client/session contract; it is outside the first Magpie memory integration slice. The [capability matrix](../harness-capability-matrix.md) records a Magpie column only after delivered behavior has scoped evidence.
 
@@ -80,6 +81,7 @@ Use a fake NMG service and recorded protocol fixtures before live deployment. Re
 - Bounded authorized recall with and without a confirmed exact-get tool connection; timeout/cancellation/failure leaves the original request intact.
 - Streaming completion, partial/failed replies, dropped completion notifications and capture-off read-only behavior.
 - Native-plugin coexistence, duplicate request handling, withdrawal rechecks and no inferred positive feedback.
+- Composed gateway/MCP flows, trusted session binding, cross-entry exact reads and budget continuity; disconnect/reconnect does not repeat accepted effects.
 - Tool schema and Agent Surface parity, argument validation, actual MCP client/session binding and unknown write outcomes.
 - Plugin reload and real target Magpie/Bun startup, configured local/cloud connectivity, and settings changes without conversation export during tests.
 - Operations metrics, period/retry classification, operator credential handling and embedding index transitions under the [panel acceptance slices](magpie-operations.md#delivery-order-and-acceptance).

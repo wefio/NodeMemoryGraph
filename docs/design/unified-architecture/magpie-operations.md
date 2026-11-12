@@ -170,12 +170,12 @@ The useful addition is a combination of independent observations:
 | Gateway platform | Available provider/model usage, fallback/retry outcomes, cache reports and request latency | Not all platform data is exposed to plugin hooks or bridge reads |
 | NMG | Retrieved evidence, InformationView budgets, disclosure identity and index state | Does not infer correctness or useful memory from response success |
 
-For already integrated clients, prefer native recall ownership with gateway
-observations and GUI. For explicitly bound clients without a native adapter,
-the gateway can own bounded recall. These are per-session choices. Sharing a
-validated disclosure identity can suppress duplicate injection when both paths
-are present; two independent caches or a text hash do not establish that join.
-Missing host capabilities remain unknown; available capabilities can combine.
+Use the [shared capability composition](harness-integration.md#compose-capabilities-across-connected-entry-points)
+across all entry points connected to a session. Preserve capable native recall
+paths and fill gaps with gateway preparation, MCP tools or other supported
+providers. The page can show each capability's selected provider, coverage and
+remaining gap. A composed flow needs trusted state handoff and one effect owner
+per operation; independent caches or text hashes do not establish that join.
 
 The [adapter map](magpie-capabilities.md#complement-existing-nmg-adapters)
 identifies Pi as the first trace-join candidate and MCP-only clients as the
@@ -213,7 +213,8 @@ recall hook path.
 
 Slice 1 does not imply an admin configuration API already exists. Slices 1 and
 2 form the initial GUI scope; gateway integration can follow without blocking
-that work. Function names, telemetry retention and refresh intervals remain
+that work. Slice 3 includes the [MCP/gateway handoff](magpie-capabilities.md#mcp-plus-magpie-as-one-session)
+so combined coverage is tested alongside each provider. Function names, telemetry retention and refresh intervals remain
 adjustable. Existing [gateway consent and identity rules](magpie-integration.md)
 continue to apply. No plugin install, service upgrade, key change, index rebuild
 or live model call was performed to write this plan.

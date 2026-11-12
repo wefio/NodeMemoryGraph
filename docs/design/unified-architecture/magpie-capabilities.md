@@ -7,11 +7,12 @@
 
 ## Integration choices
 
-Use Magpie for gateway observations, embedding transport and the operations UI.
-Keep native recall and execution lifecycle with each existing Harness adapter.
-Gateway automatic recall adds the most coverage for clients that have only NMG
-MCP tools. Pi is the first candidate for tracing native recall through gateway
-routing because its provider-header extension permits an explicit trace join.
+Compose Magpie with the client's whole connected capability set: native
+adapters, MCP, hooks and CLI/Skill access. The shared
+[composition model](harness-integration.md#compose-capabilities-across-connected-entry-points)
+selects providers per operation. Gateway recall plus MCP tools is a candidate
+for a combined memory flow without a native plugin. Pi is a separate candidate
+for tracing native recall through gateway routing using an explicit trace join.
 
 The interface review targets Magpie `0.1.3545`, observed locally on 2026-11-12.
 The versioned sources below establish available interfaces, not a working NMG
@@ -72,6 +73,46 @@ trace propagation still needs tests against the supported SDK/provider path.
 The proposed [pi durable binding](harness-integration.md) is a separate cloud
 execution design, not another shipped adapter. Checkpoints, sleep and durable
 task execution stay with that host. A gateway cannot supply those semantics.
+
+## MCP plus Magpie as one session
+
+This draft combines providers at the shared service. It does not require the
+gateway to push events through MCP or a native plugin to exist first.
+
+| Capability | Contribution to the composed session | Remaining condition or gap |
+| --- | --- | --- |
+| Automatic recall | Magpie request admission triggers shared recall and context injection | Validate protocol and new-turn versus continuation/retry recognition |
+| Exact evidence and memory writes | Existing MCP search/get/remember tools | Bind the tool connection to the same authorized conversation generation |
+| Disclosure and budget continuity | Shared InformationView, service-owned disclosure state and access checks | Establish cross-entry handoff; independent AG IDs are not interchangeable |
+| Working state and coordination | MCP state tools provide explicit reads/writes; gateway can prepare authorized pending context | Respect endpoint capability and local-only board boundaries; model reads are pull, not idle push |
+| Tool observations | MCP server knows its own tool executions; gateway may see submitted tool-result messages | Other tools need native witnesses; protocol content alone is not verified execution |
+| Completion and feedback | Gateway observes completed responses; explicit MCP operations can submit permitted feedback | Completion is best effort and is not positive feedback or confirmation |
+| Usage and UI | Gateway usage/trace plus Magpie panels over NMG metrics | Join only with validated correlation and preserve accounting scope |
+| Idle wake, reset and durable recovery | Use another connected provider if available | MCP plus model-request hooks alone do not establish these capabilities |
+
+A candidate handoff proceeds as follows:
+
+1. Host configuration or an authenticated service handshake binds gateway and
+   MCP connections to the same scoped conversation generation. Model-supplied
+   session IDs alone cannot establish it. Binding issuance, expiry and reconnect
+   handling need implementation and isolation tests.
+2. On an admitted model request, the gateway calls shared recall. The service
+   prepares InformationView context and permitted follow-up references, retaining
+   disclosure state and distinguishing prepared context from confirmed delivery.
+3. If the model needs full evidence, it uses the existing MCP `get` surface.
+   The service resolves the authorized projection for that binding and checks
+   current access, source revision and budget. Cross-entry resolution is design
+   work, not an ability of today's unrelated MCP and hook AG sessions. Without
+   it, use self-contained gateway context or a fresh MCP search.
+4. MCP writes return normal service receipts. A later gateway request observes
+   the shared state under current authorization. Operation identity and effect
+   reconciliation prevent retries or provider changes from duplicating effects.
+
+These providers compose a broader memory workflow, with explicit lifecycle gaps.
+Test interleaved clients, forks, reset/reconnect, withdrawal, concurrent state
+writes, budget continuity and duplicate injection before claiming coverage.
+If another provider supplies a missing capability, add it to the same set and
+validate the handoff rather than introducing another parallel session system.
 
 ## Reuse the embedding transport before duplicating credentials
 

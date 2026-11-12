@@ -24,6 +24,8 @@ Magpie 是额外的网关集成候选。[Magpie 设计](../../design/unified-arc
 
 [固定版本接口映射](../../design/unified-architecture/magpie-capabilities.zh-CN.md)用 Magpie `0.1.3545` 源码和各原生适配器接线支撑该草案。优先复用网关向量传输，避免复制上游 key，首先用 Pi 验证 trace 关联，用仅 MCP 客户端验证新增自动召回。原生生命周期所有权保持完整，源码核对不替代运行联调证据。
 
+能力覆盖由客户端已连接的原生适配器、MCP、hook、CLI／Skill 与 Magpie 共同组成。[共享组合模型](../../design/unified-architecture/harness-integration.zh-CN.md#组合各接入点的能力)按操作分配提供方并保留明确缺口，避免要求 MCP 或 Magpie 独自成为完整 Harness，允许通过受支持交接组成覆盖更广的流程。这是设计方向，组合运行覆盖仍需联调证据。
+
 ## Alternatives considered
 
 - 强制把本地记忆和协作拆成两个数据库文件：没有物理隔离要求时会增加配置；默认在一个本地 SQLite 文件中保持独立所有权。

@@ -35,6 +35,44 @@ The [capability matrix](../harness-capability-matrix.md) owns delivered coverage
 
 The [Magpie integration design](magpie-integration.md) adds a gateway candidate alongside native Harness bindings. It separates request-hook recall, best-effort completion observation and explicitly connected memory tools. Magpie remains a gateway; its client owns Agent execution. Identity, protocol coverage and coexistence with a native NMG plugin require validation before enabling this path.
 
+## Compose capabilities across connected entry points
+
+Treat the client's configured native adapter, MCP connection, passive hooks,
+CLI/Skill access and other supported bindings as one available capability set.
+Magpie contributes to that set. Select providers per capability and operation,
+not one adapter for the whole session. A client can use gateway turn preparation
+and delivery, MCP exact reads and writes, native tool witnesses, and a Magpie UI
+over shared service state. Neither MCP nor Magpie has to supply the whole flow.
+
+The target is the greatest verified coverage the connected set can provide.
+Retain stronger native capabilities and explicit remaining gaps. A CLI/Skill
+instruction can enable explicit action but cannot create an automatic event.
+Two partial implementations establish a combined capability only when their
+handoff is supported and tested. The draft
+[MCP plus Magpie composition](magpie-capabilities.md#mcp-plus-magpie-as-one-session)
+describes one such handoff without requiring a native plugin.
+
+For each enabled capability, identify its provider, trigger, scope, evidence
+strength and fallback. Shared integration selects one side-effect owner per
+operation and permits additional observers. Recall preparation, delivery,
+explicit tools and optional capture can have different owners. Re-selecting an
+owner after disconnect or reconnect must reconcile accepted effects before
+repeating them. Missing delivery evidence remains unknown.
+
+Composition requires a trusted mapping to the same endpoint, tenant, memory
+scope, conversation generation and applicable operation/disclosure identity.
+Transport connections can stay separate. AG access and writer fences remain
+service-controlled; a model-visible memory reference is not authority to borrow
+another connection's AG. The concrete binding handshake is implementation work.
+Unauthenticated matching by prompt text, directory, model or display name cannot
+establish the mapping. Authorization boundaries, including local-only board
+access, remain in force across all contributors.
+
+The resulting capability description belongs to the bound session, while the
+adapter matrix continues to describe individual providers. Verify combinations
+and their gaps as well as individual adapters. No new scheduler or second
+memory/state store is needed to express this composition.
+
 ## Cloud memory API
 
 The cloud application boundary serves the shared memory DTOs and Agent Surface through authenticated HTTP. Its required surface includes search, exact get/evidence, governed remember/batch/resolution, and the session disclosure/attribution operations needed by enabled recall features. It enforces the [storage contract](../unified-architecture.md#storage-contract) on writes and advertises only implemented capabilities. Tool names and fields remain shared even when local and remote routing differ.

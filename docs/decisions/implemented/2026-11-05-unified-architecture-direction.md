@@ -33,6 +33,14 @@ first trace join, and MCP-only clients for added automatic recall. Native
 lifecycle ownership stays intact. Source review does not replace runtime
 integration evidence.
 
+Capability coverage is composed across the client's connected entry points,
+including native adapters, MCP, hooks, CLI/Skills and Magpie. The
+[shared composition model](../../design/unified-architecture/harness-integration.md#compose-capabilities-across-connected-entry-points)
+assigns providers per operation and retains explicit gaps. This avoids requiring
+either MCP or Magpie to become a complete Harness and allows their supported
+handoffs to supply a broader flow. The model is a design direction; combined
+runtime coverage still requires integration evidence.
+
 ## Alternatives considered
 
 - SQLite snapshots as the object backend: useful for reusing database behavior, but does not satisfy the requested independent native-object path. Keep the current format as a migration source.
