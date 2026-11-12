@@ -41,8 +41,15 @@ Treat the client's configured native adapter, MCP connection, passive hooks,
 CLI/Skill access and other supported bindings as one available capability set.
 Magpie contributes to that set. Select providers per capability and operation,
 not one adapter for the whole session. A client can use gateway turn preparation
-and delivery, MCP exact reads and writes, native tool witnesses, and a Magpie UI
-over shared service state. Neither MCP nor Magpie has to supply the whole flow.
+and delivery, MCP exact reads and writes, native tool witnesses and shared AG
+state carriage. Neither MCP nor Magpie has to supply the whole flow.
+
+Measure composition by NMG feature parity: search/exact evidence, governed
+memory lifecycle actions, recall, maintained-state carriage, disclosure/budget
+continuity, supported attribution/feedback and board collaboration. Use the same
+end-to-end contract cases across providers. GUI, usage and transport tracing
+are independent enhancements and do not count as closing these feature gaps.
+Match operation semantics and evidence quality, not interface appearance.
 
 The target is the greatest verified coverage the connected set can provide.
 Retain stronger native capabilities and explicit remaining gaps. A CLI/Skill

@@ -178,10 +178,10 @@ remaining gap. A composed flow needs trusted state handoff and one effect owner
 per operation; independent caches or text hashes do not establish that join.
 
 The [adapter map](magpie-capabilities.md#complement-existing-nmg-adapters)
-identifies Pi as the first trace-join candidate and MCP-only clients as the
-first candidates for added automatic recall. Pi already observes usage and
-provider timing. DSH legacy also has pre-step recall; the DSH host package,
-OpenCode and WorkBuddy retain their own native preparation paths.
+targets NMG feature gaps in every adapter. Priorities include DSH/OpenCode state
+carriage, WorkBuddy hook/tool continuity, missing shared tools and MCP automatic
+recall. Usage, tracing and this GUI are independent enhancements; they do not
+establish normal NMG feature coverage. Preserve existing native preparation.
 
 Request hooks cannot assume the final routed provider is known before routing.
 Start with configured bounded context, then use validated budget/usage hints
@@ -208,13 +208,13 @@ recall hook path.
 | 0: host contract | Pin Magpie/Bun, page/service loading, bridge reads and identity fields | Isolated target startup; page can reach only its configured authenticated service; record unavailable host fields |
 | 1: read panel | Store snapshots, existing health, new durable recall/search counters and reported gateway usage | Counts match fixtures; unknown/stale/gaps are visible; reload/restart does not fabricate history; a retry is not a new user turn |
 | 2: settings | Provider/model/key form, effective-source display and candidate-index activation | Masked reads; invalid/revision-conflicting settings fail; model generations never mix; failure preserves a usable mode |
-| 3: gateway recall | Shared admission, InformationView rendering and native coexistence | Protocol fixtures, tool continuations, duplicate-owner suppression, cancellation and background recursion exclusion; unsupported cases pass through |
+| 3: NMG feature parity | Shared tools, recall/state carriage, attribution and request-time board delivery across bindings | Shared end-to-end cases per adapter, trusted handoff, tool continuations, duplicate suppression and cancellation; unsupported cases remain explicit |
 | 4: optional capture | Separately enabled completion capture | Existing consent/source-time rules; partial/lost replies do not imply durable capture or positive feedback |
 
 Slice 1 does not imply an admin configuration API already exists. Slices 1 and
 2 form the initial GUI scope; gateway integration can follow without blocking
-that work. Slice 3 includes the [MCP/gateway handoff](magpie-capabilities.md#mcp-plus-magpie-as-one-session)
-so combined coverage is tested alongside each provider. Function names, telemetry retention and refresh intervals remain
+that work. Slice 3 covers [every adapter's NMG gaps](magpie-capabilities.md#complement-existing-nmg-adapters),
+with MCP/gateway as one worked handoff. Function names, telemetry retention and refresh intervals remain
 adjustable. Existing [gateway consent and identity rules](magpie-integration.md)
 continue to apply. No plugin install, service upgrade, key change, index rebuild
 or live model call was performed to write this plan.

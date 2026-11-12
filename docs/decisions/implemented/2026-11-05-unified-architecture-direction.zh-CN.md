@@ -22,7 +22,7 @@ Magpie 是额外的网关集成候选。[Magpie 设计](../../design/unified-arc
 
 后续[管理面板草案](../../design/unified-architecture/magpie-operations.zh-CN.md)借用 Magpie 现有 UI 展示 NMG 统计和向量设置，再将网关观测与原生绑定组合。库／配置继续归共享服务，使其他 UI 也能复用。草案不表示指标、管理 API 或 Magpie 适配器已交付。
 
-[固定版本接口映射](../../design/unified-architecture/magpie-capabilities.zh-CN.md)用 Magpie `0.1.3545` 源码和各原生适配器接线支撑该草案。优先复用网关向量传输，避免复制上游 key，首先用 Pi 验证 trace 关联，用仅 MCP 客户端验证新增自动召回。原生生命周期所有权保持完整，源码核对不替代运行联调证据。
+[固定版本接口映射](../../design/unified-architecture/magpie-capabilities.zh-CN.md)用 Magpie `0.1.3545` 源码和各原生适配器接线支撑该草案，优先复用网关向量传输，避免复制上游 key。功能对齐覆盖每个适配器的 NMG 缺口，包括工作状态承载、工具接续、归因／反馈和黑板投递；GUI、用量与追踪属于独立增强。原生生命周期所有权保持完整，源码核对不替代运行联调证据。
 
 能力覆盖由客户端已连接的原生适配器、MCP、hook、CLI／Skill 与 Magpie 共同组成。[共享组合模型](../../design/unified-architecture/harness-integration.zh-CN.md#组合各接入点的能力)按操作分配提供方并保留明确缺口，避免要求 MCP 或 Magpie 独自成为完整 Harness，允许通过受支持交接组成覆盖更广的流程。这是设计方向，组合运行覆盖仍需联调证据。
 

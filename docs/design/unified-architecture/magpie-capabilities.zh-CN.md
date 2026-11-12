@@ -7,7 +7,7 @@
 
 ## 接入选择
 
-将 Magpie 与客户端完整的已连接能力集合组合，包括原生适配器、MCP、hook 和 CLI／Skill 访问。共享[组合模型](harness-integration.zh-CN.md#组合各接入点的能力)按操作选择提供方。网关召回与 MCP 工具可组合成无需原生插件的记忆流程候选。Pi 则是通过显式 trace 关联验证原生召回到网关路由追踪的另一候选。
+将 Magpie 与客户端完整的已连接能力集合组合，包括原生适配器、MCP、hook 和 CLI／Skill 访问。共享[组合模型](harness-integration.zh-CN.md#组合各接入点的能力)按操作选择提供方。目标是让各适配器正常使用 NMG 的记忆操作、自动召回、工作状态、披露、归因／反馈与协作。用量、追踪和 GUI 是 Magpie 的附加特性，本身不补齐 NMG 能力缺口。
 
 接口核对以 2026-11-12 本机观察到的 Magpie `0.1.3545` 为目标。下列固定版本源码证明接口存在，不表示 NMG 集成可用。本次没有验证插件加载、collector 导出、真实模型请求或 NMG／Magpie 联合会话。NMG 源码链接表示接线，不表示部署。[管理计划](magpie-operations.zh-CN.md)拥有交付切片。
 
@@ -17,10 +17,10 @@
 | --- | --- | --- |
 | 读取／修改模型上下文 | [网关 hook](https://github.com/yetone/magpie/blob/v0.1.3545/docs/subsystems/gateway-request-hooks.md)、[上下文定义](https://github.com/yetone/magpie/blob/v0.1.3545/internal/plugin/gateway.go) | 异步 Bun `onRequest` 可以等待有界 NMG 读取，接收 origin、protocol、请求模型、stream、path、agent、session、cwd、query。它在路由前运行，请求模型不等于最终供应商／模型。工具与工具选择仍归客户端。 |
 | 观察已完成回复 | 同一请求 hook 合同 | `onResponse` 接收重建的客户端回复和完成状态，不能改写已交付回复，通知可能丢失，不提供原生工具执行或 Agent 空闲状态。 |
-| 展示聚合用量 | [页面 bridge](https://github.com/yetone/magpie/blob/v0.1.3545/internal/gui/pluginpage.go) | 声明过的 `usage:summary` 读取支持 today／7d／30d 的调用、错误、输入／输出、缓存读取、成本和有界模型摘要，不提供会话归因。`usage:day` 有独立按日视图。 |
+| 展示聚合用量 | [页面 bridge](https://github.com/yetone/magpie/blob/v0.1.3545/internal/gui/pluginpage.go) | 声明过的 `usage:summary` 读取提供 today／7d／30d 聚合，不提供会话归因，`usage:day` 有独立按日视图。 |
 | 观察用量行 | [Middleware 扩展](https://github.com/yetone/magpie/blob/v0.1.3545/internal/middleware/points.go) | `onUsage` 在 moejs 中同步运行，与 Bun 不同。行包含供应商／账号、调用方／供应商 key 的 ID 和名称、请求／实际模型、token 分类、耗时、尝试、状态和成本，不含 session、请求 ID、prompt 或原始凭据。 |
-| 关联单次模型请求 | [OTLP 请求 span](https://github.com/yetone/magpie/blob/v0.1.3545/internal/otlp/request.go) 与[参考文档](https://github.com/yetone/magpie/blob/v0.1.3545/docs/reference.md) | 合法的 W3C version-00 `traceparent` 接入调用方 trace。网关父 span 包含路由尝试子 span，覆盖失败尝试和 fallback，用量记在子 span。原生工具执行需要调用方独立 span。 |
-| 将 NMG GUI 放进现有窗口 | [页面／面板声明](https://github.com/yetone/magpie/blob/v0.1.3545/internal/plugin/page.go) | 独立页面可以带 host service，面板可放入 agents／usage／settings／provider，供应商／Agent 菜单动作带 ID／名称打开插件页。面板传输仍需独立验证。 |
+| 关联模型请求 | [OTLP span](https://github.com/yetone/magpie/blob/v0.1.3545/internal/otlp/request.go) | W3C version-00 `traceparent` 接入调用方 trace，路由尝试子 span 包含失败、fallback 与用量，原生工具需要调用方 span。 |
+| 放置 NMG GUI | [页面／面板声明](https://github.com/yetone/magpie/blob/v0.1.3545/internal/plugin/page.go) | 独立页面可以带 service，面板可放入 agents／usage／settings／provider，菜单动作带 ID／名称打开页面，面板传输独立验证。 |
 | 复用向量和重排供应商 | [检索 API 参考](https://github.com/yetone/magpie/blob/v0.1.3545/docs/reference.md) | `/v1/embeddings` 接收 OpenAI 形状输入，`/v1/rerank` 接收支持的检索供应商格式。两者使用网关 key，模型可为 provider/model 或裸 ID，供应商兼容性与 NMG 索引身份需要测试。 |
 | 分发显式工具 | [插件工具](https://github.com/yetone/magpie/blob/v0.1.3545/docs/subsystems/plugin-tools.md) | Streamable HTTP `/mcp/magpie/tools` 提供带插件前缀的工具。执行上下文提供网关识别的 agent、abort 和宿主目录，不建立原生 Harness 会话绑定。 |
 
@@ -34,18 +34,29 @@ OTLP 导出需要配置 collector。当原生 transcript 追踪已覆盖某 agen
 
 下表所有网关贡献都要求客户端模型流量实际经过 Magpie，直连流量和只切换配置的用法不在覆盖内。仅匹配显示名不能关联会话。
 
-| 适配器与源码入口 | 已有原生贡献 | Magpie 补充及边界 |
+| 适配器与源码入口 | 待补齐的 NMG 缺口 | 候选组合行为 |
 | --- | --- | --- |
-| [Pi](../../../.pi/extensions/nmg/index.ts)、[耗时观测](../../../.pi/extensions/nmg/first-response-timing.ts) | 召回准备、工具结果观察、压缩、完成和会话生命周期。Pi 已观察 Assistant usage 及 provider／首响应耗时。 | 补充网关内部供应商／账号选择、路由尝试、fallback 和计费／缓存观测。通过 `before_provider_headers` 与 OTLP 验证 `traceparent` 传递，原生层保留召回所有权。 |
-| [DSH 宿主包](../../../dsh/dsh-nmg/src/plugin/index.ts) | Inbox 触发召回、真实原生 Agent／会话身份、忙碌声明、销毁、子任务恢复和唤醒投递。召回 token 总量是估算。 | 补充上游实际用量、路由结果和跨 Harness 管理视图。网关无流量不能替代原生忙碌／销毁／子任务生命周期。 |
-| [DSH 旧适配器](../../../dsh/nmg-plugin.mjs) | `agent/pre-step` 调用 `onPreStep`，准入召回回合，将新候选追加到进入执行的 decision，同时提供记忆工具。 | 它已有自动召回，应配合网关观测，避免再次注入。与宿主包的 inbox／会话集成分开表达。 |
-| [OpenCode v2](../../../opencode-plugin/index.ts) | Prompt／context 召回、工具观察、压缩和事件映射会话。完成使用 execution 事件，不是保证存在的 idle 事件。 | 补充请求／路由结果和上游实际用量。HTTP 成功不等于原生执行结束。当前适配器宿主合同尚未证明 provider-header 传递能力。 |
-| [WorkBuddy hook](../../../workbuddy-plugin/nmg-hook.ts) 与 [MCP 分离](../../../workbuddy-plugin/README.md) | UserPromptSubmit 准备、独立命名空间的 hook 会话及有限工具提醒。Hook 输出本身不确认已交付模型。 | 网关 hook 可以检查提交的模型请求中是否有准备好的披露，观察完成／用量，最多证明网关收到。它不合并 hook 和 MCP 的独立 AG 会话，也不证明使用过记忆。 |
-| [仅 MCP 客户端](../../../claude-plugins/nmg-memory/agents/memory-copilot.ts)，包括从 Codex 或 Claude Code 使用此服务器的客户端 | 显式 search／get／remember 与带栅栏 state 工具，没有原生用户回合或自动召回 hook。 | 获准且稳定的客户端／会话绑定可以增加网关自动召回，MCP 保留显式工具。缺少绑定时，只做授权无状态召回或跳过，不虚构空闲唤醒和工具执行观察。 |
+| [Pi](../../../.pi/extensions/nmg/index.ts) | 原生覆盖较完整，但准备好的逐回合工作状态没有最终输入确认。 | 保留原生召回／工具／见证／唤醒，在网关边界检查带标记的当前状态与披露，获准时通过共享准备修复缺失上下文，不把已有工具或召回算成新增能力。 |
+| [DSH 宿主包](../../../dsh/dsh-nmg/src/plugin/index.ts) | 已有 state 工具，但召回上下文本身不证明维护中的 AG 状态承载、通用工具结果观察或答案归因落盘。 | 用原生绑定承载当前工作状态投影，通过共享流程补充请求可见工具结果及答案重合诊断，保留证据限制和原生会话销毁／忙碌／唤醒。 |
+| [DSH 旧适配器](../../../dsh/nmg-plugin.mjs) | 已有 pre-step 召回和记忆工具，缺统一 state／事件工具、工作状态承载和生命周期反馈。 | 经明确连接的 MCP 路径补共享工具，网关补状态承载、请求时待处理黑板投递，共用披露／预算与诊断归因。宿主支持时优先用宿主包，不推断空闲唤醒。 |
+| [OpenCode v2](../../../opencode-plugin/index.ts) | 已有 state 工具、工具观察及归因，这里尚未建立专用状态承载；首回合作用域依赖事件映射，claim outcome 缺原生见证支持。 | 验证网关状态承载及上下文恢复；可信 cwd／session 元数据能及时取得时，在召回前补作用域。保留原生执行事件与见证，网关成功不能补出不支持的 claim 证据。 |
+| [WorkBuddy hook](../../../workbuddy-plugin/nmg-hook.ts) 与[工具路径](../../../workbuddy-plugin/README.md) | Hook 召回与 MCP 工具的 AG 会话分离，未证明连续状态承载、通用工具观察或自动归因。 | 绑定 hook／MCP／网关状态后，接续召回到 get、维护状态承载、请求可见观察、诊断归因与待处理黑板上下文。没有 MCP 工具时补上；选择 hook 召回时不重复注入。 |
+| [仅 MCP 客户端](../../../claude-plugins/nmg-memory/agents/memory-copilot.ts) | 缺召回、状态承载、自动归因与请求时黑板投递，反馈在动作枚举中有名称，但缺标签参数／处理分支。 | 网关补请求触发部分，共享工具接线补完整反馈及读写／state，共用同一授权会话，其他提供方继续补生命周期事件。 |
 
-Pi SDK 依赖在 [package.json](../../../package.json) 中声明，已检查的 SDK `BeforeProviderHeadersEvent` 允许修改出站请求头。NMG 现有耗时 handler 只观察此 hook，trace 传递仍需针对受支持 SDK／provider 路径实现并测试。
+这里列的是源码支持的缺口与拟议补齐路径，不是已交付组合覆盖。[适配器矩阵](../harness-capability-matrix.zh-CN.md)拥有已交付覆盖，state 读写支持不证明状态承载。[承载合同](../session-active-graph-runtime-design.md#dedicated-state-carriage)区分准备、传输与确认。
 
-拟议的 [pi durable 绑定](harness-integration.zh-CN.md)是独立云端执行设计，不是另一个已交付适配器。检查点、休眠和持久任务执行仍归该宿主，网关不能提供这些语义。
+### 用于功能对齐的共享机制
+
+各组合使用相同机制：
+
+- 通过客户端实际连接的 MCP 服务器补缺失的记忆／状态／反馈工具，可选 Magpie 工具路径。Hook 不能向请求增加工具 schema，也不能代替客户端调用工具；已有原生等价工具时不重复提供。
+- 当前工作状态、召回和待处理通知使用共享 InformationView 预算及各自承载规则，保护状态片段并按披露去重。上下文丢失后只在当前绑定有效时重新准备，不无差别逐请求插入。
+- 将请求可见工具结果作为报告证据接入共享 AG 观察／提醒流程，有原生执行见证时优先使用。只对绑定披露与对应完整回复做答案重合诊断，它既不是正确性判定，也不是训练反馈。
+- 没有原生投递时，在下一个获准请求承载待处理黑板上下文；批量选择、订阅与收据沿共享黑板流程。请求时投递不等于对空闲 Agent 主动唤醒。
+
+用端到端 NMG 任务衡量对齐：召回后精确 get、写入／更新和遗忘、状态写入后续承载、可归因证据／显式反馈、黑板批量读取与回复。跨适配器使用相同合同用例，各自缺失的生命周期行为单独记录。
+
+拟议的 [pi durable 绑定](harness-integration.zh-CN.md)拥有云端检查点、休眠与持久执行，不是已交付适配器或网关能力。
 
 ## MCP 与 Magpie 组成同一会话
 
@@ -59,7 +70,6 @@ Pi SDK 依赖在 [package.json](../../../package.json) 中声明，已检查的 
 | 工作状态和协作 | MCP state 工具提供显式读写，网关可准备获准的待处理上下文 | 遵守端点能力和本地黑板边界，模型读取是拉取，不是空闲主动推送 |
 | 工具观察 | MCP 服务器知道自身工具执行，网关可能看到提交的工具结果消息 | 其他工具需要原生见证，协议内容本身不证明真实执行 |
 | 完成与反馈 | 网关观察完成回复，显式 MCP 操作可提交获准反馈 | 完成通知尽力而为，不等于正向反馈或事实确认 |
-| 用量与 GUI | 网关 usage／trace 加上展示 NMG 指标的 Magpie 面板 | 只按验证过的关联组合，保留统计作用域 |
 | 空闲唤醒、reset 与持久恢复 | 可用时由其他已连接提供方补充 | 单靠 MCP 和模型请求 hook 尚不能建立这些能力 |
 
 候选交接流程如下：
@@ -81,11 +91,6 @@ Magpie rerank 端点是可用上游传输，不表示 NMG 已有 reranker，也�
 
 ## 首批联调证据
 
-保留 GUI 优先的顺序。初始用量面板使用聚合 bridge 读取，库指标使用 NMG 服务快照，不承诺通过 `onUsage` 分摊每次召回费用。
+保留 [GUI 优先的交付顺序](magpie-operations.zh-CN.md#交付顺序与验收)。
 
-随后分别验证两条有界路径：
-
-1. Pi 保留原生召回所有权，将调用方 trace 接到网关尝试 span，验证 SDK 请求头传递、collector 导出和 transcript 去重，标明耗时与 token 报告来自哪一段。
-2. 一个明确绑定的仅 MCP 客户端通过共享 InformationView 获得网关召回，扩大覆盖前验证协议格式、会话隔离、披露去重与精确 get 所有权。
-
-向量传输可在面板工作期间通过协议样例测试。真实供应商请求、启用 collector 和部署各自需要明确执行范围，接受本接口映射不要求开展这些操作。
+通过共享合同用例验证表中的 NMG 缺口，优先验证 DSH／OpenCode 的工作状态承载、WorkBuddy 的 hook 到工具接续、旧／部分客户端的缺失工具，以及仅 MCP 客户端的请求触发 NMG 功能。Pi 在已覆盖部分提供参考行为。Trace／用量关联是独立观测任务，不通过 NMG 功能对齐验收。

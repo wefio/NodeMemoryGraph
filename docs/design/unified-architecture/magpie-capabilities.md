@@ -10,9 +10,10 @@
 Compose Magpie with the client's whole connected capability set: native
 adapters, MCP, hooks and CLI/Skill access. The shared
 [composition model](harness-integration.md#compose-capabilities-across-connected-entry-points)
-selects providers per operation. Gateway recall plus MCP tools is a candidate
-for a combined memory flow without a native plugin. Pi is a separate candidate
-for tracing native recall through gateway routing using an explicit trace join.
+selects providers per operation. The target is normal use of NMG features across
+adapters: memory operations, automatic recall, working state, disclosure,
+attribution/feedback and coordination. Usage, tracing and GUI are additional
+Magpie features; they do not close an NMG capability gap by themselves.
 
 The interface review targets Magpie `0.1.3545`, observed locally on 2026-11-12.
 The versioned sources below establish available interfaces, not a working NMG
@@ -26,10 +27,10 @@ deployment. The [operations plan](magpie-operations.md) owns delivery slices.
 | --- | --- | --- |
 | Read/modify the model context | [Gateway hooks](https://github.com/yetone/magpie/blob/v0.1.3545/docs/subsystems/gateway-request-hooks.md), [context definition](https://github.com/yetone/magpie/blob/v0.1.3545/internal/plugin/gateway.go) | Async Bun `onRequest` can await bounded NMG reads. It receives origin, protocol, requested model, stream, path, agent, session, cwd and query. It runs before routing, so requested model is not the final provider/model. Tools and tool choice remain client-owned. |
 | Observe completed replies | The same request-hook contract | `onResponse` receives the reconstructed client-facing reply and completion status. It cannot rewrite the delivered reply and can be lost. It supplies neither native tool execution nor Agent idle state. |
-| Show aggregate usage | [Page bridge](https://github.com/yetone/magpie/blob/v0.1.3545/internal/gui/pluginpage.go) | Declared `usage:summary` reads cover today/7d/30d calls, errors, input/output, cache reads, cost and a bounded model summary. They do not provide session-level attribution. `usage:day` has its own day view. |
+| Show aggregate usage | [Page bridge](https://github.com/yetone/magpie/blob/v0.1.3545/internal/gui/pluginpage.go) | Declared `usage:summary` reads provide today/7d/30d aggregates, not session attribution. `usage:day` has a separate day view. |
 | Observe usage rows | [Middleware extension](https://github.com/yetone/magpie/blob/v0.1.3545/internal/middleware/points.go) | `onUsage` runs synchronously in moejs, separately from Bun. Rows include provider/account, caller/provider key IDs and names, requested/served model, token categories, timing, attempts, status and cost. They omit session, request ID, prompt and raw credentials. |
-| Join an individual model request | [OTLP request spans](https://github.com/yetone/magpie/blob/v0.1.3545/internal/otlp/request.go) and [reference](https://github.com/yetone/magpie/blob/v0.1.3545/docs/reference.md) | Valid incoming W3C version-00 `traceparent` joins the caller trace. Gateway parent spans contain routing-attempt children, including failed attempts and fallback. Usage belongs to the children. Native tool execution needs separate caller spans. |
-| Place NMG UI in the existing window | [Page/panel declarations](https://github.com/yetone/magpie/blob/v0.1.3545/internal/plugin/page.go) | An independent page can have a host service. Panels have agents/usage/settings/provider slots. Provider/agent menu actions open the plugin page with an ID/name. Panel transport still needs its own validation. |
+| Join a model request | [OTLP spans](https://github.com/yetone/magpie/blob/v0.1.3545/internal/otlp/request.go) | W3C version-00 `traceparent` joins the caller trace. Routing-attempt children carry failures, fallback and usage. Native tools need caller spans. |
+| Place NMG UI | [Page/panel declarations](https://github.com/yetone/magpie/blob/v0.1.3545/internal/plugin/page.go) | Independent pages can have services. Panels have agents/usage/settings/provider slots. Menu actions open pages with ID/name. Validate panel transport separately. |
 | Use embedding and rerank providers | [Retrieval API reference](https://github.com/yetone/magpie/blob/v0.1.3545/docs/reference.md) | `/v1/embeddings` accepts OpenAI-shaped inputs, `/v1/rerank` accepts supported retrieval-vendor shapes. Both use a gateway key and provider/model or bare model ID. Provider compatibility and NMG index identity need tests. |
 | Distribute explicit tools | [Plugin tools](https://github.com/yetone/magpie/blob/v0.1.3545/docs/subsystems/plugin-tools.md) | Streamable HTTP `/mcp/magpie/tools` exposes plugin-prefixed tools. Execution context exposes gateway-known agent, abort and host directory. That does not establish a native Harness session binding. |
 
@@ -56,23 +57,48 @@ All gateway contributions below require the client's model traffic to actually
 pass through Magpie. Direct traffic and switch-only configurations are outside
 that coverage. Matching a display name alone cannot join sessions.
 
-| Adapter and source entry | Existing native contribution | Magpie contribution and boundary |
+| Adapter and source entry | NMG gap to close | Candidate combined NMG behavior |
 | --- | --- | --- |
-| [Pi](../../../.pi/extensions/nmg/index.ts), [timing](../../../.pi/extensions/nmg/first-response-timing.ts) | Recall preparation, tool-result observations, compaction, completion and session lifecycle. Pi already observes Assistant usage and provider/first-response timing. | Add gateway-internal provider/account selection, routing attempts, fallback and billing/cache observations. Test outgoing `traceparent` through `before_provider_headers` and OTLP. Preserve native recall ownership. |
-| [DSH host package](../../../dsh/dsh-nmg/src/plugin/index.ts) | Inbox-triggered recall, actual native Agent/session identity, busy declarations, disposal, child resume and wake delivery. Recall token totals are estimates. | Add actual upstream usage, route outcomes and a cross-Harness operations view. Gateway silence cannot replace native busy/disposal/child lifecycle. |
-| [DSH legacy](../../../dsh/nmg-plugin.mjs) | `agent/pre-step` invokes `onPreStep`, admits a recall turn and appends fresh candidates to the entering decision. It also exposes memory tools. | It already has automatic recall. Use gateway observations alongside that path, not another injection. Keep it distinct from the host package's inbox/session integration. |
-| [OpenCode v2](../../../opencode-plugin/index.ts) | Prompt/context recall, tool observations, compaction and event-mapped sessions. Completion uses execution events rather than a guaranteed idle event. | Add request/route outcomes and actual upstream usage. An HTTP success is not native execution completion. Provider-header propagation is not established by this adapter's current host contract. |
-| [WorkBuddy hook](../../../workbuddy-plugin/nmg-hook.ts) and [MCP separation](../../../workbuddy-plugin/README.md) | UserPromptSubmit preparation, a namespaced hook session and limited tool nudges. Hook output alone does not confirm model delivery. | A gateway hook can check the submitted model envelope for the prepared disclosure and observe completion/usage. That proves gateway receipt at most. It does not merge the separate hook and MCP AG sessions or prove memory use. |
-| [MCP-only clients](../../../claude-plugins/nmg-memory/agents/memory-copilot.ts), including clients using this server from Codex or Claude Code | Explicit search/get/remember and fenced state tools. No native user-turn or automatic recall hook. | An authorized, stable client/session binding can add gateway automatic recall while MCP keeps explicit tools. Without that binding, restrict to authorized stateless recall or skip. Do not manufacture idle wake or tool execution observations. |
+| [Pi](../../../.pi/extensions/nmg/index.ts) | Broad native coverage, but prepared per-turn working state has no final input confirmation. | Keep native recall/tools/witnesses/wake. At the gateway boundary, check the labelled current state/disclosure and repair missing context through shared preparation where authorized. Do not claim an already-covered tool or recall as a new capability. |
+| [DSH host package](../../../dsh/dsh-nmg/src/plugin/index.ts) | State tools exist; recall context alone does not establish maintained AG-state carriage, general tool-result observation or answer-attribution flush. | Carry the current working-state projection with the native binding. Add request-visible tool-result observations and answer-overlap diagnostics using shared flows and their evidence limits. Keep native session disposal, busy and wake. |
+| [DSH legacy](../../../dsh/nmg-plugin.mjs) | Pre-step recall and memory tools exist; unified state/event tools, working-state carriage and lifecycle feedback are missing. | Supply missing shared tools through an explicitly connected MCP path, gateway state carriage and pending-board delivery on a request. Use the same disclosure/budget flow and diagnostic attribution. Prefer the host package where supported; do not infer idle wake. |
+| [OpenCode v2](../../../opencode-plugin/index.ts) | State tools, tool observations and attribution exist. Dedicated state carriage is not established here; first-turn scope depends on event mapping, and claim outcomes lack native witness support. | Test gateway state carriage and context restoration. Use trusted cwd/session metadata to resolve scope before recall only when available in time. Preserve native execution events and witnesses; gateway success cannot repair unsupported claim evidence. |
+| [WorkBuddy hook](../../../workbuddy-plugin/nmg-hook.ts) + [tool path](../../../workbuddy-plugin/README.md) | Hook recall and MCP tools use separate AG sessions. No demonstrated continuous state carriage, general tool observations or automatic attribution. | Bind hook/MCP/gateway state, then support recall-to-get, maintained-state carriage, request-visible observations, diagnostic attribution and pending-board context. Supply MCP tools if absent. Keep hook recall when selected; no duplicate injection. |
+| [MCP-only clients](../../../claude-plugins/nmg-memory/agents/memory-copilot.ts) | Missing recall, state carriage, automatic attribution and request-time board delivery. Feedback is named in the action enum but lacks labels/dispatch. | Gateway supplies request-triggered parts; shared tool wiring must complete feedback and provide reads/writes/state. Bind both paths to one authorized session. Other providers can supply lifecycle events. |
 
-Pi's SDK dependency is declared in [package.json](../../../package.json).
-The inspected SDK `BeforeProviderHeadersEvent` permits mutation of outgoing
-headers. The existing NMG timing handler only observes this hook. Implementing
-trace propagation still needs tests against the supported SDK/provider path.
+These are source-grounded gaps and proposed closures, not shipped combined
+coverage. The [adapter matrix](../harness-capability-matrix.md) owns delivered
+coverage. In particular, state read/write support does not prove state carriage.
+The [carriage contract](../session-active-graph-runtime-design.md#dedicated-state-carriage)
+separates preparation, transport and confirmation.
 
-The proposed [pi durable binding](harness-integration.md) is a separate cloud
-execution design, not another shipped adapter. Checkpoints, sleep and durable
-task execution stay with that host. A gateway cannot supply those semantics.
+### Shared mechanisms for feature parity
+
+Use the same mechanisms across all combinations:
+
+- Expose missing memory/state/feedback operations through shared Agent Surface
+  tools in a client-connected MCP server, including Magpie's tools path if
+  selected. A hook cannot add tool schemas to a request or call tools on the
+  client's behalf. Avoid duplicate tools when native equivalents exist.
+- Prepare current working state, recall and pending notices under the shared
+  InformationView budget and their distinct carriage rules. Preserve protected
+  state fragments and apply disclosure deduplication. Re-prepare after context
+  loss only with a current binding; do not indiscriminately reinsert every call.
+- Feed request-visible tool results into shared AG observation/nudge flows as
+  reported evidence. Use native execution witnesses where available. Run
+  diagnostic answer-overlap attribution only for the bound disclosure and a
+  corresponding complete reply; it is neither correctness nor training feedback.
+- Deliver pending board context on the next admitted request if native delivery
+  is absent. Keep batch selection, subscriptions and receipts in the shared
+  board flow. Request-time delivery is not an unsolicited idle-Agent wake.
+
+Measure parity by end-to-end NMG tasks: recall then exact get, write/update and
+forget, state write then later carriage, attributable evidence/explicit feedback,
+and board batch read/reply. Use the same contract cases across adapters, with
+each missing lifecycle behavior recorded separately.
+
+The proposed [pi durable binding](harness-integration.md) owns cloud checkpoints,
+sleep and durable execution. It is not a shipped adapter or a gateway capability.
 
 ## MCP plus Magpie as one session
 
@@ -87,7 +113,6 @@ gateway to push events through MCP or a native plugin to exist first.
 | Working state and coordination | MCP state tools provide explicit reads/writes; gateway can prepare authorized pending context | Respect endpoint capability and local-only board boundaries; model reads are pull, not idle push |
 | Tool observations | MCP server knows its own tool executions; gateway may see submitted tool-result messages | Other tools need native witnesses; protocol content alone is not verified execution |
 | Completion and feedback | Gateway observes completed responses; explicit MCP operations can submit permitted feedback | Completion is best effort and is not positive feedback or confirmation |
-| Usage and UI | Gateway usage/trace plus Magpie panels over NMG metrics | Join only with validated correlation and preserve accounting scope |
 | Idle wake, reset and durable recovery | Use another connected provider if available | MCP plus model-request hooks alone do not establish these capabilities |
 
 A candidate handoff proceeds as follows:
@@ -136,19 +161,10 @@ latency, cost and failure-mode measurements.
 
 ## First integration proofs
 
-Keep the GUI-first delivery order. Within that work, use aggregate bridge reads
-for the initial usage panel and NMG service snapshots for store metrics. Do not
-promise per-recall billing from `onUsage`.
+Keep the [GUI-first delivery order](magpie-operations.md#delivery-order-and-acceptance).
 
-Next validate two bounded paths independently:
-
-1. Pi native recall remains the owner. Join a caller trace to gateway attempt
-   spans, verify SDK header propagation, collector export and transcript dedup,
-   and show where latency and token reports originate.
-2. One explicitly bound MCP-only client receives gateway recall through shared
-   InformationView. Verify protocol shape, session isolation, disclosure
-   deduplication and exact-get ownership before widening coverage.
-
-Embedding transport can be tested with protocol fixtures in parallel with the
-panel work. Real provider requests, collector enabling and deployment require
-their own execution scope. None is necessary to accept this interface map.
+Validate the NMG gaps in the adapter table using shared contract cases. Prioritize
+working-state carriage for DSH/OpenCode, hook-to-tool continuity for WorkBuddy,
+missing tools for legacy/partial clients, and request-triggered NMG features for
+MCP-only clients. Pi supplies a reference behavior where covered. Trace/usage
+joins are a separate observability task and do not pass the NMG parity gate.

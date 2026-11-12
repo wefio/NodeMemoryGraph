@@ -28,10 +28,11 @@ establish delivered metrics, an operator API, or a working Magpie adapter.
 
 The [versioned interface map](../../design/unified-architecture/magpie-capabilities.md)
 grounds that draft in Magpie `0.1.3545` source and each native adapter's wiring.
-It favors gateway embedding transport over copying upstream keys, Pi for the
-first trace join, and MCP-only clients for added automatic recall. Native
-lifecycle ownership stays intact. Source review does not replace runtime
-integration evidence.
+It favors gateway embedding transport over copying upstream keys. Feature-parity
+work covers each adapter's NMG gaps, including working-state carriage, tool
+continuity, attribution/feedback and board delivery. GUI, usage and tracing are
+separate enhancements. Native lifecycle ownership stays intact. Source review
+does not replace runtime integration evidence.
 
 Capability coverage is composed across the client's connected entry points,
 including native adapters, MCP, hooks, CLI/Skills and Magpie. The
