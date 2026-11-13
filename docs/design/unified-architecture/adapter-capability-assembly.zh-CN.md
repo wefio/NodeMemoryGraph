@@ -15,7 +15,7 @@
 ## 可执行装配
 
 [`adapter-capability-catalog.ts`](../../../src/integration/adapter-capability-catalog.ts)
-声明六个当前入口已迁移的能力。各入口通过
+声明当前入口已迁移的能力。各入口通过
 [`assembleAdapterCapabilities`](../../../src/integration/adapter-capability-assembly.ts)
 消费声明并提供可执行的原生绑定。该目录描述装配覆盖情况，
 [宿主矩阵](../harness-capability-matrix.zh-CN.md)继续负责整体宿主覆盖情况。
@@ -23,8 +23,9 @@
 共享模块装配记忆工具组（search、get、remember）、状态及 Lab 工具、召回准备、
 Owner 状态投影、工具结果观察、诊断归因、黑板投递及被动完成提醒。
 各入口只选择已实现的绑定。Kimi 当前装配共享提醒，其旧黑板轮询仍是本地代码。
-MCP 装配显式工具，没有因此获得自动生命周期。Codex 可复用该 MCP 组件，
-仓库仍未交付专用 NMG Codex 插件包。Magpie 保持独立目标。
+MCP 装配显式工具。Codex 包按每次原生请求绑定共享工具服务，装配上下文、状态、观察与
+prompt 时黑板 hook。[插件指南](../../../codex-plugin/README.zh-CN.md)负责安装及会话代次。
+Magpie 保持独立目标。
 
 装配器在注册前检查全部必需绑定。缺工具、缺生命周期绑定及重复能力会使启动失败。
 禁用模块有明确状态，不执行绑定。保留原生 schema 和工具组内的既有顺序。

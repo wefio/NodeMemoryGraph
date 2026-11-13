@@ -16,7 +16,7 @@ carriage depend on the adapter connected to the current conversation.
 | --- | --- | --- |
 | [Pi](#pi) | Install the root Pi package | Native memory/state tools, automatic recall, state carriage and board wake |
 | [Claude Code and other MCP clients](#claude-code-and-other-mcp-clients) | Register the stdio MCP server | Explicit memory/state/board tools; no automatic recall, state carriage or idle wake from MCP alone |
-| [Codex](#codex) | Plugin-capable host; NMG currently supplies reusable MCP/Skill components | The dedicated Codex plugin package and lifecycle binding are not shipped here; do not infer a platform limitation |
+| [Codex](#codex) | Install the generated Codex plugin | Native session-bound tools, automatic recall, state carriage and prompt-time board delivery |
 | [WorkBuddy](#workbuddy) | MCP tools plus optional event hook and Skill | Hook adds automatic recall and prompt-time board polling; hook and MCP have different AG sessions |
 | [Kimi Code CLI](#kimi-code-cli) | MCP tools plus optional Kimi hook and Skill | Hook adds reminders, presence and prompt-time board polling; it does not search memory or carry maintained state |
 | [DeepSeek Harness](#deepseek-harness) | Build and install `dsh/dsh-nmg/` into the selected profile | Native tools, automatic recall, state carriage and session-directed coordination |
@@ -143,20 +143,20 @@ hook connection. Matching Agent names does not join AG projections.
 
 ## Codex
 
-Codex supports plugins that bundle skills and MCP servers, with lifecycle hooks
-on supported manually installed desktop paths. Hook loading/trust remains
-host-controlled; see [official plugin packaging](https://developers.openai.com/plugins/build/plugins).
-This checkout has reusable NMG MCP/Skill components but no dedicated Codex
-production manifest and hook binding. Use the MCP/Skill route above for current NMG access;
-that delivery gap does not make Codex an MCP-only platform. A future package
-needs its own loading, session and hook tests before advertising automatic NMG
-capabilities. Do not substitute the Claude manifest as a verified Codex install.
+Build and install the generated self-contained Codex plugin. Its README owns
+packaging, Node requirements, hook trust and loading instructions.
+[Codex setup](../../../codex-plugin/README.md)
 
-The [native Codex exercise](../../../docs/experiments/runtime/codex-plugin-capabilities-2026-11-13.md)
-has verified a source-bound local plugin with all five tools, Skill loading,
-hook context and state on resume. Tested versions need the compatibility-only
-manifest for hook discovery, explicit hook enablement/trust and MCP tool approval.
-This experiment does not ship a production plugin or automatic session mapping.
+The adapter supplies five tools, automatic recall, complete working-state carriage,
+final-tool observations and prompt-time board batches through shared capability
+assembly. Native MCP metadata and hook admission bind tools to the same chat and
+project. Resume retains the binding. Forks have independent AG state. Native clear
+starts a fresh generation and requires a newly admitted turn.
+
+Use the same search/get and state enable/replace operations described above.
+Hooks require explicit enablement and trust. Tools work when hooks are disabled,
+with project scope unavailable until admission. Answer attribution and idle wake
+remain unavailable in this binding. A compatible daemon must already be running.
 
 ## WorkBuddy
 

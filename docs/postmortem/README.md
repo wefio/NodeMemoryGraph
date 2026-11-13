@@ -161,3 +161,4 @@ one place to read the whole taxonomy.
 | 0005 | [Maintenance pressure that could not drain](0005-maintenance-pressure-cannot-drain.md)                                          | undrainable backlog            |
 | 0006 | [The submission fails before the first question](0006-concurrency-ceiling-on-the-live-endpoint.md)                              | submission concurrency ceiling |
 | 0007 | [I deployed into a scored run, and a refactor dropped a field no test watched](0007-deployed-into-a-run-and-dropped-a-field.md) | rule not on the action path    |
+| 0008 | [Private Codex home with a shared NMG daemon](0008-codex-private-home-shared-daemon.md) | child environment isolation |

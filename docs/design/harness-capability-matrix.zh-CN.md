@@ -32,24 +32,28 @@
 
 这里 DSH 只有一个当前集成目标，即宿主包。较早的 `dsh/nmg-plugin.mjs` preset 是历史集成代码，不是第二个当前适配目标，不纳入对照与 Magpie 功能对齐计划。
 
-Codex 的[原生插件联调](../experiments/runtime/codex-plugin-capabilities-2026-11-13.zh-CN.md)
-已在私有宿主中验证打包 MCP 工具、Skill 和装配后的 hook 上下文。
-源码绑定 fixture 不作为另一个已交付适配器列，会话接线缺口仍与平台限制区分。
+[Codex 插件包](../../codex-plugin/README.zh-CN.md)将原生 hook 与 MCP 组成一个适配器。
+[原生联调](../experiments/runtime/codex-plugin-capabilities-2026-11-13.zh-CN.md)记录安装分发包与多会话证据。
+
+Codex 承载完整 Owner 状态，使用原生传输会话元数据。黑板批次在用户 prompt 时到达，
+Stop 报告处理状态未知。工具观察只接受已识别的最终结果标志。
+答案归因、空闲唤醒、交互控制台及 CLI 兜底尚未接入。
+
 
 ## 矩阵
 
-| 能力 | Pi | OpenCode | WorkBuddy | MCP | DSH | Kimi |
-|---|---|---|---|---|---|---|
-| 自动召回（按准入回合暂存头行） | full | full | full | none | full | none |
-| 记忆工具（`nmg_search`/`get`/`remember`，共享 Agent Surface） | full | full | none | partial | full | none |
-| 工作状态（`space=ag`，带调用栅栏） | full | full | none | full | full | none |
-| 工具结果观察 + 弱完成提醒 | full | full | partial | none | full | partial |
-| 归因落盘 + 代理身份心跳 | full | full | partial | partial | full | partial |
-| Board 唤醒（轮询 → 定向/世界投递） | full | partial | partial | none | partial | partial |
-| 交互控制台（`/nmg`） | full | partial | none | none | none | none |
-| 传输：lease 快路径、CLI 兜底、共享 daemon 不接管 | full | full | partial | partial | full | partial |
+| 能力 | Pi | OpenCode | WorkBuddy | MCP | DSH | Kimi | Codex |
+|---|---|---|---|---|---|---|---|
+| 自动召回（按准入回合暂存头行） | full | full | full | none | full | none | full |
+| 记忆工具（`nmg_search`/`get`/`remember`，共享 Agent Surface） | full | full | none | partial | full | none | partial |
+| 工作状态（`space=ag`，带调用栅栏） | full | full | none | full | full | none | full |
+| 工具结果观察 + 弱完成提醒 | full | full | partial | none | full | partial | partial |
+| 归因落盘 + 代理身份心跳 | full | full | partial | partial | full | partial | partial |
+| Board 唤醒（轮询 → 定向/世界投递） | full | partial | partial | none | partial | partial | partial |
+| 交互控制台（`/nmg`） | full | partial | none | none | none | none | none |
+| 传输：lease 快路径、CLI 兜底、共享 daemon 不接管 | full | full | partial | partial | full | partial | partial |
 
-Pi、OpenCode 与 DSH 的工作状态承载复用完整正文 InformationView 投影。准备始终未确认，各宿主通过原生通道承载。
+Pi、OpenCode、DSH 与 Codex 的工作状态承载复用完整正文 InformationView 投影。准备始终未确认，各宿主通过原生通道承载。
 
 ## 协调能力扩展
 
@@ -60,12 +64,12 @@ Kimi hook 没有自动记忆搜索或状态承载，执行前提醒不是工具�
 唤醒或模型理解。`board-events` 为新增事件／通知字段提供
 兼容门槛，旧 owner 应拒绝，不能静默丢弃字段。
 
-| 能力 | Pi | OpenCode | WorkBuddy | MCP | DSH | Kimi |
-|---|---|---|---|---|---|---|
-| 事件记录与公开任务状态 | full | full | none | full | full | none |
-| 点名／频道／事件通知载荷及受邀自动订阅频道 | full | full | none | full | full | none |
-| 讨论／事件主动唤醒与入队后记收据 | full | partial | none | none | partial | none |
-| `nmg_state` 统一工作状态 | full | full | none | full | full | none |
+| 能力 | Pi | OpenCode | WorkBuddy | MCP | DSH | Kimi | Codex |
+|---|---|---|---|---|---|---|---|
+| 事件记录与公开任务状态 | full | full | none | full | full | none | full |
+| 点名／频道／事件通知载荷及受邀自动订阅频道 | full | full | none | full | full | none | full |
+| 讨论／事件主动唤醒与入队后记收据 | full | partial | none | none | partial | none | partial |
+| `nmg_state` 统一工作状态 | full | full | none | full | full | none | full |
 
 OpenCode 与 DSH 宿主包有私有 HTTP 注册／透传 fixture；共享唤醒测试覆盖入队成功与失败、
 不重复广播世界频道及不自动认领。这不证明真实桌面空闲唤醒或模型理解。

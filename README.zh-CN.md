@@ -82,7 +82,7 @@ skills/nmg-memory/SKILL.md，再选择当前环境支持的最佳接入方式。
 | [OpenCode v2](opencode-plugin/README.md) | 记忆工具、自动召回、工作状态与任务板 | 可用时由原生查询提供首回合作用域；部分唤醒能力仍有限制 |
 | [Claude Code / MCP](#claude-code-插件) | 记忆工具、工作状态、任务板和可选 Lab | 通过 MCP 显式调用；没有自动逐轮召回或推送唤醒 |
 | [DeepSeek Harness](dsh/dsh-nmg/README.md) | 记忆工具、自动召回、工作状态承载和任务板 | 使用当前宿主包；生命周期与真实唤醒验证范围有限 |
-| [Codex](skills/nmg-memory/references/adapter-usage.zh-CN.md#codex) | 可复用 NMG MCP 工具与 Skill，Codex 本身也支持插件包 | 专用 NMG Codex 打包与 hook 尚未交付 |
+| [Codex](codex-plugin/README.zh-CN.md) | 独立插件包，原生多会话映射、五类工具与共享 hook | 构建并安装生成包，然后启用、信任 hook |
 | [WorkBuddy](workbuddy-plugin/README.zh-CN.md) | Hook 自动召回；可组合 MCP 工具与 Skill | Hook 自身不提供记忆工具；Hook 与 MCP 的会话状态不同 |
 | [Kimi Code CLI](kimi-plugin/README.zh-CN.md) | MCP 工具加可选提醒、在场登记和 prompt 时黑板轮询 | 只装 hook 没有记忆工具、自动召回或状态承载 |
 | 其他可调用工具的 Agent | [CLI + Skill](#agent-无关-cli) 保存、搜索并展开记忆 | 需要 Agent 能执行 CLI 并读取 Skill；自动召回取决于宿主 |

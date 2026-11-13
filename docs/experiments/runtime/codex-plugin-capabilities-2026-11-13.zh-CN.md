@@ -2,6 +2,29 @@
 
 [English](codex-plugin-capabilities-2026-11-13.md) · [术语](codex-plugin-capabilities-2026-11-13.terms.yaml)
 
+## 独立分发适配器
+
+独立 Codex 包从解压后的归档安装到原生插件缓存。Windows CLI 0.169.0 完成了 20 次
+确定性模型请求，覆盖两个并发聊天、会话恢复及真实原生分叉。原生 hook 准入与 MCP 元数据
+连接同一个私有 daemon 及项目范围，实际执行自动召回、五类工具和完整维护状态承载。
+显式选择的 Skill 来自已安装的插件缓存。
+[分发包回执](artifacts/codex-plugin-capabilities-2026-11-13/distribution.json)
+
+分叉继承原生聊天记录。隔离检查读取分叉当前的 Owner AG，并确认父会话 AG 保留原状态。
+契约测试还覆盖共享 MCP 连接拒绝外来投影，以及 clear 后旧轮次被栅栏拒绝。
+归档客户端独立于源码 checkout 和 node_modules。该分发探针未运行桌面 GUI、其他操作系统，
+或原生交互压缩。压缩后的承载由契约测试覆盖。
+
+```text
+npm run codex:package -- --output <release-directory>
+node docs/experiments/runtime/codex-distribution-probe.mjs --codex-bin <codex.exe> --archive <release-directory>/nmg-codex-plugin-0.1.0.tgz --output <evidence-directory>
+```
+
+探针检查显式状态写入及记忆保存实际到达私有 RPC owner。子进程环境传递，以及此前
+测试误路由后的恢复，记录于事故归属文档。
+[子进程环境事故](../../postmortem/0008-codex-private-home-shared-daemon.zh-CN.md)
+[插件使用](../../../codex-plugin/README.zh-CN.md)
+
 ## 结果与范围
 
 NMG 已通过 Codex 原生本地插件安装路径运行。已安装插件提供现有 NMG MCP 服务和

@@ -1,13 +1,13 @@
 // Native Codex plugin installation and execution against private, local fixtures.
 import assert from "node:assert/strict";
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createInterface } from "node:readline";
+import { readHookCatalog } from "./codex-hook-catalog.mjs";
 import { parseArgs, promisify } from "node:util";
 import { privateNmg } from "./native-nmg-fixture.mjs";
 
@@ -16,6 +16,7 @@ const { values } = parseArgs({
     "codex-bin": { type: "string" },
     output: { type: "string" },
     layout: { type: "string", default: "compatibility" },
+    "capture-mcp": { type: "boolean", default: false },
   },
 });
 assert.ok(values["codex-bin"] && values.output, "Required: --codex-bin <exe> --output <directory>");
@@ -90,47 +91,6 @@ function sendResponse(response, item) {
   response.end();
 }
 
-async function readHookCatalog() {
-  const child = spawn(binary, ["--no-daemon", "app-server", "--stdio"], {
-    cwd: project,
-    env: environment,
-    windowsHide: true,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  let sequence = 0;
-  const pending = new Map();
-  const lines = createInterface({ input: child.stdout });
-  lines.on("line", (line) => {
-    const message = JSON.parse(line);
-    pending.get(message.id)?.(message);
-  });
-  child.stderr.resume();
-  const request = (method, params) =>
-    new Promise((done, reject) => {
-      const id = ++sequence;
-      const timer = setTimeout(() => reject(new Error(`App-server ${method} timed out`)), 10000);
-      pending.set(id, (message) => {
-        clearTimeout(timer);
-        pending.delete(id);
-        if (message.error) reject(new Error(JSON.stringify(message.error)));
-        else done(message.result);
-      });
-      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
-    });
-  try {
-    await request("initialize", {
-      clientInfo: { name: "nmg_native_probe", version: "0.1.0" },
-      capabilities: { experimentalApi: true },
-    });
-    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "initialized" }) + "\n");
-    const result = await request("hooks/list", { cwds: [project] });
-    await writeFile(join(output, "hooks-list.json"), JSON.stringify(result, null, 2) + "\n");
-  } finally {
-    lines.close();
-    child.stdin.end();
-    child.kill();
-  }
-}
 
 try {
   await mkdir(home, { recursive: true });
@@ -269,12 +229,18 @@ try {
           command: "node",
           args: [
             "--experimental-strip-types",
-            join(root, "claude-plugins/nmg-memory/agents/memory-copilot.ts"),
+            values["capture-mcp"]
+              ? join(import.meta.dirname, "codex-mcp-capture.mjs")
+              : join(root, "claude-plugins/nmg-memory/agents/memory-copilot.ts"),
           ],
           env: {
             NMG_DATA_DIR: nmg.dataDirectory,
             NMG_SESSION_ID: environment.NMG_SESSION_ID,
             NMG_ENABLE_COORDINATION: "0",
+            ...(values["capture-mcp"] ? {
+              NMG_MCP_SOURCE: join(root, "claude-plugins/nmg-memory/agents/memory-copilot.ts"),
+              NMG_MCP_CAPTURE_LOG: join(output, "mcp-host-metadata.jsonl"),
+            } : {}),
           },
         },
       },
@@ -346,7 +312,7 @@ try {
       '\n[plugins."nmg-native-probe@nmg-native-market".mcp_servers.nmg]\ndefault_tools_approval_mode = "approve"\n',
   );
   await run(["features", "list"], "features");
-  await readHookCatalog();
+  await readHookCatalog({ binary, project, environment, output });
   const listed = JSON.parse(
     await run(["plugin", "list", "--marketplace", "nmg-native-market", "--json"], "plugins"),
   );

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "nmg": {
+      "command": "node",
+      "args": ["./scripts/nmg.mjs", "mcp"],
+      "cwd": ".",
+      "env_vars": ["NMG_DATA_DIR", "NMG_ENABLE_COORDINATION"]
+    }
+  }
+}

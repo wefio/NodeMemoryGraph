@@ -17,7 +17,7 @@ remain open to adjustment.
 ## Executable assembly
 
 [`adapter-capability-catalog.ts`](../../../src/integration/adapter-capability-catalog.ts)
-declares the migrated features of all six current entry points. Each consumes
+declares the migrated features of all current entry points. Each consumes
 its declaration through
 [`assembleAdapterCapabilities`](../../../src/integration/adapter-capability-assembly.ts)
 and supplies executable native bindings. This catalog describes assembly coverage;
@@ -27,9 +27,10 @@ The shared modules install the memory tool group (`search`, `get`, `remember`),
 state and Lab tools, recall preparation, owner-state projection, tool-result
 observation, diagnostic attribution, board delivery and passive completion nudges.
 Each entry selects only its implemented bindings. Kimi currently assembles its
-shared nudge; its older board poller is still native code. MCP assembles explicit
-tools and gains no automatic lifecycle. Codex can reuse that MCP component;
-there is still no dedicated NMG Codex package. Magpie remains a separate target.
+shared nudge; its older board poller is still native code. MCP assembles explicit tools. The Codex package binds the shared tool server per
+native request and assembles its context, state, observation and prompt-time board
+hooks. Its [package guide](../../../codex-plugin/README.md) owns installation and
+session-generation behavior. Magpie remains a separate target.
 
 The assembler validates every required binding before registration. Missing
 tools, missing lifecycle bindings and duplicate capabilities fail setup. Disabled

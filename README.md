@@ -97,7 +97,7 @@ you choose an integration.
 | [OpenCode v2](opencode-plugin/README.md) | Memory tools, automatic recall, working state and Task Board | Native lookup resolves first-turn scope when available; some wake capabilities remain limited |
 | [Claude Code / MCP](#claude-code-plugin) | Memory tools, working state, Task Board and optional Lab | Explicit MCP calls; no automatic per-turn recall or push wake |
 | [DeepSeek Harness](dsh/dsh-nmg/README.md) | Memory tools, automatic recall, working-state carriage and Task Board | Use the current host package; lifecycle and live-wake verification remain scoped |
-| [Codex](skills/nmg-memory/references/adapter-usage.md#codex) | Reusable NMG MCP tools and Skill; Codex also supports plugin bundles | Dedicated NMG Codex packaging and hooks are not yet shipped |
+| [Codex](codex-plugin/README.md) | Self-contained plugin with native multi-session mapping, five tools and shared hooks | Build and install the generated package, then enable and trust hooks |
 | [WorkBuddy](workbuddy-plugin/README.md) | Hook-based automatic recall; can combine MCP tools and Skill | The hook itself has no memory tools; hook and MCP session state differ |
 | [Kimi Code CLI](kimi-plugin/README.md) | MCP tools plus optional reminders, presence and prompt-time board polling | Hook alone has no memory tools, automatic recall or state carriage |
 | Other tool-capable agents | [CLI + Skill](#agent-independent-cli) to save, search and open memory | The agent must run the CLI and read the Skill; automatic recall depends on the host |

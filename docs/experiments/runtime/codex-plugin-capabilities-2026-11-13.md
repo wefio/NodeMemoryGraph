@@ -2,6 +2,34 @@
 
 [中文](codex-plugin-capabilities-2026-11-13.zh-CN.md) · [Terms](codex-plugin-capabilities-2026-11-13.terms.yaml)
 
+## Distributable adapter
+
+The self-contained Codex package installs from an extracted archive into the
+native plugin cache. Windows CLI 0.169.0 completed 20 deterministic model requests
+across two concurrent chats, a resumed chat and a real native fork. Native hook
+admission and MCP metadata join the same private daemon and project scope.
+Automatic recall, all five tools and full maintained-state carriage execute.
+The explicitly selected Skill comes from the installed plugin cache.
+[Artifact receipt](artifacts/codex-plugin-capabilities-2026-11-13/distribution.json)
+
+The fork inherits its native transcript. Isolation checks read the fork's current
+owner AG and verify that parent state remains in the parent AG. Contract tests
+also reject a foreign projection on a shared MCP connection and fence old turns
+after clear. The client archive contains no source-checkout or node_modules runtime
+dependency. Desktop GUI, other operating systems and native interactive compaction
+are unexercised by this distribution probe. Compaction carriage has contract tests.
+
+```text
+npm run codex:package -- --output <release-directory>
+node docs/experiments/runtime/codex-distribution-probe.mjs --codex-bin <codex.exe> --archive <release-directory>/nmg-codex-plugin-0.1.0.tgz --output <evidence-directory>
+```
+
+The probe verifies that explicit state writes and memory saves reach its private
+RPC owner. Child environment forwarding and recovery from an earlier misrouted
+fixture run are recorded in the incident owner.
+[Child environment incident](../../postmortem/0008-codex-private-home-shared-daemon.md)
+[Package use](../../../codex-plugin/README.md)
+
 ## Result and scope
 
 NMG works through Codex's native local-plugin installation path. The installed

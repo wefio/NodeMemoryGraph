@@ -135,11 +135,24 @@ for (const sub of SUBPACKAGES) {
   process.stdout.write(`  ok\n`);
 }
 
+process.stdout.write("\nverify:packages — Codex self-contained distribution\n");
+const codex = capture(
+  "npm",
+  ["run", "codex:package", "--", "--output", ".nmg/verification/codex-package"],
+  root,
+);
+if (!codex.ok) {
+  failures += 1;
+  process.stderr.write(codex.output);
+} else {
+  process.stdout.write("  ok\n");
+}
+
 if (failures > 0) {
   process.stderr.write(`\nverify:packages — ${failures} subpackage(s) failed\n`);
   process.exitCode = 1;
 } else {
   process.stdout.write(
-    `\nverify:packages ok: ${SUBPACKAGES.length} subpackage(s) build from clean install\n`,
+    `\nverify:packages ok: ${SUBPACKAGES.length} subpackage(s) build from clean install; Codex distribution packs\n`,
   );
 }

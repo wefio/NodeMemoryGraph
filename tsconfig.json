@@ -9,7 +9,9 @@
     "noEmit": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
   "include": [
     "src/**/*.ts",
@@ -17,6 +19,8 @@
     "claude-plugins/**/*.ts",
     "tools/autodiff-benchmark.ts",
     "tools/repo-context.ts",
-    "tools/agent-verify.ts"
+    "tools/agent-verify.ts",
+    "codex-plugin/**/*.ts",
+    "scripts/build-codex-plugin.ts"
   ]
 }

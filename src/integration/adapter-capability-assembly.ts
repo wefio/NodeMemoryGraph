@@ -45,7 +45,7 @@ export async function observeAdapterToolResult(input: ToolObservationInput): Pro
   });
 }
 
-interface CapabilityServices {
+export interface CapabilityServices {
   "automatic-recall": { prepare: typeof prepareAutomaticRecallSurface };
   "state-context": { views: typeof contextStateViews };
   "tool-observation": { observe: typeof observeAdapterToolResult };

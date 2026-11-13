@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | [Pi](#pi) | 安装根目录 Pi 包 | 原生记忆／状态工具、自动召回、状态承载和黑板唤醒 |
 | [Claude Code 与其他 MCP 客户端](#claude-code-与其他-mcp-客户端) | 注册 stdio MCP 服务 | 显式记忆／状态／黑板工具；单独 MCP 不提供自动召回、状态承载或空闲唤醒 |
-| [Codex](#codex) | 宿主支持插件，NMG 当前提供可复用 MCP／Skill 组件 | 仓库尚未交付专用 Codex 插件包及生命周期绑定，不据此推断宿主限制 |
+| [Codex](#codex) | 安装生成的 Codex 插件包 | 原生会话绑定工具、自动召回、状态承载及 prompt 时黑板投递 |
 | [WorkBuddy](#workbuddy) | MCP 工具，加可选事件 hook 与 Skill | Hook 增加自动召回和 prompt 时黑板轮询；hook 与 MCP 的 AG 会话不同 |
 | [Kimi Code CLI](#kimi-code-cli) | MCP 工具，加可选 Kimi hook 与 Skill | Hook 增加提醒、在场登记和 prompt 时黑板轮询，不搜索记忆或承载工作状态 |
 | [DeepSeek Harness](#deepseek-harness) | 构建并安装 `dsh/dsh-nmg/` 到指定 profile | 原生工具、自动召回、状态承载和面向实际会话的协作 |
@@ -116,17 +116,16 @@ Claude Code 使用项目 `.mcp.json`；其他客户端将这些 stdio 字段映�
 
 ## Codex
 
-Codex 支持组合 Skill 和 MCP 服务的插件，受支持的桌面手动安装路径还提供生命周期 hook。
-Hook 的加载和信任由宿主控制，见[官方插件打包文档](https://developers.openai.com/plugins/build/plugins)。
-本 checkout 有可复用的 NMG MCP／Skill 组件，尚无正式交付的专用 Codex 清单与 hook 绑定。
-当前 NMG 可走上面的 MCP／Skill 路径；交付缺口不表示 Codex 是 MCP-only 平台。
-后续插件包需要自己的加载、会话和 hook 测试，才能声明 NMG 自动能力，不能把 Claude 清单当作
-已验证的 Codex 安装入口。
+构建并安装生成的独立 Codex 插件包。打包、Node 要求、hook 信任和加载说明由 README 维护。
+[Codex 安装指南](../../../codex-plugin/README.zh-CN.md)
 
-[Codex 原生联调](../../../docs/experiments/runtime/codex-plugin-capabilities-2026-11-13.zh-CN.md)
-已验证源码绑定的本地插件，包括五个工具、Skill 加载、hook 上下文和恢复后的状态。
-测试版本需要只使用兼容清单才能发现 hook，并显式启用／信任 hook、授权 MCP 工具。
-该实验没有交付生产插件或自动会话映射。
+适配器通过共享能力装配提供五个工具、自动召回、完整工作状态承载、工具最终结果观察，
+以及 prompt 时批量黑板投递。原生 MCP 元数据与 hook 准入将工具绑定到相同聊天和项目。
+恢复保留绑定，分叉获得独立 AG，原生 clear 开启新代次并要求新轮次准入。
+
+使用上述 search/get 和 state enable/replace 操作。Hook 需要显式启用和信任。
+禁用 hook 时仍可使用工具，项目范围在准入后确定。本绑定的答案归因与空闲唤醒尚未接入。
+需要预先运行兼容的 daemon。
 
 ## WorkBuddy
 

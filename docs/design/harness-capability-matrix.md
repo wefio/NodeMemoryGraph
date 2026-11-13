@@ -40,25 +40,24 @@ DSH has one current integration target here: the host package. The older
 `dsh/nmg-plugin.mjs` preset is historical integration code, not a second current
 adapter target. It is excluded from the comparison and Magpie parity plan.
 
-Codex's [native plugin exercise](../experiments/runtime/codex-plugin-capabilities-2026-11-13.md)
-verifies packaged MCP tools, Skill and assembled hook context in private hosts.
-Its source-bound fixture is not another shipped adapter column. Missing NMG
-session wiring remains distinct from a platform restriction.
+The [Codex package](../../codex-plugin/README.md) combines native hooks and MCP
+in one adapter. Its [native exercise](../experiments/runtime/codex-plugin-capabilities-2026-11-13.md)
+records artifact installation and multi-session evidence.
 
 ## Matrix
 
-| Capability | Pi | OpenCode | WorkBuddy | MCP | DSH | Kimi |
-|---|---|---|---|---|---|---|
-| Automatic recall (staged headers per admitted turn) | full | full | full | none | full | none |
-| Memory tools (`nmg_search`/`get`/`remember`) on the shared Agent Surface | full | full | none | partial | full | none |
-| Working state (`space=ag` with the invocation fence) | full | full | none | full | full | none |
-| Tool-result observation + weak completion nudge | full | full | partial | none | full | partial |
-| Attribution flush + agent identity heartbeat | full | full | partial | partial | full | partial |
-| Board wake (poll → directed/world delivery) | full | partial | partial | none | partial | partial |
-| Interactive console (`/nmg`) | full | partial | none | none | none | none |
-| Transport: lease fast path, CLI fallback, shared-daemon non-ownership | full | full | partial | partial | full | partial |
+| Capability | Pi | OpenCode | WorkBuddy | MCP | DSH | Kimi | Codex |
+|---|---|---|---|---|---|---|---|
+| Automatic recall (staged headers per admitted turn) | full | full | full | none | full | none | full |
+| Memory tools (`nmg_search`/`get`/`remember`) on the shared Agent Surface | full | full | none | partial | full | none | partial |
+| Working state (`space=ag` with the invocation fence) | full | full | none | full | full | none | full |
+| Tool-result observation + weak completion nudge | full | full | partial | none | full | partial | partial |
+| Attribution flush + agent identity heartbeat | full | full | partial | partial | full | partial | partial |
+| Board wake (poll → directed/world delivery) | full | partial | partial | none | partial | partial | partial |
+| Interactive console (`/nmg`) | full | partial | none | none | none | none | none |
+| Transport: lease fast path, CLI fallback, shared-daemon non-ownership | full | full | partial | partial | full | partial | partial |
 
-Maintained-state carriage uses the same complete-body InformationView projection in Pi, OpenCode and DSH. Preparation remains unconfirmed; its native transport differs by host.
+Maintained-state carriage uses the same complete-body InformationView projection in Pi, OpenCode, DSH and Codex. Preparation remains unconfirmed; its native transport differs by host.
 
 ## Coordination extension
 
@@ -70,18 +69,24 @@ DSH refers to the same host package in both tables. These rows describe source
 wiring, not deployment or a live idle-Agent/model test. `board-events` gates additive event/notification
 fields; an older owner must refuse them rather than silently drop them.
 
-| Capability | Pi | OpenCode | WorkBuddy | MCP | DSH | Kimi |
-|---|---|---|---|---|---|---|
-| Event records and public task status | full | full | none | full | full | none |
-| Direct/channel/event notification payload and invite-driven channel enrollment | full | full | none | full | full | none |
-| Discussion/event wake emission and enqueue-before-receipt | full | partial | none | none | partial | none |
-| Unified working state through `nmg_state` | full | full | none | full | full | none |
+| Capability | Pi | OpenCode | WorkBuddy | MCP | DSH | Kimi | Codex |
+|---|---|---|---|---|---|---|---|
+| Event records and public task status | full | full | none | full | full | none | full |
+| Direct/channel/event notification payload and invite-driven channel enrollment | full | full | none | full | full | none | full |
+| Discussion/event wake emission and enqueue-before-receipt | full | partial | none | none | partial | none | partial |
+| Unified working state through `nmg_state` | full | full | none | full | full | none | full |
 
 OpenCode and the DSH host package have private HTTP registration/forwarding
 fixtures. Shared wake tests cover successful/rejected enqueue, no world
 rebroadcast and no automatic claim. They do not establish live desktop idle wake
 or model comprehension. MCP/CLI provide explicit reads, not push wake.
 The [event contract](board-event-records.md) owns subscription boundaries.
+
+
+Codex carries complete owner state and uses native transport session metadata.
+Its board batches arrive on user prompts. Stop reports unknown processing state.
+Tool observation accepts recognized final-result flags. Answer attribution,
+idle wake, interactive console and CLI fallback are unconnected.
 
 ## Per-adapter partials
 

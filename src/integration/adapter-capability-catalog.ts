@@ -4,6 +4,19 @@ import type { AdapterCapability } from "./adapter-capability-assembly.ts";
  * Consumers select this declaration instead of maintaining their own tool list.
  */
 export const ADAPTER_CAPABILITY_CATALOG = {
+  codex: {
+    entry: "codex-plugin/index.ts",
+    capabilities: [
+      "memory-tools",
+      "state-tool",
+      "lab-tools",
+      "automatic-recall",
+      "state-context",
+      "tool-observation",
+      "completion-nudge",
+      "board-delivery",
+    ],
+  },
   pi: {
     entry: ".pi/extensions/nmg/index.ts",
     capabilities: [
