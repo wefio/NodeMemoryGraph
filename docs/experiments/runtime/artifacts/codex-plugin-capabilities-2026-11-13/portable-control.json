@@ -1,0 +1,56 @@
+[
+  {
+    "measuredAt": "2026-11-13T08:55:09.536Z",
+    "version": "codex-cli 0.167.0-alpha.4.1",
+    "layout": "portable",
+    "binarySha256": "83f5c2dd2ac2902e0d96ba5d8ccdd27d513f57df4a9ab73e06a5a518028e9a2f",
+    "sourceSha256": {
+      "docs/experiments/runtime/codex-plugin-probe.mjs": "36972096bfa0e920f5e71220c4472cd59ac11fa479d575bd277f37ee2e8ebd3d",
+      "docs/experiments/runtime/codex-probe-hook.mjs": "4af8f6a505dc62c1d4ed7ef40975209486a5008cf0af7fd64c74290e1cf05410",
+      "src/integration/adapter-capability-assembly.ts": "b2bd978866a5e59ac6c5f10aa36c13a1b778bfd14e21227a8374e766c5b238fc",
+      "src/integration/adapter-capability-catalog.ts": "fb2bcb64315dee1460217df14b1f478ff7008a32f17987d7a15b5b26f124791d",
+      "claude-plugins/nmg-memory/agents/memory-copilot.ts": "593dc5e21333e78b226e77713da85fa7370d24215646bec853a1bb34959a53b7"
+    },
+    "expectedOutcome": "nonzero: plugin hook context must reach the loopback receiver",
+    "hookDiscoveryCount": 0,
+    "hookInvocationCount": 0,
+    "toolsExecuted": [
+      "get",
+      "hello",
+      "lab",
+      "remember",
+      "search",
+      "sessionActiveGraph",
+      "state"
+    ],
+    "packagedSkillReachedModel": true,
+    "exactEvidenceReachedModel": true
+  },
+  {
+    "measuredAt": "2026-11-13T08:57:01.043Z",
+    "version": "codex-cli 0.167.2",
+    "layout": "portable",
+    "binarySha256": "6f65c42e3769209976cce097a400720b5d877e1d24ec8bb6272bf0f02d5e0fd7",
+    "sourceSha256": {
+      "docs/experiments/runtime/codex-plugin-probe.mjs": "36972096bfa0e920f5e71220c4472cd59ac11fa479d575bd277f37ee2e8ebd3d",
+      "docs/experiments/runtime/codex-probe-hook.mjs": "4af8f6a505dc62c1d4ed7ef40975209486a5008cf0af7fd64c74290e1cf05410",
+      "src/integration/adapter-capability-assembly.ts": "b2bd978866a5e59ac6c5f10aa36c13a1b778bfd14e21227a8374e766c5b238fc",
+      "src/integration/adapter-capability-catalog.ts": "fb2bcb64315dee1460217df14b1f478ff7008a32f17987d7a15b5b26f124791d",
+      "claude-plugins/nmg-memory/agents/memory-copilot.ts": "593dc5e21333e78b226e77713da85fa7370d24215646bec853a1bb34959a53b7"
+    },
+    "expectedOutcome": "nonzero: plugin hook context must reach the loopback receiver",
+    "hookDiscoveryCount": 0,
+    "hookInvocationCount": 0,
+    "toolsExecuted": [
+      "get",
+      "hello",
+      "lab",
+      "remember",
+      "search",
+      "sessionActiveGraph",
+      "state"
+    ],
+    "packagedSkillReachedModel": true,
+    "exactEvidenceReachedModel": true
+  }
+]

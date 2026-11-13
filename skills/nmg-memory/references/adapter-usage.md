@@ -147,10 +147,16 @@ Codex supports plugins that bundle skills and MCP servers, with lifecycle hooks
 on supported manually installed desktop paths. Hook loading/trust remains
 host-controlled; see [official plugin packaging](https://developers.openai.com/plugins/build/plugins).
 This checkout has reusable NMG MCP/Skill components but no dedicated Codex
-manifest and hook binding. Use the MCP/Skill route above for current NMG access;
+production manifest and hook binding. Use the MCP/Skill route above for current NMG access;
 that delivery gap does not make Codex an MCP-only platform. A future package
 needs its own loading, session and hook tests before advertising automatic NMG
 capabilities. Do not substitute the Claude manifest as a verified Codex install.
+
+The [native Codex exercise](../../../docs/experiments/runtime/codex-plugin-capabilities-2026-11-13.md)
+has verified a source-bound local plugin with all five tools, Skill loading,
+hook context and state on resume. Tested versions need the compatibility-only
+manifest for hook discovery, explicit hook enablement/trust and MCP tool approval.
+This experiment does not ship a production plugin or automatic session mapping.
 
 ## WorkBuddy
 

@@ -1,0 +1,406 @@
+{
+  "measuredAt": "2026-11-13T08:51:50.979Z",
+  "version": "codex-cli 0.167.2",
+  "binarySha256": "6f65c42e3769209976cce097a400720b5d877e1d24ec8bb6272bf0f02d5e0fd7",
+  "sourceSha256": {
+    "docs/experiments/runtime/codex-plugin-probe.mjs": "36972096bfa0e920f5e71220c4472cd59ac11fa479d575bd277f37ee2e8ebd3d",
+    "docs/experiments/runtime/codex-probe-hook.mjs": "4af8f6a505dc62c1d4ed7ef40975209486a5008cf0af7fd64c74290e1cf05410",
+    "src/integration/adapter-capability-assembly.ts": "b2bd978866a5e59ac6c5f10aa36c13a1b778bfd14e21227a8374e766c5b238fc",
+    "src/integration/adapter-capability-catalog.ts": "fb2bcb64315dee1460217df14b1f478ff7008a32f17987d7a15b5b26f124791d",
+    "claude-plugins/nmg-memory/agents/memory-copilot.ts": "593dc5e21333e78b226e77713da85fa7370d24215646bec853a1bb34959a53b7"
+  },
+  "layout": "compatibility",
+  "modelCalls": [
+    {
+      "path": "/v1/responses",
+      "toolNames": [
+        "exec_command",
+        "write_stdin",
+        "list_mcp_resources",
+        "list_mcp_resource_templates",
+        "read_mcp_resource",
+        "request_user_input",
+        "view_image",
+        "multi_agent_v1.close_agent",
+        "multi_agent_v1.resume_agent",
+        "multi_agent_v1.send_input",
+        "multi_agent_v1.spawn_agent",
+        "multi_agent_v1.wait_agent",
+        "mcp__nmg.nmg_get",
+        "mcp__nmg.nmg_lab",
+        "mcp__nmg.nmg_remember",
+        "mcp__nmg.nmg_search",
+        "mcp__nmg.nmg_state",
+        "get_goal",
+        "create_goal",
+        "update_goal"
+      ],
+      "hook": true,
+      "state": false,
+      "completeState": false,
+      "exact": false,
+      "skill": true,
+      "outputs": []
+    },
+    {
+      "path": "/v1/responses",
+      "toolNames": [
+        "exec_command",
+        "write_stdin",
+        "list_mcp_resources",
+        "list_mcp_resource_templates",
+        "read_mcp_resource",
+        "request_user_input",
+        "view_image",
+        "multi_agent_v1.close_agent",
+        "multi_agent_v1.resume_agent",
+        "multi_agent_v1.send_input",
+        "multi_agent_v1.spawn_agent",
+        "multi_agent_v1.wait_agent",
+        "mcp__nmg.nmg_get",
+        "mcp__nmg.nmg_lab",
+        "mcp__nmg.nmg_remember",
+        "mcp__nmg.nmg_search",
+        "mcp__nmg.nmg_state",
+        "get_goal",
+        "create_goal",
+        "update_goal"
+      ],
+      "hook": true,
+      "state": false,
+      "completeState": false,
+      "exact": true,
+      "skill": true,
+      "outputs": [
+        "call_probe_0"
+      ]
+    },
+    {
+      "path": "/v1/responses",
+      "toolNames": [
+        "exec_command",
+        "write_stdin",
+        "list_mcp_resources",
+        "list_mcp_resource_templates",
+        "read_mcp_resource",
+        "request_user_input",
+        "view_image",
+        "multi_agent_v1.close_agent",
+        "multi_agent_v1.resume_agent",
+        "multi_agent_v1.send_input",
+        "multi_agent_v1.spawn_agent",
+        "multi_agent_v1.wait_agent",
+        "mcp__nmg.nmg_get",
+        "mcp__nmg.nmg_lab",
+        "mcp__nmg.nmg_remember",
+        "mcp__nmg.nmg_search",
+        "mcp__nmg.nmg_state",
+        "get_goal",
+        "create_goal",
+        "update_goal"
+      ],
+      "hook": true,
+      "state": false,
+      "completeState": false,
+      "exact": true,
+      "skill": true,
+      "outputs": [
+        "call_probe_0",
+        "call_probe_1"
+      ]
+    },
+    {
+      "path": "/v1/responses",
+      "toolNames": [
+        "exec_command",
+        "write_stdin",
+        "list_mcp_resources",
+        "list_mcp_resource_templates",
+        "read_mcp_resource",
+        "request_user_input",
+        "view_image",
+        "multi_agent_v1.close_agent",
+        "multi_agent_v1.resume_agent",
+        "multi_agent_v1.send_input",
+        "multi_agent_v1.spawn_agent",
+        "multi_agent_v1.wait_agent",
+        "mcp__nmg.nmg_get",
+        "mcp__nmg.nmg_lab",
+        "mcp__nmg.nmg_remember",
+        "mcp__nmg.nmg_search",
+        "mcp__nmg.nmg_state",
+        "get_goal",
+        "create_goal",
+        "update_goal"
+      ],
+      "hook": true,
+      "state": false,
+      "completeState": false,
+      "exact": true,
+      "skill": true,
+      "outputs": [
+        "call_probe_0",
+        "call_probe_1",
+        "call_probe_2"
+      ]
+    },
+    {
+      "path": "/v1/responses",
+      "toolNames": [
+        "exec_command",
+        "write_stdin",
+        "list_mcp_resources",
+        "list_mcp_resource_templates",
+        "read_mcp_resource",
+        "request_user_input",
+        "view_image",
+        "multi_agent_v1.close_agent",
+        "multi_agent_v1.resume_agent",
+        "multi_agent_v1.send_input",
+        "multi_agent_v1.spawn_agent",
+        "multi_agent_v1.wait_agent",
+        "mcp__nmg.nmg_get",
+        "mcp__nmg.nmg_lab",
+        "mcp__nmg.nmg_remember",
+        "mcp__nmg.nmg_search",
+        "mcp__nmg.nmg_state",
+        "get_goal",
+        "create_goal",
+        "update_goal"
+      ],
+      "hook": true,
+      "state": false,
+      "completeState": false,
+      "exact": true,
+      "skill": true,
+      "outputs": [
+        "call_probe_0",
+        "call_probe_1",
+        "call_probe_2",
+        "call_probe_3"
+      ]
+    },
+    {
+      "path": "/v1/responses",
+      "toolNames": [
+        "exec_command",
+        "write_stdin",
+        "list_mcp_resources",
+        "list_mcp_resource_templates",
+        "read_mcp_resource",
+        "request_user_input",
+        "view_image",
+        "multi_agent_v1.close_agent",
+        "multi_agent_v1.resume_agent",
+        "multi_agent_v1.send_input",
+        "multi_agent_v1.spawn_agent",
+        "multi_agent_v1.wait_agent",
+        "mcp__nmg.nmg_get",
+        "mcp__nmg.nmg_lab",
+        "mcp__nmg.nmg_remember",
+        "mcp__nmg.nmg_search",
+        "mcp__nmg.nmg_state",
+        "get_goal",
+        "create_goal",
+        "update_goal"
+      ],
+      "hook": true,
+      "state": false,
+      "completeState": false,
+      "exact": true,
+      "skill": true,
+      "outputs": [
+        "call_probe_0",
+        "call_probe_1",
+        "call_probe_2",
+        "call_probe_3",
+        "call_probe_4"
+      ]
+    },
+    {
+      "path": "/v1/responses",
+      "toolNames": [
+        "exec_command",
+        "write_stdin",
+        "list_mcp_resources",
+        "list_mcp_resource_templates",
+        "read_mcp_resource",
+        "request_user_input",
+        "view_image",
+        "multi_agent_v1.close_agent",
+        "multi_agent_v1.resume_agent",
+        "multi_agent_v1.send_input",
+        "multi_agent_v1.spawn_agent",
+        "multi_agent_v1.wait_agent",
+        "mcp__nmg.nmg_get",
+        "mcp__nmg.nmg_lab",
+        "mcp__nmg.nmg_remember",
+        "mcp__nmg.nmg_search",
+        "mcp__nmg.nmg_state",
+        "get_goal",
+        "create_goal",
+        "update_goal"
+      ],
+      "hook": true,
+      "state": false,
+      "completeState": false,
+      "exact": true,
+      "skill": true,
+      "outputs": [
+        "call_probe_0",
+        "call_probe_1",
+        "call_probe_2",
+        "call_probe_3",
+        "call_probe_4",
+        "call_probe_5"
+      ]
+    },
+    {
+      "path": "/v1/responses",
+      "toolNames": [
+        "exec_command",
+        "write_stdin",
+        "list_mcp_resources",
+        "list_mcp_resource_templates",
+        "read_mcp_resource",
+        "request_user_input",
+        "view_image",
+        "multi_agent_v1.close_agent",
+        "multi_agent_v1.resume_agent",
+        "multi_agent_v1.send_input",
+        "multi_agent_v1.spawn_agent",
+        "multi_agent_v1.wait_agent",
+        "mcp__nmg.nmg_get",
+        "mcp__nmg.nmg_lab",
+        "mcp__nmg.nmg_remember",
+        "mcp__nmg.nmg_search",
+        "mcp__nmg.nmg_state",
+        "get_goal",
+        "create_goal",
+        "update_goal"
+      ],
+      "hook": true,
+      "state": true,
+      "completeState": true,
+      "exact": true,
+      "skill": true,
+      "outputs": [
+        "call_probe_0",
+        "call_probe_1",
+        "call_probe_2",
+        "call_probe_3",
+        "call_probe_4",
+        "call_probe_5"
+      ]
+    }
+  ],
+  "rpcMethods": [
+    {
+      "method": "hello"
+    },
+    {
+      "method": "hello"
+    },
+    {
+      "method": "state",
+      "action": "read"
+    },
+    {
+      "method": "search"
+    },
+    {
+      "method": "sessionActiveGraph",
+      "action": "beginDisclosureTurn"
+    },
+    {
+      "method": "search"
+    },
+    {
+      "method": "sessionActiveGraph",
+      "action": "disclose"
+    },
+    {
+      "method": "get"
+    },
+    {
+      "method": "sessionActiveGraph",
+      "action": "disclose"
+    },
+    {
+      "method": "state",
+      "action": "write",
+      "operation": "enable"
+    },
+    {
+      "method": "state",
+      "action": "read",
+      "operation": "status"
+    },
+    {
+      "method": "state",
+      "action": "write",
+      "operation": "replace"
+    },
+    {
+      "method": "remember"
+    },
+    {
+      "method": "lab",
+      "action": "list"
+    },
+    {
+      "method": "hello"
+    },
+    {
+      "method": "hello"
+    },
+    {
+      "method": "state",
+      "action": "read"
+    },
+    {
+      "method": "search"
+    }
+  ],
+  "hookCatalog": [
+    {
+      "eventName": "preToolUse",
+      "source": "plugin",
+      "enabled": true,
+      "trustStatus": "untrusted"
+    },
+    {
+      "eventName": "postToolUse",
+      "source": "plugin",
+      "enabled": true,
+      "trustStatus": "untrusted"
+    },
+    {
+      "eventName": "sessionStart",
+      "source": "plugin",
+      "enabled": true,
+      "trustStatus": "untrusted"
+    },
+    {
+      "eventName": "userPromptSubmit",
+      "source": "plugin",
+      "enabled": true,
+      "trustStatus": "untrusted"
+    },
+    {
+      "eventName": "stop",
+      "source": "plugin",
+      "enabled": true,
+      "trustStatus": "untrusted"
+    }
+  ],
+  "hookEventCounts": {
+    "SessionStart": 2,
+    "UserPromptSubmit": 2,
+    "PreToolUse": 6,
+    "PostToolUse": 6,
+    "Stop": 2
+  },
+  "nativeSessionCount": 1,
+  "scope": "Private native CLI/app-server, generated source-bound plugin, fixed operator-selected NMG session, loopback Responses model. Hook trust bypass and MCP approval scoped to this fixture. No desktop GUI or production configuration changes."
+}

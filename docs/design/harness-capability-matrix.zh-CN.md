@@ -32,6 +32,10 @@
 
 这里 DSH 只有一个当前集成目标，即宿主包。较早的 `dsh/nmg-plugin.mjs` preset 是历史集成代码，不是第二个当前适配目标，不纳入对照与 Magpie 功能对齐计划。
 
+Codex 的[原生插件联调](../experiments/runtime/codex-plugin-capabilities-2026-11-13.zh-CN.md)
+已在私有宿主中验证打包 MCP 工具、Skill 和装配后的 hook 上下文。
+源码绑定 fixture 不作为另一个已交付适配器列，会话接线缺口仍与平台限制区分。
+
 ## 矩阵
 
 | 能力 | Pi | OpenCode | WorkBuddy | MCP | DSH | Kimi |

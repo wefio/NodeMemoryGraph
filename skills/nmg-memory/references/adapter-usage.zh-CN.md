@@ -118,10 +118,15 @@ Claude Code 使用项目 `.mcp.json`；其他客户端将这些 stdio 字段映�
 
 Codex 支持组合 Skill 和 MCP 服务的插件，受支持的桌面手动安装路径还提供生命周期 hook。
 Hook 的加载和信任由宿主控制，见[官方插件打包文档](https://developers.openai.com/plugins/build/plugins)。
-本 checkout 有可复用的 NMG MCP／Skill 组件，尚无专用 Codex 清单与 hook 绑定。
+本 checkout 有可复用的 NMG MCP／Skill 组件，尚无正式交付的专用 Codex 清单与 hook 绑定。
 当前 NMG 可走上面的 MCP／Skill 路径；交付缺口不表示 Codex 是 MCP-only 平台。
 后续插件包需要自己的加载、会话和 hook 测试，才能声明 NMG 自动能力，不能把 Claude 清单当作
 已验证的 Codex 安装入口。
+
+[Codex 原生联调](../../../docs/experiments/runtime/codex-plugin-capabilities-2026-11-13.zh-CN.md)
+已验证源码绑定的本地插件，包括五个工具、Skill 加载、hook 上下文和恢复后的状态。
+测试版本需要只使用兼容清单才能发现 hook，并显式启用／信任 hook、授权 MCP 工具。
+该实验没有交付生产插件或自动会话映射。
 
 ## WorkBuddy
 

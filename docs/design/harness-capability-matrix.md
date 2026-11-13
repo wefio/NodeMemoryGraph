@@ -40,6 +40,11 @@ DSH has one current integration target here: the host package. The older
 `dsh/nmg-plugin.mjs` preset is historical integration code, not a second current
 adapter target. It is excluded from the comparison and Magpie parity plan.
 
+Codex's [native plugin exercise](../experiments/runtime/codex-plugin-capabilities-2026-11-13.md)
+verifies packaged MCP tools, Skill and assembled hook context in private hosts.
+Its source-bound fixture is not another shipped adapter column. Missing NMG
+session wiring remains distinct from a platform restriction.
+
 ## Matrix
 
 | Capability | Pi | OpenCode | WorkBuddy | MCP | DSH | Kimi |

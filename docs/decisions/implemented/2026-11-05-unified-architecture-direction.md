@@ -64,6 +64,8 @@ The NMG usage Skill routes installation, use and activation checks for all shipp
 
 The initial [capability assembly](../../design/unified-architecture/adapter-capability-assembly.md) now executes declarations at the six existing plugin entry points. Shared tool registration, context, observation, attribution, delivery and reminder modules consume native bindings. Missing required bindings fail setup; endpoint/session checks remain in the operation paths. Cross-provider composition and automatic generation of the overall matrix remain targets.
 
+The [Codex native exercise](../../experiments/runtime/codex-plugin-capabilities-2026-11-13.md) verifies a source-bound plugin with MCP tools, Skill, assembled hook context and resumed state. It supplies scoped host evidence for native parity, not a released Codex adapter or a production cross-connection session mapping. Native Codex work therefore remains independent of Magpie deployment.
+
 ## Alternatives considered
 
 - SQLite snapshots as the object backend: useful for reusing database behavior, but does not satisfy the requested independent native-object path. Keep the current format as a migration source.

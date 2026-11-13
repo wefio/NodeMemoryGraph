@@ -36,6 +36,8 @@ NMG 使用 Skill 将全部已交付适配器及 CLI／MCP 连接的安装、使�
 
 初始[能力装配](../../design/unified-architecture/adapter-capability-assembly.zh-CN.md)已在六个现有插件入口执行声明。共享工具注册、上下文、观察、归因、投递及提醒模块消费原生绑定。必需绑定缺失会使启动失败，端点／会话检查仍在操作路径中。跨提供方组合及整体矩阵的自动生成仍是目标。
 
+[Codex 原生联调](../../experiments/runtime/codex-plugin-capabilities-2026-11-13.zh-CN.md)已验证源码绑定插件的 MCP 工具、Skill、装配后的 hook 上下文和恢复状态。这为原生能力补齐提供范围明确的宿主证据，不构成正式 Codex 适配器或生产跨连接会话映射，Codex 原生工作因此仍独立于 Magpie 部署。
+
 ## Alternatives considered
 
 - 强制把本地记忆和协作拆成两个数据库文件：没有物理隔离要求时会增加配置；默认在一个本地 SQLite 文件中保持独立所有权。
