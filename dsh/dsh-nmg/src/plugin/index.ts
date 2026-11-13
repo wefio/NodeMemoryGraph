@@ -1,3 +1,5 @@
+import { assembleAdapterCapabilities } from '../../../../src/integration/adapter-capability-assembly.ts'
+import { ADAPTER_CAPABILITY_CATALOG } from '../../../../src/integration/adapter-capability-catalog.ts'
 // NMG adapter for DeepSeek Harness — community-standard dual-face host package.
 //
 // HOST-ADAPTER BOUNDARY (shared layer rule): this package is a thin transport
@@ -34,19 +36,16 @@ import {
   searchParameterProperties,
 } from '../../../../src/integration/tool-contract.ts'
 import { stateRequiresBoardEvents } from '../../../../src/integration/state.ts'
-import { collectWakeCandidates, maybeBroadcastToWorld as broadcastWakeEntry } from '../../../../src/integration/board-wake.ts'
-import { enqueueBoardWakeBatch, reportHarnessActivity } from '../../../../src/integration/board-wake-batch.ts'
+import { maybeBroadcastToWorld as broadcastWakeEntry } from '../../../../src/integration/board-wake.ts'
 import { loadOrCreateAgentIdentity, renameAgentIdentity } from '../../../../src/integration/agent-identity.ts'
 import { compactSearchContext, memoryDisclosureEntries } from '../../../../src/integration/search-projection.ts'
 import {
-  prepareAutomaticRecallSurface,
   renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
 } from '../../../../src/integration/agent-surface.ts'
 import { loadPrompts, renderDisclosure } from '../../../../src/prompts/load.ts'
 import { RecallBudget } from '../../../../src/integration/recall-budget.ts'
-import { contextStateViews } from '../../../../src/integration/context-information.ts'
 import { prepareInformationOutput } from '../../../../src/integration/information-output.ts'
 import { DshNativeEvents } from './native-events.ts'
 import { contextOnlineLearningEnabled } from '../../../../src/lab/context-router-online.ts'
@@ -89,6 +88,8 @@ function estimateTokens(text) {
 }
 
 export function apply(ctx: Context): () => Promise<void> {
+  let prepareAutomaticRecallSurface: typeof import('../../../../src/integration/agent-surface.ts').prepareAutomaticRecallSurface
+  let contextStateViews: typeof import('../../../../src/integration/context-information.ts').contextStateViews
   const tools = ctx.tools
   const subprocess = ctx.subprocess
   const sandboxPolicy = ctx.sandboxPolicy
@@ -427,12 +428,10 @@ export function apply(ctx: Context): () => Promise<void> {
   const MAX_RECALL_HISTORY = 5 // per-session recall rounds kept for the floating indicator
   const openSearches = new Map() // sessionId -> Promise that resolves once the stash is written
   const maintainedState = new Map()
-  const nativeEvents = new DshNativeEvents(
-    async (method, params, signal) => daemonCall(method, params, signal),
-    workspaceRoot,
-    (agent) => !hostDisposed && !disposedAgents.has(agent) &&
-      (!lastAgents.has(String(agent.id)) || lastAgents.get(String(agent.id)) === agent),
-  )
+  let nativeEvents: DshNativeEvents
+  let collectWakeCandidates: typeof import('../../../../src/integration/board-wake.ts').collectWakeCandidates
+  let enqueueBoardWakeBatch: typeof import('../../../../src/integration/board-wake-batch.ts').enqueueBoardWakeBatch
+  let reportHarnessActivity: typeof import('../../../../src/integration/board-wake-batch.ts').reportHarnessActivity
 
   // Activity ledger for the right-pane tab: what the adapter did for a session —
   // automatic recalls, explicit searches, evidence reads. In-memory only; the
@@ -1741,19 +1740,44 @@ export function apply(ctx: Context): () => Promise<void> {
   // First poll on next tick (let the event loop settle).
   const initialWakeDisposer = coordinationEnabled ? ctx.timeout(boardWakeOnce, 0) : undefined
 
+  const capabilityAssembly = assembleAdapterCapabilities(ADAPTER_CAPABILITY_CATALOG.dsh.capabilities, {
+    tools: {
+      nmg_search: () => tools.register(searchTool),
+      nmg_get: () => tools.register(getTool),
+      nmg_remember: () => tools.register(rememberTool),
+      nmg_state: () => tools.register(stateTool),
+      nmg_lab: () => tools.register(labTool),
+    },
+    'automatic-recall': ({ prepare }) => {
+      prepareAutomaticRecallSurface = prepare
+      const remove = [
+        ctx.on('agent/inbox/inserted', onInboxInserted),
+        ctx.on('agent/inbox/claimed', onInboxClaimed),
+        ctx.on('agent/request', onRequest),
+      ]
+      return () => { for (const dispose of remove) if (typeof dispose === 'function') dispose() }
+    },
+    'state-context': ({ views }) => { contextStateViews = views },
+    'answer-attribution': ({ create }) => {
+      nativeEvents = new DshNativeEvents(
+        async (method, params, signal) => daemonCall(method, params, signal),
+        workspaceRoot,
+        (agent) => !hostDisposed && !disposedAgents.has(agent) &&
+          (!lastAgents.has(String(agent.id)) || lastAgents.get(String(agent.id)) === agent),
+        create(32),
+      )
+      return ctx.on('session/event', (session, event) => nativeEvents.event(session, event))
+    },
+    'board-delivery': ({ collect, enqueue, activity }) => {
+      collectWakeCandidates = collect
+      enqueueBoardWakeBatch = enqueue
+      reportHarnessActivity = activity
+    },
+    'tool-observation': ({ observe }) => ctx.on('tools/result', (exec, result) => nativeEvents.observe(exec, result, observe)),
+  })
   const disposers = [
-    tools.register(searchTool),
-    tools.register(getTool),
-    tools.register(rememberTool),
-    tools.register(labTool),
-    tools.register(stateTool),
     tools.register(daemonTool),
     contextDisposer,
-    ctx.on('agent/inbox/inserted', onInboxInserted),
-    ctx.on('agent/inbox/claimed', onInboxClaimed),
-    ctx.on('agent/request', onRequest),
-    ctx.on('tools/result', (exec, result) => nativeEvents.observe(exec, result)),
-    ctx.on('session/event', (session, event) => nativeEvents.event(session, event)),
     ctx.on('agent/disposed', onAgentDisposed),
   ]
   if (coordinationEnabled) {
@@ -1769,6 +1793,7 @@ export function apply(ctx: Context): () => Promise<void> {
   // Return the cordis dispose-time cleanup for this plugin contribution.
   return async () => {
     hostDisposed = true
+    await capabilityAssembly.dispose()
     for (const dispose of disposers) {
       if (typeof dispose === 'function') dispose()
     }

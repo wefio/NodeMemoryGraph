@@ -1,0 +1,292 @@
+{
+  "measuredAt": "2026-11-13T08:20:46.002Z",
+  "scope": "Installed DSH core services with synthetic Agent events and private OpenCode HTTP host with loopback model. No external provider or production owner changes.",
+  "nmgSourceSha256": {
+    "opencode-plugin/index.ts": "af2dd8be6d96ad8ceeb6a7ff88fd99717584a48ef90117c3c34ceaff6aaf725c",
+    "dsh/dsh-nmg/src/plugin/index.ts": "009687f3394ddcb2c2a41088e853d47728af947823ae6013ad40e3cffa68a59e",
+    "dsh/dsh-nmg/src/plugin/native-events.ts": "73e90c886abb8520e768b5cb2974ed74311a962cd2786b57e034681029d18880",
+    "src/integration/adapter-capability-assembly.ts": "b2bd978866a5e59ac6c5f10aa36c13a1b778bfd14e21227a8374e766c5b238fc",
+    "src/integration/adapter-capability-catalog.ts": "fb2bcb64315dee1460217df14b1f478ff7008a32f17987d7a15b5b26f124791d",
+    "src/integration/completion-nudge.ts": "2e90d5fa70692faf772bf3b1d1bcaa546d6ff8228b875a5ef2290bb84fe9072c",
+    "docs/experiments/runtime/native-plugin-probe.mjs": "ea633b98f9fbacdd6e9da1094a7778e5e5c1216380b55a66fce0f0bb5181eb64",
+    "docs/experiments/runtime/opencode-hook-exercise.mjs": "ab7afbae9d99fde31d7e11972d160242a86515459a4d7170651ed48e5c077fed",
+    "docs/experiments/runtime/dsh-nmg-exercise.mjs": "c39a8a685a53120729621b1e04e27ed470417f5315641c9eabc315a291fe3634",
+    "docs/experiments/runtime/native-nmg-fixture.mjs": "840fc39a61f96b7131a714a22096b72fa606ca52fd766a52f4231f7acf41b11f"
+  },
+  "dsh": {
+    "versions": {
+      "dsh-system-prompt": {
+        "version": "0.2.1-rc.2",
+        "sha256": "5bc21a42f4e307d3b7d02bc7a6a79175f7e2bff10c58dc110036f6985d10f926"
+      },
+      "dsh-tools": {
+        "version": "0.2.1-rc.2",
+        "sha256": "543d6336692ea37f7377dd32a00a17e1f6a2869f3ed82d1dc56d6c2291426ebd"
+      },
+      "dsh-agent": {
+        "version": "0.2.1-rc.2",
+        "sha256": "7b59cf82c2784c25bdce4e3e24e5e5303b02b9f1003efacf50255492d17baf8b"
+      }
+    },
+    "nmg": {
+      "checks": [
+        "NMG native tool execution",
+        "admission and real context assembly",
+        "complete maintained state",
+        "recall and exact get",
+        "completed-turn diagnostic attribution"
+      ],
+      "modelCalls": 0
+    },
+    "checks": [
+      "dynamic context refresh",
+      "context selection by supplied assembly identity",
+      "context disposal",
+      "final success/error tool-result notifications"
+    ],
+    "notTested": [
+      "native Agent lifecycle",
+      "desktop bundle loading",
+      "model/provider calls"
+    ]
+  },
+  "opencode": {
+    "binarySha256": "d0fff437ac139cfb59d715897602349baf6e7cab7ca67f6d7478788afaafa847",
+    "version": "2.0.32",
+    "plugin": {
+      "status": "registered",
+      "hooks": [
+        "session.prompt",
+        "session.context",
+        "session.compaction",
+        "tool.execute.after"
+      ],
+      "eventCounts": {
+        "prompt": 3,
+        "context": 4,
+        "execute.after": 5,
+        "compaction": 1
+      },
+      "toolCalls": 0
+    },
+    "exercise": {
+      "compactionHook": true,
+      "calls": [
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "stream",
+            "stream_options",
+            "store"
+          ],
+          "stateMarker": false,
+          "toolResult": false,
+          "maintainedState": false,
+          "exactEvidence": false,
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": true,
+          "toolResult": false,
+          "maintainedState": false,
+          "exactEvidence": false,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": true,
+          "toolResult": true,
+          "maintainedState": false,
+          "exactEvidence": true,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": true,
+          "toolResult": true,
+          "maintainedState": true,
+          "exactEvidence": true,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": false,
+          "toolResult": true,
+          "maintainedState": false,
+          "exactEvidence": true,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": false,
+          "toolResult": true,
+          "maintainedState": false,
+          "exactEvidence": true,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": true,
+          "toolResult": true,
+          "maintainedState": true,
+          "exactEvidence": true,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": true
+        }
+      ],
+      "outcome": "succeeded",
+      "nmgMethods": [
+        "hello",
+        "sessionActiveGraph",
+        "state",
+        "search",
+        "get"
+      ]
+    },
+    "notTested": [
+      "live external model/provider",
+      "fork/reset/reconnect generations and live idle wake",
+      "desktop frontend"
+    ]
+  }
+}

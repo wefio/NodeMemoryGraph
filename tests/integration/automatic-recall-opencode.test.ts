@@ -29,6 +29,7 @@ async function host(
   options: {
     snapshot?: () => SessionActiveGraphSnapshot | null;
     directory?: string;
+    deferTools?: boolean;
     lookup?: (input: {
       sessionID: string;
     }) => Promise<{ id: string; location: { directory: string } }>;
@@ -75,6 +76,7 @@ async function host(
   });
   const hooks = new Map<string, (event: unknown) => unknown>();
   const tools = new Map<string, unknown>();
+  const toolRegistrations: Array<() => void> = [];
   const dispose = await plugin.setup({
     location: options.directory ? { directory: options.directory } : undefined,
     session: {
@@ -86,11 +88,14 @@ async function host(
     tool: {
       async hook() {},
       async transform(edit) {
-        edit({
-          add(tool) {
-            tools.set(tool.name, tool);
-          },
-        });
+        const apply = () =>
+          edit({
+            add(tool) {
+              tools.set(tool.name, tool);
+            },
+          });
+        toolRegistrations.push(apply);
+        if (!options.deferTools) apply();
       },
     },
     event: { async *subscribe() {} },
@@ -116,8 +121,32 @@ async function host(
     hooks.get("context")!({ sessionID, messages });
     return messages;
   };
-  return { prompt, inject, hooks, requests, tools };
+  return {
+    prompt,
+    inject,
+    hooks,
+    requests,
+    tools,
+    activateTools: () => toolRegistrations.forEach((apply) => apply()),
+  };
 }
+
+test("OpenCode activates lifecycle capabilities before its deferred tool transformer runs", async (t) => {
+  const h = await host(t, async () => context("deferred"), { deferTools: true });
+  assert.equal(h.tools.size, 0);
+  assert.ok(h.hooks.has("prompt"));
+  await h.prompt("deferred");
+  assert.match(JSON.stringify(h.inject()), /SQLite/);
+  h.activateTools();
+  assert.deepEqual([...h.tools.keys()].sort(), [
+    "nmg_get",
+    "nmg_remember",
+    "nmg_search",
+    "nmg_state",
+  ]);
+  h.activateTools();
+  assert.equal(h.tools.size, 4);
+});
 
 test("OpenCode carries complete owner state without recall, budgets it and excludes cleared/foreign state", async (t) => {
   const runtime = new SessionActiveGraphRuntime();

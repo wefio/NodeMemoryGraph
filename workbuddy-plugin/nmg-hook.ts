@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { assembleAdapterCapabilities } from "../src/integration/adapter-capability-assembly.ts";
+import { ADAPTER_CAPABILITY_CATALOG } from "../src/integration/adapter-capability-catalog.ts";
 /**
  * NMG hook for WorkBuddy (Claude Code-compatible hooks, Git Bash on Windows).
  *
@@ -24,19 +26,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { compatibleLease, liveLease, rpcCall } from "../src/integration/lease-transport.ts";
-import { prepareAutomaticRecallSurface } from "../src/integration/agent-surface.ts";
 import { RecallBudget } from "../src/integration/recall-budget.ts";
 import {
-  collectWakeCandidates,
   readWakeConfig,
   wakeBudgetGate,
   type BoardWakeState,
 } from "../src/integration/board-wake.ts";
-import {
-  preparePendingBoardWake,
-  recordBoardWakeBatchDelivery,
-  reportHarnessActivity,
-} from "../src/integration/board-wake-batch.ts";
 import { compactSearchContext } from "../src/integration/search-projection.ts";
 import type { MemoryContext } from "../src/core/types.ts";
 
@@ -70,14 +65,29 @@ interface WakeEntry {
   createdAt?: string | null;
 }
 
-const NUDGE = [
-  "<nmg_nudge>",
-  "A code commit or task completion was just detected. NMG long-term memory is",
-  "available: you may recall relevant decisions (nmg_search) or save this",
-  "turn's key conclusions (nmg_remember) if useful. This is only a reminder;",
-  "it does not affect the current work.",
-  "</nmg_nudge>",
-].join("\n");
+let prepareAutomaticRecallSurface: typeof import("../src/integration/agent-surface.ts").prepareAutomaticRecallSurface;
+let prepareNudge: typeof import("../src/integration/completion-nudge.ts").promptCompletionNudge;
+let collectWakeCandidates: typeof import("../src/integration/board-wake.ts").collectWakeCandidates;
+let preparePendingBoardWake: typeof import("../src/integration/board-wake-batch.ts").preparePendingBoardWake;
+let recordBoardWakeBatchDelivery: typeof import("../src/integration/board-wake-batch.ts").recordBoardWakeBatchDelivery;
+let reportHarnessActivity: typeof import("../src/integration/board-wake-batch.ts").reportHarnessActivity;
+const capabilityAssembly = assembleAdapterCapabilities(
+  ADAPTER_CAPABILITY_CATALOG.workbuddy.capabilities,
+  {
+    "board-delivery": ({ collect, prepare, record, activity }) => {
+      collectWakeCandidates = collect;
+      preparePendingBoardWake = prepare;
+      recordBoardWakeBatchDelivery = record;
+      reportHarnessActivity = activity;
+    },
+    "automatic-recall": ({ prepare }) => {
+      prepareAutomaticRecallSurface = prepare;
+    },
+    "completion-nudge": ({ prepare }) => {
+      prepareNudge = prepare;
+    },
+  },
+);
 
 const RECALL_PREAMBLE = [
   "[NMG automatic recall] Long-term memory headers for the current user turn (injected, not yet used).",
@@ -85,9 +95,6 @@ const RECALL_PREAMBLE = [
   "the current tool session before nmg_get so exact disclosure gets a session-owned activeGraphId.",
   "Ignore headers that are irrelevant noise; no useful memory is a valid result.",
 ].join("\n");
-
-const COMPLETION_PATTERN =
-  /(?:完成了|收工|搞定|结束|提交了|committed|done|finished|wrapped\s+up)/iu;
 
 // Automatic-recall budget per harness-adapters.md: limit ≈ 13, maxTier 1,
 // graphHops 1, tiered disclosure.
@@ -114,21 +121,6 @@ function promptText(payload: HookPayload): string {
       .join("\n");
   }
   return "";
-}
-
-function isGitCommit(payload: HookPayload): boolean {
-  const command = payload?.tool_input?.command;
-  return typeof command === "string" && /\bgit\s+commit\b/u.test(command);
-}
-
-function shouldNudge(payload: HookPayload): boolean {
-  const event = payload?.hook_event_name ?? payload?.event;
-  if (event === "UserPromptSubmit") return COMPLETION_PATTERN.test(promptText(payload));
-  if (event === "PreToolUse") {
-    const toolName = payload?.tool_name ?? "";
-    return /^(bash|shell|powershell)$/iu.test(toolName) && isGitCommit(payload);
-  }
-  return false;
 }
 
 function isPromptSubmit(payload: HookPayload): boolean {
@@ -334,7 +326,12 @@ export async function runHook(
   const coordinationEnabled = !FALSE_LIKE.has(
     (environment.NMG_ENABLE_COORDINATION ?? "").trim().toLowerCase(),
   );
-  if (shouldNudge(payload)) output.push(NUDGE);
+  await capabilityAssembly.ready;
+  const nudge = prepareNudge({
+    ...payload,
+    tool_name: payload.tool_name === "powershell" ? "shell" : payload.tool_name,
+  });
+  if (nudge) output.push(nudge);
   if (isPromptSubmit(payload)) {
     const recall = await recallHeaders(payload, dir).catch(() => "");
     if (recall) output.push(recall);

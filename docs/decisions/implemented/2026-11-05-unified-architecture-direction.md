@@ -62,7 +62,7 @@ independent of gateway deployment. Installed OpenCode activation, hooks, Code Mo
 
 The NMG usage Skill routes installation, use and activation checks for all shipped adapters and CLI/MCP connections to an [adapter operating guide](../../../skills/nmg-memory/references/adapter-usage.md). Adapter development stays in its existing contract reference. This keeps operating instructions aligned with verified native paths without presenting Magpie's draft binding as an installed prerequisite.
 
-The draft [capability assembly candidate](../../design/unified-architecture/adapter-capability-assembly.md) explores implementation-backed declarations that could drive shared wiring and generated coverage, reducing manual adapter omissions. It does not replace the current bindings or establish an assembly runtime.
+The initial [capability assembly](../../design/unified-architecture/adapter-capability-assembly.md) now executes declarations at the six existing plugin entry points. Shared tool registration, context, observation, attribution, delivery and reminder modules consume native bindings. Missing required bindings fail setup; endpoint/session checks remain in the operation paths. Cross-provider composition and automatic generation of the overall matrix remain targets.
 
 ## Alternatives considered
 

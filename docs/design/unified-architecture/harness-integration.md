@@ -31,7 +31,7 @@ Preserve the [adapter recipe](../../../skills/nmg-memory/references/harness-adap
 
 The [capability matrix](../harness-capability-matrix.md) owns delivered coverage. It gains pi durable or Magpie columns only when adapters are implemented with scoped evidence; the target design is not a claim of shipped coverage.
 
-Candidate: [declaration-driven adapter capability assembly](adapter-capability-assembly.md).
+[Capability assembly: implemented slice and composition target](adapter-capability-assembly.md).
 
 ## Magpie gateway binding
 

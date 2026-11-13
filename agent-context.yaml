@@ -310,6 +310,19 @@ routes:
       blocking: [check, test:product, build]
       advisory: []
 
+  - id: adapter-capability-assembly
+    paths:
+      - src/integration/adapter-capability-assembly.ts
+      - src/integration/adapter-capability-catalog.ts
+      - src/integration/completion-nudge.ts
+    owners:
+      - docs/design/unified-architecture/adapter-capability-assembly.md
+    tests:
+      [tests/integration/adapter-capability-assembly.test.ts]
+    verify:
+      blocking: [check, test:product, build]
+      advisory: []
+
   - id: harness-connection
     paths:
       - src/integration/harness-connection.ts

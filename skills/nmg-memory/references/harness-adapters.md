@@ -10,6 +10,18 @@ Per-adapter coverage of the capability surface is compared in the
 Read it when developing or extending an adapter. For installation, loading and
 daily use of any shipped connection, read [adapter usage](adapter-usage.md).
 
+## Shared capability assembly
+
+Use `ADAPTER_CAPABILITY_CATALOG` and `assembleAdapterCapabilities` for migrated
+features; the [assembly contract](../../../docs/design/unified-architecture/adapter-capability-assembly.md#executable-assembly)
+owns supported modules, readiness and cleanup. Bind native schema registrations
+and lifecycle interfaces to shared services. The memory tool group requires
+search, get and remember together; do not register an incomplete group manually.
+Keep host event normalization, session fences, cancellation and acceptance
+receipts in the native binding. Await `ready` for asynchronous host registration,
+and return cleanup callbacks where the host supplies them. Assembly diagnostics
+are not evidence of real hook activation or final provider delivery.
+
 ## The stable contract
 
 An adapter is **thin**: it never imports the NMG core store

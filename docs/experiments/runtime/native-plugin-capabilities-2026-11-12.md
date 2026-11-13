@@ -37,6 +37,23 @@ The SDK does not apply `options.namespace` to added tool names. NMG therefore re
 
 The installed run exercises prompt, context, tool completion and manual compaction hooks. After native compaction, the next prompt carries the current complete working state to the loopback receiver. Cancellation and stale-work rejection also have fixture coverage. Interrupted/automatic compaction, fork and reconnect sequences remain unverified.
 
+## Capability assembly recheck, 2026-11-13
+
+The declaration-driven assembly change was rerun with the same installed host
+versions and private loopback exercise. The
+[retained receipt](artifacts/native-plugin-capabilities-2026-11-12/capability-assembly-2026-11-13.json)
+adds hashes of the assembly, catalog and shared nudge modules. DSH native tools,
+context/state and completed-turn attribution pass. OpenCode tools, exact reads,
+state carriage and manual-compaction recovery reach the loopback receiver.
+
+The first attempt exposed a registration-order defect: OpenCode stores its tool
+transform callback and invokes it per request, so waiting for that callback during
+setup prevented lifecycle assembly. Assembly now completes before registering
+the transformer; the transformer only publishes already-selected native tool
+definitions. A deferred-transform regression test fails before this fix and
+passes after it. This recheck retains the scope limits below and adds no live
+provider, idle-wake, fork or reconnect evidence.
+
 ## Restrictions and remaining gates
 
 | Boundary | Confirmed restriction or remaining question |

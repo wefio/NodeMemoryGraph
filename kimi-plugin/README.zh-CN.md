@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) · [术语](README.terms.yaml)
 
-给 Kimi Code 的 NMG hook——补 Kimi 缺失的事件钩子。三项能力：
+NMG 使用 Kimi Code 的事件 hook 提供三项能力：
 
 1. **写入提醒**：检测到 `git commit` 或完成类关键词时，把一条弱提醒附加进上下文，
    提示 agent 可以用 `nmg_remember` 落库本轮结论。只是提醒，不强制写入
@@ -18,8 +18,8 @@
    上下文，也不会启动 daemon；因此 MCP 的 `nmg_board discover` 可以找到仅由
    hook 在线的 Kimi 会话。
 
-Kimi 侧的工具面（`nmg_search` / `nmg_get` / `nmg_remember` / `nmg_board`）由
-MCP server 提供（`.mcp.json` 里的 `nmg` 条目），本目录只补事件钩子。
+Kimi 的显式记忆／状态工具由另行连接的 MCP server 提供。
+黑板操作使用 `nmg_state space=board`，本目录提供事件 hook。
 
 ## 唤醒开关
 
@@ -38,7 +38,7 @@ MCP server 提供（`.mcp.json` 里的 `nmg` 条目），本目录只补事件�
 
 ## 文件
 
-- `nmg-hook.mjs` — 零依赖 hook 脚本，处理两个**可影响主流程**的事件：
+- `nmg-hook.mjs` — 使用 NMG checkout 共享能力装配的 hook 脚本，需保留完整 checkout 并使用 Node.js ≥ 22.19，处理两个**可影响主流程**的事件：
   - `UserPromptSubmit`：完成类关键词（完成了/收工/committed/done…）+ 黑板唤醒轮询；
   - `PreToolUse`（matcher `Bash`）：命令里出现 `git commit`。
 

@@ -1,10 +1,6 @@
 import { AgentAttributionFlow } from '../../../../src/integration/agent-attribution.ts'
-import {
-  isMemorableToolResult,
-  isSuccessfulCommit,
-  messageText,
-  summarizeToolResult,
-} from '../../../../src/integration/tool-observation.ts'
+import { messageText } from '../../../../src/integration/tool-observation.ts'
+import { observeAdapterToolResult } from '../../../../src/integration/adapter-capability-assembly.ts'
 import { deriveAnswerOverlapMemoryIds } from '../../../../src/core/feedback.ts'
 import type { MemoryContext } from '../../../../src/core/types.ts'
 
@@ -18,7 +14,7 @@ type Turn = { number: number; prompt: string; answer: string; ended: boolean }
 
 /** DSH event translation; observation selection and attribution stay shared. */
 export class DshNativeEvents {
-  readonly #attribution = new AgentAttributionFlow(32)
+  readonly #attribution: AgentAttributionFlow
   readonly #turns = new Map<string, Turn>()
   readonly #writes = new Map<string, Promise<void>>()
   readonly #nudges = new Set<string>()
@@ -26,7 +22,8 @@ export class DshNativeEvents {
   readonly #projectDir: string
   readonly #live: (agent: Agent) => boolean
 
-  constructor(invoke: Invoke, projectDir: string, live: (agent: Agent) => boolean) {
+  constructor(invoke: Invoke, projectDir: string, live: (agent: Agent) => boolean, attribution = new AgentAttributionFlow(32)) {
+    this.#attribution = attribution
     this.#invoke = invoke
     this.#projectDir = projectDir
     this.#live = live
@@ -49,6 +46,7 @@ export class DshNativeEvents {
   observe(
     exec: { agent?: Agent; name?: string; arguments?: unknown },
     result: { isError?: boolean; content?: unknown },
+    observe = observeAdapterToolResult,
   ): Promise<void> {
     const agent = exec?.agent
     if (!agent?.id || !this.#live(agent) || String(exec.name).startsWith('nmg_'))
@@ -60,23 +58,14 @@ export class DshNativeEvents {
       isError: result?.isError === true,
       content: result?.content,
     }
-    if (isSuccessfulCommit(observation)) this.#nudges.add(String(agent.id))
-    if (!isMemorableToolResult(observation)) return Promise.resolve()
-    const summary = summarizeToolResult(observation)
     return this.#enqueue(String(agent.id), async () => {
       if (!this.#live(agent)) return
-      await this.#invoke(
-        'sessionActiveGraph',
-        {
-          action: 'observe',
-          sessionId: String(agent.id),
-          sourceId: observation.toolName,
-          sourceKind: observation.isError ? 'tool_error' : 'tool_result',
-          nodeId: summary.nodeName,
-          statement: summary.statement,
-        },
-        AbortSignal.timeout(2000),
-      )
+      await observe({
+        sessionId: String(agent.id),
+        event: observation,
+        onCommit: () => { this.#nudges.add(String(agent.id)) },
+        invoke: (method, params) => this.#invoke(method, params, AbortSignal.timeout(2000)),
+      })
     })
   }
 

@@ -6,6 +6,15 @@ NMG 为各类 Harness 提供轻量适配器（Pi、Claude Code MCP、DeepSeek Ha
 
 仓库同时提供 `opencode-plugin/` 中的 OpenCode v2 薄适配器。跨宿主的具体能力覆盖见[适配器能力矩阵](../../../docs/design/harness-capability-matrix.zh-CN.md)，不能从存在插件推断所有能力都已端到端接入。
 
+## 共享能力装配
+
+已迁移的功能使用 `ADAPTER_CAPABILITY_CATALOG` 和 `assembleAdapterCapabilities`，
+[装配合同](../../../docs/design/unified-architecture/adapter-capability-assembly.zh-CN.md#可执行装配)
+负责模块、就绪及清理约定。将原生 schema 注册和生命周期接口绑定到共享服务。
+记忆工具组同时要求 search、get、remember，不再手工注册不完整的工具组。
+原生绑定保留事件转换、会话栅栏、取消及接受回执。异步注册等待 `ready`，
+宿主提供清理函数时将其返回。装配诊断不证明真实 hook 激活或最终 provider 投递。
+
 ## 稳定合同
 
 适配器应保持**轻量**：不得导入 NMG 核心存储（`src/core`、`src/cli/service.ts`）。它通过 HTTP JSON-RPC 与运行中的 daemon 通信：读取 `<data-dir>/nmg.sqlite.server.json`，再携带 `Authorization: Bearer <token>` 发送 `{ jsonrpc: '2.0', method, params, id }`。仅对宿主合同明确支持的操作，才可在 daemon 不可用时回退到一次性 CLI（`node bin/nmg.mjs`）。适配器不自行接管 daemon 生命周期；daemon 运行时，应避免每次调用都启动进程（Node 启动约需 180 ms）。

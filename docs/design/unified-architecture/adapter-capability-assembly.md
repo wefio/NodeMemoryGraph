@@ -2,16 +2,61 @@
 
 [中文](adapter-capability-assembly.zh-CN.md) · [Terms](adapter-capability-assembly.terms.yaml)
 
-**Status:** draft
+**Status:** current
 **Authority:** [Harness integration](harness-integration.md)
 
 ## Purpose and scope
 
-This candidate lets a thin adapter acquire shared NMG behavior by providing
+This assembly lets a thin adapter acquire shared NMG behavior by providing
 executable host bindings and selecting capabilities. It addresses omitted tool
 registration, repeated lifecycle wiring and incomplete adapter inventories.
-It is a design proposal, not the current plugin loading contract or a new runtime.
-Names and the exact declaration format remain open to adjustment.
+The executable initial slice below runs inside existing plugin entry points.
+It adds no scheduler or plugin loader. The broader composition design and names
+remain open to adjustment.
+
+## Executable assembly
+
+[`adapter-capability-catalog.ts`](../../../src/integration/adapter-capability-catalog.ts)
+declares the migrated features of all six current entry points. Each consumes
+its declaration through
+[`assembleAdapterCapabilities`](../../../src/integration/adapter-capability-assembly.ts)
+and supplies executable native bindings. This catalog describes assembly coverage;
+the [host matrix](../harness-capability-matrix.md) retains overall host coverage.
+
+The shared modules install the memory tool group (`search`, `get`, `remember`),
+state and Lab tools, recall preparation, owner-state projection, tool-result
+observation, diagnostic attribution, board delivery and passive completion nudges.
+Each entry selects only its implemented bindings. Kimi currently assembles its
+shared nudge; its older board poller is still native code. MCP assembles explicit
+tools and gains no automatic lifecycle. Codex can reuse that MCP component;
+there is still no dedicated NMG Codex package. Magpie remains a separate target.
+
+The assembler validates every required binding before registration. Missing
+tools, missing lifecycle bindings and duplicate capabilities fail setup. Disabled
+modules are explicit and execute no binding. Existing native schemas and tool
+order are retained within a group. Installers can return native cleanup callbacks
+or promises; asynchronous hosts await `ready`. Failure releases accepted
+registrations, including callbacks accepted after disposal. `dispose()` releases
+registrations once, and `describe()` reports pending, assembled, disabled, failed
+or disposed states. These are assembly states, not live-hook or enabled-state
+certificates. Endpoint methods, session ownership and writer fences are still
+checked by the existing operation paths.
+
+Native admission, cancellation, deadlines, generation fences, committed-answer
+boundaries and enqueue receipts remain in their adapters. Pi/OpenCode/DSH call
+the same assembled observation implementation after normalizing native events.
+DSH retains its per-session queue and endpoint liveness checks. Preparation does
+not write a delivery receipt or authorize a memory claim.
+
+The entry-point contract test discovers conventional public plugin entries,
+resolves the Pi manifest wrapper and checks DSH/MCP entries against the catalog.
+It also verifies that each descriptor is consumed by its entry point. Controlled
+host and MCP regression tests exercise actual tools and context behavior. This
+change does not upgrade a running host. The retained
+[native recheck](../../experiments/runtime/native-plugin-capabilities-2026-11-12.md#capability-assembly-recheck-2026-11-13)
+exercises installed DSH services and a private OpenCode HTTP host with a loopback
+model, including deferred tool transformation and compaction recovery. It does
+not cover full DSH Agent execution, production providers or live idle wake.
 
 The shared layer already has tool/action contracts, Agent Surface rendering,
 `SessionRecallFlow`, `RecallBudget`, context preparation and endpoint/session
@@ -75,10 +120,9 @@ into purported idle wake.
 
 ## Inventory, usage guidance and checks
 
-The candidate catalog is the implementation-backed source for adapter feature
-tables and machine-readable diagnostics. Each shipped entry point registers its
-descriptor; package/entry-point checks detect missing catalog registration.
-Generated capability summaries link to maintained host setup instructions and
+The catalog supplies declarations and machine-readable assembly diagnostics.
+Automatic generation of the overall capability matrix remains a target.
+Generated capability summaries should link to maintained host setup instructions and
 scoped validation evidence. Installation commands and host-specific caveats
 remain at their current owners rather than being inferred from capability names.
 
@@ -89,10 +133,10 @@ Real host activation remains a separate proof from descriptor/type validation.
 An unregistered adapter must surface as an inventory error, not disappear from a
 matrix because an author forgot a column.
 
-An initial slice can share explicit tool registration across Pi, MCP and
-OpenCode, then add admission/state flows and further hosts. Keep the current
-adapters usable during migration and require scoped equivalence evidence before
-moving each existing behavior to assembly. Automatic matrix generation and the
-assembly runtime are still unimplemented; the current
+The remaining work is cross-provider session composition, per-operation effect
+ownership, automatic matrix generation and migration of legacy local policies
+such as Kimi's board poller. Those are not implied by local assembly. Keep current
+adapters usable and require scoped equivalence evidence before migrating further
+behavior. The current
 [usage guide](../../../skills/nmg-memory/references/adapter-usage.md) documents
 the actual connections.

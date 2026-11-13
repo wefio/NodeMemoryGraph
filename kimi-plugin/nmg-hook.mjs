@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { assembleAdapterCapabilities } from "../src/integration/adapter-capability-assembly.ts";
+import { ADAPTER_CAPABILITY_CATALOG } from "../src/integration/adapter-capability-catalog.ts";
 /**
  * NMG hook for Kimi Code CLI.
  *
@@ -40,17 +42,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const NUDGE = [
-  "<nmg_nudge>",
-  "A code commit or task completion was just detected. NMG long-term memory is",
-  "available: you may recall relevant decisions (nmg_search) or save this",
-  "turn's key conclusions (nmg_remember) if useful. This is only a reminder;",
-  "it does not affect the current work.",
-  "</nmg_nudge>",
-].join("\n");
+let prepareNudge;
+const capabilityAssembly = assembleAdapterCapabilities(ADAPTER_CAPABILITY_CATALOG.kimi.capabilities, {
+  "completion-nudge": ({ prepare }) => { prepareNudge = prepare; },
+});
 
-const COMPLETION_PATTERN =
-  /(?:完成了|收工|搞定|结束|提交了|committed|done|finished|wrapped\s+up)/iu;
+
+
 
 const WORLD_BOARD_ID = "default";
 const COORDINATION_ENABLED = !new Set(["0", "false", "off", "no"]).has(
@@ -85,21 +83,6 @@ function promptText(payload) {
       .join("\n");
   }
   return "";
-}
-
-function isGitCommit(payload) {
-  const command = payload?.tool_input?.command;
-  return typeof command === "string" && /\bgit\s+commit\b/u.test(command);
-}
-
-function shouldNudge(payload) {
-  const event = payload?.hook_event_name ?? payload?.event;
-  if (event === "UserPromptSubmit") return COMPLETION_PATTERN.test(promptText(payload));
-  if (event === "PreToolUse") {
-    const toolName = payload?.tool_name ?? "";
-    return /^(bash|shell)$/iu.test(toolName) && isGitCommit(payload);
-  }
-  return false;
 }
 
 function isPromptSubmit(payload) {
@@ -303,9 +286,11 @@ async function runFromStdin() {
   try {
     const payload = JSON.parse(input || "{}");
     const output = [];
-    if (shouldNudge(payload)) {
+    await capabilityAssembly.ready;
+    const nudge = prepareNudge(payload);
+    if (nudge) {
       // Plain stdout text is attached to the context; exit 0 = allow.
-      output.push(NUDGE);
+      output.push(nudge);
     }
     if (COORDINATION_ENABLED && isPromptSubmit(payload)) {
       await reportAgentPresence(payload).catch(() => false);

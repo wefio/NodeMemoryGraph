@@ -34,7 +34,7 @@ DSH 目标是当前宿主包，历史 preset 不作为并行功能对齐目标�
 
 NMG 使用 Skill 将全部已交付适配器及 CLI／MCP 连接的安装、使用和激活检查指向[适配器使用指南](../../../skills/nmg-memory/references/adapter-usage.zh-CN.md)，适配器开发仍由既有合同参考负责。操作指引据此对齐已验证的原生路径，不把 Magpie 草案绑定当成已安装的先决条件。
 
-[能力装配候选草案](../../design/unified-architecture/adapter-capability-assembly.zh-CN.md)探索由可执行实现支撑的声明驱动共享接线和覆盖情况生成，减少手工遗漏适配器。它不替换当前绑定，也不构成装配运行时已交付。
+初始[能力装配](../../design/unified-architecture/adapter-capability-assembly.zh-CN.md)已在六个现有插件入口执行声明。共享工具注册、上下文、观察、归因、投递及提醒模块消费原生绑定。必需绑定缺失会使启动失败，端点／会话检查仍在操作路径中。跨提供方组合及整体矩阵的自动生成仍是目标。
 
 ## Alternatives considered
 

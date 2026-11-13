@@ -1,3 +1,8 @@
+import {
+  assembleAdapterCapabilities,
+  type AdapterCapabilityBindings,
+} from "../src/integration/adapter-capability-assembly.ts";
+import { ADAPTER_CAPABILITY_CATALOG } from "../src/integration/adapter-capability-catalog.ts";
 // NMG adapter for OpenCode (v2 plugin contract).
 //
 // HOST-ADAPTER BOUNDARY (shared layer rule): this plugin is a thin transport.
@@ -22,12 +27,11 @@
 //   learned from `session.created` events (data.location.directory).
 
 import {
-  AgentAttributionFlow,
+  type AgentAttributionFlow,
   extractAnswerText,
   extractPromptText,
 } from "../src/integration/agent-attribution.ts";
 import {
-  prepareAutomaticRecallSurface,
   renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
@@ -35,16 +39,7 @@ import {
   type TaskBoardDirectoryEntry,
   type TaskBoardSurfaceResult,
 } from "../src/integration/agent-surface.ts";
-import {
-  collectWakeCandidates,
-  loadWakeState,
-  readWakeConfig,
-  wakeBudgetGate,
-} from "../src/integration/board-wake.ts";
-import {
-  deliverBoardWakeBatch,
-  reportHarnessActivity,
-} from "../src/integration/board-wake-batch.ts";
+import { loadWakeState, readWakeConfig, wakeBudgetGate } from "../src/integration/board-wake.ts";
 import {
   configuredAutoRecallLimit,
   configuredAutoRecallTier,
@@ -61,7 +56,6 @@ import {
 import { SessionRecallFlow } from "../src/integration/session-recall-flow.ts";
 import { RecallBudget } from "../src/integration/recall-budget.ts";
 import { prepareInformationOutput } from "../src/integration/information-output.ts";
-import { contextStateViews } from "../src/integration/context-information.ts";
 import type { PreparedInformationOutput } from "../src/core/information-view.ts";
 import { SessionTaskWindow } from "../src/integration/session-task-window.ts";
 import {
@@ -79,12 +73,7 @@ import {
   searchParameterProperties,
 } from "../src/integration/tool-contract.ts";
 import type { TaskBoardToolResult } from "../src/integration/tool-contract.ts";
-import {
-  isMemorableToolResult,
-  isSuccessfulCommit,
-  messageText,
-  summarizeToolResult,
-} from "../src/integration/tool-observation.ts";
+import { messageText } from "../src/integration/tool-observation.ts";
 import type { MemoryContext, MemoryTier, RememberResult } from "../src/core/types.ts";
 import { TASK_BOARD_VERDICTS, WORLD_BOARD_ID } from "../src/core/types.ts";
 import { deriveAnswerOverlapMemoryIds } from "../src/core/feedback.ts";
@@ -225,13 +214,31 @@ function normalizeToolName(tool: string): string {
 export default {
   id: "nmg",
   setup: async (ctx: PluginContext): Promise<(() => Promise<void>) | undefined> => {
+    let prepareAutomaticRecallSurface: typeof import("../src/integration/agent-surface.ts").prepareAutomaticRecallSurface;
+    let contextStateViews: typeof import("../src/integration/context-information.ts").contextStateViews;
+    let collectWakeCandidates: typeof import("../src/integration/board-wake.ts").collectWakeCandidates;
+    let deliverBoardWakeBatch: typeof import("../src/integration/board-wake-batch.ts").deliverBoardWakeBatch;
+    let reportHarnessActivity: typeof import("../src/integration/board-wake-batch.ts").reportHarnessActivity;
+    const capabilityBindings: AdapterCapabilityBindings = {
+      "answer-attribution": ({ create }) => {
+        attribution = create(32);
+      },
+      "board-delivery": ({ collect, deliver, activity }) => {
+        collectWakeCandidates = collect;
+        deliverBoardWakeBatch = deliver;
+        reportHarnessActivity = activity;
+      },
+      "state-context": ({ views }) => {
+        contextStateViews = views;
+      },
+    };
     const dataDir = resolveNmgDataDir();
     const invoke = (method: string, params: unknown) =>
       invokeDaemon(method, params as Record<string, unknown>, { dataDir });
 
     const taskWindow = new SessionTaskWindow();
     const recallFlow = new SessionRecallFlow();
-    const attribution = new AgentAttributionFlow(32);
+    let attribution: AgentAttributionFlow;
     // Injection pass: prepared at prompt admission and delivered by context
     // requests. The staged body RETAINS for the whole execution — provider
     // retries rebuild the request context without the previously pushed
@@ -413,22 +420,27 @@ export default {
       }
     };
 
-    await ctx.session.hook("prompt", async (raw: PromptHookEvent) => {
-      const sessionId = String((raw as PromptHookEvent)?.sessionID ?? "");
-      if (sessionId) {
-        // OpenCode has no session.created on the plugin stream; a missing row
-        // is a normal root session until a parentID event upgrades it (the
-        // merge in rememberSession is sticky toward child=true).
-        const existing = sessions.get(sessionId) ?? {
-          projectDir: "",
-          child: false,
-          lastPromptAt: 0,
-          lastIdleAt: 0,
-        };
-        sessions.set(sessionId, { ...existing, lastPromptAt: Date.now() });
-      }
-      if (sessionId) await preparePromptRecall(raw as PromptHookEvent, sessionId);
-    });
+    capabilityBindings["automatic-recall"] = ({ prepare }) => {
+      prepareAutomaticRecallSurface = prepare;
+      return ctx.session
+        .hook("prompt", async (raw: PromptHookEvent) => {
+          const sessionId = String((raw as PromptHookEvent)?.sessionID ?? "");
+          if (sessionId) {
+            // OpenCode has no session.created on the plugin stream; a missing row
+            // is a normal root session until a parentID event upgrades it (the
+            // merge in rememberSession is sticky toward child=true).
+            const existing = sessions.get(sessionId) ?? {
+              projectDir: "",
+              child: false,
+              lastPromptAt: 0,
+              lastIdleAt: 0,
+            };
+            sessions.set(sessionId, { ...existing, lastPromptAt: Date.now() });
+          }
+          if (sessionId) await preparePromptRecall(raw as PromptHookEvent, sessionId);
+        })
+        .then(() => undefined);
+    };
 
     await ctx.session.hook("context", (raw: ContextHookEvent) => {
       const sessionId = String(raw?.sessionID ?? "");
@@ -481,33 +493,27 @@ export default {
     });
 
     // ---- Tool observations + commit nudge (execute.after) -----------------
-    const observeToolResult = async (event: AfterToolEvent): Promise<void> => {
-      const sessionId = String(event?.sessionID ?? "");
-      const toolId = String(event?.tool ?? "");
-      if (!sessionId || !toolId) return;
-      if (toolId.startsWith("nmg_")) return; // handled inside the tool executes
-      const observation = {
-        toolName: normalizeToolName(toolId),
-        isError: event?.status === "error",
-        content: event?.result?.content,
-        input: event?.input,
-      };
-      if (isSuccessfulCommit(observation)) commitNudges.add(sessionId);
-      if (!isMemorableToolResult(observation)) return;
-      const summary = summarizeToolResult(observation);
-      await invoke("sessionActiveGraph", {
-        action: "observe",
-        sessionId,
-        sourceId: observation.toolName,
-        sourceKind: observation.isError ? "tool_error" : "tool_result",
-        nodeId: summary.nodeName,
-        statement: summary.statement,
-      }).catch(() => undefined);
-    };
-
-    await ctx.tool.hook("execute.after", (raw: AfterToolEvent) => {
-      void observeToolResult(raw as AfterToolEvent).catch(() => undefined);
-    });
+    capabilityBindings["tool-observation"] = ({ observe }) =>
+      ctx.tool
+        .hook("execute.after", (event: AfterToolEvent) => {
+          const sessionId = String(event?.sessionID ?? "");
+          const toolId = String(event?.tool ?? "");
+          if (!sessionId || !toolId) return;
+          void observe({
+            sessionId,
+            event: {
+              toolName: normalizeToolName(toolId),
+              isError: event?.status === "error",
+              content: event?.result?.content,
+              input: event?.input,
+            },
+            invoke,
+            onCommit: () => {
+              commitNudges.add(sessionId);
+            },
+          }).catch(() => undefined);
+        })
+        .then(() => undefined);
 
     // ---- Shared disclosure projection ------------------------------------
     const disclosedContext = async (
@@ -1232,11 +1238,33 @@ export default {
       },
     });
 
+    // The SDK retains transform callbacks and applies them per request. Resolve
+    // shared capabilities during setup; the callback only publishes native tools.
+    const toolDefinitions: ToolRegistration[] = [];
+    const capabilityAssembly = assembleAdapterCapabilities(
+      ADAPTER_CAPABILITY_CATALOG.opencode.capabilities,
+      {
+        ...capabilityBindings,
+        tools: {
+          nmg_search: () => {
+            toolDefinitions.push({ ...searchTool(), name: "nmg_search" });
+          },
+          nmg_get: () => {
+            toolDefinitions.push({ ...getTool(), name: "nmg_get" });
+          },
+          nmg_remember: () => {
+            toolDefinitions.push({ ...rememberTool(), name: "nmg_remember" });
+          },
+          nmg_state: () => {
+            toolDefinitions.push({ ...stateTool(), name: "nmg_state" });
+          },
+        },
+      },
+    );
+    await capabilityAssembly.ready;
     let registered: Promise<unknown>;
     const registerTools = (editor: ToolEditor): void => {
-      for (const tool of [searchTool(), getTool(), rememberTool(), stateTool()]) {
-        editor.add({ ...tool, name: `nmg_${tool.name}` });
-      }
+      for (const definition of toolDefinitions) editor.add(definition);
     };
     try {
       // Names are explicit: this SDK does not apply an options.namespace prefix.
@@ -1422,6 +1450,7 @@ export default {
       }
       sessions.clear();
       scopedSessions.clear();
+      await capabilityAssembly?.dispose();
     };
   },
 };

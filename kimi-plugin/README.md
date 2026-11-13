@@ -2,13 +2,13 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
 
-NMG hooks for Kimi Code fill in event hooks that Kimi lacks. They provide three functions:
+NMG uses Kimi Code's event hooks for three functions:
 
 1. **Write reminder:** When `git commit` or completion-like keywords are detected, append a soft reminder to the context suggesting that the agent can use `nmg_remember` to save the outcome of the current turn. This is a reminder, not a forced write (equivalent to the completion nudge in the Pi extension).
 2. **Degraded board wake:** On every `UserPromptSubmit`, poll the daemon's Task Board—the world channel and channels subscribed to by this session—and append a notification when a new open entry has not already been delivered. The Pi extension uses a background timer and idle detection; Kimi hooks have no background timer, so a notification arrives on the "next user message," not immediately. The protocol matches Pi: skip the agent's own echoes, claimed entries, and broadcast entries; deduplicate with `deliveryCheck`; and write a `recordDelivery` receipt after notification so the same entry does not interrupt again.
 3. **System-level identity:** On every `UserPromptSubmit`, report Kimi's stable `NMG_AGENT_ID` and optional `NMG_AGENT_CAPABILITIES` to an already-running daemon. Registration does not require wake to be enabled, emits no context, and does not start the daemon; this lets MCP's `nmg_board discover` find a Kimi session that is online only through its hook.
 
-Kimi's tool surface (`nmg_search` / `nmg_get` / `nmg_remember` / `nmg_board`) is provided by the MCP server (the `nmg` entry in `.mcp.json`). This directory adds only event hooks.
+Kimi's explicit memory/state tools come from the separately connected MCP server. Use `nmg_state space=board` for board operations. This directory adds event hooks.
 
 ## Wake controls
 
@@ -22,7 +22,7 @@ Wake is enabled by default so a new Agent can discover shared work without manua
 
 ## Files
 
-- `nmg-hook.mjs` — zero-dependency hook script that handles two **flow-affecting** events:
+- `nmg-hook.mjs` — hook script using shared capability assembly from the NMG checkout. Keep the checkout intact and use Node.js ≥ 22.19. It handles two **flow-affecting** events:
   - `UserPromptSubmit`: completion-like keywords (完成了/收工/committed/done…) and board-wake polling;
   - `PreToolUse` (matcher `Bash`): a command containing `git commit`.
 
