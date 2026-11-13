@@ -1,5 +1,22 @@
 import type { MemoryContext, MemorySearchResult } from "../core/types.ts";
 import { messageText } from "./tool-observation.ts";
+import type { AnswerAttributionReference } from "../core/feedback.ts";
+
+/** Short-lived adapters retain versioned IDs and submit the native completed answer. */
+export async function recordVersionedAnswerAttribution(input: {
+  invoke: (method: string, params: unknown) => Promise<unknown>;
+  sessionId: string;
+  projectDir?: string;
+  activeGraphId: string;
+  memoryVersions: readonly AnswerAttributionReference[];
+  answerText: string;
+}): Promise<void> {
+  const { invoke, answerText, ...scope } = input;
+  if (!answerText.trim()) return;
+  const hello = (await invoke("hello", {})) as { capabilities?: string[] };
+  if (!hello?.capabilities?.includes("versioned-answer-attribution")) return;
+  await invoke("recordActiveGraphAttribution", { ...scope, answerText, attributedMemoryIds: [] });
+}
 
 /**
  * Agent-end diagnostic-attribution cache. Independent of the SkillOpt shadow

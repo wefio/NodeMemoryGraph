@@ -1,0 +1,50 @@
+{
+  "measuredAt": "2026-11-13T15:40:49.506Z",
+  "version": "codex-cli 0.169.0",
+  "binarySha256": "ce1945eb440b5481ed1233ebaf32b7056ee7e4e452fa62ffe1cbfb26103cdee0",
+  "archiveSha256": "44a2efceb8f000e736e335bc54e69275110dd752ba2c3477510d54974ba3bdea",
+  "bundleSha256": "690dce5fc6e363dc81517734c7d6c0801d6614cb2f3079bb9ef35bce3c858c25",
+  "modelRequests": 27,
+  "concurrent": true,
+  "resumedState": true,
+  "forkIsolated": true,
+  "packagedCacheExecution": true,
+  "sourceDependency": false,
+  "hookAdmission": true,
+  "paidRequests": 0,
+  "hookInstrumentation": false,
+  "feedback": true,
+  "answerAttribution": true,
+  "nativeToolObservation": true,
+  "completionBoardContinuation": true,
+  "sourceHashes": {
+    "codex-plugin/hook.ts": "540cdb7de7c8cc8da64502986a4f38f6c0291765145cbc212abcab350540da71",
+    "codex-plugin/turn-traces.ts": "f2355385ae09c44c6dd38e86fa3a528e5dd5d536b8193160fc5bd5220c524ee2",
+    "codex-plugin/tool-result.ts": "ce561325fa8c012ef5fd53e996e58a0763ebfab7d4e2095f8d115240f735dac3",
+    "codex-plugin/index.ts": "907dd02c9255fd76cffe5a69cedbecea68e0071fbd81f142351d23f57fa3e3cf",
+    "codex-plugin/hooks/hooks.json": "ea4455b9c627f7a05a50a70f5af9213f9c72cedce74249f88ed913ece00f0777",
+    "src/integration/mcp-tools.ts": "2504fbd74eb9302de704c91ad04fb8561047a0982e5fbb70bd32424b0915467d",
+    "src/integration/agent-attribution.ts": "7b678b3c151184e7d355587b0090b09c1da903ec7025e07d41eaaedf69d91821",
+    "src/integration/adapter-capability-assembly.ts": "7c6810a5c1cba05d991223fe0aac47c89228a74095b175507ef11c970ff4e60c",
+    "src/cli/service.ts": "1c34440c33b91efe6261890783a9d38013c1839f5b6462143a3d54d29b76ed83",
+    "src/cli/protocol.ts": "55540864a33d6aad8a857c034364cbc240798aadb11003aaa038b3a6630bd731",
+    "src/core/feedback.ts": "5bfef9cfd4df8e299ea73c49bb9c18f875530f92de16a519d3a5f12d5f90a4da",
+    "docs/experiments/runtime/codex-distribution-probe.mjs": "674e16d0e4568d0423417517f8ff47d9f99c89f784a459d7fbb9e6dabd007f95"
+  },
+  "sourceHashEncoding": "Git text normalized to LF",
+  "contractOnly": [
+    "PostCompact restoration",
+    "Interrupt cancellation",
+    "64 concurrent references capped at 32",
+    "8-author budget and accepted-sink receipts"
+  ],
+  "unverified": [
+    "Desktop GUI",
+    "other operating systems",
+    "native interactive compaction/interruption",
+    "fully idle background wake",
+    "complete provider input confirmation"
+  ],
+  "cleanBuildTree": "4db8e5ba781c2a328984efb074e6c9d6b906c8f1",
+  "cleanSourceInstall": "npm ci --ignore-scripts"
+}

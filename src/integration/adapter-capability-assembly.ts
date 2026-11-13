@@ -1,7 +1,7 @@
 import { prepareAutomaticRecallSurface } from "./agent-surface.ts";
 import { contextStateViews } from "./context-information.ts";
 import { promptCompletionNudge } from "./completion-nudge.ts";
-import { AgentAttributionFlow } from "./agent-attribution.ts";
+import { AgentAttributionFlow, recordVersionedAnswerAttribution } from "./agent-attribution.ts";
 import { collectWakeCandidates } from "./board-wake.ts";
 import {
   deliverBoardWakeBatch,
@@ -50,7 +50,10 @@ export interface CapabilityServices {
   "state-context": { views: typeof contextStateViews };
   "tool-observation": { observe: typeof observeAdapterToolResult };
   "completion-nudge": { prepare: typeof promptCompletionNudge };
-  "answer-attribution": { create: (maxPending?: number) => AgentAttributionFlow };
+  "answer-attribution": {
+    create: (maxPending?: number) => AgentAttributionFlow;
+    record: typeof recordVersionedAnswerAttribution;
+  };
   "board-delivery": {
     collect: typeof collectWakeCandidates;
     deliver: typeof deliverBoardWakeBatch;
@@ -66,7 +69,10 @@ const SERVICES: CapabilityServices = {
   "state-context": { views: contextStateViews },
   "tool-observation": { observe: observeAdapterToolResult },
   "completion-nudge": { prepare: promptCompletionNudge },
-  "answer-attribution": { create: (maxPending) => new AgentAttributionFlow(maxPending) },
+  "answer-attribution": {
+    create: (maxPending) => new AgentAttributionFlow(maxPending),
+    record: recordVersionedAnswerAttribution,
+  },
   "board-delivery": {
     collect: collectWakeCandidates,
     deliver: deliverBoardWakeBatch,

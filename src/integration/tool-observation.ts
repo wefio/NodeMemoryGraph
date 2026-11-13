@@ -3,6 +3,15 @@
  * tool results through these functions so "what counts as an observation" is
  * shared state, never adapter-local policy. */
 
+export interface ToolObservationEvent {
+  toolName: string;
+  isError: boolean;
+  content: unknown;
+  input?: unknown;
+  /** False when a host reports output without a trustworthy final outcome. */
+  outcomeKnown?: boolean;
+}
+
 /** Flatten host message content (string or chunk array) into plain text. */
 export function messageText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -29,13 +38,8 @@ export function excerpt(value: string, maxLength: number): string {
 
 /** True only when a git commit actually landed, so a failed or no-op commit
  *  never raises the completion nudge. */
-export function isSuccessfulCommit(event: {
-  toolName: string;
-  isError: boolean;
-  content: unknown;
-  input?: unknown;
-}): boolean {
-  if (event.toolName !== "bash" || event.isError) return false;
+export function isSuccessfulCommit(event: ToolObservationEvent): boolean {
+  if (event.toolName !== "bash" || event.isError || event.outcomeKnown === false) return false;
   const command = String((event.input as { command?: unknown })?.command ?? "");
   if (!/\bgit\s+commit\b/.test(command)) return false;
   const output = messageText(event.content);
@@ -43,12 +47,7 @@ export function isSuccessfulCommit(event: {
 }
 
 /** Only tool results with lasting information value are captured as traces. */
-export function isMemorableToolResult(event: {
-  toolName: string;
-  isError: boolean;
-  content: unknown;
-  input?: unknown;
-}): boolean {
+export function isMemorableToolResult(event: ToolObservationEvent): boolean {
   if (event.isError) return true;
   const text = messageText(event.content);
   switch (event.toolName) {
@@ -71,23 +70,25 @@ export function isMemorableToolResult(event: {
   }
 }
 
-export function summarizeToolResult(event: {
-  toolName: string;
-  isError: boolean;
-  content: unknown;
-  input?: unknown;
-}): { statement: string; nodeName: string } {
+export function summarizeToolResult(event: ToolObservationEvent): {
+  statement: string;
+  nodeName: string;
+} {
   const input = event.input as Record<string, unknown> | undefined;
   if (event.toolName === "edit" || event.toolName === "write") {
     const path = String(input?.path ?? input?.filePath ?? "?");
     const verb = event.toolName === "write" ? "Wrote" : "Edited";
     return {
-      statement: `${verb} ${path}${event.isError ? " (tool returned an error)" : ""}.`,
+      statement:
+        event.outcomeKnown === false
+          ? `Tool ${event.toolName} reported for ${path} [outcome unknown].`
+          : `${verb} ${path}${event.isError ? " (tool returned an error)" : ""}.`,
       nodeName: path,
     };
   }
   const text = excerpt(messageText(event.content), 400);
-  const status = event.isError ? " [error]" : "";
+  const status =
+    event.outcomeKnown === false ? " [outcome unknown]" : event.isError ? " [error]" : "";
   return {
     statement: `Tool ${event.toolName}${status}: ${text || "(no text output)"}`,
     nodeName: `tool:${event.toolName}`,

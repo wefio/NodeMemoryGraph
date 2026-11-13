@@ -17,6 +17,7 @@ export interface NmgMcpOptions {
     signal?: AbortSignal,
   ) => Promise<unknown>;
   capabilities?: readonly AdapterCapability[];
+  onContext?: (binding: McpSessionBinding, context: MemoryContext) => Promise<void>;
 }
 import {
   assembleAdapterCapabilities,
@@ -88,6 +89,20 @@ const rememberSchema = {
     .string()
     .optional()
     .describe(nmgPrompts.mcp_active_graph_id_parameter_description),
+  taskSuccess: z.boolean().optional().describe(nmgPrompts.feedback_label_parameter_description),
+  userCorrection: z.boolean().optional().describe(nmgPrompts.feedback_label_parameter_description),
+  evidenceSufficient: z
+    .boolean()
+    .optional()
+    .describe(nmgPrompts.feedback_label_parameter_description),
+  expansionUseful: z.boolean().optional().describe(nmgPrompts.feedback_label_parameter_description),
+  excessiveNoise: z.boolean().optional().describe(nmgPrompts.feedback_label_parameter_description),
+  noMemoryNeeded: z.boolean().optional().describe(nmgPrompts.feedback_label_parameter_description),
+  memoryMisleading: z
+    .boolean()
+    .optional()
+    .describe(nmgPrompts.feedback_misleading_parameter_description),
+  feedbackNote: z.string().optional().describe(nmgPrompts.feedback_note_parameter_description),
   semanticTaskId: z.string().optional().describe(nmgPrompts.semantic_task_id_parameter_description),
   claimOutcome: z
     .enum(["supported", "contradicted"])
@@ -139,6 +154,33 @@ const rememberSchema = {
 };
 type RememberParams = z.infer<z.ZodObject<typeof rememberSchema>>;
 type McpInvoke = (method: NmgMethod, params: Record<string, unknown>) => Promise<unknown>;
+
+async function recordFeedback(params: RememberParams, sessionId: string, invoke: McpInvoke) {
+  const labels = {
+    taskSuccess: params.taskSuccess,
+    userCorrection: params.userCorrection,
+    evidenceSufficient: params.evidenceSufficient,
+    expansionUseful: params.expansionUseful,
+    excessiveNoise: params.excessiveNoise,
+    noMemoryNeeded: params.noMemoryNeeded,
+    memoryMisleading: params.memoryMisleading,
+    note: params.feedbackNote,
+  };
+  if (!params.activeGraphId?.trim())
+    throw new Error("action=feedback requires activeGraphId from the rated recall");
+  if (Object.values(labels).every((value) => value === undefined))
+    throw new Error("action=feedback requires at least one label or feedbackNote");
+  const result = await invoke("recordFeedback", {
+    activeGraphId: params.activeGraphId,
+    sessionId,
+    ...labels,
+  });
+  return {
+    content: [
+      { type: "text" as const, text: `Retrieval feedback processed. ${JSON.stringify(result)}` },
+    ],
+  };
+}
 
 async function claimOutcome(params: RememberParams, sessionId: string, invoke: McpInvoke) {
   if (
@@ -258,6 +300,14 @@ async function saveMemory(params: RememberParams, sessionId: string, invoke: Mcp
     "claimSourceLineage",
     "claimIndexes",
     "claimWeight",
+    "taskSuccess",
+    "userCorrection",
+    "evidenceSufficient",
+    "expansionUseful",
+    "excessiveNoise",
+    "noMemoryNeeded",
+    "memoryMisleading",
+    "feedbackNote",
   ]) {
     delete memory[key];
   }
@@ -363,6 +413,7 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
             sessionId: binding().sessionId,
           })) as MemoryContext;
           const disclosed = await discloseContext(r, "header");
+          await options.onContext?.(binding(), disclosed.context).catch(() => undefined);
           return {
             content: [
               {
@@ -401,6 +452,7 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
             missingMemoryIds?: string[];
           };
           const disclosed = await discloseContext(r, "evidence", params.activeGraphId);
+          await options.onContext?.(binding(), disclosed.context).catch(() => undefined);
           return {
             content: [
               {
@@ -427,6 +479,8 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
         withBinding(extra, async () => {
           const sessionId = binding().sessionId;
           switch (params.action) {
+            case "feedback":
+              return recordFeedback(params, sessionId, invoke);
             case "claim_outcome":
               return claimOutcome(params, sessionId, invoke);
             case "forget":

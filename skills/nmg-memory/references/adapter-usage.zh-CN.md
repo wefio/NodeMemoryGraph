@@ -114,18 +114,22 @@ Claude Code 使用项目 `.mcp.json`；其他客户端将这些 stdio 字段映�
 或空闲唤醒。部分 remember 动作也有适配器实现缺口，以矩阵为准。使用独立 hook 连接中的 ID
 前，应经本 MCP 会话重新搜索／读取。Agent 名称相同不表示 AG 投影已关联。
 
+显式检索反馈使用 `nmg_remember action=feedback`，提供被评价召回的 `activeGraphId`，
+以及至少一个布尔标签或 `feedbackNote`。`false` 也是有效标签，读取回执中的 `trained` 状态。
+完成回复或诊断重合不构成填写正向标签的授权。
+
 ## Codex
 
 构建并安装生成的独立 Codex 插件包。打包、Node 要求、hook 信任和加载说明由 README 维护。
 [Codex 安装指南](../../../codex-plugin/README.zh-CN.md)
 
 适配器通过共享能力装配提供五个工具、自动召回、完整工作状态承载、工具最终结果观察，
-以及 prompt 时批量黑板投递。原生 MCP 元数据与 hook 准入将工具绑定到相同聊天和项目。
+以及 prompt／结束时批量黑板投递和答案重合诊断。原生 MCP 元数据与 hook 准入将工具绑定到相同聊天和项目。
 恢复保留绑定，分叉获得独立 AG，原生 clear 开启新代次并要求新轮次准入。
 
 使用上述 search/get 和 state enable/replace 操作。Hook 需要显式启用和信任。
-禁用 hook 时仍可使用工具，项目范围在准入后确定。本绑定的答案归因与空闲唤醒尚未接入。
-需要预先运行兼容的 daemon。
+禁用 hook 时仍可使用工具，项目范围在准入后确定。Stop 可携带有预算的黑板批次续接一次，
+完全空闲的聊天等待原生事件。需要预先运行兼容 daemon，诊断归因要求 versioned-answer-attribution。
 
 ## WorkBuddy
 

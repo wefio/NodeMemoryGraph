@@ -8,7 +8,8 @@ import {
 } from "../src/integration/lease-transport.ts";
 import { resolveNmgDataDir } from "../src/cli/data-path.ts";
 import { CodexSessionStore } from "./session-store.ts";
-import { codexMcpBinding } from "./session.ts";
+import { codexMcpBinding, type CodexBinding } from "./session.ts";
+import { CodexTurnTraces } from "./turn-traces.ts";
 import { CodexHook } from "./hook.ts";
 
 const declared = ADAPTER_CAPABILITY_CATALOG.codex.capabilities;
@@ -16,6 +17,7 @@ const toolCapabilities = new Set(["memory-tools", "state-tool", "lab-tools"]);
 
 export function createCodexAdapter(dataDirectory = resolveNmgDataDir()) {
   const sessions = new CodexSessionStore(dataDirectory);
+  const traces = new CodexTurnTraces(dataDirectory);
   const invoke = async (method: string, params: unknown, signal?: AbortSignal) => {
     signal?.throwIfAborted();
     const lease = await compatibleLease(dataDirectory);
@@ -35,13 +37,21 @@ export function createCodexAdapter(dataDirectory = resolveNmgDataDir()) {
       createNmgMcpServer({
         capabilities: declared.filter((capability) => toolCapabilities.has(capability)),
         resolveBinding: (metadata) => sessions.resolve(codexMcpBinding(metadata)),
+        onContext: (binding, context) => traces.note(binding as CodexBinding, context),
         invoke,
       }),
-    hook: (writeOutput: (text: string) => Promise<void>) =>
-      new CodexHook(
-        { dataDirectory, invoke, writeOutput },
+    hook: (writeOutput: (text: string) => Promise<void>) => {
+      const deadline = AbortSignal.timeout(4000);
+      return new CodexHook(
+        {
+          dataDirectory,
+          writeOutput,
+          invoke: (method, params, signal) =>
+            invoke(method, params, signal ? AbortSignal.any([signal, deadline]) : deadline),
+        },
         declared.filter((capability) => !toolCapabilities.has(capability)),
-      ),
+      );
+    },
   };
 }
 

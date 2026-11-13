@@ -46,6 +46,7 @@ export async function privateNmg(directory) {
       dataDirectory,
       requests,
       memoryId,
+      invoke: (method, params) => service.invoke(method, params),
       close,
     };
   } catch (error) {

@@ -45,10 +45,22 @@ MCP 使用 Codex 原生传输元数据，hook 使用原生 session／turn 字段
 不保存记忆正文或凭据。Writer 租约、AG 状态及证据仍由 daemon 管理。
 没有 hook 准入时，显式工具仍隔离会话，项目作用域保持未知，不从提示词猜测。
 
-插件接入共享能力装配及 InformationView 预算。自动准备不确认最终披露。
-维护状态独立于可选召回准备，并在压缩后恢复。黑板通知在用户 prompt 边界批量投递，
-输出接收后才写回执，不提供空闲唤醒。Stop 报告 unknown 处理状态。
-通用工具观察只接受可识别的结果标志，模糊结果不能触发成功提交提醒，不声明答案归因。
+插件接入共享能力装配及 InformationView 预算。状态在可选召回前准备，
+在 compact 会话／PostCompact hook 恢复。黑板在用户 prompt 和原生 Stop 边界批量投递。
+Stop 接收批次后可续接一次，沿用 wake 开关、预算与冷却。回执在输出接收后覆盖已准入片段。
+完全空闲的聊天等待下一个原生事件。Stop 报告处理状态 unknown，提出续接后报告 busy。
+
+`nmg_remember action=feedback` 接收显式标签和被评价的 activeGraphId，
+daemon 回报该标签是否能够训练对应暂存决策。自动答案重合属于独立诊断。
+Stop 提供原生已完成回复，适配层每轮最多保留 32 个投影引用及陈述指纹。
+声明 `versioned-answer-attribution` 的 daemon 核对所有权与当前内容版本，再计算重合。
+中断轮次丢弃诊断引用。该诊断不标注真伪、任务成功或有用证据。
+
+Bash hook 可能只提供 stdout，缺少退出状态时按结果未知观察。
+结束时可通过有界 transcript 读取，核对相同原生调用和轮次，再记录一次最终状态。
+严格检查已测试的 Codex 0.169 格式，未识别格式保持结果未知，不能触发成功提交提醒。
+RPC 工作共用四秒 hook 期限，处于 Codex 五秒处理器超时内。
+准备完成与最终供应商输入确认分别记录。
 
 `NMG_DATA_DIR`、共用召回／显示设置和 `NMG_ENABLE_COORDINATION` 保持既有含义。
 daemon 不可用或不兼容时，工具返回错误，hook 跳过可选上下文。

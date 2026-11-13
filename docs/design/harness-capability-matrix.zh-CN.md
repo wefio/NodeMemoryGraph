@@ -36,8 +36,10 @@
 [原生联调](../experiments/runtime/codex-plugin-capabilities-2026-11-13.zh-CN.md)记录安装分发包与多会话证据。
 
 Codex 承载完整 Owner 状态，使用原生传输会话元数据。黑板批次在用户 prompt 时到达，
-Stop 报告处理状态未知。工具观察只接受已识别的最终结果标志。
-答案归因、空闲唤醒、交互控制台及 CLI 兜底尚未接入。
+Stop 报告处理状态未知，提出续接后报告 busy。工具观察接收原生 stdout，
+通过有界、会话／轮次绑定的 transcript 读取补充已识别的最终退出状态。
+原生 Stop 记录带版本核对的答案重合诊断，并可携带有预算的黑板批次续接一次。
+后台空闲唤醒、交互控制台及 CLI 兜底尚未接入。
 
 
 ## 矩阵
@@ -45,10 +47,10 @@ Stop 报告处理状态未知。工具观察只接受已识别的最终结果标
 | 能力 | Pi | OpenCode | WorkBuddy | MCP | DSH | Kimi | Codex |
 |---|---|---|---|---|---|---|---|
 | 自动召回（按准入回合暂存头行） | full | full | full | none | full | none | full |
-| 记忆工具（`nmg_search`/`get`/`remember`，共享 Agent Surface） | full | full | none | partial | full | none | partial |
+| 记忆工具（`nmg_search`/`get`/`remember`，共享 Agent Surface） | full | full | full | full | full | none | full |
 | 工作状态（`space=ag`，带调用栅栏） | full | full | none | full | full | none | full |
 | 工具结果观察 + 弱完成提醒 | full | full | partial | none | full | partial | partial |
-| 归因落盘 + 代理身份心跳 | full | full | partial | partial | full | partial | partial |
+| 归因落盘 + 代理身份心跳 | full | full | partial | partial | full | partial | full |
 | Board 唤醒（轮询 → 定向/世界投递） | full | partial | partial | none | partial | partial | partial |
 | 交互控制台（`/nmg`） | full | partial | none | none | none | none | none |
 | 传输：lease 快路径、CLI 兜底、共享 daemon 不接管 | full | full | partial | partial | full | partial | partial |
@@ -90,8 +92,7 @@ MCP／CLI 提供显式读取，不提供主动唤醒；订阅边界由[事件契
 - **Kimi** — 事件 hook 在用户输入时报告在场并轮询黑板通知，另提供完成关键词／提交前提醒；不搜索记忆、不暴露记忆／状态工具、不观察最终工具结果，也不落盘答案归因。显式工具来自独立 MCP 连接，prompt 时轮询不是空闲唤醒。这些是 hook 未实现项，不是 Kimi 平台能力限制。
 - **MCP** — 服务器在无 daemon 时启动自有子进程，复用已有 daemon，且只停止
   自己启动的进程。没有 CLI 兜底（服务器保证 lease 存在）；也不做回合级观
-  察、归因、唤醒循环或控制台。remember 动作枚举包含反馈，但当前 NMG 服务器实现缺少
-  标签参数与处理分支，属于实现缺口，不是 MCP 协议限制。
+  察、归因、唤醒循环或控制台。共享 remember feedback 将显式标签及被评价的图传给 daemon。
   工作状态沿共享带栅栏 state API；board 使用即心跳，读取写入投递回
   执。
 - **DSH** — 宿主包在原生请求准入时准备状态与召回，经 `systemPrompt.context` 承载。`tools/result` 接共享 AG 观察和 commit 提醒。已提交 `assistant/message` 与完成的 `turn/end` 每回合落一次诊断答案重合，取消、外部和重复事件不产生归因。桌面生命周期边界与真实唤醒单独保留验证门槛。

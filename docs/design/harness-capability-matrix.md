@@ -49,10 +49,10 @@ records artifact installation and multi-session evidence.
 | Capability | Pi | OpenCode | WorkBuddy | MCP | DSH | Kimi | Codex |
 |---|---|---|---|---|---|---|---|
 | Automatic recall (staged headers per admitted turn) | full | full | full | none | full | none | full |
-| Memory tools (`nmg_search`/`get`/`remember`) on the shared Agent Surface | full | full | none | partial | full | none | partial |
+| Memory tools (`nmg_search`/`get`/`remember`) on the shared Agent Surface | full | full | full | full | full | none | full |
 | Working state (`space=ag` with the invocation fence) | full | full | none | full | full | none | full |
 | Tool-result observation + weak completion nudge | full | full | partial | none | full | partial | partial |
-| Attribution flush + agent identity heartbeat | full | full | partial | partial | full | partial | partial |
+| Attribution flush + agent identity heartbeat | full | full | partial | partial | full | partial | full |
 | Board wake (poll → directed/world delivery) | full | partial | partial | none | partial | partial | partial |
 | Interactive console (`/nmg`) | full | partial | none | none | none | none | none |
 | Transport: lease fast path, CLI fallback, shared-daemon non-ownership | full | full | partial | partial | full | partial | partial |
@@ -85,8 +85,10 @@ The [event contract](board-event-records.md) owns subscription boundaries.
 
 Codex carries complete owner state and uses native transport session metadata.
 Its board batches arrive on user prompts. Stop reports unknown processing state.
-Tool observation accepts recognized final-result flags. Answer attribution,
-idle wake, interactive console and CLI fallback are unconnected.
+Tool observation handles native stdout and resolves recognized final exit metadata
+from a bounded, session/turn-bound transcript read. Native Stop records versioned
+answer-overlap diagnostics and can continue once with a budgeted board batch.
+Background idle wake, interactive console and CLI fallback are unconnected.
 
 ## Per-adapter partials
 
@@ -108,9 +110,8 @@ idle wake, interactive console and CLI fallback are unconnected.
 - **MCP** — the server starts its own daemon subprocess when none is running,
   reuses an existing daemon, and stops only what it started. There is no CLI
   fallback (the server guarantees its lease) and no turn-level observation,
-  attribution, wake loop, or console. The remember action enum includes feedback,
-  but its labels and dispatch are missing from this NMG server implementation;
-  this is an implementation gap, not an MCP protocol restriction.
+  attribution, wake loop, or console. Shared `nmg_remember action=feedback`
+  accepts explicit labels and returns the daemon's training result.
   Working state uses the shared fenced state API; board use heartbeats and
   reads write delivery receipts.
 - **DSH** — The host package carries complete state and recall through `systemPrompt.context`, prepared at native request admission. `tools/result` feeds shared AG observation and commit nudges. Committed `assistant/message` plus completed `turn/end` flush diagnostic answer overlap once per turn. Aborted, foreign and duplicate events do not produce attribution. Desktop lifecycle edges and live wake remain separate validation tasks.

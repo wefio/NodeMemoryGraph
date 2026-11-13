@@ -21,7 +21,9 @@ import {
 import type { InformationView } from "../src/core/information-view.ts";
 import type { MemoryContext } from "../src/core/types.ts";
 import type { NmgStateResult, NmgSessionActiveGraphResult } from "../src/cli/protocol.ts";
+import { completedCodexTools, normalizeCodexToolResult } from "./tool-result.ts";
 import { CodexSessionStore } from "./session-store.ts";
+import { CodexTurnTraces } from "./turn-traces.ts";
 import { codexHookBinding, type CodexBinding } from "./session.ts";
 
 export type CodexInvoke = (
@@ -41,17 +43,20 @@ export interface CodexHookOptions {
  */
 export class CodexHook {
   private readonly store: CodexSessionStore;
+  private readonly traces: CodexTurnTraces;
   private recall!: CapabilityServices["automatic-recall"];
   private state!: CapabilityServices["state-context"];
   private observation!: CapabilityServices["tool-observation"];
   private completion!: CapabilityServices["completion-nudge"];
   private board!: CapabilityServices["board-delivery"];
+  private attribution!: CapabilityServices["answer-attribution"];
   private readonly assembly;
   private readonly options: CodexHookOptions;
 
   constructor(options: CodexHookOptions, capabilities: readonly AdapterCapability[]) {
     this.options = options;
     this.store = new CodexSessionStore(options.dataDirectory);
+    this.traces = new CodexTurnTraces(options.dataDirectory);
     this.assembly = assembleAdapterCapabilities(capabilities, {
       "automatic-recall": (service) => {
         this.recall = service;
@@ -67,6 +72,9 @@ export class CodexHook {
       },
       "board-delivery": (service) => {
         this.board = service;
+      },
+      "answer-attribution": (service) => {
+        this.attribution = service;
       },
     });
   }
@@ -89,24 +97,77 @@ export class CodexHook {
       return;
     }
     if (event === "UserPromptSubmit") return this.prompt(payload, native);
+    if (event === "PostCompact") return this.carriedState(native, "PostCompact");
     const binding = await this.store.resolve(native);
     if (event === "PostToolUse") await this.observe(payload, binding);
-    if (event === "Stop" && this.coordination()) {
+    if (event === "Interrupt") {
+      await this.traces.cancel(binding);
+      if (this.coordination())
+        await this.board.activity(
+          this.options.invoke,
+          binding.agentId,
+          binding.sessionId,
+          "unknown",
+          ["prompt-delivery", "completion-delivery"],
+        );
+    }
+    if (event === "Stop") await this.stop(payload, binding);
+  }
+
+  private async stop(payload: Record<string, unknown>, binding: CodexBinding): Promise<void> {
+    for (const tool of await completedCodexTools(payload, binding).catch(() => []))
+      await this.observe(tool, binding);
+    const answerText =
+      typeof payload.last_assistant_message === "string" ? payload.last_assistant_message : "";
+    if (binding.turnId && answerText.trim()) {
+      await this.traces
+        .finish(binding, (trace) =>
+          this.attribution.record({
+            ...trace,
+            answerText,
+            sessionId: binding.sessionId,
+            projectDir: binding.projectDir,
+            invoke: this.options.invoke,
+          }),
+        )
+        .catch(() => undefined);
+    }
+    if (this.coordination()) {
       await this.board.activity(
         this.options.invoke,
         binding.agentId,
         binding.sessionId,
         "unknown",
+        ["prompt-delivery", "completion-delivery"],
+      );
+      const continued = payload.stop_hook_active !== true && (await this.completionBoard(binding));
+      await this.board.activity(
+        this.options.invoke,
+        binding.agentId,
+        binding.sessionId,
+        continued ? "busy" : "unknown",
         ["prompt-delivery"],
       );
     }
+  }
+
+  private async completionBoard(binding: CodexBinding): Promise<boolean> {
+    if (await this.traces.continued(binding)) return false;
+    const pending = await this.pendingBoard(binding).catch(() => null);
+    if (!pending?.entries.length) return false;
+    const output = pending.information;
+    if (!output.text) return false;
+    await this.options.writeOutput(JSON.stringify({ decision: "block", reason: output.text }));
+    await this.traces.continued(binding, true);
+    await this.receiptBoard(binding, pending.entries, output.included);
+    return true;
   }
 
   private coordination(): boolean {
     return coordinationEnabled(this.options.environment);
   }
 
-  private async carriedState(native: CodexBinding): Promise<void> {
+  private async carriedState(native: CodexBinding, eventName = "SessionStart"): Promise<void> {
     const binding = await this.store.current(native);
     const state = (await this.options.invoke("state", {
       action: "read",
@@ -122,7 +183,7 @@ export class CodexHook {
       await this.options.writeOutput(
         JSON.stringify({
           hookSpecificOutput: {
-            hookEventName: "SessionStart",
+            hookEventName: eventName,
             additionalContext: output.text,
           },
         }),
@@ -134,7 +195,14 @@ export class CodexHook {
     const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
     const views = await this.context(binding, prompt);
     const pending = this.coordination() ? await this.pendingBoard(binding).catch(() => null) : null;
-    if (pending) views.push(...pending.information.views);
+    if (pending) {
+      const admitted = new Set(pending.entries.map((entry) => entry.id));
+      views.push(
+        ...pending.information.views.filter(
+          (view) => view.source?.kind !== "board" || admitted.has(view.source.entryId),
+        ),
+      );
+    }
     const nudge = this.completion.prepare({ hook_event_name: "UserPromptSubmit", prompt });
     if (nudge) views.push(...contextNotice(nudge));
     if (await this.store.nudge(binding, true))
@@ -211,6 +279,7 @@ export class CodexHook {
             signal,
           ),
         )) as MemoryContext;
+        await this.traces.note(binding, context).catch(() => undefined);
         views.push(...this.recall.prepare(compactSearchContext(context)).views);
       }
     } catch {
@@ -286,28 +355,22 @@ export class CodexHook {
   }
 
   private async observe(payload: Record<string, unknown>, binding: CodexBinding): Promise<void> {
-    const name = String(payload.tool_name ?? "");
-    if (name.startsWith("mcp__nmg")) return;
-    const response = payload.tool_response;
-    const result =
-      response && typeof response === "object" ? (response as Record<string, unknown>) : {};
-    const input =
-      payload.tool_input && typeof payload.tool_input === "object"
-        ? (payload.tool_input as Record<string, unknown>)
-        : {};
-    const knownExit = typeof result.exit_code === "number";
-    const explicit = typeof result.isError === "boolean";
-    if (!knownExit && !explicit) return; // Unknown result shapes cannot certify a commit.
-    const toolName = /^(Bash|shell|exec_command)$/i.test(name) ? "bash" : name;
+    const event = await normalizeCodexToolResult(payload, binding);
+    if (!event) return;
+    const observe = () => this.recordObservation(event, binding);
+    if (event.outcomeKnown && typeof payload.tool_use_id === "string")
+      return this.traces.observeOnce(binding, payload.tool_use_id, observe);
+    await observe();
+  }
+
+  private async recordObservation(
+    event: Parameters<CapabilityServices["tool-observation"]["observe"]>[0]["event"],
+    binding: CodexBinding,
+  ): Promise<void> {
     let committed = false;
     await this.observation.observe({
       sessionId: binding.sessionId,
-      event: {
-        toolName,
-        input: { ...input, command: input.command ?? input.cmd },
-        isError: knownExit ? result.exit_code !== 0 : result.isError === true,
-        content: result.content ?? result.stdout ?? response,
-      },
+      event,
       invoke: this.options.invoke,
       onCommit: () => {
         committed = true;

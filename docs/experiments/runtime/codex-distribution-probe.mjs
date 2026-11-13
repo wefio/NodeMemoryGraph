@@ -12,6 +12,7 @@ import { readHookCatalog } from "./codex-hook-catalog.mjs";
 
 const { values } = parseArgs({ options: {
   "codex-bin": { type: "string" }, archive: { type: "string" }, output: { type: "string" },
+  "capture-hooks": { type: "boolean", default: false },
 } });
 assert.ok(values["codex-bin"] && values.archive && values.output,
   "Required: --codex-bin <exe> --archive <tgz> --output <directory>");
@@ -25,13 +26,17 @@ const unpacked = join(directory, "artifact");
 const environment = Object.fromEntries(Object.entries(process.env).filter(
   ([key]) => !/(?:API_KEY|AUTH_TOKEN|ACCESS_TOKEN|OPENAI_|ANTHROPIC_|NMG_|CODEX_)/i.test(key),
 ));
-Object.assign(environment, { CODEX_HOME: home, NMG_ENABLE_COORDINATION: "0",
+Object.assign(environment, { CODEX_HOME: home, NMG_ENABLE_COORDINATION: "1",
+  NMG_PROBE_HOOK_LOG: join(output, "native-hooks.jsonl"),
   RUST_LOG: "codex_mcp=debug,rmcp=debug",
   NMG_SESSION_ID: "deliberately-wrong-global", NMG_AGENT_ID: "deliberately-wrong-global" });
 const invoke = promisify(execFile);
 const calls = [];
 const stages = new Map();
 const toolOutputs = new Map();
+const projections = new Map();
+let boardInjected = false;
+let continuationSeen = false;
 let nmg;
 let model;
 
@@ -75,8 +80,22 @@ function instructions(lane) {
     ["nmg_get", { memoryIds: [nmg.memoryId] }],
     ["nmg_lab", { action: "list" }],
     ["nmg_remember", { action: "save", nodeName: "CodexDistribution", statement: `Saved${lane}Marker` }],
+    ["exec_command", { cmd: "echo WARNING NmgNativeToolObservationMarker", max_output_tokens: 200 }],
+    ["exec_command", { cmd: 'node -e "console.log(123);process.exit(7)"', max_output_tokens: 200 }],
+    ["nmg_remember", { action: "feedback", activeGraphId: projections.get(lane), taskSuccess: false,
+      feedbackNote: "Synthetic explicit feedback from the deterministic fixture." }],
   ];
   return [["nmg_state", { action: "read", space: "ag" }]];
+}
+
+async function injectCompletionNotice(lane) {
+  if (lane !== "A" || boardInjected) return;
+    boardInjected = true;
+    const session = nmg.requests.find((item) => item.method === "state" && item.params.operation === "replace" && item.params.text?.startsWith("OwnerAStateMarker"))?.params.sessionId;
+    assert.ok(session);
+    await nmg.invoke("taskBoard", { action: "put", taskId: "native-completion", agentId: "fixture-author", kind: "note",
+      content: "NmgLaneA NmgNativeCompletionNoticeMarker", to: session,
+      notification: { key: "native-completion-once", scopes: ["direct"], recipients: [session] } });
 }
 
 async function serve(request, response) {
@@ -90,6 +109,9 @@ async function serve(request, response) {
   const input = JSON.stringify(body.input);
   const contexts = JSON.stringify((body.input ?? []).filter((item) => ["system", "developer"].includes(item.role)));
   const outputs = (body.input ?? []).filter((item) => item.type === "function_call_output");
+  const projected = JSON.stringify(outputs).match(/activeGraphId=([a-f0-9-]+)/)?.[1];
+  if (projected) projections.set(lane, projected);
+  if (JSON.stringify(user).includes("NmgNativeCompletionNoticeMarker")) continuationSeen = true;
   toolOutputs.set(lane, outputs);
   calls.push({ lane, stateA: contexts.includes("OwnerAStateMarker"), stateB: contexts.includes("OwnerBStateMarker"),
     invariantA: contexts.includes("Complete invariant for A."), exact: input.includes("NmgNativeExactEvidenceMarker"),
@@ -103,8 +125,11 @@ async function serve(request, response) {
     stages.set(lane, stage + 1);
     respond(response, { id: `fc_${lane}_${stage}`, type: "function_call", status: "completed",
       call_id: `call_${lane}_${stage}`, name: tool.name, namespace: tool.namespace, arguments: JSON.stringify(command[1]) });
-  } else respond(response, { id: `msg_${lane}`, type: "message", role: "assistant", status: "completed",
-    content: [{ type: "output_text", text: `Done ${lane}`, annotations: [] }] });
+  } else {
+    await injectCompletionNotice(lane);
+    respond(response, { id: `msg_${lane}`, type: "message", role: "assistant", status: "completed",
+    content: [{ type: "output_text", text: `Done ${lane}. Atlas uses SQLite storage. NmgNativeExactEvidenceMarker`, annotations: [] }] });
+  }
 }
 
 function threadId(text) {
@@ -118,9 +143,18 @@ try {
   await Promise.all([home, project, output, unpacked].map((path) => mkdir(path, { recursive: true })));
   await invoke("tar", ["-xzf", archive, "-C", unpacked], { windowsHide: true });
   const plugin = join(unpacked, "package");
+  if (values["capture-hooks"]) {
+    const path = join(plugin, "hooks", "hooks.json");
+    const catalog = JSON.parse(await readFile(path, "utf8"));
+    for (const groups of Object.values(catalog.hooks)) for (const group of groups) for (const hook of group.hooks) {
+      hook.command = `node "${join(import.meta.dirname, "codex-hook-capture.mjs")}" "\${PLUGIN_ROOT}/scripts/nmg.mjs"`;
+    }
+    await writeFile(path, JSON.stringify(catalog));
+  }
   assert.ok(!(await readdir(plugin)).includes("node_modules"));
   nmg = await privateNmg(directory);
   environment.NMG_DATA_DIR = nmg.dataDirectory;
+  await writeFile(join(nmg.dataDirectory, "board-wake.json"), JSON.stringify({ enabled: true, budget: 8, cooldownMs: 0 }));
   model = createServer((request, response) => serve(request, response).catch((error) => {
     console.error(error);
     response.writeHead(500); response.end(String(error));
@@ -144,12 +178,12 @@ try {
   await readHookCatalog({ binary, project, environment, output });
   // Only this reviewed, private fixture bypasses trust. The package does not.
   const prefix = ["--no-daemon", "--dangerously-bypass-hook-trust", "exec"];
-  const suffix = ["--skip-git-repo-check", "--json"];
+  const suffix = ["--skip-git-repo-check", "--ignore-rules", "--json"];
   // Initialize the native DB before testing concurrent launches.
   await run(["--no-daemon", "debug", "--help"], "native-setup");
   const concurrent = await Promise.allSettled([
-    run([...prefix, ...suffix, "-s", "read-only", "$nmg:nmg-memory NmgLaneA What did we previously decide about Atlas SQLite storage?"], "chat-a"),
-    run([...prefix, ...suffix, "-s", "read-only", "$nmg:nmg-memory NmgLaneB What did we previously decide about Atlas SQLite storage?"], "chat-b"),
+    run([...prefix, ...suffix, "-s", "danger-full-access", "$nmg:nmg-memory NmgLaneA What did we previously decide about Atlas SQLite storage?"], "chat-a"),
+    run([...prefix, ...suffix, "-s", "danger-full-access", "$nmg:nmg-memory NmgLaneB What did we previously decide about Atlas SQLite storage?"], "chat-b"),
   ]);
   for (const result of concurrent) if (result.status === "rejected") throw result.reason;
   const [firstA, firstB] = concurrent.map((result) => result.value);
@@ -184,6 +218,10 @@ try {
   assert.ok(nmg.requests.some((item) => item.method === "search" && item.params.autoRecall === true), "Native admission must trigger shared automatic recall");
   assert.ok(sessionRequests.some((item) => item.method === "state" && item.params.operation === "replace"), "Packaged MCP must use the private daemon");
   assert.ok(nmg.requests.some((item) => item.method === "remember" && item.params.statement === "SavedAMarker"));
+  assert.ok(nmg.requests.some((item) => item.method === "recordFeedback" && item.params.taskSuccess === false), "Shared explicit feedback must execute");
+  assert.ok(nmg.requests.some((item) => item.method === "recordActiveGraphAttribution" && item.params.answerText?.includes("NmgNativeExactEvidenceMarker")), "Native completed answers must be attributed");
+  assert.ok(nmg.requests.some((item) => item.method === "sessionActiveGraph" && item.params.sourceKind === "tool_error"), "Native failing shell output must be observed");
+  assert.ok(continuationSeen, "Native Stop continuation must deliver the completion notice");
   assert.ok(sessionRequests.every((item) => item.params.sessionId !== environment.NMG_SESSION_ID));
   const routingFiles = await readdir(join(nmg.dataDirectory, "codex-sessions"));
   assert.ok(routingFiles.includes(`${a}.json`) && routingFiles.includes(`${b}.json`), "Native admission hooks must persist scopes");
@@ -192,7 +230,9 @@ try {
     archiveSha256: createHash("sha256").update(await readFile(archive)).digest("hex"),
     bundleSha256: createHash("sha256").update(await readFile(join(installed.installedPath, "scripts", "nmg.mjs"))).digest("hex"),
     chats: { a, b, fork }, modelRequests: calls.length, concurrent: true, resumedState: true, forkIsolated: true,
-    packagedCacheExecution: true, sourceDependency: false, hookAdmission: true, paidRequests: 0 };
+    packagedCacheExecution: true, sourceDependency: false, hookAdmission: true, paidRequests: 0,
+    hookInstrumentation: values["capture-hooks"], feedback: true, answerAttribution: true, nativeToolObservation: true,
+    completionBoardContinuation: continuationSeen };
   await writeFile(join(output, "summary.json"), JSON.stringify(summary, null, 2) + "\n");
   console.log(JSON.stringify(summary));
 } finally {

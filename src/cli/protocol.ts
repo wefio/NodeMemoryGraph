@@ -108,6 +108,7 @@ export const NMG_CAPABILITIES = [
   "lexical-retrieval",
   "optional-embedding-retrieval",
   "diagnostic-answer-attribution",
+  "versioned-answer-attribution",
   "claim-outcome-origin-provenance",
   "memory-chains",
   "lab-capabilities",
@@ -377,9 +378,7 @@ export interface NmgRecordClaimOutcomesParams extends RecordClaimOutcomesInput {
 
 /** Online context-use feedback (RSCB-style): labels for one recalled graph. */
 export interface NmgRecordFeedbackParams extends ContextFeedbackLabels {
-  /** Active graph of the auto-recall decision the feedback labels. Optional:
-   *  when omitted, the daemon binds the most recently staged decision for
-   *  `sessionId` (natural-feedback semantics, resolved server-side). */
+  /** Explicit graph being rated. Omission skips training without selecting a latest graph. */
   activeGraphId?: string;
   /** Session owning the recall; required to resolve the latest staged graph
    *  when activeGraphId is absent. */
@@ -565,6 +564,10 @@ export interface NmgRecordActiveGraphAttributionParams {
   activeGraphId: string;
   /** Memories whose statement tokens appeared in the final agent answer (diagnostic only). */
   attributedMemoryIds: string[];
+  /** Native completed answer. Requires an owned live projection and versioned candidates.
+   * Empty attributedMemoryIds selects daemon-side diagnostic derivation. */
+  answerText?: string;
+  memoryVersions?: Array<{ memoryId: string; statementHash: string }>;
   projectDir?: string;
   sessionId?: string;
 }

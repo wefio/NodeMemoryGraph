@@ -141,6 +141,11 @@ Some remember actions also have adapter implementation gaps; the matrix records
 them. Re-read/search through this MCP session before using IDs from a separate
 hook connection. Matching Agent names does not join AG projections.
 
+For explicit retrieval feedback, use `nmg_remember` with `action=feedback`,
+`activeGraphId` from the rated recall and at least one boolean label or `feedbackNote`.
+A false label remains meaningful. Read the returned `trained` status. Completed
+answers and diagnostic overlap do not authorize positive labels.
+
 ## Codex
 
 Build and install the generated self-contained Codex plugin. Its README owns
@@ -148,15 +153,16 @@ packaging, Node requirements, hook trust and loading instructions.
 [Codex setup](../../../codex-plugin/README.md)
 
 The adapter supplies five tools, automatic recall, complete working-state carriage,
-final-tool observations and prompt-time board batches through shared capability
+final-tool observations, answer-overlap diagnostics and prompt/completion board batches through shared capability
 assembly. Native MCP metadata and hook admission bind tools to the same chat and
 project. Resume retains the binding. Forks have independent AG state. Native clear
 starts a fresh generation and requires a newly admitted turn.
 
 Use the same search/get and state enable/replace operations described above.
 Hooks require explicit enablement and trust. Tools work when hooks are disabled,
-with project scope unavailable until admission. Answer attribution and idle wake
-remain unavailable in this binding. A compatible daemon must already be running.
+with project scope unavailable until admission. Stop can continue once to carry a
+budgeted board batch. A fully idle chat waits for a native event. A compatible daemon
+must already be running; diagnostic attribution requires versioned-answer-attribution.
 
 ## WorkBuddy
 

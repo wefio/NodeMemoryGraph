@@ -34,15 +34,16 @@ OTLP 导出需要配置 collector。当原生 transcript 追踪已覆盖某 agen
 
 下表所有网关贡献都要求客户端模型流量实际经过 Magpie，直连流量和只切换配置的用法不在覆盖内。仅匹配显示名不能关联会话。
 
-缺口描述 NMG 接线，不描述宿主做不到。按[矩阵核实结果](../harness-capability-matrix.zh-CN.md#原生宿主能力核实)区分尚未实现、宿主路径待验证与宿主明确限制。DSH 只指当前宿主包，历史 preset 不作为功能对齐目标。DSH／OpenCode 的现有原生上下文／工具／事件 hook 合适时优先使用。Magpie 保留完整实现，作为可独立使用的提供方，不成为原生接线未完成的必需前提。
+按[矩阵核实结果](../harness-capability-matrix.zh-CN.md#原生宿主能力核实)区分尚未实现、宿主路径待验证与宿主明确限制。DSH 只指当前宿主包。DSH／OpenCode／Codex 的现有原生上下文／工具／事件 hook 合适时优先使用。Magpie 保留完整实现，作为可独立使用的提供方。
 
 | 适配器与源码入口 | 待补齐的 NMG 缺口 | 候选组合行为 |
 | --- | --- | --- |
 | [Pi](../../../.pi/extensions/nmg/index.ts) | 原生覆盖较完整，但准备好的逐回合工作状态没有最终输入确认。 | 保留原生召回／工具／见证／唤醒，在网关边界检查带标记的当前状态与披露，获准时通过共享准备修复缺失上下文，不把已有工具或召回算成新增能力。 |
 | [DSH](../../../dsh/dsh-nmg/src/plugin/index.ts) | 完整状态承载、工具观察／提醒及提交后的回合诊断归因已接原生 hook。已安装核心包与私有 fixture 覆盖该切片，真实唤醒和生命周期边界仍待验证。 | 选中原生提供方时保留其所有权，继续验证剩余边界。Magpie 保留可独立使用的请求级等价实现。 |
 | [OpenCode v2](../../../opencode-plugin/index.ts) | 原生状态承载和首回合 SDK 目录查询已接线。真实已安装宿主与本地模拟模型已验证激活、hook、Code Mode NMG search／get／state 及后续状态承载。见证 lineage 和真实唤醒仍待验证。 | 选中原生提供方时保留上下文／工具／事件路径。Magpie 保持完整备选提供方，共享交接验证后可修复获准的请求级缺口。 |
+| [Codex](../../../codex-plugin/README.zh-CN.md) | 原生 hook 与共享工具承载召回、状态、显式反馈、完整答案诊断、工具观察、中断及 prompt／完成时黑板批次。完全空闲唤醒需要额外宿主传输，完整 provider 输入确认仍待验证。 | 保留原生所有权及会话映射，跨入口授权映射验证后评估网关上下文确认。网关独立提供请求级准备和完整回复观察。 |
 | [WorkBuddy hook](../../../workbuddy-plugin/nmg-hook.ts) 与[工具路径](../../../workbuddy-plugin/README.md) | Hook 召回与 MCP 工具的 AG 会话分离，未证明连续状态承载、通用工具观察或自动归因。 | 绑定 hook／MCP／网关状态后，接续召回到 get、维护状态承载、请求可见观察、诊断归因与待处理黑板上下文。没有 MCP 工具时补上；选择 hook 召回时不重复注入。 |
-| [仅 MCP 客户端](../../../claude-plugins/nmg-memory/agents/memory-copilot.ts) | 缺召回、状态承载、自动归因与请求时黑板投递，反馈在动作枚举中有名称，但缺标签参数／处理分支。 | 网关补请求触发部分，共享工具接线补完整反馈及读写／state，共用同一授权会话，其他提供方继续补生命周期事件。 |
+| [仅 MCP 客户端](../../../claude-plugins/nmg-memory/agents/memory-copilot.ts) | 已有显式记忆、反馈和状态工具。自动召回、状态承载、归因与请求时黑板投递需要另一已连接事件提供方。 | 两个入口绑定到同一授权会话后，网关补请求触发部分，其他提供方继续补生命周期事件。 |
 
 这里列的是源码支持的缺口与拟议补齐路径，不是已交付组合覆盖。[适配器矩阵](../harness-capability-matrix.zh-CN.md)拥有已交付覆盖，state 读写支持不证明状态承载。[承载合同](../session-active-graph-runtime-design.md#dedicated-state-carriage)区分准备、传输与确认。
 

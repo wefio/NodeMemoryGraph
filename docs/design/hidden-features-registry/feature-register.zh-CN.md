@@ -8,6 +8,7 @@
 
 | 功能 | Gate／开关 | 默认值 | 含义摘要 | 状态／owner |
 |---|---|---|---|---|
+| 原生答案版本归因 | hello capability `versioned-answer-attribution` | 能力可用，由调用方选择 | 自有投影、已完成回复及匹配的陈述指纹产生诊断重合 | [Codex 契约](../../../codex-plugin/README.zh-CN.md)，确定性原生 fixture 已验证 |
 | 可替换记忆后端 | 库选项 `NmgServiceOptions.memoryBackend` | 未设置；沿用既有路径 | `sqlite` 默认与协作共用服务的 `databasePath`；`lancedb` 指定 URI，协作留在本地；显式命名空间、稳定 `operationId`、公布受支持能力子集 | 显式启用；原生 S3 协议夹具已验证，真实服务商部署未验证；[后端契约](../unified-architecture/native-backends.zh-CN.md) |
 | OmniMemEval deployed HTTP transport | `NMG_OMNI_API_URL`、`NMG_OMNI_API_TOKEN`、`NMG_OMNI_API_NAMESPACE` | OFF；默认本地 NDJSON 桥 | 带鉴权和显式 namespace 的同步 AML Add/Search；不做本地 embedding 预检，不支持重定向、删除或操作级物化记录 | 显式启用，验证范围由各实验限定；[Benchmark 集成](../../../evals/omnimemeval/README.zh-CN.md#集成边界) |
 | Board presence, events and Agent status | `board-events`、`board-agent-activity`、`board-agent-presence`、`board-wake-batches`；`nmg_state space=board` | 跟随共享黑板 gate，记录创建为显式动作 | 版本历史、范围通知、邀请订阅与退出、任务状态，以及[会话在线状态与处理报告](../board-event-records/agent-activity-and-batches.zh-CN.md) | 源码验证与部署分开 |
@@ -38,7 +39,7 @@
 | Paths | `NMG_DATA_DIR`、`NMG_PROJECT_DIR`、`HOME`、`USERPROFILE` | 依环境 | data／project 目录 | 配置 |
 | Model selection | `NMG_EMBED_MODEL`、`NMG_SUMMARY_MODEL`、`NMG_JUDGE_MODEL`、`EVAL_MODEL`、`ANSWER_MODEL` | provider 默认值 | 选择 embedding、summarizer、judge、eval、answer 模型 | 配置 |
 | Retrieval backend mode（RPC 参数，非 env） | `retrievalMode` | `legacy` | `legacy`／`fts5`／`hashing`／`qwen3`／`hybrid` | 配置／knob |
-| Online recall feedback affordance（all recalls） | 无新增 gate；沿用 online-learning 默认值 | ON | 每次 recall 输出携带含 activeGraphId 的简短评分邀请；调用者提交 `nmg_remember action=feedback`，daemon 仅训练指定 graph；Pi 与 dsh 均接入 | 已实现（2026-09-07）；机械 end-of-turn labeler 仍是可选后续 |
+| 在线召回反馈 | 沿用 online-learning 默认值 | ON | 评分邀请带 activeGraphId，`nmg_remember action=feedback` 为该图提交显式标签并返回训练结果。共享 MCP 与原生工具使用同一 RPC。提示归属为 `src/prompts/nmg-prompts.yaml` 的 `recall_feedback_affordance` | [反馈用法](../../../skills/nmg-memory/references/adapter-usage.zh-CN.md)，确定性契约已验证 |
 | Benchmark venv directory | `NMG_BENCH_VENV`、`NMG_HALUMEM_PYTHON` | `bge-venv` | `.benchmarks/` 下的共享 Python 3.13 benchmark venv；缺失时 runner 发出警告，不静默回退到 PATH 中的 Python | 已实现（2026-09-11）；benchmark harness |
 | Pi first-output timing observer | `/nmg-latency on\|off\|status` | OFF；会话替换／分支导航／reload 时重置 | host-event observer；无 probe request，不改变等待策略；加载本身不会启用采集 | opt-in；[lifecycle contract](../session-memory-lifecycle-hooks-2026-08-10.zh-CN.md) |
 

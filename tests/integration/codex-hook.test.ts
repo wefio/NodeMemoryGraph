@@ -1,6 +1,6 @@
 import { stripProviderEnv } from "../helpers/test-env.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -81,6 +81,10 @@ test("Codex carries full owner state when optional recall fails and restores it 
     await hook.run({ hook_event_name: "SessionStart", source: "compact", session_id: id });
     assert.match(output.join("\n"), /OwnerInvariantMarker/);
     assert.match(output.join("\n"), /Keep the complete multiline invariant/);
+    output.length = 0;
+    await hook.run({ hook_event_name: "PostCompact", session_id: id });
+    assert.equal(JSON.parse(output[0]!).hookSpecificOutput.hookEventName, "PostCompact");
+    assert.match(output.join("\n"), /OwnerInvariantMarker/);
     await hook.run({ hook_event_name: "Stop", session_id: id, turn_id: turn });
     const state = await service.invoke("state", { action: "read", space: "ag", sessionId });
     assert.match(JSON.stringify(state), /OwnerInvariantMarker/);
@@ -125,6 +129,101 @@ test("Codex refuses context prepared before a native clear", async () => {
       /Obsolete/,
     );
     assert.equal(output, "");
+  } finally {
+    await service.close();
+    removeTempDirectory(directory);
+  }
+});
+
+test("Codex completion batches many authors, receipts accepted output and prevents continuation loops", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-codex-completion-"));
+  const service = new NmgService({ dataDirectory: directory, environment: {} });
+  const output: string[] = [];
+  let rejectOutput = false;
+  let forwardedPosts = 0;
+  const receipts: unknown[] = [];
+  writeFileSync(
+    join(directory, "board-wake.json"),
+    JSON.stringify({ enabled: true, budget: 8, cooldownMs: 0 }),
+  );
+  const sessionId = `codex-${id}`;
+  try {
+    const hook = new CodexHook(
+      {
+        dataDirectory: directory,
+        environment: {},
+        invoke: async (method, params) => {
+          if (method === "taskBoard" && (params as { action?: string }).action === "put")
+            forwardedPosts++;
+          if (method === "taskBoard" && (params as { action?: string }).action === "recordDelivery")
+            receipts.push(params);
+          return service.invoke(method as NmgMethod, params);
+        },
+        writeOutput: async (text) => {
+          if (rejectOutput) throw new Error("Sink rejected");
+          output.push(text);
+        },
+      },
+      capabilities,
+    );
+    await hook.run({
+      hook_event_name: "UserPromptSubmit",
+      session_id: id,
+      turn_id: turn,
+      cwd: directory,
+      prompt: "hello",
+    });
+    for (let i = 0; i < 8; i++)
+      await service.invoke("taskBoard", {
+        action: "put",
+        taskId: "completion-fixture",
+        agentId: `author-${i}`,
+        kind: "note",
+        content: `CompletionNotice${i}`,
+        to: sessionId,
+        notification: { key: `completion-${i}`, scopes: ["direct"], recipients: [sessionId] },
+      });
+    output.length = 0;
+    rejectOutput = true;
+    await assert.rejects(
+      hook.run({ hook_event_name: "Stop", session_id: id, turn_id: turn, stop_hook_active: false }),
+      /Sink rejected/,
+    );
+    rejectOutput = false;
+    await hook.run({
+      hook_event_name: "Stop",
+      session_id: id,
+      turn_id: turn,
+      stop_hook_active: false,
+    });
+    assert.equal(output.length, 1);
+    const message = JSON.parse(output[0]!);
+    assert.equal(message.decision, "block");
+    const admitted = String(message.reason).match(/CompletionNotice\d/g) ?? [];
+    assert.ok(admitted.length > 2);
+    assert.ok(admitted.length <= 8);
+    assert.ok(message.reason.length <= 4000);
+    await hook.run({
+      hook_event_name: "Stop",
+      session_id: id,
+      turn_id: turn,
+      stop_hook_active: true,
+    });
+    await hook.run({
+      hook_event_name: "Stop",
+      session_id: id,
+      turn_id: turn,
+      stop_hook_active: false,
+    });
+    assert.equal(
+      output.length,
+      1,
+      JSON.stringify({
+        receipts,
+        notices: output.map((text) => JSON.parse(text).reason?.match(/notice=[^ ]+/g)),
+      }),
+    );
+    assert.equal(forwardedPosts, 0);
   } finally {
     await service.close();
     removeTempDirectory(directory);

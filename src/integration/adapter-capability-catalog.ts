@@ -12,6 +12,7 @@ export const ADAPTER_CAPABILITY_CATALOG = {
       "lab-tools",
       "automatic-recall",
       "state-context",
+      "answer-attribution",
       "tool-observation",
       "completion-nudge",
       "board-delivery",

@@ -29,10 +29,28 @@ The daemon retains writer leases, evidence and maintained state. Missing hook
 admission leaves explicit tools available with unknown project scope, except
 after clear when a new admitted turn is required.
 
-Hooks assemble shared recall, owner-state projection, observations, reminders
-and prompt-time board batches. Owner state is prepared before optional recall.
-Output acceptance precedes board receipts. Stop reports unknown processing state.
-The binding supplies no answer-attribution or idle-wake event.
+Hooks assemble shared recall, owner-state projection, observations, reminders,
+answer attribution and board batches. Owner state is prepared before optional
+recall and carried after compaction. Interrupt cancels pending attribution.
+Stop supplies the completed answer and can request one continuation for an
+admitted board batch. Output acceptance precedes receipts and marks continuation
+consumption even if receipt recording fails. Remaining notices wait for the next
+native event. Processing is unknown at Stop, or busy when continuation is requested.
+
+Shared MCP feedback submits explicit labels against the rated projection and
+returns the daemon's training result. The versioned answer-attribution path
+requires a daemon advertising `versioned-answer-attribution`. The adapter stores
+up to 32 projection references per turn containing memory IDs and statement
+hashes. The daemon checks live projection ownership and current content versions,
+then derives diagnostic overlap using the recorded retrieval query. Existing
+callers retain their ID-based path. Automatic overlap and explicit supervision
+have independent semantics.
+
+Codex Bash hooks can supply stdout with unknown execution outcome. A bounded
+read of the native transcript resolves final status for the matching session,
+turn and call. Only the tested native result header is accepted. Unsupported
+formats retain unknown outcome. Per-call markers deduplicate final observations.
+Hook RPCs share a four-second deadline within the five-second native handler.
 
 The build bundles a Node client, Skill and compatibility manifests into a local
 marketplace package. Runtime dependencies are embedded. The closure check refuses
@@ -47,7 +65,14 @@ The installation guide owns commands and trust requirements.
 Native metadata support and reviewed hooks are host prerequisites. Each hook
 invocation loads the small client and routing record. Abrupt host termination
 uses registry heartbeat expiry. Routing files persist for resume and contain
-identifiers and project paths. They contain no memory bodies or credentials.
+identifiers and project paths. Diagnostic reference files are consumed at Stop
+or interruption, while small per-turn cancellation/continuation markers persist.
+Memory bodies and credentials remain outside these routing and reference files.
+
+Fully idle background wake requires an additional host transport. Current
+request hooks expose model-attempt diagnostics without complete provider input,
+so final input confirmation remains unverified. Neither boundary requires
+delegating existing native recall, state, feedback or completion handling to Magpie.
 
 Contract tests cover shared-connection isolation, foreign projection refusal,
 generation fencing, complete state carriage and independent package startup.

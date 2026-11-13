@@ -25,7 +25,22 @@ node docs/experiments/runtime/codex-distribution-probe.mjs --codex-bin <codex.ex
 [子进程环境事故](../../postmortem/0008-codex-private-home-shared-daemon.zh-CN.md)
 [插件使用](../../../codex-plugin/README.zh-CN.md)
 
-## 结果与范围
+## 原生反馈与生命周期补齐
+
+打包后的 Codex CLI 0.169.0 联调执行共享显式反馈、完整答案归因、成功及失败的
+原生 shell 观察，以及携带定向黑板通知的 Stop 续接，并保留并发聊天、恢复和原生分叉检查。
+全部模型响应由本地确定性服务提供。
+[原生补齐回执](artifacts/codex-plugin-capabilities-2026-11-13/native-parity.json)
+
+契约测试还覆盖 PostCompact 状态恢复、中断丢弃、64 次并发引用准入最多占用 32 个槽位、
+外来 Owner 拒绝、版本不匹配、显式 false 反馈、输出端拒绝，以及 4,000 字符预算内的
+八作者黑板批次。每个原始轮次最多续接一次，剩余通知等待下一次原生事件。
+
+原生记录兜底最多读取开头 64 KiB 和末尾 256 KiB，验证 session／turn／call 元数据，
+接受实测的原生退出头格式。未知格式保留未知结果。
+交互压缩和中断由契约测试覆盖，原生 GUI 交互、完全空闲后台唤醒及完整 provider 输入确认仍待验证。
+
+## 较早的源码绑定实验
 
 NMG 已通过 Codex 原生本地插件安装路径运行。已安装插件提供现有 NMG MCP 服务和
 Skill，并携带使用共享能力装配的源码绑定 hook fixture。
@@ -69,7 +84,7 @@ Skill，并携带使用共享能力装配的源码绑定 hook fixture。
 - Responses 的 namespace 调用分别传 `namespace` 和 `name`。
   将两者用点拼成一个名字会被原生路由器拒绝。
 
-## 证据边界与剩余工作
+## 较早实验的证据边界
 
 fixture 将一个私有 Codex 聊天绑定到操作方明确选择的 NMG session，MCP 使用相同绑定。
 hook 的原生 session／turn ID 被记录，不作为模型自行提供的授权。
@@ -80,9 +95,8 @@ hook 使用 `assembleAdapterCapabilities`、InformationView 和当前 owner 状�
 工具前后事件被记录以验证宿主边界，不构成已交付的通用工具捕获或答案归因绑定。
 压缩、空闲唤醒、子 Agent、事件取消及桌面安装交互尚未在这里验证。
 
-目前仍没有正式交付独立 NMG Codex 适配器。
-成功的源码绑定插件 fixture 说明，NMG 尚未接线不能归因为宿主做不到，
-Codex 原生能力补齐可以独立于 Magpie 推进。
+较早的源码绑定实验确认了原生入口。
+上方独立分发及原生补齐章节记录正式适配器后续的独立包与生命周期验证。
 
 ## 复现
 

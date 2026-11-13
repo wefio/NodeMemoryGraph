@@ -60,7 +60,7 @@ Gaps describe NMG wiring, not host inability. Separate missing implementation,
 unverified host paths and explicit host restrictions under the
 [matrix findings](../harness-capability-matrix.md#native-host-capability-findings).
 DSH means the current host package; the historical preset is not a parity target.
-For DSH/OpenCode, use existing native context/tool/event hooks first where they
+For DSH/OpenCode/Codex, use existing native context/tool/event hooks first where they
 fit. Magpie retains its complete implementation as an independently usable
 provider, not a requirement for unfinished native wiring.
 
@@ -69,18 +69,16 @@ provider, not a requirement for unfinished native wiring.
 | [Pi](../../../.pi/extensions/nmg/index.ts) | Broad native coverage, but prepared per-turn working state has no final input confirmation. | Keep native recall/tools/witnesses/wake. At the gateway boundary, check the labelled current state/disclosure and repair missing context through shared preparation where authorized. Do not claim an already-covered tool or recall as a new capability. |
 | [DSH](../../../dsh/dsh-nmg/src/plugin/index.ts) | Complete state carriage, tool observation/nudges and committed-turn diagnostic attribution use native hooks. Installed-core and private fixture checks cover this slice; live wake and lifecycle edges remain unverified. | Keep native ownership where selected and validate remaining boundaries. Magpie retains independently usable request-bound equivalents. |
 | [OpenCode v2](../../../opencode-plugin/index.ts) | Native state carriage and first-turn scope lookup pass an installed-host loopback run with NMG tools. Witness lineage and live wake remain unverified. | Keep native context/tool/event paths where selected. Magpie remains a full alternative provider and can repair authorized request-time gaps after shared handoff validation. |
+| [Codex](../../../codex-plugin/README.md) | Native hooks cover state, feedback, attribution, observations and prompt/completion board batches. Idle wake needs another transport. Provider-input confirmation is unverified. | Preserve native session ownership. Validate cross-entry mapping before gateway context confirmation. |
 | [WorkBuddy hook](../../../workbuddy-plugin/nmg-hook.ts) + [tool path](../../../workbuddy-plugin/README.md) | Hook recall and MCP tools use separate AG sessions. No demonstrated continuous state carriage, general tool observations or automatic attribution. | Bind hook/MCP/gateway state, then support recall-to-get, maintained-state carriage, request-visible observations, diagnostic attribution and pending-board context. Supply MCP tools if absent. Keep hook recall when selected; no duplicate injection. |
-| [MCP-only clients](../../../claude-plugins/nmg-memory/agents/memory-copilot.ts) | Missing recall, state carriage, automatic attribution and request-time board delivery. Feedback is named in the action enum but lacks labels/dispatch. | Gateway supplies request-triggered parts; shared tool wiring must complete feedback and provide reads/writes/state. Bind both paths to one authorized session. Other providers can supply lifecycle events. |
+| [MCP-only clients](../../../claude-plugins/nmg-memory/agents/memory-copilot.ts) | Explicit memory, feedback and state tools are available. Automatic recall, state carriage, attribution and request-time board delivery require another connected event provider. | Gateway supplies request-triggered parts after both paths bind to one authorized session. Other providers can supply lifecycle events. |
 
-These are source-grounded gaps and proposed closures, not shipped combined
-coverage. The [adapter matrix](../harness-capability-matrix.md) owns delivered
-coverage. In particular, state read/write support does not prove state carriage.
-The [carriage contract](../session-active-graph-runtime-design.md#dedicated-state-carriage)
-separates preparation, transport and confirmation.
+The [adapter matrix](../harness-capability-matrix.md) owns delivered coverage.
+Combined providers require integration tests. The
+[carriage contract](../session-active-graph-runtime-design.md#dedicated-state-carriage)
+defines preparation, transport and confirmation separately from state read/write.
 
 ### Shared mechanisms for feature parity
-
-Use the same mechanisms across all combinations:
 
 - Expose missing memory/state/feedback operations through shared Agent Surface
   tools in a client-connected MCP server, including Magpie's tools path if

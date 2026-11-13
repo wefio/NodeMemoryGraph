@@ -55,13 +55,29 @@ credentials. Writer leases, AG state and evidence remain in the daemon.
 Without a hook admission, explicit tools retain session isolation and leave
 project scope unknown. Project scope is never guessed from prompt text.
 
-The plugin uses the shared capability assembly and InformationView budgets.
-Automatic preparation does not confirm final disclosure. State is prepared
-independently of optional recall and is restored after compaction. Board notices
-are batched at user prompts, with receipts only after the output sink accepts
-them. This adapter provides no idle wake. Stop reports unknown processing state.
-Generic tool observations require recognized result flags; ambiguous outcomes
-cannot produce successful-commit nudges. Answer attribution is not advertised.
+The plugin uses shared capability assembly and InformationView budgets. State is
+prepared before optional recall and restored by compact-session/PostCompact hooks.
+Board notices are batched at user prompts and at native Stop. An accepted Stop
+batch can continue the turn once. Existing wake enablement, budgets and cooldowns
+apply. Receipts cover the admitted fragment after output acceptance. A fully idle
+chat waits for its next native event. Stop reports unknown processing state,
+or busy after requesting continuation.
+
+`nmg_remember action=feedback` accepts explicit labels and the rated activeGraphId.
+The daemon reports whether the label could train its staged decision. Automatic
+answer overlap is separate diagnostic telemetry. Stop supplies the native completed
+answer. The adapter keeps up to 32 projection references per turn with statement
+fingerprints. A daemon advertising `versioned-answer-attribution` validates ownership
+and current content versions before deriving overlap. Interrupted turns are discarded.
+This diagnostic does not label truth, task success or useful evidence.
+
+Bash hooks can supply stdout without exit status. The adapter observes that output
+with unknown outcome. At completion it can resolve the matching native call and
+turn in a bounded transcript read, then observe its final status once. The tested
+Codex 0.169 format is checked strictly. Unrecognized formats retain unknown outcome
+and cannot trigger a successful-commit nudge. RPC work shares a four-second hook
+deadline within Codex's five-second handler timeout. Preparation remains distinct
+from final provider-input confirmation.
 
 `NMG_DATA_DIR`, common recall/display settings and `NMG_ENABLE_COORDINATION`
 retain their existing meanings. If the daemon is unavailable or incompatible,

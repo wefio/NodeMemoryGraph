@@ -30,7 +30,27 @@ fixture run are recorded in the incident owner.
 [Child environment incident](../../postmortem/0008-codex-private-home-shared-daemon.md)
 [Package use](../../../codex-plugin/README.md)
 
-## Result and scope
+## Native feedback and lifecycle parity
+
+The packaged Codex CLI 0.169.0 run exercises shared explicit feedback, completed
+answer attribution, successful and failing native shell observations, and a Stop
+continuation carrying a direct board notice. It retains concurrent chat, resume
+and native fork checks. All model responses are deterministic and local.
+[Native parity receipt](artifacts/codex-plugin-capabilities-2026-11-13/native-parity.json)
+
+Contract tests additionally cover PostCompact state restoration, interruption
+discard, 64 concurrent reference admissions bounded to 32 slots, foreign owner
+refusal, version mismatch, explicit false feedback, rejected output sinks and
+eight-author board batching under a 4,000-character budget. The continuation is
+bounded to one per original turn. Remaining notices wait for the next native event.
+
+The native transcript fallback reads at most the first 64 KiB and last 256 KiB,
+validates session/turn/call metadata and accepts the tested native exit header.
+Unknown formats retain unknown outcome. Interactive compaction and interruption
+are contract-tested, while native GUI interaction, fully idle background wake
+and complete provider-input confirmation remain unverified.
+
+## Earlier source-bound experiment
 
 NMG works through Codex's native local-plugin installation path. The installed
 plugin supplies the existing NMG MCP server and Skill, plus a source-bound hook
@@ -82,7 +102,7 @@ Other conditions:
 - Responses namespace calls carry separate `namespace` and `name` fields.
   Joining them with a dot produced unsupported calls in the native router.
 
-## Evidence and remaining work
+## Earlier experiment boundary
 
 The fixture binds one private Codex conversation to a fixed operator-selected
 NMG session used by its MCP connection. The hook's native session/turn IDs are
@@ -97,9 +117,9 @@ to verify the host boundary; this is not a shipped general tool-capture or
 answer-attribution binding. Compaction, idle wake, subagents, event cancellation
 and desktop installation UX remain untested here.
 
-There is still no released standalone NMG Codex adapter. The successful
-source-bound plugin fixture shows that missing NMG wiring is not a host
-restriction. It supports pursuing native Codex parity independently of Magpie.
+This earlier source-bound exercise established the native entry points.
+The distributable and native-parity sections above record the production
+adapter's subsequent independent package and lifecycle tests.
 
 ## Reproduction
 
