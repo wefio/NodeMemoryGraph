@@ -1,0 +1,9 @@
+{
+  "name": "nmg",
+  "version": "0.1.0",
+  "description": "Durable memory, maintained working state and shared task coordination for Codex.",
+  "author": { "name": "NMG" },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json"
+}

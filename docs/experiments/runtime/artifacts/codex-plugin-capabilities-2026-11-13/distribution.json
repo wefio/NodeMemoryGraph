@@ -1,0 +1,35 @@
+{
+  "measuredAt": "2026-11-13T14:47:55.709Z",
+  "version": "codex-cli 0.169.0",
+  "binarySha256": "ce1945eb440b5481ed1233ebaf32b7056ee7e4e452fa62ffe1cbfb26103cdee0",
+  "archiveSha256": "be0c1dda58f2830cf6cb25fb0bd786c6ddf66f7ba38209d13b26d56ba67bfc48",
+  "bundleSha256": "8c0168332fc5ca891253070086929149892b430f0e71c92fe77a6cb55881dca4",
+  "chats": {
+    "a": "01a1d560-e18d-78b0-84ce-0019b3f21628",
+    "b": "01a1d560-e18f-7891-a2d7-2b012587ee60",
+    "fork": "01a1d561-12ed-72a1-9917-3d10de43791e"
+  },
+  "modelRequests": 20,
+  "concurrent": true,
+  "resumedState": true,
+  "forkIsolated": true,
+  "packagedCacheExecution": true,
+  "sourceDependency": false,
+  "hookAdmission": true,
+  "paidRequests": 0,
+  "sourceSha256": {
+    "codex-plugin/index.ts": "0ba2c9f01ab5dae1f051ddd68ef384567b4b2ea0fbd2a487b17954466f1027e0",
+    "codex-plugin/main.ts": "d7abda6ba2ae597c636587e338b16941f95793363631cce99135021e4293c508",
+    "codex-plugin/hook.ts": "8e0887504773b9b337ab53002fde96c75c2cebe2cfa963f8631d55e9547fb942",
+    "codex-plugin/session.ts": "7adb050383d7bb80c4d8c9f11f1b37513b7b1cb89f2112565803576c827843e2",
+    "codex-plugin/session-store.ts": "4c2bafb9ef72928deb00e665b1ece6e052fc31b28333a391823440acc0436a91",
+    "codex-plugin/.mcp.json": "67709c071822a2902295ee0e72affcfc5dc678e520489355790895f732f91dc1",
+    "codex-plugin/hooks/hooks.json": "2c1142d114e72536e8ddf52e27a32278e02baec92a4a8ac53e9fa91fe93b70e3",
+    "src/integration/mcp-tools.ts": "02d31f134d945631728fb2c5a800d3e09ed3268a302c495bd5b94d5af87427a9",
+    "scripts/build-codex-plugin.ts": "66b5d9c6bacb6ce064f722590881e7106bb520a4dbc58f851f0f156704389964",
+    "docs/experiments/runtime/codex-distribution-probe.mjs": "e10be5fb34b713b45e2996af55907a720a26e32175aacb5552f3de4d23b2634c"
+  },
+  "cleanBuildTree": "da676937d3dedde70570fa5ed9e005061c40044c",
+  "automaticRecall": true,
+  "explicitWritesReachedPrivateDaemon": true
+}

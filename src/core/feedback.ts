@@ -13,6 +13,25 @@
  * a portable property of the memory system.
  */
 import type { MemorySearchResult } from "./types.ts";
+import { createHash } from "node:crypto";
+
+export interface AnswerAttributionReference {
+  memoryId: string;
+  statementHash: string;
+}
+
+export function statementFingerprint(statement: string): string {
+  return createHash("sha256").update(statement).digest("hex");
+}
+
+export function answerAttributionReferences(
+  results: readonly Pick<MemorySearchResult, "memory">[],
+): AnswerAttributionReference[] {
+  return results.map(({ memory }) => ({
+    memoryId: memory.id,
+    statementHash: statementFingerprint(memory.statement),
+  }));
+}
 
 const FEEDBACK_STOPWORDS = new Set([
   "the",
@@ -133,7 +152,7 @@ export function contentTokens(text: string): string[] {
  */
 export function deriveAnswerOverlapMemoryIds(
   answerText: string,
-  results: readonly MemorySearchResult[],
+  results: readonly { memory: Pick<MemorySearchResult["memory"], "id" | "statement"> }[],
   promptText?: string,
 ): string[] {
   const answerTokens = new Set(contentTokens(answerText));

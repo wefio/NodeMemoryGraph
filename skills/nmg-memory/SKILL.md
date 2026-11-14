@@ -1,6 +1,6 @@
 ---
 name: nmg-memory
-description: Use NMG as durable memory or temporary multi-Agent coordination when a task may depend on prior user facts, preferences, constraints, decisions, project state, events, reusable experience, or a shared task blackboard; when the user asks to remember or recall something; or when an Agent must maintain/show current work status or safely manage the NMG daemon.
+description: Use NMG as durable memory or temporary multi-Agent coordination when a task may depend on prior user facts, preferences, constraints, decisions, project state, events, reusable experience, or a shared task blackboard; when the user asks to remember or recall something; or when an Agent must maintain/show current work status or safely manage the NMG daemon; or when installing or using an NMG host integration.
 ---
 
 # NMG Memory
@@ -16,6 +16,12 @@ For first-time setup from a persistent local checkout, prefer linking this entir
 Skill directory into the Agent's skills directory (Windows: directory junction).
 Keep the source available; confirm migration before replacing an existing
 installation or local changes. No periodic sync script is needed for a link.
+
+The Skill supplies instructions; tools and automatic context depend on the
+connected adapter. For installation, loading and daily use of supported host
+connections, read [adapter usage](references/adapter-usage.md). Reuse connected
+NMG tools; the CLI examples below are the shell alternative, not extra calls to
+make after every tool operation.
 
 ## Responsibilities and boundaries
 
@@ -34,7 +40,7 @@ installation or local changes. No periodic sync script is needed for a link.
 
 ## Normal workflow
 
-1. Check `nmg daemon status --json`; inspect both `running` and `compatible`.
+1. For CLI access or daemon troubleshooting, check `nmg daemon status --json`; inspect both `running` and `compatible`.
    If stopped, run `nmg daemon start --json` and track this invocation's ownership.
    For `compatible=false`, do not reuse or automatically replace it;
    request an owner/user-coordinated restart at a safe point.
@@ -80,7 +86,8 @@ use an `rtk` prefix only when the active `AGENTS.md` requires it.
 | Ongoing multi-step work, current progress/status, or working-state recovery | [daily work status](references/optional-capabilities.md#daily-work-status) |
 | Non-default QPP/controller/STG/topology/ANN or Lab | [optional capabilities](references/optional-capabilities.md) |
 | Natural evidence collection and gated updates | [natural evidence loop](references/natural-evidence.md) |
-| New harness integration | [harness adapters](references/harness-adapters.md) |
+| Install, load, use or troubleshoot an NMG adapter or tool connection | [adapter usage](references/adapter-usage.md) |
+| Develop or extend a harness adapter | [harness adapters](references/harness-adapters.md) |
 
 Use `nmg_state` for normal temporary AG/board operations. Use Lab only when ordinary memory/state operations are insufficient; reuse the
 existing daemon. Read its reference and `nmg lab list` before enabling/invoking;

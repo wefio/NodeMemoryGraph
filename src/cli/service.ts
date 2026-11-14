@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { deriveAnswerOverlapMemoryIds, statementFingerprint } from "../core/feedback.ts";
 import { dirname, join, relative, resolve } from "node:path";
 
 import {
@@ -1625,51 +1626,8 @@ export class NmgService {
         `new memory ${params.newMemoryId} does not exist`,
       );
     }
+    if (params.action === "relate") return this.#relateRemember(params, store);
     const newer = store.getMemory(params.newMemoryId, params.sessionId);
-    if (params.action === "relate") {
-      const related = store.getMemory(params.relatedMemoryId, params.sessionId);
-      if (!newer || !related) {
-        throw new NmgProtocolError(
-          "INVALID_PARAMS",
-          "relation targets must exist in the same LTG or session-owned STG store",
-        );
-      }
-      if (
-        ["conflict", "refines", "same_entity"].includes(params.relationJudgement) &&
-        !scopesOverlap(newer.scope, related.scope)
-      ) {
-        throw new NmgProtocolError(
-          "INVALID_PARAMS",
-          `${params.relationJudgement} requires non-conflicting scope; use distinct for different entities or retain both memories`,
-        );
-      }
-      if (params.relationJudgement === "conflict" && !validityIntervalsOverlap(newer, related)) {
-        throw new NmgProtocolError(
-          "INVALID_PARAMS",
-          "conflict requires overlapping validity; sequential values should remain temporal states or use supersede",
-        );
-      }
-      const relationType = {
-        conflict: "contradicts",
-        distinct: "distinct_from",
-        refines: "refines",
-        related: "related_to",
-        same_entity: "same_as",
-      } as const;
-      const proposal = store.proposeSemanticRelation({
-        sourceNodeId: newer.nodeId,
-        targetNodeId: related.nodeId,
-        relationType: relationType[params.relationJudgement],
-        evidenceMemoryIds: [newer.id, related.id],
-        confidence: params.confidence,
-      });
-      return {
-        action: "relate",
-        newMemoryId: newer.id,
-        relatedMemoryId: related.id,
-        proposal,
-      };
-    }
     const stale = store.getMemory(params.supersededMemoryId, params.sessionId);
     if (!newer || !stale) {
       throw new NmgProtocolError(
@@ -1704,6 +1662,55 @@ export class NmgService {
     };
   }
 
+  #relateRemember(
+    params: Extract<NmgResolveRememberParams, { action: "relate" }>,
+    store: NmgStore,
+  ): NmgMethodResult["resolveRemember"] {
+    const newer = store.getMemory(params.newMemoryId, params.sessionId);
+    const related = store.getMemory(params.relatedMemoryId, params.sessionId);
+    if (!newer || !related) {
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        "relation targets must exist in the same LTG or session-owned STG store",
+      );
+    }
+    if (
+      ["conflict", "refines", "same_entity"].includes(params.relationJudgement) &&
+      !scopesOverlap(newer.scope, related.scope)
+    ) {
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        `${params.relationJudgement} requires non-conflicting scope; use distinct for different entities or retain both memories`,
+      );
+    }
+    if (params.relationJudgement === "conflict" && !validityIntervalsOverlap(newer, related)) {
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        "conflict requires overlapping validity; sequential values should remain temporal states or use supersede",
+      );
+    }
+    const relationType = {
+      conflict: "contradicts",
+      distinct: "distinct_from",
+      refines: "refines",
+      related: "related_to",
+      same_entity: "same_as",
+    } as const;
+    const proposal = store.proposeSemanticRelation({
+      sourceNodeId: newer.nodeId,
+      targetNodeId: related.nodeId,
+      relationType: relationType[params.relationJudgement],
+      evidenceMemoryIds: [newer.id, related.id],
+      confidence: params.confidence,
+    });
+    return {
+      action: "relate",
+      newMemoryId: newer.id,
+      relatedMemoryId: related.id,
+      proposal,
+    };
+  }
+
   /** Consume one labeled auto-recall graph (RSCB context-use feedback) into the
    *  daemon-owned online learner. No usable label or no staged decision → not
    *  trained. Best-effort: never breaks the remember path on a foreign graph. */
@@ -1712,6 +1719,9 @@ export class NmgService {
       trained: false,
       activeGraphId: null,
     };
+    const owner =
+      params.activeGraphId && this.#sessionActiveGraphs.projectionOwner(params.activeGraphId);
+    if (owner && owner !== (params.sessionId?.trim() || "__anonymous__")) return result;
     try {
       const learner = this.#getOnlineLearner();
       if (!learner) return result; // online learning disabled
@@ -2519,6 +2529,15 @@ export class NmgService {
   #recordActiveGraphAttribution(
     params: NmgRecordActiveGraphAttributionParams,
   ): NmgMethodResult["recordActiveGraphAttribution"] {
+    if (params.answerText !== undefined) {
+      const attributedMemoryIds = this.#deriveVersionedAnswerAttribution(params);
+      return this.#recordActiveGraphAttribution({
+        activeGraphId: params.activeGraphId,
+        attributedMemoryIds,
+        sessionId: params.sessionId,
+        projectDir: params.projectDir,
+      });
+    }
     // Agent-end answer-overlap attribution. This is diagnostic telemetry,
     // not QPP supervision or proof of causal model reliance.
     const sharedStore = this.#getStore();
@@ -2585,6 +2604,31 @@ export class NmgService {
       activeGraphId: params.activeGraphId,
       attributedMemoryIds: params.attributedMemoryIds,
     };
+  }
+
+  #deriveVersionedAnswerAttribution(params: NmgRecordActiveGraphAttributionParams): string[] {
+    const parts = this.#projectionParts(params.activeGraphId, params.sessionId);
+    if (!params.sessionId || !parts?.length)
+      throw new NmgProtocolError(
+        "NOT_FOUND",
+        "Owned live projection is required for answer attribution",
+      );
+    const versions = new Map(
+      params.memoryVersions!.map((item) => [item.memoryId, item.statementHash]),
+    );
+    const attributed = new Set<string>();
+    for (const part of parts) {
+      const query = part.store.retrievalTrace(part.traceId, params.sessionId)?.query;
+      const candidates = [...part.memoryIds].flatMap((id) => {
+        const memory = part.store.getMemory(id, params.sessionId);
+        return memory && versions.get(id) === statementFingerprint(memory.statement)
+          ? [{ memory }]
+          : [];
+      });
+      for (const id of deriveAnswerOverlapMemoryIds(params.answerText!, candidates, query))
+        attributed.add(id);
+    }
+    return [...attributed];
   }
 
   #getStore(): NmgStore {
@@ -3351,14 +3395,44 @@ function parseRecordActiveGraphAttributionParams(
   value: unknown,
 ): NmgRecordActiveGraphAttributionParams {
   const params = objectParams(value);
+  const answerText = optionalString(params, "answerText");
+  const attributedMemoryIds = requiredStringArray(params, "attributedMemoryIds", 0, 10_000);
+  const memoryVersions = parseAttributionVersions(params.memoryVersions, answerText);
+  if (
+    answerText !== undefined &&
+    (answerText.length > 256_000 ||
+      attributedMemoryIds.length > 0 ||
+      !optionalString(params, "sessionId"))
+  )
+    throw new NmgProtocolError(
+      "INVALID_PARAMS",
+      "answerText requires sessionId, empty attributedMemoryIds and at most 256000 characters",
+    );
   return {
     activeGraphId: requiredString(params, "activeGraphId"),
     // An empty list is meaningful diagnostic coverage: recall happened, but
     // no candidate wording overlapped the final answer. It is not a negative label.
-    attributedMemoryIds: requiredStringArray(params, "attributedMemoryIds", 0, 10_000),
+    attributedMemoryIds,
+    ...(answerText !== undefined ? { answerText, memoryVersions } : {}),
     projectDir: optionalString(params, "projectDir"),
     sessionId: optionalString(params, "sessionId"),
   };
+}
+
+function parseAttributionVersions(value: unknown, answer: string | undefined) {
+  if (answer === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 50)
+    throw new NmgProtocolError(
+      "INVALID_PARAMS",
+      "memoryVersions must be an array of at most 50 references",
+    );
+  return value.map((item) => {
+    const record = objectParams(item);
+    const statementHash = requiredString(record, "statementHash");
+    if (!/^[a-f0-9]{64}$/.test(statementHash))
+      throw new NmgProtocolError("INVALID_PARAMS", "Invalid attribution statementHash");
+    return { memoryId: requiredString(record, "memoryId"), statementHash };
+  });
 }
 
 function parseSyncStgParams(value: unknown): NmgSyncStgParams {

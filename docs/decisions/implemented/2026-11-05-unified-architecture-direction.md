@@ -20,6 +20,52 @@ pi durable is the selected cloud Harness. Its NMG binding shares integration beh
 
 Magpie is an additional gateway integration candidate. The [Magpie design](../../design/unified-architecture/magpie-integration.md) separates automatic recall from explicit tool access and limits completion capture to the host's best-effort contract. It does not replace a Harness or establish full native-plugin capability coverage.
 
+The follow-up [operations-panel draft](../../design/unified-architecture/magpie-operations.md)
+uses Magpie's existing UI for NMG statistics and embedding settings, then adds
+gateway observations alongside native bindings. It keeps store/configuration
+ownership in the shared service so another UI can reuse it. The draft does not
+establish delivered metrics, an operator API, or a working Magpie adapter.
+
+The [versioned interface map](../../design/unified-architecture/magpie-capabilities.md)
+grounds that draft in Magpie `0.1.3545` source and each native adapter's wiring.
+It favors gateway embedding transport over copying upstream keys. Feature-parity
+work covers each adapter's NMG gaps, including working-state carriage, tool
+continuity, attribution/feedback and board delivery. GUI, usage and tracing are
+separate enhancements. Native lifecycle ownership stays intact. Source review
+does not replace runtime integration evidence.
+
+Capability coverage is composed across the client's connected entry points,
+including native adapters, MCP, hooks, CLI/Skills and Magpie. The
+[shared composition model](../../design/unified-architecture/harness-integration.md#compose-capabilities-across-connected-entry-points)
+assigns providers per operation and retains explicit gaps. This avoids requiring
+either MCP or Magpie to become a complete Harness and allows their supported
+handoffs to supply a broader flow. The model is a design direction; combined
+runtime coverage still requires integration evidence.
+
+Magpie's role in filling another adapter's gaps does not reduce its own plugin
+surface. The plugin targets complete standalone NMG integration within supported
+host interfaces. Composition selects enabled providers and effect owners while
+preserving their overlapping implementations. This separates plugin completeness
+from session deduplication; both standalone and composed behavior need evidence.
+
+The DSH target is its current host package; the historical preset is not a
+parallel parity target. Gap analysis separates unfinished NMG wiring from
+unverified host paths and demonstrated host restrictions. DSH/OpenCode native
+context and tool/event hooks remain implementation candidates. A missing NMG
+connection does not establish that the host needs a gateway to provide it.
+
+The [native capability audit](../../experiments/runtime/native-plugin-capabilities-2026-11-12.md)
+reuses the original OpenCode matrix and smoke record. DSH core-service probes
+confirm dynamic context and final tool notifications; OpenCode's private API
+returns a session directory before a prompt. Native parity work therefore stays
+independent of gateway deployment. Installed OpenCode activation, hooks, Code Mode tools and state carriage are exercised against a loopback model. DSH state carriage and committed-turn attribution are exercised with installed core services. Native lifecycle edges, live wake and composed-provider handoffs retain separate validation gates.
+
+The NMG usage Skill routes installation, use and activation checks for all shipped adapters and CLI/MCP connections to an [adapter operating guide](../../../skills/nmg-memory/references/adapter-usage.md). Adapter development stays in its existing contract reference. This keeps operating instructions aligned with verified native paths without presenting Magpie's draft binding as an installed prerequisite.
+
+The initial [capability assembly](../../design/unified-architecture/adapter-capability-assembly.md) now executes declarations at the six existing plugin entry points. Shared tool registration, context, observation, attribution, delivery and reminder modules consume native bindings. Missing required bindings fail setup; endpoint/session checks remain in the operation paths. Cross-provider composition and automatic generation of the overall matrix remain targets.
+
+The [Codex adapter](../../../codex-plugin/README.md) assembles shared tools and native hooks with per-request session binding. Its [native exercise](../../experiments/runtime/codex-plugin-capabilities-2026-11-13.md) records self-contained artifact installation, concurrent chats, resume and fork isolation.
+
 ## Alternatives considered
 
 - SQLite snapshots as the object backend: useful for reusing database behavior, but does not satisfy the requested independent native-object path. Keep the current format as a migration source.

@@ -1,3 +1,8 @@
+import {
+  assembleAdapterCapabilities,
+  type AdapterCapabilityBindings,
+} from "../src/integration/adapter-capability-assembly.ts";
+import { ADAPTER_CAPABILITY_CATALOG } from "../src/integration/adapter-capability-catalog.ts";
 // NMG adapter for OpenCode (v2 plugin contract).
 //
 // HOST-ADAPTER BOUNDARY (shared layer rule): this plugin is a thin transport.
@@ -22,12 +27,11 @@
 //   learned from `session.created` events (data.location.directory).
 
 import {
-  AgentAttributionFlow,
+  type AgentAttributionFlow,
   extractAnswerText,
   extractPromptText,
 } from "../src/integration/agent-attribution.ts";
 import {
-  prepareAutomaticRecallSurface,
   renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
@@ -35,16 +39,7 @@ import {
   type TaskBoardDirectoryEntry,
   type TaskBoardSurfaceResult,
 } from "../src/integration/agent-surface.ts";
-import {
-  collectWakeCandidates,
-  loadWakeState,
-  readWakeConfig,
-  wakeBudgetGate,
-} from "../src/integration/board-wake.ts";
-import {
-  deliverBoardWakeBatch,
-  reportHarnessActivity,
-} from "../src/integration/board-wake-batch.ts";
+import { loadWakeState, readWakeConfig, wakeBudgetGate } from "../src/integration/board-wake.ts";
 import {
   configuredAutoRecallLimit,
   configuredAutoRecallTier,
@@ -78,12 +73,7 @@ import {
   searchParameterProperties,
 } from "../src/integration/tool-contract.ts";
 import type { TaskBoardToolResult } from "../src/integration/tool-contract.ts";
-import {
-  isMemorableToolResult,
-  isSuccessfulCommit,
-  messageText,
-  summarizeToolResult,
-} from "../src/integration/tool-observation.ts";
+import { messageText } from "../src/integration/tool-observation.ts";
 import type { MemoryContext, MemoryTier, RememberResult } from "../src/core/types.ts";
 import { TASK_BOARD_VERDICTS, WORLD_BOARD_ID } from "../src/core/types.ts";
 import { deriveAnswerOverlapMemoryIds } from "../src/core/feedback.ts";
@@ -150,6 +140,11 @@ interface SessionPromptApi {
   hook: (name: string, handler: (event: never) => unknown) => Promise<unknown>;
   prompt?: (input: { sessionID: string; text: string }) => Promise<unknown>;
   context?: (input: { sessionID: string }) => Promise<unknown>;
+  get?: (input: { sessionID: string }) => Promise<{
+    id: string;
+    parentID?: string;
+    location?: { directory?: string };
+  }>;
 }
 
 interface HostEvent {
@@ -159,6 +154,7 @@ interface HostEvent {
 }
 
 interface PluginContext {
+  location?: { directory?: string };
   session: SessionPromptApi;
   event: { subscribe: (input?: { signal?: AbortSignal }) => AsyncIterable<HostEvent> };
   tool: {
@@ -218,13 +214,31 @@ function normalizeToolName(tool: string): string {
 export default {
   id: "nmg",
   setup: async (ctx: PluginContext): Promise<(() => Promise<void>) | undefined> => {
+    let prepareAutomaticRecallSurface: typeof import("../src/integration/agent-surface.ts").prepareAutomaticRecallSurface;
+    let contextStateViews: typeof import("../src/integration/context-information.ts").contextStateViews;
+    let collectWakeCandidates: typeof import("../src/integration/board-wake.ts").collectWakeCandidates;
+    let deliverBoardWakeBatch: typeof import("../src/integration/board-wake-batch.ts").deliverBoardWakeBatch;
+    let reportHarnessActivity: typeof import("../src/integration/board-wake-batch.ts").reportHarnessActivity;
+    const capabilityBindings: AdapterCapabilityBindings = {
+      "answer-attribution": ({ create }) => {
+        attribution = create(32);
+      },
+      "board-delivery": ({ collect, deliver, activity }) => {
+        collectWakeCandidates = collect;
+        deliverBoardWakeBatch = deliver;
+        reportHarnessActivity = activity;
+      },
+      "state-context": ({ views }) => {
+        contextStateViews = views;
+      },
+    };
     const dataDir = resolveNmgDataDir();
     const invoke = (method: string, params: unknown) =>
       invokeDaemon(method, params as Record<string, unknown>, { dataDir });
 
     const taskWindow = new SessionTaskWindow();
     const recallFlow = new SessionRecallFlow();
-    const attribution = new AgentAttributionFlow(32);
+    let attribution: AgentAttributionFlow;
     // Injection pass: prepared at prompt admission and delivered by context
     // requests. The staged body RETAINS for the whole execution — provider
     // retries rebuild the request context without the previously pushed
@@ -238,6 +252,17 @@ export default {
       }
     >();
     const preparations = new Map<string, AbortController>();
+    const stageInjection = (
+      sessionId: string,
+      pending: { output: PreparedInformationOutput; context?: MemoryContext },
+    ) => {
+      pendingInjections.set(sessionId, pending);
+      while (pendingInjections.size > PENDING_INJECTIONS_CAP) {
+        const oldest = pendingInjections.keys().next().value;
+        if (oldest === undefined) break;
+        pendingInjections.delete(oldest);
+      }
+    };
     const cancelRecall = (sessionId: string) => {
       preparations.get(sessionId)?.abort();
       preparations.delete(sessionId);
@@ -256,7 +281,9 @@ export default {
     const projectDirectory = (sessionId: string): string | undefined => {
       const override = process.env.NMG_PROJECT_DIR?.trim();
       if (override) return override;
-      return sessions.get(sessionId)?.projectDir?.trim() || undefined;
+      return (
+        sessions.get(sessionId)?.projectDir?.trim() || ctx.location?.directory?.trim() || undefined
+      );
     };
 
     const rememberSession = (sessionId: string, directory: string, child: boolean): void => {
@@ -272,6 +299,16 @@ export default {
         if (oldest === undefined) break;
         sessions.delete(oldest);
       }
+    };
+
+    const scopedSessions = new Set<string>();
+    const resolveNativeSession = async (sessionId: string, signal: AbortSignal): Promise<void> => {
+      if (scopedSessions.has(sessionId) || !ctx.session.get) return;
+      const session = await ctx.session.get({ sessionID: sessionId }).catch(() => undefined);
+      signal.throwIfAborted();
+      if (session?.id !== sessionId) return;
+      rememberSession(sessionId, session.location?.directory ?? "", Boolean(session.parentID));
+      scopedSessions.add(sessionId);
     };
 
     // ---- Automatic recall + nudge staging (prompt hook) --------------------
@@ -301,8 +338,28 @@ export default {
       return context.results?.length ? context : undefined;
     };
 
-    const stagePromptRecall = async (event: PromptHookEvent, signal: AbortSignal) => {
+    const readStateViews = async (sessionId: string, signal: AbortSignal) => {
+      const state = (await invoke("state", { action: "read", space: "ag", sessionId }).catch(
+        () => undefined,
+      )) as NmgStateResult | undefined;
+      signal.throwIfAborted();
+      try {
+        return state?.space === "ag" && state.result.action === "snapshot"
+          ? contextStateViews(state.result.snapshot, sessionId)
+          : [];
+      } catch {
+        // Foreign or malformed owner state never becomes model input.
+        return [];
+      }
+    };
+
+    const stagePromptRecall = async (
+      event: PromptHookEvent,
+      signal: AbortSignal,
+      retainState: (output: PreparedInformationOutput) => void,
+    ) => {
       const sessionId = String(event?.sessionID ?? "");
+      await resolveNativeSession(sessionId, signal);
       const prompt = textOfPrompt(event?.prompt);
       const turnKey = event?.messageID ? `message:${event.messageID}` : `prompt:${Date.now()}`;
       recallFlow.beginTurn(sessionId, turnKey);
@@ -322,6 +379,8 @@ export default {
       const decision =
         handshake?.action === "beginDisclosureTurn" ? handshake.sessionRecall?.decision : undefined;
       signal.throwIfAborted();
+      const base = await readStateViews(sessionId, signal);
+      retainState(prepareInformationOutput(base, { format: "context" }));
       const request = taskWindow.prepare(sessionId, prompt, decision);
       const context = request
         ? await recallHeaders(sessionId, request).catch(() => undefined)
@@ -333,7 +392,10 @@ export default {
             postamble: nudge,
           })
         : prepareInformationOutput([{ purpose: "guidance", body: nudge }], { format: "context" });
-      return { output, context };
+      return {
+        output: prepareInformationOutput([...base, ...output.views], { format: "context" }),
+        context,
+      };
     };
 
     const preparePromptRecall = async (event: PromptHookEvent, sessionId: string) => {
@@ -343,15 +405,13 @@ export default {
       preparations.set(sessionId, controller);
       try {
         const pending = await budget.run("automatic.context", (signal) =>
-          stagePromptRecall(event, signal),
+          stagePromptRecall(event, signal, (output) => {
+            if (preparations.get(sessionId) === controller && output.text)
+              stageInjection(sessionId, { output });
+          }),
         );
         if (preparations.get(sessionId) !== controller || !pending.output.text) return;
-        pendingInjections.set(sessionId, pending);
-        while (pendingInjections.size > PENDING_INJECTIONS_CAP) {
-          const oldest = pendingInjections.keys().next().value;
-          if (oldest === undefined) break;
-          pendingInjections.delete(oldest);
-        }
+        stageInjection(sessionId, pending);
       } catch {
         // A cancelled or late preparation never becomes an injection.
       } finally {
@@ -360,22 +420,27 @@ export default {
       }
     };
 
-    await ctx.session.hook("prompt", async (raw: PromptHookEvent) => {
-      const sessionId = String((raw as PromptHookEvent)?.sessionID ?? "");
-      if (sessionId) {
-        // OpenCode has no session.created on the plugin stream; a missing row
-        // is a normal root session until a parentID event upgrades it (the
-        // merge in rememberSession is sticky toward child=true).
-        const existing = sessions.get(sessionId) ?? {
-          projectDir: "",
-          child: false,
-          lastPromptAt: 0,
-          lastIdleAt: 0,
-        };
-        sessions.set(sessionId, { ...existing, lastPromptAt: Date.now() });
-      }
-      if (sessionId) await preparePromptRecall(raw as PromptHookEvent, sessionId);
-    });
+    capabilityBindings["automatic-recall"] = ({ prepare }) => {
+      prepareAutomaticRecallSurface = prepare;
+      return ctx.session
+        .hook("prompt", async (raw: PromptHookEvent) => {
+          const sessionId = String((raw as PromptHookEvent)?.sessionID ?? "");
+          if (sessionId) {
+            // OpenCode has no session.created on the plugin stream; a missing row
+            // is a normal root session until a parentID event upgrades it (the
+            // merge in rememberSession is sticky toward child=true).
+            const existing = sessions.get(sessionId) ?? {
+              projectDir: "",
+              child: false,
+              lastPromptAt: 0,
+              lastIdleAt: 0,
+            };
+            sessions.set(sessionId, { ...existing, lastPromptAt: Date.now() });
+          }
+          if (sessionId) await preparePromptRecall(raw as PromptHookEvent, sessionId);
+        })
+        .then(() => undefined);
+    };
 
     await ctx.session.hook("context", (raw: ContextHookEvent) => {
       const sessionId = String(raw?.sessionID ?? "");
@@ -428,33 +493,27 @@ export default {
     });
 
     // ---- Tool observations + commit nudge (execute.after) -----------------
-    const observeToolResult = async (event: AfterToolEvent): Promise<void> => {
-      const sessionId = String(event?.sessionID ?? "");
-      const toolId = String(event?.tool ?? "");
-      if (!sessionId || !toolId) return;
-      if (toolId.startsWith("nmg_")) return; // handled inside the tool executes
-      const observation = {
-        toolName: normalizeToolName(toolId),
-        isError: event?.status === "error",
-        content: event?.result?.content,
-        input: event?.input,
-      };
-      if (isSuccessfulCommit(observation)) commitNudges.add(sessionId);
-      if (!isMemorableToolResult(observation)) return;
-      const summary = summarizeToolResult(observation);
-      await invoke("sessionActiveGraph", {
-        action: "observe",
-        sessionId,
-        sourceId: observation.toolName,
-        sourceKind: observation.isError ? "tool_error" : "tool_result",
-        nodeId: summary.nodeName,
-        statement: summary.statement,
-      }).catch(() => undefined);
-    };
-
-    await ctx.tool.hook("execute.after", (raw: AfterToolEvent) => {
-      void observeToolResult(raw as AfterToolEvent).catch(() => undefined);
-    });
+    capabilityBindings["tool-observation"] = ({ observe }) =>
+      ctx.tool
+        .hook("execute.after", (event: AfterToolEvent) => {
+          const sessionId = String(event?.sessionID ?? "");
+          const toolId = String(event?.tool ?? "");
+          if (!sessionId || !toolId) return;
+          void observe({
+            sessionId,
+            event: {
+              toolName: normalizeToolName(toolId),
+              isError: event?.status === "error",
+              content: event?.result?.content,
+              input: event?.input,
+            },
+            invoke,
+            onCommit: () => {
+              commitNudges.add(sessionId);
+            },
+          }).catch(() => undefined);
+        })
+        .then(() => undefined);
 
     // ---- Shared disclosure projection ------------------------------------
     const disclosedContext = async (
@@ -1179,16 +1238,37 @@ export default {
       },
     });
 
+    // The SDK retains transform callbacks and applies them per request. Resolve
+    // shared capabilities during setup; the callback only publishes native tools.
+    const toolDefinitions: ToolRegistration[] = [];
+    const capabilityAssembly = assembleAdapterCapabilities(
+      ADAPTER_CAPABILITY_CATALOG.opencode.capabilities,
+      {
+        ...capabilityBindings,
+        tools: {
+          nmg_search: () => {
+            toolDefinitions.push({ ...searchTool(), name: "nmg_search" });
+          },
+          nmg_get: () => {
+            toolDefinitions.push({ ...getTool(), name: "nmg_get" });
+          },
+          nmg_remember: () => {
+            toolDefinitions.push({ ...rememberTool(), name: "nmg_remember" });
+          },
+          nmg_state: () => {
+            toolDefinitions.push({ ...stateTool(), name: "nmg_state" });
+          },
+        },
+      },
+    );
+    await capabilityAssembly.ready;
     let registered: Promise<unknown>;
     const registerTools = (editor: ToolEditor): void => {
-      editor.add(searchTool());
-      editor.add(getTool());
-      editor.add(rememberTool());
-      editor.add(stateTool());
+      for (const definition of toolDefinitions) editor.add(definition);
     };
     try {
-      // namespace+nodemode lands these as nmg_<name> in the Code Mode catalog.
-      registered = ctx.tool.transform(registerTools, { namespace: "nmg", codemode: true });
+      // Names are explicit: this SDK does not apply an options.namespace prefix.
+      registered = ctx.tool.transform(registerTools, { codemode: true });
     } catch {
       // Defensive: if this v2 build rejects transform options, register plain.
       registered = ctx.tool.transform(registerTools);
@@ -1369,6 +1449,8 @@ export default {
         attribution.clear(sessionId);
       }
       sessions.clear();
+      scopedSessions.clear();
+      await capabilityAssembly?.dispose();
     };
   },
 };

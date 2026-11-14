@@ -8,6 +8,7 @@ coverage/
 .claude/settings.local.json
 .claude/.mcp-approvals.json
 .mcp.json
+!/codex-plugin/.mcp.json
 /.benchmarks/
 /.playwright-cli/
 # Scratch and experiment output for a session; never a home for a necessary file (AGENTS.md).
@@ -89,3 +90,5 @@ results/
 
 # local scratch (agent fixtures, probe output)
 .runtime/
+
+/releases/codex/

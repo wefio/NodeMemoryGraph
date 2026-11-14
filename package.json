@@ -58,10 +58,10 @@
     "cli": "node --experimental-strip-types src/cli/main.ts",
     "rcp": "node --experimental-strip-types src/rcp/cli/main.ts",
     "tutorial:first-recall": "node --experimental-strip-types scripts/tutorial-first-recall.ts",
-    "lint": "eslint src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ opencode-plugin/ tests/ evals/ scripts/ tools/",
-    "lint:fix": "eslint --fix src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ opencode-plugin/ tests/ evals/ scripts/ tools/",
-    "format": "prettier --write \"src/**/*.ts\" \".pi/**/*.ts\" \"workbuddy-plugin/**/*.ts\" \"opencode-plugin/**/*.ts\" \"tests/**/*.ts\" \"evals/**/*.ts\" \"scripts/**/*.ts\" \"tools/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \".pi/**/*.ts\" \"workbuddy-plugin/**/*.ts\" \"opencode-plugin/**/*.ts\" \"tests/**/*.ts\" \"evals/**/*.ts\" \"scripts/**/*.ts\" \"tools/**/*.ts\"",
+    "lint": "eslint src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ opencode-plugin/ codex-plugin/ tests/ evals/ scripts/ tools/",
+    "lint:fix": "eslint --fix src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ opencode-plugin/ codex-plugin/ tests/ evals/ scripts/ tools/",
+    "format": "prettier --write \"src/**/*.ts\" \".pi/**/*.ts\" \"workbuddy-plugin/**/*.ts\" \"opencode-plugin/**/*.ts\" \"codex-plugin/**/*.ts\" \"tests/**/*.ts\" \"evals/**/*.ts\" \"scripts/**/*.ts\" \"tools/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \".pi/**/*.ts\" \"workbuddy-plugin/**/*.ts\" \"opencode-plugin/**/*.ts\" \"codex-plugin/**/*.ts\" \"tests/**/*.ts\" \"evals/**/*.ts\" \"scripts/**/*.ts\" \"tools/**/*.ts\"",
     "test:coverage": "c8 --check-coverage --lines 0.01 node --experimental-strip-types --test --test-concurrency=2 \"tests/cli/**/*.test.ts\" \"tests/core/**/*.test.ts\" \"tests/docker/**/*.test.ts\" \"tests/docs/**/*.test.ts\" \"tests/extensions/**/*.test.ts\" \"tests/guardrails/**/*.test.ts\" \"tests/integration/**/*.test.ts\" \"tests/lab/**/*.test.ts\" \"tests/prompts/**/*.test.ts\" \"tests/rcp/**/*.test.ts\" \"tests/scripts/**/*.test.ts\" \"tests/skills/**/*.test.ts\" \"tests/support/**/*.test.ts\" \"tests/tools/**/*.test.ts\"",
     "eval:agents": "node --experimental-strip-types evals/run.ts",
     "hotspot:modules": "node --experimental-strip-types scripts/hotspot-files.ts",
@@ -152,7 +152,9 @@
     "glossary:check": "node --experimental-strip-types tools/glossary-check.ts",
     "check:policy-words": "node --experimental-strip-types tools/policy-word-check.ts",
     "rtm:check": "node --experimental-strip-types tools/rtm-check.ts",
-    "verify:onlion": "cd onlion && npm run verify"
+    "verify:onlion": "cd onlion && npm run verify",
+    "codex:build": "npm run prompts:generate && node --experimental-strip-types scripts/build-codex-plugin.ts",
+    "codex:package": "npm run prompts:generate && node --experimental-strip-types scripts/build-codex-plugin.ts --pack"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
@@ -161,6 +163,7 @@
     "@mizchi/server-faults": "^1.0.0",
     "@types/node": "24.12.4",
     "c8": "^12.0.0",
+    "esbuild": "^0.28.2",
     "eslint": "^10.7.0",
     "globals": "^17.12.0",
     "prettier": "^3.9.5",

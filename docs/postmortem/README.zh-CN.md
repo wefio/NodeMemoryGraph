@@ -111,4 +111,5 @@
 | 0005 | [重平衡无法消耗的维护压力](0005-maintenance-pressure-cannot-drain.zh-CN.md)                                       | undrainable backlog            |
 | 0006 | [The submission fails before the first question](0006-concurrency-ceiling-on-the-live-endpoint.md)                | submission concurrency ceiling |
 | 0007 | [我在评分运行中做了部署，而一次重构丢了一个没人盯着的字段](0007-deployed-into-a-run-and-dropped-a-field.zh-CN.md) | 规则不在动作路径上             |
+| 0008 | [私有 Codex home 连接到了共享 NMG daemon](0008-codex-private-home-shared-daemon.zh-CN.md) | 子进程环境隔离 |
 | ---  | ----                                                                                                              | -------------                  |

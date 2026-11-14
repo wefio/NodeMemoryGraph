@@ -34,11 +34,7 @@ test("host-neutral action contracts are unique and Pi only adds host-owned actio
 test("Pi, MCP, DSH, and OpenCode schemas consume the shared action contract", () => {
   const sources = [
     ["../../.pi/extensions/nmg/index.ts", /PI_BOARD_ACTIONS/u, /PI_REMEMBER_ACTIONS/u],
-    [
-      "../../claude-plugins/nmg-memory/agents/memory-copilot.ts",
-      /STATE_OPERATIONS/u,
-      /COMMON_REMEMBER_ACTIONS/u,
-    ],
+    ["../../src/integration/mcp-tools.ts", /STATE_OPERATIONS/u, /COMMON_REMEMBER_ACTIONS/u],
     ["../../dsh/dsh-nmg/src/plugin/index.ts", /STATE_OPERATIONS/u, /COMMON_REMEMBER_ACTIONS/u],
     ["../../opencode-plugin/index.ts", /STATE_OPERATIONS/u, /COMMON_REMEMBER_ACTIONS/u],
   ] as const;
@@ -52,7 +48,7 @@ test("Pi, MCP, DSH, and OpenCode schemas consume the shared action contract", ()
 test("Pi, MCP, DSH, and OpenCode expose recall triggers through remember", () => {
   for (const relativePath of [
     "../../.pi/extensions/nmg/index.ts",
-    "../../claude-plugins/nmg-memory/agents/memory-copilot.ts",
+    "../../src/integration/mcp-tools.ts",
     "../../dsh/dsh-nmg/src/plugin/index.ts",
     "../../opencode-plugin/index.ts",
   ]) {
@@ -64,7 +60,7 @@ test("Pi, MCP, DSH, and OpenCode expose recall triggers through remember", () =>
 test("Pi, MCP, DSH, and OpenCode render through the shared agent surface", () => {
   const sources = [
     "../../.pi/extensions/nmg/index.ts",
-    "../../claude-plugins/nmg-memory/agents/memory-copilot.ts",
+    "../../src/integration/mcp-tools.ts",
     "../../dsh/dsh-nmg/src/plugin/index.ts",
     "../../opencode-plugin/index.ts",
   ] as const;

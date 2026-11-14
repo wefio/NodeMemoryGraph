@@ -1,0 +1,22 @@
+{
+  "name": "@nmg/codex-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Self-contained Codex plugin client for the local NMG daemon",
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "files": [
+    ".codex-plugin",
+    ".mcp.json",
+    ".agents",
+    "scripts",
+    "hooks",
+    "skills",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ]
+}

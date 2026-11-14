@@ -1,3 +1,9 @@
+import {
+  assembleAdapterCapabilities,
+  type AdapterToolBindings,
+  type AdapterCapabilityBindings,
+} from "../../../src/integration/adapter-capability-assembly.ts";
+import { ADAPTER_CAPABILITY_CATALOG } from "../../../src/integration/adapter-capability-catalog.ts";
 // Pi host adapter for NMG.
 //
 // HOST-ADAPTER BOUNDARY (shared layer rule): this extension is a thin transport
@@ -65,22 +71,17 @@ import type { TaskBoardToolResult } from "../../../src/integration/tool-contract
 import {
   type BoardWakeConfig,
   type BoardWakeState,
-  collectWakeCandidates,
   loadWakeState as loadWakeStateShared,
   readWakeConfig as readWakeConfigShared,
   wakeBudgetGate,
   writeWakeConfig as writeWakeConfigShared,
 } from "../../../src/integration/board-wake.ts";
 import {
-  deliverBoardWakeBatch,
-  reportHarnessActivity,
-} from "../../../src/integration/board-wake-batch.ts";
-import {
   loadOrCreateAgentIdentity,
   renameAgentIdentity,
 } from "../../../src/integration/agent-identity.ts";
 import {
-  AgentAttributionFlow,
+  type AgentAttributionFlow,
   extractAnswerText,
   extractPromptText,
 } from "../../../src/integration/agent-attribution.ts";
@@ -89,12 +90,7 @@ import {
   type SessionRecallRequest,
   SessionTaskWindow,
 } from "../../../src/integration/session-task-window.ts";
-import {
-  isMemorableToolResult,
-  isSuccessfulCommit,
-  messageText,
-  summarizeToolResult,
-} from "../../../src/integration/tool-observation.ts";
+import { messageText } from "../../../src/integration/tool-observation.ts";
 import { renderLabOutput } from "../../../src/integration/lab-capabilities.ts";
 import { TASK_BOARD_VERDICTS } from "../../../src/core/types.ts";
 import { resolveSkillOptPolicyChannels } from "../../../src/lab/skillopt-policy.ts";
@@ -135,7 +131,6 @@ import {
   checkpointInformationViews,
   contextBoardEntries,
   contextNotice,
-  contextStateViews,
 } from "../../../src/integration/context-information.ts";
 import { deriveAnswerOverlapMemoryIds } from "../../../src/core/feedback.ts";
 import {
@@ -192,13 +187,35 @@ function assertBoardVerbCall(params: {
 }
 
 export default function nmgExtension(pi: ExtensionAPI): void {
+  let contextStateViews: typeof import("../../../src/integration/context-information.ts").contextStateViews;
+  const toolBindings: AdapterToolBindings = {};
+  const registerSharedTool: ExtensionAPI["registerTool"] = (tool) => {
+    toolBindings[tool.name as keyof AdapterToolBindings] = () => pi.registerTool(tool);
+  };
+  let collectWakeCandidates: typeof import("../../../src/integration/board-wake.ts").collectWakeCandidates;
+  let deliverBoardWakeBatch: typeof import("../../../src/integration/board-wake-batch.ts").deliverBoardWakeBatch;
+  let reportHarnessActivity: typeof import("../../../src/integration/board-wake-batch.ts").reportHarnessActivity;
+  const capabilityBindings: AdapterCapabilityBindings = {
+    tools: toolBindings,
+    "answer-attribution": ({ create }) => {
+      agentAttributionFlow = create(32);
+    },
+    "board-delivery": ({ collect, deliver, activity }) => {
+      collectWakeCandidates = collect;
+      deliverBoardWakeBatch = deliver;
+      reportHarnessActivity = activity;
+    },
+    "state-context": ({ views }) => {
+      contextStateViews = views;
+    },
+  };
   const firstResponseTiming = registerFirstResponseTiming(pi);
   let connectionPromise: Promise<DaemonConnection> | undefined;
   let latestRecallTiming: ReturnType<RecallBudget["timing"]> | undefined;
   const taskWindow = new SessionTaskWindow();
   const recallFlow = new SessionRecallFlow();
   let automaticPreparation: symbol | undefined;
-  const agentAttributionFlow = new AgentAttributionFlow(32);
+  let agentAttributionFlow: AgentAttributionFlow;
   const qpp1Mode = configuredQpp1Mode();
   const qpp2Mode = configuredQpp2Mode();
   const qpp2RetainedMass = configuredQpp2RetainedMass();
@@ -416,24 +433,22 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   // is success-aware (only a commit that actually landed nudges). Memorable
   // tool outcomes stay in the session-local runtime AG; they are working state,
   // not durable memories.
-  pi.on("tool_result", async (event, ctx) => {
-    const sessionId = ctx.sessionManager.getSessionId();
-    if (isSuccessfulCommit(event)) commitNudgePending = true;
-    if (!isMemorableToolResult(event)) return;
-    const observation = summarizeToolResult(event);
-    try {
-      await invoke("sessionActiveGraph", {
-        action: "observe",
-        sessionId,
-        sourceId: event.toolName,
-        sourceKind: event.isError ? "tool_error" : "tool_result",
-        nodeId: observation.nodeName,
-        statement: observation.statement,
-      });
-    } catch {
-      // Temporary working state must never break the host tool lifecycle.
-    }
-  });
+  capabilityBindings["tool-observation"] = ({ observe }) => {
+    pi.on("tool_result", async (event, ctx) => {
+      try {
+        await observe({
+          sessionId: ctx.sessionManager.getSessionId(),
+          event,
+          invoke,
+          onCommit: () => {
+            commitNudgePending = true;
+          },
+        });
+      } catch {
+        // Temporary working state must never break the host tool lifecycle.
+      }
+    });
+  };
 
   const recallNudges = async (
     budget: RecallBudget,
@@ -532,7 +547,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }
   };
 
-  observeRecallPreparation(pi, firstResponseTiming, async (event, ctx) => {
+  const prepareAutomaticRecall: Parameters<typeof observeRecallPreparation>[2] = async (
+    event,
+    ctx,
+  ) => {
     const preparation = Symbol();
     automaticPreparation = preparation;
     const budget = new RecallBudget(undefined, ctx.signal);
@@ -714,7 +732,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       latestRecallTiming = budget.timing();
       budget.close();
     }
-  });
+  };
+  capabilityBindings["automatic-recall"] = () =>
+    observeRecallPreparation(pi, firstResponseTiming, prepareAutomaticRecall);
 
   // TUI 折叠开关：nmg-context 默认折叠为一个 [nmg-context] chip，避免每轮刷屏。
   // /nmg-recall 切换展开（走 pi 默认渲染：label + 全文）。状态只影响后续渲染
@@ -753,6 +773,90 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       "info",
     );
   };
+  const nmgWakeParameter = (wcmd: string, wval: number, ctx: ExtensionCommandContext): void => {
+    const current = readWakeConfig();
+    switch (wcmd) {
+      case "budget": {
+        if (!Number.isFinite(wval)) {
+          ctx.ui.notify("用法：/nmg wake budget N（0=不限制）", "warning");
+          return;
+        }
+        const budget = Math.max(0, Math.min(100, Math.round(wval)));
+        writeWakeConfig({ ...current, budget });
+        ctx.ui.notify(`黑板唤醒预算已设为 ${budget === 0 ? "不限制" : `${budget}/天`}`, "info");
+        return;
+      }
+      case "cooldown": {
+        if (!Number.isFinite(wval)) {
+          ctx.ui.notify("用法：/nmg wake cooldown M（0=无冷却）", "warning");
+          return;
+        }
+        const cooldownMs = wval === 0 ? 0 : Math.max(30_000, Math.round(wval * 60_000));
+        writeWakeConfig({ ...current, cooldownMs });
+        ctx.ui.notify(
+          `黑板唤醒冷却已设为 ${cooldownMs === 0 ? "无" : `${Math.round(cooldownMs / 60_000)} 分钟`}`,
+          "info",
+        );
+        return;
+      }
+      case "interval": {
+        if (!Number.isFinite(wval)) {
+          ctx.ui.notify("用法：/nmg wake interval S（秒，最小 5）", "warning");
+          return;
+        }
+        const intervalMs = Math.max(5_000, Math.round(wval * 1_000));
+        writeWakeConfig({ ...current, intervalMs });
+        ctx.ui.notify(`黑板唤醒轮询已设为 ${Math.round(intervalMs / 1_000)} 秒`, "info");
+        return;
+      }
+    }
+  };
+  const nmgWakeCommand = (restText: string, ctx: ExtensionCommandContext): void => {
+    const current = readWakeConfig();
+    const [wcmd, wvalRaw] = restText.split(/\s+/);
+    const wval = Number(wvalRaw);
+    if (["budget", "cooldown", "interval"].includes(wcmd ?? "")) {
+      nmgWakeParameter(wcmd!, wval, ctx);
+      return;
+    }
+    switch (wcmd) {
+      case "on":
+        writeWakeConfig({ ...current, enabled: true });
+        ctx.ui.notify("黑板唤醒已开启（世界频道+活跃频道有新 open 条目会唤醒）", "info");
+        return;
+      case "off":
+        writeWakeConfig({ ...current, enabled: false });
+        ctx.ui.notify("黑板唤醒已关闭", "info");
+        return;
+      case "status": {
+        const budgetText = current.budget === 0 ? "不限制" : `${current.budget}/天`;
+        const cooldownText =
+          current.cooldownMs === 0 ? "无" : `${Math.round(current.cooldownMs / 60_000)} 分`;
+        ctx.ui.notify(
+          `黑板唤醒：${current.enabled ? "开" : "关"} · 预算 ${budgetText} · 冷却 ${cooldownText} · 轮询 ${Math.round(current.intervalMs / 1_000)} 秒 · 世界广播 ${current.worldBroadcast ? "开" : "关"}`,
+          "info",
+        );
+        return;
+      }
+      case "world": {
+        // 无参切换；0 关、1 开。
+        const world = wvalRaw === "0" ? false : wvalRaw === "1" ? true : !current.worldBroadcast;
+        writeWakeConfig({ ...current, worldBroadcast: world });
+        ctx.ui.notify(
+          world
+            ? "已开启世界频道协作广播：协作类新条目会同时发到世界频道拉其他 agent"
+            : "已关闭世界频道协作广播",
+          "info",
+        );
+        return;
+      }
+      default: {
+        const enabled = !current.enabled;
+        writeWakeConfig({ ...current, enabled });
+        ctx.ui.notify(enabled ? "黑板唤醒已开启" : "黑板唤醒已关闭", "info");
+      }
+    }
+  };
   const nmgMenuHandler = async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
     const parts = args.trim().split(/\s+/).filter(Boolean);
     const [sub, ...rest] = parts;
@@ -763,80 +867,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         return;
       }
       case "wake": {
-        const current = readWakeConfig();
-        const [wcmd, wvalRaw] = restText.split(/\s+/);
-        const wval = Number(wvalRaw);
-        switch (wcmd) {
-          case "on":
-            writeWakeConfig({ ...current, enabled: true });
-            ctx.ui.notify("黑板唤醒已开启（世界频道+活跃频道有新 open 条目会唤醒）", "info");
-            return;
-          case "off":
-            writeWakeConfig({ ...current, enabled: false });
-            ctx.ui.notify("黑板唤醒已关闭", "info");
-            return;
-          case "status": {
-            const budgetText = current.budget === 0 ? "不限制" : `${current.budget}/天`;
-            const cooldownText =
-              current.cooldownMs === 0 ? "无" : `${Math.round(current.cooldownMs / 60_000)} 分`;
-            ctx.ui.notify(
-              `黑板唤醒：${current.enabled ? "开" : "关"} · 预算 ${budgetText} · 冷却 ${cooldownText} · 轮询 ${Math.round(current.intervalMs / 1_000)} 秒 · 世界广播 ${current.worldBroadcast ? "开" : "关"}`,
-              "info",
-            );
-            return;
-          }
-          case "budget": {
-            if (!Number.isFinite(wval)) {
-              ctx.ui.notify("用法：/nmg wake budget N（0=不限制）", "warning");
-              return;
-            }
-            const budget = Math.max(0, Math.min(100, Math.round(wval)));
-            writeWakeConfig({ ...current, budget });
-            ctx.ui.notify(`黑板唤醒预算已设为 ${budget === 0 ? "不限制" : `${budget}/天`}`, "info");
-            return;
-          }
-          case "cooldown": {
-            if (!Number.isFinite(wval)) {
-              ctx.ui.notify("用法：/nmg wake cooldown M（0=无冷却）", "warning");
-              return;
-            }
-            const cooldownMs = wval === 0 ? 0 : Math.max(30_000, Math.round(wval * 60_000));
-            writeWakeConfig({ ...current, cooldownMs });
-            ctx.ui.notify(
-              `黑板唤醒冷却已设为 ${cooldownMs === 0 ? "无" : `${Math.round(cooldownMs / 60_000)} 分钟`}`,
-              "info",
-            );
-            return;
-          }
-          case "interval": {
-            if (!Number.isFinite(wval)) {
-              ctx.ui.notify("用法：/nmg wake interval S（秒，最小 5）", "warning");
-              return;
-            }
-            const intervalMs = Math.max(5_000, Math.round(wval * 1_000));
-            writeWakeConfig({ ...current, intervalMs });
-            ctx.ui.notify(`黑板唤醒轮询已设为 ${Math.round(intervalMs / 1_000)} 秒`, "info");
-            return;
-          }
-          case "world": {
-            // 无参切换；0 关、1 开。
-            const world =
-              wvalRaw === "0" ? false : wvalRaw === "1" ? true : !current.worldBroadcast;
-            writeWakeConfig({ ...current, worldBroadcast: world });
-            ctx.ui.notify(
-              world
-                ? "已开启世界频道协作广播：协作类新条目会同时发到世界频道拉其他 agent"
-                : "已关闭世界频道协作广播",
-              "info",
-            );
-            return;
-          }
-          default: {
-            const enabled = !current.enabled;
-            writeWakeConfig({ ...current, enabled });
-            ctx.ui.notify(enabled ? "黑板唤醒已开启" : "黑板唤醒已关闭", "info");
-          }
-        }
+        nmgWakeCommand(restText, ctx);
         return;
       }
       default: {
@@ -922,6 +953,18 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     await workingStateView.setPreview(onOff === "显示", ctx);
     ctx.ui.notify(onOff === "显示" ? "状态预览已显示" : "状态预览已隐藏（状态本身不变）", "info");
   };
+  const nmgStatus = (ctx: ExtensionCommandContext): void => {
+    {
+      const wake = readWakeConfig();
+      const budgetText = wake.budget === 0 ? "不限制" : `${wake.budget}/天`;
+      const cooldownText =
+        wake.cooldownMs === 0 ? "无" : `${Math.round(wake.cooldownMs / 60_000)} 分`;
+      ctx.ui.notify(
+        `NMG：召回折叠 ${recallCollapsed ? "开" : "关"} · 唤醒 ${wake.enabled ? "开" : "关"}（预算 ${budgetText}，冷却 ${cooldownText}，轮询 ${Math.round(wake.intervalMs / 1_000)} 秒）`,
+        "info",
+      );
+    }
+  };
   const nmgInteractiveMenu = async (ctx: ExtensionCommandContext): Promise<void> => {
     if (!ctx.hasUI || typeof ctx.ui.select !== "function") {
       ctx.ui.notify(
@@ -972,16 +1015,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       await nmgStatePreviewMenu(ctx);
       return;
     }
-    {
-      const wake = readWakeConfig();
-      const budgetText = wake.budget === 0 ? "不限制" : `${wake.budget}/天`;
-      const cooldownText =
-        wake.cooldownMs === 0 ? "无" : `${Math.round(wake.cooldownMs / 60_000)} 分`;
-      ctx.ui.notify(
-        `NMG：召回折叠 ${recallCollapsed ? "开" : "关"} · 唤醒 ${wake.enabled ? "开" : "关"}（预算 ${budgetText}，冷却 ${cooldownText}，轮询 ${Math.round(wake.intervalMs / 1_000)} 秒）`,
-        "info",
-      );
-    }
+    nmgStatus(ctx);
   };
   // `/nmg state [on|off]` is the read-only state view and its preview switch.
   // It dispatches before the menu handler so that handler keeps its own shape.
@@ -1415,7 +1449,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     });
   }
 
-  pi.registerTool({
+  registerSharedTool({
     name: "nmg_lab",
     label: "NMG Lab capabilities",
     description: nmgPrompts.lab_description,
@@ -1477,350 +1511,324 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerTool({
-    name: "nmg_remember",
-    label: "Remember with NMG",
-    description: nmgPrompts.remember_description,
-    parameters: Type.Object({
-      action: Type.Optional(
-        Type.Union(
-          PI_REMEMBER_ACTIONS.map((action) => Type.Literal(action)),
-          { description: nmgPrompts.remember_action_parameter_description },
+  toolBindings.nmg_remember = () =>
+    pi.registerTool({
+      name: "nmg_remember",
+      label: "Remember with NMG",
+      description: nmgPrompts.remember_description,
+      parameters: Type.Object({
+        action: Type.Optional(
+          Type.Union(
+            PI_REMEMBER_ACTIONS.map((action) => Type.Literal(action)),
+            { description: nmgPrompts.remember_action_parameter_description },
+          ),
         ),
-      ),
-      memoryId: Type.Optional(
-        Type.String({
-          description: nmgPrompts.remember_memory_id_parameter_description,
-        }),
-      ),
-      activeGraphId: Type.Optional(
-        Type.String({
-          description: nmgPrompts.active_graph_id_parameter_description,
-        }),
-      ),
-      taskSuccess: Type.Optional(
-        Type.Boolean({
-          description: nmgPrompts.feedback_label_parameter_description,
-        }),
-      ),
-      userCorrection: Type.Optional(
-        Type.Boolean({
-          description: nmgPrompts.feedback_label_parameter_description,
-        }),
-      ),
-      evidenceSufficient: Type.Optional(
-        Type.Boolean({
-          description: nmgPrompts.feedback_label_parameter_description,
-        }),
-      ),
-      expansionUseful: Type.Optional(
-        Type.Boolean({
-          description: nmgPrompts.feedback_label_parameter_description,
-        }),
-      ),
-      excessiveNoise: Type.Optional(
-        Type.Boolean({
-          description: nmgPrompts.feedback_label_parameter_description,
-        }),
-      ),
-      noMemoryNeeded: Type.Optional(
-        Type.Boolean({
-          description: nmgPrompts.feedback_label_parameter_description,
-        }),
-      ),
-      memoryMisleading: Type.Optional(
-        Type.Boolean({
-          description: nmgPrompts.feedback_misleading_parameter_description,
-        }),
-      ),
-      feedbackNote: Type.Optional(
-        Type.String({
-          description: nmgPrompts.feedback_note_parameter_description,
-        }),
-      ),
-      semanticTaskId: Type.Optional(
-        Type.String({
-          description: nmgPrompts.semantic_task_id_parameter_description,
-        }),
-      ),
-      claimOutcome: Type.Optional(
-        Type.Union([Type.Literal("supported"), Type.Literal("contradicted")], {
-          description: nmgPrompts.claim_outcome_parameter_description,
-        }),
-      ),
-      claimOutcomeSource: Type.Optional(
-        Type.Union([Type.Literal("user"), Type.Literal("tool"), Type.Literal("task")], {
-          description: nmgPrompts.claim_outcome_source_parameter_description,
-        }),
-      ),
-      claimSourceLineage: Type.Optional(
-        Type.String({
-          description: nmgPrompts.claim_source_lineage_parameter_description,
-        }),
-      ),
-      claimIndexes: Type.Optional(
-        Type.Array(Type.Number({ minimum: 0 }), {
-          description: nmgPrompts.claim_indexes_parameter_description,
-        }),
-      ),
-      claimWeight: Type.Optional(Type.Number({ minimum: 0.000001, maximum: 1 })),
-      statement: Type.Optional(Type.String()),
-      nodeName: Type.Optional(
-        Type.String({
-          description: nmgPrompts.node_name_parameter_description,
-        }),
-      ),
-      recallTriggers: Type.Optional(
-        Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
-          maxItems: 16,
-          description: nmgPrompts.recall_triggers_parameter_description,
-        }),
-      ),
-      newMemoryId: Type.Optional(
-        Type.String({
-          description: nmgPrompts.remember_new_memory_id_parameter_description,
-        }),
-      ),
-      supersededMemoryId: Type.Optional(
-        Type.String({
-          description: nmgPrompts.remember_superseded_memory_id_parameter_description,
-        }),
-      ),
-      relatedMemoryId: Type.Optional(
-        Type.String({
-          description: nmgPrompts.remember_related_memory_id_parameter_description,
-        }),
-      ),
-      relationJudgement: Type.Optional(
-        Type.Union(
-          [
-            Type.Literal("conflict"),
-            Type.Literal("distinct"),
-            Type.Literal("refines"),
-            Type.Literal("related"),
-            Type.Literal("same_entity"),
-          ],
-          {
-            description: nmgPrompts.remember_relation_judgement_parameter_description,
-          },
-        ),
-      ),
-      relationConfidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
-      resolutionReason: Type.Optional(Type.String()),
-      resolution: Type.Optional(
-        Type.Union([Type.Literal("open"), Type.Literal("resolved"), Type.Literal("reopened")]),
-      ),
-      openedAt: Type.Optional(Type.String()),
-      relatedMemoryIds: Type.Optional(Type.Array(Type.String())),
-      memoryType: Type.Optional(
-        Type.Union([
-          Type.Literal("constraint"),
-          Type.Literal("event"),
-          Type.Literal("fact"),
-          Type.Literal("preference"),
-          Type.Literal("state"),
-          Type.Literal("strategy"),
-        ]),
-      ),
-      stateKey: Type.Optional(
-        Type.String({
-          description: nmgPrompts.state_key_parameter_description,
-        }),
-      ),
-      eventTime: Type.Optional(Type.String()),
-      referenceTime: Type.Optional(
-        Type.String({
-          description:
-            "Source ISO timestamp with Z/offset anchoring eventTime, for historical replay.",
-        }),
-      ),
-      timeZone: Type.Optional(
-        Type.String({ description: "Source IANA time zone; defaults to referenceTime's offset." }),
-      ),
-      sourceActor: Type.Optional(
-        Type.Union(
-          [
-            Type.Literal("assistant"),
-            Type.Literal("system"),
-            Type.Literal("tool"),
-            Type.Literal("user"),
-          ],
-          { description: nmgPrompts.source_actor_parameter_description },
-        ),
-      ),
-      truthStatus: Type.Optional(
-        Type.Union([
-          Type.Literal("asserted"),
-          Type.Literal("inferred"),
-          Type.Literal("unverified"),
-          Type.Literal("verified"),
-        ]),
-      ),
-      evidence: Type.Optional(
-        Type.String({ description: nmgPrompts.evidence_parameter_description }),
-      ),
-      writeReason: Type.Optional(Type.String()),
-      tier: Type.Optional(
-        Type.Union([Type.Literal(0), Type.Literal(1), Type.Literal(2), Type.Literal(3)]),
-      ),
-      importance: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
-      scope: Type.Optional(Type.Record(Type.String(), Type.String())),
-      residence: Type.Optional(Type.Union([Type.Literal("ltg"), Type.Literal("stg")])),
-      unsafe: Type.Optional(
-        Type.Boolean({
-          description:
-            "Rust-unsafe-style escape hatch (docs §3.6): explicitly opt out of " +
-            "the transient/instruction write policy (e.g. a genuine persistent " +
-            "preference whose wording trips the transient-word filter). Secrets " +
-            "are never bypassable.",
-        }),
-      ),
-      expiresAt: Type.Optional(Type.String()),
-      externalSource: Type.Optional(
-        Type.Object({
-          source: Type.String({
-            description: nmgPrompts.external_source_parameter_description,
+        memoryId: Type.Optional(
+          Type.String({
+            description: nmgPrompts.remember_memory_id_parameter_description,
           }),
-          retrievedAt: Type.Optional(Type.String()),
-          hash: Type.Optional(Type.String()),
-        }),
-      ),
-      boardSource: Type.Optional(
-        Type.Object(
-          {
-            taskId: Type.String({
-              description: "Task board channel the content came from",
-            }),
-            entryId: Type.String({
-              description: "Task board entry the content came from",
-            }),
-          },
-          {
-            description: nmgPrompts.remember_board_source_parameter_description,
-          },
         ),
-      ),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (params.action === "claim_outcome") {
-        if (
-          !params.memoryId ||
-          !params.claimOutcome ||
-          !params.claimOutcomeSource ||
-          !params.semanticTaskId?.trim()
-        ) {
-          throw new Error(
-            "action=claim_outcome requires memoryId, claimOutcome, claimOutcomeSource, and semanticTaskId",
-          );
-        }
-        if (params.claimIndexes?.some((index) => !Number.isInteger(index))) {
-          throw new Error("claimIndexes must contain only non-negative integers");
-        }
-        const sessionId = ctx.sessionManager.getSessionId();
-        const evidenceSource =
-          params.claimOutcomeSource === "user" || params.claimOutcomeSource === "tool"
-            ? selectPiEvidenceSource(ctx.sessionManager, params.evidence, params.claimOutcomeSource)
-            : undefined;
-        if (
-          (params.claimOutcomeSource === "user" || params.claimOutcomeSource === "tool") &&
-          !evidenceSource
-        ) {
-          throw new Error(
-            `claimOutcomeSource=${params.claimOutcomeSource} requires an exact matching evidence excerpt from the current Pi session`,
-          );
-        }
-        const sourceLineage = evidenceSource?.sourceMessageId ?? params.claimSourceLineage?.trim();
-        if (!sourceLineage) {
-          throw new Error("claimOutcomeSource=task requires claimSourceLineage");
-        }
-        const activeGraphId =
-          params.activeGraphId ??
-          controllerShadow.latestActiveGraphIdForMemory(sessionId, params.memoryId) ??
-          agentAttributionFlow.latestActiveGraphIdForMemories(sessionId, [params.memoryId]) ??
-          undefined;
-        const result = await invoke("recordClaimOutcomes", {
-          semanticTaskId: params.semanticTaskId,
-          activeGraphId,
-          sessionId,
-          projectDir: projectDirectory(),
-          collectionOrigin: shadowCollectionOrigin(),
-          votes: [
+        activeGraphId: Type.Optional(
+          Type.String({
+            description: nmgPrompts.active_graph_id_parameter_description,
+          }),
+        ),
+        taskSuccess: Type.Optional(
+          Type.Boolean({
+            description: nmgPrompts.feedback_label_parameter_description,
+          }),
+        ),
+        userCorrection: Type.Optional(
+          Type.Boolean({
+            description: nmgPrompts.feedback_label_parameter_description,
+          }),
+        ),
+        evidenceSufficient: Type.Optional(
+          Type.Boolean({
+            description: nmgPrompts.feedback_label_parameter_description,
+          }),
+        ),
+        expansionUseful: Type.Optional(
+          Type.Boolean({
+            description: nmgPrompts.feedback_label_parameter_description,
+          }),
+        ),
+        excessiveNoise: Type.Optional(
+          Type.Boolean({
+            description: nmgPrompts.feedback_label_parameter_description,
+          }),
+        ),
+        noMemoryNeeded: Type.Optional(
+          Type.Boolean({
+            description: nmgPrompts.feedback_label_parameter_description,
+          }),
+        ),
+        memoryMisleading: Type.Optional(
+          Type.Boolean({
+            description: nmgPrompts.feedback_misleading_parameter_description,
+          }),
+        ),
+        feedbackNote: Type.Optional(
+          Type.String({
+            description: nmgPrompts.feedback_note_parameter_description,
+          }),
+        ),
+        semanticTaskId: Type.Optional(
+          Type.String({
+            description: nmgPrompts.semantic_task_id_parameter_description,
+          }),
+        ),
+        claimOutcome: Type.Optional(
+          Type.Union([Type.Literal("supported"), Type.Literal("contradicted")], {
+            description: nmgPrompts.claim_outcome_parameter_description,
+          }),
+        ),
+        claimOutcomeSource: Type.Optional(
+          Type.Union([Type.Literal("user"), Type.Literal("tool"), Type.Literal("task")], {
+            description: nmgPrompts.claim_outcome_source_parameter_description,
+          }),
+        ),
+        claimSourceLineage: Type.Optional(
+          Type.String({
+            description: nmgPrompts.claim_source_lineage_parameter_description,
+          }),
+        ),
+        claimIndexes: Type.Optional(
+          Type.Array(Type.Number({ minimum: 0 }), {
+            description: nmgPrompts.claim_indexes_parameter_description,
+          }),
+        ),
+        claimWeight: Type.Optional(Type.Number({ minimum: 0.000001, maximum: 1 })),
+        statement: Type.Optional(Type.String()),
+        nodeName: Type.Optional(
+          Type.String({
+            description: nmgPrompts.node_name_parameter_description,
+          }),
+        ),
+        recallTriggers: Type.Optional(
+          Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
+            maxItems: 16,
+            description: nmgPrompts.recall_triggers_parameter_description,
+          }),
+        ),
+        newMemoryId: Type.Optional(
+          Type.String({
+            description: nmgPrompts.remember_new_memory_id_parameter_description,
+          }),
+        ),
+        supersededMemoryId: Type.Optional(
+          Type.String({
+            description: nmgPrompts.remember_superseded_memory_id_parameter_description,
+          }),
+        ),
+        relatedMemoryId: Type.Optional(
+          Type.String({
+            description: nmgPrompts.remember_related_memory_id_parameter_description,
+          }),
+        ),
+        relationJudgement: Type.Optional(
+          Type.Union(
+            [
+              Type.Literal("conflict"),
+              Type.Literal("distinct"),
+              Type.Literal("refines"),
+              Type.Literal("related"),
+              Type.Literal("same_entity"),
+            ],
             {
-              memoryId: params.memoryId,
-              claimIndexes: params.claimIndexes,
-              outcome: params.claimOutcome,
-              source: params.claimOutcomeSource,
-              sourceLineage,
-              evidenceSource: evidenceSource
-                ? {
-                    actor: evidenceSource.actor,
-                    content: evidenceSource.content,
-                    sessionId,
-                    sourceMessageId: evidenceSource.sourceMessageId,
-                    sourceRef: evidenceSource.sourceRef,
-                  }
-                : undefined,
-              weight: params.claimWeight,
+              description: nmgPrompts.remember_relation_judgement_parameter_description,
             },
-          ],
-        });
-        const insertedEvents = (result as { events?: unknown[] }).events ?? [];
-        // Only independently attributable user/tool outcomes become evidence
-        // targets. A model-authored task label may update its explicit posterior,
-        // but cannot silently supervise the retrieval controller.
-        if (
-          insertedEvents.length > 0 &&
-          (params.claimOutcomeSource === "user" || params.claimOutcomeSource === "tool")
-        ) {
-          await controllerShadow.verifiedClaimOutcome(
+          ),
+        ),
+        relationConfidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+        resolutionReason: Type.Optional(Type.String()),
+        resolution: Type.Optional(
+          Type.Union([Type.Literal("open"), Type.Literal("resolved"), Type.Literal("reopened")]),
+        ),
+        openedAt: Type.Optional(Type.String()),
+        relatedMemoryIds: Type.Optional(Type.Array(Type.String())),
+        memoryType: Type.Optional(
+          Type.Union([
+            Type.Literal("constraint"),
+            Type.Literal("event"),
+            Type.Literal("fact"),
+            Type.Literal("preference"),
+            Type.Literal("state"),
+            Type.Literal("strategy"),
+          ]),
+        ),
+        stateKey: Type.Optional(
+          Type.String({
+            description: nmgPrompts.state_key_parameter_description,
+          }),
+        ),
+        eventTime: Type.Optional(Type.String()),
+        referenceTime: Type.Optional(
+          Type.String({
+            description:
+              "Source ISO timestamp with Z/offset anchoring eventTime, for historical replay.",
+          }),
+        ),
+        timeZone: Type.Optional(
+          Type.String({
+            description: "Source IANA time zone; defaults to referenceTime's offset.",
+          }),
+        ),
+        sourceActor: Type.Optional(
+          Type.Union(
+            [
+              Type.Literal("assistant"),
+              Type.Literal("system"),
+              Type.Literal("tool"),
+              Type.Literal("user"),
+            ],
+            { description: nmgPrompts.source_actor_parameter_description },
+          ),
+        ),
+        truthStatus: Type.Optional(
+          Type.Union([
+            Type.Literal("asserted"),
+            Type.Literal("inferred"),
+            Type.Literal("unverified"),
+            Type.Literal("verified"),
+          ]),
+        ),
+        evidence: Type.Optional(
+          Type.String({ description: nmgPrompts.evidence_parameter_description }),
+        ),
+        writeReason: Type.Optional(Type.String()),
+        tier: Type.Optional(
+          Type.Union([Type.Literal(0), Type.Literal(1), Type.Literal(2), Type.Literal(3)]),
+        ),
+        importance: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+        scope: Type.Optional(Type.Record(Type.String(), Type.String())),
+        residence: Type.Optional(Type.Union([Type.Literal("ltg"), Type.Literal("stg")])),
+        unsafe: Type.Optional(
+          Type.Boolean({
+            description:
+              "Rust-unsafe-style escape hatch (docs §3.6): explicitly opt out of " +
+              "the transient/instruction write policy (e.g. a genuine persistent " +
+              "preference whose wording trips the transient-word filter). Secrets " +
+              "are never bypassable.",
+          }),
+        ),
+        expiresAt: Type.Optional(Type.String()),
+        externalSource: Type.Optional(
+          Type.Object({
+            source: Type.String({
+              description: nmgPrompts.external_source_parameter_description,
+            }),
+            retrievedAt: Type.Optional(Type.String()),
+            hash: Type.Optional(Type.String()),
+          }),
+        ),
+        boardSource: Type.Optional(
+          Type.Object(
+            {
+              taskId: Type.String({
+                description: "Task board channel the content came from",
+              }),
+              entryId: Type.String({
+                description: "Task board entry the content came from",
+              }),
+            },
+            {
+              description: nmgPrompts.remember_board_source_parameter_description,
+            },
+          ),
+        ),
+      }),
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        if (params.action === "claim_outcome") {
+          if (
+            !params.memoryId ||
+            !params.claimOutcome ||
+            !params.claimOutcomeSource ||
+            !params.semanticTaskId?.trim()
+          ) {
+            throw new Error(
+              "action=claim_outcome requires memoryId, claimOutcome, claimOutcomeSource, and semanticTaskId",
+            );
+          }
+          if (params.claimIndexes?.some((index) => !Number.isInteger(index))) {
+            throw new Error("claimIndexes must contain only non-negative integers");
+          }
+          const sessionId = ctx.sessionManager.getSessionId();
+          const evidenceSource =
+            params.claimOutcomeSource === "user" || params.claimOutcomeSource === "tool"
+              ? selectPiEvidenceSource(
+                  ctx.sessionManager,
+                  params.evidence,
+                  params.claimOutcomeSource,
+                )
+              : undefined;
+          if (
+            (params.claimOutcomeSource === "user" || params.claimOutcomeSource === "tool") &&
+            !evidenceSource
+          ) {
+            throw new Error(
+              `claimOutcomeSource=${params.claimOutcomeSource} requires an exact matching evidence excerpt from the current Pi session`,
+            );
+          }
+          const sourceLineage =
+            evidenceSource?.sourceMessageId ?? params.claimSourceLineage?.trim();
+          if (!sourceLineage) {
+            throw new Error("claimOutcomeSource=task requires claimSourceLineage");
+          }
+          const activeGraphId =
+            params.activeGraphId ??
+            controllerShadow.latestActiveGraphIdForMemory(sessionId, params.memoryId) ??
+            agentAttributionFlow.latestActiveGraphIdForMemories(sessionId, [params.memoryId]) ??
+            undefined;
+          const result = await invoke("recordClaimOutcomes", {
+            semanticTaskId: params.semanticTaskId,
             activeGraphId,
             sessionId,
-            params.memoryId,
-            params.claimOutcome,
+            projectDir: projectDirectory(),
+            collectionOrigin: shadowCollectionOrigin(),
+            votes: [
+              {
+                memoryId: params.memoryId,
+                claimIndexes: params.claimIndexes,
+                outcome: params.claimOutcome,
+                source: params.claimOutcomeSource,
+                sourceLineage,
+                evidenceSource: evidenceSource
+                  ? {
+                      actor: evidenceSource.actor,
+                      content: evidenceSource.content,
+                      sessionId,
+                      sourceMessageId: evidenceSource.sourceMessageId,
+                      sourceRef: evidenceSource.sourceRef,
+                    }
+                  : undefined,
+                weight: params.claimWeight,
+              },
+            ],
+          });
+          const insertedEvents = (result as { events?: unknown[] }).events ?? [];
+          // Only independently attributable user/tool outcomes become evidence
+          // targets. A model-authored task label may update its explicit posterior,
+          // but cannot silently supervise the retrieval controller.
+          if (
+            insertedEvents.length > 0 &&
+            (params.claimOutcomeSource === "user" || params.claimOutcomeSource === "tool")
+          ) {
+            await controllerShadow.verifiedClaimOutcome(
+              activeGraphId,
+              sessionId,
+              params.memoryId,
+              params.claimOutcome,
+            );
+          }
+          return toolResult(
+            result,
+            "Explicit attributable claim outcome recorded. Retrieval or answer use alone was not treated as support.",
           );
         }
-        return toolResult(
-          result,
-          "Explicit attributable claim outcome recorded. Retrieval or answer use alone was not treated as support.",
-        );
-      }
-      if (params.action === "feedback") {
-        const sessionId = ctx.sessionManager.getSessionId();
-        const labels = {
-          taskSuccess: params.taskSuccess,
-          userCorrection: params.userCorrection,
-          evidenceSufficient: params.evidenceSufficient,
-          expansionUseful: params.expansionUseful,
-          excessiveNoise: params.excessiveNoise,
-          noMemoryNeeded: params.noMemoryNeeded,
-          memoryMisleading: params.memoryMisleading,
-          note: params.feedbackNote,
-          semanticTaskId: params.semanticTaskId,
-        };
-        if (Object.values(labels).every((value) => value === undefined)) {
-          throw new Error("action=feedback requires at least one label or feedbackNote");
-        }
-        // Pi's own natural shadow-events dataset is best-effort and only records
-        // when the controller shadow is enabled. It does NOT gate online learning.
-        let recorded = false;
-        let shadowGraphId: string | null = null;
-        try {
-          shadowGraphId = params.activeGraphId ?? controllerShadow.latestActiveGraphId(sessionId);
-          if (shadowGraphId) {
-            recorded = await controllerShadow.feedback(shadowGraphId, sessionId, labels);
-          }
-        } catch {
-          recorded = false;
-        }
-        // Online learning is DAEMON-OWNED (shared layer): forward thin. The
-        // daemon resolves the staged graph (explicit activeGraphId, else the
-        // session's latest) and runs the single observed-action update.
-        let online: string;
-        let daemonGraphId: string | null = null;
-        try {
-          const raw = await invoke("recordFeedback", {
-            activeGraphId: params.activeGraphId,
-            sessionId,
+        if (params.action === "feedback") {
+          const sessionId = ctx.sessionManager.getSessionId();
+          const labels = {
             taskSuccess: params.taskSuccess,
             userCorrection: params.userCorrection,
             evidenceSufficient: params.evidenceSufficient,
@@ -1829,192 +1837,226 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             noMemoryNeeded: params.noMemoryNeeded,
             memoryMisleading: params.memoryMisleading,
             note: params.feedbackNote,
-          });
-          const result = raw as
-            | {
-                trained?: boolean;
-                reward?: number;
-                loss?: number;
-                activeGraphId?: string | null;
-              }
-            | null
-            | undefined;
-          daemonGraphId = result?.activeGraphId ?? null;
-          online =
-            result && result.trained
-              ? ` Online router updated (reward=${result.reward}, loss=${result.loss?.toFixed(4)}).`
-              : result
-                ? " (no staged decision or no usable label; skipped)."
-                : " (daemon unavailable; skipped).";
-        } catch {
-          online = " (online update skipped).";
-        }
-        // Any real feedback addressed the recall it names; nothing to clear here
-        // (the affordance rides with recall output, it is not scheduled).
-        return toolResult(
-          {
-            recorded,
-            activeGraphId: params.activeGraphId ?? shadowGraphId ?? daemonGraphId,
-          },
-          `Retrieval feedback processed.${online}${recorded ? "" : " Shadow log not recorded (set NMG_CONTROLLER_SHADOW=1 to also record natural shadow events)."}`,
-        );
-      }
-      if (params.action === "forget") {
-        if (!params.memoryId) throw new Error("action=forget requires memoryId");
-        const resolved = await invoke("resolveRemember", {
-          action: "forget",
-          memoryId: params.memoryId,
-          projectDir: projectDirectory(),
-          sessionId: ctx.sessionManager.getSessionId(),
-        });
-        return toolResult(
-          resolved,
-          "Memory withdrawn from normal retrieval. The tombstone remains for audit; this is not physical privacy erasure.",
-        );
-      }
-      if (params.action === "resolve" || params.action === "reopen") {
-        if (!params.memoryId) throw new Error(`action=${params.action} requires memoryId`);
-        const resolved = await invoke("resolveRemember", {
-          action: params.action,
-          memoryId: params.memoryId,
-          relatedMemoryIds: params.relatedMemoryIds,
-          reason: params.resolutionReason,
-          projectDir: projectDirectory(),
-          sessionId: ctx.sessionManager.getSessionId(),
-        });
-        return toolResult(
-          resolved,
-          params.action === "resolve"
-            ? "Open memory marked resolved; it is now eligible for ordinary retention policy."
-            : "Memory reopened and restored to indexed storage with its related evidence anchors.",
-        );
-      }
-      if (params.action === "supersede") {
-        if (!params.newMemoryId || !params.supersededMemoryId) {
-          throw new Error("action=supersede requires newMemoryId and supersededMemoryId");
-        }
-        const resolved = await invoke("resolveRemember", {
-          action: "supersede",
-          newMemoryId: params.newMemoryId,
-          supersededMemoryId: params.supersededMemoryId,
-          reason: params.resolutionReason,
-          projectDir: projectDirectory(),
-          sessionId: ctx.sessionManager.getSessionId(),
-        });
-        return toolResult(resolved, "Older memory superseded by the new value.");
-      }
-      if (params.action === "relate") {
-        if (!params.newMemoryId || !params.relatedMemoryId || !params.relationJudgement) {
-          throw new Error(
-            "action=relate requires newMemoryId, relatedMemoryId, and relationJudgement",
+            semanticTaskId: params.semanticTaskId,
+          };
+          if (Object.values(labels).every((value) => value === undefined)) {
+            throw new Error("action=feedback requires at least one label or feedbackNote");
+          }
+          // Pi's own natural shadow-events dataset is best-effort and only records
+          // when the controller shadow is enabled. It does NOT gate online learning.
+          let recorded = false;
+          let shadowGraphId: string | null = null;
+          try {
+            shadowGraphId = params.activeGraphId ?? controllerShadow.latestActiveGraphId(sessionId);
+            if (shadowGraphId) {
+              recorded = await controllerShadow.feedback(shadowGraphId, sessionId, labels);
+            }
+          } catch {
+            recorded = false;
+          }
+          // Online learning is DAEMON-OWNED (shared layer): forward thin. The
+          // daemon resolves the staged graph (explicit activeGraphId, else the
+          // session's latest) and runs the single observed-action update.
+          let online: string;
+          let daemonGraphId: string | null = null;
+          try {
+            const raw = await invoke("recordFeedback", {
+              activeGraphId: params.activeGraphId,
+              sessionId,
+              taskSuccess: params.taskSuccess,
+              userCorrection: params.userCorrection,
+              evidenceSufficient: params.evidenceSufficient,
+              expansionUseful: params.expansionUseful,
+              excessiveNoise: params.excessiveNoise,
+              noMemoryNeeded: params.noMemoryNeeded,
+              memoryMisleading: params.memoryMisleading,
+              note: params.feedbackNote,
+            });
+            const result = raw as
+              | {
+                  trained?: boolean;
+                  reward?: number;
+                  loss?: number;
+                  activeGraphId?: string | null;
+                }
+              | null
+              | undefined;
+            daemonGraphId = result?.activeGraphId ?? null;
+            online =
+              result && result.trained
+                ? ` Online router updated (reward=${result.reward}, loss=${result.loss?.toFixed(4)}).`
+                : result
+                  ? " (no staged decision or no usable label; skipped)."
+                  : " (daemon unavailable; skipped).";
+          } catch {
+            online = " (online update skipped).";
+          }
+          // Any real feedback addressed the recall it names; nothing to clear here
+          // (the affordance rides with recall output, it is not scheduled).
+          return toolResult(
+            {
+              recorded,
+              activeGraphId: params.activeGraphId ?? shadowGraphId ?? daemonGraphId,
+            },
+            `Retrieval feedback processed.${online}${recorded ? "" : " Shadow log not recorded (set NMG_CONTROLLER_SHADOW=1 to also record natural shadow events)."}`,
           );
         }
-        const resolved = await invoke("resolveRemember", {
-          action: "relate",
-          newMemoryId: params.newMemoryId,
-          relatedMemoryId: params.relatedMemoryId,
-          relationJudgement: params.relationJudgement,
-          confidence: params.relationConfidence,
+        if (params.action === "forget") {
+          if (!params.memoryId) throw new Error("action=forget requires memoryId");
+          const resolved = await invoke("resolveRemember", {
+            action: "forget",
+            memoryId: params.memoryId,
+            projectDir: projectDirectory(),
+            sessionId: ctx.sessionManager.getSessionId(),
+          });
+          return toolResult(
+            resolved,
+            "Memory withdrawn from normal retrieval. The tombstone remains for audit; this is not physical privacy erasure.",
+          );
+        }
+        if (params.action === "resolve" || params.action === "reopen") {
+          if (!params.memoryId) throw new Error(`action=${params.action} requires memoryId`);
+          const resolved = await invoke("resolveRemember", {
+            action: params.action,
+            memoryId: params.memoryId,
+            relatedMemoryIds: params.relatedMemoryIds,
+            reason: params.resolutionReason,
+            projectDir: projectDirectory(),
+            sessionId: ctx.sessionManager.getSessionId(),
+          });
+          return toolResult(
+            resolved,
+            params.action === "resolve"
+              ? "Open memory marked resolved; it is now eligible for ordinary retention policy."
+              : "Memory reopened and restored to indexed storage with its related evidence anchors.",
+          );
+        }
+        if (params.action === "supersede") {
+          if (!params.newMemoryId || !params.supersededMemoryId) {
+            throw new Error("action=supersede requires newMemoryId and supersededMemoryId");
+          }
+          const resolved = await invoke("resolveRemember", {
+            action: "supersede",
+            newMemoryId: params.newMemoryId,
+            supersededMemoryId: params.supersededMemoryId,
+            reason: params.resolutionReason,
+            projectDir: projectDirectory(),
+            sessionId: ctx.sessionManager.getSessionId(),
+          });
+          return toolResult(resolved, "Older memory superseded by the new value.");
+        }
+        if (params.action === "relate") {
+          if (!params.newMemoryId || !params.relatedMemoryId || !params.relationJudgement) {
+            throw new Error(
+              "action=relate requires newMemoryId, relatedMemoryId, and relationJudgement",
+            );
+          }
+          const resolved = await invoke("resolveRemember", {
+            action: "relate",
+            newMemoryId: params.newMemoryId,
+            relatedMemoryId: params.relatedMemoryId,
+            relationJudgement: params.relationJudgement,
+            confidence: params.relationConfidence,
+            projectDir: projectDirectory(),
+            sessionId: ctx.sessionManager.getSessionId(),
+          });
+          return toolResult(
+            resolved,
+            "Semantic relation recorded as a reversible pending proposal; node identities remain separate.",
+          );
+        }
+        if (!params.statement?.trim() || !params.nodeName?.trim()) {
+          throw new Error("saving a memory requires statement and nodeName");
+        }
+        const { externalSource, boardSource, ...memory } = params;
+        delete memory.action;
+        delete memory.memoryId;
+        delete memory.newMemoryId;
+        delete memory.supersededMemoryId;
+        delete memory.relatedMemoryId;
+        delete memory.relationJudgement;
+        delete memory.relationConfidence;
+        delete memory.resolutionReason;
+        delete memory.activeGraphId;
+        delete memory.taskSuccess;
+        delete memory.userCorrection;
+        delete memory.evidenceSufficient;
+        delete memory.expansionUseful;
+        delete memory.excessiveNoise;
+        delete memory.noMemoryNeeded;
+        delete memory.feedbackNote;
+        delete memory.semanticTaskId;
+        delete memory.claimOutcome;
+        delete memory.claimOutcomeSource;
+        delete memory.claimSourceLineage;
+        delete memory.claimIndexes;
+        delete memory.claimWeight;
+        if (externalSource && !/^(?:file|web):.+/u.test(externalSource.source)) {
+          throw new Error("externalSource.source must start with web: or file:");
+        }
+        const sourceActor = params.sourceActor ?? "assistant";
+        const evidenceResolution = resolvePiEvidenceSource(
+          ctx.sessionManager,
+          params.evidence,
+          sourceActor,
+        );
+        const evidenceSource = evidenceResolution.source;
+        if (sourceActor !== "assistant" && !evidenceSource && !externalSource) {
+          throw new Error(
+            `sourceActor=${sourceActor} requires an exact matching evidence excerpt from the current Pi session or an explicit externalSource`,
+          );
+        }
+        const markers = [
+          ...(externalSource
+            ? [
+                {
+                  kind: "external_source",
+                  attributes: {
+                    source: externalSource.source,
+                    retrievedAt: externalSource.retrievedAt ?? new Date().toISOString(),
+                    ...(externalSource.hash ? { hash: externalSource.hash } : {}),
+                  },
+                } as const,
+              ]
+            : []),
+          ...(boardSource
+            ? [
+                {
+                  kind: "board_origin",
+                  attributes: {
+                    taskId: boardSource.taskId,
+                    entryId: boardSource.entryId,
+                  },
+                } as const,
+              ]
+            : []),
+          ...(params.evidence?.trim() && !evidenceSource && !externalSource
+            ? [
+                {
+                  kind: "provenance_degraded",
+                  attributes: {
+                    provider: "pi",
+                    historyReferenceVersion: evidenceResolution.version,
+                    reason: evidenceResolution.reason ?? "unbound_source",
+                  },
+                } as const,
+              ]
+            : []),
+        ];
+        const result = await invoke("remember", {
+          ...memory,
+          sourceActor,
+          writeSource: "agent",
+          evidenceSource,
+          markers: markers.length ? markers : undefined,
           projectDir: projectDirectory(),
           sessionId: ctx.sessionManager.getSessionId(),
         });
-        return toolResult(
-          resolved,
-          "Semantic relation recorded as a reversible pending proposal; node identities remain separate.",
-        );
-      }
-      if (!params.statement?.trim() || !params.nodeName?.trim()) {
-        throw new Error("saving a memory requires statement and nodeName");
-      }
-      const { externalSource, boardSource, ...memory } = params;
-      delete memory.action;
-      delete memory.memoryId;
-      delete memory.newMemoryId;
-      delete memory.supersededMemoryId;
-      delete memory.relatedMemoryId;
-      delete memory.relationJudgement;
-      delete memory.relationConfidence;
-      delete memory.resolutionReason;
-      delete memory.activeGraphId;
-      delete memory.taskSuccess;
-      delete memory.userCorrection;
-      delete memory.evidenceSufficient;
-      delete memory.expansionUseful;
-      delete memory.excessiveNoise;
-      delete memory.noMemoryNeeded;
-      delete memory.feedbackNote;
-      delete memory.semanticTaskId;
-      delete memory.claimOutcome;
-      delete memory.claimOutcomeSource;
-      delete memory.claimSourceLineage;
-      delete memory.claimIndexes;
-      delete memory.claimWeight;
-      if (externalSource && !/^(?:file|web):.+/u.test(externalSource.source)) {
-        throw new Error("externalSource.source must start with web: or file:");
-      }
-      const sourceActor = params.sourceActor ?? "assistant";
-      const evidenceResolution = resolvePiEvidenceSource(
-        ctx.sessionManager,
-        params.evidence,
-        sourceActor,
-      );
-      const evidenceSource = evidenceResolution.source;
-      if (sourceActor !== "assistant" && !evidenceSource && !externalSource) {
-        throw new Error(
-          `sourceActor=${sourceActor} requires an exact matching evidence excerpt from the current Pi session or an explicit externalSource`,
-        );
-      }
-      const markers = [
-        ...(externalSource
-          ? [
-              {
-                kind: "external_source",
-                attributes: {
-                  source: externalSource.source,
-                  retrievedAt: externalSource.retrievedAt ?? new Date().toISOString(),
-                  ...(externalSource.hash ? { hash: externalSource.hash } : {}),
-                },
-              } as const,
-            ]
-          : []),
-        ...(boardSource
-          ? [
-              {
-                kind: "board_origin",
-                attributes: {
-                  taskId: boardSource.taskId,
-                  entryId: boardSource.entryId,
-                },
-              } as const,
-            ]
-          : []),
-        ...(params.evidence?.trim() && !evidenceSource && !externalSource
-          ? [
-              {
-                kind: "provenance_degraded",
-                attributes: {
-                  provider: "pi",
-                  historyReferenceVersion: evidenceResolution.version,
-                  reason: evidenceResolution.reason ?? "unbound_source",
-                },
-              } as const,
-            ]
-          : []),
-      ];
-      const result = await invoke("remember", {
-        ...memory,
-        sourceActor,
-        writeSource: "agent",
-        evidenceSource,
-        markers: markers.length ? markers : undefined,
-        projectDir: projectDirectory(),
-        sessionId: ctx.sessionManager.getSessionId(),
-      });
-      return toolResult(result, formatRememberResult(result));
-    },
-  });
+        return toolResult(result, formatRememberResult(result));
+      },
+    });
 
-  pi.registerTool({
+  registerSharedTool({
     name: "nmg_get",
     label: "Get NMG evidence",
     description: nmgPrompts.get_description,
@@ -2065,7 +2107,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerTool({
+  registerSharedTool({
     name: "nmg_search",
     label: "Search NMG",
     description: nmgPrompts.search_description,
@@ -2433,7 +2475,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerTool({
+  registerSharedTool({
     name: "nmg_state",
     label: "NMG state",
     description: nmgPrompts.state_description,
@@ -2619,6 +2661,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       });
   };
   if (coordinationToolsEnabled) setTimeout(wakeLoop, readWakeConfig().intervalMs).unref();
+  const capabilityAssembly = assembleAdapterCapabilities(
+    ADAPTER_CAPABILITY_CATALOG.pi.capabilities,
+    capabilityBindings,
+  );
+  pi.on("session_shutdown", async () => {
+    await capabilityAssembly.dispose();
+  });
 }
 
 const EVIDENCE_SOURCE_WINDOW = 64;

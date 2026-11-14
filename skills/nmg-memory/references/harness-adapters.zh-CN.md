@@ -2,9 +2,18 @@
 
 [English](harness-adapters.md) · [术语](harness-adapters.terms.yaml)
 
-NMG 为各类 Harness 提供轻量适配器（Pi、Claude Code MCP、DeepSeek Harness，以及可安装的 WorkBuddy hook）。本文说明如何编写适配器；在将 NMG 接入新的工具型 Harness，或排查现有适配器行为时阅读。
+NMG 为各类 Harness 提供轻量适配器（Pi、Claude Code MCP、DeepSeek Harness，以及 WorkBuddy／Kimi hook 和 OpenCode v2 插件）。本文供开发或扩展适配器时阅读。各已交付接入方式的安装、加载和日常使用见[适配器使用指南](adapter-usage.zh-CN.md)。
 
 仓库同时提供 `opencode-plugin/` 中的 OpenCode v2 薄适配器。跨宿主的具体能力覆盖见[适配器能力矩阵](../../../docs/design/harness-capability-matrix.zh-CN.md)，不能从存在插件推断所有能力都已端到端接入。
+
+## 共享能力装配
+
+已迁移的功能使用 `ADAPTER_CAPABILITY_CATALOG` 和 `assembleAdapterCapabilities`，
+[装配合同](../../../docs/design/unified-architecture/adapter-capability-assembly.zh-CN.md#可执行装配)
+负责模块、就绪及清理约定。将原生 schema 注册和生命周期接口绑定到共享服务。
+记忆工具组同时要求 search、get、remember，不再手工注册不完整的工具组。
+原生绑定保留事件转换、会话栅栏、取消及接受回执。异步注册等待 `ready`，
+宿主提供清理函数时将其返回。装配诊断不证明真实 hook 激活或最终 provider 投递。
 
 ## 稳定合同
 
@@ -56,34 +65,17 @@ AG 替换或清除必须携带该租约所捕获的 binding，且该元数据不
 
 只有工具接口并不能保证模型会搜索记忆。在宿主提供合适生命周期接入点时，适配器可以在每个新用户回合执行有界搜索，并通过宿主支持的上下文机制暴露 **Active-Graph header projection**（精简标题及 `activeGraphId`）。精确陈述和证据仍应由 `get(activeGraphId)` 获取；它会在 AG trace 上记录实际使用。仅显示注入的标题不算使用。限制搜索预算，召回失败时也应让用户回合继续。自动输出遵守[共享上下文契约](../../../docs/design/state-spaces.zh-CN.md#统一上下文信息项)：宿主提示计入预算，不以准备完成推定已经送达并折叠未来候选。当前自动宿主钩子不支持最终输入确认。
 
-自动上下文准备共用五秒绝对等待预算，不为每次 RPC 重开额度。后续阶段到期仍保留及时完成的候选，支持取消的调用传递取消信号；超时不意味着能抢占同步 SQLite 工作或停止远端工作。模型显式请求的搜索不受自动期限约束。检查点、剩余预算准入与 daemon 上限见[等待预算契约](../../../docs/design/session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.zh-CN.md)。
+自动上下文准备共用一次绝对等待预算，不为每次 RPC 重开额度。共享默认值为五秒；DSH 和 OpenCode 使用更紧的 1.5 秒原生预算。后续阶段到期仍保留及时完成的候选，支持取消的调用传递取消信号；超时不意味着能抢占同步 SQLite 工作或停止远端工作。模型显式请求的搜索不受自动期限约束。检查点、剩余预算准入与 daemon 上限见[等待预算契约](../../../docs/design/session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.zh-CN.md)。
 
-具体注入机制因宿主而异。本仓库的 DSH 包在用户消息进入 inbox 时启动召回，通过 DSH 的 `systemPrompt.context` 提供结果；Pi 使用其自身持久化的 `nmg-context` 消息路径。宿主有受支持的上下文 API 时，不要自行伪造用户消息。只有 hook 与模型侧工具共享同一宿主 session identity 时，projection handle 才有效。独立的 WorkBuddy hook 使用命名空间身份 `workbuddy-hook:<sessionId>`，发出的 projection handle 属于独立 AG；不要把该 handle 传给工具侧 `nmg_get`。当前 hook 路径没有发送 `release` RPC，因此不能声称 AG 会立即清理。Agent 必须先调用工具侧 `nmg_search` 再调用 `nmg_get`；不得为了复用 hook 创建的句柄而削弱 session 所有权边界。
+具体注入机制因宿主而异。本仓库的 DSH 包在用户消息进入 inbox 时启动召回，在异步请求准入后刷新 DSH 的 `systemPrompt.context` 提供结果；OpenCode 在 `prompt` 准入时准备，经 `context` hook 承载。两者都将完整 owner 状态与召回分开准备。Pi 使用其自身持久化的 `nmg-context` 消息路径。宿主有受支持的上下文 API 时，不要自行伪造用户消息。只有 hook 与模型侧工具共享同一宿主 session identity 时，projection handle 才有效。独立的 WorkBuddy hook 使用命名空间身份 `workbuddy-hook:<sessionId>`，发出的 projection handle 属于独立 AG；不要把该 handle 传给工具侧 `nmg_get`。当前 hook 路径没有发送 `release` RPC，因此不能声称 AG 会立即清理。Agent 必须先调用工具侧 `nmg_search` 再调用 `nmg_get`；不得为了复用 hook 创建的句柄而削弱 session 所有权边界。
 
 对合同支持 JSON-RPC 的操作使用常驻 daemon，并为自动召回设置有界等待。CLI 回退取决于具体操作和宿主；不要承诺每种状态变更都能回退到新进程。记忆层缓慢或不可用时，不得阻塞用户回合。
 
 ## DeepSeek Harness（仓库内的包）
 
-本仓库的 DSH 适配器是双面包 [`dsh/dsh-nmg/`](../../../dsh/dsh-nmg/README.md)。宿主侧注册 NMG 工具并执行自动召回；浏览器侧渲染可持久化的工具卡片。该包通过 DSH 的 host plugin 机制组合，因此仓库中较早的 agent-preset 配方不是本包的安装路径。
-
-启动宿主前，在 `dsh/dsh-nmg/` 中构建：
-
-```sh
-pnpm install --frozen-lockfile
-pnpm run build
-```
-
-然后将本地包安装到 web profile 并重启 DSH：
-
-```text
-dsh plugin --profile web add link:<path-to-this-repository>/dsh/dsh-nmg
-```
-
-构建产物为 `lib/index.js` 和 `lib/client.js`；`lib/` 是不入库的生成产物。`cordis.patch.yml` 将包插入 web host composition。不要编辑部署目录下的安装副本，也不要假设构建或重载会自动更新运行中的 host。当前安装与行为以该包的 README 和源码为准。
-
-DSH host adapter 注册 `nmg_search`、`nmg_get`、`nmg_remember`、`nmg_state`、`nmg_lab` 和可选的 daemon 健康检查工具。Board 操作通过 `nmg_state` 的 `space="board"` 执行；工作状态操作使用 `space="ag"`。包在本回合首次上下文组装前执行有界自动召回，并通过 DSH 的 `systemPrompt.context` 暴露结果。这条召回路径不能证明 DSH 也会把维护中的 AG 工作状态携带进模型输入。不得把 Pi 每用户回合携带合同套用到 DSH。
-
-不要将已移除的 preset 指令、`harness-adapters/deepseek-harness/` 模块路径、动态 `cordis_define` 试用配方或手工构造 `createUserMessage` 的方式当成本仓库当前 DSH 配置。这些指令属于已被替代的集成方式，也不是受支持的回退路径。
+当前 DSH 目标是双面宿主包 [`dsh/dsh-nmg/`](../../../dsh/dsh-nmg/README.md)。
+构建、profile 安装、原生上下文行为和激活检查见
+[DSH 使用指南](adapter-usage.zh-CN.md#deepseek-harness)。历史 preset 不是第二个集成目标或回退路径。
 
 ## 手动 CLI 路径
 

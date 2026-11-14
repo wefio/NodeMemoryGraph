@@ -59,12 +59,12 @@ test("real OpenCode registration forwards event payloads and public status to pr
         },
       },
     });
-    const state = tools.get("state")!;
+    const state = tools.get("nmg_state")!;
     assert.match(JSON.stringify(state.input), /eventId/);
     assert.match(JSON.stringify(state.input), /eventUpdate/);
     assert.match(JSON.stringify(state.input), /notification/);
     const context = { sessionID: "event-test-session" };
-    const remember = tools.get("remember")!;
+    const remember = tools.get("nmg_remember")!;
     assert.match(JSON.stringify(remember.input), /referenceTime/);
     assert.match(JSON.stringify(remember.input), /timeZone/);
     await remember.execute(

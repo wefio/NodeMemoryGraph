@@ -94,10 +94,12 @@ you choose an integration.
 | Environment | What you can use | Limits to know |
 | --- | --- | --- |
 | [Pi](#pi) | Save and search memory, open evidence, automatic recall, working state, Task Board and optional Lab | Automatic writes and recall follow the integration policy |
-| [OpenCode v2](opencode-plugin/README.md) | Memory tools, automatic recall, working state and Task Board | The first turn of a new service may lack project scope; some wake capabilities are limited |
+| [OpenCode v2](opencode-plugin/README.md) | Memory tools, automatic recall, working state and Task Board | Native lookup resolves first-turn scope when available; some wake capabilities remain limited |
 | [Claude Code / MCP](#claude-code-plugin) | Memory tools, working state, Task Board and optional Lab | Explicit MCP calls; no automatic per-turn recall or push wake |
-| [DeepSeek Harness](dsh/README.md) | Memory tools, automatic recall and Task Board | The legacy adapter and [web host package](dsh/dsh-nmg/README.md) differ in capabilities and setup |
+| [DeepSeek Harness](dsh/dsh-nmg/README.md) | Memory tools, automatic recall, working-state carriage and Task Board | Use the current host package; lifecycle and live-wake verification remain scoped |
+| [Codex](codex-plugin/README.md) | Self-contained plugin with native multi-session mapping, five tools and shared hooks | Build and install the generated package, then enable and trust hooks |
 | [WorkBuddy](workbuddy-plugin/README.md) | Hook-based automatic recall; can combine MCP tools and Skill | The hook itself has no memory tools; hook and MCP session state differ |
+| [Kimi Code CLI](kimi-plugin/README.md) | MCP tools plus optional reminders, presence and prompt-time board polling | Hook alone has no memory tools, automatic recall or state carriage |
 | Other tool-capable agents | [CLI + Skill](#agent-independent-cli) to save, search and open memory | The agent must run the CLI and read the Skill; automatic recall depends on the host |
 
 Adapters expose native tools and transport the calls. Pi, Claude MCP, DSH, and
@@ -105,8 +107,8 @@ the benchmark bridge share the Agent Surface for compact search, exact evidence,
 remember follow-up, Task Board output, redaction, and logical-chain projection.
 Host-specific lifecycle, tool schemas and transport fallbacks remain in adapters.
 See the [capability matrix](docs/design/harness-capability-matrix.md) for details.
-Its legacy DSH automatic-recall entry differs from the current implementation;
-use the adapter source and instructions for that capability.
+For installation and daily operation across these connections, use the
+[adapter usage guide](skills/nmg-memory/references/adapter-usage.md).
 
 ### Pi
 

@@ -1,0 +1,1256 @@
+{
+  "measuredAt": "2026-11-12T14:40:09.058Z",
+  "nmgSourceSha256": {
+    "opencode-plugin/index.ts": "fbe8b8a6d0cafff672799dd3d98c8f561429d1d5e8aa6f3f214179ac2090e439",
+    "dsh/dsh-nmg/src/plugin/index.ts": "4c4165fe7f37a870b08c69fc2ac078046dc687705c132e2e05f262b38958e71b",
+    "dsh/dsh-nmg/src/plugin/native-events.ts": "6390dac61de8134b480b02e5fd85a30f01d9908bd5a032e096063d4e771dc276",
+    "docs/experiments/runtime/native-plugin-probe.mjs": "e5e8797f3c5b3cbac0e24f9a7743f9432f79ad5bc3d3db169c94f4727045b216",
+    "docs/experiments/runtime/opencode-hook-exercise.mjs": "ab7afbae9d99fde31d7e11972d160242a86515459a4d7170651ed48e5c077fed",
+    "docs/experiments/runtime/dsh-nmg-exercise.mjs": "c39a8a685a53120729621b1e04e27ed470417f5315641c9eabc315a291fe3634",
+    "docs/experiments/runtime/native-nmg-fixture.mjs": "840fc39a61f96b7131a714a22096b72fa606ca52fd766a52f4231f7acf41b11f"
+  },
+  "dsh": {
+    "versions": {
+      "dsh-system-prompt": {
+        "version": "0.2.1-rc.5",
+        "sha256": "7be9f7aafbf345d01ddcc12fd297b16e9a1d41283a6a04073b867becca0bf020"
+      },
+      "dsh-tools": {
+        "version": "0.2.1-rc.5",
+        "sha256": "1e53932e7c4213ea24a7d87f06960b7a7702cb21f8a5741c97242b4a470a442a"
+      },
+      "dsh-agent": {
+        "version": "0.2.1-rc.5",
+        "sha256": "7b59cf82c2784c25bdce4e3e24e5e5303b02b9f1003efacf50255492d17baf8b"
+      }
+    },
+    "nmg": {
+      "checks": [
+        "NMG native tool execution",
+        "admission and real context assembly",
+        "complete maintained state",
+        "recall and exact get",
+        "completed-turn diagnostic attribution"
+      ],
+      "modelCalls": 0
+    },
+    "checks": [
+      "dynamic context refresh",
+      "context selection by supplied assembly identity",
+      "context disposal",
+      "final success/error tool-result notifications"
+    ],
+    "notTested": [
+      "native Agent lifecycle",
+      "desktop bundle loading",
+      "model/provider calls"
+    ]
+  },
+  "opencode": {
+    "binarySha256": "d0fff437ac139cfb59d715897602349baf6e7cab7ca67f6d7478788afaafa847",
+    "versionFile": "2.0.32",
+    "info": {
+      "title": "opencode HttpApi",
+      "version": "0.0.1",
+      "description": "Experimental HttpApi surface for selected instance routes."
+    },
+    "openapiPath": "/openapi.json",
+    "plugin": {
+      "namespaces": [
+        "app",
+        "location",
+        "options",
+        "agent",
+        "aisdk",
+        "command",
+        "credential",
+        "event",
+        "experimental",
+        "generate",
+        "model",
+        "provider",
+        "integration",
+        "mcp",
+        "permission",
+        "plugin",
+        "reference",
+        "rpc",
+        "skill",
+        "storage",
+        "tool",
+        "vcs",
+        "websearch",
+        "worktree",
+        "session",
+        "shell"
+      ],
+      "hooks": [
+        "session.prompt",
+        "session.context",
+        "session.compaction",
+        "tool.execute.after"
+      ],
+      "events": [
+        {
+          "name": "prompt",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "keys": [
+            "sessionID",
+            "messageID",
+            "prompt",
+            "metadata",
+            "delivery"
+          ]
+        },
+        {
+          "name": "context",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "keys": [
+            "sessionID",
+            "model",
+            "system",
+            "messages",
+            "options",
+            "agent",
+            "tools"
+          ]
+        },
+        {
+          "name": "execute.after",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "tool": "nmg_search",
+          "keys": [
+            "tool",
+            "sessionID",
+            "agent",
+            "messageID",
+            "id",
+            "input",
+            "status",
+            "result"
+          ]
+        },
+        {
+          "name": "execute.after",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "tool": "nmg_get",
+          "keys": [
+            "tool",
+            "sessionID",
+            "agent",
+            "messageID",
+            "id",
+            "input",
+            "status",
+            "result"
+          ]
+        },
+        {
+          "name": "execute.after",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "tool": "nmg_state",
+          "keys": [
+            "tool",
+            "sessionID",
+            "agent",
+            "messageID",
+            "id",
+            "input",
+            "status",
+            "result"
+          ]
+        },
+        {
+          "name": "execute.after",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "tool": "nmg_state",
+          "keys": [
+            "tool",
+            "sessionID",
+            "agent",
+            "messageID",
+            "id",
+            "input",
+            "status",
+            "result"
+          ]
+        },
+        {
+          "name": "execute.after",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "tool": "execute",
+          "keys": [
+            "tool",
+            "sessionID",
+            "agent",
+            "messageID",
+            "id",
+            "input",
+            "status",
+            "result"
+          ]
+        },
+        {
+          "name": "context",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "keys": [
+            "sessionID",
+            "model",
+            "system",
+            "messages",
+            "options",
+            "agent",
+            "tools"
+          ]
+        },
+        {
+          "name": "prompt",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "keys": [
+            "sessionID",
+            "messageID",
+            "prompt",
+            "metadata",
+            "delivery"
+          ]
+        },
+        {
+          "name": "context",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "keys": [
+            "sessionID",
+            "model",
+            "system",
+            "messages",
+            "options",
+            "agent",
+            "tools"
+          ]
+        },
+        {
+          "name": "compaction",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "keys": [
+            "sessionID",
+            "model",
+            "system",
+            "messages",
+            "options",
+            "agent",
+            "tools"
+          ]
+        },
+        {
+          "name": "prompt",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "keys": [
+            "sessionID",
+            "messageID",
+            "prompt",
+            "metadata",
+            "delivery"
+          ]
+        },
+        {
+          "name": "context",
+          "sessionID": "ses_e2fcc4706ffeDPB9KR9MjJ6tqm",
+          "keys": [
+            "sessionID",
+            "model",
+            "system",
+            "messages",
+            "options",
+            "agent",
+            "tools"
+          ]
+        }
+      ],
+      "toolCalls": 0,
+      "sessionMethods": [
+        "hook",
+        "create",
+        "get",
+        "remove",
+        "switchAgent",
+        "switchModel",
+        "prompt",
+        "generate",
+        "command",
+        "compact",
+        "synthetic",
+        "interrupt",
+        "update",
+        "move",
+        "wait",
+        "context"
+      ],
+      "toolMethods": [
+        "reload",
+        "list",
+        "transform",
+        "hook"
+      ],
+      "eventMethods": [
+        "subscribe"
+      ],
+      "locationKeys": [
+        "directory",
+        "workspaceID",
+        "project"
+      ],
+      "toolTransform": true,
+      "sessionLookup": {
+        "keys": [
+          "id",
+          "projectID",
+          "model",
+          "cost",
+          "tokens",
+          "outcome",
+          "time",
+          "title",
+          "location"
+        ],
+        "directory": "C:\\Users\\LEGION\\AppData\\Local\\Temp\\nmg-opencode-audit-h4xdUh"
+      },
+      "status": "registered"
+    },
+    "exercise": {
+      "compactionHook": true,
+      "calls": [
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "stream",
+            "stream_options",
+            "store"
+          ],
+          "stateMarker": false,
+          "toolResult": false,
+          "maintainedState": false,
+          "exactEvidence": false,
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": true,
+          "toolResult": false,
+          "maintainedState": false,
+          "exactEvidence": false,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": true,
+          "toolResult": true,
+          "maintainedState": false,
+          "exactEvidence": true,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": true,
+          "toolResult": true,
+          "maintainedState": true,
+          "exactEvidence": true,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": false,
+          "toolResult": true,
+          "maintainedState": false,
+          "exactEvidence": true,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": false,
+          "toolResult": true,
+          "maintainedState": false,
+          "exactEvidence": true,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": false
+        },
+        {
+          "path": "/v1/chat/completions",
+          "keys": [
+            "model",
+            "messages",
+            "tools",
+            "stream",
+            "stream_options",
+            "max_completion_tokens",
+            "store"
+          ],
+          "stateMarker": true,
+          "toolResult": true,
+          "maintainedState": true,
+          "exactEvidence": true,
+          "tools": [
+            "edit",
+            "glob",
+            "grep",
+            "question",
+            "read",
+            "shell",
+            "skill",
+            "subagent",
+            "webfetch",
+            "websearch",
+            "write",
+            "execute"
+          ],
+          "afterCompaction": true
+        }
+      ],
+      "outcome": "succeeded",
+      "nmgMethods": [
+        "hello",
+        "sessionActiveGraph",
+        "state",
+        "search",
+        "get"
+      ]
+    },
+    "sessionLocationBeforePrompt": true,
+    "operations": [
+      {
+        "path": "/api/info",
+        "method": "get",
+        "id": "server.info"
+      },
+      {
+        "path": "/api/pair",
+        "method": "post",
+        "id": "server.pair"
+      },
+      {
+        "path": "/auth/connect/{code}",
+        "method": "get",
+        "id": "server.connect"
+      },
+      {
+        "path": "/api/location",
+        "method": "get",
+        "id": "location.get"
+      },
+      {
+        "path": "/api/location/reload",
+        "method": "post",
+        "id": "location.reload"
+      },
+      {
+        "path": "/api/agent",
+        "method": "get",
+        "id": "agent.list"
+      },
+      {
+        "path": "/api/agent/{agentID}",
+        "method": "get",
+        "id": "agent.get"
+      },
+      {
+        "path": "/api/plugin",
+        "method": "get",
+        "id": "plugin.list"
+      },
+      {
+        "path": "/api/plugin/check",
+        "method": "post",
+        "id": "plugin.check"
+      },
+      {
+        "path": "/api/plugin/update",
+        "method": "post",
+        "id": "plugin.update"
+      },
+      {
+        "path": "/api/session",
+        "method": "get",
+        "id": "session.list"
+      },
+      {
+        "path": "/api/session",
+        "method": "post",
+        "id": "session.create"
+      },
+      {
+        "path": "/api/experimental/session/stats",
+        "method": "get",
+        "id": "experimental.session.stats"
+      },
+      {
+        "path": "/api/experimental/session/import",
+        "method": "post",
+        "id": "experimental.session.import"
+      },
+      {
+        "path": "/api/experimental/session/{sessionID}/export",
+        "method": "get",
+        "id": "experimental.session.export"
+      },
+      {
+        "path": "/api/session/active",
+        "method": "get",
+        "id": "session.active"
+      },
+      {
+        "path": "/api/session/{sessionID}",
+        "method": "get",
+        "id": "session.get"
+      },
+      {
+        "path": "/api/session/{sessionID}",
+        "method": "delete",
+        "id": "session.remove"
+      },
+      {
+        "path": "/api/session/{sessionID}",
+        "method": "patch",
+        "id": "session.update"
+      },
+      {
+        "path": "/api/session/{sessionID}/fork",
+        "method": "post",
+        "id": "session.fork"
+      },
+      {
+        "path": "/api/session/{sessionID}/agent",
+        "method": "post",
+        "id": "session.switchAgent"
+      },
+      {
+        "path": "/api/session/{sessionID}/model",
+        "method": "post",
+        "id": "session.switchModel"
+      },
+      {
+        "path": "/api/session/{sessionID}/move",
+        "method": "post",
+        "id": "session.move"
+      },
+      {
+        "path": "/api/session/{sessionID}/prompt",
+        "method": "post",
+        "id": "session.prompt"
+      },
+      {
+        "path": "/api/session/{sessionID}/command",
+        "method": "post",
+        "id": "session.command"
+      },
+      {
+        "path": "/api/experimental/session/{sessionID}/skill",
+        "method": "post",
+        "id": "experimental.session.skill"
+      },
+      {
+        "path": "/api/session/{sessionID}/synthetic",
+        "method": "post",
+        "id": "session.synthetic"
+      },
+      {
+        "path": "/api/session/{sessionID}/shell",
+        "method": "post",
+        "id": "session.shell"
+      },
+      {
+        "path": "/api/session/{sessionID}/compact",
+        "method": "post",
+        "id": "session.compact"
+      },
+      {
+        "path": "/api/experimental/session/{sessionID}/wait",
+        "method": "post",
+        "id": "experimental.session.wait"
+      },
+      {
+        "path": "/api/session/{sessionID}/revert/stage",
+        "method": "post",
+        "id": "session.revert.stage"
+      },
+      {
+        "path": "/api/session/{sessionID}/revert",
+        "method": "delete",
+        "id": "session.revert.clear"
+      },
+      {
+        "path": "/api/session/{sessionID}/revert/commit",
+        "method": "post",
+        "id": "session.revert.commit"
+      },
+      {
+        "path": "/api/session/{sessionID}/context",
+        "method": "get",
+        "id": "session.context"
+      },
+      {
+        "path": "/api/session/{sessionID}/diff",
+        "method": "get",
+        "id": "session.diff"
+      },
+      {
+        "path": "/api/session/{sessionID}/inbox",
+        "method": "get",
+        "id": "session.inbox.list"
+      },
+      {
+        "path": "/api/session/{sessionID}/inbox/{inboxID}",
+        "method": "delete",
+        "id": "session.inbox.cancel"
+      },
+      {
+        "path": "/api/session/{sessionID}/inbox/{inboxID}",
+        "method": "patch",
+        "id": "session.inbox.update"
+      },
+      {
+        "path": "/api/experimental/session/{sessionID}/instructions/entries",
+        "method": "get",
+        "id": "experimental.session.instructions.entry.list"
+      },
+      {
+        "path": "/api/experimental/session/{sessionID}/instructions/entries/{key}",
+        "method": "put",
+        "id": "experimental.session.instructions.entry.put"
+      },
+      {
+        "path": "/api/experimental/session/{sessionID}/instructions/entries/{key}",
+        "method": "delete",
+        "id": "experimental.session.instructions.entry.remove"
+      },
+      {
+        "path": "/api/session/{sessionID}/generate",
+        "method": "post",
+        "id": "session.generate"
+      },
+      {
+        "path": "/api/experimental/session/{sessionID}/log",
+        "method": "get",
+        "id": "session.log"
+      },
+      {
+        "path": "/api/session/{sessionID}/interrupt",
+        "method": "post",
+        "id": "session.interrupt"
+      },
+      {
+        "path": "/api/session/{sessionID}/background",
+        "method": "post",
+        "id": "session.background"
+      },
+      {
+        "path": "/api/session/{sessionID}/message/{messageID}",
+        "method": "get",
+        "id": "session.message.get"
+      },
+      {
+        "path": "/api/session/{sessionID}/form",
+        "method": "get",
+        "id": "session.form.list"
+      },
+      {
+        "path": "/api/session/{sessionID}/form",
+        "method": "post",
+        "id": "session.form.create"
+      },
+      {
+        "path": "/api/session/{sessionID}/form/{formID}",
+        "method": "get",
+        "id": "session.form.get"
+      },
+      {
+        "path": "/api/session/{sessionID}/form/{formID}",
+        "method": "delete",
+        "id": "session.form.cancel"
+      },
+      {
+        "path": "/api/session/{sessionID}/form/{formID}/reply",
+        "method": "post",
+        "id": "session.form.reply"
+      },
+      {
+        "path": "/api/session/{sessionID}/environment",
+        "method": "put",
+        "id": "session.environment"
+      },
+      {
+        "path": "/api/session/{sessionID}/view",
+        "method": "post",
+        "id": "session.view"
+      },
+      {
+        "path": "/api/session/{sessionID}/message",
+        "method": "get",
+        "id": "session.message.list"
+      },
+      {
+        "path": "/api/model",
+        "method": "get",
+        "id": "model.list"
+      },
+      {
+        "path": "/api/model/default",
+        "method": "get",
+        "id": "model.default"
+      },
+      {
+        "path": "/api/experimental/generate",
+        "method": "post",
+        "id": "experimental.generate.text"
+      },
+      {
+        "path": "/api/experimental/voice/session",
+        "method": "post",
+        "id": "experimental.voice.session"
+      },
+      {
+        "path": "/api/provider",
+        "method": "get",
+        "id": "provider.list"
+      },
+      {
+        "path": "/api/provider/{providerID}",
+        "method": "get",
+        "id": "provider.get"
+      },
+      {
+        "path": "/api/integration",
+        "method": "get",
+        "id": "integration.list"
+      },
+      {
+        "path": "/api/integration/{integrationID}",
+        "method": "get",
+        "id": "integration.get"
+      },
+      {
+        "path": "/api/experimental/integration/wellknown",
+        "method": "post",
+        "id": "experimental.integration.wellknown.add"
+      },
+      {
+        "path": "/api/integration/{integrationID}/connect/key",
+        "method": "post",
+        "id": "integration.connect.key"
+      },
+      {
+        "path": "/api/integration/{integrationID}/connect/external",
+        "method": "post",
+        "id": "integration.connect.external"
+      },
+      {
+        "path": "/api/integration/{integrationID}/connect/oauth",
+        "method": "post",
+        "id": "integration.oauth.connect"
+      },
+      {
+        "path": "/api/integration/{integrationID}/connect/oauth/{attemptID}",
+        "method": "get",
+        "id": "integration.oauth.status"
+      },
+      {
+        "path": "/api/integration/{integrationID}/connect/oauth/{attemptID}",
+        "method": "delete",
+        "id": "integration.oauth.cancel"
+      },
+      {
+        "path": "/api/integration/{integrationID}/connect/oauth/{attemptID}/complete",
+        "method": "post",
+        "id": "integration.oauth.complete"
+      },
+      {
+        "path": "/api/integration/{integrationID}/connect/command",
+        "method": "post",
+        "id": "integration.command.connect"
+      },
+      {
+        "path": "/api/integration/{integrationID}/connect/command/{attemptID}",
+        "method": "get",
+        "id": "integration.command.status"
+      },
+      {
+        "path": "/api/integration/{integrationID}/connect/command/{attemptID}",
+        "method": "delete",
+        "id": "integration.command.cancel"
+      },
+      {
+        "path": "/api/mcp",
+        "method": "get",
+        "id": "mcp.list"
+      },
+      {
+        "path": "/api/experimental/mcp/{server}",
+        "method": "put",
+        "id": "experimental.mcp.add"
+      },
+      {
+        "path": "/api/experimental/mcp/{server}",
+        "method": "delete",
+        "id": "experimental.mcp.remove"
+      },
+      {
+        "path": "/api/experimental/mcp/{server}/connect",
+        "method": "post",
+        "id": "experimental.mcp.connect"
+      },
+      {
+        "path": "/api/experimental/mcp/{server}/disconnect",
+        "method": "post",
+        "id": "experimental.mcp.disconnect"
+      },
+      {
+        "path": "/api/mcp/resource",
+        "method": "get",
+        "id": "mcp.resource.catalog"
+      },
+      {
+        "path": "/api/credential",
+        "method": "get",
+        "id": "credential.list"
+      },
+      {
+        "path": "/api/credential",
+        "method": "post",
+        "id": "credential.create"
+      },
+      {
+        "path": "/api/credential/{credentialID}",
+        "method": "patch",
+        "id": "credential.update"
+      },
+      {
+        "path": "/api/credential/{credentialID}",
+        "method": "delete",
+        "id": "credential.remove"
+      },
+      {
+        "path": "/api/credential/{credentialID}/activate",
+        "method": "post",
+        "id": "credential.activate"
+      },
+      {
+        "path": "/api/project",
+        "method": "get",
+        "id": "project.list"
+      },
+      {
+        "path": "/api/project/{projectID}",
+        "method": "patch",
+        "id": "project.update"
+      },
+      {
+        "path": "/api/form",
+        "method": "get",
+        "id": "form.list"
+      },
+      {
+        "path": "/api/permission/request",
+        "method": "get",
+        "id": "permission.request.list"
+      },
+      {
+        "path": "/api/permission/saved",
+        "method": "get",
+        "id": "permission.saved.list"
+      },
+      {
+        "path": "/api/permission/saved/{id}",
+        "method": "delete",
+        "id": "permission.saved.remove"
+      },
+      {
+        "path": "/api/session/{sessionID}/permission",
+        "method": "post",
+        "id": "session.permission.create"
+      },
+      {
+        "path": "/api/session/{sessionID}/permission",
+        "method": "get",
+        "id": "session.permission.list"
+      },
+      {
+        "path": "/api/session/{sessionID}/permission/{requestID}",
+        "method": "get",
+        "id": "session.permission.get"
+      },
+      {
+        "path": "/api/session/{sessionID}/permission/{requestID}/reply",
+        "method": "post",
+        "id": "session.permission.reply"
+      },
+      {
+        "path": "/api/fs/read/*",
+        "method": "get",
+        "id": "fs.read"
+      },
+      {
+        "path": "/api/fs/list",
+        "method": "get",
+        "id": "fs.list"
+      },
+      {
+        "path": "/api/fs/find",
+        "method": "get",
+        "id": "fs.find"
+      },
+      {
+        "path": "/api/experimental/fs/write",
+        "method": "post",
+        "id": "experimental.fs.write"
+      },
+      {
+        "path": "/api/command",
+        "method": "get",
+        "id": "command.list"
+      },
+      {
+        "path": "/api/skill",
+        "method": "get",
+        "id": "skill.list"
+      },
+      {
+        "path": "/api/rpc/{rpcID}/{method}",
+        "method": "post",
+        "id": "rpc.call"
+      },
+      {
+        "path": "/api/event",
+        "method": "get",
+        "id": "event.subscribe"
+      },
+      {
+        "path": "/api/pty",
+        "method": "get",
+        "id": "pty.list"
+      },
+      {
+        "path": "/api/pty",
+        "method": "post",
+        "id": "pty.create"
+      },
+      {
+        "path": "/api/pty/{ptyID}",
+        "method": "get",
+        "id": "pty.get"
+      },
+      {
+        "path": "/api/pty/{ptyID}",
+        "method": "put",
+        "id": "pty.update"
+      },
+      {
+        "path": "/api/pty/{ptyID}",
+        "method": "delete",
+        "id": "pty.remove"
+      },
+      {
+        "path": "/api/pty/{ptyID}/connect-token",
+        "method": "post",
+        "id": "pty.connect.token"
+      },
+      {
+        "path": "/api/pty/{ptyID}/connect",
+        "method": "get",
+        "id": "pty.connect"
+      },
+      {
+        "path": "/api/experimental/session/{sessionID}/terminal/read",
+        "method": "get",
+        "id": "server.experimental.persistentPty.read"
+      },
+      {
+        "path": "/api/experimental/session/{sessionID}/terminal",
+        "method": "get",
+        "id": "server.experimental.persistentPty.list"
+      },
+      {
+        "path": "/api/experimental/session/{sessionID}/terminal",
+        "method": "post",
+        "id": "server.experimental.persistentPty.create"
+      },
+      {
+        "path": "/api/experimental/persistent-pty/shutdown",
+        "method": "post",
+        "id": "server.experimental.persistentPty.shutdown"
+      },
+      {
+        "path": "/api/experimental/persistent-pty/handoff",
+        "method": "post",
+        "id": "server.experimental.persistentPty.handoff"
+      },
+      {
+        "path": "/api/experimental/persistent-pty/{ptyID}",
+        "method": "get",
+        "id": "server.experimental.persistentPty.get"
+      },
+      {
+        "path": "/api/experimental/persistent-pty/{ptyID}",
+        "method": "put",
+        "id": "server.experimental.persistentPty.update"
+      },
+      {
+        "path": "/api/experimental/persistent-pty/{ptyID}",
+        "method": "delete",
+        "id": "server.experimental.persistentPty.remove"
+      },
+      {
+        "path": "/api/experimental/persistent-pty/{ptyID}/snapshot",
+        "method": "get",
+        "id": "server.experimental.persistentPty.snapshot"
+      },
+      {
+        "path": "/api/experimental/persistent-pty/{ptyID}/connect-token",
+        "method": "post",
+        "id": "server.experimental.persistentPty.connectToken"
+      },
+      {
+        "path": "/api/experimental/persistent-pty/{ptyID}/connect",
+        "method": "get",
+        "id": "persistentPty.connect"
+      },
+      {
+        "path": "/api/shell",
+        "method": "get",
+        "id": "shell.list"
+      },
+      {
+        "path": "/api/shell",
+        "method": "post",
+        "id": "shell.create"
+      },
+      {
+        "path": "/api/shell/{id}",
+        "method": "get",
+        "id": "shell.get"
+      },
+      {
+        "path": "/api/shell/{id}",
+        "method": "delete",
+        "id": "shell.remove"
+      },
+      {
+        "path": "/api/shell/{id}/output",
+        "method": "get",
+        "id": "shell.output"
+      },
+      {
+        "path": "/api/reference",
+        "method": "get",
+        "id": "reference.list"
+      },
+      {
+        "path": "/api/worktree",
+        "method": "get",
+        "id": "worktree.list"
+      },
+      {
+        "path": "/api/worktree",
+        "method": "post",
+        "id": "worktree.create"
+      },
+      {
+        "path": "/api/worktree",
+        "method": "delete",
+        "id": "worktree.remove"
+      },
+      {
+        "path": "/api/worktree/refresh",
+        "method": "post",
+        "id": "worktree.refresh"
+      },
+      {
+        "path": "/api/vcs/init",
+        "method": "post",
+        "id": "vcs.init"
+      },
+      {
+        "path": "/api/vcs",
+        "method": "get",
+        "id": "vcs.get"
+      },
+      {
+        "path": "/api/vcs/base",
+        "method": "get",
+        "id": "vcs.base"
+      },
+      {
+        "path": "/api/vcs/status",
+        "method": "get",
+        "id": "vcs.status"
+      },
+      {
+        "path": "/api/vcs/branch",
+        "method": "get",
+        "id": "vcs.branch.list"
+      },
+      {
+        "path": "/api/vcs/diff",
+        "method": "get",
+        "id": "vcs.diff"
+      },
+      {
+        "path": "/api/debug/location",
+        "method": "get",
+        "id": "debug.location.list"
+      },
+      {
+        "path": "/api/debug/location",
+        "method": "delete",
+        "id": "debug.location.evict"
+      },
+      {
+        "path": "/api/experimental/migration/v1",
+        "method": "get",
+        "id": "experimental.migration.v1.status"
+      },
+      {
+        "path": "/api/websearch/provider",
+        "method": "get",
+        "id": "websearch.providers"
+      },
+      {
+        "path": "/api/websearch",
+        "method": "post",
+        "id": "websearch.query"
+      },
+      {
+        "path": "/api/config",
+        "method": "get",
+        "id": "config.get"
+      },
+      {
+        "path": "/api/config/shell",
+        "method": "get",
+        "id": "config.shells"
+      },
+      {
+        "path": "/api/experimental/config",
+        "method": "patch",
+        "id": "experimental.config.update"
+      }
+    ],
+    "notTested": [
+      "live external model/provider",
+      "fork/reset/reconnect generations and live idle wake",
+      "desktop frontend"
+    ]
+  }
+}

@@ -1,3 +1,5 @@
+import { assembleAdapterCapabilities } from '../../../../src/integration/adapter-capability-assembly.ts'
+import { ADAPTER_CAPABILITY_CATALOG } from '../../../../src/integration/adapter-capability-catalog.ts'
 // NMG adapter for DeepSeek Harness — community-standard dual-face host package.
 //
 // HOST-ADAPTER BOUNDARY (shared layer rule): this package is a thin transport
@@ -34,18 +36,18 @@ import {
   searchParameterProperties,
 } from '../../../../src/integration/tool-contract.ts'
 import { stateRequiresBoardEvents } from '../../../../src/integration/state.ts'
-import { collectWakeCandidates, maybeBroadcastToWorld as broadcastWakeEntry } from '../../../../src/integration/board-wake.ts'
-import { enqueueBoardWakeBatch, reportHarnessActivity } from '../../../../src/integration/board-wake-batch.ts'
+import { maybeBroadcastToWorld as broadcastWakeEntry } from '../../../../src/integration/board-wake.ts'
 import { loadOrCreateAgentIdentity, renameAgentIdentity } from '../../../../src/integration/agent-identity.ts'
 import { compactSearchContext, memoryDisclosureEntries } from '../../../../src/integration/search-projection.ts'
 import {
-  prepareAutomaticRecallSurface,
   renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
 } from '../../../../src/integration/agent-surface.ts'
 import { loadPrompts, renderDisclosure } from '../../../../src/prompts/load.ts'
 import { RecallBudget } from '../../../../src/integration/recall-budget.ts'
+import { prepareInformationOutput } from '../../../../src/integration/information-output.ts'
+import { DshNativeEvents } from './native-events.ts'
 import { contextOnlineLearningEnabled } from '../../../../src/lab/context-router-online.ts'
 import { STATE_OPERATIONS, STATE_AG_FIELDS, stateOperation, captureStateInvocation, renderStateOutput } from '../../../../src/integration/state.ts'
 import { renderLabOutput } from '../../../../src/integration/lab-capabilities.ts'
@@ -86,6 +88,8 @@ function estimateTokens(text) {
 }
 
 export function apply(ctx: Context): () => Promise<void> {
+  let prepareAutomaticRecallSurface: typeof import('../../../../src/integration/agent-surface.ts').prepareAutomaticRecallSurface
+  let contextStateViews: typeof import('../../../../src/integration/context-information.ts').contextStateViews
   const tools = ctx.tools
   const subprocess = ctx.subprocess
   const sandboxPolicy = ctx.sandboxPolicy
@@ -413,22 +417,9 @@ export function apply(ctx: Context): () => Promise<void> {
 
   // ── automatic recall (DSH-native: systemPrompt.context) ───────────────────
   //
-  // DSH's native way to feed the model dynamic context is `systemPrompt.context`:
-  // a named contribution whose resolved text is "materialized as a durable
-  // user-role snapshot" and APPENDED to the turn's messages by the agent loop
-  // itself (the `[...claimed, context]` default `enter` decision). We register
-  // `nmg:recall` as such a contribution and drop all manual user-message
-  // fabrication in `agent/pre-step`.
-  //
-  // Ordering in the agent loop matters: `assemble()` runs BEFORE `agent/pre-step`
-  // on each step, so a provider that searched inside itself would land one step
-  // late. Instead we start the (async, ~10 ms daemon) search when the user
-  // message first ENTERS the inbox (`agent/inbox/inserted`, which precedes the
-  // turn's first assemble), stash the formatted snapshot per agent, and let the
-  // synchronous `context()` provider simply serve the current stash. On the
-  // (rare) fast path where the search has not landed by the first assembly, the
-  // snapshot appears from the next step — and, being runtime context, stays in
-  // front of the model for the whole turn rather than only the first step.
+  // Inbox arrival starts bounded recall. Request admission awaits preparation;
+  // the native loop then refreshes this synchronous, logged context channel.
+  // State has its own complete-body projection and survives an empty recall.
 
   const recallGenerations = new Map() // sessionId -> generation
   let recallSequence = 0
@@ -436,6 +427,11 @@ export function apply(ctx: Context): () => Promise<void> {
   const recallBatch = new Map() // sessionId -> recall[] (newest first, capped at MAX_RECALL_HISTORY)
   const MAX_RECALL_HISTORY = 5 // per-session recall rounds kept for the floating indicator
   const openSearches = new Map() // sessionId -> Promise that resolves once the stash is written
+  const maintainedState = new Map()
+  let nativeEvents: DshNativeEvents
+  let collectWakeCandidates: typeof import('../../../../src/integration/board-wake.ts').collectWakeCandidates
+  let enqueueBoardWakeBatch: typeof import('../../../../src/integration/board-wake-batch.ts').enqueueBoardWakeBatch
+  let reportHarnessActivity: typeof import('../../../../src/integration/board-wake-batch.ts').reportHarnessActivity
 
   // Activity ledger for the right-pane tab: what the adapter did for a session —
   // automatic recalls, explicit searches, evidence reads. In-memory only; the
@@ -538,7 +534,7 @@ export function apply(ctx: Context): () => Promise<void> {
         projectDir: workspaceRoot,
         sessionId,
       }, budget)
-      if (context) return compactSearchContext(context)
+      if (context) return context
     } catch {
       return null
     }
@@ -550,20 +546,18 @@ export function apply(ctx: Context): () => Promise<void> {
       '--tiered-disclosure',
       '--project-dir', workspaceRoot,
       '--session-id', sessionId,
-      '--compact-json',
+      '--json',
     ]
     const result = await nmgJson(argv, budget)
     return result.ok ? result.data : null
   }
 
-  // Kick the recall search when a user message enters the inbox. This precedes
-  // the turn's first system-prompt assembly, so the stash is normally ready
-  // before the model sees `nmg:recall`. Never awaited in the message path: a
-  // slow/failed search leaves the previous (or no) snapshot and the turn goes on.
+  // Start before assembly without blocking inbox delivery. The generation fence
+  // prevents late work or an empty turn from reusing a historical fragment.
   function onInboxInserted(payload) {
     try {
       const { agent, message } = payload || {}
-      if (!agent || !message) return
+      if (!agent || !message || hostDisposed || disposedAgents.has(agent)) return
       // 缓存活跃 agent 实例——定时器唤醒（agent.send）需要它，而事件
       // payload 只在用户消息进入时才有。多会话：每个 agent 独立缓存。
       lastAgents.set(String(agent.id), agent)
@@ -583,8 +577,9 @@ export function apply(ctx: Context): () => Promise<void> {
           if (recallGenerations.get(sessionId) !== generation) return
           // Keep historical snapshots for the indicator. Only this generation
           // can contribute a fresh automatic fragment to model input.
-          const recall = await budget.run('search', (signal) => autoRecall(query, sessionId, signal))
+          const context = await budget.run('search', (signal) => autoRecall(query, sessionId, signal))
           if (recallGenerations.get(sessionId) !== generation) return
+          const recall = context ? compactSearchContext(context) : null
           if (!recall || !Array.isArray(recall.candidates) || recall.candidates.length === 0) {
             return
           }
@@ -601,6 +596,8 @@ export function apply(ctx: Context): () => Promise<void> {
           sessionTokenTotals.set(sessionId, sessionTotal)
           const entry = {
             generation,
+            output,
+            context,
             text,
             tokens: thisTokens,
             sessionTotal,
@@ -617,7 +614,7 @@ export function apply(ctx: Context): () => Promise<void> {
             activeGraphId: recall.activeGraphId || null,
           })
         } catch {
-          // Keep the last successful snapshot on any recall failure.
+          // Historical UI snapshots remain, but their generation cannot enter a new turn.
         } finally {
           budget.close()
         }
@@ -629,6 +626,44 @@ export function apply(ctx: Context): () => Promise<void> {
     } catch {
       // never let a recall computation throw into the inbox event
     }
+  }
+
+  function onInboxClaimed(payload) {
+    if (!payload?.agent?.id || !Number.isSafeInteger(payload.turn)) return
+    nativeEvents.begin(String(payload.agent.id), payload.turn, extractUserPrompt(payload.message))
+  }
+
+  // Admission is asynchronous; the native loop refreshes the synchronous
+  // context contribution afterwards, before committing the request surface.
+  async function prepareMaintainedState(sessionId, generation, budget) {
+    const state = await budget.run('state.read', (signal) => daemonCall('state', {
+      action: 'read', space: 'ag', sessionId,
+    }, signal))
+    if (recallGenerations.get(sessionId) !== generation || hostDisposed) return
+    const views = state?.space === 'ag' && state.result?.action === 'snapshot'
+      ? contextStateViews(state.result.snapshot, sessionId) : []
+    const nudge = nativeEvents.takeNudge(sessionId)
+      ? [{ purpose: 'guidance' as const, body: renderDisclosure(nmgPrompts.completion_nudge, {}) }] : []
+    maintainedState.set(sessionId, { generation, views: [...views, ...nudge] })
+  }
+
+  async function onRequest(payload, next) {
+    const sessionId = String(payload?.agent?.id ?? '')
+    if (!sessionId || hostDisposed || disposedAgents.has(payload.agent)) return next()
+    const generation = recallGenerations.get(sessionId)
+    if (maintainedState.get(sessionId)?.generation === generation && maintainedState.has(sessionId)) return next()
+    maintainedState.delete(sessionId)
+    const budget = new RecallBudget(1500, payload.signal)
+    try {
+      await prepareMaintainedState(sessionId, generation, budget)
+      await budget.run('recall.ready', async () => { await openSearches.get(sessionId) })
+    } catch {
+      // Optional context failure leaves the admitted owner state or no state.
+    } finally {
+      budget.close()
+    }
+    payload.signal?.throwIfAborted()
+    return next()
   }
 
   // Feedback guidance participates in the same prepared budget. Repeated
@@ -650,7 +685,19 @@ export function apply(ctx: Context): () => Promise<void> {
       const latest = Array.isArray(stack) ? stack[0] : stack
       // Historical snapshots remain available to the UI, but a new turn cannot
       // inherit an old automatic injection after a failed/empty search.
-      return latest?.generation === recallGenerations.get(id) ? latest.text : ''
+      const generation = recallGenerations.get(id)
+      const state = maintainedState.get(id)
+      const views = state?.generation === generation ? state.views : []
+      const output = prepareInformationOutput([
+        ...views,
+        ...(latest?.generation === generation ? latest.output.views : []),
+      ], { format: 'context' })
+      if (latest?.generation === generation) {
+        const ids = new Set(output.included.flatMap((entry) =>
+          entry.source.kind === 'memory' ? [entry.source.memoryId] : []))
+        nativeEvents.note(id, { ...latest.context, results: latest.context.results.filter((result) => ids.has(result.memory.id)) })
+      }
+      return output.text
     } catch {
       return ''
     }
@@ -707,6 +754,7 @@ export function apply(ctx: Context): () => Promise<void> {
         sessionTokenTotals.delete(id)
         recallBatch.delete(id)
         openSearches.delete(id)
+        maintainedState.delete(id)
         activityLog.delete(id)
         wakeBatch.delete(id)
         if (lastAgents.get(id) === payload.agent) lastAgents.delete(id)
@@ -720,6 +768,7 @@ export function apply(ctx: Context): () => Promise<void> {
             retireBoardRegistration(sessionId, record),
           )
         await Promise.allSettled([
+          nativeEvents.clear(id),
           ...retirements,
           daemonCall('sessionActiveGraph', {
             action: 'release',
@@ -1129,6 +1178,7 @@ export function apply(ctx: Context): () => Promise<void> {
       )
       const freshIds = new Set(disclosure.freshMemoryIds)
       const data = { ...r.data, results: r.data.results.filter((result) => freshIds.has(result.memory.id)) }
+      nativeEvents.note(sessionId, data)
       const deferred = data.progressiveDisclosure && data.progressiveDisclosure.deferredMemoryIds
       const nextStep = Array.isArray(deferred) && deferred.length
         ? 'More ranked records are folded. Expand selected memory IDs first; deferred IDs: ' + deferred.join(',')
@@ -1197,6 +1247,7 @@ export function apply(ctx: Context): () => Promise<void> {
       )
       const freshIds = new Set(disclosure.freshMemoryIds)
       const visible = { ...r.data, results: r.data.results.filter((result) => freshIds.has(result.memory.id)) }
+      nativeEvents.note(sessionId, visible)
       const forget = visible.results.some((result) =>
         (result.memory.markers || []).some((marker) => marker.kind === 'forget'),
       )
@@ -1689,15 +1740,44 @@ export function apply(ctx: Context): () => Promise<void> {
   // First poll on next tick (let the event loop settle).
   const initialWakeDisposer = coordinationEnabled ? ctx.timeout(boardWakeOnce, 0) : undefined
 
+  const capabilityAssembly = assembleAdapterCapabilities(ADAPTER_CAPABILITY_CATALOG.dsh.capabilities, {
+    tools: {
+      nmg_search: () => tools.register(searchTool),
+      nmg_get: () => tools.register(getTool),
+      nmg_remember: () => tools.register(rememberTool),
+      nmg_state: () => tools.register(stateTool),
+      nmg_lab: () => tools.register(labTool),
+    },
+    'automatic-recall': ({ prepare }) => {
+      prepareAutomaticRecallSurface = prepare
+      const remove = [
+        ctx.on('agent/inbox/inserted', onInboxInserted),
+        ctx.on('agent/inbox/claimed', onInboxClaimed),
+        ctx.on('agent/request', onRequest),
+      ]
+      return () => { for (const dispose of remove) if (typeof dispose === 'function') dispose() }
+    },
+    'state-context': ({ views }) => { contextStateViews = views },
+    'answer-attribution': ({ create }) => {
+      nativeEvents = new DshNativeEvents(
+        async (method, params, signal) => daemonCall(method, params, signal),
+        workspaceRoot,
+        (agent) => !hostDisposed && !disposedAgents.has(agent) &&
+          (!lastAgents.has(String(agent.id)) || lastAgents.get(String(agent.id)) === agent),
+        create(32),
+      )
+      return ctx.on('session/event', (session, event) => nativeEvents.event(session, event))
+    },
+    'board-delivery': ({ collect, enqueue, activity }) => {
+      collectWakeCandidates = collect
+      enqueueBoardWakeBatch = enqueue
+      reportHarnessActivity = activity
+    },
+    'tool-observation': ({ observe }) => ctx.on('tools/result', (exec, result) => nativeEvents.observe(exec, result, observe)),
+  })
   const disposers = [
-    tools.register(searchTool),
-    tools.register(getTool),
-    tools.register(rememberTool),
-    tools.register(labTool),
-    tools.register(stateTool),
     tools.register(daemonTool),
     contextDisposer,
-    ctx.on('agent/inbox/inserted', onInboxInserted),
     ctx.on('agent/disposed', onAgentDisposed),
   ]
   if (coordinationEnabled) {
@@ -1713,15 +1793,18 @@ export function apply(ctx: Context): () => Promise<void> {
   // Return the cordis dispose-time cleanup for this plugin contribution.
   return async () => {
     hostDisposed = true
+    await capabilityAssembly.dispose()
     for (const dispose of disposers) {
       if (typeof dispose === 'function') dispose()
     }
     await Promise.allSettled([...boardRegistrations.entries()]
       .map(([sessionId, record]) => retireBoardRegistration(sessionId, record)))
+    await nativeEvents.close()
     recallGenerations.clear()
     sessionTokenTotals.clear()
     recallBatch.clear()
     openSearches.clear()
+    maintainedState.clear()
     wakeBatch.clear()
   }
 }

@@ -107,6 +107,10 @@ confirmation unsupported and commits no state exposure to the disclosure ledger.
 guarantee of final provider input. Scope and proof:
 [carriage decision](../decisions/implemented/2026-10-08-ag-working-state-input.md).
 
+OpenCode prepares the same complete state views at prompt admission and stages them alongside recall through its native `context` hook. State remains available when optional recall fails. Retries reuse the prepared fragment, and exact matching avoids duplicate insertion into an already-carried request. New prompts and compaction cancel stale preparation.
+
+DSH starts recall at inbox arrival and prepares complete state once at request admission for that generation. The native loop refreshes its logged `systemPrompt.context` contribution before request commitment. State and recall share the InformationView budget; an empty recall does not remove state. New inbox generations and disposal fence stale fragments. Both adapters leave final delivery unconfirmed and write no state exposure merely from assembly. Their scoped runtime evidence is in the [native audit](../experiments/runtime/native-plugin-capabilities-2026-11-12.md).
+
 ## Literature cross-check (surveyed 2026-09-01)
 
 The recorded survey was a post-hoc author cross-check, not independent semantic

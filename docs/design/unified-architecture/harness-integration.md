@@ -31,9 +31,69 @@ Preserve the [adapter recipe](../../../skills/nmg-memory/references/harness-adap
 
 The [capability matrix](../harness-capability-matrix.md) owns delivered coverage. It gains pi durable or Magpie columns only when adapters are implemented with scoped evidence; the target design is not a claim of shipped coverage.
 
+[Capability assembly: implemented slice and composition target](adapter-capability-assembly.md).
+
 ## Magpie gateway binding
 
 The [Magpie integration design](magpie-integration.md) adds a gateway candidate alongside native Harness bindings. It separates request-hook recall, best-effort completion observation and explicitly connected memory tools. Magpie remains a gateway; its client owns Agent execution. Identity, protocol coverage and coexistence with a native NMG plugin require validation before enabling this path.
+
+## Compose capabilities across connected entry points
+
+Treat the client's configured native adapter, MCP connection, passive hooks,
+CLI/Skill access and other supported bindings as one available capability set.
+Magpie contributes to that set. Select providers per capability and operation,
+not one adapter for the whole session. A client can use gateway turn preparation
+and delivery, MCP exact reads and writes, native tool witnesses and shared AG
+state carriage. Neither MCP nor Magpie has to supply the whole flow.
+
+Measure composition by NMG feature parity: search/exact evidence, governed
+memory lifecycle actions, recall, maintained-state carriage, disclosure/budget
+continuity, supported attribution/feedback and board collaboration. Use the same
+end-to-end contract cases across providers. GUI, usage and transport tracing
+are independent enhancements and do not count as closing these feature gaps.
+Match operation semantics and evidence quality, not interface appearance.
+
+A provider's implementation is independent of its selection in a session.
+Complete providers can overlap. Selecting native recall or tools does not trim
+the Magpie plugin to a residual subset; its
+[standalone surface](magpie-integration.md#complete-plugin-and-per-session-activation)
+remains independently usable. Track capability, enablement and operation
+ownership separately, and test standalone providers as well as combinations.
+
+Record each gap as missing NMG implementation, an unverified host path or an
+explicit host restriction using the [owning matrix](../harness-capability-matrix.md#native-host-capability-findings).
+DSH/OpenCode context and tool/event contracts provide native paths. Native
+work and complete Magpie support can proceed independently; unfinished native
+wiring does not make a gateway necessary.
+
+The target is the greatest verified coverage the connected set can provide.
+Retain stronger native capabilities and explicit remaining gaps. A CLI/Skill
+instruction can enable explicit action but cannot create an automatic event.
+Two partial implementations establish a combined capability only when their
+handoff is supported and tested. The draft
+[MCP plus Magpie composition](magpie-capabilities.md#mcp-plus-magpie-as-one-session)
+describes one such handoff without requiring a native plugin.
+
+For each enabled capability, identify its provider, trigger, scope, evidence
+strength and fallback. Shared integration selects one side-effect owner per
+operation and permits additional observers. Recall preparation, delivery,
+explicit tools and optional capture can have different owners. Re-selecting an
+owner after disconnect or reconnect must reconcile accepted effects before
+repeating them. Missing delivery evidence remains unknown.
+
+Composition requires a trusted mapping to the same endpoint, tenant, memory
+scope, conversation generation and applicable operation/disclosure identity.
+Transport connections can stay separate. AG access and writer fences remain
+service-controlled; a model-visible memory reference is not authority to borrow
+another connection's AG. The concrete binding handshake is implementation work.
+Unauthenticated matching by prompt text, directory, model or display name cannot
+establish the mapping. Authorization boundaries, including local-only board
+access, remain in force across all contributors.
+
+The resulting capability description belongs to the bound session, while the
+adapter matrix continues to describe individual providers. Verify combinations
+and their gaps as well as individual adapters. No new scheduler or second
+memory/state store is needed to express this composition.
 
 ## Cloud memory API
 

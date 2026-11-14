@@ -113,6 +113,16 @@ routes:
       blocking: [check]
       advisory: []
 
+  - id: codex-adapter
+    paths: [codex-plugin/**, scripts/build-codex-plugin.ts]
+    owners:
+      - codex-plugin/README.md
+      - docs/design/unified-architecture/adapter-capability-assembly.md
+    tests: [tests/integration/codex-*.test.ts, tests/integration/mcp-session-scope.test.ts]
+    verify:
+      blocking: [check, check:tests, test:product, build]
+      advisory: []
+
   - id: claude-adapter
     paths: [claude-plugins/**]
     owners:
@@ -234,6 +244,7 @@ routes:
   # paths match - `src/integration/ooo-*.ts` would match nothing and stay silently unrouted.
   - id: agent-surface
     paths:
+      - src/integration/mcp-tools.ts
       - src/integration/agent-surface.ts
       - src/integration/aml-projection.ts
       - src/integration/multimodal-content.ts
@@ -306,6 +317,19 @@ routes:
         tests/integration/session-flows.test.ts,
         tests/extensions/nmg/index.test.ts,
       ]
+    verify:
+      blocking: [check, test:product, build]
+      advisory: []
+
+  - id: adapter-capability-assembly
+    paths:
+      - src/integration/adapter-capability-assembly.ts
+      - src/integration/adapter-capability-catalog.ts
+      - src/integration/completion-nudge.ts
+    owners:
+      - docs/design/unified-architecture/adapter-capability-assembly.md
+    tests:
+      [tests/integration/adapter-capability-assembly.test.ts]
     verify:
       blocking: [check, test:product, build]
       advisory: []

@@ -35,7 +35,7 @@ modules for its lifetime: after editing plugin code, unload the old server
 see the change.
 
 Spawned tools are named `nmg_search`, `nmg_get`, `nmg_remember`, and
-`nmg_state` in the Code Mode catalog (`namespace: nmg`).
+`nmg_state` in the Code Mode catalog. Names are explicit; the target SDK does not apply an `options.namespace` prefix.
 
 ## What it does
 
@@ -60,11 +60,8 @@ Spawned tools are named `nmg_search`, `nmg_get`, `nmg_remember`, and
   fragments; cancelled or late work cannot stage a replacement. The shared
   [context contract](../docs/design/state-spaces.md#unified-context-information-items)
   owns output budgets and the unsupported final-delivery confirmation boundary.
-- The tool executor context carries no project directory, and the OpenCode
-  2.0.32 plugin event stream emits no `session.created`; sessions map to
-  project dirs from the first event that carries
-  `event.location.directory` — the first turn of a fresh server searches
-  unscoped until then. `NMG_PROJECT_DIR` overrides explicitly.
+- Before first-turn recall, `session.get` resolves the native directory and child status. The plugin location is the fallback, and `NMG_PROJECT_DIR` overrides explicitly. If neither lookup nor fallback provides a directory, scope remains unavailable. The lookup shares the prompt deadline and cannot publish a late result.
+- Prompt admission also prepares complete current working state through shared InformationView. State is carried independently of recall and survives an optional search timeout. Assembly does not confirm final provider delivery.
 - Wake emission is a real user turn and is routed to a recently-idle session
   from a small pool (subagent children excluded); `NMG_WAKE_PROJECT` narrows
   the pool. Directed (`to=`) entries only wake when the matching identity is

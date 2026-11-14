@@ -20,6 +20,24 @@ pi durable 是选定的云端 Harness。其 NMG 绑定与本地宿主共享集�
 
 Magpie 是额外的网关集成候选。[Magpie 设计](../../design/unified-architecture/magpie-integration.zh-CN.md)区分自动召回与显式工具接入，并将完成采集限制在宿主尽力通知的合同内。它不替代 Harness，也不表示完整原生插件能力覆盖。
 
+后续[管理面板草案](../../design/unified-architecture/magpie-operations.zh-CN.md)借用 Magpie 现有 UI 展示 NMG 统计和向量设置，再将网关观测与原生绑定组合。库／配置继续归共享服务，使其他 UI 也能复用。草案不表示指标、管理 API 或 Magpie 适配器已交付。
+
+[固定版本接口映射](../../design/unified-architecture/magpie-capabilities.zh-CN.md)用 Magpie `0.1.3545` 源码和各原生适配器接线支撑该草案，优先复用网关向量传输，避免复制上游 key。功能对齐覆盖每个适配器的 NMG 缺口，包括工作状态承载、工具接续、归因／反馈和黑板投递；GUI、用量与追踪属于独立增强。原生生命周期所有权保持完整，源码核对不替代运行联调证据。
+
+能力覆盖由客户端已连接的原生适配器、MCP、hook、CLI／Skill 与 Magpie 共同组成。[共享组合模型](../../design/unified-architecture/harness-integration.zh-CN.md#组合各接入点的能力)按操作分配提供方并保留明确缺口，避免要求 MCP 或 Magpie 独自成为完整 Harness，允许通过受支持交接组成覆盖更广的流程。这是设计方向，组合运行覆盖仍需联调证据。
+
+Magpie 补齐其他适配器的角色不缩减自身插件界面。插件目标是在受支持宿主接口内提供完整、可独立使用的 NMG 集成。组合只选择启用提供方与效果所有者，保留重叠实现，将插件完整性与会话去重分开；独立与组合行为都需要证据。
+
+DSH 目标是当前宿主包，历史 preset 不作为并行功能对齐目标。缺口分析区分 NMG 接线未完成、宿主路径待验证和已证明宿主限制。DSH／OpenCode 原生上下文与工具／事件 hook 仍是实现候选，缺少 NMG 接线不证明宿主需要网关才能提供该能力。
+
+[原生能力核实](../../experiments/runtime/native-plugin-capabilities-2026-11-12.zh-CN.md)复用既有 OpenCode 矩阵与 smoke 记录。DSH 核心服务探测确认动态上下文及最终工具通知，OpenCode 私有 API 在 prompt 前返回会话目录，因此原生功能对齐独立于网关部署。已安装 OpenCode 的插件激活、hook、Code Mode 工具及状态承载通过本地模拟模型验证。DSH 状态承载与提交后回合归因通过已安装核心服务验证。原生生命周期边界、真实唤醒及提供方组合交接保留各自验证门槛。
+
+NMG 使用 Skill 将全部已交付适配器及 CLI／MCP 连接的安装、使用和激活检查指向[适配器使用指南](../../../skills/nmg-memory/references/adapter-usage.zh-CN.md)，适配器开发仍由既有合同参考负责。操作指引据此对齐已验证的原生路径，不把 Magpie 草案绑定当成已安装的先决条件。
+
+初始[能力装配](../../design/unified-architecture/adapter-capability-assembly.zh-CN.md)已在六个现有插件入口执行声明。共享工具注册、上下文、观察、归因、投递及提醒模块消费原生绑定。必需绑定缺失会使启动失败，端点／会话检查仍在操作路径中。跨提供方组合及整体矩阵的自动生成仍是目标。
+
+[Codex 适配器](../../../codex-plugin/README.zh-CN.md)按每次请求绑定会话，装配共享工具与原生 hook。[原生联调](../../experiments/runtime/codex-plugin-capabilities-2026-11-13.zh-CN.md)记录独立分发包安装、并发聊天、恢复和分叉隔离。
+
 ## Alternatives considered
 
 - 强制把本地记忆和协作拆成两个数据库文件：没有物理隔离要求时会增加配置；默认在一个本地 SQLite 文件中保持独立所有权。

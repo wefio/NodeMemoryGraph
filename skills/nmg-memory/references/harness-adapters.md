@@ -3,12 +3,24 @@
 [中文](harness-adapters.zh-CN.md) · [Terms used](harness-adapters.terms.yaml)
 
 NMG ships a thin adapter per harness (Pi, Claude Code MCP, DeepSeek Harness,
-plus the installable WorkBuddy hook in `workbuddy-plugin/` and the OpenCode v2
+plus event hooks in `workbuddy-plugin/` and `kimi-plugin/`, and the OpenCode v2
 plugin in `opencode-plugin/`). This reference is the recipe for writing one.
 Per-adapter coverage of the capability surface is compared in the
 [harness capability matrix](../../../docs/design/harness-capability-matrix.md).
-Read it when you need to expose NMG
-to a new tool-capable harness, or when an existing adapter misbehaves.
+Read it when developing or extending an adapter. For installation, loading and
+daily use of any shipped connection, read [adapter usage](adapter-usage.md).
+
+## Shared capability assembly
+
+Use `ADAPTER_CAPABILITY_CATALOG` and `assembleAdapterCapabilities` for migrated
+features; the [assembly contract](../../../docs/design/unified-architecture/adapter-capability-assembly.md#executable-assembly)
+owns supported modules, readiness and cleanup. Bind native schema registrations
+and lifecycle interfaces to shared services. The memory tool group requires
+search, get and remember together; do not register an incomplete group manually.
+Keep host event normalization, session fences, cancellation and acceptance
+receipts in the native binding. Await `ready` for asynchronous host registration,
+and return cleanup callbacks where the host supplies them. Assembly diagnostics
+are not evidence of real hook activation or final provider delivery.
 
 ## The stable contract
 
@@ -129,11 +141,11 @@ include host notices in its budget and do not fold future candidates on the
 assumption that a prepared fragment was delivered. Final input confirmation is
 unsupported by the current automatic host hooks.
 
-Automatic context preparation uses one absolute five-second waiting budget, not a fresh allowance per RPC. Keep timely completed candidates if a later phase expires, propagate cancellation where supported, and do not imply that a timeout preempts synchronous SQLite work or stops remote work. Explicit model-requested search is outside this automatic deadline. Use the [waiting-budget contract](../../../docs/design/session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.md) for checkpoints, remaining-budget admission and daemon limits.
+Automatic context preparation uses one absolute waiting budget, not a fresh allowance per RPC. The shared default is five seconds; DSH and OpenCode use their tighter 1.5-second native budgets. Keep timely completed candidates if a later phase expires, propagate cancellation where supported, and do not imply that a timeout preempts synchronous SQLite work or stops remote work. Explicit model-requested search is outside this automatic deadline. Use the [waiting-budget contract](../../../docs/design/session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.md) for checkpoints, remaining-budget admission and daemon limits.
 
 The right insertion mechanism is host-specific. The DSH package in this
 repository starts recall when the user message enters the inbox and supplies the
-result through DSH's `systemPrompt.context`; Pi uses its own persisted
+result through DSH's `systemPrompt.context`, refreshed after asynchronous request admission. OpenCode prepares at `prompt` admission and carries through its `context` hook. Both prepare complete owner state separately from recall. Pi uses its own persisted
 `nmg-context` message path. Do not fabricate user messages when the host provides
 a supported context API. A projection handle is valid only when the hook and
 model-facing tools share the same host session identity. A detached WorkBuddy hook
@@ -150,43 +162,11 @@ Never let a slow or unavailable memory layer block the user turn.
 
 ## DeepSeek Harness (repository package)
 
-This repository's DSH adapter is the dual-face package at
-[`dsh/dsh-nmg/`](../../../dsh/dsh-nmg/README.md). Its host half registers the
-NMG tools and automatic recall; its browser half renders persistent tool cards.
-The package composes through DSH's host plugin mechanism, so the older agent-preset
-recipe below is not the installation path for this repository.
-
-From `dsh/dsh-nmg/`, build the package before starting the host:
-
-```sh
-pnpm install --frozen-lockfile
-pnpm run build
-```
-
-Then install the local package into the web profile and restart DSH:
-
-```text
-dsh plugin --profile web add link:<path-to-this-repository>/dsh/dsh-nmg
-```
-
-The build emits `lib/index.js` and `lib/client.js`; `lib/` is generated and is
-not committed. The `cordis.patch.yml` inserts the package into web host
-composition. Do not edit an installed copy under a deployment directory or
-assume that building/reloading updates the host automatically. The package's
-README and source own current setup and behavior.
-
-The DSH host adapter registers `nmg_search`, `nmg_get`, `nmg_remember`,
-`nmg_state`, `nmg_lab` and the optional daemon health tool. Board operations use
-`nmg_state` with `space="board"`; working-state operations use `space="ag"`.
-The package starts bounded automatic recall before the turn's first context
-assembly and exposes it through DSH's `systemPrompt.context`. That recall path is
-not proof that DSH also carries maintained AG working state into the model input.
-The Pi per-user-turn carriage contract must not be projected onto DSH.
-
-Do not use the removed preset instructions, `harness-adapters/deepseek-harness/`
-module paths, dynamic `cordis_define` trial recipe, or manual `createUserMessage`
-construction as this repository's current DSH setup. Those instructions describe
-a superseded integration and are not a supported fallback.
+The current DSH target is the dual-face host package at
+[`dsh/dsh-nmg/`](../../../dsh/dsh-nmg/README.md). Use the
+[DSH operating guide](adapter-usage.md#deepseek-harness) for build, profile
+installation, native context behavior and activation checks. The historical
+preset is not a second integration target or fallback.
 
 ## Manual CLI path
 

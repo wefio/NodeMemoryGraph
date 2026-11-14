@@ -1,15 +1,16 @@
 # NMG Memory MCP server
 
+[中文](CLAUDE.zh-CN.md) · [Terms](CLAUDE.terms.yaml)
+
 Durable-memory tools plus the task board, served over MCP stdio:
 
 - `nmg_search` — compact memory headers (mid/node/type/tier/preview)
 - `nmg_get` — exact memory statements and source evidence
 - `nmg_remember` — save facts/preferences/constraints/states/events
   (`boardSource` marks a memory as distilled from a board entry)
-- `nmg_board` — task-board channels: put/read/resolve/acknowledge/claim/
-  release/subscribe/unsubscribe; `discover` lists online agents and `put` with
-  `to=<agent name>` performs directed delivery. No taskId means the shared world
-  channel (the lobby), reading it lists active named channels.
+- `nmg_state` — explicit AG working-state operations and Task Board access through
+  `space=ag|board`; use board operations for discovery, subscriptions and replies.
+- `nmg_lab` — listed optional capabilities, not ordinary state updates.
 
 Board identity: `NMG_AGENT_ID` / `NMG_SESSION_ID` env vars win; otherwise the
 server uses its own pid (`mcp:<pid>`), which is stable per host session.
@@ -20,7 +21,7 @@ Reading open entries writes delivery receipts so wake loops never re-push
 what this session already saw.
 
 The MCP server manages the local daemon automatically (JSON-RPC over HTTP;
-start on connect, safe stop on exit, reuse if already running).
+ensure on connect, stop only its own process on exit, reuse a compatible existing owner).
 
 Requirements: Node.js ≥ 22.19, `npm install` run in the project.
 
@@ -58,18 +59,15 @@ Register the server as a stdio transport:
 - **VS Code / Cursor / Codex**: add to the editor's MCP config file.
 - **Any MCP-compatible client**: same JSON block, same stdio protocol.
 
-After restarting the client, restart it. The three NMG tools appear
-automatically. First connection may require a one-time approval.
+Reload the client connection, then inspect the actual tool list. First connection may require client approval. MCP alone does not add automatic recall, state carriage or idle wake.
 
-**Alternative — global install**: to make NMG available across all projects
-regardless of cwd, use an absolute path for `args` and for `--experimental-strip-types` include `--experimental-strip-types` pointing at the plugin's
-`CLAUDE.md` directory.
+Use an absolute path to `agents/memory-copilot.ts` in the `args` array when the client can start from different working directories. Keep `--experimental-strip-types` as a separate argument. Other clients may use a different configuration format for the same stdio fields.
+
+The [adapter usage guide](../../skills/nmg-memory/references/adapter-usage.md#claude-code-and-other-mcp-clients) covers daily tools, state and combinations with hooks.
 
 ## Troubleshooting
 
 - Tools missing? MCP server likely failed to connect. Check Node.js version,
-  `npm install`, and remove a stale daemon lockfile if present
-  (`rm .nmg/nmg.sqlite.server.json`).
-- Empty search results? The database may not have been written to yet. Any
-  `nmg_remember` call populates it.
-- Run `npx claude mcp list` (Claude Code) or `node bin/nmg.mjs daemon status --json` (terminal) to inspect daemon and embedding health.
+  dependencies, absolute script path and client logs. Inspect daemon compatibility; do not delete a live lease or replace a shared owner.
+- Empty search results are valid. Check the selected store and query before assuming a connection fault; do not invent a memory merely to make a test return data.
+- Use the client's connection logs and `node bin/nmg.mjs daemon status --json` from the checkout to inspect the actual connection and daemon health.

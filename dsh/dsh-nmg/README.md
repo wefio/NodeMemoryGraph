@@ -82,3 +82,12 @@ DSH 上报会话原生处理状态，黑板结合 Agent 独立声明判断忙碌
 父会话通过原生消息接收，continuable 子会话通过 `ctx.subagents.followup` 恢复。
 网页历史保留已送来源用于显示。共享语义见
 [活动与回复批次契约](../../docs/design/board-event-records/agent-activity-and-batches.zh-CN.md)。
+
+## 原生上下文与结果事件
+
+Inbox 到达时启动有界召回，`agent/request` 准入等待准备并读取完整工作状态。
+原生循环随后刷新 `systemPrompt.context`，状态和召回经共享 InformationView 预算承载。
+同一代次复用准备片段，下一回合重读当前状态，装配不提交最终投递收据。
+`tools/result` 连接共享工具观察与弱 commit 提醒；已提交的 `assistant/message` 在
+完成的 `turn/end` 上落盘诊断归因，取消与重复结束不产生归因。
+运行范围见[原生联调记录](../../docs/experiments/runtime/native-plugin-capabilities-2026-11-12.zh-CN.md)。

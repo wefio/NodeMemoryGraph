@@ -87,6 +87,10 @@ clear／release 从下一回合停止携带，并移除对应活状态；不删�
 确认。适配器报告确认不受支持，不向披露账本提交状态暴露。这只是携带，不保证
 最终 provider 输入。范围与证据由[携带决策](../decisions/implemented/2026-10-08-ag-working-state-input.zh-CN.md)拥有。
 
+OpenCode 在 prompt 准入时准备同一套完整状态视图，经原生 `context` hook 与召回一同暂存承载。可选召回失败时保留已准备状态。重试复用同一片段，以精确匹配避免向已有片段的请求重复插入。新 prompt 与压缩取消迟到准备。
+
+DSH 在 inbox 到达时启动召回，在请求准入时为该代次准备一次完整状态。原生循环在提交请求前刷新有日志的 `systemPrompt.context` 贡献。状态和召回共享 InformationView 预算，召回为空也保留状态。新 inbox 代次与销毁阻止旧片段进入。两种适配器都保持最终投递未确认，不因装配而提交状态暴露。范围明确的运行证据见[原生核实记录](../experiments/runtime/native-plugin-capabilities-2026-11-12.zh-CN.md)。
+
 ## 文献对照：调查于 2026-09-01
 
 所记录调查是作者事后对照，不是独立语义审稿、需求来源或新一次联网核实。
