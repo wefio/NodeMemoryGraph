@@ -156,7 +156,7 @@ try {
   environment.NMG_DATA_DIR = nmg.dataDirectory;
   await writeFile(join(nmg.dataDirectory, "board-wake.json"), JSON.stringify({ enabled: true, budget: 8, cooldownMs: 0 }));
   model = createServer((request, response) => serve(request, response).catch((error) => {
-    console.error(error);
+    process.stderr.write(String(error) + "\n");
     response.writeHead(500); response.end(String(error));
   }));
   await new Promise((done) => model.listen(0, "127.0.0.1", done));
@@ -234,7 +234,7 @@ try {
     hookInstrumentation: values["capture-hooks"], feedback: true, answerAttribution: true, nativeToolObservation: true,
     completionBoardContinuation: continuationSeen };
   await writeFile(join(output, "summary.json"), JSON.stringify(summary, null, 2) + "\n");
-  console.log(JSON.stringify(summary));
+  process.stdout.write(String(JSON.stringify(summary)) + "\n");
 } finally {
   await cp(join(home, "log"), join(output, "host-log"), { recursive: true }).catch((error) => {
     if (error.code !== "ENOENT") throw error;

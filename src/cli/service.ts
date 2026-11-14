@@ -1626,51 +1626,8 @@ export class NmgService {
         `new memory ${params.newMemoryId} does not exist`,
       );
     }
+    if (params.action === "relate") return this.#relateRemember(params, store);
     const newer = store.getMemory(params.newMemoryId, params.sessionId);
-    if (params.action === "relate") {
-      const related = store.getMemory(params.relatedMemoryId, params.sessionId);
-      if (!newer || !related) {
-        throw new NmgProtocolError(
-          "INVALID_PARAMS",
-          "relation targets must exist in the same LTG or session-owned STG store",
-        );
-      }
-      if (
-        ["conflict", "refines", "same_entity"].includes(params.relationJudgement) &&
-        !scopesOverlap(newer.scope, related.scope)
-      ) {
-        throw new NmgProtocolError(
-          "INVALID_PARAMS",
-          `${params.relationJudgement} requires non-conflicting scope; use distinct for different entities or retain both memories`,
-        );
-      }
-      if (params.relationJudgement === "conflict" && !validityIntervalsOverlap(newer, related)) {
-        throw new NmgProtocolError(
-          "INVALID_PARAMS",
-          "conflict requires overlapping validity; sequential values should remain temporal states or use supersede",
-        );
-      }
-      const relationType = {
-        conflict: "contradicts",
-        distinct: "distinct_from",
-        refines: "refines",
-        related: "related_to",
-        same_entity: "same_as",
-      } as const;
-      const proposal = store.proposeSemanticRelation({
-        sourceNodeId: newer.nodeId,
-        targetNodeId: related.nodeId,
-        relationType: relationType[params.relationJudgement],
-        evidenceMemoryIds: [newer.id, related.id],
-        confidence: params.confidence,
-      });
-      return {
-        action: "relate",
-        newMemoryId: newer.id,
-        relatedMemoryId: related.id,
-        proposal,
-      };
-    }
     const stale = store.getMemory(params.supersededMemoryId, params.sessionId);
     if (!newer || !stale) {
       throw new NmgProtocolError(
@@ -1702,6 +1659,55 @@ export class NmgService {
       supersededMemoryId: params.supersededMemoryId,
       applied:
         store.getMemory(params.supersededMemoryId, params.sessionId)?.status === "superseded",
+    };
+  }
+
+  #relateRemember(
+    params: Extract<NmgResolveRememberParams, { action: "relate" }>,
+    store: NmgStore,
+  ): NmgMethodResult["resolveRemember"] {
+    const newer = store.getMemory(params.newMemoryId, params.sessionId);
+    const related = store.getMemory(params.relatedMemoryId, params.sessionId);
+    if (!newer || !related) {
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        "relation targets must exist in the same LTG or session-owned STG store",
+      );
+    }
+    if (
+      ["conflict", "refines", "same_entity"].includes(params.relationJudgement) &&
+      !scopesOverlap(newer.scope, related.scope)
+    ) {
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        `${params.relationJudgement} requires non-conflicting scope; use distinct for different entities or retain both memories`,
+      );
+    }
+    if (params.relationJudgement === "conflict" && !validityIntervalsOverlap(newer, related)) {
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        "conflict requires overlapping validity; sequential values should remain temporal states or use supersede",
+      );
+    }
+    const relationType = {
+      conflict: "contradicts",
+      distinct: "distinct_from",
+      refines: "refines",
+      related: "related_to",
+      same_entity: "same_as",
+    } as const;
+    const proposal = store.proposeSemanticRelation({
+      sourceNodeId: newer.nodeId,
+      targetNodeId: related.nodeId,
+      relationType: relationType[params.relationJudgement],
+      evidenceMemoryIds: [newer.id, related.id],
+      confidence: params.confidence,
+    });
+    return {
+      action: "relate",
+      newMemoryId: newer.id,
+      relatedMemoryId: related.id,
+      proposal,
     };
   }
 

@@ -9,5 +9,5 @@ const child = spawn(process.execPath, [process.argv[2], "hook"], {
   windowsHide: true, stdio: ["pipe", "inherit", "inherit"],
 });
 child.stdin.end(input);
-child.on("error", (error) => { console.error(error); process.exitCode = 1; });
+child.on("error", (error) => { process.stderr.write(String(error) + "\n"); process.exitCode = 1; });
 child.on("exit", (code) => { process.exitCode = code ?? 1; });

@@ -433,8 +433,7 @@ try {
     hooks.some((hook) => hook.event === "PostToolUse"),
     "Native post-tool hook must execute",
   );
-  console.log(
-    JSON.stringify({
+  process.stdout.write(String(JSON.stringify({
       output,
       version,
       requests: modelCalls.length,
@@ -446,8 +445,7 @@ try {
         "resumed state carriage",
         "post-tool hook",
       ],
-    }),
-  );
+    })) + "\n");
 } finally {
   await writeFile(join(output, "model-calls.json"), JSON.stringify(modelCalls, null, 2) + "\n");
   if (model) {

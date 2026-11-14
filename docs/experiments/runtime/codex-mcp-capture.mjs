@@ -28,5 +28,5 @@ process.stdin.on("data", (chunk) => {
 process.stdin.on("end", () => child.stdin.end());
 child.stdout.pipe(process.stdout);
 child.stderr.pipe(process.stderr);
-child.on("error", (error) => { console.error(error.message); process.exitCode = 1; });
+child.on("error", (error) => { process.stderr.write(String(error.message) + "\n"); process.exitCode = 1; });
 child.on("exit", (code) => { process.exitCode = code ?? 1; });

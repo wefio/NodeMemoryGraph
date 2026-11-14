@@ -773,6 +773,90 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       "info",
     );
   };
+  const nmgWakeParameter = (wcmd: string, wval: number, ctx: ExtensionCommandContext): void => {
+    const current = readWakeConfig();
+    switch (wcmd) {
+      case "budget": {
+        if (!Number.isFinite(wval)) {
+          ctx.ui.notify("用法：/nmg wake budget N（0=不限制）", "warning");
+          return;
+        }
+        const budget = Math.max(0, Math.min(100, Math.round(wval)));
+        writeWakeConfig({ ...current, budget });
+        ctx.ui.notify(`黑板唤醒预算已设为 ${budget === 0 ? "不限制" : `${budget}/天`}`, "info");
+        return;
+      }
+      case "cooldown": {
+        if (!Number.isFinite(wval)) {
+          ctx.ui.notify("用法：/nmg wake cooldown M（0=无冷却）", "warning");
+          return;
+        }
+        const cooldownMs = wval === 0 ? 0 : Math.max(30_000, Math.round(wval * 60_000));
+        writeWakeConfig({ ...current, cooldownMs });
+        ctx.ui.notify(
+          `黑板唤醒冷却已设为 ${cooldownMs === 0 ? "无" : `${Math.round(cooldownMs / 60_000)} 分钟`}`,
+          "info",
+        );
+        return;
+      }
+      case "interval": {
+        if (!Number.isFinite(wval)) {
+          ctx.ui.notify("用法：/nmg wake interval S（秒，最小 5）", "warning");
+          return;
+        }
+        const intervalMs = Math.max(5_000, Math.round(wval * 1_000));
+        writeWakeConfig({ ...current, intervalMs });
+        ctx.ui.notify(`黑板唤醒轮询已设为 ${Math.round(intervalMs / 1_000)} 秒`, "info");
+        return;
+      }
+    }
+  };
+  const nmgWakeCommand = (restText: string, ctx: ExtensionCommandContext): void => {
+    const current = readWakeConfig();
+    const [wcmd, wvalRaw] = restText.split(/\s+/);
+    const wval = Number(wvalRaw);
+    if (["budget", "cooldown", "interval"].includes(wcmd ?? "")) {
+      nmgWakeParameter(wcmd!, wval, ctx);
+      return;
+    }
+    switch (wcmd) {
+      case "on":
+        writeWakeConfig({ ...current, enabled: true });
+        ctx.ui.notify("黑板唤醒已开启（世界频道+活跃频道有新 open 条目会唤醒）", "info");
+        return;
+      case "off":
+        writeWakeConfig({ ...current, enabled: false });
+        ctx.ui.notify("黑板唤醒已关闭", "info");
+        return;
+      case "status": {
+        const budgetText = current.budget === 0 ? "不限制" : `${current.budget}/天`;
+        const cooldownText =
+          current.cooldownMs === 0 ? "无" : `${Math.round(current.cooldownMs / 60_000)} 分`;
+        ctx.ui.notify(
+          `黑板唤醒：${current.enabled ? "开" : "关"} · 预算 ${budgetText} · 冷却 ${cooldownText} · 轮询 ${Math.round(current.intervalMs / 1_000)} 秒 · 世界广播 ${current.worldBroadcast ? "开" : "关"}`,
+          "info",
+        );
+        return;
+      }
+      case "world": {
+        // 无参切换；0 关、1 开。
+        const world = wvalRaw === "0" ? false : wvalRaw === "1" ? true : !current.worldBroadcast;
+        writeWakeConfig({ ...current, worldBroadcast: world });
+        ctx.ui.notify(
+          world
+            ? "已开启世界频道协作广播：协作类新条目会同时发到世界频道拉其他 agent"
+            : "已关闭世界频道协作广播",
+          "info",
+        );
+        return;
+      }
+      default: {
+        const enabled = !current.enabled;
+        writeWakeConfig({ ...current, enabled });
+        ctx.ui.notify(enabled ? "黑板唤醒已开启" : "黑板唤醒已关闭", "info");
+      }
+    }
+  };
   const nmgMenuHandler = async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
     const parts = args.trim().split(/\s+/).filter(Boolean);
     const [sub, ...rest] = parts;
@@ -783,80 +867,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         return;
       }
       case "wake": {
-        const current = readWakeConfig();
-        const [wcmd, wvalRaw] = restText.split(/\s+/);
-        const wval = Number(wvalRaw);
-        switch (wcmd) {
-          case "on":
-            writeWakeConfig({ ...current, enabled: true });
-            ctx.ui.notify("黑板唤醒已开启（世界频道+活跃频道有新 open 条目会唤醒）", "info");
-            return;
-          case "off":
-            writeWakeConfig({ ...current, enabled: false });
-            ctx.ui.notify("黑板唤醒已关闭", "info");
-            return;
-          case "status": {
-            const budgetText = current.budget === 0 ? "不限制" : `${current.budget}/天`;
-            const cooldownText =
-              current.cooldownMs === 0 ? "无" : `${Math.round(current.cooldownMs / 60_000)} 分`;
-            ctx.ui.notify(
-              `黑板唤醒：${current.enabled ? "开" : "关"} · 预算 ${budgetText} · 冷却 ${cooldownText} · 轮询 ${Math.round(current.intervalMs / 1_000)} 秒 · 世界广播 ${current.worldBroadcast ? "开" : "关"}`,
-              "info",
-            );
-            return;
-          }
-          case "budget": {
-            if (!Number.isFinite(wval)) {
-              ctx.ui.notify("用法：/nmg wake budget N（0=不限制）", "warning");
-              return;
-            }
-            const budget = Math.max(0, Math.min(100, Math.round(wval)));
-            writeWakeConfig({ ...current, budget });
-            ctx.ui.notify(`黑板唤醒预算已设为 ${budget === 0 ? "不限制" : `${budget}/天`}`, "info");
-            return;
-          }
-          case "cooldown": {
-            if (!Number.isFinite(wval)) {
-              ctx.ui.notify("用法：/nmg wake cooldown M（0=无冷却）", "warning");
-              return;
-            }
-            const cooldownMs = wval === 0 ? 0 : Math.max(30_000, Math.round(wval * 60_000));
-            writeWakeConfig({ ...current, cooldownMs });
-            ctx.ui.notify(
-              `黑板唤醒冷却已设为 ${cooldownMs === 0 ? "无" : `${Math.round(cooldownMs / 60_000)} 分钟`}`,
-              "info",
-            );
-            return;
-          }
-          case "interval": {
-            if (!Number.isFinite(wval)) {
-              ctx.ui.notify("用法：/nmg wake interval S（秒，最小 5）", "warning");
-              return;
-            }
-            const intervalMs = Math.max(5_000, Math.round(wval * 1_000));
-            writeWakeConfig({ ...current, intervalMs });
-            ctx.ui.notify(`黑板唤醒轮询已设为 ${Math.round(intervalMs / 1_000)} 秒`, "info");
-            return;
-          }
-          case "world": {
-            // 无参切换；0 关、1 开。
-            const world =
-              wvalRaw === "0" ? false : wvalRaw === "1" ? true : !current.worldBroadcast;
-            writeWakeConfig({ ...current, worldBroadcast: world });
-            ctx.ui.notify(
-              world
-                ? "已开启世界频道协作广播：协作类新条目会同时发到世界频道拉其他 agent"
-                : "已关闭世界频道协作广播",
-              "info",
-            );
-            return;
-          }
-          default: {
-            const enabled = !current.enabled;
-            writeWakeConfig({ ...current, enabled });
-            ctx.ui.notify(enabled ? "黑板唤醒已开启" : "黑板唤醒已关闭", "info");
-          }
-        }
+        nmgWakeCommand(restText, ctx);
         return;
       }
       default: {
@@ -942,6 +953,18 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     await workingStateView.setPreview(onOff === "显示", ctx);
     ctx.ui.notify(onOff === "显示" ? "状态预览已显示" : "状态预览已隐藏（状态本身不变）", "info");
   };
+  const nmgStatus = (ctx: ExtensionCommandContext): void => {
+    {
+      const wake = readWakeConfig();
+      const budgetText = wake.budget === 0 ? "不限制" : `${wake.budget}/天`;
+      const cooldownText =
+        wake.cooldownMs === 0 ? "无" : `${Math.round(wake.cooldownMs / 60_000)} 分`;
+      ctx.ui.notify(
+        `NMG：召回折叠 ${recallCollapsed ? "开" : "关"} · 唤醒 ${wake.enabled ? "开" : "关"}（预算 ${budgetText}，冷却 ${cooldownText}，轮询 ${Math.round(wake.intervalMs / 1_000)} 秒）`,
+        "info",
+      );
+    }
+  };
   const nmgInteractiveMenu = async (ctx: ExtensionCommandContext): Promise<void> => {
     if (!ctx.hasUI || typeof ctx.ui.select !== "function") {
       ctx.ui.notify(
@@ -992,16 +1015,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       await nmgStatePreviewMenu(ctx);
       return;
     }
-    {
-      const wake = readWakeConfig();
-      const budgetText = wake.budget === 0 ? "不限制" : `${wake.budget}/天`;
-      const cooldownText =
-        wake.cooldownMs === 0 ? "无" : `${Math.round(wake.cooldownMs / 60_000)} 分`;
-      ctx.ui.notify(
-        `NMG：召回折叠 ${recallCollapsed ? "开" : "关"} · 唤醒 ${wake.enabled ? "开" : "关"}（预算 ${budgetText}，冷却 ${cooldownText}，轮询 ${Math.round(wake.intervalMs / 1_000)} 秒）`,
-        "info",
-      );
-    }
+    nmgStatus(ctx);
   };
   // `/nmg state [on|off]` is the read-only state view and its preview switch.
   // It dispatches before the menu handler so that handler keeps its own shape.

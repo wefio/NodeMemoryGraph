@@ -73,17 +73,7 @@ const KIND_LABEL = {
 // several sequential RPCs, so each call gets a tight budget.
 const RPC_TIMEOUT_MS = 2_000;
 
-function promptText(payload) {
-  const prompt = payload?.prompt;
-  if (typeof prompt === "string") return prompt;
-  if (Array.isArray(prompt)) {
-    return prompt
-      .filter((part) => part && part.type === "text" && typeof part.text === "string")
-      .map((part) => part.text)
-      .join("\n");
-  }
-  return "";
-}
+
 
 function isPromptSubmit(payload) {
   const event = payload?.hook_event_name ?? payload?.event;

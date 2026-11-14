@@ -78,8 +78,9 @@ export async function main(mode = process.argv[2]): Promise<void> {
     );
     await hook.run(JSON.parse(input || "{}") as Record<string, unknown>);
   } catch (error) {
-    console.error(
-      `NMG Codex hook skipped: ${error instanceof Error ? error.message : String(error)}`,
+    process.stderr.write(
+      String(`NMG Codex hook skipped: ${error instanceof Error ? error.message : String(error)}`) +
+        "\n",
     );
   }
 }

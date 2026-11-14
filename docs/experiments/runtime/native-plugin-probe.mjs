@@ -404,11 +404,9 @@ const result = {
   opencode: await probeOpenCode(resolve(values["opencode-bin"])),
 };
 await writeFile(join(output, "native-plugin-probe.json"), JSON.stringify(result, null, 2) + "\n");
-console.log(
-  JSON.stringify(
+process.stdout.write(String(JSON.stringify(
     { output, dsh: result.dsh, opencode: { ...result.opencode, operations: undefined } },
     null,
     2,
-  ),
-);
+  )) + "\n");
 if (result.opencode.plugin.status !== "registered") process.exitCode = 2;
