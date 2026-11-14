@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { CodexSessionStore } from "../../codex-plugin/session-store.ts";
 import { codexHookBinding } from "../../codex-plugin/session.ts";
+import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
 const a = "00000000-0000-7000-8000-000000000001";
 const b = "00000000-0000-7000-8000-000000000002";
@@ -14,7 +15,7 @@ const binding = (id = a, turnId = turn) => codexHookBinding({ session_id: id, tu
 
 test("Codex routing survives restart and isolates concurrent chats and projects", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "nmg-codex-routing-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTempDirectory(directory));
   const store = new CodexSessionStore(directory);
   const [first, second] = await Promise.all([
     store.admit(binding(), resolve(directory, "A")),
@@ -31,7 +32,7 @@ test("Codex routing survives restart and isolates concurrent chats and projects"
 
 test("Codex clear fences old turns, retains identity, clears nudges and admits a new generation", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "nmg-codex-clear-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTempDirectory(directory));
   const store = new CodexSessionStore(directory);
   const original = await store.admit(binding(), directory);
   await store.nudge(original);
@@ -48,7 +49,7 @@ test("Codex clear fences old turns, retains identity, clears nudges and admits a
 
 test("Codex tools without hook admission keep project scope unknown and refuse corrupt records", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "nmg-codex-no-hook-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTempDirectory(directory));
   const store = new CodexSessionStore(directory);
   assert.deepEqual(await store.resolve(binding()), binding());
   await store.admit(binding(), directory);

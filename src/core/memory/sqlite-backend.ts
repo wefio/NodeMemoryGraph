@@ -130,7 +130,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
       requestHash: request.requestHash,
       revision: revision + 1,
       resultIds: [...request.resultIds],
-      result: request.result,
+      ...(request.result === undefined ? {} : { result: request.result }),
     };
     const statement = this.writer.prepare(
       `INSERT OR REPLACE INTO nmg_memory_entities VALUES (${Array(ENTITY_COLUMNS.length + 1)

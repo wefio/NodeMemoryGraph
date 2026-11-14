@@ -213,7 +213,7 @@ export class MemoryEngine {
         const previous = await this.backend.receipt(view, operationId);
         if (previous) {
           if (previous.requestHash !== hash) throw new MemoryOperationConflict(operationId);
-          return replay(view, previous);
+          return await replay(view, previous);
         }
         const plan = new MemoryPlan(this.backend, view);
         const prepared = await prepare(plan);

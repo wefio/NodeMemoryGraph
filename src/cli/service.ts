@@ -97,7 +97,7 @@ import {
   type SearchOptions,
 } from "../core/types.ts";
 import { TASK_BOARD_VERDICTS } from "../core/types.ts";
-import { assessMemoryWrite } from "../core/write-policy.ts";
+import { assessMemoryWrite, MemoryWriteRejected } from "../core/write-policy.ts";
 import {
   MemoryGraphReasoner,
   type LogicExpr,
@@ -114,6 +114,7 @@ import { readRelevanceModel } from "../lab/relevance-model.ts";
 import { normalizeRecallTriggers } from "../core/recall-triggers.ts";
 import { SessionRecallTrial, type SessionRecallPreparation } from "../core/session-recall.ts";
 import { RecallContextPolicy } from "../integration/recall-context-policy.ts";
+import type { CoordinationPort, TaskBoardPort } from "../integration/coordination-port.ts";
 import {
   bindRunEntry,
   cancelRun,
@@ -607,7 +608,15 @@ export class NmgService {
   }
 
   async #invokeMemory(method: NmgMethod, value: unknown): Promise<unknown> {
-    if (this.#portableMemory) return this.#invokePortable(method, value);
+    if (this.#portableMemory) {
+      try {
+        return await this.#invokePortable(method, value);
+      } catch (error) {
+        if (error instanceof MemoryWriteRejected)
+          throw new NmgProtocolError("WRITE_REJECTED", error.reason);
+        throw error;
+      }
+    }
     switch (method) {
       case "remember":
         return this.#remember(parseRememberParams(value));
@@ -1446,6 +1455,7 @@ export class NmgService {
     const assessment = assessMemoryWrite({
       statement: params.statement,
       evidence: params.evidence,
+      evidenceSource: params.evidenceSource,
       memoryType: params.memoryType,
       bypass: params.unsafe,
       expiresAt: params.expiresAt,
@@ -3814,7 +3824,7 @@ type TaskBoardParamsOf<A extends NmgTaskBoardParams["action"]> = Extract<
   { action: A }
 >;
 type TaskBoardHandler = (
-  store: NmgStore,
+  store: TaskBoardPort,
   parsed: NmgTaskBoardParams,
 ) => NmgMethodResult["taskBoard"];
 
@@ -4054,7 +4064,10 @@ type TaskRunParamsOf<A extends NmgTaskRunParams["action"]> = Extract<
   NmgTaskRunParams,
   { action: A }
 >;
-type TaskRunHandler = (store: NmgStore, parsed: NmgTaskRunParams) => NmgMethodResult["taskRun"];
+type TaskRunHandler = (
+  store: CoordinationPort,
+  parsed: NmgTaskRunParams,
+) => NmgMethodResult["taskRun"];
 
 /** Table-driven run-surface dispatch, for the same reason as `taskBoardHandlers`: the transition
  *  rules live in the coordinator, and every branch here is one call into it. */

@@ -126,7 +126,7 @@ export class LanceMemoryBackend implements MemoryBackend {
       requestHash: request.requestHash,
       revision: head.revision + 1,
       resultIds: [...request.resultIds],
-      result: request.result,
+      ...(request.result === undefined ? {} : { result: request.result }),
     };
     const name = `nmg_${randomUUID().replaceAll("-", "")}`;
     const staged = await branches.create(name, head.branch, head.version);

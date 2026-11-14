@@ -81,6 +81,31 @@ for (const kind of ["sqlite", "lancedb"] as const) {
       };
       const privateMemory = await engine.remember(privateInput, "private-receipt");
       assert.notEqual(privateMemory.node.id, first.node.id);
+      const derived = await engine.remember({
+        statement: "The projected capacity is ten",
+        nodeName: "Capacity",
+        memoryType: "derived",
+        sessionId: "owner",
+      });
+      assert.equal(derived.memory.residence, "stg");
+      assert.equal(derived.history.sessionId, "owner");
+      assert.equal((await engine.get([derived.memory.id])).results.length, 0);
+      assert.equal(
+        (await engine.get([derived.memory.id], { sessionId: "owner" })).results.length,
+        1,
+      );
+      await assert.rejects(
+        engine.remember({
+          statement: "Builds use pinned dependencies",
+          nodeName: "Build",
+          evidenceSource: {
+            actor: "assistant",
+            sourceMessageId: "m1",
+            content: "Pinned dependencies",
+          },
+        }),
+        /does not match sourceActor/,
+      );
       await assert.rejects(
         engine.remember({
           statement: "Public evidence reuse",

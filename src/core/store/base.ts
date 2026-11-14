@@ -1,3 +1,4 @@
+import { normalizeStatement } from "../memory-normalization.ts";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -64,7 +65,6 @@ import {
   MEMORY_PREVIOUS_TURN_SQL,
   memoryEmbeddingModelId,
   memoryEmbeddingText,
-  normalizeStatement,
   surfaceAnchorExpression,
   type StoreRow as Row,
 } from "./search-ranking.ts";

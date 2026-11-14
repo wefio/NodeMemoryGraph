@@ -1,8 +1,15 @@
 import type { HistoryRecord, MemoryRecord, RememberResult } from "../types.ts";
 import { serializeScope } from "../scope.ts";
-import { normalizeStatement } from "../store/search-ranking.ts";
+import { normalizeStatement } from "../memory-normalization.ts";
 import type { MemoryBackend, MemoryEntity, MemoryEntityQuery, MemoryReadView } from "./backend.ts";
-import { memoryIdentity, newHistory, newMemory, newNode, visibleMemory } from "./model.ts";
+import {
+  memoryIdentity,
+  memoryResidence,
+  newHistory,
+  newMemory,
+  newNode,
+  visibleMemory,
+} from "./model.ts";
 import type { MemoryInput } from "./model.ts";
 
 /** One planning view plus uncommitted entities; ordered batch inputs observe prior inputs. */
@@ -41,7 +48,8 @@ export class MemoryPlan {
     slot: number,
     now: string,
   ): Promise<RememberResult> {
-    const sessionId = input.residence === "stg" ? (input.sessionId ?? undefined) : undefined;
+    const residence = memoryResidence(input);
+    const sessionId = residence === "stg" ? (input.sessionId ?? undefined) : undefined;
     const duplicates = await this.find({
       kind: "memory",
       exactText: input.statement,
@@ -54,21 +62,11 @@ export class MemoryPlan {
         visibleMemory(entity.value, sessionId, now) &&
         entity.value.memoryType === (input.memoryType ?? "fact") &&
         entity.value.stateKey === (input.stateKey ?? null) &&
-        entity.value.residence === (input.residence ?? "ltg"),
+        entity.value.residence === residence &&
+        entity.value.sessionId === (sessionId ?? null),
     );
     if (duplicate?.kind === "memory") return this.result(duplicate.value);
-    const nodeId = memoryIdentity(
-      this.backend.namespace,
-      "node",
-      input.nodeName.trim().toLocaleLowerCase("en-US"),
-      input.residence ?? "ltg",
-      sessionId ?? "",
-    );
-    const nodes = await this.find({ kind: "node", ids: [nodeId] });
-    const existing = nodes.find(
-      (entity) => entity.kind === "node" && entity.value.status === "active",
-    );
-    const node = existing?.kind === "node" ? existing.value : newNode(input, nodeId, now);
+    const node = await this.node(input, sessionId, now);
     const id = memoryIdentity(this.backend.namespace, operationId, String(slot));
     const history = await this.history(input, `${id}_evidence`, now);
     const memory = newMemory(input, id, node.id, history.id, now);
@@ -78,6 +76,33 @@ export class MemoryPlan {
     this.put({ kind: "history", value: history });
     this.put({ kind: "memory", value: memory });
     return { history, node, memory };
+  }
+
+  private async node(input: MemoryInput, sessionId: string | undefined, now: string) {
+    const residence = memoryResidence(input);
+    const nodeId = memoryIdentity(
+      this.backend.namespace,
+      "node",
+      input.nodeName.trim().toLocaleLowerCase("en-US"),
+      residence,
+      sessionId ?? "",
+    );
+    const nodes = await this.find(
+      residence === "ltg"
+        ? { kind: "node", nodeName: input.nodeName }
+        : { kind: "node", ids: [nodeId] },
+    );
+    const active = nodes.flatMap((entity) =>
+      entity.kind === "node" &&
+      entity.value.status === "active" &&
+      entity.value.residence === residence
+        ? [entity.value]
+        : [],
+    );
+    const exact = active.find((node) => node.canonicalName === input.nodeName.trim());
+    if (exact) return exact;
+    if (active.length > 1) throw new Error("Multiple active nodes match this name");
+    return active[0] ?? newNode(input, nodeId, now);
   }
 
   private async replacePrevious(
@@ -122,6 +147,7 @@ export class MemoryPlan {
     )
       throw new Error("Supersession requires active memories in identical scope and residence");
     memory.supersedesId = previous.id;
+    memory.evidenceRole = input.evidenceRole ?? "update";
     this.put({
       kind: "memory",
       value: { ...previous, status: "superseded", validUntil: memory.validFrom },
@@ -132,7 +158,7 @@ export class MemoryPlan {
     if (!input.evidenceHistoryId) return newHistory(input, id, now);
     const entities = await this.find({ kind: "history", ids: [input.evidenceHistoryId] });
     const entity = entities[0];
-    const sessionId = input.residence === "stg" ? input.sessionId : null;
+    const sessionId = memoryResidence(input) === "stg" ? input.sessionId : null;
     if (
       entity?.kind !== "history" ||
       (entity.value.sessionId && entity.value.sessionId !== sessionId)

@@ -1,5 +1,6 @@
 import { serializeScope } from "../scope.ts";
-import { normalizeStatement } from "../store/search-ranking.ts";
+import { normalizeStatement } from "../memory-normalization.ts";
+import { MAX_MEMORY_COMMIT_ENTITIES } from "./backend.ts";
 import type {
   MemoryCommitReceipt,
   MemoryCommitRequest,
@@ -126,7 +127,8 @@ export function validateCommit(request: MemoryCommitRequest): void {
     throw new Error("Operation identity is required");
   if (!Number.isSafeInteger(request.expectedRevision) || request.expectedRevision < 0)
     throw new Error("Invalid expected revision");
-  if (request.changes.upsert.length > 512) throw new Error("At most 512 entity changes per commit");
+  if (request.changes.upsert.length > MAX_MEMORY_COMMIT_ENTITIES)
+    throw new Error(`At most ${MAX_MEMORY_COMMIT_ENTITIES} entity changes per commit`);
   const keys = new Set<string>();
   for (const entity of request.changes.upsert) {
     if (!entity.value.id.trim()) throw new Error("Entity identity is required");

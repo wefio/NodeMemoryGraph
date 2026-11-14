@@ -6,6 +6,8 @@ import type {
   NodeRelation,
 } from "../types.ts";
 
+export const MAX_MEMORY_COMMIT_ENTITIES = 512;
+
 export type MemoryEntity =
   | { kind: "memory"; value: MemoryRecord }
   | { kind: "history"; value: HistoryRecord }

@@ -111,6 +111,9 @@ are not supplied by this profile; unsupported service operations fail explicitly
 No automatic migration, cloud interactive API or native Worker/WASM deployment
 is provided. The existing AML/snapshot path is unchanged.
 
+The [legacy graph migration rehearsal](legacy-graph-migration.md) compares the
+two paths and exercises a bounded import into either backend.
+
 Native branches and receipts are retained; automatic compaction, unreachable
 branch collection and retention administration require a separate maintenance
 contract. FTS is prepared on each memory commit, so small frequent writes and many

@@ -1,4 +1,4 @@
-import type { NmgStore } from "../core/store.ts";
+import type { CoordinationStatePort } from "./coordination-port.ts";
 import { parseAgentActivity, type AgentSessionActivity } from "../core/agent-activity.ts";
 import {
   coordinationNames,
@@ -124,7 +124,7 @@ function revision(value: unknown, minimum = 1): number {
 
 /** One validation/dispatch owner for every native schema and CLI. */
 export function executeCoordinationState(
-  store: NmgStore,
+  store: CoordinationStatePort,
   operation: string,
   params: Record<string, unknown>,
 ): CoordinationStateResult {
@@ -192,7 +192,7 @@ export function executeCoordinationState(
   return subscriptionOrDelete(store, operation, id(), actor, data);
 }
 function listEvents(
-  store: NmgStore,
+  store: CoordinationStatePort,
   params: Record<string, unknown>,
   data: Record<string, unknown>,
 ): CoordinationStateResult {
@@ -209,7 +209,7 @@ function listEvents(
 }
 
 function subscriptionOrDelete(
-  store: NmgStore,
+  store: CoordinationStatePort,
   operation: string,
   eventId: string,
   agentId: string,

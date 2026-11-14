@@ -101,6 +101,14 @@ for (const kind of ["sqlite", "lancedb"] as const) {
         nodeName: "Atlas",
         operationId: "stable-write",
       };
+      await assert.rejects(
+        service.invoke("remember", {
+          ...input,
+          evidenceSource: { actor: "user", content: "api_key=fake-example", sourceMessageId: "m1" },
+          unsafe: true,
+        }),
+        { code: "WRITE_REJECTED", message: /secret/u },
+      );
       const first = await service.invoke("remember", input);
       assert.equal((await service.invoke("remember", input)).memory.id, first.memory.id);
       assert.equal((await service.invoke("search", { query: "Atlas" })).results.length, 1);

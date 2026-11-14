@@ -5,6 +5,16 @@ export interface MemoryWriteAssessment {
   reason: "allowed" | "secret" | "non_persistent_instruction" | "coordination_state";
 }
 
+export class MemoryWriteRejected extends Error {
+  readonly reason: MemoryWriteAssessment["reason"];
+
+  constructor(reason: MemoryWriteAssessment["reason"]) {
+    super(`Memory write rejected: ${reason}`);
+    this.name = "MemoryWriteRejected";
+    this.reason = reason;
+  }
+}
+
 const SECRET_PATTERNS = [
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i,
   /\b(?:api[_ -]?key|access[_ -]?token|auth(?:orization)?[_ -]?token|password|passwd|secret)\b\s*[:=]\s*\S+/i,
@@ -95,13 +105,13 @@ const COORDINATION_STATE_PATTERNS = [
 export function assessMemoryWrite(input: {
   statement: string;
   evidence?: string;
+  evidenceSource?: { content: string };
   memoryType?: MemoryType;
   bypass?: boolean;
   expiresAt?: string;
 }): MemoryWriteAssessment {
   const statementText = `${input.statement}`;
-  const evidenceText = `${input.evidence ?? ""}`;
-  const fullText = evidenceText ? `${statementText}\n${evidenceText}` : statementText;
+  const fullText = [statementText, input.evidence, input.evidenceSource?.content].join("\n");
   // Secret detection scans the full text (statement + evidence): credentials
   // can hide inside a quoted source excerpt, so evidence must never exempt
   // them.

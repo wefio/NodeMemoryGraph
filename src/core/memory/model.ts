@@ -7,11 +7,26 @@ import {
 import { normalizeClaims } from "../claims.ts";
 import { recallTriggerMarkers } from "../recall-triggers.ts";
 import { assertTemporalValidity } from "../semantic-domain.ts";
-import { normalizeMarkers } from "../store/rows.ts";
-import { assessMemoryWrite } from "../write-policy.ts";
+import { normalizeMarkers } from "../memory-normalization.ts";
+import { defaultResidence } from "../memory-residence.ts";
+import { validateEvidenceSource } from "../memory-evidence.ts";
+import { assessMemoryWrite, MemoryWriteRejected } from "../write-policy.ts";
 import type { HistoryRecord, MemoryNode, MemoryRecord, RememberInput } from "../types.ts";
 
 export type MemoryInput = RememberInput & { unsafe?: boolean };
+
+export function memoryResidence(input: MemoryInput) {
+  return input.residence ?? defaultResidence({ ...input, truthStatus: memoryTruthStatus(input) });
+}
+
+function memoryTruthStatus(input: MemoryInput): MemoryRecord["truthStatus"] {
+  return (
+    input.truthStatus ??
+    (input.markers?.some((marker) => marker.kind?.trim() === "external_source")
+      ? "unverified"
+      : "asserted")
+  );
+}
 
 export function memoryIdentity(...parts: string[]): string {
   return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
@@ -44,10 +59,10 @@ export function validateMemoryInput(input: MemoryInput): void {
   const assessment = assessMemoryWrite({
     ...input,
     bypass: input.unsafe,
-    evidence: [input.evidence, input.evidenceSource?.content].filter(Boolean).join("\n"),
   });
-  if (!assessment.allowed) throw new Error(`Memory write rejected: ${assessment.reason}`);
+  if (!assessment.allowed) throw new MemoryWriteRejected(assessment.reason);
   validateMemoryStructure(input);
+  validateEvidenceSource(input, memoryResidence(input));
   // Resolve date phrases before the timestamp guard, so "上周三" and "2026年11月6日"
   // are accepted as the instants they name while genuine garbage is still refused.
   assertTemporalValidity({
@@ -62,8 +77,6 @@ function validateMemoryStructure(input: MemoryInput): void {
     throw new Error("State memories require stateKey");
   if (input.residence === "stg" && !input.sessionId?.trim())
     throw new Error("Provisional memories require sessionId");
-  if (input.evidenceSource && input.evidenceSource.content.length > 4096)
-    throw new Error("Evidence source exceeds its bound");
   if (input.resolution && input.resolution !== "resolved" && !input.relatedMemoryIds?.length)
     throw new Error("Open memories require relatedMemoryIds");
   if (input.expiresAt && !Number.isFinite(Date.parse(input.expiresAt)))
@@ -88,7 +101,7 @@ export function visibleMemory(
 export function newHistory(input: MemoryInput, id: string, now: string): HistoryRecord {
   return {
     id,
-    sessionId: input.residence === "stg" ? (input.sessionId ?? null) : null,
+    sessionId: memoryResidence(input) === "stg" ? (input.sessionId ?? null) : null,
     sourceMessageId: input.evidenceSource?.sourceMessageId ?? null,
     role: input.evidenceSource?.actor ?? input.sourceActor ?? "user",
     content: input.evidenceSource?.content ?? input.evidence ?? input.statement,
@@ -106,7 +119,7 @@ export function newNode(input: MemoryInput, id: string, now: string): MemoryNode
     createdAt: now,
     updatedAt: now,
     status: "active",
-    residence: input.residence ?? "ltg",
+    residence: memoryResidence(input),
   };
 }
 
@@ -128,7 +141,6 @@ export function newMemory(
     ...recallTriggerMarkers(input.recallTriggers),
     ...(input.unsafe ? [{ kind: "write_bypass", attributes: { policy: "unsafe" } }] : []),
   ]);
-  const external = markers.some((marker) => marker.kind === "external_source");
   // One canonical shape on the way in: `event_time` is compared as TEXT by the
   // candidate SQL, so every writer lands in the same form. A source clock,
   // when supplied, anchors event phrases independently of ingestion time.
@@ -147,7 +159,7 @@ export function newMemory(
     ...claimFields(input),
     ...timeFields(orderable, now),
     ...residenceFields(input, now),
-    truthStatus: input.truthStatus ?? (external ? "unverified" : "asserted"),
+    truthStatus: memoryTruthStatus(input),
     markers,
     scope: input.scope ?? {},
     status: "active",
@@ -209,7 +221,7 @@ function residenceFields(
   input: MemoryInput,
   now: string,
 ): Pick<MemoryRecord, "residence" | "sessionId" | "promotedAt"> {
-  const residence = input.residence ?? "ltg";
+  const residence = memoryResidence(input);
   return {
     residence,
     sessionId: residence === "stg" ? (input.sessionId ?? null) : null,
