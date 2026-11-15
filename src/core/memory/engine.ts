@@ -3,7 +3,9 @@ import type {
   MemoryBackend,
   MemoryCommitReceipt,
   MemoryEntity,
+  MemoryEntityQuery,
   MemoryReadView,
+  MemoryVectorQuery,
 } from "./backend.ts";
 import { MemoryOperationConflict } from "./backend.ts";
 import {
@@ -16,6 +18,9 @@ import {
 import type { MemoryInput } from "./model.ts";
 import { MemoryPlan } from "./plan.ts";
 import { MemoryWriteRejected } from "../write-policy.ts";
+import { hybridScore, lexicalTextScore, searchTerms } from "../store/search-ranking.ts";
+import { normalize } from "../memory-normalization.ts";
+import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import { TESSERA_REF_MARKER } from "../types.ts";
 import type {
   MemoryContext,
@@ -154,7 +159,11 @@ export class MemoryEngine {
     }
   }
 
-  async search(text: string, options: MemoryQueryOptions = {}): Promise<MemoryContext> {
+  async search(
+    text: string,
+    options: MemoryQueryOptions = {},
+    semantic?: MemoryVectorQuery,
+  ): Promise<MemoryContext> {
     if (!text.trim()) throw new Error("Search query is required");
     const limit = options.limit ?? 20;
     if (!Number.isInteger(limit) || limit < 1 || limit > 100)
@@ -162,25 +171,86 @@ export class MemoryEngine {
     boundedGraphHops(options.graphHops);
     const view = await this.backend.openRead();
     try {
-      const entities = await this.backend.scan(view, {
+      const query: MemoryEntityQuery = {
         kind: "memory",
-        text,
         scope: options.scope,
         sessionId: options.sessionId,
         limit: 512,
-      });
-      const results = (await this.project(view, entities, options)).slice(0, limit);
+      };
+      const results = semantic
+        ? await this.semanticResults(view, text, query, options, semantic)
+        : await this.project(view, await this.backend.scan(view, { ...query, text }), options);
+      results.splice(limit);
       const relations = await this.expand(view, results, { ...options, limit });
       const tesserae = await this.attachedTesserae(view, results);
       return {
         results,
         relations,
-        retrieval: { mode: "lexical", degraded: false },
+        retrieval: { mode: semantic ? "hybrid" : "lexical", degraded: false },
         ...(tesserae.length ? { tesserae } : {}),
       };
     } finally {
       await this.backend.closeRead(view);
     }
+  }
+
+  private async semanticResults(
+    view: MemoryReadView,
+    text: string,
+    query: MemoryEntityQuery,
+    options: MemoryQueryOptions,
+    semantic: MemoryVectorQuery,
+  ): Promise<MemorySearchResult[]> {
+    if (!this.backend.vectorIndex) throw new Error("This memory backend has no vector index");
+    const semanticLimit = semantic.mode === "vector" ? 512 : 256;
+    const vectors = this.backend.vectorIndex.candidates(
+      view,
+      { ...query, limit: semanticLimit },
+      semantic,
+    );
+    const lexical =
+      semantic.mode === "vector"
+        ? []
+        : await this.backend.scan(view, { ...query, text, limit: 256 });
+    const candidates = new Map(
+      [...lexical, ...vectors.map((item) => item.entity)].map((entity) => [
+        entity.value.id,
+        entity,
+      ]),
+    );
+    const scores = new Map(vectors.map((item) => [item.entity.value.id, item]));
+    const queryText = normalize(text);
+    const terms = searchTerms(queryText);
+    return (await this.project(view, [...candidates.values()], options))
+      .map((result) => {
+        const score = scores.get(result.memory.id);
+        const vectorScore = score?.recordScore ?? 0;
+        const routeScore = score?.routeScore ?? 0;
+        const triggers = recallTriggersFromStoredMarkers(result.memory.markers).join(" ");
+        const lexicalScore = lexicalTextScore(
+          queryText,
+          `${result.memory.statement} ${result.node.canonicalName} ${result.node.summary} ${triggers}`,
+          terms,
+        );
+        const combinedScore =
+          semantic.mode === "vector"
+            ? Math.max(vectorScore, routeScore)
+            : hybridScore(lexicalScore, vectorScore, routeScore);
+        const recallReason = score
+          ? lexicalScore
+            ? "hybrid_match"
+            : "vector_match"
+          : "lexical_match";
+        return {
+          ...result,
+          lexicalScore,
+          vectorScore,
+          routeScore,
+          combinedScore,
+          recallReason,
+        } as MemorySearchResult;
+      })
+      .sort((left, right) => right.combinedScore - left.combinedScore);
   }
 
   async linkNodes(

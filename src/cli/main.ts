@@ -197,8 +197,11 @@ async function runDaemonAction(command: DaemonCommand, service: NmgService, tick
   return runDaemonCommand(command, service, ticket);
 }
 
-async function migrateDaemonMemory(path: string): Promise<Record<string, unknown>> {
-  const lease = acquireServerLease(path);
+export async function migrateDaemonMemory(
+  path: string,
+  reloadTicket?: string,
+): Promise<Record<string, unknown>> {
+  const lease = acquireServerLease(path, reloadTicket);
   try {
     const existing = activatedLocalMemory(path);
     if (existing) return { migrated: true, namespace: existing, databasePath: path };

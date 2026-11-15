@@ -23,6 +23,7 @@ import { graphImportRequest } from "./graph-import.ts";
 import { readLegacyMemoryRows } from "../store/legacy-memory-snapshot.ts";
 import { migrate } from "../store/schema.ts";
 import { ftsExpression, ftsIndexedText } from "../store/search-ranking.ts";
+import { SqliteMemoryVectors } from "./sqlite-vectors.ts";
 
 const LOCAL_MEMORY_TABLE = "nmg_local_memory";
 export const LOCAL_MEMORY_NAMESPACE = "local-memory-v1";
@@ -80,6 +81,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
   private closed = false;
   private readonly path: string;
   readonly namespace: string;
+  readonly vectorIndex: SqliteMemoryVectors;
 
   constructor(path: string, namespace: string) {
     this.path = path;
@@ -99,6 +101,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
       CREATE INDEX IF NOT EXISTS nmg_memory_name ON nmg_memory_entities(namespace, kind, name);
       CREATE VIRTUAL TABLE IF NOT EXISTS nmg_memory_fts USING fts5(namespace UNINDEXED, key UNINDEXED, text);`);
     this.writer.prepare("INSERT OR IGNORE INTO nmg_memory_head VALUES (?, 0)").run(namespace);
+    this.vectorIndex = new SqliteMemoryVectors(this.writer, namespace, (view) => this.reader(view));
   }
 
   async openRead(): Promise<MemoryReadView> {
@@ -168,7 +171,10 @@ export class SqliteMemoryBackend implements MemoryBackend {
   activateLocal(): void {
     this.transaction(() => {
       const current = localNamespace(this.writer);
-      if (current === this.namespace) return;
+      if (current === this.namespace) {
+        this.vectorIndex.importLegacy();
+        return;
+      }
       if (current || this.revision(this.writer) !== 0)
         throw new Error("Local activation requires an unused namespace");
       migrate(this.writer);
@@ -178,6 +184,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
         validateCommit(request, entities.length);
         this.write(request);
       }
+      this.vectorIndex.importLegacy();
       fenceLegacyGraph(this.writer);
       this.writer.exec(`CREATE TABLE ${LOCAL_MEMORY_TABLE} (
         id INTEGER PRIMARY KEY CHECK(id=1), namespace TEXT NOT NULL)`);

@@ -1,14 +1,87 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { NmgService } from "../../src/cli/service.ts";
+import { NmgStore } from "../../src/core/store.ts";
+import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
+
+test("activated SQLite uses legacy vectors and indexes new writes across restart", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-portable-vector-"));
+  const path = join(directory, "memory.sqlite");
+  let documentCalls = 0;
+  const server = createServer(async (request, response) => {
+    const parts = [];
+    for await (const chunk of request) parts.push(chunk);
+    const { requests } = JSON.parse(Buffer.concat(parts).toString()) as {
+      requests: Array<{ taskType: string }>;
+    };
+    documentCalls += requests.filter((item) => item.taskType === "RETRIEVAL_DOCUMENT").length;
+    response.end(JSON.stringify({ embeddings: requests.map(() => ({ values: [1, 0] })) }));
+  });
+  await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const environment = {
+    NMG_EMBED_PROVIDER: "gemini",
+    NMG_EMBED_API_KEY: "fixture-only",
+    NMG_EMBED_BASE_URL: `http://127.0.0.1:${address.port}/v1beta`,
+  };
+  const indexId = createEmbeddingClientFromEnv(environment)!.indexId;
+  const legacy = new NmgStore(path);
+  const original = legacy.remember({
+    statement: "The logistics depot is in Oslo",
+    nodeName: "Depot",
+  });
+  legacy.upsertExternalEmbeddings(indexId, [{ memoryId: original.memory.id, vector: [1, 0] }]);
+  legacy.close();
+  let service = new NmgService({
+    databasePath: path,
+    environment,
+    memoryBackend: { kind: "sqlite", namespace: "vector-test", local: true },
+  });
+  try {
+    const pure = await service.invoke("search", {
+      query: "semantic-only query",
+      retrievalMode: "qwen3",
+    });
+    assert.equal(pure.results[0]?.memory.id, original.memory.id);
+    assert.equal(pure.results[0]?.vectorScore, 1);
+    assert.equal(documentCalls, 0);
+    const hybrid = await service.invoke("search", {
+      query: "logistics depot",
+      retrievalMode: "hybrid",
+    });
+    assert.equal(hybrid.retrieval?.mode, "hybrid");
+    assert.ok(hybrid.results[0]!.lexicalScore > 0);
+    const next = await service.invoke("remember", {
+      statement: "The freight terminal is in Bergen",
+      nodeName: "Terminal",
+      operationId: "portable-vector-index-restart",
+    });
+    await service.close();
+    service = new NmgService({ databasePath: path, environment });
+    const restored = await service.invoke("search", {
+      query: "semantic-only query",
+      retrievalMode: "hybrid",
+    });
+    assert.ok(
+      restored.results.some((item) => item.memory.id === next.memory.id && item.vectorScore === 1),
+    );
+    assert.equal(documentCalls, 1);
+  } finally {
+    await service.close();
+    await new Promise<void>((done) => server.close(() => done()));
+    removeTempDirectory(directory);
+  }
+});
 
 for (const first of ["memory", "coordination"] as const) {
   test(`local SQLite shares one file with independent memory and board tables (${first} first)`, async () => {

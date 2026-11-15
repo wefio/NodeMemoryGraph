@@ -123,9 +123,19 @@ export function lexicalScore(
   preparedTerms?: readonly string[],
 ): number {
   const triggers = recallTriggersFromStoredMarkers(row.m_markers_json).join(" ");
-  const haystack = normalize(
+  return lexicalTextScore(
+    query,
     `${row.m_statement} ${row.n_canonical_name} ${row.n_summary} ${triggers}`,
+    preparedTerms,
   );
+}
+
+export function lexicalTextScore(
+  query: string,
+  text: string,
+  preparedTerms?: readonly string[],
+): number {
+  const haystack = normalize(text);
   if (haystack.includes(query)) return 10 + query.length;
   const terms = preparedTerms ?? searchTerms(query);
   return terms.reduce((score, term) => score + (haystack.includes(term) ? term.length : 0), 0);

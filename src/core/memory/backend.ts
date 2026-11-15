@@ -80,12 +80,48 @@ export type MemoryCommitOutcome =
 export interface MemoryBackend {
   readonly namespace: string;
   readonly kind: "sqlite" | "lancedb";
+  readonly vectorIndex?: MemoryVectorIndex;
   openRead(): Promise<MemoryReadView>;
   scan(view: MemoryReadView, query: MemoryEntityQuery): Promise<MemoryEntity[]>;
   receipt(view: MemoryReadView, operationId: string): Promise<MemoryCommitReceipt | null>;
   closeRead(view: MemoryReadView): Promise<void>;
   commit(request: MemoryCommitRequest): Promise<MemoryCommitOutcome>;
   close(): Promise<void>;
+}
+
+export interface MemoryVectorQuery {
+  indexId: string;
+  vector: readonly number[];
+  granularity: "records" | "hierarchy" | "union";
+  mode: "vector" | "hybrid";
+}
+
+export interface MemoryVectorDocument {
+  id: string;
+  statement: string;
+  text: string;
+}
+
+export interface MemoryVectorCandidate {
+  entity: Extract<MemoryEntity, { kind: "memory" }>;
+  recordScore: number;
+  routeScore: number;
+}
+
+export interface MemoryVectorIndex {
+  has(indexId: string, dimensions?: number): boolean;
+  stats(indexId: string): { indexed: number; pending: number };
+  pending(indexId: string, limit: number): MemoryVectorDocument[];
+  save(
+    indexId: string,
+    documents: readonly MemoryVectorDocument[],
+    vectors: readonly number[][],
+  ): void;
+  candidates(
+    view: MemoryReadView,
+    query: MemoryEntityQuery,
+    semantic: MemoryVectorQuery,
+  ): MemoryVectorCandidate[];
 }
 
 export class MemoryOperationConflict extends Error {

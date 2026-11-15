@@ -315,6 +315,7 @@ export class NmgService {
               }
             : memoryBackend,
           memoryBackend.kind === "sqlite" && memoryBackend.local === true,
+          () => this.#configuredEmbeddingClient(),
         )
       : undefined;
     this.#dataDirectory = dataDirectory;
@@ -783,13 +784,7 @@ export class NmgService {
         ...this.#hello(),
         process: { pid: process.pid, node: process.version },
         storage: this.#portableMemory.storageStatus,
-        embedding: {
-          configured: false,
-          provider: null,
-          indexId: null,
-          health: null,
-          reason: "portable_memory_lexical",
-        },
+        embedding: this.#portableEmbeddingStatus(),
       };
     const exists = existsSync(this.databasePath);
     const embeddingClient = this.#configuredEmbeddingClient();
@@ -814,6 +809,19 @@ export class NmgService {
             : null,
         reason: this.#embeddingError,
       },
+    };
+  }
+
+  #portableEmbeddingStatus(): NmgStatusResult["embedding"] {
+    const portable = this.#portableMemory!;
+    const provider = portable.local ? this.#configuredProvider() : null;
+    const client = provider ? this.#configuredEmbeddingClient() : undefined;
+    return {
+      configured: provider !== null,
+      provider,
+      indexId: client?.indexId ?? null,
+      health: client ? portable.embeddingHealth(client.indexId) : null,
+      reason: portable.local ? this.#embeddingError : "portable_memory_lexical",
     };
   }
 

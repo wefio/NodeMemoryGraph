@@ -28,6 +28,11 @@ same transaction as graph import and the legacy write fence. A daemon reopening
 that file follows the record. Codex state and disclosure use the shared session
 runtime and project recall reads the unified backend.
 
+SQLite carries record vectors across activation with their model identifiers
+and references the retained node/leaf projections. The engine fuses results
+through a vector-candidate port. The host owns provider calls and bounded
+indexing work, and SQLite writes vectors after that I/O returns.
+
 ## Alternatives considered
 
 - Replay legacy statements through remember, which allocates new identities and applies current write policy to historical data.

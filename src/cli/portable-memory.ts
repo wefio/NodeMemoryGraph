@@ -15,6 +15,8 @@ import type {
 import { NmgProtocolError } from "./protocol.ts";
 import { mergeStgLtgContexts, stgStorePath } from "../core/stg.ts";
 import type { MemoryContext } from "../core/types.ts";
+import { LocalMemoryEmbeddings } from "./local-memory-embeddings.ts";
+import type { EmbeddingClient } from "../core/embedding-provider.ts";
 
 const METHODS = new Set<NmgMethod>(["remember", "rememberBatch", "search", "get", "deleteMemory"]);
 const LOCAL_METHODS = new Set<NmgMethod>(["hello", "status", "taskBoard", "taskRun", "shutdown"]);
@@ -41,12 +43,18 @@ export class PortableMemoryService {
   private pending: Promise<MemoryEngine> | undefined;
   private backend: MemoryBackend | undefined;
   private readonly projects = new Map<string, Promise<MemoryEngine>>();
+  private readonly embeddings: LocalMemoryEmbeddings;
   readonly local: boolean;
 
-  constructor(options: MemoryBackendOptions, local = false) {
+  constructor(
+    options: MemoryBackendOptions,
+    local = false,
+    embedding: () => EmbeddingClient | undefined = () => undefined,
+  ) {
     // Do not retain a caller-mutable credentials/options object.
     this.options = structuredClone(options);
     this.local = local;
+    this.embeddings = new LocalMemoryEmbeddings(embedding);
   }
 
   static handles(method: NmgMethod): boolean {
@@ -82,6 +90,7 @@ export class PortableMemoryService {
         ...(this.local
           ? ([
               "session-active-graph",
+              "optional-embedding-retrieval",
               "state-spaces",
               "diagnostic-answer-attribution",
               "versioned-answer-attribution",
@@ -109,7 +118,12 @@ export class PortableMemoryService {
   }
 
   async remember(input: NmgRememberParams, operationId?: string) {
-    if (this.local) return (await this.writer(input)).remember(input, operationId);
+    if (this.local) {
+      const engine = await this.writer(input);
+      const result = await engine.remember(input, operationId);
+      this.embeddings.afterWrite(engine.backend.vectorIndex);
+      return result;
+    }
     rejectOptions(input, ["projectDir"]);
     return (await this.engine()).remember(input, operationId);
   }
@@ -122,7 +136,10 @@ export class PortableMemoryService {
           "INVALID_PARAMS",
           "rememberBatch items must target one physical memory store",
         );
-      return { results: await (await this.writer(inputs[0]!)).rememberMany(inputs, operationId) };
+      const engine = await this.writer(inputs[0]!);
+      const results = await engine.rememberMany(inputs, operationId);
+      this.embeddings.afterWrite(engine.backend.vectorIndex);
+      return { results };
     }
     inputs.forEach((input) => rejectOptions(input, ["projectDir"]));
     return { results: await (await this.engine()).rememberMany(inputs, operationId) };
@@ -142,17 +159,26 @@ export class PortableMemoryService {
       "persistTrace",
       "activeGraphBudget",
       "queries",
+      "retrievalMode",
+      "vectorGranularity",
     ]);
-    const search = (engine: MemoryEngine, query: string, sessionId?: string) =>
-      engine.search(query, { ...input, sessionId });
     const shared = await this.engine();
     const project = await this.project(input.projectDir);
     const results = await Promise.all(
       [input.query, ...(input.queries ?? [])].map(async (query) => {
-        const main = await search(shared, query);
-        return project
-          ? mergeLocalContexts(await search(project, query, input.sessionId), main)
-          : main;
+        const indexes = [shared.backend.vectorIndex, project?.backend.vectorIndex].flatMap(
+          (index) => (index ? [index] : []),
+        );
+        const { semantic, reason } = await this.embeddings.query(query, input, indexes);
+        const search = async (engine: MemoryEngine) => {
+          const useVector =
+            semantic && engine.backend.vectorIndex?.has(semantic.indexId, semantic.vector.length);
+          const context = await engine.search(query, input, useVector ? semantic : undefined);
+          if (reason) context.retrieval = { mode: "lexical", degraded: true, reason };
+          return context;
+        };
+        const main = await search(shared);
+        return project ? mergeLocalContexts(await search(project), main) : main;
       }),
     );
     const primary = results[0]!;
@@ -185,11 +211,25 @@ export class PortableMemoryService {
   }
 
   async close(): Promise<void> {
+    await this.embeddings.close();
     const projects = await Promise.allSettled(this.projects.values());
     for (const project of projects)
       if (project.status === "fulfilled") await project.value.backend.close();
     this.projects.clear();
     await this.backend?.close();
+  }
+
+  embeddingHealth(indexId: string) {
+    const stats = this.backend?.vectorIndex?.stats(indexId);
+    return stats
+      ? {
+          indexId,
+          targets: ["records"],
+          indexed: { records: stats.indexed },
+          pending: { records: stats.pending },
+          status: stats.pending ? "running" : "ready",
+        }
+      : null;
   }
 
   private engine(): Promise<MemoryEngine> {
