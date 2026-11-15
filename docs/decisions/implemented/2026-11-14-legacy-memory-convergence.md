@@ -23,6 +23,11 @@ reference rows. Keep SQLite-specific queries and row decoding in
 SQLite code. Route local coordination through explicit board/run/activity ports
 while retaining the shared SQLite file for pure-local use.
 
+Select the local SQLite engine through an activation record published in the
+same transaction as graph import and the legacy write fence. A daemon reopening
+that file follows the record. Codex state and disclosure use the shared session
+runtime and project recall reads the unified backend.
+
 ## Alternatives considered
 
 - Replay legacy statements through remember, which allocates new identities and applies current write policy to historical data.
@@ -31,5 +36,6 @@ while retaining the shared SQLite file for pure-local use.
 ## Consequences
 
 The opt-in [rehearsal and comparison](../../design/unified-architecture/legacy-graph-migration.md)
-cover both the bounded cross-backend graph and the full local copy. Default host
-behavior and writer handoff govern the subsequent switch and retirement of old memory mixins.
+cover the bounded cross-backend graph and the full local copy. Local activation
+retains the legacy profile for databases awaiting migration and preserves the
+original tables for recovery.

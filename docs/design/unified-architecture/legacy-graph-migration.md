@@ -70,14 +70,26 @@ restoring a backup taken after the write, and board access on the restored file.
 The migration test also aborts an insert midway and verifies an empty target
 before retrying.
 
-## Default-entry criteria
+## Local default after activation
 
-The default remains on the legacy path. On the restored copy, the portable
-service rejects the session Active Graph handshake and the project-scoped
-automatic search that the Codex host sends. Attachment lookup also needs the
-remaining file behavior, and the old store's derived indexes have no unified
-engine update path. Complete the host behaviors and verify the writer handoff
-under the [migration gates](../unified-architecture.md#validation-and-migration-gates)
-before switching the default. The SQLite recovery rehearsal restores the
-unified copy and its new writes. Returning to the legacy writer would need a
-separate verified way to carry those writes back.
+On a stopped local daemon, `nmg daemon migrate --db FILE --json` takes the
+daemon lease and makes an online SQLite backup beside the database. It imports
+the graph, fences legacy graph writes and publishes the local namespace marker
+in one SQLite transaction. Regular daemon starts and direct local CLI calls
+automatically use the marked namespace. The main file continues to hold Task
+Board and local run data. Existing project STG files are converted atomically on
+first use in this profile. A project-scoped read against an absent STG uses the
+shared database.
+
+The Codex hook uses the shared session Active Graph runtime for state and
+begin-disclosure, and queries the unified engine for project and shared memory.
+Exact reads and versioned answer attribution use the same session visibility.
+The real-copy rehearsal verified prompt submission, answer attribution,
+legacy write refusal and recovery of a subsequent memory write and a board
+entry from the same SQLite backup.
+
+Activation selects the [local unified profile](native-backends.md). It provides
+lexical recall and existing file attachments. Vector retrieval, independent file
+search and relocation, chains and legacy maintenance methods remain on the
+legacy profile. The activated daemon publishes its supported methods. A backup
+made after activation restores the selected profile and its new writes.

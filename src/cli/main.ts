@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
+import { backup, DatabaseSync } from "node:sqlite";
+import { randomUUID } from "node:crypto";
 
 import {
   type NmgGetParams,
@@ -41,6 +43,11 @@ import {
 } from "./lifecycle.ts";
 import { reloadDaemon } from "./daemon-reload.ts";
 import { NmgService } from "./service.ts";
+import {
+  activatedLocalMemory,
+  LOCAL_MEMORY_NAMESPACE,
+  SqliteMemoryBackend,
+} from "../core/memory/sqlite-backend.ts";
 import { histogramQuantile } from "../core/perf.ts";
 import type { MemoryContext } from "../core/types.ts";
 import { compactSearchContext } from "../integration/search-projection.ts";
@@ -52,7 +59,7 @@ import { assertDaemonCapability, assertDaemonProtocol, parseDaemonHello } from "
 // assembled from the command registry in commands.ts; only the daemon
 // synopsis line is local because daemon commands are not RPC methods.
 const USAGE = cliUsage([
-  "nmg daemon start|restart|reload|status|stop [--data-dir DIR | --db FILE] [--json]",
+  "nmg daemon start|restart|reload|status|stop|migrate [--data-dir DIR | --db FILE] [--json]",
 ]);
 
 export async function runCli(
@@ -93,7 +100,7 @@ export async function runCli(
       io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
       return 1;
     } finally {
-      service.close();
+      await service.close();
     }
   }
   if (parsed.command === "inspect" || parsed.command === "graph") {
@@ -114,7 +121,7 @@ export async function runCli(
       io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
       return 1;
     } finally {
-      service.close();
+      await service.close();
     }
   }
 
@@ -134,7 +141,7 @@ export async function runCli(
     io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   } finally {
-    service.close();
+    await service.close();
   }
 }
 
@@ -186,7 +193,38 @@ async function runDaemonAction(command: DaemonCommand, service: NmgService, tick
     return reloadDaemon(service.databasePath, resolve(import.meta.dirname, "../../bin/nmg.mjs"));
   }
   if (command !== "daemon-run") await waitForReload(service.databasePath);
+  if (command === "daemon-migrate") return migrateDaemonMemory(service.databasePath);
   return runDaemonCommand(command, service, ticket);
+}
+
+async function migrateDaemonMemory(path: string): Promise<Record<string, unknown>> {
+  const lease = acquireServerLease(path);
+  try {
+    const existing = activatedLocalMemory(path);
+    if (existing) return { migrated: true, namespace: existing, databasePath: path };
+    const backupPath = await backupLegacyMemory(path);
+    const backend = new SqliteMemoryBackend(path, LOCAL_MEMORY_NAMESPACE);
+    try {
+      backend.activateLocal();
+    } finally {
+      await backend.close();
+    }
+    return { migrated: true, namespace: LOCAL_MEMORY_NAMESPACE, databasePath: path, backupPath };
+  } finally {
+    lease.release();
+  }
+}
+
+async function backupLegacyMemory(path: string): Promise<string | undefined> {
+  if (!existsSync(path)) return undefined;
+  const copy = `${path}.before-unified-${randomUUID()}.sqlite`;
+  const source = new DatabaseSync(path, { readOnly: true });
+  try {
+    await backup(source, copy);
+    return copy;
+  } finally {
+    source.close();
+  }
 }
 
 async function runDaemonCommand(
@@ -284,9 +322,19 @@ async function runDaemonCommand(
 
   const lease = acquireServerLease(service.databasePath, reloadTicket);
   const stopOnSignal = () => {
-    lease.release();
-    service.close();
-    process.exit(0);
+    void service
+      .drain()
+      .then(() => service.close())
+      .then(
+        () => {
+          lease.release();
+          process.exit(0);
+        },
+        () => {
+          lease.release();
+          process.exit(1);
+        },
+      );
   };
   process.once("SIGINT", stopOnSignal);
   process.once("SIGTERM", stopOnSignal);
@@ -296,12 +344,15 @@ async function runDaemonCommand(
   } finally {
     process.off("SIGINT", stopOnSignal);
     process.off("SIGTERM", stopOnSignal);
-    lease.release();
     // serveHttp resolves on the shutdown RPC or idle timeout, but it only
     // closes the HTTP server. Without service.close() the SQLite handle keeps
     // the event loop alive and the daemon silently lingers (observed as leaked
     // nmg.mjs daemon processes after tests). Release it so the process exits.
-    service.close();
+    try {
+      await service.close();
+    } finally {
+      lease.release();
+    }
   }
 }
 
@@ -330,6 +381,7 @@ type DaemonCommand =
   | "daemon-start"
   | "daemon-restart"
   | "daemon-reload"
+  | "daemon-migrate"
   | "daemon-status"
   | "daemon-stop";
 
@@ -426,8 +478,8 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
 
 function daemonArguments(rest: readonly string[]): ParsedArguments {
   const action = rest[0];
-  if (!["run", "start", "restart", "reload", "status", "stop"].includes(action ?? "")) {
-    throw new Error("daemon requires start, restart, reload, status, or stop");
+  if (!["run", "start", "restart", "reload", "status", "stop", "migrate"].includes(action ?? "")) {
+    throw new Error("daemon requires start, restart, reload, status, stop, or migrate");
   }
   const values = parseOptions(rest.slice(1));
   const allowedFlags = new Set(action === "run" ? [] : ["json"]);
@@ -698,6 +750,8 @@ function humanResult(value: unknown): string {
 }
 
 function humanDaemonResult(result: Record<string, unknown>): string {
+  if (result.migrated)
+    return `Activated unified SQLite memory at ${String(result.databasePath)}.\n`;
   if (result.reloaded)
     return `Reloaded NMG daemon from pid ${String(result.reloadedFrom)} to pid ${String(result.pid)} at ${String(result.endpoint)}; transient AG and leases cleared.\n`;
   if (result.restarted)

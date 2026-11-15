@@ -19,6 +19,7 @@ import { MemoryWriteRejected } from "../write-policy.ts";
 import { TESSERA_REF_MARKER } from "../types.ts";
 import type {
   MemoryContext,
+  EdgePathStep,
   MemoryActor,
   MemoryRecord,
   MemoryScope,
@@ -128,6 +129,7 @@ export class MemoryEngine {
   }
 
   async get(ids: readonly string[], options: MemoryQueryOptions = {}): Promise<MemoryContext> {
+    const graphHops = boundedGraphHops(options.graphHops);
     const view = await this.backend.openRead();
     try {
       const entities = await this.backend.scan(view, {
@@ -138,8 +140,15 @@ export class MemoryEngine {
         limit: 512,
       });
       const results = await this.project(view, entities, options);
+      const order = new Map(ids.map((id, index) => [id, index]));
+      results.sort((left, right) => order.get(left.memory.id)! - order.get(right.memory.id)!);
+      const relations = await this.expand(view, results, {
+        ...options,
+        graphHops,
+        limit: Math.max(results.length, options.limit ?? 50),
+      });
       const tesserae = await this.attachedTesserae(view, results);
-      return { results, relations: [], ...(tesserae.length ? { tesserae } : {}) };
+      return { results, relations, ...(tesserae.length ? { tesserae } : {}) };
     } finally {
       await this.backend.closeRead(view);
     }
@@ -150,12 +159,7 @@ export class MemoryEngine {
     const limit = options.limit ?? 20;
     if (!Number.isInteger(limit) || limit < 1 || limit > 100)
       throw new Error("Search limit must be 1..100");
-    if (
-      !Number.isInteger(options.graphHops ?? 0) ||
-      (options.graphHops ?? 0) < 0 ||
-      (options.graphHops ?? 0) > 2
-    )
-      throw new Error("Graph hops must be 0..2");
+    boundedGraphHops(options.graphHops);
     const view = await this.backend.openRead();
     try {
       const entities = await this.backend.scan(view, {
@@ -407,6 +411,7 @@ export class MemoryEngine {
   ): Promise<NodeRelation[]> {
     let frontier = [...new Set(results.map((item) => item.node.id))];
     const visited = new Set(frontier);
+    const paths = new Map<string, EdgePathStep[]>(frontier.map((id) => [id, []]));
     const relations = new Map<string, NodeRelation>();
     for (
       let depth = 0;
@@ -434,6 +439,17 @@ export class MemoryEngine {
           if (visited.has(adjacent)) continue;
           visited.add(adjacent);
           next.push(adjacent);
+          const path = [
+            ...paths.get(nodeId)!,
+            {
+              relationId: edge.id,
+              sourceNodeId: nodeId,
+              targetNodeId: adjacent,
+              relationType: edge.type,
+              hop: depth + 1,
+            },
+          ];
+          paths.set(adjacent, path);
           const found = await this.backend.scan(view, {
             kind: "memory",
             nodeId: adjacent,
@@ -442,7 +458,8 @@ export class MemoryEngine {
             limit: 100,
           });
           const projected = await this.project(view, found, options);
-          for (const item of projected) if (results.length < options.limit!) results.push(item);
+          for (const item of projected)
+            if (results.length < options.limit!) results.push({ ...item, path });
         }
       }
       frontier = next;
@@ -464,4 +481,9 @@ export class MemoryEngine {
         throw new Error("The recorded operation result is unavailable");
     }
   }
+}
+
+function boundedGraphHops(hops = 0): number {
+  if (!Number.isInteger(hops) || hops < 0 || hops > 3) throw new Error("Graph hops must be 0..3");
+  return hops;
 }

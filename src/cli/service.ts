@@ -85,6 +85,7 @@ import {
   RETRIEVAL_MODES,
   TRUTH_STATUSES,
   VECTOR_GRANULARITIES,
+  type ActiveGraph,
   type ActiveGraphBudget,
   type ClaimPosterior,
   type MemoryChain,
@@ -203,6 +204,8 @@ import {
   type NmgTopologyProposalParams,
 } from "./protocol.ts";
 import { resolveNmgDataDir } from "./data-path.ts";
+import { portableRecallGraph } from "../integration/portable-recall.ts";
+import { activatedLocalMemory } from "../core/memory/sqlite-backend.ts";
 
 const SERVICE_VERSION = "0.1.0";
 type ActiveGraphStorePart = {
@@ -212,10 +215,9 @@ type ActiveGraphStorePart = {
   referenceTargets?: readonly MemoryReferenceTarget[];
 };
 export interface NmgServiceOptions {
-  /** Explicit opt-in. SQLite defaults to databasePath, shared with local coordination.
-   * Legacy memory data is migrated separately, never silently reinterpreted. */
+  /** Select a backend directly. Local SQLite follows the activated namespace when omitted. */
   memoryBackend?:
-    | { kind: "sqlite"; namespace: string; path?: string }
+    | { kind: "sqlite"; namespace: string; path?: string; local?: true }
     | Extract<MemoryBackendOptions, { kind: "lancedb" }>;
   dataDirectory?: string;
   databasePath?: string;
@@ -303,7 +305,7 @@ export class NmgService {
         ? dirname(databasePath)
         : resolveNmgDataDir(environment);
     this.databasePath = databasePath ?? join(dataDirectory, "nmg.sqlite");
-    const memoryBackend = options.memoryBackend;
+    const memoryBackend = options.memoryBackend ?? localMemorySelection(this.databasePath);
     this.#portableMemory = memoryBackend
       ? new PortableMemoryService(
           memoryBackend.kind === "sqlite"
@@ -312,6 +314,7 @@ export class NmgService {
                 path: memoryBackend.path ? resolve(memoryBackend.path) : this.databasePath,
               }
             : memoryBackend,
+          memoryBackend.kind === "sqlite" && memoryBackend.local === true,
         )
       : undefined;
     this.#dataDirectory = dataDirectory;
@@ -476,9 +479,9 @@ export class NmgService {
         case "recordFeedback":
           return this.#recordFeedback(parseRecordFeedbackParams(params)) as NmgMethodResult[M];
         case "recordActiveGraphAttribution":
-          return this.#recordActiveGraphAttribution(
+          return (await this.#attributeRecall(
             parseRecordActiveGraphAttributionParams(params),
-          ) as NmgMethodResult[M];
+          )) as NmgMethodResult[M];
         case "retentionCandidates":
           return {
             candidates: this.#getStore().retentionCandidates(
@@ -646,9 +649,9 @@ export class NmgService {
       case "rememberBatch":
         return memory.rememberMany(parseRememberBatchParams(params).items, operationId);
       case "search":
-        return memory.search(parseSearchParams(params));
+        return this.#searchPortable(parseSearchParams(params));
       case "get":
-        return memory.get(parseGetParams(params));
+        return this.#getPortable(parseGetParams(params));
       case "deleteMemory": {
         const parsed = parseDeleteMemoryParams(params);
         return memory.withdraw(parsed.memoryId, operationId, optionalString(params, "sessionId"));
@@ -659,6 +662,107 @@ export class NmgService {
           `${method} is not a portable memory operation`,
         );
     }
+  }
+
+  async #searchPortable(params: NmgSearchParams): Promise<MemoryContext> {
+    const memory = this.#portableMemory!;
+    const started = performance.now();
+    const context = await memory.search(params);
+    if (!memory.local || !params.sessionId) return context;
+    context.results = this.#recallContext.rank(
+      params.sessionId,
+      resolve(params.projectDir ?? process.cwd()),
+      params.query,
+      context.results,
+    );
+    if (params.autoRecall) context.recallDisplayMode = this.#recallContext.mode(params.sessionId);
+    const projected = portableRecallGraph(context, params, performance.now() - started);
+    const activeGraph = this.#sessionActiveGraphs.registerProjection(
+      projected.activeGraph,
+      this.#portableTraceParts(projected.activeGraph, params.persistTrace),
+    );
+    return { ...projected, activeGraph: activeGraph.graph };
+  }
+
+  #portableTraceParts(
+    graph: ActiveGraph,
+    persistTrace?: boolean,
+  ): Array<ActiveGraphProjectionPart<ActiveGraphStorePart>> {
+    if (persistTrace === false) return [];
+    const store = this.#getStore();
+    const traceId = store.recordRetrievalTrace(
+      {
+        sessionId: graph.sessionId ?? undefined,
+        query: graph.query,
+        taskId: graph.taskId,
+        resultMemoryIds: graph.memoryIds,
+        resultNodeIds: graph.nodeIds,
+        relationIds: graph.edges.map((edge) => edge.id),
+        activeGraphBudget: graph.budget,
+        activeGraphUsage: graph.usage,
+        selections: graph.selections,
+        expansions: graph.expansions,
+        budgetLedger: graph.budgetLedger,
+      },
+      false,
+    );
+    const memoryIds = new Set(graph.memoryIds);
+    return [{ traceId, memoryIds, value: { store, traceId, memoryIds } }];
+  }
+
+  async #getPortable(params: NmgGetParams): Promise<NmgMethodResult["get"]> {
+    if (params.activeGraphId) this.#ownedPortableGraph(params.activeGraphId, params.sessionId);
+    const context = await this.#portableMemory!.get(params);
+    const found = new Set(context.results.map((result) => result.memory.id));
+    return { ...context, missingMemoryIds: params.memoryIds.filter((id) => !found.has(id)) };
+  }
+
+  #ownedPortableGraph(id: string, sessionId?: string) {
+    const projection = this.#sessionActiveGraphs.projection(id, sessionId);
+    if (!projection || projection.sessionId !== (sessionId?.trim() || "__anonymous__"))
+      throw new NmgProtocolError(
+        "NOT_FOUND",
+        "Active Graph projection is absent or belongs to another session",
+      );
+    return projection.graph;
+  }
+
+  async #attributeRecall(
+    params: NmgRecordActiveGraphAttributionParams,
+  ): Promise<NmgMethodResult["recordActiveGraphAttribution"]> {
+    if (!this.#portableMemory?.local) return this.#recordActiveGraphAttribution(params);
+    const graph = this.#ownedPortableGraph(params.activeGraphId, params.sessionId);
+    const visible = new Set(graph.memoryIds);
+    const attributedMemoryIds =
+      params.answerText === undefined
+        ? params.attributedMemoryIds.filter((id) => visible.has(id))
+        : await this.#portableOverlap(graph, params);
+    for (const part of this.#projectionParts(graph.id, params.sessionId) ?? [])
+      part.store.recordActiveGraphAttribution(
+        part.traceId,
+        { method: "answer_overlap", attributedMemoryIds },
+        params.sessionId,
+      );
+    return { activeGraphId: graph.id, attributedMemoryIds };
+  }
+
+  async #portableOverlap(
+    graph: ActiveGraph,
+    params: NmgRecordActiveGraphAttributionParams,
+  ): Promise<string[]> {
+    const versions = new Map(
+      params.memoryVersions!.map((item) => [item.memoryId, item.statementHash]),
+    );
+    const ids = graph.memoryIds.filter((id) => versions.has(id));
+    const context = await this.#portableMemory!.get({
+      memoryIds: ids,
+      sessionId: params.sessionId,
+      projectDir: params.projectDir,
+    });
+    const candidates = context.results.filter(
+      ({ memory }) => versions.get(memory.id) === statementFingerprint(memory.statement),
+    );
+    return deriveAnswerOverlapMemoryIds(params.answerText!, candidates, graph.query);
   }
 
   #hello(): NmgHelloResult {
@@ -2780,6 +2884,11 @@ export class NmgService {
       .catch(() => undefined)
       .finally(() => this.#nodeSummaryDrains.delete(store));
   }
+}
+
+function localMemorySelection(path: string): NmgServiceOptions["memoryBackend"] {
+  const namespace = activatedLocalMemory(path);
+  return namespace ? { kind: "sqlite", namespace, local: true } : undefined;
 }
 
 function parseRememberParams(value: unknown): NmgRememberParams {

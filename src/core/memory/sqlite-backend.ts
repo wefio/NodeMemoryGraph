@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { MemoryOperationConflict } from "./backend.ts";
@@ -20,6 +20,57 @@ import {
   validateCommit,
 } from "./entity-rows.ts";
 import { graphImportRequest } from "./graph-import.ts";
+import { readLegacyMemoryRows } from "../store/legacy-memory-snapshot.ts";
+import { migrate } from "../store/schema.ts";
+import { ftsExpression, ftsIndexedText } from "../store/search-ranking.ts";
+
+const LOCAL_MEMORY_TABLE = "nmg_local_memory";
+export const LOCAL_MEMORY_NAMESPACE = "local-memory-v1";
+const LEGACY_GRAPH_TABLES = [
+  "history_records",
+  "memory_records",
+  "memory_nodes",
+  "node_relations",
+  "memory_evidence_links",
+  "state_key_aliases",
+  "memory_write_events",
+  "tesserae",
+] as const;
+
+function localNamespace(db: DatabaseSync): string | undefined {
+  const exists = db
+    .prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?")
+    .get(LOCAL_MEMORY_TABLE);
+  if (!exists) return undefined;
+  return String(
+    db.prepare(`SELECT namespace FROM ${LOCAL_MEMORY_TABLE} WHERE id=1`).get()!.namespace,
+  );
+}
+
+export function activatedLocalMemory(path: string): string | undefined {
+  if (!existsSync(path)) return undefined;
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    return localNamespace(db);
+  } finally {
+    db.close();
+  }
+}
+
+function fenceLegacyGraph(db: DatabaseSync): void {
+  for (const table of LEGACY_GRAPH_TABLES) {
+    for (const action of ["INSERT", "UPDATE", "DELETE"]) {
+      // Opening the existing coordination store still repeats this schema backfill.
+      const when =
+        table === "memory_evidence_links" && action === "INSERT"
+          ? "WHEN NOT EXISTS (SELECT 1 FROM memory_evidence_links WHERE memory_id=NEW.memory_id AND history_id=NEW.history_id)"
+          : "";
+      db.exec(`CREATE TRIGGER nmg_unified_${table}_${action} BEFORE ${action} ON ${table}
+        ${when}
+        BEGIN SELECT RAISE(ABORT, 'This database uses the unified memory engine'); END`);
+    }
+  }
+}
 
 /** Portable memory format. The legacy Store is imported explicitly, never opened as this schema. */
 export class SqliteMemoryBackend implements MemoryBackend {
@@ -68,18 +119,18 @@ export class SqliteMemoryBackend implements MemoryBackend {
   async scan(view: MemoryReadView, query: MemoryEntityQuery): Promise<MemoryEntity[]> {
     const db = this.reader(view);
     const { limit, offset } = queryBounds(query);
-    let where = `namespace = ${sqlLiteral(this.namespace)} AND ${queryWhere(query)}`;
-    if (query.text?.trim()) {
-      const terms = query.text
-        .trim()
-        .split(/\s+/u)
-        .map((word) => `"${word.replaceAll('"', '""')}"`)
-        .join(" OR ");
-      where += ` AND key IN (SELECT key FROM nmg_memory_fts WHERE namespace = ${sqlLiteral(this.namespace)} AND text MATCH ${sqlLiteral(terms)})`;
-    }
+    const where = `namespace = ${sqlLiteral(this.namespace)} AND ${queryWhere(query)}`;
+    const fts = query.text ? ftsExpression(query.text) : undefined;
+    if (fts === "") return [];
+    const matches = fts
+      ? `JOIN (SELECT key AS fts_key, rank AS fts_rank FROM nmg_memory_fts
+      WHERE namespace = ${sqlLiteral(this.namespace)} AND text MATCH ${sqlLiteral(fts)})
+      ON key = fts_key`
+      : "";
+    const order = fts ? "fts_rank, id" : "id";
     return db
       .prepare(
-        `SELECT kind, payload FROM nmg_memory_entities WHERE ${where} ORDER BY id LIMIT ? OFFSET ?`,
+        `SELECT kind, payload FROM nmg_memory_entities ${matches} WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`,
       )
       .all(limit, offset)
       .map((row) => ({ kind: row.kind, value: JSON.parse(String(row.payload)) }) as MemoryEntity);
@@ -113,11 +164,36 @@ export class SqliteMemoryBackend implements MemoryBackend {
     return outcome.receipt;
   }
 
+  /** Atomically install the current local data and prevent publication through the old tables. */
+  activateLocal(): void {
+    this.transaction(() => {
+      const current = localNamespace(this.writer);
+      if (current === this.namespace) return;
+      if (current || this.revision(this.writer) !== 0)
+        throw new Error("Local activation requires an unused namespace");
+      migrate(this.writer);
+      const entities = readLegacyMemoryRows(this.writer, true);
+      if (entities.length) {
+        const request = graphImportRequest(entities, true);
+        validateCommit(request, entities.length);
+        this.write(request);
+      }
+      fenceLegacyGraph(this.writer);
+      this.writer.exec(`CREATE TABLE ${LOCAL_MEMORY_TABLE} (
+        id INTEGER PRIMARY KEY CHECK(id=1), namespace TEXT NOT NULL)`);
+      this.writer.prepare(`INSERT INTO ${LOCAL_MEMORY_TABLE} VALUES (1, ?)`).run(this.namespace);
+    });
+  }
+
   private publish(request: MemoryCommitRequest): MemoryCommitOutcome {
+    return this.transaction(() => this.write(request));
+  }
+
+  private transaction<T>(run: () => T): T {
     this.assertOpen();
     this.writer.exec("BEGIN IMMEDIATE");
     try {
-      const outcome = this.write(request);
+      const outcome = run();
       this.writer.exec("COMMIT");
       return outcome;
     } catch (error) {
@@ -158,7 +234,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
       if (row.kind === "memory")
         this.writer
           .prepare("INSERT INTO nmg_memory_fts VALUES (?, ?, ?)")
-          .run(this.namespace, row.key, row.text);
+          .run(this.namespace, row.key, ftsIndexedText(row.text));
     }
     this.writer
       .prepare("UPDATE nmg_memory_head SET revision=? WHERE namespace=?")

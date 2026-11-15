@@ -27,10 +27,10 @@ flowchart TB
   Coordination --> DB
 ```
 
-The explicit library entry is `NmgServiceOptions.memoryBackend`. Omitting it keeps
-the existing memory path. It is not selected by a CLI flag or a model parameter.
-Use a new memory namespace; existing memory data is not imported or converted.
-Pure local deployment shares one SQLite file between memory and coordination.
+The explicit library entry is `NmgServiceOptions.memoryBackend`. An explicit
+backend with a new namespace starts empty. Local CLI migration
+installs existing SQLite data and selects it by default on reopen. Pure local
+deployment shares one SQLite file between memory and coordination.
 
 ```typescript
 import { NmgService } from "./src/cli/service.ts";
@@ -107,9 +107,10 @@ This API supports remember/batch, search, exact get and withdrawal. `MemoryEngin
 also supports explicit node links and bounded graph expansion. The capability
 handshake advertises the supported subset. Search supports explicit history,
 source actor and node filters. Attached file references from a full SQLite
-snapshot are returned with visible memories. Session AG, chains, independent
-file search and relocation, vector retrieval, event-time windows, merge/split,
-feedback and other advanced filters remain outside this service profile.
+snapshot are returned with visible memories. The activated local SQLite profile
+also supports session AG, project recall and versioned answer attribution.
+Chains, independent file search and relocation, vector retrieval, event-time
+windows, merge/split and learning feedback remain outside the unified profile.
 No automatic migration, cloud interactive API or native Worker/WASM deployment
 is provided. The existing AML/snapshot path is unchanged.
 

@@ -8,6 +8,9 @@ import { CodexHook } from "../../codex-plugin/hook.ts";
 import { CodexSessionStore } from "../../codex-plugin/session-store.ts";
 import { codexHookBinding } from "../../codex-plugin/session.ts";
 import { NmgService } from "../../src/cli/service.ts";
+import { runCli } from "../../src/cli/main.ts";
+import { NmgStore } from "../../src/core/store.ts";
+import { stgStorePath } from "../../src/core/stg.ts";
 import type { NmgMethod } from "../../src/cli/protocol.ts";
 import { ADAPTER_CAPABILITY_CATALOG } from "../../src/integration/adapter-capability-catalog.ts";
 import { captureStateInvocation } from "../../src/integration/state.ts";
@@ -20,6 +23,142 @@ const turn = "00000000-0000-7000-8000-000000000002";
 const capabilities = ADAPTER_CAPABILITY_CATALOG.codex.capabilities.filter(
   (capability) => !["memory-tools", "state-tool", "lab-tools"].includes(capability),
 );
+
+test("Codex automatically recalls unified SQLite memory from the owning project and session", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-codex-local-memory-"));
+  const databasePath = join(directory, "memory.sqlite");
+  const project = join(directory, "project");
+  const source = new NmgStore(stgStorePath(project));
+  const owner = `codex-${id}`;
+  const captured = source.remember({
+    statement: "Atlas SQLite deployment keeps the owner backup in ProjectRecallMarker",
+    nodeName: "Atlas SQLite project",
+    residence: "stg",
+    sessionId: owner,
+  });
+  source.remember({
+    statement: "Atlas SQLite deployment keeps another backup in OtherSessionMarker",
+    nodeName: "Atlas SQLite project",
+    residence: "stg",
+    sessionId: "other-session",
+  });
+  source.close();
+  let service: NmgService | undefined;
+  const output: string[] = [];
+  const methods: string[] = [];
+  const hook = new CodexHook(
+    {
+      dataDirectory: directory,
+      environment: { NMG_ENABLE_COORDINATION: "0" },
+      invoke: async (method, params) => {
+        methods.push(method);
+        return service!.invoke(method as NmgMethod, params);
+      },
+      writeOutput: async (content) => {
+        output.push(content);
+      },
+    },
+    capabilities,
+  );
+  try {
+    const legacy = new NmgStore(databasePath);
+    try {
+      legacy.remember({
+        statement: "Atlas SQLite deployment keeps a durable rollout guide",
+        nodeName: "Atlas SQLite rollout",
+        markers: [{ kind: "annotation", attributes: { note: "anchor_ref" } }],
+      });
+    } finally {
+      legacy.close();
+    }
+    let migration = "";
+    let stderr = "";
+    assert.equal(
+      await runCli(["daemon", "migrate", "--db", databasePath, "--json"], {
+        stdout: {
+          write: (value) => {
+            migration += String(value);
+            return true;
+          },
+        },
+        stderr: {
+          write: (value) => {
+            stderr += String(value);
+            return true;
+          },
+        },
+      }),
+      0,
+      stderr,
+    );
+    assert.ok(JSON.parse(migration).backupPath);
+    service = new NmgService({ databasePath, environment: {} });
+    assert.ok((await service.invoke("hello")).capabilities.includes("portable-memory"));
+    await hook.run({
+      hook_event_name: "UserPromptSubmit",
+      session_id: id,
+      turn_id: turn,
+      cwd: project,
+      prompt: "What did we previously decide about Atlas SQLite deployment backup?",
+    });
+    assert.deepEqual(methods.slice(0, 3), ["state", "sessionActiveGraph", "search"]);
+    assert.match(output.join("\n"), /ProjectRecallMarker/);
+    assert.doesNotMatch(
+      output.join("\n"),
+      /OtherSessionMarker|optional context preparation is unavailable/,
+    );
+
+    const read = await service.invoke("state", { action: "read", space: "ag", sessionId: owner });
+    assert.match(JSON.stringify(read), new RegExp(captured.memory.id, "u"));
+    const context = await service.invoke("get", {
+      memoryIds: [captured.memory.id],
+      sessionId: owner,
+      projectDir: project,
+    });
+    assert.equal(context.results[0]?.memory.id, captured.memory.id);
+    const outside = await service.invoke("get", {
+      memoryIds: [captured.memory.id],
+      sessionId: owner,
+      projectDir: directory,
+    });
+    assert.equal(outside.results.length, 0);
+    const mainWrite = await service.invoke("remember", {
+      statement: "Unified SQLite remembers the migration fixture",
+      nodeName: "Cutover fixture",
+    });
+    const board = await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "local-cutover",
+      agentId: "test",
+      content: "Shared SQLite coordination",
+      ttlSeconds: 600,
+    });
+    assert.equal(board.action, "put");
+    await service.close();
+    service = new NmgService({ databasePath, environment: {} });
+    assert.equal(
+      (await service.invoke("get", { memoryIds: [mainWrite.memory.id] })).results.length,
+      1,
+    );
+    const oldWriter = new NmgStore(databasePath);
+    try {
+      assert.throws(
+        () =>
+          oldWriter.remember({
+            statement: "An obsolete writer attempted publication",
+            nodeName: "Obsolete",
+          }),
+        /unified memory engine/,
+      );
+      assert.equal(oldWriter.readTaskBoard({ taskId: "local-cutover" }).entries.length, 1);
+    } finally {
+      oldWriter.close();
+    }
+  } finally {
+    await service?.close();
+    removeTempDirectory(directory);
+  }
+});
 
 test("Codex carries full owner state when optional recall fails and restores it after compaction", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-codex-hook-"));

@@ -9,7 +9,7 @@
 | 功能 | Gate／开关 | 默认值 | 含义摘要 | 状态／owner |
 |---|---|---|---|---|
 | 原生答案版本归因 | hello capability `versioned-answer-attribution` | 能力可用，由调用方选择 | 自有投影、已完成回复及匹配的陈述指纹产生诊断重合 | [Codex 契约](../../../codex-plugin/README.zh-CN.md)，确定性原生 fixture 已验证 |
-| 可替换记忆后端 | 库选项 `NmgServiceOptions.memoryBackend` | 未设置；沿用既有路径 | `sqlite` 默认与协作共用 `databasePath`；`lancedb` 指定 URI，协作留在本地；显式命名空间、稳定 `operationId` | 显式启用；原生 S3 协议夹具已验证，真实服务商部署未验证。[后端契约](../unified-architecture/native-backends.zh-CN.md) · [图数据迁移演练](../unified-architecture/legacy-graph-migration.zh-CN.md) |
+| 统一记忆后端 | `nmg daemon migrate` 或 `NmgServiceOptions.memoryBackend` | SQLite 遵循启用标记 | SQLite 与协作共用文件；LanceDB 使用 URI | 本地副本和 S3 协议夹具已验证。[后端契约](../unified-architecture/native-backends.zh-CN.md) · [启用流程](../unified-architecture/legacy-graph-migration.zh-CN.md) |
 | OmniMemEval deployed HTTP transport | `NMG_OMNI_API_URL`、`NMG_OMNI_API_TOKEN`、`NMG_OMNI_API_NAMESPACE` | OFF；默认本地 NDJSON 桥 | 带鉴权和显式 namespace 的同步 AML Add/Search；不做本地 embedding 预检，不支持重定向、删除或操作级物化记录 | 显式启用，验证范围由各实验限定；[Benchmark 集成](../../../evals/omnimemeval/README.zh-CN.md#集成边界) |
 | Board presence, events and Agent status | `board-events`、`board-agent-activity`、`board-agent-presence`、`board-wake-batches`；`nmg_state space=board` | 跟随共享黑板 gate，记录创建为显式动作 | 版本历史、范围通知、邀请订阅与退出、任务状态，以及[会话在线状态与处理报告](../board-event-records/agent-activity-and-batches.zh-CN.md) | 源码验证与部署分开 |
 | Automatic recall deadline and timing | 无 env gate；Pi `/nmg recall timing` 查看诊断 | ON | [五秒绝对等待预算](../session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.zh-CN.md)；显式搜索不受自动期限约束；实现位于 `src/integration/recall-budget.ts` 与 Pi／WorkBuddy adapters | 默认开启；共享 integration owner |
