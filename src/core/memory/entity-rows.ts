@@ -66,6 +66,8 @@ export function entityRow(entity: MemoryEntity): EntityRow {
   } else if (entity.kind === "edge") {
     row.source = entity.value.sourceNodeId;
     row.target = entity.value.targetNodeId;
+  } else if (entity.kind === "history") {
+    row.name = entity.value.sourceMessageId ?? "";
   }
   return row;
 }
@@ -85,6 +87,17 @@ export function receiptRow(receipt: MemoryCommitReceipt): EntityRow {
     name: "",
     statekey: "",
   };
+}
+
+export function commitRows(
+  request: MemoryCommitRequest,
+  receipt: MemoryCommitReceipt,
+): EntityRow[] {
+  return [
+    ...request.changes.upsert.map(entityRow),
+    ...(request.audit ?? []).map((value) => entityRow({ kind: "writeEvent", value })),
+    receiptRow(receipt),
+  ];
 }
 
 export function sqlLiteral(value: string): string {
@@ -110,6 +123,8 @@ export function queryWhere(query: MemoryEntityQuery): string {
     clauses.push(
       `(source = ${sqlLiteral(query.connectedTo)} OR target = ${sqlLiteral(query.connectedTo)})`,
     );
+  if (query.sourceMessageId !== undefined)
+    clauses.push(`(name = ${sqlLiteral(query.sourceMessageId)} OR name = '')`);
   return clauses.join(" AND ");
 }
 
@@ -122,15 +137,27 @@ export function queryBounds(query: MemoryEntityQuery): { limit: number; offset: 
   return { limit, offset };
 }
 
-export function validateCommit(request: MemoryCommitRequest): void {
+export function validateCommit(
+  request: MemoryCommitRequest,
+  limit = MAX_MEMORY_COMMIT_ENTITIES,
+): void {
   if (!request.operationId.trim() || !request.requestHash.trim())
     throw new Error("Operation identity is required");
   if (!Number.isSafeInteger(request.expectedRevision) || request.expectedRevision < 0)
     throw new Error("Invalid expected revision");
-  if (request.changes.upsert.length > MAX_MEMORY_COMMIT_ENTITIES)
-    throw new Error(`At most ${MAX_MEMORY_COMMIT_ENTITIES} entity changes per commit`);
+  if (request.changes.upsert.length > limit)
+    throw new Error(`At most ${limit} entity changes per commit`);
+  const audit = request.audit ?? [];
+  if (audit.length > 128) throw new Error("At most 128 audit events per commit");
+  validateEntities([
+    ...request.changes.upsert,
+    ...audit.map((value): MemoryEntity => ({ kind: "writeEvent", value })),
+  ]);
+}
+
+function validateEntities(entities: readonly MemoryEntity[]): void {
   const keys = new Set<string>();
-  for (const entity of request.changes.upsert) {
+  for (const entity of entities) {
     if (!entity.value.id.trim()) throw new Error("Entity identity is required");
     const key = `${entity.kind}:${entity.value.id}`;
     if (keys.has(key)) throw new Error(`Duplicate entity change ${key}`);

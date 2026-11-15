@@ -53,8 +53,9 @@ transactions retain their existing SQLite contract tests.
 
 The [migration rehearsal](unified-architecture/legacy-graph-migration.md)
 verifies original IDs, references, state replacement, session isolation and
-local board access on SQLite and native local LanceDB. This is an opt-in library
-profile. Full migration and behavior parity, real AWS/S3-compatible provider
+local board access on SQLite and native local LanceDB. SQLite also has a
+full-copy rehearsal with exact-read comparison, an interrupted import and
+post-write backup recovery. Default host behavior parity, real AWS/S3-compatible provider
 deployment, cost/latency benchmarks, branch collection, cloud interactive API
 and concrete Harness plugins remain open.
 

@@ -12,7 +12,7 @@ import type {
   MemoryReadView,
 } from "./backend.ts";
 import {
-  entityRow,
+  commitRows,
   queryBounds,
   queryWhere,
   receiptRow,
@@ -135,7 +135,7 @@ export class LanceMemoryBackend implements MemoryBackend {
         .mergeInsert("key")
         .whenMatchedUpdateAll()
         .whenNotMatchedInsertAll()
-        .execute([...request.changes.upsert.map(entityRow), receiptRow(receipt)]);
+        .execute(commitRows(request, receipt));
       if (request.changes.upsert.some((entity) => entity.kind === "memory"))
         await staged.createIndex("text", { config: Index.fts(), replace: true });
       const version = await staged.version();

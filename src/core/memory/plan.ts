@@ -1,4 +1,4 @@
-import type { HistoryRecord, MemoryRecord, RememberResult } from "../types.ts";
+import type { HistoryRecord, MemoryRecord, MemoryWriteEvent, RememberResult } from "../types.ts";
 import { serializeScope } from "../scope.ts";
 import { normalizeStatement } from "../memory-normalization.ts";
 import type { MemoryBackend, MemoryEntity, MemoryEntityQuery, MemoryReadView } from "./backend.ts";
@@ -8,6 +8,7 @@ import {
   newHistory,
   newMemory,
   newNode,
+  stateAliasId,
   visibleMemory,
 } from "./model.ts";
 import type { MemoryInput } from "./model.ts";
@@ -15,6 +16,7 @@ import type { MemoryInput } from "./model.ts";
 /** One planning view plus uncommitted entities; ordered batch inputs observe prior inputs. */
 export class MemoryPlan {
   readonly changes = new Map<string, MemoryEntity>();
+  readonly audit: MemoryWriteEvent[] = [];
   readonly backend: MemoryBackend;
   readonly view: MemoryReadView;
 
@@ -48,6 +50,7 @@ export class MemoryPlan {
     slot: number,
     now: string,
   ): Promise<RememberResult> {
+    input = await this.resolveStateAlias(input);
     const residence = memoryResidence(input);
     const sessionId = residence === "stg" ? (input.sessionId ?? undefined) : undefined;
     const duplicates = await this.find({
@@ -75,7 +78,29 @@ export class MemoryPlan {
     this.put({ kind: "node", value: node });
     this.put({ kind: "history", value: history });
     this.put({ kind: "memory", value: memory });
+    this.audit.push({
+      id: `${memory.id}_write`,
+      memoryId: memory.id,
+      historyId: history.id,
+      sessionId: input.sessionId ?? null,
+      decision: "accepted",
+      policyReason: "allowed",
+      writeReason: memory.writeReason,
+      writeSource: memory.writeSource,
+      memoryType: memory.memoryType,
+      requestedResidence: residence,
+      createdAt: now,
+    });
     return { history, node, memory };
+  }
+
+  private async resolveStateAlias(input: MemoryInput): Promise<MemoryInput> {
+    if (input.memoryType !== "state" || !input.stateKey) return input;
+    const [alias] = await this.find({
+      kind: "stateAlias",
+      ids: [stateAliasId(input.stateKey, input.scope ?? {})],
+    });
+    return alias?.kind === "stateAlias" ? { ...input, stateKey: alias.value.canonicalKey } : input;
   }
 
   private async node(input: MemoryInput, sessionId: string | undefined, now: string) {
@@ -155,7 +180,7 @@ export class MemoryPlan {
   }
 
   private async history(input: MemoryInput, id: string, now: string): Promise<HistoryRecord> {
-    if (!input.evidenceHistoryId) return newHistory(input, id, now);
+    if (!input.evidenceHistoryId) return this.historyForSource(input, id, now);
     const entities = await this.find({ kind: "history", ids: [input.evidenceHistoryId] });
     const entity = entities[0];
     const sessionId = memoryResidence(input) === "stg" ? input.sessionId : null;
@@ -165,6 +190,28 @@ export class MemoryPlan {
     )
       throw new Error("Evidence does not exist in this session");
     return entity.value;
+  }
+
+  private async historyForSource(
+    input: MemoryInput,
+    id: string,
+    now: string,
+  ): Promise<HistoryRecord> {
+    const history = newHistory(input, id, now);
+    if (!history.sourceMessageId) return history;
+    const entities = await this.find({ kind: "history", sourceMessageId: history.sourceMessageId });
+    const existing = entities.find(
+      (entity) =>
+        entity.kind === "history" &&
+        entity.value.sessionId === history.sessionId &&
+        entity.value.sourceMessageId === history.sourceMessageId,
+    );
+    if (existing?.kind !== "history") return history;
+    if (existing.value.content !== history.content || existing.value.role !== history.role)
+      throw new Error(
+        `source message ${history.sourceMessageId} already exists with different content`,
+      );
+    return existing.value;
   }
 
   private async requireRelated(

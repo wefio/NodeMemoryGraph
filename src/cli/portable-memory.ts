@@ -80,7 +80,17 @@ export class PortableMemoryService {
   }
 
   async search(input: NmgSearchParams) {
-    allowOptions(input, ["query", "scope", "sessionId", "maxTier", "limit", "graphHops"]);
+    allowOptions(input, [
+      "query",
+      "scope",
+      "sessionId",
+      "maxTier",
+      "limit",
+      "graphHops",
+      "includeHistorical",
+      "sourceActor",
+      "nodeName",
+    ]);
     return (await this.engine()).search(input.query, input);
   }
 

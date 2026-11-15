@@ -15,6 +15,82 @@ import { removeTempDirectory } from "../helpers/temp-directory.ts";
 const liveSince = "2025-01-01T00:00:00.000Z";
 const state = { nodeName: "Atlas", memoryType: "state", stateKey: "atlas.region" } as const;
 
+test("SQLite installs a full legacy snapshot atomically and can reopen after new writes", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-migrate-"));
+  const path = join(directory, "source.sqlite");
+  try {
+    const { current } = seedLegacy(path);
+    const db = new DatabaseSync(path);
+    try {
+      db.exec(`WITH RECURSIVE ids(n) AS (
+        VALUES(1) UNION ALL SELECT n + 1 FROM ids WHERE n < 600
+      ) INSERT INTO history_records (id, role, content, created_at)
+      SELECT 'extra-' || n, 'explicit', 'Archived test evidence', '${liveSince}' FROM ids`);
+      db.prepare("UPDATE history_records SET session_id = ? WHERE id = ?").run(
+        "originating-conversation",
+        current.history.id,
+      );
+      db.prepare("UPDATE node_relations SET evidence_ids_json = '[]'").run();
+      db.prepare(
+        "INSERT INTO state_key_aliases VALUES ('atlas.location', '{}', 'atlas.region', ?)",
+      ).run(liveSince);
+    } finally {
+      db.close();
+    }
+    const snapshot = readLegacyMemorySnapshot(path, { fullSqlite: true });
+    assert.ok(snapshot.length > 512);
+    const backend = new SqliteMemoryBackend(path, "local");
+    try {
+      const rejectWrite = new DatabaseSync(path);
+      try {
+        rejectWrite.exec(`CREATE TRIGGER fail_migration BEFORE INSERT ON nmg_memory_entities
+          WHEN NEW.id = 'extra-300' BEGIN SELECT RAISE(ABORT, 'test import interruption'); END`);
+        await assert.rejects(backend.installLegacySnapshot(snapshot), /test import interruption/);
+        assert.equal(
+          rejectWrite.prepare("SELECT count(*) AS n FROM nmg_memory_entities").get()?.n,
+          0,
+        );
+        assert.equal(rejectWrite.prepare("SELECT count(*) AS n FROM nmg_memory_fts").get()?.n, 0);
+        rejectWrite.exec("DROP TRIGGER fail_migration");
+      } finally {
+        rejectWrite.close();
+      }
+      const installed = await backend.installLegacySnapshot(snapshot);
+      assert.equal(installed.revision, 1);
+      const migrated = await new MemoryEngine(backend).get([current.memory.id]);
+      assert.equal(migrated.tesserae?.[0]?.path, "deployment.md");
+      assert.equal(migrated.tesserae?.[0]?.memoryId, current.memory.id);
+      const update = await new MemoryEngine(backend).remember(
+        { ...state, stateKey: "atlas.location", statement: "Atlas region is central" },
+        "new-write",
+      );
+      assert.equal(update.memory.stateKey, "atlas.region");
+      assert.equal(update.memory.supersedesId, current.memory.id);
+      const historical = await new MemoryEngine(backend).search("Atlas", {
+        includeHistorical: true,
+      });
+      assert.ok(historical.results.some((item) => item.memory.id === current.memory.id));
+      assert.deepEqual(await backend.installLegacySnapshot(snapshot), installed);
+      await backend.close();
+      const reopened = new SqliteMemoryBackend(path, "local");
+      try {
+        const engine = new MemoryEngine(reopened);
+        assert.equal(
+          (await engine.get([update.memory.id])).results[0]?.memory.id,
+          update.memory.id,
+        );
+        assert.equal((await engine.get([current.memory.id])).results.length, 0);
+      } finally {
+        await reopened.close();
+      }
+    } finally {
+      await backend.close();
+    }
+  } finally {
+    removeTempDirectory(directory);
+  }
+});
+
 function seedLegacy(path: string) {
   const store = new NmgStore(path);
   try {
@@ -27,6 +103,7 @@ function seedLegacy(path: string) {
       ...state,
       statement: "Atlas region is west",
       validFrom: liveSince,
+      tesserae: [{ path: "deployment.md", snippet: "Atlas region is west" }],
     });
     const dependency = store.remember({
       nodeName: "Registry",

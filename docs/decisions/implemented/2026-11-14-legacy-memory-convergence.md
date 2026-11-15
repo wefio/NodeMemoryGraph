@@ -17,7 +17,9 @@ where it shares the same SQLite file.
 
 Converge domain rules in slices and exercise a consistent legacy graph snapshot
 against both backend contracts. Retain identifiers and publish the rehearsal in a
-single bounded commit. Keep SQLite-specific queries and row decoding in
+single commit. The full local SQLite rehearsal uses a dedicated import into an
+empty namespace on a copy, with existing audit records, state aliases and file
+reference rows. Keep SQLite-specific queries and row decoding in
 SQLite code. Route local coordination through explicit board/run/activity ports
 while retaining the shared SQLite file for pure-local use.
 
@@ -29,5 +31,5 @@ while retaining the shared SQLite file for pure-local use.
 ## Consequences
 
 The opt-in [rehearsal and comparison](../../design/unified-architecture/legacy-graph-migration.md)
-verify one graph slice. Full migration and behavior gates govern a subsequent
-default switch and retirement of the old memory mixins.
+cover both the bounded cross-backend graph and the full local copy. Default host
+behavior and writer handoff govern the subsequent switch and retirement of old memory mixins.

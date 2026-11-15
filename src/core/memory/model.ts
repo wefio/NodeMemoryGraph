@@ -5,13 +5,20 @@ import {
   resolveWriteEventTime,
 } from "../event-time.ts";
 import { normalizeClaims } from "../claims.ts";
+import { serializeScope } from "../scope.ts";
 import { recallTriggerMarkers } from "../recall-triggers.ts";
 import { assertTemporalValidity } from "../semantic-domain.ts";
 import { normalizeMarkers } from "../memory-normalization.ts";
 import { defaultResidence } from "../memory-residence.ts";
 import { validateEvidenceSource } from "../memory-evidence.ts";
 import { assessMemoryWrite, MemoryWriteRejected } from "../write-policy.ts";
-import type { HistoryRecord, MemoryNode, MemoryRecord, RememberInput } from "../types.ts";
+import type {
+  HistoryRecord,
+  MemoryActor,
+  MemoryNode,
+  MemoryRecord,
+  RememberInput,
+} from "../types.ts";
 
 export type MemoryInput = RememberInput & { unsafe?: boolean };
 
@@ -30,6 +37,10 @@ function memoryTruthStatus(input: MemoryInput): MemoryRecord["truthStatus"] {
 
 export function memoryIdentity(...parts: string[]): string {
   return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
+}
+
+export function stateAliasId(key: string, scope: MemoryRecord["scope"]): string {
+  return memoryIdentity(key, serializeScope(scope));
 }
 
 export function requestHash(value: unknown): string {
@@ -98,13 +109,28 @@ export function visibleMemory(
   );
 }
 
+export function searchableMemory(
+  memory: MemoryRecord,
+  options: { sessionId?: string; includeHistorical?: boolean; sourceActor?: MemoryActor },
+  now: string,
+): boolean {
+  if (options.sourceActor && memory.sourceActor !== options.sourceActor) return false;
+  if (!options.includeHistorical) return visibleMemory(memory, options.sessionId, now);
+  return (
+    memory.status !== "deleted" &&
+    !memory.markers.some((marker) => marker.kind === "forget") &&
+    (!memory.sessionId || memory.sessionId === options.sessionId) &&
+    (!memory.expiresAt || Date.parse(memory.expiresAt) > Date.parse(now))
+  );
+}
+
 export function newHistory(input: MemoryInput, id: string, now: string): HistoryRecord {
   return {
     id,
     sessionId: memoryResidence(input) === "stg" ? (input.sessionId ?? null) : null,
-    sourceMessageId: input.evidenceSource?.sourceMessageId ?? null,
-    role: input.evidenceSource?.actor ?? input.sourceActor ?? "user",
-    content: input.evidenceSource?.content ?? input.evidence ?? input.statement,
+    sourceMessageId: input.evidenceSource?.sourceMessageId.trim() || null,
+    role: input.evidenceSource?.actor ?? "explicit",
+    content: (input.evidenceSource?.content ?? input.evidence ?? input.statement).trim(),
     sourceRef: input.evidenceSource?.sourceRef ?? input.sourceRef ?? null,
     createdAt: now,
   };

@@ -122,7 +122,7 @@ for (const kind of ["sqlite", "lancedb"] as const) {
         "memory operations must not open coordination SQLite",
       );
       await assert.rejects(
-        service.invoke("search", { query: "Atlas", includeHistorical: true }),
+        service.invoke("search", { query: "Atlas", retrievalMode: "qwen3" }),
         /does not support/,
       );
       await assert.rejects(service.invoke("chainList", {}), /not supported/);

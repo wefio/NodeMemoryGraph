@@ -3,16 +3,29 @@ import type {
   MemoryNode,
   MemoryRecord,
   MemoryScope,
+  MemoryWriteEvent,
   NodeRelation,
+  TesseraRecord,
 } from "../types.ts";
 
 export const MAX_MEMORY_COMMIT_ENTITIES = 512;
+
+export interface MemoryStateAlias {
+  id: string;
+  aliasKey: string;
+  canonicalKey: string;
+  scope: MemoryScope;
+  createdAt: string;
+}
 
 export type MemoryEntity =
   | { kind: "memory"; value: MemoryRecord }
   | { kind: "history"; value: HistoryRecord }
   | { kind: "node"; value: MemoryNode }
-  | { kind: "edge"; value: NodeRelation };
+  | { kind: "edge"; value: NodeRelation }
+  | { kind: "stateAlias"; value: MemoryStateAlias }
+  | { kind: "writeEvent"; value: MemoryWriteEvent }
+  | { kind: "tessera"; value: TesseraRecord };
 
 /** A service authenticates the namespace before opening a backend. */
 export interface MemoryReadView {
@@ -30,6 +43,7 @@ export interface MemoryEntityQuery {
   text?: string;
   exactText?: string;
   stateKey?: string;
+  sourceMessageId?: string;
   connectedTo?: string;
   limit?: number;
   offset?: number;
@@ -54,6 +68,7 @@ export interface MemoryCommitRequest {
   requestHash: string;
   expectedRevision: number;
   changes: MemoryChanges;
+  audit?: readonly MemoryWriteEvent[];
   resultIds: readonly string[];
   result?: unknown;
 }

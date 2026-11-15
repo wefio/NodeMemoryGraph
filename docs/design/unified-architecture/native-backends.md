@@ -105,9 +105,11 @@ both table groups share one file; with object memory, only coordination uses it.
 
 This API supports remember/batch, search, exact get and withdrawal. `MemoryEngine`
 also supports explicit node links and bounded graph expansion. The capability
-handshake advertises the supported subset. Session AG, chains, file tesserae,
-vector retrieval, historical queries, merge/split, feedback and advanced filters
-are not supplied by this profile; unsupported service operations fail explicitly.
+handshake advertises the supported subset. Search supports explicit history,
+source actor and node filters. Attached file references from a full SQLite
+snapshot are returned with visible memories. Session AG, chains, independent
+file search and relocation, vector retrieval, event-time windows, merge/split,
+feedback and other advanced filters remain outside this service profile.
 No automatic migration, cloud interactive API or native Worker/WASM deployment
 is provided. The existing AML/snapshot path is unchanged.
 

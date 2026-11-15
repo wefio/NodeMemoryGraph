@@ -13,12 +13,12 @@ and maintenance mixins. The explicit profile routes memory through
 
 | Responsibility | Legacy path | Unified engine and remaining difference |
 | --- | --- | --- |
-| Admission and write defaults | Service applies admission, records rejected writes and unsafe bypass, sets truth defaults. Store normalizes markers and derives provisional residence. | Shared admission, marker and default-residence rules. Both service profiles return `WRITE_REJECTED` for secrets in structured evidence. Engine marks bypass. Legacy audit events and full write metadata parity still need work. |
-| Evidence | History rows, source-message dedupe by session, primary evidence and additional links. | Evidence entities and links in memory payloads. Rehearsal preserves all cited IDs. New evidence still needs equivalent source-message reuse and conflict handling. |
-| Deduplication and state | Scoped SQL exact match, normalized recent candidates, optional duplicate judgment, near-match suggestions, scope-aware state-key aliases and state replacement. | Normalized exact matching, scoped state replacement and update evidence role. Alias state and inference, candidate policy, and historical/temporal boundary cases are open. |
+| Admission and write defaults | Service applies admission, records rejected writes and unsafe bypass, sets truth defaults. Store normalizes markers and derives provisional residence. | Shared admission, marker and default-residence rules. Accepted writes publish with their audit event. Policy rejection records a separate metadata-only event. The full SQLite snapshot imports original audit records. |
+| Evidence | History rows, source-message dedupe by session, primary evidence and additional links. | Preserves cited IDs. Writes reuse the same session and source-message pair, and reject different content or actor at that identity. |
+| Deduplication and state | Scoped SQL exact match, normalized recent candidates, optional duplicate judgment, near-match suggestions, scope-aware state-key aliases and state replacement. | Normalized exact matching, scoped state replacement, update evidence role and application of imported aliases. Alias inference, candidate policy and temporal boundary cases are open. |
 | Node identity and graph | SQLite graph tables with node redirects, merges/splits, evidence and relation metadata. | Node/edge payloads and bounded expansion. Reuses active LTG node IDs by name, including imported IDs. Spelling variants, provisional-node identity, topology transforms and retrieval semantics still differ. |
-| Retrieval | Native SQLite candidate queries and indexes, with scope/actor and time filters, vector/FTS, AG and history. | Current lexical retrieval and exact get, with scope/tier/session constraints and graph expansion. Backend ranking can vary. SQLite FTS, index maintenance and SQL stay with the SQLite implementation; the engine owns semantic filters and graph rules. |
-| Lifecycle and surrounding records | Deletion, markers, promotion, retention, chains, tesserae, feedback, session data, audit, and projections. | Withdrawal and current visibility. Rehearsal transfers domain rows only. Lifecycle behavior and dependent records need migration or an explicit compatibility path. |
+| Retrieval | Native SQLite candidate queries and indexes, with scope/actor and time filters, vector/FTS, AG and history. | Lexical retrieval and exact get, with historical results on request, node/actor filters, scope/tier/session constraints and graph expansion. Event-time windows, supersession-aware ranking, embeddings and host automatic recall still differ. |
+| Lifecycle and surrounding records | Deletion, markers, promotion, retention, chains, tesserae, feedback, session data, audit, and projections. | Withdrawal and current visibility. The full SQLite snapshot imports existing file references and the engine returns attachments to visible results. File relocation, standalone file search, new attachments, promotion, retention, chains, feedback and projections remain legacy responsibilities. |
 | Physical layout | `memory_records`, `memory_nodes`, `history_records`, `memory_evidence_links`, `node_relations` and auxiliary SQLite tables. | Native SQLite namespace/entity/FTS tables, or Lance entity data plus published head. Both encode node, memory, evidence and edge domain values with the original IDs on import. |
 | Local coordination | Task Board, run, events and activity in SQLite behind the store. | Service and orchestration see narrow coordination ports. The existing local SQLite implementation remains the owner. When SQLite also holds memory, both sets of tables use the same file. |
 
@@ -48,13 +48,36 @@ after import and check that the source graph remains readable with the same data
 Lance exercises native local objects for this migration. The backend has a
 separate S3 protocol fixture.
 
+## Full SQLite copy and recovery
+
+On a local copy, pass `{ fullSqlite: true }` to the snapshot reader and use
+`SqliteMemoryBackend.installLegacySnapshot(entities)`. SQLite installs the graph,
+alias, audit and file-reference rows in one transaction in a fresh namespace.
+Existing legacy evidence and predecessor links keep their original IDs and
+session provenance. Retrieval still checks the session of the memory returned,
+and new links use the engine's access checks. Dormant and quarantined rows, node
+redirects, and dangling graph references still fail installation. Original
+SQLite tables, including coordination and derived indexes, stay in the copy.
+
+On 2026-11-15, rehearsal on online backups of the owner's main SQLite and project
+STG compared 1,249 and 3 memory IDs respectively. The paths agreed on all 982
+visible results and their primary evidence. The owner copy contained 4,582
+imported entities, including 1,326 audit events and 46 file references. Exact
+reads returned all 45 references belonging to active memories. The remaining
+reference belongs to a deleted memory. The rehearsal checked installed
+entity payloads, an engine write followed by close/reopen, receipt replay,
+restoring a backup taken after the write, and board access on the restored file.
+The migration test also aborts an insert midway and verifies an empty target
+before retrying.
+
 ## Default-entry criteria
 
-Resolve the behavior differences above, including all default entry point
-capabilities, and verify parity against representative legacy databases and
-project/session STG stores. Extend rehearsal to production-size data and
-auxiliary records, and verify restart, source write fencing, and recovery
-after new writes under the [migration gates](../unified-architecture.md#validation-and-migration-gates).
-After those checks, switch the default entry point and remove mixins after
-their remaining callers have migrated. The opt-in profile can be exercised
-independently of those steps.
+The default remains on the legacy path. On the restored copy, the portable
+service rejects the session Active Graph handshake and the project-scoped
+automatic search that the Codex host sends. Attachment lookup also needs the
+remaining file behavior, and the old store's derived indexes have no unified
+engine update path. Complete the host behaviors and verify the writer handoff
+under the [migration gates](../unified-architecture.md#validation-and-migration-gates)
+before switching the default. The SQLite recovery rehearsal restores the
+unified copy and its new writes. Returning to the legacy writer would need a
+separate verified way to carry those writes back.

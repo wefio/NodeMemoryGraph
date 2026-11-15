@@ -6,16 +6,27 @@ import type {
   MemoryReadView,
 } from "./backend.ts";
 import { MemoryOperationConflict } from "./backend.ts";
-import { memoryIdentity, requestHash, validateMemoryInput, visibleMemory } from "./model.ts";
+import {
+  memoryIdentity,
+  requestHash,
+  searchableMemory,
+  validateMemoryInput,
+  visibleMemory,
+} from "./model.ts";
 import type { MemoryInput } from "./model.ts";
 import { MemoryPlan } from "./plan.ts";
+import { MemoryWriteRejected } from "../write-policy.ts";
+import { TESSERA_REF_MARKER } from "../types.ts";
 import type {
   MemoryContext,
+  MemoryActor,
   MemoryRecord,
   MemoryScope,
   MemorySearchResult,
+  MemoryWriteEvent,
   NodeRelation,
   RememberResult,
+  TesseraHit,
 } from "../types.ts";
 
 export interface MemoryQueryOptions {
@@ -24,6 +35,9 @@ export interface MemoryQueryOptions {
   limit?: number;
   maxTier?: 0 | 1 | 2 | 3;
   graphHops?: number;
+  includeHistorical?: boolean;
+  sourceActor?: MemoryActor;
+  nodeName?: string;
 }
 
 interface PlannedResult<T> {
@@ -51,8 +65,8 @@ export class MemoryEngine {
   ): Promise<RememberResult[]> {
     if (!inputs.length || inputs.length > 128)
       throw new Error("A memory batch needs 1..128 inputs");
-    inputs.forEach(validateMemoryInput);
     const timestamp = this.now();
+    await this.validateWrites(inputs, operationId, timestamp);
     return this.mutate(
       operationId,
       { action: "remember", inputs },
@@ -70,6 +84,49 @@ export class MemoryEngine {
     );
   }
 
+  private async validateWrites(inputs: readonly MemoryInput[], operationId: string, now: string) {
+    for (const [slot, input] of inputs.entries()) {
+      try {
+        validateMemoryInput(input);
+      } catch (error) {
+        if (error instanceof MemoryWriteRejected)
+          await this.recordRejection(input, operationId, slot, error.reason, now);
+        throw error;
+      }
+    }
+  }
+
+  private async recordRejection(
+    input: MemoryInput,
+    operationId: string,
+    slot: number,
+    policyReason: string,
+    now: string,
+  ) {
+    const id = memoryIdentity("rejected-memory-write", operationId, String(slot), policyReason);
+    const metadata: Omit<MemoryWriteEvent, "createdAt"> = {
+      id,
+      memoryId: null,
+      historyId: null,
+      sessionId: input.sessionId ?? null,
+      decision: "rejected",
+      policyReason,
+      writeReason: `cli_rejected_${input.memoryType ?? "fact"}`,
+      writeSource: input.writeSource ?? "agent",
+      memoryType: input.memoryType ?? "fact",
+      requestedResidence: input.residence ?? "ltg",
+    };
+    await this.mutate(
+      `audit:${id}`,
+      metadata,
+      async (plan) => {
+        plan.audit.push({ ...metadata, createdAt: now });
+        return { result: null, ids: [] };
+      },
+      async () => null,
+    );
+  }
+
   async get(ids: readonly string[], options: MemoryQueryOptions = {}): Promise<MemoryContext> {
     const view = await this.backend.openRead();
     try {
@@ -80,7 +137,9 @@ export class MemoryEngine {
         scope: options.scope,
         limit: 512,
       });
-      return { results: await this.project(view, entities, options), relations: [] };
+      const results = await this.project(view, entities, options);
+      const tesserae = await this.attachedTesserae(view, results);
+      return { results, relations: [], ...(tesserae.length ? { tesserae } : {}) };
     } finally {
       await this.backend.closeRead(view);
     }
@@ -108,7 +167,13 @@ export class MemoryEngine {
       });
       const results = (await this.project(view, entities, options)).slice(0, limit);
       const relations = await this.expand(view, results, { ...options, limit });
-      return { results, relations, retrieval: { mode: "lexical", degraded: false } };
+      const tesserae = await this.attachedTesserae(view, results);
+      return {
+        results,
+        relations,
+        retrieval: { mode: "lexical", degraded: false },
+        ...(tesserae.length ? { tesserae } : {}),
+      };
     } finally {
       await this.backend.closeRead(view);
     }
@@ -222,6 +287,7 @@ export class MemoryEngine {
           requestHash: hash,
           expectedRevision: view.revision,
           changes: { upsert: [...plan.changes.values()] },
+          audit: plan.audit,
           resultIds: prepared.ids,
           result: prepared.result,
         });
@@ -246,9 +312,10 @@ export class MemoryEngine {
     entities: MemoryEntity[],
     options: MemoryQueryOptions,
   ): Promise<MemorySearchResult[]> {
+    const now = this.now();
     const memories = entities.flatMap((entity) =>
       entity.kind === "memory" &&
-      visibleMemory(entity.value, options.sessionId, this.now()) &&
+      searchableMemory(entity.value, options, now) &&
       entity.value.tier <= (options.maxTier ?? 3)
         ? [entity.value]
         : [],
@@ -261,24 +328,27 @@ export class MemoryEngine {
     });
     const evidenceIds = [...new Set(memories.flatMap((memory) => memory.evidenceIds))];
     const histories = await this.histories(view, evidenceIds);
-    return memories.map((memory, index) => {
+    return memories.flatMap((memory, index) => {
       const node = nodes.find(
         (entity) => entity.kind === "node" && entity.value.id === memory.nodeId,
       );
       const evidenceRecords = histories.filter((entity) => memory.evidenceIds.includes(entity.id));
       const evidence = evidenceRecords.find((item) => item.id === memory.evidenceId);
       if (node?.kind !== "node" || !evidence) throw new Error("Broken memory references");
-      return {
-        memory,
-        node: node.value,
-        evidence,
-        evidenceRecords,
-        lexicalScore: 1 / (index + 1),
-        vectorScore: 0,
-        routeScore: 0,
-        combinedScore: 1 / (index + 1),
-        recallReason: "lexical_match",
-      };
+      if (options.nodeName && node.value.canonicalName !== options.nodeName) return [];
+      return [
+        {
+          memory,
+          node: node.value,
+          evidence,
+          evidenceRecords,
+          lexicalScore: 1 / (index + 1),
+          vectorScore: 0,
+          routeScore: 0,
+          combinedScore: 1 / (index + 1),
+          recallReason: "lexical_match",
+        },
+      ];
     });
   }
 
@@ -293,6 +363,41 @@ export class MemoryEngine {
       for (const entity of entities) if (entity.kind === "history") result.push(entity.value);
     }
     return result;
+  }
+
+  private async attachedTesserae(
+    view: MemoryReadView,
+    results: MemorySearchResult[],
+  ): Promise<TesseraHit[]> {
+    const references = new Map<string, Set<string>>();
+    for (const { memory } of results) {
+      for (const marker of memory.markers) {
+        const id = marker.attributes?.tesseraId;
+        if (marker.kind !== TESSERA_REF_MARKER || typeof id !== "string") continue;
+        const owners = references.get(id) ?? new Set<string>();
+        owners.add(memory.id);
+        references.set(id, owners);
+      }
+    }
+    const ids = [...references.keys()];
+    const hits: TesseraHit[] = [];
+    for (let offset = 0; offset < ids.length; offset += 512) {
+      const entities = await this.backend.scan(view, {
+        kind: "tessera",
+        ids: ids.slice(offset, offset + 512),
+        limit: 512,
+      });
+      for (const entity of entities) {
+        if (
+          entity.kind !== "tessera" ||
+          !references.get(entity.value.id)?.has(entity.value.memoryId ?? "")
+        )
+          continue;
+        const { id, path, snippet, label, kind, memoryId, fileSimhash } = entity.value;
+        hits.push({ id, path, snippet, label, kind, memoryId, fileSimhash });
+      }
+    }
+    return hits;
   }
 
   private async expand(

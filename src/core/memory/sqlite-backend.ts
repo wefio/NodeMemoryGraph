@@ -13,13 +13,13 @@ import type {
 } from "./backend.ts";
 import {
   ENTITY_COLUMNS,
-  entityRow,
+  commitRows,
   queryBounds,
   queryWhere,
-  receiptRow,
   sqlLiteral,
   validateCommit,
 } from "./entity-rows.ts";
+import { graphImportRequest } from "./graph-import.ts";
 
 /** Portable memory format. The legacy Store is imported explicitly, never opened as this schema. */
 export class SqliteMemoryBackend implements MemoryBackend {
@@ -100,8 +100,21 @@ export class SqliteMemoryBackend implements MemoryBackend {
   }
 
   async commit(request: MemoryCommitRequest): Promise<MemoryCommitOutcome> {
-    this.assertOpen();
     validateCommit(request);
+    return this.publish(request);
+  }
+
+  /** Install a trusted legacy graph on an empty namespace, including existing evidence citations. */
+  async installLegacySnapshot(entities: readonly MemoryEntity[]): Promise<MemoryCommitReceipt> {
+    const request = graphImportRequest(entities, true);
+    validateCommit(request, entities.length);
+    const outcome = this.publish(request);
+    if (outcome.status === "conflict") throw new Error("Graph import requires an empty namespace");
+    return outcome.receipt;
+  }
+
+  private publish(request: MemoryCommitRequest): MemoryCommitOutcome {
+    this.assertOpen();
     this.writer.exec("BEGIN IMMEDIATE");
     try {
       const outcome = this.write(request);
@@ -137,7 +150,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
         .fill("?")
         .join(",")})`,
     );
-    for (const row of [...request.changes.upsert.map(entityRow), receiptRow(receipt)]) {
+    for (const row of commitRows(request, receipt)) {
       statement.run(this.namespace, ...ENTITY_COLUMNS.map((column) => row[column]));
       this.writer
         .prepare("DELETE FROM nmg_memory_fts WHERE namespace=? AND key=?")
