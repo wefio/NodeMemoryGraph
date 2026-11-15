@@ -15,15 +15,17 @@ import {
   ENTITY_COLUMNS,
   commitRows,
   queryBounds,
-  queryWhere,
+  sqliteQueryWhere,
   sqlLiteral,
   validateCommit,
 } from "./entity-rows.ts";
 import { graphImportRequest } from "./graph-import.ts";
-import { readLegacyMemoryRows } from "../store/legacy-memory-snapshot.ts";
+import { readLegacyClaimRows, readLegacyMemoryRows } from "../store/legacy-memory-snapshot.ts";
+import { requestHash } from "./model.ts";
 import { migrate } from "../store/schema.ts";
 import { ftsExpression, ftsIndexedText } from "../store/search-ranking.ts";
 import { SqliteMemoryVectors } from "./sqlite-vectors.ts";
+import { readSqliteChainProjection } from "./sqlite-chains.ts";
 
 const LOCAL_MEMORY_TABLE = "nmg_local_memory";
 export const LOCAL_MEMORY_NAMESPACE = "local-memory-v1";
@@ -58,8 +60,8 @@ export function activatedLocalMemory(path: string): string | undefined {
   }
 }
 
-function fenceLegacyGraph(db: DatabaseSync): void {
-  for (const table of LEGACY_GRAPH_TABLES) {
+function fenceLegacyTables(db: DatabaseSync, tables: readonly string[]): void {
+  for (const table of tables) {
     for (const action of ["INSERT", "UPDATE", "DELETE"]) {
       // Opening the existing coordination store still repeats this schema backfill.
       const when =
@@ -99,7 +101,8 @@ export class SqliteMemoryBackend implements MemoryBackend {
       CREATE INDEX IF NOT EXISTS nmg_memory_kind ON nmg_memory_entities(namespace, kind, id);
       CREATE INDEX IF NOT EXISTS nmg_memory_node ON nmg_memory_entities(namespace, kind, node);
       CREATE INDEX IF NOT EXISTS nmg_memory_name ON nmg_memory_entities(namespace, kind, name);
-      CREATE VIRTUAL TABLE IF NOT EXISTS nmg_memory_fts USING fts5(namespace UNINDEXED, key UNINDEXED, text);`);
+      CREATE VIRTUAL TABLE IF NOT EXISTS nmg_memory_fts USING fts5(namespace UNINDEXED, key UNINDEXED, text);
+      CREATE VIRTUAL TABLE IF NOT EXISTS nmg_memory_tessera_fts USING fts5(namespace UNINDEXED, key UNINDEXED, text);`);
     this.writer.prepare("INSERT OR IGNORE INTO nmg_memory_head VALUES (?, 0)").run(namespace);
     this.vectorIndex = new SqliteMemoryVectors(this.writer, namespace, (view) => this.reader(view));
   }
@@ -122,11 +125,12 @@ export class SqliteMemoryBackend implements MemoryBackend {
   async scan(view: MemoryReadView, query: MemoryEntityQuery): Promise<MemoryEntity[]> {
     const db = this.reader(view);
     const { limit, offset } = queryBounds(query);
-    const where = `namespace = ${sqlLiteral(this.namespace)} AND ${queryWhere(query)}`;
+    const where = `namespace = ${sqlLiteral(this.namespace)} AND ${sqliteQueryWhere(query)}`;
     const fts = query.text ? ftsExpression(query.text) : undefined;
     if (fts === "") return [];
+    const ftsTable = textIndex(query.kind);
     const matches = fts
-      ? `JOIN (SELECT key AS fts_key, rank AS fts_rank FROM nmg_memory_fts
+      ? `JOIN (SELECT key AS fts_key, rank AS fts_rank FROM ${ftsTable}
       WHERE namespace = ${sqlLiteral(this.namespace)} AND text MATCH ${sqlLiteral(fts)})
       ON key = fts_key`
       : "";
@@ -144,6 +148,10 @@ export class SqliteMemoryBackend implements MemoryBackend {
       .prepare("SELECT payload FROM nmg_memory_entities WHERE namespace=? AND key=?")
       .get(this.namespace, `receipt:${operationId}`);
     return row ? (JSON.parse(String(row.payload)) as MemoryCommitReceipt) : null;
+  }
+
+  chainProjection(view: MemoryReadView, ids: readonly string[], sessionId?: string) {
+    return readSqliteChainProjection(this.reader(view), ids, sessionId);
   }
 
   async closeRead(view: MemoryReadView): Promise<void> {
@@ -173,6 +181,8 @@ export class SqliteMemoryBackend implements MemoryBackend {
       const current = localNamespace(this.writer);
       if (current === this.namespace) {
         this.vectorIndex.importLegacy();
+        this.importLegacyClaims();
+        this.importLegacyTesseraIndex();
         return;
       }
       if (current || this.revision(this.writer) !== 0)
@@ -185,15 +195,60 @@ export class SqliteMemoryBackend implements MemoryBackend {
         this.write(request);
       }
       this.vectorIndex.importLegacy();
-      fenceLegacyGraph(this.writer);
+      this.importLegacyClaims();
+      this.importLegacyTesseraIndex();
+      fenceLegacyTables(this.writer, LEGACY_GRAPH_TABLES);
       this.writer.exec(`CREATE TABLE ${LOCAL_MEMORY_TABLE} (
         id INTEGER PRIMARY KEY CHECK(id=1), namespace TEXT NOT NULL)`);
       this.writer.prepare(`INSERT INTO ${LOCAL_MEMORY_TABLE} VALUES (1, ?)`).run(this.namespace);
     });
   }
 
+  private importLegacyClaims(): void {
+    const operationId = "migration:legacy-sqlite-claims:v1";
+    if (
+      this.writer
+        .prepare("SELECT 1 FROM nmg_memory_entities WHERE namespace=? AND key=?")
+        .get(this.namespace, `receipt:${operationId}`)
+    )
+      return;
+    const entities = readLegacyClaimRows(this.writer);
+    this.write({
+      operationId,
+      requestHash: requestHash(entities),
+      expectedRevision: this.revision(this.writer),
+      changes: { upsert: entities },
+      resultIds: [],
+    });
+    fenceLegacyTables(this.writer, ["claim_posteriors", "claim_outcome_events"]);
+  }
+
   private publish(request: MemoryCommitRequest): MemoryCommitOutcome {
     return this.transaction(() => this.write(request));
+  }
+
+  private importLegacyTesseraIndex(): void {
+    const operationId = "migration:sqlite-tessera-index:v1";
+    if (
+      this.writer
+        .prepare("SELECT 1 FROM nmg_memory_entities WHERE namespace=? AND key=?")
+        .get(this.namespace, `receipt:${operationId}`)
+    )
+      return;
+    const rows = this.writer
+      .prepare("SELECT payload FROM nmg_memory_entities WHERE namespace=? AND kind='tessera'")
+      .all(this.namespace);
+    const entities = rows.map((row): MemoryEntity => ({
+      kind: "tessera",
+      value: JSON.parse(String(row.payload)),
+    }));
+    this.write({
+      operationId,
+      requestHash: requestHash(entities),
+      expectedRevision: this.revision(this.writer),
+      changes: { upsert: entities },
+      resultIds: [],
+    });
   }
 
   private transaction<T>(run: () => T): T {
@@ -235,13 +290,15 @@ export class SqliteMemoryBackend implements MemoryBackend {
     );
     for (const row of commitRows(request, receipt)) {
       statement.run(this.namespace, ...ENTITY_COLUMNS.map((column) => row[column]));
-      this.writer
-        .prepare("DELETE FROM nmg_memory_fts WHERE namespace=? AND key=?")
-        .run(this.namespace, row.key);
-      if (row.kind === "memory")
+      if (row.kind === "memory" || row.kind === "tessera") {
+        const index = textIndex(row.kind);
         this.writer
-          .prepare("INSERT INTO nmg_memory_fts VALUES (?, ?, ?)")
+          .prepare(`DELETE FROM ${index} WHERE namespace=? AND key=?`)
+          .run(this.namespace, row.key);
+        this.writer
+          .prepare(`INSERT INTO ${index} VALUES (?, ?, ?)`)
           .run(this.namespace, row.key, ftsIndexedText(row.text));
+      }
     }
     this.writer
       .prepare("UPDATE nmg_memory_head SET revision=? WHERE namespace=?")
@@ -273,4 +330,8 @@ export class SqliteMemoryBackend implements MemoryBackend {
   private assertOpen(): void {
     if (this.closed) throw new Error("Memory backend is closed");
   }
+}
+
+function textIndex(kind: string): string {
+  return kind === "tessera" ? "nmg_memory_tessera_fts" : "nmg_memory_fts";
 }

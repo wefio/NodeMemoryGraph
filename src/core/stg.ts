@@ -144,12 +144,15 @@ export function consolidateStgMemoryToLtg(
   const context = stg.getContext([memoryId], 0, sessionId);
   const result = context.results.find((candidate) => candidate.memory.id === memoryId);
   if (!result) throw new Error(`STG memory ${memoryId} does not exist`);
+  return ltg.remember(stgConsolidationInput(result));
+}
+
+export function stgConsolidationInput(
+  result: MemoryContext["results"][number],
+): Parameters<NmgStore["remember"]>[0] {
   const { memory, node, evidence } = result;
-  if (memory.residence !== "stg") throw new Error(`memory ${memoryId} is not resident in STG`);
-  if (memory.markers.some((marker) => marker.kind === "cached_from_ltg")) {
-    throw new Error(`memory ${memoryId} is a cached_from_ltg copy and cannot be consolidated`);
-  }
-  return ltg.remember({
+  assertConsolidatable(memory);
+  return {
     statement: memory.statement,
     nodeName: node.canonicalName,
     nodeSummary: node.summary,
@@ -171,7 +174,7 @@ export function consolidateStgMemoryToLtg(
         attributes: { sourceMemoryId: memory.id },
       },
     ],
-    evidence: evidence?.content ?? memory.statement,
+    evidence: evidence.content,
     sourceRef: evidence?.sourceRef ?? undefined,
     tier: memory.tier,
     importance: memory.importance,
@@ -182,7 +185,14 @@ export function consolidateStgMemoryToLtg(
     residence: "ltg",
     writeReason: "stg_outcome_consolidation",
     writeSource: "automatic",
-  });
+  };
+}
+
+function assertConsolidatable(memory: MemoryContext["results"][number]["memory"]): void {
+  if (memory.residence !== "stg") throw new Error(`memory ${memory.id} is not resident in STG`);
+  if (memory.markers.some((marker) => marker.kind === "cached_from_ltg")) {
+    throw new Error(`memory ${memory.id} is a cached_from_ltg copy and cannot be consolidated`);
+  }
 }
 
 /**

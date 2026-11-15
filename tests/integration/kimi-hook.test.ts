@@ -4,12 +4,17 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
+import { NmgService } from "../../src/cli/service.ts";
+import type { NmgMethod } from "../../src/cli/protocol.ts";
+import { stripProviderEnv } from "../helpers/test-env.ts";
 
 import {
   isBoardWakeCandidate,
   kimiAgentIdentity,
   reportAgentPresence,
 } from "../../kimi-plugin/nmg-hook.mjs";
+
+stripProviderEnv();
 
 const hookPath = resolve(import.meta.dirname, "../../kimi-plugin/nmg-hook.mjs");
 
@@ -109,30 +114,48 @@ test("kimi hook reports a stable discoverable agent identity independently of wa
     },
   );
 
+  const directory = mkdtempSync(resolve(tmpdir(), "nmg-kimi-daemon-contract-"));
+  const service = new NmgService({
+    dataDirectory: directory,
+    environment: {},
+    memoryBackend: { kind: "sqlite", namespace: "kimi-contract", local: true },
+  });
   const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
-  const reported = await reportAgentPresence(
-    { session_id: "kimi-session" },
-    {
-      dataDir: "unused",
-      environment: { NMG_AGENT_ID: "kimi-reviewer", NMG_AGENT_CAPABILITIES: "review" },
-      rpc: async (method: string, params: Record<string, unknown>) => {
-        calls.push({ method, params });
-        return {};
+  try {
+    const reported = await reportAgentPresence(
+      { session_id: "kimi-session" },
+      {
+        dataDir: "unused",
+        environment: { NMG_AGENT_ID: "kimi-reviewer", NMG_AGENT_CAPABILITIES: "review" },
+        rpc: async (method: string, params: Record<string, unknown>) => {
+          calls.push({ method, params });
+          return service.invoke(method as NmgMethod, params);
+        },
       },
-    },
-  );
+    );
 
-  assert.equal(reported, true);
-  assert.deepEqual(calls, [
-    {
-      method: "taskBoard",
-      params: {
-        action: "registerAgent",
-        id: "kimi-reviewer",
-        agentName: "kimi-reviewer",
-        capabilities: "review",
-        supportedInterfaces: "kimi-hook",
+    assert.equal(reported, true);
+    assert.deepEqual(calls, [
+      {
+        method: "taskBoard",
+        params: {
+          action: "registerAgent",
+          id: "kimi-reviewer",
+          agentName: "kimi-reviewer",
+          capabilities: "review",
+          supportedInterfaces: "kimi-hook",
+        },
       },
-    },
-  ]);
+    ]);
+    const result = await service.invoke("taskBoard", {
+      action: "discover",
+      agentId: "test-observer",
+      taskId: "default",
+    });
+    assert.match(JSON.stringify(result), /kimi-reviewer/u);
+    assert.equal((await service.invoke("status")).rpcRejections?.length, 0);
+  } finally {
+    await service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

@@ -11,8 +11,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { assertDaemonProtocol } from "../cli/daemon-client.ts";
+import { assertDaemonProtocol, parseDaemonHello } from "../cli/daemon-client.ts";
 import type { NmgHelloResult } from "../cli/protocol.ts";
+import type { AdapterEndpoint } from "./adapter-capability-assembly.ts";
 import { requiresEventTimeReference } from "../cli/protocol.ts";
 
 export interface HttpLease {
@@ -21,6 +22,7 @@ export interface HttpLease {
   port: number;
   token: string;
   pid: number;
+  endpoint?: AdapterEndpoint;
 }
 
 /** Budget per harness-adapters.md: an RPC must never stall a user turn. */
@@ -120,6 +122,30 @@ export async function compatibleLease(dir: string): Promise<HttpLease | null> {
  * returned no lease (the daemon may start later). */
 export function dropCompatibleLease(dir: string): void {
   verifiedLeaseByDirectory.delete(dir);
+}
+
+export function probeAdapterEndpoint(dir: string): Promise<NmgHelloResult | undefined> | undefined {
+  const lease = liveLease(dir);
+  return lease
+    ? rpcCall(lease, "hello", {})
+        .then(parseDaemonHello)
+        .catch(() => undefined)
+    : undefined;
+}
+
+export function advertisedAdapterEndpoint(
+  lease: Pick<HttpLease, "endpoint"> | null,
+): AdapterEndpoint | undefined {
+  const endpoint = lease?.endpoint;
+  if (!endpoint || !stringList(endpoint.methods) || !stringList(endpoint.searchParameters))
+    return undefined;
+  return { methods: endpoint.methods, searchParameters: endpoint.searchParameters };
+}
+
+function stringList(value: unknown): boolean {
+  return (
+    value === undefined || (Array.isArray(value) && value.every((item) => typeof item === "string"))
+  );
 }
 
 async function verifyLease(dir: string): Promise<HttpLease | null> {

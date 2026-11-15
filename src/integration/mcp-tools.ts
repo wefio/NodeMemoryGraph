@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { AdapterCapability } from "./adapter-capability-assembly.ts";
+import type { AdapterCapability, AdapterEndpoint } from "./adapter-capability-assembly.ts";
 import type { NmgMethod } from "../cli/protocol.ts";
 
 export interface McpSessionBinding {
@@ -17,10 +17,13 @@ export interface NmgMcpOptions {
     signal?: AbortSignal,
   ) => Promise<unknown>;
   capabilities?: readonly AdapterCapability[];
+  endpoint?: AdapterEndpoint;
   onContext?: (binding: McpSessionBinding, context: MemoryContext) => Promise<void>;
 }
 import {
   assembleAdapterCapabilities,
+  endpointSupports,
+  supportedSearchParameters,
   type AdapterToolBindings,
 } from "./adapter-capability-assembly.ts";
 import { ADAPTER_CAPABILITY_CATALOG } from "./adapter-capability-catalog.ts";
@@ -37,7 +40,7 @@ import {
 } from "./state.ts";
 import type { NmgStateResult } from "../cli/protocol.ts";
 import { memoryDisclosureEntries } from "./search-projection.ts";
-import { COMMON_REMEMBER_ACTIONS } from "./tool-contract.ts";
+import { COMMON_REMEMBER_ACTIONS, supportedRememberActions } from "./tool-contract.ts";
 import { searchParameterDescription } from "./tool-contract.ts";
 import {
   renderEvidenceSurface,
@@ -345,7 +348,9 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
     scope.getStore()?.signal?.throwIfAborted();
     const projectDir = scope.getStore()?.binding.projectDir;
     const scoped =
-      projectDir && ["search", "get", "remember", "resolveRemember"].includes(method)
+      projectDir &&
+      ["search", "get", "remember", "resolveRemember", "recordClaimOutcomes"].includes(method) &&
+      (options.endpoint?.searchParameters?.includes("projectDir") ?? true)
         ? { ...params, projectDir }
         : params;
     return options.invoke(method, scoped, scope.getStore()?.signal);
@@ -367,42 +372,48 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
 
   // ── nmg_search ──
 
-  toolBindings.nmg_search = () => {
+  toolBindings.nmg_search = (endpoint) => {
     const registered = server.registerTool(
       "nmg_search",
       {
         description: nmgPrompts.search_description,
-        inputSchema: {
-          query: z.string().describe("Focused recall query"),
-          recallCue: z
-            .string()
-            .optional()
-            .describe(nmgPrompts.search_recall_cue_parameter_description),
-          recallRevision: z
-            .number()
-            .int()
-            .positive()
-            .optional()
-            .describe(nmgPrompts.search_recall_revision_parameter_description),
-          limit: z.number().int().min(1).max(50).default(8),
-          maxTier: z.number().int().min(0).max(3).optional(),
-          graphHops: z.number().int().min(0).max(3).optional(),
-          nodeName: z.string().optional(),
-          sourceActor: z.enum(["user", "assistant", "system", "tool"]).optional(),
-          includeHistorical: z.boolean().optional(),
-          scope: z.record(z.string(), z.string()).optional(),
-          eventTimeFrom: z
-            .string()
-            .optional()
-            .describe(searchParameterDescription("eventTimeFrom")),
-          eventTimeTo: z.string().optional().describe(searchParameterDescription("eventTimeTo")),
-          secondPass: z.boolean().optional(),
-        },
+        inputSchema: supportedSearchParameters(
+          {
+            query: z.string().describe("Focused recall query"),
+            recallCue: z
+              .string()
+              .optional()
+              .describe(nmgPrompts.search_recall_cue_parameter_description),
+            recallRevision: z
+              .number()
+              .int()
+              .positive()
+              .optional()
+              .describe(nmgPrompts.search_recall_revision_parameter_description),
+            limit: z.number().int().min(1).max(50).default(8),
+            maxTier: z.number().int().min(0).max(3).optional(),
+            graphHops: z.number().int().min(0).max(3).optional(),
+            nodeName: z.string().optional(),
+            sourceActor: z.enum(["user", "assistant", "system", "tool"]).optional(),
+            includeHistorical: z.boolean().optional(),
+            scope: z.record(z.string(), z.string()).optional(),
+            eventTimeFrom: z
+              .string()
+              .optional()
+              .describe(searchParameterDescription("eventTimeFrom")),
+            eventTimeTo: z.string().optional().describe(searchParameterDescription("eventTimeTo")),
+            secondPass: z.boolean().optional(),
+          },
+          endpoint,
+        ),
       },
       async (params, extra) =>
         withBinding(extra, async () => {
           // An explicit preparation must survive until its piggybacked search.
-          if (params.recallRevision === undefined) {
+          if (
+            params.recallRevision === undefined &&
+            endpointSupports("sessionActiveGraph", endpoint)
+          ) {
             await invoke("sessionActiveGraph", {
               action: "beginDisclosureTurn",
               sessionId: binding().sessionId,
@@ -429,18 +440,20 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
 
   // ── nmg_get ──
 
-  toolBindings.nmg_get = () => {
+  toolBindings.nmg_get = (endpoint) => {
     const registered = server.registerTool(
       "nmg_get",
       {
         description: nmgPrompts.get_description,
         inputSchema: {
           memoryIds: z.array(z.string()).min(1).max(50).describe("Memory IDs from nmg_search"),
-          graphHops: z.number().int().min(0).max(3).optional(),
-          activeGraphId: z
-            .string()
-            .optional()
-            .describe(nmgPrompts.mcp_active_graph_id_parameter_description),
+          ...(endpointSupports("sessionActiveGraph", endpoint) && {
+            graphHops: z.number().int().min(0).max(3).optional(),
+            activeGraphId: z
+              .string()
+              .optional()
+              .describe(nmgPrompts.mcp_active_graph_id_parameter_description),
+          }),
         },
       },
       async (params, extra) =>
@@ -468,12 +481,18 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
 
   // ── nmg_remember ──
 
-  toolBindings.nmg_remember = () => {
+  toolBindings.nmg_remember = (endpoint) => {
     const registered = server.registerTool(
       "nmg_remember",
       {
         description: nmgPrompts.mcp_remember_description,
-        inputSchema: rememberSchema,
+        inputSchema: {
+          ...rememberSchema,
+          action: z
+            .enum(supportedRememberActions(endpoint?.methods))
+            .default("save")
+            .describe(nmgPrompts.mcp_remember_action_parameter_description),
+        },
       },
       async (params, extra) =>
         withBinding(extra, async () => {
@@ -702,6 +721,8 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
     disclosure: "header" | "evidence",
     projectionId = context.activeGraph?.id,
   ): Promise<{ context: MemoryContext; foldedMemoryIds: string[] }> {
+    if (!endpointSupports("sessionActiveGraph", options.endpoint))
+      return { context, foldedMemoryIds: [] };
     const rawDecision = (await invoke("sessionActiveGraph", {
       action: "disclose",
       sessionId: binding().sessionId,
@@ -786,6 +807,7 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
   const assembly = assembleAdapterCapabilities(
     options.capabilities ?? ADAPTER_CAPABILITY_CATALOG.mcp.capabilities,
     { tools: toolBindings },
+    { endpoint: options.endpoint },
   );
   return {
     server,

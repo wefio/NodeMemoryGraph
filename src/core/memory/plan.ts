@@ -1,7 +1,9 @@
 import type { HistoryRecord, MemoryRecord, MemoryWriteEvent, RememberResult } from "../types.ts";
+import { TESSERA_REF_MARKER } from "../types.ts";
 import { serializeScope } from "../scope.ts";
 import { normalizeStatement } from "../memory-normalization.ts";
 import type { MemoryBackend, MemoryEntity, MemoryEntityQuery, MemoryReadView } from "./backend.ts";
+import { sessionScopedEntity } from "./backend.ts";
 import {
   memoryIdentity,
   memoryResidence,
@@ -27,6 +29,11 @@ export class MemoryPlan {
 
   put(entity: MemoryEntity): void {
     this.changes.set(`${entity.kind}:${entity.value.id}`, entity);
+  }
+
+  async record(id: string, sessionId?: string): Promise<MemoryRecord | null> {
+    const [entity] = await this.find({ kind: "memory", ids: [id], sessionId });
+    return entity?.kind === "memory" ? entity.value : null;
   }
 
   async find(query: MemoryEntityQuery): Promise<MemoryEntity[]> {
@@ -75,6 +82,7 @@ export class MemoryPlan {
     const memory = newMemory(input, id, node.id, history.id, now);
     await this.replacePrevious(input, memory, now);
     await this.requireRelated(memory, sessionId, now);
+    this.attachTesserae(input, memory, now);
     this.put({ kind: "node", value: node });
     this.put({ kind: "history", value: history });
     this.put({ kind: "memory", value: memory });
@@ -92,6 +100,29 @@ export class MemoryPlan {
       createdAt: now,
     });
     return { history, node, memory };
+  }
+
+  private attachTesserae(input: MemoryInput, memory: MemoryRecord, now: string): void {
+    for (const [index, tessera] of (input.tesserae ?? []).entries()) {
+      const path = tessera.path.trim();
+      const snippet = tessera.snippet.trim();
+      if (!path || !snippet) continue;
+      const id = memoryIdentity(memory.id, "tessera", String(index));
+      this.put({
+        kind: "tessera",
+        value: {
+          id,
+          path,
+          snippet,
+          label: tessera.label?.trim() ?? "",
+          kind: tessera.kind?.trim(),
+          memoryId: memory.id,
+          createdAt: now,
+          fileSimhash: tessera.fileSimhash,
+        },
+      });
+      memory.markers.push({ kind: TESSERA_REF_MARKER, attributes: { tesseraId: id, path } });
+    }
   }
 
   private async resolveStateAlias(input: MemoryInput): Promise<MemoryInput> {
@@ -244,6 +275,7 @@ function matches(entity: MemoryEntity, query: MemoryEntityQuery): boolean {
   if (entity.kind === "memory") {
     return matchesMemory(entity.value, query);
   }
+  if (!matchesMetadata(entity, query)) return false;
   if (
     entity.kind === "node" &&
     query.nodeName &&
@@ -254,11 +286,26 @@ function matches(entity: MemoryEntity, query: MemoryEntityQuery): boolean {
   return true;
 }
 
+function matchesMetadata(entity: MemoryEntity, query: MemoryEntityQuery): boolean {
+  if (
+    sessionScopedEntity(entity.kind) &&
+    "sessionId" in entity.value &&
+    entity.value.sessionId &&
+    entity.value.sessionId !== query.sessionId
+  )
+    return false;
+  return (
+    !query.claimMemoryId ||
+    (entity.kind === "claimPosterior" && entity.value.posterior.memoryId === query.claimMemoryId)
+  );
+}
+
 function matchesMemory(memory: MemoryRecord, query: MemoryEntityQuery): boolean {
   if (query.scope && serializeScope(query.scope) !== serializeScope(memory.scope)) return false;
   if (memory.sessionId && memory.sessionId !== query.sessionId) return false;
   if (query.nodeId && memory.nodeId !== query.nodeId) return false;
   if (query.stateKey !== undefined && memory.stateKey !== query.stateKey) return false;
+  if (query.supersedesId && memory.supersedesId !== query.supersedesId) return false;
   return (
     !query.exactText || normalizeStatement(memory.statement) === normalizeStatement(query.exactText)
   );

@@ -197,6 +197,7 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
   registerProjection(
     graph: ActiveGraph,
     parts: Array<ActiveGraphProjectionPart<TPart>>,
+    projectionId: string = randomUUID(),
   ): SessionActiveGraphProjection<TPart> {
     const sessionId = normalizedSessionId(graph.sessionId);
     const state = this.#state(sessionId, graph.taskId);
@@ -207,7 +208,6 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     // chain rather than linking across frames.
     const parentProjectionId = frame.latestProjectionId;
     state.sequence += 1;
-    const projectionId = randomUUID();
     const traceIds = [...new Set(parts.map((part) => part.traceId))];
     const createdAt = new Date(this.#now()).toISOString();
     const projectedGraph: ActiveGraph = deepFreezeGraph({

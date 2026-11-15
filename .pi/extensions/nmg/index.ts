@@ -1,5 +1,6 @@
 import {
   assembleAdapterCapabilities,
+  supportedSearchParameters,
   type AdapterToolBindings,
   type AdapterCapabilityBindings,
 } from "../../../src/integration/adapter-capability-assembly.ts";
@@ -65,7 +66,11 @@ import {
 } from "../../../src/cli/archive-staging.ts";
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import { memoryDisclosureEntries } from "../../../src/integration/search-projection.ts";
-import { PI_BOARD_ACTIONS, PI_REMEMBER_ACTIONS } from "../../../src/integration/tool-contract.ts";
+import {
+  PI_BOARD_ACTIONS,
+  supportedRememberActions,
+} from "../../../src/integration/tool-contract.ts";
+import { advertisedAdapterEndpoint, liveLease } from "../../../src/integration/lease-transport.ts";
 import { searchParameterDescription } from "../../../src/integration/tool-contract.ts";
 import type { TaskBoardToolResult } from "../../../src/integration/tool-contract.ts";
 import {
@@ -190,7 +195,19 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   let contextStateViews: typeof import("../../../src/integration/context-information.ts").contextStateViews;
   const toolBindings: AdapterToolBindings = {};
   const registerSharedTool: ExtensionAPI["registerTool"] = (tool) => {
-    toolBindings[tool.name as keyof AdapterToolBindings] = () => pi.registerTool(tool);
+    toolBindings[tool.name as keyof AdapterToolBindings] = (endpoint) => {
+      if (tool.name !== "nmg_search" || !endpoint?.searchParameters) return pi.registerTool(tool);
+      const schema = tool.parameters as typeof tool.parameters & {
+        properties: Record<string, unknown>;
+      };
+      return pi.registerTool({
+        ...tool,
+        parameters: {
+          ...schema,
+          properties: supportedSearchParameters(schema.properties, endpoint),
+        },
+      });
+    };
   };
   let collectWakeCandidates: typeof import("../../../src/integration/board-wake.ts").collectWakeCandidates;
   let deliverBoardWakeBatch: typeof import("../../../src/integration/board-wake-batch.ts").deliverBoardWakeBatch;
@@ -1117,6 +1134,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    await capabilityAssembly.ready;
     latestAgentCtx = ctx;
     // Flush archive entries staged by a previous session_shutdown. The daemon
     // is lazily started by the first invoke, so this cannot race teardown.
@@ -1511,7 +1529,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     },
   });
 
-  toolBindings.nmg_remember = () =>
+  toolBindings.nmg_remember = (endpoint) =>
     pi.registerTool({
       name: "nmg_remember",
       label: "Remember with NMG",
@@ -1519,7 +1537,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       parameters: Type.Object({
         action: Type.Optional(
           Type.Union(
-            PI_REMEMBER_ACTIONS.map((action) => Type.Literal(action)),
+            supportedRememberActions(endpoint?.methods).map((action) => Type.Literal(action)),
             { description: nmgPrompts.remember_action_parameter_description },
           ),
         ),
@@ -2664,6 +2682,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const capabilityAssembly = assembleAdapterCapabilities(
     ADAPTER_CAPABILITY_CATALOG.pi.capabilities,
     capabilityBindings,
+    { endpoint: advertisedAdapterEndpoint(liveLease(wakeDataDir)) },
   );
   pi.on("session_shutdown", async () => {
     await capabilityAssembly.dispose();

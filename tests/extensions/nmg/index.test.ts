@@ -24,6 +24,8 @@ import { loadPrompts } from "../../../src/prompts/load.ts";
 import { SEARCH_TOOL_PARAMETERS } from "../../../src/integration/tool-contract.ts";
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
 import { NmgStore } from "../../../src/core/store.ts";
+import { SqliteMemoryBackend } from "../../../src/core/memory/sqlite-backend.ts";
+import { connectDaemon, invokeDaemon } from "../../../src/cli/daemon-client.ts";
 import { renameAgentIdentity } from "../../../src/integration/agent-identity.ts";
 import type { MemoryContext } from "../../../src/core/types.ts";
 import { ControllerRuntime } from "../../../src/lab/controller-runtime.ts";
@@ -1014,6 +1016,55 @@ test("NMG prompt keeps a stable policy prefix; dynamic recall goes to the traili
   ]);
   assert.match(full, /<nmg_material>\nrecall\nruntime\n<\/nmg_material>/);
   assert.match(full, /<nmg_guidance>\nnudge\n<\/nmg_guidance>/);
+});
+
+test("Pi sends its live automatic recall and exact lookup to the unified SQLite daemon", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-unified-contract-"));
+  const databasePath = join(directory, "nmg.sqlite");
+  const previous = process.env.NMG_DATA_DIR;
+  const previousProject = process.env.NMG_PROJECT_DIR;
+  process.env.NMG_DATA_DIR = directory;
+  process.env.NMG_PROJECT_DIR = directory;
+  t.after(() => {
+    if (previous === undefined) delete process.env.NMG_DATA_DIR;
+    else process.env.NMG_DATA_DIR = previous;
+    if (previousProject === undefined) delete process.env.NMG_PROJECT_DIR;
+    else process.env.NMG_PROJECT_DIR = previousProject;
+    rmSync(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  });
+  const legacy = new NmgStore(databasePath);
+  const stored = legacy.remember({
+    statement: "Atlas uses CedarStore exclusively for offline storage",
+    nodeName: "Atlas storage",
+  });
+  legacy.close();
+  const backend = new SqliteMemoryBackend(databasePath, "pi-contract");
+  backend.activateLocal();
+  await backend.close();
+  const { handlers, tools } = extensionHarness();
+  const sessionManager = {
+    getSessionId: () => "pi-contract-session",
+    getSessionFile: () => "session.jsonl",
+    getBranch: () => [],
+  };
+  try {
+    const result = (await handlers.get("before_agent_start")!(
+      { prompt: "What did we decide for Atlas offline storage?", systemPrompt: "base" },
+      { sessionManager },
+    )) as { message?: { content: string } };
+    assert.match(result.message?.content ?? "", /CedarStore/u);
+    const exact = await tools
+      .get("nmg_get")!
+      .execute("contract-get", { memoryIds: [stored.memory.id] }, undefined, undefined, {
+        sessionManager,
+      });
+    assert.match(JSON.stringify(exact), /CedarStore/u);
+    const connection = await connectDaemon(databasePath);
+    const status = await invokeDaemon(connection, "status", {});
+    assert.deepEqual((status as { rpcRejections?: unknown[] }).rpcRejections, []);
+  } finally {
+    await handlers.get("session_shutdown")!({}, { sessionManager });
+  }
 });
 
 test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", async () => {

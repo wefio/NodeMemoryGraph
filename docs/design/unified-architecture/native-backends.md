@@ -112,10 +112,11 @@ also supports session AG, project recall, versioned answer attribution, and
 vector and hybrid retrieval. Its SQLite backend owns the model-keyed record
 index plus candidate queries. The engine combines those candidates with full
 text and applies visibility and graph rules. The host supplies embeddings.
-Chains, independent file search and relocation, event-time
-windows, merge/split and learning feedback remain outside the unified profile.
-No automatic migration, cloud interactive API or native Worker/WASM deployment
-is provided. The existing AML/snapshot path is unchanged.
+The [local compatibility profile](legacy-graph-migration.md#local-default-after-activation)
+also owns event-time windows, lifecycle writes, feedback, bookmark lookup and
+existing chain projection. Chain editing and node transforms retain separate
+migration gates. Native Worker/WASM deployment and the cloud interactive API
+remain separate work.
 
 The [legacy graph migration rehearsal](legacy-graph-migration.md) compares the
 two paths and exercises a bounded import into either backend.

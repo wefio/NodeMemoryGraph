@@ -1,4 +1,4 @@
-import { assembleAdapterCapabilities } from '../../../../src/integration/adapter-capability-assembly.ts'
+import { assembleAdapterCapabilities, supportedSearchParameters } from '../../../../src/integration/adapter-capability-assembly.ts'
 import { ADAPTER_CAPABILITY_CATALOG } from '../../../../src/integration/adapter-capability-catalog.ts'
 // NMG adapter for DeepSeek Harness — community-standard dual-face host package.
 //
@@ -29,7 +29,7 @@ import { randomUUID } from 'node:crypto'
 import { connect } from 'node:net'
 import type { Context } from '@deepseek-ai/cordis'
 import { coordinationEnabled as configuredCoordinationEnabled } from '../../../../src/integration/config.ts'
-import { appendRememberTimeContext, COMMON_REMEMBER_ACTIONS } from '../../../../src/integration/tool-contract.ts'
+import { appendRememberTimeContext, COMMON_REMEMBER_ACTIONS, supportedRememberActions } from '../../../../src/integration/tool-contract.ts'
 import { requiresEventTimeReference } from '../../../../src/cli/protocol.ts'
 import {
   SEARCH_REQUIRED_PARAMETERS,
@@ -87,7 +87,7 @@ function estimateTokens(text) {
   return Math.ceil(cjk + latin / 4)
 }
 
-export function apply(ctx: Context): () => Promise<void> {
+export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<void> } {
   let prepareAutomaticRecallSurface: typeof import('../../../../src/integration/agent-surface.ts').prepareAutomaticRecallSurface
   let contextStateViews: typeof import('../../../../src/integration/context-information.ts').contextStateViews
   const tools = ctx.tools
@@ -224,6 +224,11 @@ export function apply(ctx: Context): () => Promise<void> {
       daemon = null
       return null
     }
+  }
+
+  function readAdapterEndpoint() {
+    if (!resolveDaemon()) return undefined
+    return daemonCall('hello', {}, AbortSignal.timeout(2000)).catch(() => undefined)
   }
 
   // TCP 端口探测：进程活着 ≠ 服务可用（僵尸 daemon：pid 在但端口已释放，
@@ -648,6 +653,7 @@ export function apply(ctx: Context): () => Promise<void> {
   }
 
   async function onRequest(payload, next) {
+    await capabilityAssembly.ready
     const sessionId = String(payload?.agent?.id ?? '')
     if (!sessionId || hostDisposed || disposedAgents.has(payload.agent)) return next()
     const generation = recallGenerations.get(sessionId)
@@ -1742,9 +1748,21 @@ export function apply(ctx: Context): () => Promise<void> {
 
   const capabilityAssembly = assembleAdapterCapabilities(ADAPTER_CAPABILITY_CATALOG.dsh.capabilities, {
     tools: {
-      nmg_search: () => tools.register(searchTool),
+      nmg_search: endpoint => tools.register({
+        ...searchTool,
+        parameters: { ...searchTool.parameters, properties: supportedSearchParameters(searchTool.parameters.properties, endpoint) },
+      }),
       nmg_get: () => tools.register(getTool),
-      nmg_remember: () => tools.register(rememberTool),
+      nmg_remember: endpoint => tools.register({
+        ...rememberTool,
+        parameters: {
+          ...rememberTool.parameters,
+          properties: {
+            ...rememberTool.parameters.properties,
+            action: { ...rememberTool.parameters.properties.action, enum: supportedRememberActions(endpoint?.methods) },
+          },
+        },
+      }),
       nmg_state: () => tools.register(stateTool),
       nmg_lab: () => tools.register(labTool),
     },
@@ -1774,7 +1792,7 @@ export function apply(ctx: Context): () => Promise<void> {
       reportHarnessActivity = activity
     },
     'tool-observation': ({ observe }) => ctx.on('tools/result', (exec, result) => nativeEvents.observe(exec, result, observe)),
-  })
+  }, { endpoint: readAdapterEndpoint() })
   const disposers = [
     tools.register(daemonTool),
     contextDisposer,
@@ -1791,7 +1809,7 @@ export function apply(ctx: Context): () => Promise<void> {
   if (wakeRouteDisposer) disposers.push(wakeRouteDisposer)
 
   // Return the cordis dispose-time cleanup for this plugin contribution.
-  return async () => {
+  const dispose = async () => {
     hostDisposed = true
     await capabilityAssembly.dispose()
     for (const dispose of disposers) {
@@ -1807,5 +1825,6 @@ export function apply(ctx: Context): () => Promise<void> {
     maintainedState.clear()
     wakeBatch.clear()
   }
+  return Object.assign(dispose, { ready: capabilityAssembly.ready })
 }
 

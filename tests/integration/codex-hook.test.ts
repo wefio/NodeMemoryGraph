@@ -110,6 +110,7 @@ test("Codex automatically recalls unified SQLite memory from the owning project 
 
     const read = await service.invoke("state", { action: "read", space: "ag", sessionId: owner });
     assert.match(JSON.stringify(read), new RegExp(captured.memory.id, "u"));
+    assert.deepEqual((await service.invoke("status")).rpcRejections, []);
     const context = await service.invoke("get", {
       memoryIds: [captured.memory.id],
       sessionId: owner,

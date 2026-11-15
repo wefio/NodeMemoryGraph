@@ -65,8 +65,8 @@ function canonicalJson(value: unknown): string {
 export function validateMemoryInput(input: MemoryInput): void {
   if (!input.statement.trim() || !input.nodeName.trim())
     throw new Error("Statement and node name are required");
-  if (input.judgeDuplicates || input.tesserae?.length)
-    throw new Error("Portable memory does not yet support duplicate callbacks or file tesserae");
+  if (input.judgeDuplicates)
+    throw new Error("Portable memory does not support duplicate callbacks");
   const assessment = assessMemoryWrite({
     ...input,
     bypass: input.unsafe,

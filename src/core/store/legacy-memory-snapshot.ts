@@ -10,7 +10,9 @@ import {
 } from "./rows.ts";
 import type { StoreRow } from "./search-ranking.ts";
 import { stateAliasId } from "../memory/model.ts";
-import type { TesseraRecord } from "../types.ts";
+import { claimOutcomeId, claimPosteriorId } from "../memory/claim-outcomes.ts";
+import { claimPosterior } from "../claims.ts";
+import type { ClaimOutcomeEvent, TesseraRecord } from "../types.ts";
 
 /** Read a consistent graph from a current legacy schema without changing the source. */
 export function readLegacyMemorySnapshot(
@@ -100,4 +102,70 @@ function mapLegacyTessera(row: StoreRow): TesseraRecord {
     ...(row.memory_id === null ? {} : { memoryId: String(row.memory_id) }),
     ...(row.file_simhash === null ? {} : { fileSimhash: String(row.file_simhash) }),
   };
+}
+
+/** Compatibility metadata preserved for namespaces activated before this contract. */
+export function readLegacyClaimRows(db: DatabaseSync): MemoryEntity[] {
+  const events = db
+    .prepare(
+      `
+    SELECT e.*, m.session_id FROM claim_outcome_events e
+    JOIN memory_records m ON m.id=e.memory_id ORDER BY e.id
+  `,
+    )
+    .all();
+  const posteriors = db
+    .prepare(
+      `
+    SELECT p.*, m.session_id FROM claim_posteriors p
+    JOIN memory_records m ON m.id=p.memory_id ORDER BY p.memory_id, p.claim_index
+  `,
+    )
+    .all();
+  return [
+    ...events.map((row): MemoryEntity => {
+      const memoryId = String(row.memory_id);
+      const claimIndex = Number(row.claim_index);
+      const semanticTaskId = String(row.semantic_task_id);
+      return {
+        kind: "claimOutcome",
+        value: {
+          id: claimOutcomeId(memoryId, claimIndex, semanticTaskId),
+          memoryId,
+          claimIndex,
+          semanticTaskId,
+          source: String(row.source) as ClaimOutcomeEvent["source"],
+          sourceLineage: String(row.source_lineage),
+          outcome: String(row.outcome) as ClaimOutcomeEvent["outcome"],
+          collectionOrigin: String(row.collection_origin) as ClaimOutcomeEvent["collectionOrigin"],
+          weight: Number(row.weight),
+          activeGraphId: row.active_graph_id ? String(row.active_graph_id) : null,
+          evidenceId: row.evidence_id ? String(row.evidence_id) : null,
+          sessionId: row.session_id ? String(row.session_id) : null,
+          createdAt: String(row.created_at),
+        },
+      };
+    }),
+    ...posteriors.map((row): MemoryEntity => {
+      const memoryId = String(row.memory_id);
+      const claimIndex = Number(row.claim_index);
+      return {
+        kind: "claimPosterior",
+        value: {
+          posterior: claimPosterior({
+            memoryId,
+            claimIndex,
+            claimText: String(row.claim_text),
+            priorConfidence: Number(row.prior_confidence),
+            alpha: Number(row.alpha),
+            beta: Number(row.beta),
+            independentVoteCount: Number(row.independent_vote_count),
+            updatedAt: String(row.updated_at),
+          }),
+          id: claimPosteriorId(memoryId, claimIndex),
+          sessionId: row.session_id ? String(row.session_id) : null,
+        },
+      };
+    }),
+  ];
 }

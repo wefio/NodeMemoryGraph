@@ -1307,8 +1307,11 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       });
     }
 
-    recordRetrievalTrace(input: RetrievalTraceInput, trackGraphSignals = true): string {
-      const id = randomUUID();
+    recordRetrievalTrace(
+      input: RetrievalTraceInput,
+      trackGraphSignals = true,
+      id: string = randomUUID(),
+    ): string {
       const createdAt = new Date().toISOString();
       const nodeIds = [...new Set(input.resultNodeIds)].sort();
       const taskId = input.taskId?.trim() || stableTaskId(input.query);
@@ -1698,6 +1701,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       activeGraphId: string,
       disclosedMemoryIds: readonly string[],
       sessionId?: string,
+      trackUsage = true,
     ): void {
       const row = this.db
         .prepare("SELECT * FROM retrieval_traces WHERE id = ?")
@@ -1712,7 +1716,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       this.db
         .prepare("UPDATE retrieval_traces SET disclosed_memory_ids_json = ? WHERE id = ?")
         .run(JSON.stringify(disclosed), activeGraphId);
-      this.recordUsage(observed);
+      if (trackUsage) this.recordUsage(observed);
     }
 
     recordActiveGraphAttribution(

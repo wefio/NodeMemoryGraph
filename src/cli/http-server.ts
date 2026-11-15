@@ -62,12 +62,14 @@ export async function serveHttp(
   await listen(server);
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
+  const { methods, searchParameters } = await service.invoke("hello");
   lease.update({
     transport: "http",
     host: "127.0.0.1",
     port,
     token,
     protocol: NMG_PROTOCOL_VERSION,
+    endpoint: { methods, searchParameters },
   });
 
   await closed;
@@ -136,13 +138,14 @@ async function handle(
 
   let request: { method?: unknown; params?: unknown; id?: unknown };
   try {
-    request = JSON.parse(raw) as { method?: unknown; params?: unknown; id?: unknown };
+    request = parseRequest(raw);
   } catch {
     send(400, jsonRpcError(undefined, -32700, "parse error"));
     return;
   }
   const method = request.method;
   if (typeof method !== "string" || !isKnownMethod(method)) {
+    service.recordUnknownRpcMethod();
     send(400, jsonRpcError(request.id, -32601, `method not found: ${String(method)}`));
     return;
   }
@@ -164,6 +167,10 @@ async function handle(
       jsonRpcError(request.id, protocol ? -32602 : -32603, errorMessage(error)),
     );
   }
+}
+
+function parseRequest(raw: string): { method?: unknown; params?: unknown; id?: unknown } {
+  return JSON.parse(raw) ?? {};
 }
 
 async function prepareReloadIfRequested(service: NmgService, params: unknown): Promise<void> {

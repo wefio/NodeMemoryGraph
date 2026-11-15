@@ -17,8 +17,8 @@ and maintenance mixins. The explicit profile routes memory through
 | Evidence | History rows, source-message dedupe by session, primary evidence and additional links. | Preserves cited IDs. Writes reuse the same session and source-message pair, and reject different content or actor at that identity. |
 | Deduplication and state | Scoped SQL exact match, normalized recent candidates, optional duplicate judgment, near-match suggestions, scope-aware state-key aliases and state replacement. | Normalized exact matching, scoped state replacement, update evidence role and application of imported aliases. Alias inference, candidate policy and temporal boundary cases are open. |
 | Node identity and graph | SQLite graph tables with node redirects, merges/splits, evidence and relation metadata. | Node/edge payloads and bounded expansion. Reuses active LTG node IDs by name, including imported IDs. Spelling variants, provisional-node identity, topology transforms and retrieval semantics still differ. |
-| Retrieval | Native SQLite candidate queries and indexes, with scope/actor and time filters, vector/FTS, AG and history. | Lexical, vector and hybrid retrieval, exact get and project-scoped host recall. Event-time windows and supersession-aware ranking still differ. |
-| Lifecycle and surrounding records | Deletion, markers, promotion, retention, chains, tesserae, feedback, session data, audit, and projections. | Withdrawal and current visibility. The full SQLite snapshot imports existing file references and the engine returns attachments to visible results. File relocation, standalone file search, new attachments, promotion, retention, chains, feedback and projections remain legacy responsibilities. |
+| Retrieval | Native SQLite candidate queries and indexes, with scope/actor and time filters, vector/FTS, AG and history. | Lexical, vector and hybrid retrieval, exact get, event-time bounds and project-scoped host recall. Supersession-aware ranking and legacy chain expansion heuristics remain distinct. |
+| Lifecycle and surrounding records | Deletion, markers, promotion, retention, chains, tesserae, feedback, session data, audit, and projections. | Unified lifecycle writes cover withdrawal, resolution, reopening, supersession, relation proposals and claim outcomes. Local SQLite projects existing chain membership and edges and indexes file bookmarks. Explicit search and get can resolve file locations. The daemon owns session projections and feedback. Chain editing and legacy topology and retention operations require separate migration. |
 | Physical layout | `memory_records`, `memory_nodes`, `history_records`, `memory_evidence_links`, `node_relations` and auxiliary SQLite tables. | Native SQLite namespace/entity/FTS tables, or Lance entity data plus published head. Both encode node, memory, evidence and edge domain values with the original IDs on import. |
 | Local coordination | Task Board, run, events and activity in SQLite behind the store. | Service and orchestration see narrow coordination ports. The existing local SQLite implementation remains the owner. When SQLite also holds memory, both sets of tables use the same file. |
 
@@ -81,6 +81,11 @@ Board and local run data. Existing project STG files are converted atomically on
 first use in this profile. A project-scoped read against an absent STG uses the
 shared database.
 
+Local activation also imports historical claim outcomes and posterior counters
+in one transaction. The migration receipt preserves the original vote
+deduplication key across upgrades and restarts. Existing local namespaces
+receive the same metadata import on first open.
+
 The Codex hook uses the shared session Active Graph runtime for state and
 begin-disclosure, and queries the unified engine for project and shared memory.
 Exact reads and versioned answer attribution use the same session visibility.
@@ -94,9 +99,8 @@ transaction. SQLite reuses the existing node and leaf vectors as hierarchy
 signals, and new records contribute through the record index. The configured
 provider fills missing record vectors in bounded batches outside transactions.
 Provider failure leaves missing work available for retry and search reports
-lexical degradation. The activated daemon publishes the supported methods.
-Independent file search and relocation, chains and legacy maintenance remain
-on the legacy profile.
+lexical degradation. The activated daemon publishes its supported method and
+search parameter catalog.
 
 The owner-copy rehearsal compared all 1,249 existing Gemini record vectors,
 then ran vector, hierarchy hybrid and union hybrid retrieval with the configured

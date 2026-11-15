@@ -1,11 +1,17 @@
 import type {
+  ClaimOutcomeEvent,
+  ClaimPosterior,
   HistoryRecord,
   MemoryNode,
   MemoryRecord,
+  MemoryResolution,
   MemoryScope,
+  MemoryContext,
+  MemorySearchResult,
   MemoryWriteEvent,
   NodeRelation,
   TesseraRecord,
+  TopologyProposal,
 } from "../types.ts";
 
 export const MAX_MEMORY_COMMIT_ENTITIES = 512;
@@ -25,9 +31,39 @@ export type MemoryEntity =
   | { kind: "edge"; value: NodeRelation }
   | { kind: "stateAlias"; value: MemoryStateAlias }
   | { kind: "writeEvent"; value: MemoryWriteEvent }
+  | { kind: "relationProposal"; value: TopologyProposal & { sessionId: string | null } }
+  | {
+      kind: "claimPosterior";
+      value: { id: string; sessionId: string | null; posterior: ClaimPosterior };
+    }
+  | { kind: "claimOutcome"; value: ClaimOutcomeEvent & { sessionId: string | null } }
+  | {
+      kind: "resolutionEvent";
+      value: {
+        id: string;
+        memoryId: string;
+        fromResolution: MemoryResolution;
+        toResolution: MemoryResolution;
+        openedAt: string | null;
+        relatedMemoryIds: string[];
+        reason: string | null;
+        sessionId: string | null;
+        createdAt: string;
+      };
+    }
   | { kind: "tessera"; value: TesseraRecord };
 
 /** A service authenticates the namespace before opening a backend. */
+export function sessionScopedEntity(kind: MemoryEntity["kind"]): boolean {
+  return (
+    kind === "memory" ||
+    kind === "relationProposal" ||
+    kind === "resolutionEvent" ||
+    kind === "claimPosterior" ||
+    kind === "claimOutcome"
+  );
+}
+
 export interface MemoryReadView {
   readonly revision: number;
 }
@@ -44,6 +80,11 @@ export interface MemoryEntityQuery {
   exactText?: string;
   stateKey?: string;
   sourceMessageId?: string;
+  supersedesId?: string;
+  claimMemoryId?: string;
+  consolidatedFrom?: string;
+  eventTimeFrom?: string;
+  eventTimeTo?: string;
   connectedTo?: string;
   limit?: number;
   offset?: number;
@@ -81,12 +122,22 @@ export interface MemoryBackend {
   readonly namespace: string;
   readonly kind: "sqlite" | "lancedb";
   readonly vectorIndex?: MemoryVectorIndex;
+  chainProjection?(
+    view: MemoryReadView,
+    ids: readonly string[],
+    sessionId?: string,
+  ): MemoryChainProjection;
   openRead(): Promise<MemoryReadView>;
   scan(view: MemoryReadView, query: MemoryEntityQuery): Promise<MemoryEntity[]>;
   receipt(view: MemoryReadView, operationId: string): Promise<MemoryCommitReceipt | null>;
   closeRead(view: MemoryReadView): Promise<void>;
   commit(request: MemoryCommitRequest): Promise<MemoryCommitOutcome>;
   close(): Promise<void>;
+}
+
+export interface MemoryChainProjection {
+  memberships: Map<string, NonNullable<MemorySearchResult["chainMemberships"]>>;
+  edges: NonNullable<MemoryContext["chainEdges"]>;
 }
 
 export interface MemoryVectorQuery {

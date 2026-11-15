@@ -4,12 +4,28 @@ import {
   activeGraphBudgetLedger,
   activeGraphExpansions,
   estimateResultTokens,
+  expandActiveGraphBudget,
+  fibonacciEvidenceBudgets,
   selectWithinActiveGraphBudget,
   stableTaskId,
 } from "../core/store/active-graph.ts";
-import type { ActiveGraph, MemoryContext, MemoryTier } from "../core/types.ts";
+import type {
+  ActiveGraph,
+  ActiveGraphBudget,
+  MemoryContext,
+  MemoryTier,
+  QppTriggerDecision,
+} from "../core/types.ts";
 import type { NmgSearchParams } from "../cli/protocol.ts";
-import { shouldTriggerSecondPass } from "../core/qpp.ts";
+import {
+  computeQppComponents,
+  DEFAULT_INITIAL_EVIDENCE_TARGET,
+  shouldTriggerSecondPass,
+  STRONG_HIT_INITIAL_TARGET,
+  STRONG_HIT_TOP_GAP,
+} from "../core/qpp.ts";
+import { MIN_WARM_DISCLOSURE_SIZE } from "../core/store/graph-policy.ts";
+import { hybridScore } from "../core/store/search-ranking.ts";
 import type { MemorySearchResult } from "../core/types.ts";
 
 /** Apply the session graph budget to already-authorized engine results. */
@@ -18,18 +34,21 @@ export function portableRecallGraph(
   input: NmgSearchParams,
   elapsedMs: number,
 ): MemoryContext & { activeGraph: ActiveGraph } {
-  const budget = activeGraphBudget({ ...input, maxTier: input.maxTier ?? 3 });
-  const limit = Math.min(input.limit ?? budget.maxEvidence, budget.maxEvidence);
-  const { candidates, openedTiers, qpp } = openRecallTiers(
+  const originalBudget = activeGraphBudget({ ...input, maxTier: input.maxTier ?? 3 });
+  const limit = Math.min(input.limit ?? originalBudget.maxEvidence, originalBudget.maxEvidence);
+  const { candidates, openedTiers } = openRecallTiers(
     context.results,
     input,
-    budget.maxLocalTier,
+    originalBudget.maxLocalTier,
   );
-  const { results, selectedNodes, estimatedTokens, exhausted } = selectWithinActiveGraphBudget(
-    candidates,
-    budget,
+  const disclosed = foldWarmEvidence(candidates, input, originalBudget, limit);
+  const { selection, budget, qpp } = selectRecallEvidence(
+    disclosed.candidates,
+    input,
+    originalBudget,
     limit,
   );
+  const { results, selectedNodes, estimatedTokens, exhausted } = selection;
   const relations = (context.relations ?? [])
     .filter((edge) => selectedNodes.has(edge.sourceNodeId) && selectedNodes.has(edge.targetNodeId))
     .slice(0, budget.maxEdges);
@@ -64,9 +83,15 @@ export function portableRecallGraph(
   const visible = new Set(memoryIds);
   return {
     ...context,
+    progressiveDisclosure: disclosed.progressiveDisclosure,
     results,
     relations,
-    tesserae: context.tesserae?.filter((item) => item.memoryId && visible.has(item.memoryId)),
+    chainEdges: context.chainEdges?.filter(
+      (edge) => visible.has(edge.sourceMemoryId) && visible.has(edge.targetMemoryId),
+    ),
+    tesserae: context.tesserae?.filter(
+      (item) => item.score !== undefined || (item.memoryId && visible.has(item.memoryId)),
+    ),
     activeGraph: {
       id: randomUUID(),
       sessionId: input.sessionId ?? null,
@@ -114,17 +139,93 @@ function openRecallTiers(
     candidates = candidatesUpTo(++tier);
     qpp = recallQuality(input.query, candidates);
   }
-  return { candidates, openedTiers: tier + 1, qpp };
+  return { candidates, openedTiers: tier + 1 };
 }
 
 function recallQuality(query: string, candidates: MemorySearchResult[]) {
-  return shouldTriggerSecondPass(
-    query,
-    candidates.map((item) => ({
-      strength: item.combinedScore,
-      reason: item.recallReason ?? "lexical_match",
-      memoryType: item.memory.memoryType,
-      isDirect: !item.path?.length,
-    })),
-  );
+  return shouldTriggerSecondPass(query, qualityCandidates(candidates));
+}
+
+function qualityCandidates(candidates: readonly MemorySearchResult[]) {
+  return candidates.map((item) => ({
+    strength: hybridScore(item.lexicalScore, item.vectorScore, item.routeScore),
+    reason: item.recallReason ?? "lexical_match",
+    memoryType: item.memory.memoryType,
+    isDirect: !item.path?.length,
+  }));
+}
+
+function foldWarmEvidence(
+  candidates: MemorySearchResult[],
+  input: NmgSearchParams,
+  budget: ActiveGraphBudget,
+  limit: number,
+) {
+  const warm = candidates.filter((item) => item.memory.tier === 1);
+  if (!input.progressiveWarmDisclosure || warm.length < MIN_WARM_DISCLOSURE_SIZE)
+    return { candidates, progressiveDisclosure: undefined };
+  const initiallyVisible = Math.ceil(warm.length / 2);
+  const deferred = warm.slice(initiallyVisible);
+  const deferredIds = new Set(deferred.map((item) => item.memory.id));
+  const selection = selectWithinActiveGraphBudget(deferred, budget, limit);
+  return {
+    candidates: candidates.filter((item) => !deferredIds.has(item.memory.id)),
+    progressiveDisclosure: {
+      strategy: "warm_halves" as const,
+      rankedWarmCandidates: warm.length,
+      initiallyVisible,
+      deferredMemoryIds: selection.results.map((item) => item.memory.id),
+    },
+  };
+}
+
+function selectRecallEvidence(
+  candidates: MemorySearchResult[],
+  input: NmgSearchParams,
+  originalBudget: ActiveGraphBudget,
+  limit: number,
+) {
+  let budget = originalBudget;
+  let selection = selectWithinActiveGraphBudget(candidates, budget, limit);
+  let qpp = recallQuality(input.query, selection.results);
+  if (!input.secondPass) return { selection, budget, qpp };
+  const maximum = expandActiveGraphBudget(originalBudget);
+  const hardLimit = Math.min(input.limit ?? 8, maximum.maxEvidence);
+  const initial = initialEvidenceTarget(input, selection.results);
+  const targets = fibonacciEvidenceBudgets(Math.min(50, maximum.maxEvidence));
+  const stages: NonNullable<QppTriggerDecision["expansion"]>["stages"] = [];
+  let stoppedBecause: NonNullable<QppTriggerDecision["expansion"]>["stoppedBecause"] =
+    "budget_exhausted";
+  for (const target of targets.filter(
+    (value) => value >= Math.min(initial, maximum.maxEvidence) && value <= hardLimit,
+  )) {
+    budget = { ...maximum, maxEvidence: target, maxGraphHops: originalBudget.maxGraphHops };
+    selection = selectWithinActiveGraphBudget(candidates, budget, target);
+    qpp = recallQuality(input.query, selection.results);
+    stages.push({
+      targetEvidence: target,
+      selectedEvidence: selection.results.length,
+      estimatedTokens: selection.estimatedTokens,
+      qpp: qpp.qpp,
+      trigger: qpp.trigger,
+      reason: qpp.reason,
+    });
+    if (!qpp.trigger || selection.results.length >= candidates.length) {
+      stoppedBecause = qpp.trigger ? "candidate_pool_exhausted" : "sufficient";
+      break;
+    }
+  }
+  return {
+    selection,
+    budget,
+    qpp: { ...qpp, expansion: { strategy: "fibonacci" as const, stages, stoppedBecause } },
+  };
+}
+
+function initialEvidenceTarget(input: NmgSearchParams, results: MemorySearchResult[]): number {
+  const requested = input.initialEvidenceTarget ?? DEFAULT_INITIAL_EVIDENCE_TARGET;
+  const { topGap } = computeQppComponents(input.query, qualityCandidates(results));
+  return topGap >= (input.strongHitTopGap ?? STRONG_HIT_TOP_GAP)
+    ? Math.min(requested, input.strongHitInitialTarget ?? STRONG_HIT_INITIAL_TARGET)
+    : requested;
 }

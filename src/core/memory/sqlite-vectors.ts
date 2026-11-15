@@ -14,7 +14,7 @@ import type {
   MemoryVectorIndex,
   MemoryVectorQuery,
 } from "./backend.ts";
-import { queryBounds, queryWhere } from "./entity-rows.ts";
+import { queryBounds, sqliteQueryWhere } from "./entity-rows.ts";
 
 /** SQLite owns the vectors, the persisted missing-vector queue and the candidate queries. */
 export class SqliteMemoryVectors implements MemoryVectorIndex {
@@ -153,7 +153,7 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
       .prepare(
         `WITH eligible AS (
       SELECT namespace, id, node, payload FROM nmg_memory_entities m
-      WHERE namespace=? AND ${queryWhere(query)} AND ${INDEXABLE_MEMORY}
+      WHERE namespace=? AND ${sqliteQueryWhere(query)} AND ${INDEXABLE_MEMORY}
     ), scores AS MATERIALIZED (
       SELECT m.id, m.payload,
         COALESCE(nmg_memory_cosine(v.vector), 0) AS recordScore,

@@ -1,6 +1,7 @@
 import { serializeScope } from "../scope.ts";
 import { normalizeStatement } from "../memory-normalization.ts";
-import { MAX_MEMORY_COMMIT_ENTITIES } from "./backend.ts";
+import { CANONICAL_EVENT_TIME_GLOB } from "../event-time.ts";
+import { MAX_MEMORY_COMMIT_ENTITIES, sessionScopedEntity } from "./backend.ts";
 import type {
   MemoryCommitReceipt,
   MemoryCommitRequest,
@@ -68,7 +69,12 @@ export function entityRow(entity: MemoryEntity): EntityRow {
     row.target = entity.value.targetNodeId;
   } else if (entity.kind === "history") {
     row.name = entity.value.sourceMessageId ?? "";
+  } else if (entity.kind === "tessera") {
+    row.text = [entity.value.path, entity.value.label, entity.value.snippet].join(" ");
+  } else if ("sessionId" in entity.value) {
+    row.session = entity.value.sessionId ?? "";
   }
+  if (entity.kind === "claimPosterior") row.target = entity.value.posterior.memoryId;
   return row;
 }
 
@@ -117,8 +123,9 @@ export function queryWhere(query: MemoryEntityQuery): string {
   if (query.nodeName !== undefined)
     clauses.push(`name = ${sqlLiteral(query.nodeName.trim().toLocaleLowerCase("en-US"))}`);
   if (query.scope !== undefined) clauses.push(`scope = ${sqlLiteral(serializeScope(query.scope))}`);
-  if (query.kind === "memory")
+  if (sessionScopedEntity(query.kind))
     clauses.push(`(session = '' OR session = ${sqlLiteral(query.sessionId ?? "")})`);
+  if (query.claimMemoryId) clauses.push(`target = ${sqlLiteral(query.claimMemoryId)}`);
   if (query.connectedTo !== undefined)
     clauses.push(
       `(source = ${sqlLiteral(query.connectedTo)} OR target = ${sqlLiteral(query.connectedTo)})`,
@@ -135,6 +142,28 @@ export function queryBounds(query: MemoryEntityQuery): { limit: number; offset: 
     throw new Error("Read limit must be an integer from 1 to 512");
   if (!Number.isSafeInteger(offset) || offset < 0) throw new Error("Invalid read offset");
   return { limit, offset };
+}
+
+/** Filter the SQLite candidate pool before FTS or vector ranking applies its limit. */
+export function sqliteQueryWhere(query: MemoryEntityQuery): string {
+  const clauses = [queryWhere(query)];
+  if (query.supersedesId)
+    clauses.push(`json_extract(payload, '$.supersedesId') = ${sqlLiteral(query.supersedesId)}`);
+  if (query.consolidatedFrom)
+    clauses.push(`EXISTS (
+    SELECT 1 FROM json_each(json_extract(payload, '$.markers'))
+    WHERE json_extract(value, '$.kind')='consolidated_from_stg'
+      AND json_extract(value, '$.attributes.sourceMemoryId')=${sqlLiteral(query.consolidatedFrom)}
+  )`);
+  if (query.eventTimeFrom)
+    clauses.push(`json_extract(payload, '$.eventTime') >= ${sqlLiteral(query.eventTimeFrom)}`);
+  if (query.eventTimeTo)
+    clauses.push(`json_extract(payload, '$.eventTime') <= ${sqlLiteral(query.eventTimeTo)}`);
+  if (query.eventTimeFrom || query.eventTimeTo)
+    clauses.push(
+      `json_extract(payload, '$.eventTime') GLOB ${sqlLiteral(CANONICAL_EVENT_TIME_GLOB)}`,
+    );
+  return clauses.join(" AND ");
 }
 
 export function validateCommit(

@@ -17,9 +17,17 @@ import {
 } from "./model.ts";
 import type { MemoryInput } from "./model.ts";
 import { MemoryPlan } from "./plan.ts";
+import { recordClaimOutcomes } from "./claim-outcomes.ts";
+import { changeResolution, proposeMemoryRelation, supersedeMemory } from "./lifecycle.ts";
+import type {
+  MemoryRelationProposal,
+  MemoryResolutionChange,
+  MemorySupersession,
+} from "./lifecycle.ts";
 import { MemoryWriteRejected } from "../write-policy.ts";
 import { hybridScore, lexicalTextScore, searchTerms } from "../store/search-ranking.ts";
 import { normalize } from "../memory-normalization.ts";
+import { eventWindowEnd, eventWindowStart } from "../event-time.ts";
 import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import { TESSERA_REF_MARKER } from "../types.ts";
 import type {
@@ -32,6 +40,7 @@ import type {
   MemoryWriteEvent,
   NodeRelation,
   RememberResult,
+  RecordClaimOutcomesInput,
   TesseraHit,
 } from "../types.ts";
 
@@ -44,6 +53,9 @@ export interface MemoryQueryOptions {
   includeHistorical?: boolean;
   sourceActor?: MemoryActor;
   nodeName?: string;
+  eventTimeFrom?: string;
+  eventTimeTo?: string;
+  findTesserae?: boolean;
 }
 
 interface PlannedResult<T> {
@@ -75,7 +87,7 @@ export class MemoryEngine {
     await this.validateWrites(inputs, operationId, timestamp);
     return this.mutate(
       operationId,
-      { action: "remember", inputs },
+      { action: "remember", inputs: inputs.map(rememberRequest) },
       async (plan) => {
         const result: RememberResult[] = [];
         for (const [slot, input] of inputs.entries())
@@ -153,7 +165,12 @@ export class MemoryEngine {
         limit: Math.max(results.length, options.limit ?? 50),
       });
       const tesserae = await this.attachedTesserae(view, results);
-      return { results, relations, ...(tesserae.length ? { tesserae } : {}) };
+      return {
+        results,
+        relations,
+        chainEdges: this.projectChains(view, results, options.sessionId),
+        ...(tesserae.length ? { tesserae } : {}),
+      };
     } finally {
       await this.backend.closeRead(view);
     }
@@ -169,12 +186,17 @@ export class MemoryEngine {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100)
       throw new Error("Search limit must be 1..100");
     boundedGraphHops(options.graphHops);
+    const eventTimeFrom = eventWindowStart(options.eventTimeFrom) ?? undefined;
+    const eventTimeTo = eventWindowEnd(options.eventTimeTo) ?? undefined;
+    options = { ...options, eventTimeFrom, eventTimeTo };
     const view = await this.backend.openRead();
     try {
       const query: MemoryEntityQuery = {
         kind: "memory",
         scope: options.scope,
         sessionId: options.sessionId,
+        eventTimeFrom,
+        eventTimeTo,
         limit: 512,
       };
       const results = semantic
@@ -182,16 +204,67 @@ export class MemoryEngine {
         : await this.project(view, await this.backend.scan(view, { ...query, text }), options);
       results.splice(limit);
       const relations = await this.expand(view, results, { ...options, limit });
-      const tesserae = await this.attachedTesserae(view, results);
+      const tesserae = await this.searchTesserae(view, text, options, results);
       return {
         results,
         relations,
+        chainEdges: this.projectChains(view, results, options.sessionId),
         retrieval: { mode: semantic ? "hybrid" : "lexical", degraded: false },
         ...(tesserae.length ? { tesserae } : {}),
       };
     } finally {
       await this.backend.closeRead(view);
     }
+  }
+
+  private projectChains(view: MemoryReadView, results: MemorySearchResult[], sessionId?: string) {
+    const projection = this.backend.chainProjection?.(
+      view,
+      results.map((item) => item.memory.id),
+      sessionId,
+    );
+    if (!projection) return undefined;
+    for (const result of results) {
+      const memberships = projection.memberships.get(result.memory.id);
+      const primary = memberships?.[0];
+      if (!primary) continue;
+      result.chainId = primary.chainId;
+      result.chainPosition = primary.position;
+      result.chainType = primary.chainType;
+      result.chainMemberships = memberships;
+    }
+    return projection.edges.length ? projection.edges : undefined;
+  }
+
+  private async searchTesserae(
+    view: MemoryReadView,
+    text: string,
+    options: MemoryQueryOptions,
+    results: MemorySearchResult[],
+  ): Promise<TesseraHit[]> {
+    const attached = await this.attachedTesserae(view, results);
+    if (!options.findTesserae) return attached;
+    const rows = await this.backend.scan(view, { kind: "tessera", text, limit: 50 });
+    const matches = rows.flatMap((row) => (row.kind === "tessera" ? [row.value] : []));
+    const ids = [...new Set(matches.flatMap(({ memoryId }) => (memoryId ? [memoryId] : [])))];
+    const owners = await this.backend.scan(view, {
+      kind: "memory",
+      ids,
+      sessionId: options.sessionId,
+    });
+    const now = this.now();
+    const visible = new Set(
+      owners.flatMap((row) =>
+        row.kind === "memory" && visibleMemory(row.value, options.sessionId, now)
+          ? [row.value.id]
+          : [],
+      ),
+    );
+    const independent = matches
+      .filter(({ memoryId }) => !memoryId || visible.has(memoryId))
+      .slice(0, Math.min(options.limit ?? 8, 10))
+      .map((item, rank) => ({ ...item, score: 1 / (rank + 1) }));
+    return [...new Map([...attached, ...independent].map((item) => [item.id, item])).values()];
   }
 
   private async semanticResults(
@@ -339,6 +412,79 @@ export class MemoryEngine {
     );
   }
 
+  async record(id: string, sessionId?: string): Promise<MemoryRecord | null> {
+    const view = await this.backend.openRead();
+    try {
+      return await new MemoryPlan(this.backend, view).record(id, sessionId);
+    } finally {
+      await this.backend.closeRead(view);
+    }
+  }
+
+  setResolution(input: MemoryResolutionChange) {
+    return this.lifecycle("resolution", input, (plan) => changeResolution(plan, input, this.now()));
+  }
+
+  recordClaimOutcomes(input: RecordClaimOutcomesInput) {
+    return this.mutate(
+      randomUUID(),
+      { action: "claimOutcomes", input },
+      async (plan) => {
+        const result = await recordClaimOutcomes(plan, input, this.now());
+        return { result, ids: result.events.map((event) => event.id) };
+      },
+      async (_view, receipt) => receipt.result as Awaited<ReturnType<typeof recordClaimOutcomes>>,
+    );
+  }
+
+  async consolidatedFrom(sourceMemoryId: string): Promise<MemoryRecord[]> {
+    const view = await this.backend.openRead();
+    try {
+      const entities = await new MemoryPlan(this.backend, view).find({
+        kind: "memory",
+        consolidatedFrom: sourceMemoryId,
+      });
+      return entities.flatMap((entity) =>
+        entity.kind === "memory" &&
+        entity.value.status === "active" &&
+        entity.value.markers.some(
+          (marker) =>
+            marker.kind === "consolidated_from_stg" &&
+            marker.attributes?.sourceMemoryId === sourceMemoryId,
+        )
+          ? [entity.value]
+          : [],
+      );
+    } finally {
+      await this.backend.closeRead(view);
+    }
+  }
+
+  supersede(input: MemorySupersession) {
+    return this.lifecycle("supersession", input, (plan) =>
+      supersedeMemory(plan, input, this.now()),
+    );
+  }
+
+  proposeRelation(input: MemoryRelationProposal) {
+    return this.lifecycle("relationProposal", input, (plan) =>
+      proposeMemoryRelation(plan, input, this.now()),
+    );
+  }
+
+  private lifecycle<T>(
+    action: string,
+    input: { memoryId: string },
+    apply: (plan: MemoryPlan) => Promise<T>,
+  ): Promise<T> {
+    return this.mutate(
+      randomUUID(),
+      { action, input },
+      async (plan) => ({ result: await apply(plan), ids: [input.memoryId] }),
+      async (_view, receipt) => receipt.result as T,
+    );
+  }
+
   private async mutate<T>(
     operationId: string,
     request: unknown,
@@ -390,6 +536,7 @@ export class MemoryEngine {
     const memories = entities.flatMap((entity) =>
       entity.kind === "memory" &&
       searchableMemory(entity.value, options, now) &&
+      inEventWindow(entity.value, options) &&
       entity.value.tier <= (options.maxTier ?? 3)
         ? [entity.value]
         : [],
@@ -556,4 +703,21 @@ export class MemoryEngine {
 function boundedGraphHops(hops = 0): number {
   if (!Number.isInteger(hops) || hops < 0 || hops > 3) throw new Error("Graph hops must be 0..3");
   return hops;
+}
+
+function rememberRequest(input: MemoryInput): MemoryInput {
+  if (!input.tesserae) return input;
+  return {
+    ...input,
+    tesserae: input.tesserae.map(({ fileSimhash: _fileSimhash, ...item }) => item),
+  };
+}
+
+function inEventWindow(memory: MemoryRecord, options: MemoryQueryOptions): boolean {
+  const { eventTimeFrom, eventTimeTo } = options;
+  if (!eventTimeFrom && !eventTimeTo) return true;
+  const time = memory.eventTime;
+  return Boolean(
+    time && (!eventTimeFrom || time >= eventTimeFrom) && (!eventTimeTo || time <= eventTimeTo),
+  );
 }

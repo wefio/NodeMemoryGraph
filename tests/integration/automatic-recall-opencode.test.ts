@@ -10,6 +10,8 @@ import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 import { SessionActiveGraphRuntime } from "../../src/core/session-active-graph.ts";
 import type { SessionActiveGraphSnapshot } from "../../src/core/session-active-graph.ts";
+import { NmgService } from "../../src/cli/service.ts";
+import type { NmgMethod } from "../../src/cli/protocol.ts";
 
 stripProviderEnv();
 
@@ -30,6 +32,7 @@ async function host(
     snapshot?: () => SessionActiveGraphSnapshot | null;
     directory?: string;
     deferTools?: boolean;
+    daemon?: NmgService;
     lookup?: (input: {
       sessionID: string;
     }) => Promise<{ id: string; location: { directory: string } }>;
@@ -56,8 +59,9 @@ async function host(
   t.mock.method(globalThis, "fetch", async (_url: unknown, init: RequestInit) => {
     const request = JSON.parse(String(init.body));
     requests.push(request);
-    const result =
-      request.method === "hello"
+    const result = options.daemon
+      ? await options.daemon.invoke(request.method as NmgMethod, request.params)
+      : request.method === "hello"
         ? {
             protocol: "nmg.v9",
             service: "node-memory-graph",
@@ -130,6 +134,28 @@ async function host(
     activateTools: () => toolRegistrations.forEach((apply) => apply()),
   };
 }
+
+test("OpenCode submits its native automatic recall to an activated daemon", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-opencode-unified-"));
+  const daemon = new NmgService({
+    dataDirectory: directory,
+    environment: {},
+    memoryBackend: { kind: "sqlite", namespace: "opencode-contract", local: true },
+  });
+  t.after(async () => {
+    await daemon.close();
+    removeTempDirectory(directory);
+  });
+  const h = await host(t, async () => assert.fail("unexpected fallback"), { directory, daemon });
+  await daemon.invoke("remember", {
+    statement: "Atlas SQLite storage keeps a local snapshot",
+    nodeName: "Atlas",
+  });
+  await h.prompt("Atlas");
+  assert.match(JSON.stringify(h.inject()), /local snapshot/u);
+  assert.ok(h.tools.has("nmg_search"));
+  assert.equal((await daemon.invoke("status")).rpcRejections?.length, 0);
+});
 
 test("OpenCode activates lifecycle capabilities before its deferred tool transformer runs", async (t) => {
   const h = await host(t, async () => context("deferred"), { deferTools: true });

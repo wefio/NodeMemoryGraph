@@ -9,6 +9,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { connectDaemon, invokeDaemon } from "../../src/cli/daemon-client.ts";
 import type { NmgMethodResult } from "../../src/cli/protocol.ts";
 import { NmgStore } from "../../src/core/store.ts";
+import { SqliteMemoryBackend } from "../../src/core/memory/sqlite-backend.ts";
 import { SEARCH_TOOL_PARAMETERS } from "../../src/integration/tool-contract.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
@@ -364,6 +365,12 @@ test("MCP adapter exposes shared logical-chain structure", async () => {
     targetMemoryId: ids[1]!,
   });
   store.close();
+  const backend = new SqliteMemoryBackend(databasePath, "claude-chain-contract");
+  try {
+    backend.activateLocal();
+  } finally {
+    await backend.close();
+  }
 
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -384,6 +391,13 @@ test("MCP adapter exposes shared logical-chain structure", async () => {
     });
     assert.match(textOf(recalled), /chains=Claude shared projection/u);
     assert.match(textOf(recalled), /logical_chains=1/u);
+    const windowed = await client.callTool({
+      name: "nmg_search",
+      arguments: { query: "Claude chain anchor", eventTimeFrom: "2025-01-01", secondPass: false },
+    });
+    assert.match(textOf(windowed), /No NMG match/u);
+    const lab = await client.callTool({ name: "nmg_lab", arguments: { action: "list" } });
+    assert.match(textOf(lab), /recall_gate/u);
 
     const exact = await client.callTool({
       name: "nmg_get",
@@ -399,6 +413,11 @@ test("MCP adapter exposes shared logical-chain structure", async () => {
     ]) {
       assert.equal(exactText.split(statement).length - 1, 1, `${statement} is emitted once`);
     }
+    const retired = await client.callTool({
+      name: "nmg_remember",
+      arguments: { action: "forget", memoryId: ids[0] },
+    });
+    assert.match(textOf(retired), /withdrawn/u);
   } finally {
     await client.close().catch(() => undefined);
     const daemon = await connectDaemon(databasePath).catch(() => null);

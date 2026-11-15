@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { MemoryEngine } from "../core/memory/engine.ts";
+import { MemoryLifecycleError } from "../core/memory/lifecycle.ts";
 import type { MemoryBackend } from "../core/memory/backend.ts";
 import { openMemoryBackend } from "../core/memory/open.ts";
 import type { MemoryBackendOptions } from "../core/memory/open.ts";
@@ -9,12 +10,16 @@ import type {
   NmgGetParams,
   NmgHelloResult,
   NmgMethod,
+  NmgMethodResult,
   NmgRememberParams,
+  NmgResolveRememberParams,
+  NmgRecordClaimOutcomesParams,
   NmgSearchParams,
 } from "./protocol.ts";
 import { NmgProtocolError } from "./protocol.ts";
-import { mergeStgLtgContexts, stgStorePath } from "../core/stg.ts";
-import type { MemoryContext } from "../core/types.ts";
+import { mergeStgLtgContexts, stgConsolidationInput, stgStorePath } from "../core/stg.ts";
+import type { ClaimPosterior, MemoryContext } from "../core/types.ts";
+import type { StgConsolidationPolicyConfig } from "../integration/config.ts";
 import { LocalMemoryEmbeddings } from "./local-memory-embeddings.ts";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
 
@@ -24,6 +29,10 @@ const SESSION_METHODS = new Set<NmgMethod>([
   "state",
   "sessionActiveGraph",
   "recordActiveGraphAttribution",
+  "resolveRemember",
+  "recordFeedback",
+  "recordClaimOutcomes",
+  "lab",
 ]);
 const SEARCH_FIELDS = [
   "query",
@@ -35,6 +44,28 @@ const SEARCH_FIELDS = [
   "includeHistorical",
   "sourceActor",
   "nodeName",
+];
+const LOCAL_SEARCH_FIELDS = [
+  ...SEARCH_FIELDS,
+  "projectDir",
+  "autoRecall",
+  "tieredDisclosure",
+  "autoRecallBudgetMs",
+  "persistTrace",
+  "activeGraphBudget",
+  "queries",
+  "retrievalMode",
+  "vectorGranularity",
+  "eventTimeFrom",
+  "eventTimeTo",
+  "progressiveWarmDisclosure",
+  "secondPass",
+  "initialEvidenceTarget",
+  "strongHitTopGap",
+  "strongHitInitialTarget",
+  "recallCue",
+  "recallRevision",
+  "recallSource",
 ];
 
 /** Application-level memory owner. Coordination continues through the local service. */
@@ -73,6 +104,7 @@ export class PortableMemoryService {
     return {
       ...base,
       methods: [...METHODS, ...LOCAL_METHODS, ...(this.local ? SESSION_METHODS : [])],
+      searchParameters: this.local ? LOCAL_SEARCH_FIELDS : SEARCH_FIELDS,
       capabilities: [
         "hello",
         "status",
@@ -150,18 +182,7 @@ export class PortableMemoryService {
       allowOptions(input, SEARCH_FIELDS);
       return (await this.engine()).search(input.query, input);
     }
-    allowOptions(input, [
-      ...SEARCH_FIELDS,
-      "projectDir",
-      "autoRecall",
-      "tieredDisclosure",
-      "autoRecallBudgetMs",
-      "persistTrace",
-      "activeGraphBudget",
-      "queries",
-      "retrievalMode",
-      "vectorGranularity",
-    ]);
+    allowOptions(input, LOCAL_SEARCH_FIELDS);
     const shared = await this.engine();
     const project = await this.project(input.projectDir);
     const results = await Promise.all(
@@ -173,7 +194,15 @@ export class PortableMemoryService {
         const search = async (engine: MemoryEngine) => {
           const useVector =
             semantic && engine.backend.vectorIndex?.has(semantic.indexId, semantic.vector.length);
-          const context = await engine.search(query, input, useVector ? semantic : undefined);
+          const context = await engine.search(
+            query,
+            {
+              ...input,
+              limit: candidateLimit(input),
+              findTesserae: !input.autoRecall,
+            },
+            useVector ? semantic : undefined,
+          );
           if (reason) context.retrieval = { mode: "lexical", degraded: true, reason };
           return context;
         };
@@ -190,7 +219,7 @@ export class PortableMemoryService {
             context.results.map((item) => [item.memory.id, item] as const),
           ),
         ).values(),
-      ].slice(0, input.limit ?? 20),
+      ].slice(0, candidateLimit(input)),
     };
   }
 
@@ -208,6 +237,179 @@ export class PortableMemoryService {
   async withdraw(memoryId: string, operationId: string = randomUUID(), sessionId?: string) {
     const result = await (await this.engine()).withdraw(memoryId, operationId, sessionId);
     return { deleted: true, memory: result.memory };
+  }
+
+  async resolveRemember(
+    input: NmgResolveRememberParams,
+  ): Promise<NmgMethodResult["resolveRemember"]> {
+    const id = "newMemoryId" in input ? input.newMemoryId : input.memoryId;
+    const engine = await this.storeForRecord(id, input);
+    try {
+      return await this.applyResolution(engine, input);
+    } catch (error) {
+      if (error instanceof MemoryLifecycleError)
+        throw new NmgProtocolError("INVALID_PARAMS", error.message);
+      throw error;
+    }
+  }
+
+  async recordClaimOutcomes(
+    input: NmgRecordClaimOutcomesParams,
+    policy: StgConsolidationPolicyConfig,
+  ): Promise<NmgMethodResult["recordClaimOutcomes"]> {
+    const stores = new Map<MemoryEngine, typeof input.votes>();
+    for (const vote of input.votes) {
+      const store = await this.storeForRecord(vote.memoryId, input);
+      const votes = stores.get(store) ?? [];
+      votes.push(vote);
+      stores.set(store, votes);
+    }
+    const result: NmgMethodResult["recordClaimOutcomes"] = {
+      events: [],
+      posteriors: [],
+      consolidationCandidates: [],
+      consolidatedMemories: [],
+      retractedMemories: [],
+    };
+    try {
+      for (const [store, votes] of stores) {
+        const recorded = await store.recordClaimOutcomes({ ...input, votes });
+        result.events.push(...recorded.events);
+        result.posteriors.push(...recorded.posteriors);
+        const shared = await this.engine();
+        if (store !== shared)
+          await this.applyConsolidation(
+            shared,
+            store,
+            recorded.posteriors,
+            input.sessionId,
+            policy,
+            result,
+          );
+      }
+    } catch (error) {
+      if (error instanceof MemoryLifecycleError)
+        throw new NmgProtocolError("INVALID_PARAMS", error.message);
+      throw error;
+    }
+    return result;
+  }
+
+  private async applyConsolidation(
+    shared: MemoryEngine,
+    store: MemoryEngine,
+    posteriors: ClaimPosterior[],
+    sessionId: string | undefined,
+    policy: StgConsolidationPolicyConfig,
+    result: NmgMethodResult["recordClaimOutcomes"],
+  ) {
+    const groups = new Map<string, ClaimPosterior[]>();
+    for (const claim of posteriors) {
+      const group = groups.get(claim.memoryId) ?? [];
+      group.push(claim);
+      groups.set(claim.memoryId, group);
+    }
+    for (const [memoryId, claims] of groups) {
+      const eligible = claims.every(
+        (claim) =>
+          claim.independentVoteCount >= policy.minimumIndependentVotes &&
+          claim.mean >= policy.minimumPosteriorMean &&
+          claim.conservativeLowerBound >= policy.minimumConservativeLowerBound,
+      );
+      if (eligible) {
+        result.consolidationCandidates.push(memoryId);
+        if (policy.enabled)
+          await this.promoteConsolidation(shared, store, memoryId, sessionId, result);
+      } else if (
+        policy.enabled &&
+        claims.some(
+          (claim) =>
+            claim.mean < policy.minimumRetainedPosteriorMean ||
+            claim.conservativeLowerBound < policy.minimumRetainedConservativeLowerBound,
+        )
+      ) {
+        for (const memory of await shared.consolidatedFrom(memoryId)) {
+          await shared.withdraw(memory.id);
+          result.retractedMemories.push({ sourceMemoryId: memoryId, memoryId: memory.id });
+        }
+      }
+    }
+  }
+
+  private async promoteConsolidation(
+    shared: MemoryEngine,
+    store: MemoryEngine,
+    memoryId: string,
+    sessionId: string | undefined,
+    result: NmgMethodResult["recordClaimOutcomes"],
+  ) {
+    const context = await store.get([memoryId], { sessionId });
+    const source = context.results[0];
+    if (!source || source.memory.markers.some((marker) => marker.kind === "cached_from_ltg"))
+      return;
+    const promoted = await shared.remember(stgConsolidationInput(source));
+    this.embeddings.afterWrite(shared.backend.vectorIndex);
+    if (
+      promoted.memory.markers.some(
+        (marker) =>
+          marker.kind === "consolidated_from_stg" && marker.attributes?.sourceMemoryId === memoryId,
+      )
+    )
+      result.consolidatedMemories.push({ sourceMemoryId: memoryId, memoryId: promoted.memory.id });
+  }
+
+  private async applyResolution(
+    engine: MemoryEngine,
+    input: NmgResolveRememberParams,
+  ): Promise<NmgMethodResult["resolveRemember"]> {
+    const { action, sessionId } = input;
+    switch (action) {
+      case "forget": {
+        await engine.withdraw(input.memoryId, undefined, sessionId);
+        return { action, memoryId: input.memoryId, deleted: true };
+      }
+      case "resolve":
+      case "reopen":
+        return {
+          action,
+          ...(await engine.setResolution({
+            ...input,
+            resolution: action === "resolve" ? "resolved" : "reopened",
+          })),
+        };
+      case "supersede": {
+        const { newMemoryId, supersededMemoryId, reason } = input;
+        const applied = await engine.supersede({
+          newMemoryId,
+          memoryId: supersededMemoryId,
+          reason,
+          sessionId,
+        });
+        return { action, newMemoryId, supersededMemoryId, applied };
+      }
+      case "relate": {
+        const { newMemoryId, relatedMemoryId, relationJudgement, confidence } = input;
+        const proposal = await engine.proposeRelation({
+          newMemoryId,
+          memoryId: relatedMemoryId,
+          relationJudgement,
+          confidence,
+          sessionId,
+        });
+        return { action, newMemoryId, relatedMemoryId, proposal };
+      }
+    }
+  }
+
+  private async storeForRecord(
+    id: string,
+    input: { projectDir?: string; sessionId?: string },
+  ): Promise<MemoryEngine> {
+    const project = await this.project(input.projectDir);
+    if (project && (await project.record(id, input.sessionId))) return project;
+    const shared = await this.engine();
+    if (await shared.record(id, input.sessionId)) return shared;
+    throw new NmgProtocolError("INVALID_PARAMS", "Memory does not exist in this store and session");
   }
 
   async close(): Promise<void> {
@@ -286,6 +488,12 @@ function projectForWrite(input: NmgRememberParams): string | undefined {
   return input.residence === "stg" && input.projectDir ? resolve(input.projectDir) : undefined;
 }
 
+function candidateLimit(input: NmgSearchParams): number {
+  return input.sessionId && (input.secondPass || input.progressiveWarmDisclosure)
+    ? 50
+    : (input.limit ?? 20);
+}
+
 function mergeLocalContexts(project: MemoryContext, main: MemoryContext): MemoryContext {
   return {
     ...mergeStgLtgContexts(project, main),
@@ -301,7 +509,7 @@ function rejectOptions(input: object, keys: string[]): void {
   const values = input as Record<string, unknown>;
   for (const key of keys)
     if (values[key] !== undefined)
-      throw new NmgProtocolError("INVALID_PARAMS", `Portable memory does not support ${key}`);
+      throw new NmgProtocolError("INVALID_PARAMS", `Portable memory does not support ${key}`, key);
 }
 
 function allowOptions(input: object, keys: string[]): void {

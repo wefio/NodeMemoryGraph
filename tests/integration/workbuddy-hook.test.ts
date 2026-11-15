@@ -168,6 +168,7 @@ test("WorkBuddy confirms a reply batch only after the output sink accepts it", a
   const service = new NmgService({
     databasePath: join(directory, "fixture.sqlite"),
     environment: {},
+    memoryBackend: { kind: "sqlite", namespace: "workbuddy-contract", local: true },
   });
   const originalFetch = globalThis.fetch;
   const receipts: unknown[] = [];
@@ -218,9 +219,19 @@ test("WorkBuddy confirms a reply batch only after the output sink accepts it", a
     assert.equal(receipts.length, 1);
     assert.equal((receipts[0] as { entryIds: string[] }).entryIds.length, 8);
     assert.equal(await runHook(payload, options), "");
+    await service.invoke("remember", {
+      statement: "Atlas uses SQLite for field operations",
+      nodeName: "Atlas",
+    });
+    const recalled = await runHook(
+      { ...payload, prompt: "What did we decide for Atlas SQLite field operations?" },
+      options,
+    );
+    assert.match(recalled, /SQLite for field operations/u);
+    assert.equal((await service.invoke("status")).rpcRejections?.length, 0);
   } finally {
     globalThis.fetch = originalFetch;
-    service.close();
+    await service.close();
     rmSync(directory, { recursive: true, force: true });
   }
 });

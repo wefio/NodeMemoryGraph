@@ -1,4 +1,5 @@
 import type { BoardNoticeMetadata } from "../core/board-notifications.ts";
+import type { NmgMethod } from "../cli/protocol.ts";
 
 /** Host-neutral action contracts. Adapters keep their native schema library and
  * host-only fields, but must not silently omit these shared lifecycle actions. */
@@ -14,6 +15,24 @@ export const COMMON_REMEMBER_ACTIONS = [
 ] as const;
 
 export const PI_REMEMBER_ACTIONS = [...COMMON_REMEMBER_ACTIONS] as const;
+
+type RememberAction = (typeof COMMON_REMEMBER_ACTIONS)[number];
+const REMEMBER_ACTION_METHODS: Record<RememberAction, NmgMethod> = {
+  save: "remember",
+  supersede: "resolveRemember",
+  relate: "resolveRemember",
+  forget: "resolveRemember",
+  resolve: "resolveRemember",
+  reopen: "resolveRemember",
+  feedback: "recordFeedback",
+  claim_outcome: "recordClaimOutcomes",
+};
+
+export function supportedRememberActions(methods?: readonly string[]): RememberAction[] {
+  return COMMON_REMEMBER_ACTIONS.filter(
+    (action) => methods?.includes(REMEMBER_ACTION_METHODS[action]) ?? true,
+  );
+}
 
 /** Keep source-clock fields intact in both RPC and CLI fallback transports. */
 export function appendRememberTimeContext(

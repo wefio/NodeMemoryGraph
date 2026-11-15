@@ -1,4 +1,5 @@
 import { prepareAutomaticRecallSurface } from "./agent-surface.ts";
+import type { NmgHelloResult, NmgMethod } from "../cli/protocol.ts";
 import { contextStateViews } from "./context-information.ts";
 import { promptCompletionNudge } from "./completion-nudge.ts";
 import { AgentAttributionFlow, recordVersionedAnswerAttribution } from "./agent-attribution.ts";
@@ -19,7 +20,33 @@ import {
 export type CapabilityCleanup = () => void | Promise<void>;
 type Installation = void | CapabilityCleanup | Promise<void | CapabilityCleanup>;
 type ToolName = "nmg_search" | "nmg_get" | "nmg_remember" | "nmg_state" | "nmg_lab";
-export type AdapterToolBindings = Partial<Record<ToolName, () => Installation>>;
+export type AdapterEndpoint = Pick<NmgHelloResult, "methods" | "searchParameters">;
+export type AdapterToolBindings = Partial<
+  Record<ToolName, (endpoint?: AdapterEndpoint) => Installation>
+>;
+
+const TOOL_METHODS: Record<ToolName, NmgMethod> = {
+  nmg_search: "search",
+  nmg_get: "get",
+  nmg_remember: "remember",
+  nmg_state: "state",
+  nmg_lab: "lab",
+};
+
+export function endpointSupports(method: NmgMethod, endpoint?: AdapterEndpoint): boolean {
+  return endpoint?.methods?.includes(method) ?? true;
+}
+
+export function supportedSearchParameters<T extends Record<string, unknown>>(
+  schema: T,
+  endpoint?: AdapterEndpoint,
+): T {
+  const parameters = endpoint?.searchParameters;
+  if (!parameters) return schema;
+  return Object.fromEntries(
+    Object.entries(schema).filter(([key]) => parameters.includes(key)),
+  ) as T;
+}
 
 export interface ToolObservationInput {
   sessionId: string;
@@ -106,6 +133,7 @@ export interface CapabilityAssembly {
 function capabilityInstallers(
   capability: AdapterCapability,
   bindings: AdapterCapabilityBindings,
+  endpoint?: AdapterEndpoint | Promise<AdapterEndpoint | undefined>,
 ): Array<() => Installation> {
   if (Object.hasOwn(TOOL_CAPABILITIES, capability)) {
     const names = TOOL_CAPABILITIES[capability as keyof typeof TOOL_CAPABILITIES];
@@ -116,7 +144,12 @@ function capabilityInstallers(
     // Keep the host's existing order within a shared tool group.
     return Object.entries(bindings.tools ?? {})
       .filter(([name]) => (names as readonly string[]).includes(name))
-      .map(([, bind]) => bind);
+      .map(([name, bind]) => {
+        const method = TOOL_METHODS[name as ToolName];
+        const install = (discovered?: AdapterEndpoint) =>
+          endpointSupports(method, discovered) ? bind(discovered) : undefined;
+        return () => (endpoint instanceof Promise ? endpoint.then(install) : install(endpoint));
+      });
   }
   return [serviceInstaller(capability as keyof CapabilityServices, bindings)];
 }
@@ -139,14 +172,19 @@ function serviceInstaller<K extends keyof CapabilityServices>(
 export function assembleAdapterCapabilities(
   capabilities: readonly AdapterCapability[],
   bindings: AdapterCapabilityBindings,
-  options: { disabled?: readonly AdapterCapability[] } = {},
+  options: {
+    disabled?: readonly AdapterCapability[];
+    endpoint?: AdapterEndpoint | Promise<AdapterEndpoint | undefined>;
+  } = {},
 ): CapabilityAssembly {
   const disabled = new Set(options.disabled);
   if (new Set(capabilities).size !== capabilities.length) throw new Error("Duplicate capability");
   const plans = capabilities.map((capability) => ({
     capability,
     state: disabled.has(capability) ? ("disabled" as const) : ("pending" as const),
-    install: disabled.has(capability) ? [] : capabilityInstallers(capability, bindings),
+    install: disabled.has(capability)
+      ? []
+      : capabilityInstallers(capability, bindings, options.endpoint),
   }));
   return installCapabilities(plans);
 }

@@ -1,4 +1,17 @@
-import type { ExtractMethod, MemoryClaim, Polarity } from "./types.ts";
+import type { ClaimPosterior, ExtractMethod, MemoryClaim, Polarity } from "./types.ts";
+
+export function claimPosterior(
+  input: Omit<ClaimPosterior, "mean" | "conservativeLowerBound">,
+): ClaimPosterior {
+  const total = input.alpha + input.beta;
+  const mean = total > 0 ? input.alpha / total : 0.5;
+  const standardError = Math.sqrt((mean * (1 - mean)) / Math.max(1, total + 1));
+  return {
+    ...input,
+    mean,
+    conservativeLowerBound: Math.max(0, Math.min(1, mean - 1.96 * standardError)),
+  };
+}
 
 export interface ClaimRollup {
   claims: MemoryClaim[] | null;
