@@ -343,6 +343,7 @@ async function withHost(
     emit: (name: string, ...args: unknown[]) => Promise<unknown>;
     admit: () => Promise<unknown>;
   }) => Promise<void>,
+  unified = false,
 ) {
   const directory = mkdtempSync(join(tmpdir(), "nmg-dsh-state-"));
   const environment = {
@@ -355,7 +356,12 @@ async function withHost(
   };
   const previous = new Map(Object.keys(environment).map((key) => [key, process.env[key]]));
   Object.assign(process.env, environment);
-  const service = new NmgService({ dataDirectory: directory });
+  const service = new NmgService({
+    dataDirectory: directory,
+    ...(unified
+      ? { memoryBackend: { kind: "sqlite", namespace: "dsh-contract", local: true } }
+      : {}),
+  });
   const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
   const server = createServer((request, response) => {
     let body = "";
@@ -386,7 +392,7 @@ async function withHost(
       resolve(import.meta.dirname, "../../dsh/dsh-nmg/src/plugin/index.ts"),
     ).href;
     const plugin = (await import(path)) as {
-      apply(context: unknown): () => Promise<void>;
+      apply(context: unknown): (() => Promise<void>) & { ready: Promise<void> };
     };
     const tools = new Map<string, HostTool>();
     const events = new Map<string, (...args: unknown[]) => unknown>();
@@ -395,7 +401,7 @@ async function withHost(
     const children = new Map<string, WakeChild[]>();
     const resumed = new Map<string, string[]>();
     let wake = async () => {};
-    dispose = plugin.apply({
+    const contribution = plugin.apply({
       tools: {
         register(tool: HostTool) {
           tools.set(tool.name, tool);
@@ -452,6 +458,8 @@ async function withHost(
         },
       },
     });
+    dispose = contribution;
+    await contribution.ready;
     let turn = 0;
     await run({
       emit: async (name, ...args) => {
@@ -495,7 +503,7 @@ async function withHost(
   } finally {
     await dispose?.();
     await new Promise<void>((done) => server.close(() => done()));
-    service.close();
+    await service.close();
     rmSync(directory, { recursive: true, force: true });
     for (const [key, value] of previous) {
       if (value === undefined) delete process.env[key];
@@ -503,6 +511,30 @@ async function withHost(
     }
   }
 }
+
+test("DSH native search and forget use the activated daemon contract", async () => {
+  await withHost(
+    false,
+    async ({ tools, service, requests, inbox, admit, recall }) => {
+      const write = await service.invoke("remember", {
+        statement: "Atlas codifies the DSH memory contract",
+        nodeName: "Atlas",
+      });
+      inbox("What did we decide about Atlas and the DSH memory contract?");
+      await admit();
+      assert.match(recall(), /Atlas codifies/u);
+      assert.ok(requests.some(({ method }) => method === "search"));
+      const output = await tools.get("nmg_lab")!.execute({ action: "list" }, {});
+      assert.match(JSON.stringify(output), /recall_gate/u);
+      assert.equal((await service.invoke("status")).rpcRejections?.length, 0);
+      const removed = await tools
+        .get("nmg_remember")!
+        .execute({ action: "forget", memoryId: write.memory.id }, {});
+      assert.match(JSON.stringify(removed), /deleted/u);
+    },
+    true,
+  );
+});
 
 const context = {
   agent: { id: "dsh-owner" },

@@ -25,4 +25,4 @@
 | `verification/` | 验证规划与覆盖范围的测量实验 |
 
 `benchmark-results.md` 留在顶层，因为它跨主题。
-[架构基线](architecture-baseline-2026-10-27.zh-CN.md)也跨主题。
+[架构基线](architecture-baseline-2026-10-27.zh-CN.md)及其[依赖与记忆路径测量](architecture-dependency-and-memory-2026-11-14.zh-CN.md)也跨主题。

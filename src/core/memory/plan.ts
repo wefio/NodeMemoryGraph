@@ -1,13 +1,24 @@
-import type { HistoryRecord, MemoryRecord, RememberResult } from "../types.ts";
+import type { HistoryRecord, MemoryRecord, MemoryWriteEvent, RememberResult } from "../types.ts";
+import { TESSERA_REF_MARKER } from "../types.ts";
 import { serializeScope } from "../scope.ts";
-import { normalizeStatement } from "../store/search-ranking.ts";
+import { normalizeStatement } from "../memory-normalization.ts";
 import type { MemoryBackend, MemoryEntity, MemoryEntityQuery, MemoryReadView } from "./backend.ts";
-import { memoryIdentity, newHistory, newMemory, newNode, visibleMemory } from "./model.ts";
+import { sessionScopedEntity } from "./backend.ts";
+import {
+  memoryIdentity,
+  memoryResidence,
+  newHistory,
+  newMemory,
+  newNode,
+  stateAliasId,
+  visibleMemory,
+} from "./model.ts";
 import type { MemoryInput } from "./model.ts";
 
 /** One planning view plus uncommitted entities; ordered batch inputs observe prior inputs. */
 export class MemoryPlan {
   readonly changes = new Map<string, MemoryEntity>();
+  readonly audit: MemoryWriteEvent[] = [];
   readonly backend: MemoryBackend;
   readonly view: MemoryReadView;
 
@@ -18,6 +29,11 @@ export class MemoryPlan {
 
   put(entity: MemoryEntity): void {
     this.changes.set(`${entity.kind}:${entity.value.id}`, entity);
+  }
+
+  async record(id: string, sessionId?: string): Promise<MemoryRecord | null> {
+    const [entity] = await this.find({ kind: "memory", ids: [id], sessionId });
+    return entity?.kind === "memory" ? entity.value : null;
   }
 
   async find(query: MemoryEntityQuery): Promise<MemoryEntity[]> {
@@ -41,7 +57,9 @@ export class MemoryPlan {
     slot: number,
     now: string,
   ): Promise<RememberResult> {
-    const sessionId = input.residence === "stg" ? (input.sessionId ?? undefined) : undefined;
+    input = await this.resolveStateAlias(input);
+    const residence = memoryResidence(input);
+    const sessionId = residence === "stg" ? (input.sessionId ?? undefined) : undefined;
     const duplicates = await this.find({
       kind: "memory",
       exactText: input.statement,
@@ -54,30 +72,93 @@ export class MemoryPlan {
         visibleMemory(entity.value, sessionId, now) &&
         entity.value.memoryType === (input.memoryType ?? "fact") &&
         entity.value.stateKey === (input.stateKey ?? null) &&
-        entity.value.residence === (input.residence ?? "ltg"),
+        entity.value.residence === residence &&
+        entity.value.sessionId === (sessionId ?? null),
     );
     if (duplicate?.kind === "memory") return this.result(duplicate.value);
-    const nodeId = memoryIdentity(
-      this.backend.namespace,
-      "node",
-      input.nodeName.trim().toLocaleLowerCase("en-US"),
-      input.residence ?? "ltg",
-      sessionId ?? "",
-    );
-    const nodes = await this.find({ kind: "node", ids: [nodeId] });
-    const existing = nodes.find(
-      (entity) => entity.kind === "node" && entity.value.status === "active",
-    );
-    const node = existing?.kind === "node" ? existing.value : newNode(input, nodeId, now);
+    const node = await this.node(input, sessionId, now);
     const id = memoryIdentity(this.backend.namespace, operationId, String(slot));
     const history = await this.history(input, `${id}_evidence`, now);
     const memory = newMemory(input, id, node.id, history.id, now);
     await this.replacePrevious(input, memory, now);
     await this.requireRelated(memory, sessionId, now);
+    this.attachTesserae(input, memory, now);
     this.put({ kind: "node", value: node });
     this.put({ kind: "history", value: history });
     this.put({ kind: "memory", value: memory });
+    this.audit.push({
+      id: `${memory.id}_write`,
+      memoryId: memory.id,
+      historyId: history.id,
+      sessionId: input.sessionId ?? null,
+      decision: "accepted",
+      policyReason: "allowed",
+      writeReason: memory.writeReason,
+      writeSource: memory.writeSource,
+      memoryType: memory.memoryType,
+      requestedResidence: residence,
+      createdAt: now,
+    });
     return { history, node, memory };
+  }
+
+  private attachTesserae(input: MemoryInput, memory: MemoryRecord, now: string): void {
+    for (const [index, tessera] of (input.tesserae ?? []).entries()) {
+      const path = tessera.path.trim();
+      const snippet = tessera.snippet.trim();
+      if (!path || !snippet) continue;
+      const id = memoryIdentity(memory.id, "tessera", String(index));
+      this.put({
+        kind: "tessera",
+        value: {
+          id,
+          path,
+          snippet,
+          label: tessera.label?.trim() ?? "",
+          kind: tessera.kind?.trim(),
+          memoryId: memory.id,
+          createdAt: now,
+          fileSimhash: tessera.fileSimhash,
+        },
+      });
+      memory.markers.push({ kind: TESSERA_REF_MARKER, attributes: { tesseraId: id, path } });
+    }
+  }
+
+  private async resolveStateAlias(input: MemoryInput): Promise<MemoryInput> {
+    if (input.memoryType !== "state" || !input.stateKey) return input;
+    const [alias] = await this.find({
+      kind: "stateAlias",
+      ids: [stateAliasId(input.stateKey, input.scope ?? {})],
+    });
+    return alias?.kind === "stateAlias" ? { ...input, stateKey: alias.value.canonicalKey } : input;
+  }
+
+  private async node(input: MemoryInput, sessionId: string | undefined, now: string) {
+    const residence = memoryResidence(input);
+    const nodeId = memoryIdentity(
+      this.backend.namespace,
+      "node",
+      input.nodeName.trim().toLocaleLowerCase("en-US"),
+      residence,
+      sessionId ?? "",
+    );
+    const nodes = await this.find(
+      residence === "ltg"
+        ? { kind: "node", nodeName: input.nodeName }
+        : { kind: "node", ids: [nodeId] },
+    );
+    const active = nodes.flatMap((entity) =>
+      entity.kind === "node" &&
+      entity.value.status === "active" &&
+      entity.value.residence === residence
+        ? [entity.value]
+        : [],
+    );
+    const exact = active.find((node) => node.canonicalName === input.nodeName.trim());
+    if (exact) return exact;
+    if (active.length > 1) throw new Error("Multiple active nodes match this name");
+    return active[0] ?? newNode(input, nodeId, now);
   }
 
   private async replacePrevious(
@@ -122,6 +203,7 @@ export class MemoryPlan {
     )
       throw new Error("Supersession requires active memories in identical scope and residence");
     memory.supersedesId = previous.id;
+    memory.evidenceRole = input.evidenceRole ?? "update";
     this.put({
       kind: "memory",
       value: { ...previous, status: "superseded", validUntil: memory.validFrom },
@@ -129,16 +211,38 @@ export class MemoryPlan {
   }
 
   private async history(input: MemoryInput, id: string, now: string): Promise<HistoryRecord> {
-    if (!input.evidenceHistoryId) return newHistory(input, id, now);
+    if (!input.evidenceHistoryId) return this.historyForSource(input, id, now);
     const entities = await this.find({ kind: "history", ids: [input.evidenceHistoryId] });
     const entity = entities[0];
-    const sessionId = input.residence === "stg" ? input.sessionId : null;
+    const sessionId = memoryResidence(input) === "stg" ? input.sessionId : null;
     if (
       entity?.kind !== "history" ||
       (entity.value.sessionId && entity.value.sessionId !== sessionId)
     )
       throw new Error("Evidence does not exist in this session");
     return entity.value;
+  }
+
+  private async historyForSource(
+    input: MemoryInput,
+    id: string,
+    now: string,
+  ): Promise<HistoryRecord> {
+    const history = newHistory(input, id, now);
+    if (!history.sourceMessageId) return history;
+    const entities = await this.find({ kind: "history", sourceMessageId: history.sourceMessageId });
+    const existing = entities.find(
+      (entity) =>
+        entity.kind === "history" &&
+        entity.value.sessionId === history.sessionId &&
+        entity.value.sourceMessageId === history.sourceMessageId,
+    );
+    if (existing?.kind !== "history") return history;
+    if (existing.value.content !== history.content || existing.value.role !== history.role)
+      throw new Error(
+        `source message ${history.sourceMessageId} already exists with different content`,
+      );
+    return existing.value;
   }
 
   private async requireRelated(
@@ -171,6 +275,7 @@ function matches(entity: MemoryEntity, query: MemoryEntityQuery): boolean {
   if (entity.kind === "memory") {
     return matchesMemory(entity.value, query);
   }
+  if (!matchesMetadata(entity, query)) return false;
   if (
     entity.kind === "node" &&
     query.nodeName &&
@@ -181,11 +286,26 @@ function matches(entity: MemoryEntity, query: MemoryEntityQuery): boolean {
   return true;
 }
 
+function matchesMetadata(entity: MemoryEntity, query: MemoryEntityQuery): boolean {
+  if (
+    sessionScopedEntity(entity.kind) &&
+    "sessionId" in entity.value &&
+    entity.value.sessionId &&
+    entity.value.sessionId !== query.sessionId
+  )
+    return false;
+  return (
+    !query.claimMemoryId ||
+    (entity.kind === "claimPosterior" && entity.value.posterior.memoryId === query.claimMemoryId)
+  );
+}
+
 function matchesMemory(memory: MemoryRecord, query: MemoryEntityQuery): boolean {
   if (query.scope && serializeScope(query.scope) !== serializeScope(memory.scope)) return false;
   if (memory.sessionId && memory.sessionId !== query.sessionId) return false;
   if (query.nodeId && memory.nodeId !== query.nodeId) return false;
   if (query.stateKey !== undefined && memory.stateKey !== query.stateKey) return false;
+  if (query.supersedesId && memory.supersedesId !== query.supersedesId) return false;
   return (
     !query.exactText || normalizeStatement(memory.statement) === normalizeStatement(query.exactText)
   );

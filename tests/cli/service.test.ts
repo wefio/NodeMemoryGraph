@@ -1888,6 +1888,15 @@ test("CLI writes pass through the governed memory admission policy", async () =>
       }),
       { code: "WRITE_REJECTED" },
     );
+    await assert.rejects(
+      service.invoke("remember", {
+        statement: "Atlas requires authentication",
+        nodeName: "Atlas",
+        evidenceSource: { actor: "user", content: "api_key=fake-example", sourceMessageId: "m1" },
+        unsafe: true,
+      }),
+      { code: "WRITE_REJECTED", message: /secret/u },
+    );
     // Transient-word false positive is rejected by default...
     await assert.rejects(
       service.invoke("remember", {

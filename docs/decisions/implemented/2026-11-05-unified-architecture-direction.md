@@ -66,6 +66,11 @@ The initial [capability assembly](../../design/unified-architecture/adapter-capa
 
 The [Codex adapter](../../../codex-plugin/README.md) assembles shared tools and native hooks with per-request session binding. Its [native exercise](../../experiments/runtime/codex-plugin-capabilities-2026-11-13.md) records self-contained artifact installation, concurrent chats, resume and fork isolation.
 
+The [daemon compatibility contract](../../design/unified-architecture/adapter-capability-assembly.md#executable-assembly)
+uses one advertised surface for tool selection. Memory write operations publish
+through the unified engine. Aggregate rejection statistics live with the daemon
+so independently shipped hooks share the same diagnostics across restarts.
+
 ## Alternatives considered
 
 - SQLite snapshots as the object backend: useful for reusing database behavior, but does not satisfy the requested independent native-object path. Keep the current format as a migration source.

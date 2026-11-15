@@ -23,7 +23,7 @@ flowchart TB
   Coordination --> DB
 ```
 
-显式库入口是 `NmgServiceOptions.memoryBackend`。省略时沿用既有记忆路径；不通过 CLI 开关或模型参数选择。使用新的记忆命名空间，既有记忆数据不会被导入或转换。纯本地部署中，记忆与协作共用一个 SQLite 文件。
+显式库入口是 `NmgServiceOptions.memoryBackend`，新命名空间从空库开始。本地 CLI 迁移导入旧 SQLite 数据，重新打开时默认使用统一引擎。纯本地部署中，记忆与协作共用一个 SQLite 文件。
 
 ```typescript
 import { NmgService } from "./src/cli/service.ts";
@@ -63,10 +63,12 @@ SQLite 使用原生写事务和独立 WAL 快照读取。Lance 每个命名空�
 
 本地 run 协调器依赖 `CoordinationPort`，其中仅包含 board／run 操作和事务边界。既有 SQLite 实现和表仍是权威来源。可替换记忆操作不初始化协作表，显式的本地 board／run 操作才会初始化。使用 SQLite 记忆时，两组表共用一个文件；使用对象记忆时，仅协作使用该文件。
 
-此 API 支持 remember／batch、search、精确 get 和删除。`MemoryEngine` 还支持显式节点连边和有界图扩展。能力握手公布支持的子集。此配置不提供会话 AG、chain、文件 tesserae、向量检索、历史查询、merge／split、反馈和高级过滤；不支持的服务操作会明确报错。不提供自动迁移、云端交互 API 或原生 Worker／WASM 部署。既有 AML／快照路径不变。
+此 API 支持 remember／batch、search、精确 get 和删除。`MemoryEngine` 还支持显式节点连边和有界图扩展。能力握手公布支持的子集。检索支持显式历史、来源角色和节点过滤，并随可见记忆返回 SQLite 快照中的附属文件引用。启用后的本地 SQLite 还支持会话 AG、项目召回、带版本的答案归因和向量／hybrid 检索。SQLite 后端持有按模型区分的向量索引并筛选候选，统一引擎负责与全文候选融合、可见性和图规则。宿主负责提供向量。[本地兼容配置](legacy-graph-migration.zh-CN.md#启用后的本地默认入口)涵盖事件时间窗、生命周期写入、反馈、书签检索和既有链投影。链编辑和节点变换保留各自的迁移门槛。
 
 原生分支和凭据保留；自动压缩、不可达分支回收和保留期管理需要独立维护契约。每次记忆提交都会准备全文索引，小批高频写入与大量命名空间须先测量成本再用于生产。SQLite 与 Lance 可以有不同候选排序。检索限制候选和图扇出，不保证大型过滤语料上的完整召回。
 
 ## 验证边界
+
+[旧记忆图数据迁移演练](legacy-graph-migration.zh-CN.md)对照两条路径，并验证两个后端的有界导入。
 
 后端和引擎契约测试覆盖两套实现。原生 S3 测试通过真实 Lance HTTP 对象访问连接进程内协议夹具，覆盖条件发布、并发、重开和写入失败。该夹具不证明 AWS 认证、持久性或生产 S3 行为。当前证据及未验证部署门槛见[完成度审计](../completion-audit.zh-CN.md#可替换记忆后端切片)。

@@ -23,26 +23,26 @@ import {
 import { nowMs, PerfTimer, SECTION } from "../perf.ts";
 import { resolveWriteEventTime } from "../event-time.ts";
 import { normalizeClaims } from "../claims.ts";
+import { validateEvidenceSource } from "../memory-evidence.ts";
+import { normalizeMarkers, normalizeStatement } from "../memory-normalization.ts";
+import { defaultResidence } from "../memory-residence.ts";
 import { serializeScope } from "../scope.ts";
 import {
   clamp,
-  defaultResidence,
   defaultWriteReason,
   mapHistory,
-  normalizeMarkers,
+  mapMemoryRow,
   requireText,
   serializeClaims,
   serializeMarkers,
 } from "./rows.ts";
 import type { StoreRow as Row } from "./search-ranking.ts";
-import { normalizeStatement, searchTerms, statementSimilarity } from "./search-ranking.ts";
-import { MAX_EVIDENCE_SOURCE_CHARACTERS } from "../types.ts";
+import { searchTerms, statementSimilarity } from "./search-ranking.ts";
 
 import type {
   DeriveMemoryInput,
   DuplicateCandidate,
   HistoryRecord,
-  MemoryClaim,
   HistoryRole,
   MemoryMarker,
   MemoryExportBundle,
@@ -427,7 +427,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       const dupExact = indexedExact
         ? (this.db
             .prepare("SELECT m.* FROM memory_records m WHERE m.id = ?")
-            .get(indexedExact.id) as Record<string, unknown> | undefined)
+            .get(indexedExact.id) as Row | undefined)
         : scopeIndex
           ? undefined
           : (this.db
@@ -436,7 +436,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
                  WHERE m.statement = ? AND m.scope_json = ? AND m.status = 'active'
                  ORDER BY m.created_at DESC LIMIT 1`,
               )
-              .get(input.statement, scopeJson) as Record<string, unknown> | undefined);
+              .get(input.statement, scopeJson) as Row | undefined);
       const dupCandidates = this.nearDuplicateCandidates(input.statement, scopeJson);
       // The supersede scan is O(scope size) per write and its result is only
       // consumed by an external judge; bulk ingestion without one skips it.
@@ -459,7 +459,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           if (!judge || judge({ statement: input.statement, candidates: dupCandidates }).merge) {
             const targetRow = this.db
               .prepare("SELECT m.* FROM memory_records m WHERE m.id = ?")
-              .get(normExact.memoryId) as Record<string, unknown>;
+              .get(normExact.memoryId) as Row;
             return this.duplicateResult(targetRow, dupCandidates);
           }
         } else if (input.judgeDuplicates) {
@@ -470,7 +470,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           if (decision.merge) {
             const targetRow = this.db
               .prepare("SELECT m.* FROM memory_records m WHERE m.id = ?")
-              .get(dupCandidates[0]!.memoryId) as Record<string, unknown>;
+              .get(dupCandidates[0]!.memoryId) as Row;
             return this.duplicateResult(targetRow, dupCandidates);
           }
         }
@@ -900,7 +900,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         .prepare(
           `SELECT * FROM memory_records WHERE ${clauses.join(" AND ")} ORDER BY created_at, id`,
         )
-        .all(...params) as Record<string, unknown>[];
+        .all(...params) as Row[];
       return {
         format: "nmg.memory-export.v1",
         exportedAt: new Date().toISOString(),
@@ -1045,10 +1045,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       return out.slice(0, SUPERSEDE_CANDIDATE_MAX).map((x) => x.c);
     }
 
-    private duplicateResult(
-      row: Record<string, unknown>,
-      candidates: DuplicateCandidate[],
-    ): RememberResult {
+    private duplicateResult(row: Row, candidates: DuplicateCandidate[]): RememberResult {
       return {
         history: this.requireHistory(String(row.evidence_id)),
         node: this.requireNode(String(row.node_id)),
@@ -1234,35 +1231,6 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
  * superseded predecessor, which similarity (lexical or vector) cannot
  * separate from same-topic chit-chat.
  */
-function validateEvidenceSource(input: RememberInput): void {
-  const source = input.evidenceSource;
-  if (!source) return;
-  // sessionId attribution is required only for session-private STG rows.
-  // LTG rows are project/session-global (session_id NULL) and the evidence
-  // excerpt stays attributable via sourceMessageId + sourceRef.
-  const residence = input.residence ?? defaultResidence(input);
-  if (residence === "stg" && !input.sessionId?.trim()) {
-    throw new Error("evidenceSource requires sessionId");
-  }
-  if (!source.sourceMessageId?.trim()) {
-    throw new Error("evidenceSource requires sourceMessageId");
-  }
-  if (!source.content?.trim()) throw new Error("evidenceSource content must not be empty");
-  if (source.content.length > MAX_EVIDENCE_SOURCE_CHARACTERS) {
-    throw new Error(
-      `evidenceSource exceeds ${MAX_EVIDENCE_SOURCE_CHARACTERS} characters; retain an exact excerpt or external artifact reference`,
-    );
-  }
-  const actor = input.sourceActor ?? "user";
-  if (source.actor !== actor) {
-    throw new Error(`evidenceSource actor ${source.actor} does not match sourceActor ${actor}`);
-  }
-  const claimed = input.evidence?.trim();
-  if (claimed && source.content.toLocaleLowerCase() !== claimed.toLocaleLowerCase()) {
-    throw new Error("evidenceSource content must be the exact excerpt supplied as evidence");
-  }
-}
-
 function transitionFromTokens(statement: string): string[] {
   const out: string[] = [];
   const re =
@@ -1303,56 +1271,6 @@ function dupCandidate(
     eventTime: (row.event_time as string | null) ?? null,
     similarity,
     priority,
-  };
-}
-
-/** Row (snake_case memory_records) → MemoryRecord for duplicate short-circuits. */
-function mapMemoryRow(row: Record<string, unknown>): MemoryRecord {
-  const parse = (v: unknown, fallback: unknown) => {
-    if (v == null) return fallback;
-    try {
-      return JSON.parse(String(v));
-    } catch {
-      return fallback;
-    }
-  };
-  return {
-    id: String(row.id),
-    nodeId: String(row.node_id),
-    evidenceId: String(row.evidence_id),
-    evidenceIds: [String(row.evidence_id)],
-    statement: String(row.statement),
-    memoryType: (row.memory_type as MemoryRecord["memoryType"]) ?? "fact",
-    stateKey: (row.state_key as string) ?? null,
-    eventTime: (row.event_time as string) ?? null,
-    sourceActor: (row.source_actor as MemoryRecord["sourceActor"]) ?? "user",
-    truthStatus: (row.truth_status as MemoryRecord["truthStatus"]) ?? "asserted",
-    confidence: (row.confidence as number) ?? null,
-    polarity: (row.polarity as MemoryRecord["polarity"]) ?? null,
-    predicateKey: (row.predicate_key as string) ?? null,
-    extractMethod: (row.extract_method as MemoryRecord["extractMethod"]) ?? null,
-    claims: parse(row.claims_json, null) as MemoryClaim[] | null,
-    markers: parse(row.markers_json, []) as MemoryMarker[],
-    scope: parse(row.scope_json, {}) as MemoryScope,
-    validFrom: (row.valid_from as string) ?? null,
-    validUntil: (row.valid_until as string) ?? null,
-    status: (row.status as MemoryRecord["status"]) ?? "active",
-    resolution: (row.resolution as MemoryRecord["resolution"]) ?? "resolved",
-    openedAt: (row.opened_at as string) ?? null,
-    relatedMemoryIds: parse(row.related_memory_ids_json, []) as string[],
-    residence: (row.residence as MemoryRecord["residence"]) ?? "stg",
-    sessionId: (row.session_id as string) ?? null,
-    promotedAt: (row.promoted_at as string) ?? null,
-    expiresAt: (row.expires_at as string) ?? null,
-    evidenceRole: (row.evidence_role as MemoryRecord["evidenceRole"]) ?? "support",
-    supersedesId: (row.supersedes_id as string) ?? null,
-    tier: (row.tier as MemoryRecord["tier"]) ?? 1,
-    importance: (row.importance as number) ?? 0.5,
-    accessCount: (row.access_count as number) ?? 0,
-    lastAccessedAt: (row.last_accessed_at as string) ?? null,
-    writeReason: String(row.write_reason ?? ""),
-    writeSource: (row.write_source as MemoryRecord["writeSource"]) ?? "core",
-    createdAt: String(row.created_at),
   };
 }
 

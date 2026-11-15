@@ -1,3 +1,4 @@
+import { normalizeStatement } from "../memory-normalization.ts";
 /**
  * retrieval cluster of NmgStore methods — official TypeScript mixin pattern
  * (docs/design/store-cluster-split.md, cluster-dag.test.ts).
@@ -49,7 +50,6 @@ import {
   searchTerms,
   mergeSemanticCandidates,
   normalize,
-  normalizeStatement,
   queryOverlapTerms,
   recallHitTerms,
   recallReason,

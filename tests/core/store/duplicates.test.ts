@@ -5,7 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { NmgStore } from "../../../src/core/store.ts";
-import { normalizeStatement, statementSimilarity } from "../../../src/core/store/search-ranking.ts";
+import { normalizeStatement } from "../../../src/core/memory-normalization.ts";
+import { statementSimilarity } from "../../../src/core/store/search-ranking.ts";
 
 function withStore(run: (store: NmgStore) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-dup-"));

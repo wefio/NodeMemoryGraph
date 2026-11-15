@@ -51,10 +51,15 @@ Harness binding tests cover generation isolation, stable invocation replay,
 cancellation, closure and refusal of cloud coordination. Local board/run
 transactions retain their existing SQLite contract tests.
 
-This is an opt-in library profile, not completion of the whole architecture.
-Real AWS/S3-compatible provider deployment, cost/latency benchmarks, branch
-collection, migration, cloud interactive API, and concrete Harness plugins remain
-unverified or deferred. The default memory and AML paths are unchanged.
+The [migration rehearsal](unified-architecture/legacy-graph-migration.md)
+verifies original IDs, references, state replacement, session isolation and
+local board access on SQLite and native local LanceDB. SQLite also has a
+full-copy rehearsal with exact-read comparison, an interrupted import and
+post-write backup recovery. The activated SQLite profile also exercises the
+Codex prompt/Stop hooks, its project-scoped recall and local writer handoff.
+Remaining legacy capability parity and real AWS/S3-compatible provider
+deployment, cost/latency benchmarks, branch collection, cloud interactive API
+and concrete Harness plugins remain open.
 
 ## Agent convergence feedback implementation slice
 

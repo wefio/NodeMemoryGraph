@@ -59,7 +59,6 @@ const EXTRACTED: ExtractedGroup[] = [
       "identityTokens",
       "requireText",
       "clamp",
-      "defaultResidence",
       "defaultWriteReason",
       "parseScope",
       "parseStoredJson",
@@ -67,7 +66,6 @@ const EXTRACTED: ExtractedGroup[] = [
       "StoredClaim",
       "serializeClaims",
       "parseClaims",
-      "normalizeMarkers",
       "serializeMarkers",
       "parseMarkers",
       "matchesScope",
@@ -80,6 +78,18 @@ const EXTRACTED: ExtractedGroup[] = [
     moduleFile: "src/core/scope.ts",
     symbols: ["serializeScope"],
     kept: ["mapNode"],
+  },
+  {
+    sourceFile: "src/core/store/rows.ts",
+    moduleFile: "src/core/memory-normalization.ts",
+    symbols: ["normalizeMarkers"],
+    kept: ["mapNode"],
+  },
+  {
+    sourceFile: "src/core/store/search-ranking.ts",
+    moduleFile: "src/core/memory-normalization.ts",
+    symbols: ["normalizeStatement"],
+    kept: ["statementSimilarity"],
   },
 ];
 

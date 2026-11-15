@@ -39,7 +39,7 @@ Lab 不是单向的存放区。daemon 通过既有客户端 RPC 发布能力目�
 
 [可替换配置](unified-architecture/native-backends.zh-CN.md)在统一异步领域接口后提供 SQLite 和原生 LanceDB 实现。确定性测试覆盖原子版本、固定读取快照、并发发布、证据、状态替换、会话隔离、删除、重试、命名空间隔离和服务路由。原生 S3 驱动连接 HTTP 对象协议夹具，覆盖重开、并发写者及写入拒绝。共享 Harness 绑定测试覆盖 generation 隔离、稳定 invocation 重试、取消、关闭与云端协作拒绝。本地 board／run 事务沿用既有 SQLite 契约测试。
 
-这是显式启用的库配置，不代表整个架构已经完成。真实 AWS／S3 兼容服务部署、成本与延迟基准、分支回收、迁移、云端交互 API 及具体 Harness 插件仍未验证或留待后续。默认记忆路径和 AML 路径不变。
+[迁移演练](unified-architecture/legacy-graph-migration.zh-CN.md)在 SQLite 和原生本地 LanceDB 上验证原始 ID、引用、状态替换、会话隔离和本地黑板访问。SQLite 另用现有数据库副本验证精确读取、导入中断、写入后的备份恢复、Codex 项目召回及本地写入权交接。其余旧能力、真实 AWS／S3 兼容服务部署、成本与延迟基准、分支回收、云端交互 API 和具体 Harness 插件仍待完成。
 
 ## Agent 收敛反馈实现切片
 

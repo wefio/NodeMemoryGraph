@@ -38,6 +38,10 @@ NMG 使用 Skill 将全部已交付适配器及 CLI／MCP 连接的安装、使�
 
 [Codex 适配器](../../../codex-plugin/README.zh-CN.md)按每次请求绑定会话，装配共享工具与原生 hook。[原生联调](../../experiments/runtime/codex-plugin-capabilities-2026-11-13.zh-CN.md)记录独立分发包安装、并发聊天、恢复和分叉隔离。
 
+[daemon 兼容合同](../../design/unified-architecture/adapter-capability-assembly.zh-CN.md#可执行装配)
+提供统一的工具选择依据。记忆写操作由统一引擎发布。daemon 持久化拒绝汇总，
+让独立交付的 hook 共享跨重启的诊断结果。
+
 ## Alternatives considered
 
 - 强制把本地记忆和协作拆成两个数据库文件：没有物理隔离要求时会增加配置；默认在一个本地 SQLite 文件中保持独立所有权。

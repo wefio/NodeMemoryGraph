@@ -1,5 +1,7 @@
 import {
   assembleAdapterCapabilities,
+  supportedSearchParameters,
+  type AdapterEndpoint,
   type AdapterCapabilityBindings,
 } from "../src/integration/adapter-capability-assembly.ts";
 import { ADAPTER_CAPABILITY_CATALOG } from "../src/integration/adapter-capability-catalog.ts";
@@ -67,7 +69,11 @@ import {
   STATE_OPERATIONS,
 } from "../src/integration/state.ts";
 import { assembleBoardStateParams, resolveBoardOperation } from "./state-args.ts";
-import { COMMON_REMEMBER_ACTIONS } from "../src/integration/tool-contract.ts";
+import {
+  COMMON_REMEMBER_ACTIONS,
+  supportedRememberActions,
+} from "../src/integration/tool-contract.ts";
+import { probeAdapterEndpoint } from "../src/integration/lease-transport.ts";
 import {
   SEARCH_REQUIRED_PARAMETERS,
   searchParameterProperties,
@@ -573,16 +579,19 @@ export default {
     };
 
     // ---- nmg_search -------------------------------------------------------
-    const searchTool = (): ToolRegistration => ({
+    const searchTool = (endpoint?: AdapterEndpoint): ToolRegistration => ({
       name: "search",
       description: prompts.search_description,
       input: {
         type: "object",
-        properties: {
-          // Shared retrieval contract; only the prompt-enriched query text is local.
-          ...searchParameterProperties(),
-          query: { type: "string", description: prompts.search_query_parameter_description },
-        },
+        properties: supportedSearchParameters(
+          {
+            // Shared retrieval contract; only the prompt-enriched query text is local.
+            ...searchParameterProperties(),
+            query: { type: "string", description: prompts.search_query_parameter_description },
+          },
+          endpoint,
+        ),
         required: [...SEARCH_REQUIRED_PARAMETERS],
         additionalProperties: false,
       },
@@ -687,7 +696,7 @@ export default {
     });
 
     // ---- nmg_remember -----------------------------------------------------
-    const rememberTool = (): ToolRegistration => ({
+    const rememberTool = (methods?: readonly string[]): ToolRegistration => ({
       name: "remember",
       description: prompts.remember_description,
       input: {
@@ -695,7 +704,7 @@ export default {
         properties: {
           action: {
             type: "string",
-            enum: [...COMMON_REMEMBER_ACTIONS],
+            enum: supportedRememberActions(methods),
             description: prompts.remember_action_parameter_description,
           },
           memoryId: {
@@ -1246,20 +1255,21 @@ export default {
       {
         ...capabilityBindings,
         tools: {
-          nmg_search: () => {
-            toolDefinitions.push({ ...searchTool(), name: "nmg_search" });
+          nmg_search: (endpoint) => {
+            toolDefinitions.push({ ...searchTool(endpoint), name: "nmg_search" });
           },
           nmg_get: () => {
             toolDefinitions.push({ ...getTool(), name: "nmg_get" });
           },
-          nmg_remember: () => {
-            toolDefinitions.push({ ...rememberTool(), name: "nmg_remember" });
+          nmg_remember: (endpoint) => {
+            toolDefinitions.push({ ...rememberTool(endpoint?.methods), name: "nmg_remember" });
           },
           nmg_state: () => {
             toolDefinitions.push({ ...stateTool(), name: "nmg_state" });
           },
         },
       },
+      { endpoint: probeAdapterEndpoint(dataDir) },
     );
     await capabilityAssembly.ready;
     let registered: Promise<unknown>;

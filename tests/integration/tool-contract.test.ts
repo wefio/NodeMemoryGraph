@@ -33,7 +33,7 @@ test("host-neutral action contracts are unique and Pi only adds host-owned actio
 
 test("Pi, MCP, DSH, and OpenCode schemas consume the shared action contract", () => {
   const sources = [
-    ["../../.pi/extensions/nmg/index.ts", /PI_BOARD_ACTIONS/u, /PI_REMEMBER_ACTIONS/u],
+    ["../../.pi/extensions/nmg/index.ts", /PI_BOARD_ACTIONS/u, /supportedRememberActions/u],
     ["../../src/integration/mcp-tools.ts", /STATE_OPERATIONS/u, /COMMON_REMEMBER_ACTIONS/u],
     ["../../dsh/dsh-nmg/src/plugin/index.ts", /STATE_OPERATIONS/u, /COMMON_REMEMBER_ACTIONS/u],
     ["../../opencode-plugin/index.ts", /STATE_OPERATIONS/u, /COMMON_REMEMBER_ACTIONS/u],

@@ -1,3 +1,5 @@
+import { normalize, normalizeStatement } from "../memory-normalization.ts";
+export { normalize };
 import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import type { MemoryNode, MemorySearchResult, MemoryType, RecallCue } from "../types.ts";
 
@@ -121,9 +123,19 @@ export function lexicalScore(
   preparedTerms?: readonly string[],
 ): number {
   const triggers = recallTriggersFromStoredMarkers(row.m_markers_json).join(" ");
-  const haystack = normalize(
+  return lexicalTextScore(
+    query,
     `${row.m_statement} ${row.n_canonical_name} ${row.n_summary} ${triggers}`,
+    preparedTerms,
   );
+}
+
+export function lexicalTextScore(
+  query: string,
+  text: string,
+  preparedTerms?: readonly string[],
+): number {
+  const haystack = normalize(text);
   if (haystack.includes(query)) return 10 + query.length;
   const terms = preparedTerms ?? searchTerms(query);
   return terms.reduce((score, term) => score + (haystack.includes(term) ? term.length : 0), 0);
@@ -455,10 +467,6 @@ const ENGLISH_SEARCH_STOP_WORDS = new Set([
   "with",
 ]);
 
-export function normalize(value: string): string {
-  return value.normalize("NFKC").trim().toLocaleLowerCase("en-US");
-}
-
 /**
  * Query-term extraction for overlap scoring: whitespace-split terms (≥3
  * chars), CJK bigram shingles when the query is a single CJK run (no word
@@ -486,19 +494,6 @@ export function termOverlapScore(terms: readonly string[], statement: string): n
     (score, term) => score + (term && haystack.includes(term) ? term.length : 0),
     0,
   );
-}
-
-/**
- * Statement-level normalization for duplicate detection: NFKC, lowercased,
- * punctuation stripped, whitespace collapsed. Two statements that normalize
- * equal are the same fact written again regardless of surface formatting
- * (case, spacing, trailing punctuation, quotes).
- */
-export function normalizeStatement(value: string): string {
-  return normalize(value)
-    .replace(/[\p{P}\p{S}]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 /**

@@ -30,6 +30,7 @@ import type {
 } from "../core/types.ts";
 import { NmgStore } from "../core/store.ts";
 import { PortableMemoryService } from "./portable-memory.ts";
+import { RpcRejections } from "./rpc-rejections.ts";
 import type { MemoryBackendOptions } from "../core/memory/open.ts";
 import { parseBoardNotification, MAX_BOARD_DELIVERY_ENTRIES } from "../core/board-notifications.ts";
 import {
@@ -85,6 +86,7 @@ import {
   RETRIEVAL_MODES,
   TRUTH_STATUSES,
   VECTOR_GRANULARITIES,
+  type ActiveGraph,
   type ActiveGraphBudget,
   type ClaimPosterior,
   type MemoryChain,
@@ -97,7 +99,7 @@ import {
   type SearchOptions,
 } from "../core/types.ts";
 import { TASK_BOARD_VERDICTS } from "../core/types.ts";
-import { assessMemoryWrite } from "../core/write-policy.ts";
+import { assessMemoryWrite, MemoryWriteRejected } from "../core/write-policy.ts";
 import {
   MemoryGraphReasoner,
   type LogicExpr,
@@ -114,6 +116,7 @@ import { readRelevanceModel } from "../lab/relevance-model.ts";
 import { normalizeRecallTriggers } from "../core/recall-triggers.ts";
 import { SessionRecallTrial, type SessionRecallPreparation } from "../core/session-recall.ts";
 import { RecallContextPolicy } from "../integration/recall-context-policy.ts";
+import type { CoordinationPort, TaskBoardPort } from "../integration/coordination-port.ts";
 import {
   bindRunEntry,
   cancelRun,
@@ -202,6 +205,8 @@ import {
   type NmgTopologyProposalParams,
 } from "./protocol.ts";
 import { resolveNmgDataDir } from "./data-path.ts";
+import { portableRecallGraph } from "../integration/portable-recall.ts";
+import { activatedLocalMemory } from "../core/memory/sqlite-backend.ts";
 
 const SERVICE_VERSION = "0.1.0";
 type ActiveGraphStorePart = {
@@ -211,10 +216,9 @@ type ActiveGraphStorePart = {
   referenceTargets?: readonly MemoryReferenceTarget[];
 };
 export interface NmgServiceOptions {
-  /** Explicit opt-in. SQLite defaults to databasePath, shared with local coordination.
-   * Legacy memory data is migrated separately, never silently reinterpreted. */
+  /** Select a backend directly. Local SQLite follows the activated namespace when omitted. */
   memoryBackend?:
-    | { kind: "sqlite"; namespace: string; path?: string }
+    | { kind: "sqlite"; namespace: string; path?: string; local?: true }
     | Extract<MemoryBackendOptions, { kind: "lancedb" }>;
   dataDirectory?: string;
   databasePath?: string;
@@ -223,6 +227,7 @@ export interface NmgServiceOptions {
 
 export class NmgService {
   readonly #portableMemory: PortableMemoryService | undefined;
+  readonly #rpcRejections: RpcRejections;
   /**
    * Concurrency contract:
    * - one resident service is the application-level writer for its LTG and
@@ -302,7 +307,8 @@ export class NmgService {
         ? dirname(databasePath)
         : resolveNmgDataDir(environment);
     this.databasePath = databasePath ?? join(dataDirectory, "nmg.sqlite");
-    const memoryBackend = options.memoryBackend;
+    this.#rpcRejections = new RpcRejections(this.databasePath + ".rpc-rejections.sqlite");
+    const memoryBackend = options.memoryBackend ?? localMemorySelection(this.databasePath);
     this.#portableMemory = memoryBackend
       ? new PortableMemoryService(
           memoryBackend.kind === "sqlite"
@@ -311,6 +317,8 @@ export class NmgService {
                 path: memoryBackend.path ? resolve(memoryBackend.path) : this.databasePath,
               }
             : memoryBackend,
+          memoryBackend.kind === "sqlite" && memoryBackend.local === true,
+          () => this.#configuredEmbeddingClient(),
         )
       : undefined;
     this.#dataDirectory = dataDirectory;
@@ -467,28 +475,24 @@ export class NmgService {
         case "status":
           return this.#status() as NmgMethodResult[M];
         case "resolveRemember":
-          return this.#resolveRemember(parseResolveRememberParams(params)) as NmgMethodResult[M];
+          return (await this.#resolveMemory(
+            parseResolveRememberParams(params),
+          )) as NmgMethodResult[M];
         case "recordClaimOutcomes":
-          return this.#recordClaimOutcomes(
+          return (await this.#claimOutcomes(
             parseRecordClaimOutcomesParams(params),
-          ) as NmgMethodResult[M];
+          )) as NmgMethodResult[M];
         case "recordFeedback":
           return this.#recordFeedback(parseRecordFeedbackParams(params)) as NmgMethodResult[M];
         case "recordActiveGraphAttribution":
-          return this.#recordActiveGraphAttribution(
+          return (await this.#attributeRecall(
             parseRecordActiveGraphAttributionParams(params),
-          ) as NmgMethodResult[M];
+          )) as NmgMethodResult[M];
         case "retentionCandidates":
           return {
             candidates: this.#getStore().retentionCandidates(
               parseRetentionCandidatesParams(params),
             ),
-          } as NmgMethodResult[M];
-        case "perfAggregates":
-          return this.#getStore().perfAggregates() as NmgMethodResult[M];
-        case "pruneRetrievalTraces":
-          return {
-            pruned: this.#getStore().pruneRetrievalTraces(parsePerfPruneParams(params)),
           } as NmgMethodResult[M];
         case "setStorageState": {
           const parsed = parseSetStorageStateParams(params);
@@ -575,10 +579,28 @@ export class NmgService {
           this.#shutdownRequested = true;
           return { shuttingDown: true } as NmgMethodResult[M];
         default:
-          throw new NmgProtocolError("METHOD_NOT_FOUND", `unknown method: ${String(method)}`);
+          return this.#invokeLegacyDiagnostics(method, params) as NmgMethodResult[M];
       }
+    } catch (error) {
+      this.#rpcRejections.record(method, error);
+      throw error;
     } finally {
       this.#inFlight -= 1;
+    }
+  }
+
+  recordUnknownRpcMethod(): void {
+    this.#rpcRejections.record("(unknown)", new NmgProtocolError("METHOD_NOT_FOUND", ""));
+  }
+
+  #invokeLegacyDiagnostics(method: NmgMethod, params: unknown): unknown {
+    switch (method) {
+      case "perfAggregates":
+        return this.#getStore().perfAggregates();
+      case "pruneRetrievalTraces":
+        return { pruned: this.#getStore().pruneRetrievalTraces(parsePerfPruneParams(params)) };
+      default:
+        throw new NmgProtocolError("METHOD_NOT_FOUND", `unknown method: ${String(method)}`);
     }
   }
 
@@ -607,7 +629,15 @@ export class NmgService {
   }
 
   async #invokeMemory(method: NmgMethod, value: unknown): Promise<unknown> {
-    if (this.#portableMemory) return this.#invokePortable(method, value);
+    if (this.#portableMemory) {
+      try {
+        return await this.#invokePortable(method, value);
+      } catch (error) {
+        if (error instanceof MemoryWriteRejected)
+          throw new NmgProtocolError("WRITE_REJECTED", error.reason);
+        throw error;
+      }
+    }
     switch (method) {
       case "remember":
         return this.#remember(parseRememberParams(value));
@@ -633,13 +663,16 @@ export class NmgService {
     const operationId = optionalString(params, "operationId");
     switch (method) {
       case "remember":
-        return memory.remember(parseRememberParams(params), operationId);
+        return memory.remember(this.#portableWriteInput(parseRememberParams(params)), operationId);
       case "rememberBatch":
-        return memory.rememberMany(parseRememberBatchParams(params).items, operationId);
+        return memory.rememberMany(
+          parseRememberBatchParams(params).items.map((item) => this.#portableWriteInput(item)),
+          operationId,
+        );
       case "search":
-        return memory.search(parseSearchParams(params));
+        return this.#searchPortable(parseSearchParams(params));
       case "get":
-        return memory.get(parseGetParams(params));
+        return this.#getPortable(parseGetParams(params));
       case "deleteMemory": {
         const parsed = parseDeleteMemoryParams(params);
         return memory.withdraw(parsed.memoryId, operationId, optionalString(params, "sessionId"));
@@ -650,6 +683,182 @@ export class NmgService {
           `${method} is not a portable memory operation`,
         );
     }
+  }
+
+  #portableWriteInput(params: NmgRememberParams): NmgRememberParams {
+    if (!this.#portableMemory?.local) return params;
+    return { ...params, tesserae: this.#withTesseraSimhashes(params.tesserae, params.projectDir) };
+  }
+
+  async #searchPortable(params: NmgSearchParams): Promise<MemoryContext> {
+    const memory = this.#portableMemory!;
+    const started = performance.now();
+    if (memory.local) this.#offerSearchCue(params);
+    const retrieval = { ...params };
+    if (memory.local) {
+      delete retrieval.recallCue;
+      delete retrieval.recallRevision;
+      delete retrieval.recallSource;
+    }
+    const context = await memory.search(retrieval);
+    if (!memory.local) return context;
+    if (!params.autoRecall)
+      context.tesserae = this.#resolveTesseraLines(context.tesserae ?? [], params.projectDir);
+    if (!params.sessionId) return context;
+    context.results = this.#recallContext.rank(
+      params.sessionId,
+      resolve(params.projectDir ?? process.cwd()),
+      params.query,
+      context.results,
+    );
+    if (params.autoRecall) context.recallDisplayMode = this.#recallContext.mode(params.sessionId);
+    const projected = portableRecallGraph(context, params, performance.now() - started);
+    const targets = captureMemoryReferenceTargets(projected.results);
+    const activeGraph = this.#sessionActiveGraphs.registerProjection(
+      projected.activeGraph,
+      this.#portableTraceParts(projected.activeGraph, targets, params.persistTrace),
+      projected.activeGraph.id,
+    );
+    const result = { ...projected, activeGraph: activeGraph.graph };
+    if (params.persistTrace !== false) this.#stageOnlineDecision(params, result);
+    return params.persistTrace === false
+      ? result
+      : { ...result, memoryReferences: createMemoryReferences(result, targets) };
+  }
+
+  #portableTraceParts(
+    graph: ActiveGraph,
+    referenceTargets: readonly MemoryReferenceTarget[],
+    persistTrace?: boolean,
+  ): Array<ActiveGraphProjectionPart<ActiveGraphStorePart>> {
+    if (persistTrace === false) return [];
+    const store = this.#getStore();
+    const traceId = store.recordRetrievalTrace(
+      {
+        sessionId: graph.sessionId ?? undefined,
+        query: graph.query,
+        taskId: graph.taskId,
+        resultMemoryIds: graph.memoryIds,
+        resultNodeIds: graph.nodeIds,
+        relationIds: graph.edges.map((edge) => edge.id),
+        activeGraphBudget: graph.budget,
+        activeGraphUsage: graph.usage,
+        selections: graph.selections,
+        expansions: graph.expansions,
+        budgetLedger: graph.budgetLedger,
+        qpp: graph.qpp,
+      },
+      false,
+      graph.id,
+    );
+    const memoryIds = new Set(graph.memoryIds);
+    return [{ traceId, memoryIds, value: { store, traceId, memoryIds, referenceTargets } }];
+  }
+
+  async #getPortable(params: NmgGetParams): Promise<NmgMethodResult["get"]> {
+    this.#countGetReferences(params.memoryIds);
+    const trace = params.activeGraphId
+      ? this.#portableDisclosureTrace(params.activeGraphId, params.sessionId)
+      : undefined;
+    params = await this.#resolvePortableGetReferences(params);
+    const context = await this.#portableMemory!.get(params);
+    const found = new Set(context.results.map((result) => result.memory.id));
+    if (trace)
+      trace.store.recordActiveGraphDisclosure(trace.id, [...found], params.sessionId, false);
+    if (this.#portableMemory!.local)
+      context.tesserae = this.#resolveTesseraLines(context.tesserae ?? [], params.projectDir);
+    return { ...context, missingMemoryIds: params.memoryIds.filter((id) => !found.has(id)) };
+  }
+
+  #portableDisclosureTrace(id: string, sessionId?: string) {
+    if (!this.#portableMemory?.local)
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        "Portable memory does not support activeGraphId",
+        "activeGraphId",
+      );
+    const store = this.#getStore();
+    if (store.traceOwnership(id, sessionId) === "owned") {
+      const trace = store.retrievalTrace(id, sessionId)!;
+      return { id, store, memoryIds: trace.resultMemoryIds };
+    }
+    this.#ownedPortableGraph(id, sessionId);
+    return undefined; // Live ephemeral probes have no persisted trace.
+  }
+
+  async #resolvePortableGetReferences(params: NmgGetParams): Promise<NmgGetParams> {
+    if (!params.memoryIds.some(isMemoryReference)) return params;
+    if (!params.activeGraphId)
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        "Memory references require their activeGraphId.",
+        "activeGraphId",
+      );
+    const parts = this.#projectionParts(params.activeGraphId, params.sessionId) ?? [];
+    const targets = parts.flatMap((part) => part.referenceTargets ?? []);
+    const current = await this.#portableMemory!.get({
+      ...params,
+      memoryIds: targets.map(({ memory }) => memory.id),
+      graphHops: 0,
+    });
+    try {
+      return {
+        ...params,
+        memoryIds: resolveMemoryReferences(params.memoryIds, targets, current.results),
+      };
+    } catch (error) {
+      if (error instanceof MemoryReferenceError)
+        throw new NmgProtocolError("INVALID_PARAMS", error.message, "memoryIds");
+      throw error;
+    }
+  }
+
+  #ownedPortableGraph(id: string, sessionId?: string) {
+    const projection = this.#sessionActiveGraphs.projection(id, sessionId);
+    if (!projection || projection.sessionId !== (sessionId?.trim() || "__anonymous__"))
+      throw new NmgProtocolError(
+        "NOT_FOUND",
+        "Active Graph projection is absent or belongs to another session",
+      );
+    return projection.graph;
+  }
+
+  async #attributeRecall(
+    params: NmgRecordActiveGraphAttributionParams,
+  ): Promise<NmgMethodResult["recordActiveGraphAttribution"]> {
+    if (!this.#portableMemory?.local) return this.#recordActiveGraphAttribution(params);
+    const graph = this.#ownedPortableGraph(params.activeGraphId, params.sessionId);
+    const visible = new Set(graph.memoryIds);
+    const attributedMemoryIds =
+      params.answerText === undefined
+        ? params.attributedMemoryIds.filter((id) => visible.has(id))
+        : await this.#portableOverlap(graph, params);
+    for (const part of this.#projectionParts(graph.id, params.sessionId) ?? [])
+      part.store.recordActiveGraphAttribution(
+        part.traceId,
+        { method: "answer_overlap", attributedMemoryIds },
+        params.sessionId,
+      );
+    return { activeGraphId: graph.id, attributedMemoryIds };
+  }
+
+  async #portableOverlap(
+    graph: ActiveGraph,
+    params: NmgRecordActiveGraphAttributionParams,
+  ): Promise<string[]> {
+    const versions = new Map(
+      params.memoryVersions!.map((item) => [item.memoryId, item.statementHash]),
+    );
+    const ids = graph.memoryIds.filter((id) => versions.has(id));
+    const context = await this.#portableMemory!.get({
+      memoryIds: ids,
+      sessionId: params.sessionId,
+      projectDir: params.projectDir,
+    });
+    const candidates = context.results.filter(
+      ({ memory }) => versions.get(memory.id) === statementFingerprint(memory.statement),
+    );
+    return deriveAnswerOverlapMemoryIds(params.answerText!, candidates, graph.query);
   }
 
   #hello(): NmgHelloResult {
@@ -665,18 +874,15 @@ export class NmgService {
   }
 
   #status(): NmgStatusResult {
+    const rpcRejections = this.#rpcRejections.report();
     if (this.#portableMemory)
       return {
         ...this.#hello(),
         process: { pid: process.pid, node: process.version },
         storage: this.#portableMemory.storageStatus,
-        embedding: {
-          configured: false,
-          provider: null,
-          indexId: null,
-          health: null,
-          reason: "portable_memory_lexical",
-        },
+        getReferenceUsage: { ...this.#getReferenceUsage },
+        rpcRejections,
+        embedding: this.#portableEmbeddingStatus(),
       };
     const exists = existsSync(this.databasePath);
     const embeddingClient = this.#configuredEmbeddingClient();
@@ -685,6 +891,7 @@ export class NmgService {
       ...this.#hello(),
       process: { pid: process.pid, node: process.version },
       getReferenceUsage: { ...this.#getReferenceUsage },
+      rpcRejections,
       storage: {
         databasePath: this.databasePath,
         exists,
@@ -701,6 +908,19 @@ export class NmgService {
             : null,
         reason: this.#embeddingError,
       },
+    };
+  }
+
+  #portableEmbeddingStatus(): NmgStatusResult["embedding"] {
+    const portable = this.#portableMemory!;
+    const provider = portable.local ? this.#configuredProvider() : null;
+    const client = provider ? this.#configuredEmbeddingClient() : undefined;
+    return {
+      configured: provider !== null,
+      provider,
+      indexId: client?.indexId ?? null,
+      health: client ? portable.embeddingHealth(client.indexId) : null,
+      reason: portable.local ? this.#embeddingError : "portable_memory_lexical",
     };
   }
 
@@ -1446,6 +1666,7 @@ export class NmgService {
     const assessment = assessMemoryWrite({
       statement: params.statement,
       evidence: params.evidence,
+      evidenceSource: params.evidenceSource,
       memoryType: params.memoryType,
       bypass: params.unsafe,
       expiresAt: params.expiresAt,
@@ -1662,6 +1883,16 @@ export class NmgService {
     };
   }
 
+  async #resolveMemory(
+    params: NmgResolveRememberParams,
+  ): Promise<NmgMethodResult["resolveRemember"]> {
+    if (!this.#portableMemory) return this.#resolveRemember(params);
+    const result = await this.#portableMemory.resolveRemember(params);
+    if (result.action === "supersede" && result.applied)
+      this.#settleRecallDebtOnSupersede(result.supersededMemoryId);
+    return result;
+  }
+
   #relateRemember(
     params: Extract<NmgResolveRememberParams, { action: "relate" }>,
     store: NmgStore,
@@ -1744,6 +1975,27 @@ export class NmgService {
       // Feedback must never break the surrounding remember call.
     }
     return result;
+  }
+
+  async #claimOutcomes(params: NmgRecordClaimOutcomesParams) {
+    if (!this.#portableMemory) return this.#recordClaimOutcomes(params);
+    if (params.activeGraphId) {
+      const projection = this.#sessionActiveGraphs.projection(
+        params.activeGraphId,
+        params.sessionId,
+      );
+      const trace = this.#portableDisclosureTrace(params.activeGraphId, params.sessionId);
+      const exposed = new Set(projection?.graph.memoryIds ?? trace?.memoryIds);
+      if (params.votes.some((vote) => !exposed.has(vote.memoryId)))
+        throw new NmgProtocolError(
+          "INVALID_PARAMS",
+          "Claim outcome targets must be exposed by the Active Graph",
+        );
+    }
+    return this.#portableMemory.recordClaimOutcomes(
+      params,
+      configuredStgConsolidationPolicy(this.#environment),
+    );
   }
 
   #recordClaimOutcomes(
@@ -2772,6 +3024,11 @@ export class NmgService {
   }
 }
 
+function localMemorySelection(path: string): NmgServiceOptions["memoryBackend"] {
+  const namespace = activatedLocalMemory(path);
+  return namespace ? { kind: "sqlite", namespace, local: true } : undefined;
+}
+
 function parseRememberParams(value: unknown): NmgRememberParams {
   const params = objectParams(value);
   const parsed: NmgRememberParams = {
@@ -2884,6 +3141,7 @@ const SIMHASH_DRIFT_THRESHOLD = 6;
  *  skips VCS/dependency/build directories and non-regular files, caps at
  *  SIMHASH_SCOPE_MAX_FILES so a pathological tree cannot stall a search. */
 const SIMHASH_SCOPE_MAX_FILES = 200;
+const TESSERA_MAX_FILE_BYTES = 1024 * 1024;
 
 const SIMHASH_SCOPE_SKIP_DIRS = new Set([
   ".git",
@@ -2936,7 +3194,10 @@ function projectCandidateFiles(root: string, limit = SIMHASH_SCOPE_MAX_FILES): s
  *  tessera write-time SimHash computation. */
 function readFileSafe(absPath: string): string | null {
   try {
-    return readFileSync(absPath, "utf8");
+    const stats = statSync(absPath);
+    if (!stats.isFile() || stats.size > TESSERA_MAX_FILE_BYTES) return null;
+    const text = readFileSync(absPath, "utf8");
+    return text.includes("\0") ? null : text;
   } catch {
     return null;
   }
@@ -2945,12 +3206,7 @@ function readFileSafe(absPath: string): string | null {
 /** Read a file's lines, or null when unreadable/missing. Used by tessera
  *  snippet relocation. */
 function readLinesSafe(absPath: string): string[] | null {
-  try {
-    const content = readFileSync(absPath, "utf8");
-    return content.split(/\r?\n/);
-  } catch {
-    return null;
-  }
+  return readFileSafe(absPath)?.split(/\r?\n/) ?? null;
 }
 
 function parseExportMemoriesParams(value: unknown): NmgExportMemoriesParams {
@@ -3091,6 +3347,7 @@ function eventTimeBound(params: Record<string, unknown>, name: string): string |
     throw new NmgProtocolError(
       "INVALID_PARAMS",
       `${name} must be a date or a resolvable date phrase`,
+      name,
     );
   }
   return raw;
@@ -3814,7 +4071,7 @@ type TaskBoardParamsOf<A extends NmgTaskBoardParams["action"]> = Extract<
   { action: A }
 >;
 type TaskBoardHandler = (
-  store: NmgStore,
+  store: TaskBoardPort,
   parsed: NmgTaskBoardParams,
 ) => NmgMethodResult["taskBoard"];
 
@@ -4054,7 +4311,10 @@ type TaskRunParamsOf<A extends NmgTaskRunParams["action"]> = Extract<
   NmgTaskRunParams,
   { action: A }
 >;
-type TaskRunHandler = (store: NmgStore, parsed: NmgTaskRunParams) => NmgMethodResult["taskRun"];
+type TaskRunHandler = (
+  store: CoordinationPort,
+  parsed: NmgTaskRunParams,
+) => NmgMethodResult["taskRun"];
 
 /** Table-driven run-surface dispatch, for the same reason as `taskBoardHandlers`: the transition
  *  rules live in the coordinator, and every branch here is one call into it. */
@@ -4355,7 +4615,7 @@ function isActiveGraphStorePart(
 
 function requiredString(params: Record<string, unknown>, key: string): string {
   const value = optionalString(params, key);
-  if (!value) throw new NmgProtocolError("INVALID_PARAMS", `${key} is required`);
+  if (!value) throw new NmgProtocolError("INVALID_PARAMS", `${key} is required`, key);
   return value;
 }
 
@@ -4363,7 +4623,7 @@ function optionalString(params: Record<string, unknown>, key: string): string | 
   const value = params[key];
   if (value === undefined) return undefined;
   if (typeof value !== "string" || !value.trim()) {
-    throw new NmgProtocolError("INVALID_PARAMS", `${key} must be a non-empty string`);
+    throw new NmgProtocolError("INVALID_PARAMS", `${key} must be a non-empty string`, key);
   }
   return value.trim();
 }
@@ -4376,7 +4636,11 @@ function optionalStringArray(params: Record<string, unknown>, key: string): stri
     value.length === 0 ||
     value.some((entry) => typeof entry !== "string" || !entry.trim())
   ) {
-    throw new NmgProtocolError("INVALID_PARAMS", `${key} must be an array of non-empty strings`);
+    throw new NmgProtocolError(
+      "INVALID_PARAMS",
+      `${key} must be an array of non-empty strings`,
+      key,
+    );
   }
   return value.map((entry) => String(entry).trim());
 }
@@ -4419,7 +4683,7 @@ function optionalBoolean(params: Record<string, unknown>, key: string): boolean 
   const value = params[key];
   if (value === undefined) return undefined;
   if (typeof value !== "boolean") {
-    throw new NmgProtocolError("INVALID_PARAMS", `${key} must be a boolean`);
+    throw new NmgProtocolError("INVALID_PARAMS", `${key} must be a boolean`, key);
   }
   return value;
 }
@@ -4436,6 +4700,7 @@ function optionalNumber(
     throw new NmgProtocolError(
       "INVALID_PARAMS",
       `${key} must be a number from ${minimum} to ${maximum}`,
+      key,
     );
   }
   return value;
@@ -4460,7 +4725,7 @@ function optionalInteger(
 ): number | undefined {
   const value = optionalNumber(params, key, minimum, maximum);
   if (value !== undefined && !Number.isInteger(value)) {
-    throw new NmgProtocolError("INVALID_PARAMS", `${key} must be an integer`);
+    throw new NmgProtocolError("INVALID_PARAMS", `${key} must be an integer`, key);
   }
   return value;
 }
@@ -4493,7 +4758,11 @@ function optionalEnum<const T extends string>(
   const value = params[key];
   if (value === undefined) return undefined;
   if (typeof value !== "string" || !allowed.includes(value as T)) {
-    throw new NmgProtocolError("INVALID_PARAMS", `${key} must be one of: ${allowed.join(", ")}`);
+    throw new NmgProtocolError(
+      "INVALID_PARAMS",
+      `${key} must be one of: ${allowed.join(", ")}`,
+      key,
+    );
   }
   return value as T;
 }

@@ -34,6 +34,7 @@ export interface DaemonConnection {
   capabilities: ReadonlySet<string>;
   /** Methods advertised by this daemon. Absent only for an earlier same-epoch daemon. */
   methods?: ReadonlySet<string>;
+  searchParameters?: readonly string[];
   /** Discovery/cache identity only; a mismatch never implies incompatibility. */
   catalogFingerprint?: string;
   /** 数据库路径，供连接失败重连时重新拉起同库 daemon。 */
@@ -72,6 +73,7 @@ export async function connectDaemon(databasePath: string): Promise<DaemonConnect
         databasePath,
         capabilities: new Set(hello.capabilities),
         methods: hello.methods ? new Set(hello.methods) : undefined,
+        searchParameters: hello.searchParameters,
         catalogFingerprint: hello.catalogFingerprint,
       };
     } catch (error) {
@@ -106,6 +108,7 @@ export async function connectDaemon(databasePath: string): Promise<DaemonConnect
     databasePath,
     capabilities: new Set(hello.capabilities),
     methods: hello.methods ? new Set(hello.methods) : undefined,
+    searchParameters: hello.searchParameters,
     catalogFingerprint: hello.catalogFingerprint,
   };
 }
@@ -149,6 +152,8 @@ export function parseDaemonHello(value: unknown): NmgHelloResult {
     throw new NmgDaemonHandshakeError("capabilities must be a string array");
   if (hello.methods !== undefined && !stringArray(hello.methods))
     throw new NmgDaemonHandshakeError("methods must be a string array when present");
+  if (hello.searchParameters !== undefined && !stringArray(hello.searchParameters))
+    throw new NmgDaemonHandshakeError("searchParameters must be a string array when present");
   if (
     hello.catalogFingerprint !== undefined &&
     (typeof hello.catalogFingerprint !== "string" ||
@@ -343,6 +348,7 @@ async function adoptReplacedEndpoint(
     connection.startedByCaller = false;
     connection.capabilities = new Set(hello.capabilities);
     connection.methods = hello.methods ? new Set(hello.methods) : undefined;
+    connection.searchParameters = hello.searchParameters;
     connection.catalogFingerprint = hello.catalogFingerprint;
   } catch (error) {
     signal?.throwIfAborted();

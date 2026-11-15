@@ -3,19 +3,45 @@ import type {
   MemoryBackend,
   MemoryCommitReceipt,
   MemoryEntity,
+  MemoryEntityQuery,
   MemoryReadView,
+  MemoryVectorQuery,
 } from "./backend.ts";
 import { MemoryOperationConflict } from "./backend.ts";
-import { memoryIdentity, requestHash, validateMemoryInput, visibleMemory } from "./model.ts";
+import {
+  memoryIdentity,
+  requestHash,
+  searchableMemory,
+  validateMemoryInput,
+  visibleMemory,
+} from "./model.ts";
 import type { MemoryInput } from "./model.ts";
 import { MemoryPlan } from "./plan.ts";
+import { recordClaimOutcomes } from "./claim-outcomes.ts";
+import { changeResolution, proposeMemoryRelation, supersedeMemory } from "./lifecycle.ts";
+import type {
+  MemoryRelationProposal,
+  MemoryResolutionChange,
+  MemorySupersession,
+} from "./lifecycle.ts";
+import { MemoryWriteRejected } from "../write-policy.ts";
+import { hybridScore, lexicalTextScore, searchTerms } from "../store/search-ranking.ts";
+import { normalize } from "../memory-normalization.ts";
+import { eventWindowEnd, eventWindowStart } from "../event-time.ts";
+import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
+import { TESSERA_REF_MARKER } from "../types.ts";
 import type {
   MemoryContext,
+  EdgePathStep,
+  MemoryActor,
   MemoryRecord,
   MemoryScope,
   MemorySearchResult,
+  MemoryWriteEvent,
   NodeRelation,
   RememberResult,
+  RecordClaimOutcomesInput,
+  TesseraHit,
 } from "../types.ts";
 
 export interface MemoryQueryOptions {
@@ -24,6 +50,12 @@ export interface MemoryQueryOptions {
   limit?: number;
   maxTier?: 0 | 1 | 2 | 3;
   graphHops?: number;
+  includeHistorical?: boolean;
+  sourceActor?: MemoryActor;
+  nodeName?: string;
+  eventTimeFrom?: string;
+  eventTimeTo?: string;
+  findTesserae?: boolean;
 }
 
 interface PlannedResult<T> {
@@ -51,11 +83,11 @@ export class MemoryEngine {
   ): Promise<RememberResult[]> {
     if (!inputs.length || inputs.length > 128)
       throw new Error("A memory batch needs 1..128 inputs");
-    inputs.forEach(validateMemoryInput);
     const timestamp = this.now();
+    await this.validateWrites(inputs, operationId, timestamp);
     return this.mutate(
       operationId,
-      { action: "remember", inputs },
+      { action: "remember", inputs: inputs.map(rememberRequest) },
       async (plan) => {
         const result: RememberResult[] = [];
         for (const [slot, input] of inputs.entries())
@@ -70,7 +102,51 @@ export class MemoryEngine {
     );
   }
 
+  private async validateWrites(inputs: readonly MemoryInput[], operationId: string, now: string) {
+    for (const [slot, input] of inputs.entries()) {
+      try {
+        validateMemoryInput(input);
+      } catch (error) {
+        if (error instanceof MemoryWriteRejected)
+          await this.recordRejection(input, operationId, slot, error.reason, now);
+        throw error;
+      }
+    }
+  }
+
+  private async recordRejection(
+    input: MemoryInput,
+    operationId: string,
+    slot: number,
+    policyReason: string,
+    now: string,
+  ) {
+    const id = memoryIdentity("rejected-memory-write", operationId, String(slot), policyReason);
+    const metadata: Omit<MemoryWriteEvent, "createdAt"> = {
+      id,
+      memoryId: null,
+      historyId: null,
+      sessionId: input.sessionId ?? null,
+      decision: "rejected",
+      policyReason,
+      writeReason: `cli_rejected_${input.memoryType ?? "fact"}`,
+      writeSource: input.writeSource ?? "agent",
+      memoryType: input.memoryType ?? "fact",
+      requestedResidence: input.residence ?? "ltg",
+    };
+    await this.mutate(
+      `audit:${id}`,
+      metadata,
+      async (plan) => {
+        plan.audit.push({ ...metadata, createdAt: now });
+        return { result: null, ids: [] };
+      },
+      async () => null,
+    );
+  }
+
   async get(ids: readonly string[], options: MemoryQueryOptions = {}): Promise<MemoryContext> {
+    const graphHops = boundedGraphHops(options.graphHops);
     const view = await this.backend.openRead();
     try {
       const entities = await this.backend.scan(view, {
@@ -80,38 +156,174 @@ export class MemoryEngine {
         scope: options.scope,
         limit: 512,
       });
-      return { results: await this.project(view, entities, options), relations: [] };
+      const results = await this.project(view, entities, options);
+      const order = new Map(ids.map((id, index) => [id, index]));
+      results.sort((left, right) => order.get(left.memory.id)! - order.get(right.memory.id)!);
+      const relations = await this.expand(view, results, {
+        ...options,
+        graphHops,
+        limit: Math.max(results.length, options.limit ?? 50),
+      });
+      const tesserae = await this.attachedTesserae(view, results);
+      return {
+        results,
+        relations,
+        chainEdges: this.projectChains(view, results, options.sessionId),
+        ...(tesserae.length ? { tesserae } : {}),
+      };
     } finally {
       await this.backend.closeRead(view);
     }
   }
 
-  async search(text: string, options: MemoryQueryOptions = {}): Promise<MemoryContext> {
+  async search(
+    text: string,
+    options: MemoryQueryOptions = {},
+    semantic?: MemoryVectorQuery,
+  ): Promise<MemoryContext> {
     if (!text.trim()) throw new Error("Search query is required");
     const limit = options.limit ?? 20;
     if (!Number.isInteger(limit) || limit < 1 || limit > 100)
       throw new Error("Search limit must be 1..100");
-    if (
-      !Number.isInteger(options.graphHops ?? 0) ||
-      (options.graphHops ?? 0) < 0 ||
-      (options.graphHops ?? 0) > 2
-    )
-      throw new Error("Graph hops must be 0..2");
+    boundedGraphHops(options.graphHops);
+    const eventTimeFrom = eventWindowStart(options.eventTimeFrom) ?? undefined;
+    const eventTimeTo = eventWindowEnd(options.eventTimeTo) ?? undefined;
+    options = { ...options, eventTimeFrom, eventTimeTo };
     const view = await this.backend.openRead();
     try {
-      const entities = await this.backend.scan(view, {
+      const query: MemoryEntityQuery = {
         kind: "memory",
-        text,
         scope: options.scope,
         sessionId: options.sessionId,
+        eventTimeFrom,
+        eventTimeTo,
         limit: 512,
-      });
-      const results = (await this.project(view, entities, options)).slice(0, limit);
+      };
+      const results = semantic
+        ? await this.semanticResults(view, text, query, options, semantic)
+        : await this.project(view, await this.backend.scan(view, { ...query, text }), options);
+      results.splice(limit);
       const relations = await this.expand(view, results, { ...options, limit });
-      return { results, relations, retrieval: { mode: "lexical", degraded: false } };
+      const tesserae = await this.searchTesserae(view, text, options, results);
+      return {
+        results,
+        relations,
+        chainEdges: this.projectChains(view, results, options.sessionId),
+        retrieval: { mode: semantic ? "hybrid" : "lexical", degraded: false },
+        ...(tesserae.length ? { tesserae } : {}),
+      };
     } finally {
       await this.backend.closeRead(view);
     }
+  }
+
+  private projectChains(view: MemoryReadView, results: MemorySearchResult[], sessionId?: string) {
+    const projection = this.backend.chainProjection?.(
+      view,
+      results.map((item) => item.memory.id),
+      sessionId,
+    );
+    if (!projection) return undefined;
+    for (const result of results) {
+      const memberships = projection.memberships.get(result.memory.id);
+      const primary = memberships?.[0];
+      if (!primary) continue;
+      result.chainId = primary.chainId;
+      result.chainPosition = primary.position;
+      result.chainType = primary.chainType;
+      result.chainMemberships = memberships;
+    }
+    return projection.edges.length ? projection.edges : undefined;
+  }
+
+  private async searchTesserae(
+    view: MemoryReadView,
+    text: string,
+    options: MemoryQueryOptions,
+    results: MemorySearchResult[],
+  ): Promise<TesseraHit[]> {
+    const attached = await this.attachedTesserae(view, results);
+    if (!options.findTesserae) return attached;
+    const rows = await this.backend.scan(view, { kind: "tessera", text, limit: 50 });
+    const matches = rows.flatMap((row) => (row.kind === "tessera" ? [row.value] : []));
+    const ids = [...new Set(matches.flatMap(({ memoryId }) => (memoryId ? [memoryId] : [])))];
+    const owners = await this.backend.scan(view, {
+      kind: "memory",
+      ids,
+      sessionId: options.sessionId,
+    });
+    const now = this.now();
+    const visible = new Set(
+      owners.flatMap((row) =>
+        row.kind === "memory" && visibleMemory(row.value, options.sessionId, now)
+          ? [row.value.id]
+          : [],
+      ),
+    );
+    const independent = matches
+      .filter(({ memoryId }) => !memoryId || visible.has(memoryId))
+      .slice(0, Math.min(options.limit ?? 8, 10))
+      .map((item, rank) => ({ ...item, score: 1 / (rank + 1) }));
+    return [...new Map([...attached, ...independent].map((item) => [item.id, item])).values()];
+  }
+
+  private async semanticResults(
+    view: MemoryReadView,
+    text: string,
+    query: MemoryEntityQuery,
+    options: MemoryQueryOptions,
+    semantic: MemoryVectorQuery,
+  ): Promise<MemorySearchResult[]> {
+    if (!this.backend.vectorIndex) throw new Error("This memory backend has no vector index");
+    const semanticLimit = semantic.mode === "vector" ? 512 : 256;
+    const vectors = this.backend.vectorIndex.candidates(
+      view,
+      { ...query, limit: semanticLimit },
+      semantic,
+    );
+    const lexical =
+      semantic.mode === "vector"
+        ? []
+        : await this.backend.scan(view, { ...query, text, limit: 256 });
+    const candidates = new Map(
+      [...lexical, ...vectors.map((item) => item.entity)].map((entity) => [
+        entity.value.id,
+        entity,
+      ]),
+    );
+    const scores = new Map(vectors.map((item) => [item.entity.value.id, item]));
+    const queryText = normalize(text);
+    const terms = searchTerms(queryText);
+    return (await this.project(view, [...candidates.values()], options))
+      .map((result) => {
+        const score = scores.get(result.memory.id);
+        const vectorScore = score?.recordScore ?? 0;
+        const routeScore = score?.routeScore ?? 0;
+        const triggers = recallTriggersFromStoredMarkers(result.memory.markers).join(" ");
+        const lexicalScore = lexicalTextScore(
+          queryText,
+          `${result.memory.statement} ${result.node.canonicalName} ${result.node.summary} ${triggers}`,
+          terms,
+        );
+        const combinedScore =
+          semantic.mode === "vector"
+            ? Math.max(vectorScore, routeScore)
+            : hybridScore(lexicalScore, vectorScore, routeScore);
+        const recallReason = score
+          ? lexicalScore
+            ? "hybrid_match"
+            : "vector_match"
+          : "lexical_match";
+        return {
+          ...result,
+          lexicalScore,
+          vectorScore,
+          routeScore,
+          combinedScore,
+          recallReason,
+        } as MemorySearchResult;
+      })
+      .sort((left, right) => right.combinedScore - left.combinedScore);
   }
 
   async linkNodes(
@@ -200,6 +412,79 @@ export class MemoryEngine {
     );
   }
 
+  async record(id: string, sessionId?: string): Promise<MemoryRecord | null> {
+    const view = await this.backend.openRead();
+    try {
+      return await new MemoryPlan(this.backend, view).record(id, sessionId);
+    } finally {
+      await this.backend.closeRead(view);
+    }
+  }
+
+  setResolution(input: MemoryResolutionChange) {
+    return this.lifecycle("resolution", input, (plan) => changeResolution(plan, input, this.now()));
+  }
+
+  recordClaimOutcomes(input: RecordClaimOutcomesInput) {
+    return this.mutate(
+      randomUUID(),
+      { action: "claimOutcomes", input },
+      async (plan) => {
+        const result = await recordClaimOutcomes(plan, input, this.now());
+        return { result, ids: result.events.map((event) => event.id) };
+      },
+      async (_view, receipt) => receipt.result as Awaited<ReturnType<typeof recordClaimOutcomes>>,
+    );
+  }
+
+  async consolidatedFrom(sourceMemoryId: string): Promise<MemoryRecord[]> {
+    const view = await this.backend.openRead();
+    try {
+      const entities = await new MemoryPlan(this.backend, view).find({
+        kind: "memory",
+        consolidatedFrom: sourceMemoryId,
+      });
+      return entities.flatMap((entity) =>
+        entity.kind === "memory" &&
+        entity.value.status === "active" &&
+        entity.value.markers.some(
+          (marker) =>
+            marker.kind === "consolidated_from_stg" &&
+            marker.attributes?.sourceMemoryId === sourceMemoryId,
+        )
+          ? [entity.value]
+          : [],
+      );
+    } finally {
+      await this.backend.closeRead(view);
+    }
+  }
+
+  supersede(input: MemorySupersession) {
+    return this.lifecycle("supersession", input, (plan) =>
+      supersedeMemory(plan, input, this.now()),
+    );
+  }
+
+  proposeRelation(input: MemoryRelationProposal) {
+    return this.lifecycle("relationProposal", input, (plan) =>
+      proposeMemoryRelation(plan, input, this.now()),
+    );
+  }
+
+  private lifecycle<T>(
+    action: string,
+    input: { memoryId: string },
+    apply: (plan: MemoryPlan) => Promise<T>,
+  ): Promise<T> {
+    return this.mutate(
+      randomUUID(),
+      { action, input },
+      async (plan) => ({ result: await apply(plan), ids: [input.memoryId] }),
+      async (_view, receipt) => receipt.result as T,
+    );
+  }
+
   private async mutate<T>(
     operationId: string,
     request: unknown,
@@ -213,7 +498,7 @@ export class MemoryEngine {
         const previous = await this.backend.receipt(view, operationId);
         if (previous) {
           if (previous.requestHash !== hash) throw new MemoryOperationConflict(operationId);
-          return replay(view, previous);
+          return await replay(view, previous);
         }
         const plan = new MemoryPlan(this.backend, view);
         const prepared = await prepare(plan);
@@ -222,6 +507,7 @@ export class MemoryEngine {
           requestHash: hash,
           expectedRevision: view.revision,
           changes: { upsert: [...plan.changes.values()] },
+          audit: plan.audit,
           resultIds: prepared.ids,
           result: prepared.result,
         });
@@ -246,9 +532,11 @@ export class MemoryEngine {
     entities: MemoryEntity[],
     options: MemoryQueryOptions,
   ): Promise<MemorySearchResult[]> {
+    const now = this.now();
     const memories = entities.flatMap((entity) =>
       entity.kind === "memory" &&
-      visibleMemory(entity.value, options.sessionId, this.now()) &&
+      searchableMemory(entity.value, options, now) &&
+      inEventWindow(entity.value, options) &&
       entity.value.tier <= (options.maxTier ?? 3)
         ? [entity.value]
         : [],
@@ -261,24 +549,27 @@ export class MemoryEngine {
     });
     const evidenceIds = [...new Set(memories.flatMap((memory) => memory.evidenceIds))];
     const histories = await this.histories(view, evidenceIds);
-    return memories.map((memory, index) => {
+    return memories.flatMap((memory, index) => {
       const node = nodes.find(
         (entity) => entity.kind === "node" && entity.value.id === memory.nodeId,
       );
       const evidenceRecords = histories.filter((entity) => memory.evidenceIds.includes(entity.id));
       const evidence = evidenceRecords.find((item) => item.id === memory.evidenceId);
       if (node?.kind !== "node" || !evidence) throw new Error("Broken memory references");
-      return {
-        memory,
-        node: node.value,
-        evidence,
-        evidenceRecords,
-        lexicalScore: 1 / (index + 1),
-        vectorScore: 0,
-        routeScore: 0,
-        combinedScore: 1 / (index + 1),
-        recallReason: "lexical_match",
-      };
+      if (options.nodeName && node.value.canonicalName !== options.nodeName) return [];
+      return [
+        {
+          memory,
+          node: node.value,
+          evidence,
+          evidenceRecords,
+          lexicalScore: 1 / (index + 1),
+          vectorScore: 0,
+          routeScore: 0,
+          combinedScore: 1 / (index + 1),
+          recallReason: "lexical_match",
+        },
+      ];
     });
   }
 
@@ -295,6 +586,41 @@ export class MemoryEngine {
     return result;
   }
 
+  private async attachedTesserae(
+    view: MemoryReadView,
+    results: MemorySearchResult[],
+  ): Promise<TesseraHit[]> {
+    const references = new Map<string, Set<string>>();
+    for (const { memory } of results) {
+      for (const marker of memory.markers) {
+        const id = marker.attributes?.tesseraId;
+        if (marker.kind !== TESSERA_REF_MARKER || typeof id !== "string") continue;
+        const owners = references.get(id) ?? new Set<string>();
+        owners.add(memory.id);
+        references.set(id, owners);
+      }
+    }
+    const ids = [...references.keys()];
+    const hits: TesseraHit[] = [];
+    for (let offset = 0; offset < ids.length; offset += 512) {
+      const entities = await this.backend.scan(view, {
+        kind: "tessera",
+        ids: ids.slice(offset, offset + 512),
+        limit: 512,
+      });
+      for (const entity of entities) {
+        if (
+          entity.kind !== "tessera" ||
+          !references.get(entity.value.id)?.has(entity.value.memoryId ?? "")
+        )
+          continue;
+        const { id, path, snippet, label, kind, memoryId, fileSimhash } = entity.value;
+        hits.push({ id, path, snippet, label, kind, memoryId, fileSimhash });
+      }
+    }
+    return hits;
+  }
+
   private async expand(
     view: MemoryReadView,
     results: MemorySearchResult[],
@@ -302,6 +628,7 @@ export class MemoryEngine {
   ): Promise<NodeRelation[]> {
     let frontier = [...new Set(results.map((item) => item.node.id))];
     const visited = new Set(frontier);
+    const paths = new Map<string, EdgePathStep[]>(frontier.map((id) => [id, []]));
     const relations = new Map<string, NodeRelation>();
     for (
       let depth = 0;
@@ -329,6 +656,17 @@ export class MemoryEngine {
           if (visited.has(adjacent)) continue;
           visited.add(adjacent);
           next.push(adjacent);
+          const path = [
+            ...paths.get(nodeId)!,
+            {
+              relationId: edge.id,
+              sourceNodeId: nodeId,
+              targetNodeId: adjacent,
+              relationType: edge.type,
+              hop: depth + 1,
+            },
+          ];
+          paths.set(adjacent, path);
           const found = await this.backend.scan(view, {
             kind: "memory",
             nodeId: adjacent,
@@ -337,7 +675,8 @@ export class MemoryEngine {
             limit: 100,
           });
           const projected = await this.project(view, found, options);
-          for (const item of projected) if (results.length < options.limit!) results.push(item);
+          for (const item of projected)
+            if (results.length < options.limit!) results.push({ ...item, path });
         }
       }
       frontier = next;
@@ -359,4 +698,26 @@ export class MemoryEngine {
         throw new Error("The recorded operation result is unavailable");
     }
   }
+}
+
+function boundedGraphHops(hops = 0): number {
+  if (!Number.isInteger(hops) || hops < 0 || hops > 3) throw new Error("Graph hops must be 0..3");
+  return hops;
+}
+
+function rememberRequest(input: MemoryInput): MemoryInput {
+  if (!input.tesserae) return input;
+  return {
+    ...input,
+    tesserae: input.tesserae.map(({ fileSimhash: _fileSimhash, ...item }) => item),
+  };
+}
+
+function inEventWindow(memory: MemoryRecord, options: MemoryQueryOptions): boolean {
+  const { eventTimeFrom, eventTimeTo } = options;
+  if (!eventTimeFrom && !eventTimeTo) return true;
+  const time = memory.eventTime;
+  return Boolean(
+    time && (!eventTimeFrom || time >= eventTimeFrom) && (!eventTimeTo || time <= eventTimeTo),
+  );
 }

@@ -84,10 +84,12 @@ function repairAnchorMarkers(db: DatabaseSync): void {
     .all();
   const update = db.prepare("UPDATE memory_records SET markers_json = ? WHERE id = ?");
   for (const row of rows) {
-    const markers: unknown = JSON.parse(String(row.markers_json));
+    const before = String(row.markers_json);
+    const markers: unknown = JSON.parse(before);
     if (!Array.isArray(markers)) throw new Error(`invalid legacy markers for ${String(row.id)}`);
     for (const marker of markers) repairAnchorMarker(marker);
-    update.run(JSON.stringify(markers), String(row.id));
+    const after = JSON.stringify(markers);
+    if (before !== after) update.run(after, String(row.id));
   }
 }
 
@@ -1192,7 +1194,7 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
   // agent_name so existing rows survive. Run before any new-code INSERT.
   const agentColumns = db.prepare("PRAGMA table_info(task_board_agents)").all() as Row[];
   if (!agentColumns.some((row) => String(row.name) === "id")) {
-    db.exec("BEGIN IMMEDIATE");
+    db.exec("SAVEPOINT nmg_agent_registry_migration");
     try {
       db.exec("ALTER TABLE task_board_agents RENAME TO task_board_agents_legacy");
       db.exec(`CREATE TABLE task_board_agents (
@@ -1215,9 +1217,9 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
           supported_interfaces, last_seen_at, created_at
         FROM task_board_agents_legacy`);
       db.exec("DROP TABLE task_board_agents_legacy");
-      db.exec("COMMIT");
+      db.exec("RELEASE nmg_agent_registry_migration");
     } catch (error) {
-      db.exec("ROLLBACK");
+      db.exec("ROLLBACK TO nmg_agent_registry_migration; RELEASE nmg_agent_registry_migration");
       throw error;
     }
   }

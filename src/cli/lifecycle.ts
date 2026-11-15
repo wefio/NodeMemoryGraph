@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
+import type { NmgHelloResult } from "./protocol.ts";
 
 export interface ServerState {
   pid: number;
@@ -18,6 +19,7 @@ export interface ServerState {
   host?: string;
   port?: number;
   token?: string;
+  endpoint?: Pick<NmgHelloResult, "methods" | "searchParameters">;
 }
 
 export interface ServerLease {

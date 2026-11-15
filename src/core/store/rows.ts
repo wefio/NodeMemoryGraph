@@ -16,6 +16,7 @@ import type {
   HistoryRole,
   LeafBlock,
   MemoryMarker,
+  MemoryClaim,
   MemoryNode,
   MemoryNodeKind,
   MemoryRecord,
@@ -32,6 +33,7 @@ import type {
   TopologyProposal,
 } from "../types.ts";
 import { normalize } from "./search-ranking.ts";
+import { normalizeMarkers } from "../memory-normalization.ts";
 import { parseStringArray } from "./row-parse.ts";
 import type { StoreRow as Row } from "./search-ranking.ts";
 
@@ -334,17 +336,6 @@ export function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-export function defaultResidence(input: {
-  memoryType?: MemoryRecord["memoryType"];
-  sourceActor?: MemoryRecord["sourceActor"];
-  truthStatus?: MemoryRecord["truthStatus"];
-}): MemoryResidence {
-  const type = input.memoryType ?? "fact";
-  if (type === "derived" || input.truthStatus === "inferred") return "stg";
-  if (input.sourceActor === "assistant" && input.truthStatus === "unverified") return "stg";
-  return "ltg";
-}
-
 export function defaultWriteReason(
   input: { memoryType?: MemoryRecord["memoryType"]; truthStatus?: MemoryRecord["truthStatus"] },
   residence: MemoryResidence,
@@ -414,29 +405,6 @@ export function parseClaims(value: string | number | Uint8Array | null): MemoryR
   }));
 }
 
-export function normalizeMarkers(markers: readonly MemoryMarker[] | undefined): MemoryMarker[] {
-  if (!markers) return [];
-  const normalized = markers.flatMap((marker) => {
-    const kind = marker.kind?.trim();
-    if (!kind) return [];
-    const attributes = marker.attributes
-      ? Object.fromEntries(
-          Object.entries(marker.attributes)
-            .filter(
-              ([, value]) =>
-                value === null ||
-                typeof value === "string" ||
-                typeof value === "number" ||
-                typeof value === "boolean",
-            )
-            .sort(([left], [right]) => left.localeCompare(right)),
-        )
-      : undefined;
-    return [{ kind, ...(attributes && Object.keys(attributes).length > 0 ? { attributes } : {}) }];
-  });
-  return [...new Map(normalized.map((marker) => [JSON.stringify(marker), marker])).values()];
-}
-
 export function serializeMarkers(markers: readonly MemoryMarker[]): string {
   return JSON.stringify(normalizeMarkers(markers));
 }
@@ -472,4 +440,58 @@ export function effectiveFilterDimensions(options: SearchOptions): string[] {
     dimensions.push(`maxTier:${options.maxTier}`);
   if (options.graphHops !== undefined && options.graphHops > 0) dimensions.push("graphHops");
   return dimensions;
+}
+
+/** Map a legacy memory row. The caller hydrates any additional evidence links. */
+export function mapMemoryRow(row: Row): MemoryRecord {
+  return {
+    id: String(row.id),
+    nodeId: String(row.node_id),
+    evidenceId: String(row.evidence_id),
+    evidenceIds: [String(row.evidence_id)],
+    statement: String(row.statement),
+    memoryType: (row.memory_type as MemoryRecord["memoryType"]) ?? "fact",
+    ...mapMemoryAssertions(row),
+    ...mapMemoryLifecycle(row),
+    writeReason: String(row.write_reason ?? ""),
+    writeSource: (row.write_source as MemoryRecord["writeSource"]) ?? "core",
+    createdAt: String(row.created_at),
+    tier: (row.tier as MemoryRecord["tier"]) ?? 1,
+    importance: (row.importance as number) ?? 0.5,
+    accessCount: (row.access_count as number) ?? 0,
+    lastAccessedAt: (row.last_accessed_at as string) ?? null,
+  };
+}
+
+function mapMemoryAssertions(row: Row) {
+  return {
+    stateKey: (row.state_key as string) ?? null,
+    eventTime: (row.event_time as string) ?? null,
+    sourceActor: (row.source_actor as MemoryRecord["sourceActor"]) ?? "user",
+    truthStatus: (row.truth_status as MemoryRecord["truthStatus"]) ?? "asserted",
+    confidence: (row.confidence as number) ?? null,
+    polarity: (row.polarity as MemoryRecord["polarity"]) ?? null,
+    predicateKey: (row.predicate_key as string) ?? null,
+    extractMethod: (row.extract_method as MemoryRecord["extractMethod"]) ?? null,
+    claims: parseStoredJson(row.claims_json, null) as MemoryClaim[] | null,
+    markers: parseStoredJson(row.markers_json, [] as MemoryMarker[]),
+    scope: parseStoredJson(row.scope_json, {} as MemoryScope),
+    relatedMemoryIds: parseStoredJson(row.related_memory_ids_json, [] as string[]),
+  };
+}
+
+function mapMemoryLifecycle(row: Row) {
+  return {
+    validFrom: (row.valid_from as string) ?? null,
+    validUntil: (row.valid_until as string) ?? null,
+    status: (row.status as MemoryRecord["status"]) ?? "active",
+    resolution: (row.resolution as MemoryRecord["resolution"]) ?? "resolved",
+    openedAt: (row.opened_at as string) ?? null,
+    residence: (row.residence as MemoryRecord["residence"]) ?? "stg",
+    sessionId: (row.session_id as string) ?? null,
+    promotedAt: (row.promoted_at as string) ?? null,
+    expiresAt: (row.expires_at as string) ?? null,
+    evidenceRole: (row.evidence_role as MemoryRecord["evidenceRole"]) ?? "support",
+    supersedesId: (row.supersedes_id as string) ?? null,
+  };
 }

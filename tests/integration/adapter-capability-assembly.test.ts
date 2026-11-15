@@ -57,6 +57,35 @@ test("disabled features are explicit and do not execute their bindings", async (
   assert.throws(() => assembleAdapterCapabilities(["lab-tools"], {}), /nmg_lab/);
 });
 
+test("tools intersect their native declaration with the connected daemon", async () => {
+  const names: string[] = [];
+  const assembly = assembleAdapterCapabilities(
+    ["memory-tools", "state-tool", "lab-tools"],
+    {
+      tools: {
+        nmg_search: () => {
+          names.push("search");
+        },
+        nmg_get: () => {
+          names.push("get");
+        },
+        nmg_remember: () => {
+          names.push("remember");
+        },
+        nmg_state: () => {
+          names.push("state");
+        },
+        nmg_lab: () => {
+          names.push("lab");
+        },
+      },
+    },
+    { endpoint: Promise.resolve({ methods: ["search", "remember"] }) },
+  );
+  await assembly.ready;
+  assert.deepEqual(names, ["search", "remember"]);
+});
+
 test("failed asynchronous installation rolls back accepted bindings in reverse order", async () => {
   const disposed: string[] = [];
   const assembly = assembleAdapterCapabilities(["memory-tools", "state-tool"], {

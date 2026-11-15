@@ -85,7 +85,7 @@ function resolveLocalImport(
   return undefined;
 }
 
-function moduleSpecifiers(
+export function moduleSpecifiers(
   path: string,
   source: string,
 ): { specifiers: string[]; unknown: string[] } {

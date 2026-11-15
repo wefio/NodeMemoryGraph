@@ -1,18 +1,69 @@
 import type {
+  ClaimOutcomeEvent,
+  ClaimPosterior,
   HistoryRecord,
   MemoryNode,
   MemoryRecord,
+  MemoryResolution,
   MemoryScope,
+  MemoryContext,
+  MemorySearchResult,
+  MemoryWriteEvent,
   NodeRelation,
+  TesseraRecord,
+  TopologyProposal,
 } from "../types.ts";
+
+export const MAX_MEMORY_COMMIT_ENTITIES = 512;
+
+export interface MemoryStateAlias {
+  id: string;
+  aliasKey: string;
+  canonicalKey: string;
+  scope: MemoryScope;
+  createdAt: string;
+}
 
 export type MemoryEntity =
   | { kind: "memory"; value: MemoryRecord }
   | { kind: "history"; value: HistoryRecord }
   | { kind: "node"; value: MemoryNode }
-  | { kind: "edge"; value: NodeRelation };
+  | { kind: "edge"; value: NodeRelation }
+  | { kind: "stateAlias"; value: MemoryStateAlias }
+  | { kind: "writeEvent"; value: MemoryWriteEvent }
+  | { kind: "relationProposal"; value: TopologyProposal & { sessionId: string | null } }
+  | {
+      kind: "claimPosterior";
+      value: { id: string; sessionId: string | null; posterior: ClaimPosterior };
+    }
+  | { kind: "claimOutcome"; value: ClaimOutcomeEvent & { sessionId: string | null } }
+  | {
+      kind: "resolutionEvent";
+      value: {
+        id: string;
+        memoryId: string;
+        fromResolution: MemoryResolution;
+        toResolution: MemoryResolution;
+        openedAt: string | null;
+        relatedMemoryIds: string[];
+        reason: string | null;
+        sessionId: string | null;
+        createdAt: string;
+      };
+    }
+  | { kind: "tessera"; value: TesseraRecord };
 
 /** A service authenticates the namespace before opening a backend. */
+export function sessionScopedEntity(kind: MemoryEntity["kind"]): boolean {
+  return (
+    kind === "memory" ||
+    kind === "relationProposal" ||
+    kind === "resolutionEvent" ||
+    kind === "claimPosterior" ||
+    kind === "claimOutcome"
+  );
+}
+
 export interface MemoryReadView {
   readonly revision: number;
 }
@@ -28,6 +79,12 @@ export interface MemoryEntityQuery {
   text?: string;
   exactText?: string;
   stateKey?: string;
+  sourceMessageId?: string;
+  supersedesId?: string;
+  claimMemoryId?: string;
+  consolidatedFrom?: string;
+  eventTimeFrom?: string;
+  eventTimeTo?: string;
   connectedTo?: string;
   limit?: number;
   offset?: number;
@@ -52,6 +109,7 @@ export interface MemoryCommitRequest {
   requestHash: string;
   expectedRevision: number;
   changes: MemoryChanges;
+  audit?: readonly MemoryWriteEvent[];
   resultIds: readonly string[];
   result?: unknown;
 }
@@ -63,12 +121,58 @@ export type MemoryCommitOutcome =
 export interface MemoryBackend {
   readonly namespace: string;
   readonly kind: "sqlite" | "lancedb";
+  readonly vectorIndex?: MemoryVectorIndex;
+  chainProjection?(
+    view: MemoryReadView,
+    ids: readonly string[],
+    sessionId?: string,
+  ): MemoryChainProjection;
   openRead(): Promise<MemoryReadView>;
   scan(view: MemoryReadView, query: MemoryEntityQuery): Promise<MemoryEntity[]>;
   receipt(view: MemoryReadView, operationId: string): Promise<MemoryCommitReceipt | null>;
   closeRead(view: MemoryReadView): Promise<void>;
   commit(request: MemoryCommitRequest): Promise<MemoryCommitOutcome>;
   close(): Promise<void>;
+}
+
+export interface MemoryChainProjection {
+  memberships: Map<string, NonNullable<MemorySearchResult["chainMemberships"]>>;
+  edges: NonNullable<MemoryContext["chainEdges"]>;
+}
+
+export interface MemoryVectorQuery {
+  indexId: string;
+  vector: readonly number[];
+  granularity: "records" | "hierarchy" | "union";
+  mode: "vector" | "hybrid";
+}
+
+export interface MemoryVectorDocument {
+  id: string;
+  statement: string;
+  text: string;
+}
+
+export interface MemoryVectorCandidate {
+  entity: Extract<MemoryEntity, { kind: "memory" }>;
+  recordScore: number;
+  routeScore: number;
+}
+
+export interface MemoryVectorIndex {
+  has(indexId: string, dimensions?: number): boolean;
+  stats(indexId: string): { indexed: number; pending: number };
+  pending(indexId: string, limit: number): MemoryVectorDocument[];
+  save(
+    indexId: string,
+    documents: readonly MemoryVectorDocument[],
+    vectors: readonly number[][],
+  ): void;
+  candidates(
+    view: MemoryReadView,
+    query: MemoryEntityQuery,
+    semantic: MemoryVectorQuery,
+  ): MemoryVectorCandidate[];
 }
 
 export class MemoryOperationConflict extends Error {

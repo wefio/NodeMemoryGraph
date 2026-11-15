@@ -234,11 +234,13 @@ export interface NmgHelloResult {
   capabilities: readonly string[];
   /** Runtime discovery surface; optional so earlier same-epoch daemons remain compatible. */
   methods?: readonly string[];
+  searchParameters?: readonly string[];
   /** Optional same-epoch catalog identity used only for cache invalidation and diagnostics. */
   catalogFingerprint?: string;
 }
 
 export interface NmgStatusResult extends NmgHelloResult {
+  rpcRejections?: readonly NmgRpcRejection[];
   /** Get input attempts since service startup; optional for earlier same-epoch daemons. */
   getReferenceUsage?: { fullIds: number; compoundRefs: number };
   process: {
@@ -258,6 +260,14 @@ export interface NmgStatusResult extends NmgHelloResult {
     health: unknown;
     reason: string | null;
   };
+}
+
+export interface NmgRpcRejection {
+  method: string;
+  code: string;
+  parameter?: string;
+  count: number;
+  lastAt: string;
 }
 
 export interface NmgRememberParams {
@@ -1158,10 +1168,12 @@ export type NmgMethodResult = {
 
 export class NmgProtocolError extends Error {
   readonly code: string;
+  readonly parameter?: string;
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, parameter?: string) {
     super(message);
     this.code = code;
+    this.parameter = parameter;
     this.name = "NmgProtocolError";
   }
 }

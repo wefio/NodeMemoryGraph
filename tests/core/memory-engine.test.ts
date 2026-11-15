@@ -35,6 +35,24 @@ for (const kind of ["sqlite", "lancedb"] as const) {
       );
       const duplicate = await engine.remember(input, "duplicate");
       assert.equal(duplicate.memory.id, first.memory.id);
+      const supplied = {
+        actor: "user",
+        sourceMessageId: "source-1",
+        content: "Original excerpt",
+      } as const;
+      const capture = (statement: string, content = supplied.content as string) =>
+        engine.remember({
+          statement,
+          nodeName: "Attribution",
+          evidenceSource: { ...supplied, content },
+        });
+      const captured = await capture("Atlas publishes build artifacts");
+      const recaptured = await capture("Atlas retains build artifacts for 90 days");
+      assert.equal(recaptured.history.id, captured.history.id);
+      await assert.rejects(
+        capture("Atlas archives build artifacts", "Different excerpt"),
+        /different content/,
+      );
       const next = await engine.remember(
         { ...input, statement: "Atlas deployment region is us-east" },
         "next",
@@ -81,6 +99,31 @@ for (const kind of ["sqlite", "lancedb"] as const) {
       };
       const privateMemory = await engine.remember(privateInput, "private-receipt");
       assert.notEqual(privateMemory.node.id, first.node.id);
+      const derived = await engine.remember({
+        statement: "The projected capacity is ten",
+        nodeName: "Capacity",
+        memoryType: "derived",
+        sessionId: "owner",
+      });
+      assert.equal(derived.memory.residence, "stg");
+      assert.equal(derived.history.sessionId, "owner");
+      assert.equal((await engine.get([derived.memory.id])).results.length, 0);
+      assert.equal(
+        (await engine.get([derived.memory.id], { sessionId: "owner" })).results.length,
+        1,
+      );
+      await assert.rejects(
+        engine.remember({
+          statement: "Builds use pinned dependencies",
+          nodeName: "Build",
+          evidenceSource: {
+            actor: "assistant",
+            sourceMessageId: "m1",
+            content: "Pinned dependencies",
+          },
+        }),
+        /does not match sourceActor/,
+      );
       await assert.rejects(
         engine.remember({
           statement: "Public evidence reuse",
@@ -105,6 +148,28 @@ for (const kind of ["sqlite", "lancedb"] as const) {
         engine.remember({ statement: "api_key=supersecretvalue", nodeName: "Secrets" }, "secret"),
         /secret/,
       );
+      await assert.rejects(
+        engine.remember({ statement: "api_key=supersecretvalue", nodeName: "Secrets" }, "secret"),
+        /secret/,
+      );
+      const auditReader = await backend.openRead();
+      try {
+        const audit = await backend.scan(auditReader, { kind: "writeEvent" });
+        assert.equal(
+          audit.filter(
+            (entity) => entity.kind === "writeEvent" && entity.value.decision === "rejected",
+          ).length,
+          1,
+        );
+        assert.ok(
+          audit.some(
+            (entity) => entity.kind === "writeEvent" && entity.value.memoryId === first.memory.id,
+          ),
+        );
+        assert.doesNotMatch(JSON.stringify(audit), /supersecretvalue/);
+      } finally {
+        await backend.closeRead(auditReader);
+      }
       await assert.rejects(
         engine.rememberMany(
           [

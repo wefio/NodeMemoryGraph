@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { MemoryOperationConflict } from "./backend.ts";
@@ -13,13 +13,67 @@ import type {
 } from "./backend.ts";
 import {
   ENTITY_COLUMNS,
-  entityRow,
+  commitRows,
   queryBounds,
-  queryWhere,
-  receiptRow,
+  sqliteQueryWhere,
   sqlLiteral,
   validateCommit,
 } from "./entity-rows.ts";
+import { graphImportRequest } from "./graph-import.ts";
+import { readLegacyClaimRows, readLegacyMemoryRows } from "../store/legacy-memory-snapshot.ts";
+import { requestHash } from "./model.ts";
+import { migrate } from "../store/schema.ts";
+import { ftsExpression, ftsIndexedText } from "../store/search-ranking.ts";
+import { SqliteMemoryVectors } from "./sqlite-vectors.ts";
+import { readSqliteChainProjection } from "./sqlite-chains.ts";
+
+const LOCAL_MEMORY_TABLE = "nmg_local_memory";
+export const LOCAL_MEMORY_NAMESPACE = "local-memory-v1";
+const LEGACY_GRAPH_TABLES = [
+  "history_records",
+  "memory_records",
+  "memory_nodes",
+  "node_relations",
+  "memory_evidence_links",
+  "state_key_aliases",
+  "memory_write_events",
+  "tesserae",
+] as const;
+
+function localNamespace(db: DatabaseSync): string | undefined {
+  const exists = db
+    .prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?")
+    .get(LOCAL_MEMORY_TABLE);
+  if (!exists) return undefined;
+  return String(
+    db.prepare(`SELECT namespace FROM ${LOCAL_MEMORY_TABLE} WHERE id=1`).get()!.namespace,
+  );
+}
+
+export function activatedLocalMemory(path: string): string | undefined {
+  if (!existsSync(path)) return undefined;
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    return localNamespace(db);
+  } finally {
+    db.close();
+  }
+}
+
+function fenceLegacyTables(db: DatabaseSync, tables: readonly string[]): void {
+  for (const table of tables) {
+    for (const action of ["INSERT", "UPDATE", "DELETE"]) {
+      // Opening the existing coordination store still repeats this schema backfill.
+      const when =
+        table === "memory_evidence_links" && action === "INSERT"
+          ? "WHEN NOT EXISTS (SELECT 1 FROM memory_evidence_links WHERE memory_id=NEW.memory_id AND history_id=NEW.history_id)"
+          : "";
+      db.exec(`CREATE TRIGGER nmg_unified_${table}_${action} BEFORE ${action} ON ${table}
+        ${when}
+        BEGIN SELECT RAISE(ABORT, 'This database uses the unified memory engine'); END`);
+    }
+  }
+}
 
 /** Portable memory format. The legacy Store is imported explicitly, never opened as this schema. */
 export class SqliteMemoryBackend implements MemoryBackend {
@@ -29,6 +83,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
   private closed = false;
   private readonly path: string;
   readonly namespace: string;
+  readonly vectorIndex: SqliteMemoryVectors;
 
   constructor(path: string, namespace: string) {
     this.path = path;
@@ -46,8 +101,10 @@ export class SqliteMemoryBackend implements MemoryBackend {
       CREATE INDEX IF NOT EXISTS nmg_memory_kind ON nmg_memory_entities(namespace, kind, id);
       CREATE INDEX IF NOT EXISTS nmg_memory_node ON nmg_memory_entities(namespace, kind, node);
       CREATE INDEX IF NOT EXISTS nmg_memory_name ON nmg_memory_entities(namespace, kind, name);
-      CREATE VIRTUAL TABLE IF NOT EXISTS nmg_memory_fts USING fts5(namespace UNINDEXED, key UNINDEXED, text);`);
+      CREATE VIRTUAL TABLE IF NOT EXISTS nmg_memory_fts USING fts5(namespace UNINDEXED, key UNINDEXED, text);
+      CREATE VIRTUAL TABLE IF NOT EXISTS nmg_memory_tessera_fts USING fts5(namespace UNINDEXED, key UNINDEXED, text);`);
     this.writer.prepare("INSERT OR IGNORE INTO nmg_memory_head VALUES (?, 0)").run(namespace);
+    this.vectorIndex = new SqliteMemoryVectors(this.writer, namespace, (view) => this.reader(view));
   }
 
   async openRead(): Promise<MemoryReadView> {
@@ -68,18 +125,19 @@ export class SqliteMemoryBackend implements MemoryBackend {
   async scan(view: MemoryReadView, query: MemoryEntityQuery): Promise<MemoryEntity[]> {
     const db = this.reader(view);
     const { limit, offset } = queryBounds(query);
-    let where = `namespace = ${sqlLiteral(this.namespace)} AND ${queryWhere(query)}`;
-    if (query.text?.trim()) {
-      const terms = query.text
-        .trim()
-        .split(/\s+/u)
-        .map((word) => `"${word.replaceAll('"', '""')}"`)
-        .join(" OR ");
-      where += ` AND key IN (SELECT key FROM nmg_memory_fts WHERE namespace = ${sqlLiteral(this.namespace)} AND text MATCH ${sqlLiteral(terms)})`;
-    }
+    const where = `namespace = ${sqlLiteral(this.namespace)} AND ${sqliteQueryWhere(query)}`;
+    const fts = query.text ? ftsExpression(query.text) : undefined;
+    if (fts === "") return [];
+    const ftsTable = textIndex(query.kind);
+    const matches = fts
+      ? `JOIN (SELECT key AS fts_key, rank AS fts_rank FROM ${ftsTable}
+      WHERE namespace = ${sqlLiteral(this.namespace)} AND text MATCH ${sqlLiteral(fts)})
+      ON key = fts_key`
+      : "";
+    const order = fts ? "fts_rank, id" : "id";
     return db
       .prepare(
-        `SELECT kind, payload FROM nmg_memory_entities WHERE ${where} ORDER BY id LIMIT ? OFFSET ?`,
+        `SELECT kind, payload FROM nmg_memory_entities ${matches} WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`,
       )
       .all(limit, offset)
       .map((row) => ({ kind: row.kind, value: JSON.parse(String(row.payload)) }) as MemoryEntity);
@@ -92,6 +150,10 @@ export class SqliteMemoryBackend implements MemoryBackend {
     return row ? (JSON.parse(String(row.payload)) as MemoryCommitReceipt) : null;
   }
 
+  chainProjection(view: MemoryReadView, ids: readonly string[], sessionId?: string) {
+    return readSqliteChainProjection(this.reader(view), ids, sessionId);
+  }
+
   async closeRead(view: MemoryReadView): Promise<void> {
     const db = this.readers.get(view);
     if (!db) return;
@@ -100,11 +162,100 @@ export class SqliteMemoryBackend implements MemoryBackend {
   }
 
   async commit(request: MemoryCommitRequest): Promise<MemoryCommitOutcome> {
-    this.assertOpen();
     validateCommit(request);
+    return this.publish(request);
+  }
+
+  /** Install a trusted legacy graph on an empty namespace, including existing evidence citations. */
+  async installLegacySnapshot(entities: readonly MemoryEntity[]): Promise<MemoryCommitReceipt> {
+    const request = graphImportRequest(entities, true);
+    validateCommit(request, entities.length);
+    const outcome = this.publish(request);
+    if (outcome.status === "conflict") throw new Error("Graph import requires an empty namespace");
+    return outcome.receipt;
+  }
+
+  /** Atomically install the current local data and prevent publication through the old tables. */
+  activateLocal(): void {
+    this.transaction(() => {
+      const current = localNamespace(this.writer);
+      if (current === this.namespace) {
+        this.vectorIndex.importLegacy();
+        this.importLegacyClaims();
+        this.importLegacyTesseraIndex();
+        return;
+      }
+      if (current || this.revision(this.writer) !== 0)
+        throw new Error("Local activation requires an unused namespace");
+      migrate(this.writer);
+      const entities = readLegacyMemoryRows(this.writer, true);
+      if (entities.length) {
+        const request = graphImportRequest(entities, true);
+        validateCommit(request, entities.length);
+        this.write(request);
+      }
+      this.vectorIndex.importLegacy();
+      this.importLegacyClaims();
+      this.importLegacyTesseraIndex();
+      fenceLegacyTables(this.writer, LEGACY_GRAPH_TABLES);
+      this.writer.exec(`CREATE TABLE ${LOCAL_MEMORY_TABLE} (
+        id INTEGER PRIMARY KEY CHECK(id=1), namespace TEXT NOT NULL)`);
+      this.writer.prepare(`INSERT INTO ${LOCAL_MEMORY_TABLE} VALUES (1, ?)`).run(this.namespace);
+    });
+  }
+
+  private importLegacyClaims(): void {
+    const operationId = "migration:legacy-sqlite-claims:v1";
+    if (
+      this.writer
+        .prepare("SELECT 1 FROM nmg_memory_entities WHERE namespace=? AND key=?")
+        .get(this.namespace, `receipt:${operationId}`)
+    )
+      return;
+    const entities = readLegacyClaimRows(this.writer);
+    this.write({
+      operationId,
+      requestHash: requestHash(entities),
+      expectedRevision: this.revision(this.writer),
+      changes: { upsert: entities },
+      resultIds: [],
+    });
+    fenceLegacyTables(this.writer, ["claim_posteriors", "claim_outcome_events"]);
+  }
+
+  private publish(request: MemoryCommitRequest): MemoryCommitOutcome {
+    return this.transaction(() => this.write(request));
+  }
+
+  private importLegacyTesseraIndex(): void {
+    const operationId = "migration:sqlite-tessera-index:v1";
+    if (
+      this.writer
+        .prepare("SELECT 1 FROM nmg_memory_entities WHERE namespace=? AND key=?")
+        .get(this.namespace, `receipt:${operationId}`)
+    )
+      return;
+    const rows = this.writer
+      .prepare("SELECT payload FROM nmg_memory_entities WHERE namespace=? AND kind='tessera'")
+      .all(this.namespace);
+    const entities = rows.map((row): MemoryEntity => ({
+      kind: "tessera",
+      value: JSON.parse(String(row.payload)),
+    }));
+    this.write({
+      operationId,
+      requestHash: requestHash(entities),
+      expectedRevision: this.revision(this.writer),
+      changes: { upsert: entities },
+      resultIds: [],
+    });
+  }
+
+  private transaction<T>(run: () => T): T {
+    this.assertOpen();
     this.writer.exec("BEGIN IMMEDIATE");
     try {
-      const outcome = this.write(request);
+      const outcome = run();
       this.writer.exec("COMMIT");
       return outcome;
     } catch (error) {
@@ -130,22 +281,24 @@ export class SqliteMemoryBackend implements MemoryBackend {
       requestHash: request.requestHash,
       revision: revision + 1,
       resultIds: [...request.resultIds],
-      result: request.result,
+      ...(request.result === undefined ? {} : { result: request.result }),
     };
     const statement = this.writer.prepare(
       `INSERT OR REPLACE INTO nmg_memory_entities VALUES (${Array(ENTITY_COLUMNS.length + 1)
         .fill("?")
         .join(",")})`,
     );
-    for (const row of [...request.changes.upsert.map(entityRow), receiptRow(receipt)]) {
+    for (const row of commitRows(request, receipt)) {
       statement.run(this.namespace, ...ENTITY_COLUMNS.map((column) => row[column]));
-      this.writer
-        .prepare("DELETE FROM nmg_memory_fts WHERE namespace=? AND key=?")
-        .run(this.namespace, row.key);
-      if (row.kind === "memory")
+      if (row.kind === "memory" || row.kind === "tessera") {
+        const index = textIndex(row.kind);
         this.writer
-          .prepare("INSERT INTO nmg_memory_fts VALUES (?, ?, ?)")
-          .run(this.namespace, row.key, row.text);
+          .prepare(`DELETE FROM ${index} WHERE namespace=? AND key=?`)
+          .run(this.namespace, row.key);
+        this.writer
+          .prepare(`INSERT INTO ${index} VALUES (?, ?, ?)`)
+          .run(this.namespace, row.key, ftsIndexedText(row.text));
+      }
     }
     this.writer
       .prepare("UPDATE nmg_memory_head SET revision=? WHERE namespace=?")
@@ -177,4 +330,8 @@ export class SqliteMemoryBackend implements MemoryBackend {
   private assertOpen(): void {
     if (this.closed) throw new Error("Memory backend is closed");
   }
+}
+
+function textIndex(kind: string): string {
+  return kind === "tessera" ? "nmg_memory_tessera_fts" : "nmg_memory_fts";
 }

@@ -43,6 +43,22 @@ or disposed states. These are assembly states, not live-hook or enabled-state
 certificates. Endpoint methods, session ownership and writer fences are still
 checked by the existing operation paths.
 
+Tool registration intersects native bindings with the connected daemon's
+`hello.methods`. The search schema also uses `hello.searchParameters` when
+the endpoint supplies it. The `nmg_remember` action enum is derived from the
+same method list. Synchronous hosts can read the catalog published in the local
+daemon lease. Earlier daemons and offline startup use the host declaration
+when endpoint discovery is unavailable. Requests still pass the daemon's
+validation and session checks.
+
+Use `nmg status --json` and read `rpcRejections` to find rejected calls that
+reached the daemon. Counts are grouped by RPC method, protocol error code and
+known parameter name, with the latest timestamp. The daemon stores these
+aggregates in `<database>.rpc-rejections.sqlite` across restarts. The file
+contains no request values, payloads, session IDs or error messages. Unknown
+method names share one counter. Client-side schema validation happens before
+the daemon and contributes no RPC count.
+
 Native admission, cancellation, deadlines, generation fences, committed-answer
 boundaries and enqueue receipts remain in their adapters. Pi/OpenCode/DSH call
 the same assembled observation implementation after normalizing native events.

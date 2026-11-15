@@ -1307,8 +1307,11 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       });
     }
 
-    recordRetrievalTrace(input: RetrievalTraceInput): string {
-      const id = randomUUID();
+    recordRetrievalTrace(
+      input: RetrievalTraceInput,
+      trackGraphSignals = true,
+      id: string = randomUUID(),
+    ): string {
       const createdAt = new Date().toISOString();
       const nodeIds = [...new Set(input.resultNodeIds)].sort();
       const taskId = input.taskId?.trim() || stableTaskId(input.query);
@@ -1356,8 +1359,22 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
             input.conflictObserved ? 1 : 0,
             createdAt,
           );
-        const updateNode = this.db.prepare(
-          `INSERT INTO node_retrieval_signals
+        if (trackGraphSignals) this.#recordTraceSignals(input, nodeIds, createdAt);
+        else
+          this.db
+            .prepare("UPDATE retrieval_traces SET signals_drained_at = ? WHERE id = ?")
+            .run(createdAt, id);
+        this.db.exec("COMMIT");
+        return id;
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+
+    #recordTraceSignals(input: RetrievalTraceInput, nodeIds: string[], createdAt: string): void {
+      const updateNode = this.db.prepare(
+        `INSERT INTO node_retrieval_signals
             (node_id, query_count, ambiguity_sum, fallback_count,
              conflict_count, updated_at)
            VALUES (?, 1, ?, ?, ?, ?)
@@ -1367,25 +1384,25 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
              fallback_count = fallback_count + excluded.fallback_count,
              conflict_count = conflict_count + excluded.conflict_count,
              updated_at = excluded.updated_at`,
+      );
+      for (const nodeId of nodeIds) {
+        updateNode.run(
+          nodeId,
+          clamp(input.ambiguity ?? 0, 0, 1),
+          input.fallbackUsed ? 1 : 0,
+          input.conflictObserved ? 1 : 0,
+          createdAt,
         );
-        for (const nodeId of nodeIds) {
-          updateNode.run(
-            nodeId,
-            clamp(input.ambiguity ?? 0, 0, 1),
-            input.fallbackUsed ? 1 : 0,
-            input.conflictObserved ? 1 : 0,
-            createdAt,
-          );
-        }
-        // Aggregate tier of the summary-routing signal: per-node counters of
-        // how often the node-summary FTS index matched (summary_routed_count)
-        // and how often such a node also reached the base result set
-        // (summary_recalled_count). routed - recalled per node is the IR gap.
-        // Updated inline here (hot path) because the observation is only
-        // known at search time; the per-query detail is already persisted in
-        // node_route_signal_json for offline diagnosis / router training.
-        const updateNodeSignal = this.db.prepare(
-          `INSERT INTO node_retrieval_signals
+      }
+      // Aggregate tier of the summary-routing signal: per-node counters of
+      // how often the node-summary FTS index matched (summary_routed_count)
+      // and how often such a node also reached the base result set
+      // (summary_recalled_count). routed - recalled per node is the IR gap.
+      // Updated inline here (hot path) because the observation is only
+      // known at search time; the per-query detail is already persisted in
+      // node_route_signal_json for offline diagnosis / router training.
+      const updateNodeSignal = this.db.prepare(
+        `INSERT INTO node_retrieval_signals
             (node_id, query_count, ambiguity_sum, fallback_count,
              conflict_count, summary_routed_count, summary_recalled_count,
              updated_at)
@@ -1394,29 +1411,23 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
              summary_routed_count = summary_routed_count + excluded.summary_routed_count,
              summary_recalled_count = summary_recalled_count + excluded.summary_recalled_count,
              updated_at = excluded.updated_at`,
+      );
+      for (const signal of input.nodeRouteSignal ?? []) {
+        if (!signal.routed && !signal.recalled) continue;
+        updateNodeSignal.run(
+          signal.nodeId,
+          signal.routed ? 1 : 0,
+          signal.recalled ? 1 : 0,
+          createdAt,
         );
-        for (const signal of input.nodeRouteSignal ?? []) {
-          if (!signal.routed && !signal.recalled) continue;
-          updateNodeSignal.run(
-            signal.nodeId,
-            signal.routed ? 1 : 0,
-            signal.recalled ? 1 : 0,
-            createdAt,
-          );
-        }
-        this.recordNodeSelections(nodeIds, input.expandedNodeIds ?? [], createdAt);
-        this.recordEdgeSelections(input.relationIds ?? [], createdAt);
-        // Retrieval-pair signals (node_pair_signals, edge_task_observations)
-        // are deferred to drainPendingTraceSignals so the hot path stays
-        // O(result nodes) instead of O(pairs). The trace row above is the
-        // durable buffer: pending rows are replayed by the next maintenance
-        // drain, and feedback updates on the row survive via MAX semantics.
-        this.db.exec("COMMIT");
-        return id;
-      } catch (error) {
-        this.db.exec("ROLLBACK");
-        throw error;
       }
+      this.recordNodeSelections(nodeIds, input.expandedNodeIds ?? [], createdAt);
+      this.recordEdgeSelections(input.relationIds ?? [], createdAt);
+      // Retrieval-pair signals (node_pair_signals, edge_task_observations)
+      // are deferred to drainPendingTraceSignals so the hot path stays
+      // O(result nodes) instead of O(pairs). The trace row above is the
+      // durable buffer: pending rows are replayed by the next maintenance
+      // drain, and feedback updates on the row survive via MAX semantics.
     }
 
     /**
@@ -1690,6 +1701,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       activeGraphId: string,
       disclosedMemoryIds: readonly string[],
       sessionId?: string,
+      trackUsage = true,
     ): void {
       const row = this.db
         .prepare("SELECT * FROM retrieval_traces WHERE id = ?")
@@ -1704,7 +1716,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       this.db
         .prepare("UPDATE retrieval_traces SET disclosed_memory_ids_json = ? WHERE id = ?")
         .run(JSON.stringify(disclosed), activeGraphId);
-      this.recordUsage(observed);
+      if (trackUsage) this.recordUsage(observed);
     }
 
     recordActiveGraphAttribution(

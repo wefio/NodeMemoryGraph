@@ -1,5 +1,7 @@
 import { serializeScope } from "../scope.ts";
-import { normalizeStatement } from "../store/search-ranking.ts";
+import { normalizeStatement } from "../memory-normalization.ts";
+import { CANONICAL_EVENT_TIME_GLOB } from "../event-time.ts";
+import { MAX_MEMORY_COMMIT_ENTITIES, sessionScopedEntity } from "./backend.ts";
 import type {
   MemoryCommitReceipt,
   MemoryCommitRequest,
@@ -65,7 +67,14 @@ export function entityRow(entity: MemoryEntity): EntityRow {
   } else if (entity.kind === "edge") {
     row.source = entity.value.sourceNodeId;
     row.target = entity.value.targetNodeId;
+  } else if (entity.kind === "history") {
+    row.name = entity.value.sourceMessageId ?? "";
+  } else if (entity.kind === "tessera") {
+    row.text = [entity.value.path, entity.value.label, entity.value.snippet].join(" ");
+  } else if ("sessionId" in entity.value) {
+    row.session = entity.value.sessionId ?? "";
   }
+  if (entity.kind === "claimPosterior") row.target = entity.value.posterior.memoryId;
   return row;
 }
 
@@ -86,6 +95,17 @@ export function receiptRow(receipt: MemoryCommitReceipt): EntityRow {
   };
 }
 
+export function commitRows(
+  request: MemoryCommitRequest,
+  receipt: MemoryCommitReceipt,
+): EntityRow[] {
+  return [
+    ...request.changes.upsert.map(entityRow),
+    ...(request.audit ?? []).map((value) => entityRow({ kind: "writeEvent", value })),
+    receiptRow(receipt),
+  ];
+}
+
 export function sqlLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
@@ -103,12 +123,15 @@ export function queryWhere(query: MemoryEntityQuery): string {
   if (query.nodeName !== undefined)
     clauses.push(`name = ${sqlLiteral(query.nodeName.trim().toLocaleLowerCase("en-US"))}`);
   if (query.scope !== undefined) clauses.push(`scope = ${sqlLiteral(serializeScope(query.scope))}`);
-  if (query.kind === "memory")
+  if (sessionScopedEntity(query.kind))
     clauses.push(`(session = '' OR session = ${sqlLiteral(query.sessionId ?? "")})`);
+  if (query.claimMemoryId) clauses.push(`target = ${sqlLiteral(query.claimMemoryId)}`);
   if (query.connectedTo !== undefined)
     clauses.push(
       `(source = ${sqlLiteral(query.connectedTo)} OR target = ${sqlLiteral(query.connectedTo)})`,
     );
+  if (query.sourceMessageId !== undefined)
+    clauses.push(`(name = ${sqlLiteral(query.sourceMessageId)} OR name = '')`);
   return clauses.join(" AND ");
 }
 
@@ -121,14 +144,49 @@ export function queryBounds(query: MemoryEntityQuery): { limit: number; offset: 
   return { limit, offset };
 }
 
-export function validateCommit(request: MemoryCommitRequest): void {
+/** Filter the SQLite candidate pool before FTS or vector ranking applies its limit. */
+export function sqliteQueryWhere(query: MemoryEntityQuery): string {
+  const clauses = [queryWhere(query)];
+  if (query.supersedesId)
+    clauses.push(`json_extract(payload, '$.supersedesId') = ${sqlLiteral(query.supersedesId)}`);
+  if (query.consolidatedFrom)
+    clauses.push(`EXISTS (
+    SELECT 1 FROM json_each(json_extract(payload, '$.markers'))
+    WHERE json_extract(value, '$.kind')='consolidated_from_stg'
+      AND json_extract(value, '$.attributes.sourceMemoryId')=${sqlLiteral(query.consolidatedFrom)}
+  )`);
+  if (query.eventTimeFrom)
+    clauses.push(`json_extract(payload, '$.eventTime') >= ${sqlLiteral(query.eventTimeFrom)}`);
+  if (query.eventTimeTo)
+    clauses.push(`json_extract(payload, '$.eventTime') <= ${sqlLiteral(query.eventTimeTo)}`);
+  if (query.eventTimeFrom || query.eventTimeTo)
+    clauses.push(
+      `json_extract(payload, '$.eventTime') GLOB ${sqlLiteral(CANONICAL_EVENT_TIME_GLOB)}`,
+    );
+  return clauses.join(" AND ");
+}
+
+export function validateCommit(
+  request: MemoryCommitRequest,
+  limit = MAX_MEMORY_COMMIT_ENTITIES,
+): void {
   if (!request.operationId.trim() || !request.requestHash.trim())
     throw new Error("Operation identity is required");
   if (!Number.isSafeInteger(request.expectedRevision) || request.expectedRevision < 0)
     throw new Error("Invalid expected revision");
-  if (request.changes.upsert.length > 512) throw new Error("At most 512 entity changes per commit");
+  if (request.changes.upsert.length > limit)
+    throw new Error(`At most ${limit} entity changes per commit`);
+  const audit = request.audit ?? [];
+  if (audit.length > 128) throw new Error("At most 128 audit events per commit");
+  validateEntities([
+    ...request.changes.upsert,
+    ...audit.map((value): MemoryEntity => ({ kind: "writeEvent", value })),
+  ]);
+}
+
+function validateEntities(entities: readonly MemoryEntity[]): void {
   const keys = new Set<string>();
-  for (const entity of request.changes.upsert) {
+  for (const entity of entities) {
     if (!entity.value.id.trim()) throw new Error("Entity identity is required");
     const key = `${entity.kind}:${entity.value.id}`;
     if (keys.has(key)) throw new Error(`Duplicate entity change ${key}`);

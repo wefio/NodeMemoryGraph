@@ -12,7 +12,7 @@ import type {
   MemoryReadView,
 } from "./backend.ts";
 import {
-  entityRow,
+  commitRows,
   queryBounds,
   queryWhere,
   receiptRow,
@@ -126,7 +126,7 @@ export class LanceMemoryBackend implements MemoryBackend {
       requestHash: request.requestHash,
       revision: head.revision + 1,
       resultIds: [...request.resultIds],
-      result: request.result,
+      ...(request.result === undefined ? {} : { result: request.result }),
     };
     const name = `nmg_${randomUUID().replaceAll("-", "")}`;
     const staged = await branches.create(name, head.branch, head.version);
@@ -135,7 +135,7 @@ export class LanceMemoryBackend implements MemoryBackend {
         .mergeInsert("key")
         .whenMatchedUpdateAll()
         .whenNotMatchedInsertAll()
-        .execute([...request.changes.upsert.map(entityRow), receiptRow(receipt)]);
+        .execute(commitRows(request, receipt));
       if (request.changes.upsert.some((entity) => entity.kind === "memory"))
         await staged.createIndex("text", { config: Index.fts(), replace: true });
       const version = await staged.version();

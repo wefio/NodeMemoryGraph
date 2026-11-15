@@ -4,6 +4,7 @@ import { ADAPTER_CAPABILITY_CATALOG } from "../src/integration/adapter-capabilit
 import {
   compatibleLease,
   dropCompatibleLease,
+  probeAdapterEndpoint,
   rpcCall,
 } from "../src/integration/lease-transport.ts";
 import { resolveNmgDataDir } from "../src/cli/data-path.ts";
@@ -33,12 +34,13 @@ export function createCodexAdapter(dataDirectory = resolveNmgDataDir()) {
     }
   };
   return {
-    mcp: () =>
+    mcp: async () =>
       createNmgMcpServer({
         capabilities: declared.filter((capability) => toolCapabilities.has(capability)),
         resolveBinding: (metadata) => sessions.resolve(codexMcpBinding(metadata)),
         onContext: (binding, context) => traces.note(binding as CodexBinding, context),
         invoke,
+        endpoint: await probeAdapterEndpoint(dataDirectory),
       }),
     hook: (writeOutput: (text: string) => Promise<void>) => {
       const deadline = AbortSignal.timeout(4000);
@@ -58,7 +60,7 @@ export function createCodexAdapter(dataDirectory = resolveNmgDataDir()) {
 export async function main(mode = process.argv[2]): Promise<void> {
   const adapter = createCodexAdapter();
   if (mode === "mcp") {
-    const mcp = adapter.mcp();
+    const mcp = await adapter.mcp();
     await mcp.ready;
     await mcp.server.connect(new StdioServerTransport());
     return;

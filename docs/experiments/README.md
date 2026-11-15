@@ -27,4 +27,4 @@ when that prefix repeats the directory name. A rolling summary or note uses
 | `verification/` | measured verification planning and coverage experiments |
 
 `benchmark-results.md` stays at the top level because it spans topics. The
-[architecture baseline](architecture-baseline-2026-10-27.md) also spans topics.
+[architecture baseline](architecture-baseline-2026-10-27.md) and its [dependency and memory-path measurement](architecture-dependency-and-memory-2026-11-14.md) also span topics.

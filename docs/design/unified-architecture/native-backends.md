@@ -27,10 +27,10 @@ flowchart TB
   Coordination --> DB
 ```
 
-The explicit library entry is `NmgServiceOptions.memoryBackend`. Omitting it keeps
-the existing memory path. It is not selected by a CLI flag or a model parameter.
-Use a new memory namespace; existing memory data is not imported or converted.
-Pure local deployment shares one SQLite file between memory and coordination.
+The explicit library entry is `NmgServiceOptions.memoryBackend`. An explicit
+backend with a new namespace starts empty. Local CLI migration
+installs existing SQLite data and selects it by default on reopen. Pure local
+deployment shares one SQLite file between memory and coordination.
 
 ```typescript
 import { NmgService } from "./src/cli/service.ts";
@@ -105,11 +105,21 @@ both table groups share one file; with object memory, only coordination uses it.
 
 This API supports remember/batch, search, exact get and withdrawal. `MemoryEngine`
 also supports explicit node links and bounded graph expansion. The capability
-handshake advertises the supported subset. Session AG, chains, file tesserae,
-vector retrieval, historical queries, merge/split, feedback and advanced filters
-are not supplied by this profile; unsupported service operations fail explicitly.
-No automatic migration, cloud interactive API or native Worker/WASM deployment
-is provided. The existing AML/snapshot path is unchanged.
+handshake advertises the supported subset. Search supports explicit history,
+source actor and node filters. Attached file references from a full SQLite
+snapshot are returned with visible memories. The activated local SQLite profile
+also supports session AG, project recall, versioned answer attribution, and
+vector and hybrid retrieval. Its SQLite backend owns the model-keyed record
+index plus candidate queries. The engine combines those candidates with full
+text and applies visibility and graph rules. The host supplies embeddings.
+The [local compatibility profile](legacy-graph-migration.md#local-default-after-activation)
+also owns event-time windows, lifecycle writes, feedback, bookmark lookup and
+existing chain projection. Chain editing and node transforms retain separate
+migration gates. Native Worker/WASM deployment and the cloud interactive API
+remain separate work.
+
+The [legacy graph migration rehearsal](legacy-graph-migration.md) compares the
+two paths and exercises a bounded import into either backend.
 
 Native branches and receipts are retained; automatic compaction, unreachable
 branch collection and retention administration require a separate maintenance

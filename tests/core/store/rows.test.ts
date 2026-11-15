@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { normalizeMarkers } from "../../../src/core/memory-normalization.ts";
+import { defaultResidence } from "../../../src/core/memory-residence.ts";
 import type { MemoryMarker, MemoryScope, SearchOptions } from "../../../src/core/types.ts";
 import type { StoreRow } from "../../../src/core/store/search-ranking.ts";
 import { sameScope, serializeScope } from "../../../src/core/scope.ts";
 import {
   canonicalNodeIdentity,
   clamp,
-  defaultResidence,
   defaultWriteReason,
   effectiveFilterDimensions,
   identityTokens,
@@ -22,7 +23,6 @@ import {
   mapSearchResult,
   mapTopologyProposal,
   matchesScope,
-  normalizeMarkers,
   parseClaims,
   parseMarkers,
   parseQppDecision,
