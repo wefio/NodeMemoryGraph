@@ -33,6 +33,24 @@ test("contextual ordering preserves recall@20 membership, follows continuations 
   assert.equal(policy.rank("other", "/a", "继续", results)[0]?.memory.id, "0");
 });
 
+test("nearby context supplies one topic to an admitted short continuation", () => {
+  const policy = new RecallContextPolicy();
+  const topic = "请测试 HarborAtlasMarker 的 SQLite 备份恢复工作";
+  const request = "这次呢？";
+  policy.observe("s", topic, "/a");
+  assert.equal(policy.automaticQuery("s", "/a", request), request, "wait for turn admission");
+  policy.observe("s", "试一下", "/a");
+  policy.observe("s", request, "/a");
+  const enriched = `${request}\nRecent task context:\n${topic}`;
+  assert.equal(policy.automaticQuery("s", "/a", request), enriched);
+  assert.equal(policy.automaticQuery("s", "/b", request), request);
+  assert.equal(policy.automaticQuery("other", "/a", request), request);
+  assert.equal(policy.automaticQuery("s", "/a", enriched), enriched);
+  policy.observe("s", "新问题", "/a");
+  policy.observe("s", request, "/a");
+  assert.equal(policy.automaticQuery("s", "/a", request), request, "do not reach past a new topic");
+});
+
 test("display profiles change only admitted views and remain session-local ephemeral settings", () => {
   const policy = new RecallContextPolicy();
   assert.equal(policy.mode("s"), "compact");

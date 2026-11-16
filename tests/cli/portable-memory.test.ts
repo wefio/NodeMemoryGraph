@@ -152,6 +152,57 @@ test("activated daemon accepts the Pi automatic recall envelope and enforces MCP
   }
 });
 
+test("unified automatic search uses the admitted turn's nearby context before retrieval", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-nearby-context-"));
+  const local = new NmgService({
+    databasePath: join(directory, "memory.sqlite"),
+    environment: {},
+    memoryBackend: { kind: "sqlite", namespace: "nearby-context", local: true },
+  });
+  const projectDir = join(directory, "project");
+  const sessionId = "session-a";
+  const query = "这次呢？";
+  try {
+    const { memory } = await local.invoke("remember", {
+      statement: "HarborAtlasMarker restores the SQLite backup in the maintenance window",
+      nodeName: "HarborAtlasMarker",
+    });
+    for (const prompt of ["请测试 HarborAtlasMarker 的 SQLite 备份恢复工作", query]) {
+      await local.invoke("sessionActiveGraph", {
+        action: "beginDisclosureTurn",
+        sessionId,
+        projectDir,
+        prompt,
+      });
+    }
+    const options = {
+      query,
+      projectDir,
+      sessionId,
+      retrievalMode: "fts5",
+      autoRecall: true,
+      persistTrace: false,
+    } as const;
+    const recalled = await local.invoke("search", options);
+    assert.equal(recalled.results[0]?.memory.id, memory.id);
+    assert.equal(recalled.activeGraph?.query, query);
+    for (const variation of [
+      { autoRecall: false },
+      { sessionId: "session-b" },
+      { projectDir: join(directory, "another-project") },
+    ]) {
+      const separate = await local.invoke("search", { ...options, ...variation });
+      assert.equal(
+        separate.results.some((entry) => entry.memory.id === memory.id),
+        false,
+      );
+    }
+  } finally {
+    await local.close();
+    removeTempDirectory(directory);
+  }
+});
+
 test("daemon keeps aggregate compatibility rejections across restart without request content", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-rpc-rejections-"));
   const options = {

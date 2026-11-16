@@ -693,6 +693,12 @@ export class NmgService {
       delete retrieval.recallCue;
       delete retrieval.recallRevision;
       delete retrieval.recallSource;
+      if (params.autoRecall && params.sessionId)
+        retrieval.query = this.#recallContext.automaticQuery(
+          params.sessionId,
+          resolve(params.projectDir ?? process.cwd()),
+          params.query,
+        );
     }
     const context = await memory.search(retrieval);
     if (!memory.local) return context;

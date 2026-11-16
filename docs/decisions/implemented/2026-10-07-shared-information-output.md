@@ -77,6 +77,10 @@ Dedicated `working_state` replace/clear and captured-generation fencing are now 
 
 ## Contextual recall and display profiles
 
+Unified local automatic recall also uses the nearby context to formulate admitted
+short continuation queries. It uses the same session and project window as
+candidate ordering.
+
 Shared session-bound search reorders its retrieved page using the latest query
 and a bounded user-only context window. The initial score combines current term
 coverage (weight 2), compatible recent-topic coverage (0.35), and a reciprocal

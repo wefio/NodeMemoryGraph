@@ -5,6 +5,12 @@
 **Status:** current
 **Related:** [InformationView](state-spaces.zh-CN.md)、[自动召回预算](session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.zh-CN.md)
 
+## 查询准备
+
+统一引擎的本地自动召回在检索前使用临近上下文处理已准入的短追问。
+查询最多带上一条同会话、同项目的实质用户消息。调用方已补全的查询直接使用，
+Active Graph 记录原始请求。
+
 ## 候选排序
 
 共享 daemon 搜索路径在检索后、反馈暂存前，对会话关联结果重排。
