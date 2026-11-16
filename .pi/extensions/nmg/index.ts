@@ -1975,57 +1975,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     });
 
   registerSharedTool({
-    name: "nmg_get",
-    label: "Get NMG evidence",
-    description: nmgPrompts.get_description,
-    parameters: Type.Object({
-      memoryIds: Type.Array(Type.String(), { minItems: 1, maxItems: 50 }),
-      activeGraphId: Type.Optional(
-        Type.String({
-          description: nmgPrompts.active_graph_id_parameter_description,
-        }),
-      ),
-      graphHops: Type.Optional(Type.Number({ minimum: 0, maximum: 3 })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const sessionId = ctx.sessionManager.getSessionId();
-      if (!recallFlow.allowGet(sessionId)) {
-        return toolResult(
-          { getSuppressed: true, reason: "recall_tool_budget_exhausted" },
-          "Recall tool budget exhausted for this user turn. Answer from the evidence already loaded or state what remains uncertain.",
-        );
-      }
-      const activeGraphId =
-        params.activeGraphId ??
-        agentAttributionFlow.latestActiveGraphIdForMemories(sessionId, params.memoryIds) ??
-        undefined;
-      const result = (await invoke("get", {
-        ...params,
-        activeGraphId,
-        projectDir: projectDirectory(),
-        sessionId,
-      })) as MemoryContext;
-      recallFlow.recordGet(
-        sessionId,
-        result.results.map((entry) => entry.memory.id),
-      );
-      await controllerShadow.disclosure(
-        activeGraphId,
-        sessionId,
-        params.memoryIds,
-        result.results.map((entry) => entry.memory.id),
-      );
-      agentAttributionFlow.note(ctx.sessionManager.getSessionId(), result);
-      const text = await formatDisclosedContext(
-        ctx.sessionManager.getSessionId(),
-        result,
-        "evidence",
-      );
-      return toolResult(result, text || "No active memory found.");
-    },
-  });
-
-  registerSharedTool({
     name: "nmg_search",
     label: "Search NMG",
     description: nmgPrompts.search_description,
@@ -2164,6 +2113,19 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             invalidateRecallGate: () => {
               recallTurn = undefined;
               retainedHandshake = undefined;
+            },
+            memory: {
+              projectDir: projectDirectory(),
+              recallFlow,
+              attribution: agentAttributionFlow,
+              onEvidenceLookup: async (request, result) => {
+                await controllerShadow.disclosure(
+                  request.activeGraphId,
+                  sessionId,
+                  request.memoryIds,
+                  result.results.map((entry) => entry.memory.id),
+                );
+              },
             },
             boardReads: "project",
             boardIdentity: () => {

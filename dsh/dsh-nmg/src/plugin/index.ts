@@ -39,7 +39,6 @@ import { maybeBroadcastToWorld as broadcastWakeEntry } from '../../../../src/int
 import { loadOrCreateAgentIdentity, renameAgentIdentity } from '../../../../src/integration/agent-identity.ts'
 import { compactSearchContext, memoryDisclosureEntries } from '../../../../src/integration/search-projection.ts'
 import {
-  renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
 } from '../../../../src/integration/agent-surface.ts'
@@ -58,11 +57,6 @@ class NmgRpcError extends Error {
     super(message)
     this.name = 'NmgRpcError'
   }
-}
-
-/** 跨会话/过期的 activeGraphId 与 get 的组合会撞这个 —— 丢掉 id 重试即可。 */
-function isForeignActiveGraph(message: string): boolean {
-  return /active graph .* (belongs to another session|does not exist)/i.test(message)
 }
 
 export const inject = ['tools', 'subprocess', 'sandboxPolicy', 'systemPrompt', 'timer']
@@ -1207,72 +1201,6 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
     },
   }
 
-  const getTool = {
-    name: 'nmg_get',
-    description: nmgPrompts.get_description,
-    parameters: {
-      type: 'object',
-      properties: {
-        memoryIds: { type: 'array', items: { type: 'string' }, description: 'Memory IDs from nmg_search.' },
-        activeGraphId: { type: 'string', description: 'activeGraphId returned by the matching nmg_search.' },
-        graphHops: { type: 'integer', description: 'Graph expansion 0..3.' },
-      },
-      required: ['memoryIds'],
-    },
-    output: textOutput,
-    async execute(args, exec) {
-      const ids = Array.isArray(args.memoryIds) ? args.memoryIds : []
-      if (ids.length === 0) return 'nmg_get requires at least one memory ID.'
-      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-      const params: Record<string, unknown> = { memoryIds: ids, projectDir: workspaceRoot, sessionId }
-      if (args.activeGraphId) params.activeGraphId = args.activeGraphId
-      if (args.graphHops != null) params.graphHops = args.graphHops
-      const argv = ['get'].concat(ids)
-      if (args.activeGraphId) argv.push('--active-graph-id', args.activeGraphId)
-      if (args.graphHops != null) argv.push('--graph-hops', String(args.graphHops))
-      argv.push('--project-dir', workspaceRoot, '--session-id', sessionId, '--json')
-      let r = await invoke('get', params, argv, exec.signal, null)
-      // 上一轮 search 拿到的 activeGraphId 属于**上一轮**的 session（DSH 每轮新 agent id），
-      // 直接带进来会被 daemon 拒。丢掉 id 重试一次：证据照给，只是不记"这次用了"的账。
-      if (!r.ok && args.activeGraphId && isForeignActiveGraph(String(r.error))) {
-        delete params.activeGraphId
-        const retryArgv = ['get'].concat(ids)
-        if (args.graphHops != null) retryArgv.push('--graph-hops', String(args.graphHops))
-        retryArgv.push('--project-dir', workspaceRoot, '--session-id', sessionId, '--json')
-        r = await invoke('get', params, retryArgv, exec.signal, null)
-        if (r.ok) (r as { staleActiveGraph?: boolean }).staleActiveGraph = true
-      }
-      if (!r.ok) return r.error
-      const disclosure = await disclose(
-        sessionId,
-        args.activeGraphId,
-        'evidence',
-        memoryDisclosureEntries(r.data, 'evidence'),
-      )
-      const freshIds = new Set(disclosure.freshMemoryIds)
-      const visible = { ...r.data, results: r.data.results.filter((result) => freshIds.has(result.memory.id)) }
-      nativeEvents.note(sessionId, visible)
-      const forget = visible.results.some((result) =>
-        (result.memory.markers || []).some((marker) => marker.kind === 'forget'),
-      )
-      recordActivity(sessionId, {
-        kind: 'get',
-        requested: ids.length,
-        candidates: visible.results.length,
-        memoryIds: visible.results.map((result) => result.memory.id).slice(0, 8),
-      })
-      return [renderEvidenceSurface(visible, {
-        preamble: renderDisclosure(nmgPrompts.get_disclosure, {}),
-        postamble: renderDisclosure(nmgPrompts.get_disclosure_metadata, {
-          count: String(r.data.results.length),
-          next_step: '',
-          forget_hint: forget ? nmgPrompts.forget_hint : '',
-        }),
-        missingMemoryIds: Array.isArray(r.data.missingMemoryIds) ? r.data.missingMemoryIds : undefined,
-      }), foldedDisclosureText(disclosure.foldedMemoryIds)].filter(Boolean).join('\n')
-    },
-  }
-
   const rememberTool = {
     name: 'nmg_remember',
     description: 'Save or update durable memory through the shared NMG lifecycle contract. Never save secrets, chatter, unverified model claims, or transient failures. action=feedback rates a recalled graph (shared context-use learning) and is forwarded to the daemon; no labels = rejected.',
@@ -1443,7 +1371,7 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
     },
   }
 
-  class StateTransportError extends Error {}
+  class ToolTransportError extends Error {}
 
   async function resolveBoardIdentity(agent, signal) {
     if (hostDisposed) throw new Error('DSH adapter has been disposed')
@@ -1464,7 +1392,7 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
   async function invokeRegisteredTool(method, params, signal, cliFallback) {
     if (cliFallback) {
       const result = await invoke(method, params, cliFallback, signal, null)
-      if (!result.ok) throw new StateTransportError(result.error)
+      if (!result.ok) throw new ToolTransportError(result.error)
       return result.data
     }
     try {
@@ -1472,7 +1400,7 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
       if (data == null) throw new Error('NMG daemon is unavailable for state')
       return data
     } catch (error) {
-      throw new StateTransportError('NMG state request failed: ' + String(error.message || error))
+      throw new ToolTransportError('NMG state request failed: ' + String(error.message || error))
     }
   }
 
@@ -1612,7 +1540,6 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
         ...searchTool,
         parameters: { ...searchTool.parameters, properties: supportedSearchParameters(searchTool.parameters.properties, endpoint) },
       }),
-      nmg_get: () => tools.register(getTool),
       nmg_remember: endpoint => tools.register({
         ...rememberTool,
         parameters: {
@@ -1639,11 +1566,24 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
             sessionId,
             requester: 'agent:dsh',
             invoke: (method, params, cliFallback) => invokeRegisteredTool(method, params, exec?.signal, cliFallback),
+            memory: {
+              projectDir: workspaceRoot,
+              retryForeignGraph: true,
+              onEvidenceDisclosed: (request, context) => {
+                nativeEvents.note(sessionId, context)
+                recordActivity(sessionId, {
+                  kind: 'get',
+                  requested: request.memoryIds.length,
+                  candidates: context.results.length,
+                  memoryIds: context.results.map(result => result.memory.id).slice(0, 8),
+                })
+              },
+            },
             boardIdentity: () => resolveBoardIdentity(exec.agent, exec.signal),
           })
           return result.text
         } catch (error) {
-          if (error instanceof StateTransportError) return error.message
+          if (error instanceof ToolTransportError) return error.message
           throw error
         }
       },

@@ -36,11 +36,7 @@ import { coordinationEnabled } from "./config.ts";
 import { memoryDisclosureEntries } from "./search-projection.ts";
 import { COMMON_REMEMBER_ACTIONS, supportedRememberActions } from "./tool-contract.ts";
 import { searchParameterDescription } from "./tool-contract.ts";
-import {
-  renderEvidenceSurface,
-  renderRememberSurface,
-  renderSearchSurface,
-} from "./agent-surface.ts";
+import { renderRememberSurface, renderSearchSurface } from "./agent-surface.ts";
 import type { MemoryContext } from "../core/types.ts";
 
 const nmgPrompts = loadPrompts();
@@ -432,47 +428,6 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
     return () => registered.remove();
   };
 
-  // ── nmg_get ──
-
-  toolBindings.nmg_get = (endpoint) => {
-    const registered = server.registerTool(
-      "nmg_get",
-      {
-        description: nmgPrompts.get_description,
-        inputSchema: {
-          memoryIds: z.array(z.string()).min(1).max(50).describe("Memory IDs from nmg_search"),
-          ...(endpointSupports("sessionActiveGraph", endpoint) && {
-            graphHops: z.number().int().min(0).max(3).optional(),
-            activeGraphId: z
-              .string()
-              .optional()
-              .describe(nmgPrompts.mcp_active_graph_id_parameter_description),
-          }),
-        },
-      },
-      async (params, extra) =>
-        withBinding(extra, async () => {
-          const r = (await invoke("get", {
-            ...params,
-            sessionId: binding().sessionId,
-          })) as MemoryContext & {
-            missingMemoryIds?: string[];
-          };
-          const disclosed = await discloseContext(r, "evidence", params.activeGraphId);
-          await options.onContext?.(binding(), disclosed.context).catch(() => undefined);
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: memText(disclosed.context, disclosed.foldedMemoryIds),
-              },
-            ],
-          };
-        }),
-    );
-    return () => registered.remove();
-  };
-
   // ── nmg_remember ──
 
   toolBindings.nmg_remember = (endpoint) => {
@@ -556,6 +511,11 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
             sessionId,
             requester: `agent:mcp:${agentId}`,
             invoke,
+            memory: {
+              onEvidenceDisclosed: async (_request, context) => {
+                await options.onContext?.(binding(), context).catch(() => undefined);
+              },
+            },
             boardReads: "receipt",
             boardIdentity: async () => {
               await heartbeatBoardAgent();
@@ -634,29 +594,6 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
           next_step: nextStep,
           forget_hint: forget ? nmgPrompts.forget_hint : "",
         }),
-      }),
-      foldedDisclosureText(foldedMemoryIds),
-    ]
-      .filter(Boolean)
-      .join("\n");
-  }
-
-  function memText(
-    r: MemoryContext & { missingMemoryIds?: string[] },
-    foldedMemoryIds: string[] = [],
-  ): string {
-    const forget = r.results.some(({ memory }) =>
-      (memory.markers ?? []).some((marker) => marker.kind === "forget"),
-    );
-    return [
-      renderEvidenceSurface(r, {
-        preamble: renderDisclosure(nmgPrompts.get_disclosure, {}),
-        postamble: renderDisclosure(nmgPrompts.get_disclosure_metadata, {
-          count: String(r.results.length),
-          next_step: "",
-          forget_hint: forget ? nmgPrompts.forget_hint : "",
-        }),
-        missingMemoryIds: r.missingMemoryIds,
       }),
       foldedDisclosureText(foldedMemoryIds),
     ]

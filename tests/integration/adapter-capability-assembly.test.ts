@@ -5,6 +5,7 @@ import { dirname, resolve } from "node:path";
 import {
   ADAPTER_CAPABILITY_IDS,
   assembleAdapterCapabilities,
+  type SharedAdapterTool,
 } from "../../src/integration/adapter-capability-assembly.ts";
 import {
   ADAPTER_CAPABILITY_CATALOG,
@@ -16,12 +17,12 @@ import type { SharedStateTool } from "../../src/integration/state-tool.ts";
 test("only declared memory tools install and omissions fail before registration", async () => {
   const registered: string[] = [];
   const bindings = {
+    registerTool: (tool: SharedAdapterTool) => {
+      registered.push(tool.name.slice(4));
+    },
     tools: {
       nmg_search: () => {
         registered.push("search");
-      },
-      nmg_get: () => {
-        registered.push("get");
       },
     },
   };
@@ -29,6 +30,7 @@ test("only declared memory tools install and omissions fail before registration"
   assert.throws(() => assembleAdapterCapabilities(memory, bindings), /nmg_remember/);
   assert.equal(registered.length, 0);
   const assembly = assembleAdapterCapabilities(memory, {
+    ...bindings,
     tools: {
       ...bindings.tools,
       nmg_remember: () => {
@@ -78,9 +80,6 @@ test("tools intersect their native declaration with the connected daemon", async
         nmg_search: () => {
           names.push("search");
         },
-        nmg_get: () => {
-          names.push("get");
-        },
         nmg_remember: () => {
           names.push("remember");
         },
@@ -95,15 +94,15 @@ test("tools intersect their native declaration with the connected daemon", async
 test("failed asynchronous installation rolls back accepted bindings in reverse order", async () => {
   const disposed: string[] = [];
   const assembly = assembleAdapterCapabilities(["search", "get", "remember", "state.ag"], {
-    registerTool: async () => {
-      throw new Error("host rejected state");
+    registerTool: (tool) => {
+      if (tool.name === "nmg_state") return Promise.reject(new Error("host rejected state"));
+      return () => {
+        disposed.push("get");
+      };
     },
     tools: {
       nmg_search: () => () => {
         disposed.push("search");
-      },
-      nmg_get: () => () => {
-        disposed.push("get");
       },
       nmg_remember: () => () => {
         disposed.push("remember");
@@ -146,12 +145,12 @@ test("synchronous host rejection stops registration and releases previously acce
   assert.throws(
     () =>
       assembleAdapterCapabilities(["search", "get", "remember"], {
+        registerTool: () => {
+          throw new Error("host rejected get");
+        },
         tools: {
           nmg_search: () => () => {
             calls.push("release search");
-          },
-          nmg_get: () => {
-            throw new Error("host rejected get");
           },
           nmg_remember: () => {
             calls.push("remember");

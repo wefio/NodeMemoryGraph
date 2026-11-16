@@ -621,70 +621,6 @@ export default {
       },
     });
 
-    // ---- nmg_get ----------------------------------------------------------
-    const getTool = (): ToolRegistration => ({
-      name: "get",
-      description: prompts.get_description,
-      input: {
-        type: "object",
-        properties: {
-          memoryIds: {
-            type: "array",
-            items: { type: "string" },
-            minItems: 1,
-            maxItems: 50,
-            description: "Memory IDs from nmg_search.",
-          },
-          activeGraphId: {
-            type: "string",
-            description: prompts.active_graph_id_parameter_description,
-          },
-          graphHops: { type: "integer", minimum: 0, maximum: 3 },
-        },
-        required: ["memoryIds"],
-        additionalProperties: false,
-      },
-      execute: async (args, context) => {
-        const sessionId = toolSessionId(context, "get");
-        const memoryIds = Array.isArray(args.memoryIds)
-          ? (args.memoryIds as unknown[]).filter(
-              (id): id is string => typeof id === "string" && id.trim().length > 0,
-            )
-          : [];
-        if (memoryIds.length === 0) return { content: "nmg_get requires memoryIds." };
-        if (!recallFlow.allowGet(sessionId)) {
-          return {
-            content:
-              "Recall tool budget exhausted for this user turn. Answer from the evidence already " +
-              "on the surface, or state what remains uncertain.",
-          };
-        }
-        const activeGraphId =
-          (typeof args.activeGraphId === "string" && args.activeGraphId.trim()) ||
-          attribution.latestActiveGraphIdForMemories(sessionId, memoryIds) ||
-          undefined;
-        const result = (await invoke("get", {
-          memoryIds,
-          activeGraphId,
-          graphHops: args.graphHops,
-          projectDir: projectDirectory(sessionId),
-          sessionId,
-        })) as MemoryContext & { missingMemoryIds?: string[] };
-        recallFlow.recordGet(
-          sessionId,
-          result.results.map((entry) => entry.memory.id),
-        );
-        attribution.note(sessionId, result);
-        const missing = Array.isArray(result.missingMemoryIds) ? result.missingMemoryIds : [];
-        const surface = await disclosedContext(sessionId, result, "evidence");
-        return {
-          content: [surface, missing.length > 0 ? `MISSING: ${missing.join(", ")}` : ""]
-            .filter(Boolean)
-            .join("\n"),
-        };
-      },
-    });
-
     // ---- nmg_remember -----------------------------------------------------
     const rememberTool = (methods?: readonly string[]): ToolRegistration => ({
       name: "remember",
@@ -1024,9 +960,6 @@ export default {
           nmg_search: (endpoint) => {
             toolDefinitions.push({ ...searchTool(endpoint), name: "nmg_search" });
           },
-          nmg_get: () => {
-            toolDefinitions.push({ ...getTool(), name: "nmg_get" });
-          },
           nmg_remember: (endpoint) => {
             toolDefinitions.push({ ...rememberTool(endpoint?.methods), name: "nmg_remember" });
           },
@@ -1037,12 +970,13 @@ export default {
             description: tool.description,
             input: tool.inputSchema,
             async execute(args, context) {
-              const sessionId = toolSessionId(context, "state");
+              const sessionId = toolSessionId(context, tool.name.slice(4));
               const output = await tool.execute(args, {
                 sessionId,
                 requester: "agent:opencode",
                 invoke,
                 legacyBoardVerbs: true,
+                memory: { projectDir: projectDirectory(sessionId), recallFlow, attribution },
                 boardReads: "project",
                 boardIdentity: () => {
                   const identity = loadOrCreateAgentIdentity(sessionId, "opencode");

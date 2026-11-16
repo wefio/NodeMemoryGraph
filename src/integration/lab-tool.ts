@@ -1,6 +1,6 @@
 import { loadPrompts } from "../prompts/load.ts";
 import { LAB_CAPABILITIES, renderLabOutput } from "./lab-capabilities.ts";
-import type { AdapterToolSession } from "./state-tool.ts";
+import type { AdapterToolSession } from "./adapter-tool-session.ts";
 
 const actions = ["list", "status", "enable", "disable", "invoke"];
 const string = { type: "string" };

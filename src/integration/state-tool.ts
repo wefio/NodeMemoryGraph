@@ -1,6 +1,7 @@
-import type { NmgMethod, NmgStateResult } from "../cli/protocol.ts";
+import type { NmgStateResult } from "../cli/protocol.ts";
 import { TASK_BOARD_VERDICTS, WORLD_BOARD_ID } from "../core/types.ts";
 import { loadPrompts } from "../prompts/load.ts";
+import type { AdapterToolSession, StateToolIdentity } from "./adapter-tool-session.ts";
 import { contextBoardEntries } from "./context-information.ts";
 import {
   boardStateDirection,
@@ -21,26 +22,6 @@ export interface StateToolArguments extends Record<string, unknown> {
   action: string;
   space: string;
   operation?: string;
-}
-
-export interface StateToolIdentity {
-  id: string;
-  agentName: string;
-  saveName?: (name: string) => void;
-}
-
-export interface AdapterToolSession {
-  sessionId: string;
-  requester: string;
-  invoke(
-    method: NmgMethod,
-    params: Record<string, unknown>,
-    cliFallback?: string[],
-  ): Promise<unknown>;
-  boardIdentity?: () => StateToolIdentity | Promise<StateToolIdentity>;
-  boardReads?: "receipt" | "project";
-  legacyBoardVerbs?: boolean;
-  invalidateRecallGate?: () => void;
 }
 
 const prompts = loadPrompts();

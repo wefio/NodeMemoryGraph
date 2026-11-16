@@ -2,6 +2,7 @@ import { prepareAutomaticRecallSurface } from "./agent-surface.ts";
 import type { NmgHelloResult, NmgMethod } from "../cli/protocol.ts";
 import { contextStateViews } from "./context-information.ts";
 import { promptCompletionNudge } from "./completion-nudge.ts";
+import { createGetTool, type SharedGetTool } from "./get-tool.ts";
 import { createLabTool, type SharedLabTool } from "./lab-tool.ts";
 import { createStateTool, type SharedStateTool, type StateToolSpace } from "./state-tool.ts";
 import { AgentAttributionFlow, recordVersionedAnswerAttribution } from "./agent-attribution.ts";
@@ -29,7 +30,6 @@ export type AdapterToolBindings = Partial<
 
 const TOOL_METHODS: Record<ToolName, NmgMethod> = {
   nmg_search: "search",
-  nmg_get: "get",
   nmg_remember: "remember",
   nmg_daemon: "status",
   nmg_reason: "lab",
@@ -114,13 +114,19 @@ const SERVICES: CapabilityServices = {
 
 const TOOL_CAPABILITIES = {
   search: "nmg_search",
-  get: "nmg_get",
   remember: "nmg_remember",
   "daemon-health": "nmg_daemon",
   "reasoning-workspace": "nmg_reason",
 } as const;
 
-const SHARED_TOOLS = { lab: { method: "lab", create: createLabTool } } as const;
+const SHARED_TOOLS = {
+  get: {
+    method: "get",
+    create: (endpoint?: AdapterEndpoint) =>
+      createGetTool(endpointSupports("sessionActiveGraph", endpoint)),
+  },
+  lab: { method: "lab", create: createLabTool },
+} as const;
 const STATE_CAPABILITIES = { "state.ag": "ag", "state.board": "board" } as const;
 type StateCapability = keyof typeof STATE_CAPABILITIES;
 
@@ -151,7 +157,7 @@ export type AdapterCapabilityBindings = {
   tools?: AdapterToolBindings;
   registerTool?: (tool: SharedAdapterTool) => Installation;
 } & { [K in keyof CapabilityServices]?: (services: CapabilityServices[K]) => Installation };
-export type SharedAdapterTool = SharedStateTool | SharedLabTool;
+export type SharedAdapterTool = SharedStateTool | SharedLabTool | SharedGetTool;
 
 export interface CapabilityAssembly {
   ready: Promise<void>;
@@ -188,7 +194,10 @@ function capabilityInstaller(
   if (isStateCapability(capability) || shared) {
     const register = bindings.registerTool;
     if (!register) throw new Error(`${capability}: missing native tool registration`);
-    if (shared) return withEndpoint(shared.method, endpoint, () => register(shared.create()));
+    if (shared)
+      return withEndpoint(shared.method, endpoint, (discovered) =>
+        register(shared.create(discovered)),
+      );
     const spaces: StateToolSpace[] = state.map((id) => STATE_CAPABILITIES[id]);
     return withEndpoint("state", endpoint, () => register(createStateTool(spaces)));
   }

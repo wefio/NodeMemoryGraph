@@ -52,8 +52,11 @@ identity and read effects it supports. Disabling coordination omits the board
 space and its operations from the registered tool.
 `lab` uses the same native registration with the shared
 [`lab-tool.ts`](../../../src/integration/lab-tool.ts) schema, validation and
-invocation. Its fallback arguments belong to the shared definition. Memory
-tools still use per-entry installer bindings.
+invocation. Its fallback arguments belong to the shared definition.
+[`get-tool.ts`](../../../src/integration/get-tool.ts) owns exact lookup, disclosure
+folding, rendering, and CLI fallback arguments. Hosts supply project scope and
+native attribution or observation bindings. Search and remember still use
+per-entry installer bindings.
 
 Tool registration intersects native bindings with the connected daemon's
 `hello.methods`. The search schema also uses `hello.searchParameters` when

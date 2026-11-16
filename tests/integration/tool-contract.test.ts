@@ -67,7 +67,6 @@ test("Pi, MCP, DSH, and OpenCode render through the shared agent surface", () =>
   for (const relativePath of sources) {
     const source = readFileSync(resolve(import.meta.dirname, relativePath), "utf8");
     assert.match(source, /renderSearchSurface/u);
-    assert.match(source, /renderEvidenceSurface/u);
     assert.match(source, /renderRememberSurface/u);
     assert.match(source, /tool\.execute/u);
   }

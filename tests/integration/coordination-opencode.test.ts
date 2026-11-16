@@ -88,6 +88,10 @@ test("real OpenCode registration forwards event payloads and public status to pr
       sessionId: context.sessionID,
     });
     assert.equal(dated.results[0]?.memory.eventTime, "2025-05-09T00:00:00.000Z");
+    const exact = await tools
+      .get("nmg_get")!
+      .execute({ memoryIds: [dated.results[0]!.memory.id] }, context);
+    assert.match(JSON.stringify(exact), /OpenCodeHistoricalClockMarker/u);
     const created = await state.execute(
       {
         action: "write",
