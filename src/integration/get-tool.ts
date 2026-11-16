@@ -1,8 +1,12 @@
 import type { NmgMethodResult } from "../cli/protocol.ts";
 import { loadPrompts, renderDisclosure } from "../prompts/load.ts";
 import { renderEvidenceSurface } from "./agent-surface.ts";
-import type { AdapterToolSession, EvidenceLookup } from "./adapter-tool-session.ts";
-import { memoryDisclosureEntries } from "./search-projection.ts";
+import {
+  discloseMemoryContext,
+  renderFoldedDisclosure,
+  type AdapterToolSession,
+  type EvidenceLookup,
+} from "./adapter-tool-session.ts";
 
 type ExactContext = NmgMethodResult["get"];
 const prompts = loadPrompts();
@@ -57,7 +61,13 @@ export function createGetTool(graphSupported: boolean) {
       );
       memory?.attribution?.note(session.sessionId, result);
       await memory?.onEvidenceLookup?.(request, result);
-      const { context, folded } = await discloseEvidence(result, request, session, graphSupported);
+      const { context, folded } = await discloseMemoryContext(
+        result,
+        session,
+        "evidence",
+        graphSupported,
+        request.activeGraphId,
+      );
       await memory?.onEvidenceDisclosed?.(request, context);
       return { details: result, text: renderExactContext(context, folded) };
     },
@@ -114,30 +124,6 @@ async function loadEvidence(
   }
 }
 
-async function discloseEvidence(
-  result: ExactContext,
-  request: EvidenceLookup,
-  session: AdapterToolSession,
-  graphSupported: boolean,
-) {
-  if (!graphSupported || result.results.length === 0) return { context: result, folded: [] };
-  const decision = (await session
-    .invoke("sessionActiveGraph", {
-      action: "disclose",
-      sessionId: session.sessionId,
-      projectionId: request.activeGraphId ?? result.activeGraph?.id,
-      disclosure: "evidence",
-      entries: memoryDisclosureEntries(result, "evidence"),
-    })
-    .catch(() => null)) as { freshMemoryIds?: string[]; foldedMemoryIds?: string[] } | null;
-  if (!Array.isArray(decision?.freshMemoryIds)) return { context: result, folded: [] };
-  const fresh = new Set(decision.freshMemoryIds);
-  return {
-    context: { ...result, results: result.results.filter(({ memory }) => fresh.has(memory.id)) },
-    folded: Array.isArray(decision.foldedMemoryIds) ? decision.foldedMemoryIds : [],
-  };
-}
-
 function renderExactContext(context: ExactContext, folded: string[]): string {
   const containsForget = context.results.some(({ memory }) =>
     (memory.markers ?? []).some((marker) => marker.kind === "forget"),
@@ -154,12 +140,7 @@ function renderExactContext(context: ExactContext, folded: string[]): string {
           missingMemoryIds: context.missingMemoryIds,
         })
       : "";
-  const previous =
-    folded.length > 0
-      ? [
-          prompts.in_context_title,
-          ...folded.map((id) => `- memory=${id}; already_in_context=true`),
-        ].join("\n")
-      : "";
-  return [detail, previous].filter(Boolean).join("\n") || "No active memory found.";
+  return (
+    [detail, renderFoldedDisclosure(folded)].filter(Boolean).join("\n") || "No active memory found."
+  );
 }

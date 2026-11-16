@@ -15,6 +15,7 @@ import {
   assertAgentActivityContract,
   mcpToolContractText,
 } from "../helpers/agent-activity-contract.ts";
+import { assertSearchToolContract } from "../helpers/search-tool-contract.ts";
 import { assertLabToolContract } from "../helpers/lab-tool-contract.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
@@ -165,13 +166,15 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
       memoryIds: [memoryId],
     })) as NmgMethodResult["get"];
     assert.equal(dated.results[0]?.memory.eventTime, "2025-05-09T00:00:00.000Z");
-    const recalled = await client.callTool({
-      name: "nmg_search",
-      arguments: { query: "stable Active Graph session", limit: 4 },
-    });
-    const activeGraphId = /activeGraphId=([^\s]+)/u.exec(textOf(recalled))?.[1];
+    const recalled = await assertSearchToolContract(
+      async (args) =>
+        mcpToolContractText(await client.callTool({ name: "nmg_search", arguments: args })),
+      "stable Active Graph session",
+      /stable Active Graph session/u,
+    );
+    const activeGraphId = /activeGraphId=([^\s]+)/u.exec(recalled)?.[1];
     assert.ok(activeGraphId);
-    const memoryReference = /memory=([^;]+);/u.exec(textOf(recalled))?.[1];
+    const memoryReference = /memory=([^;]+);/u.exec(recalled)?.[1];
     assert.ok(memoryReference?.startsWith("ref:"));
     const repeated = await client.callTool({
       name: "nmg_search",

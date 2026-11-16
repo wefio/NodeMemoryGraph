@@ -55,8 +55,10 @@ space and its operations from the registered tool.
 invocation. Its fallback arguments belong to the shared definition.
 [`get-tool.ts`](../../../src/integration/get-tool.ts) owns exact lookup, disclosure
 folding, rendering, and CLI fallback arguments. Hosts supply project scope and
-native attribution or observation bindings. Search and remember still use
-per-entry installer bindings.
+native attribution or observation bindings. The [shared Search tool](../../../src/integration/search-tool.ts)
+owns explicit retrieval inputs, disclosure, diagnostics, and candidate rendering.
+Hosts bind their recall-flow and controller options and observe the output when needed.
+Remember uses per-entry installer bindings.
 
 Tool registration intersects native bindings with the connected daemon's
 `hello.methods`. The search schema also uses `hello.searchParameters` when

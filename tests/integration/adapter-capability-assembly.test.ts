@@ -20,11 +20,6 @@ test("only declared memory tools install and omissions fail before registration"
     registerTool: (tool: SharedAdapterTool) => {
       registered.push(tool.name.slice(4));
     },
-    tools: {
-      nmg_search: () => {
-        registered.push("search");
-      },
-    },
   };
   const memory = ["search", "get", "remember"] as const;
   assert.throws(() => assembleAdapterCapabilities(memory, bindings), /nmg_remember/);
@@ -32,7 +27,6 @@ test("only declared memory tools install and omissions fail before registration"
   const assembly = assembleAdapterCapabilities(memory, {
     ...bindings,
     tools: {
-      ...bindings.tools,
       nmg_remember: () => {
         registered.push("remember");
       },
@@ -74,12 +68,9 @@ test("tools intersect their native declaration with the connected daemon", async
     ["search", "get", "remember", "state.ag", "lab"],
     {
       registerTool: (tool) => {
-        names.push(tool.name);
+        names.push(tool.name.slice(4));
       },
       tools: {
-        nmg_search: () => {
-          names.push("search");
-        },
         nmg_remember: () => {
           names.push("remember");
         },
@@ -97,13 +88,10 @@ test("failed asynchronous installation rolls back accepted bindings in reverse o
     registerTool: (tool) => {
       if (tool.name === "nmg_state") return Promise.reject(new Error("host rejected state"));
       return () => {
-        disposed.push("get");
+        disposed.push(tool.name.slice(4));
       };
     },
     tools: {
-      nmg_search: () => () => {
-        disposed.push("search");
-      },
       nmg_remember: () => () => {
         disposed.push("remember");
       },
@@ -145,13 +133,13 @@ test("synchronous host rejection stops registration and releases previously acce
   assert.throws(
     () =>
       assembleAdapterCapabilities(["search", "get", "remember"], {
-        registerTool: () => {
-          throw new Error("host rejected get");
+        registerTool: (tool) => {
+          if (tool.name === "nmg_get") throw new Error("host rejected get");
+          return () => {
+            calls.push("release search");
+          };
         },
         tools: {
-          nmg_search: () => () => {
-            calls.push("release search");
-          },
           nmg_remember: () => {
             calls.push("remember");
           },

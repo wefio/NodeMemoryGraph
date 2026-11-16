@@ -331,6 +331,7 @@ routes:
       - src/integration/state-tool.ts
       - src/integration/lab-tool.ts
       - src/integration/get-tool.ts
+      - src/integration/search-tool.ts
       - src/integration/completion-nudge.ts
     owners:
       - docs/design/unified-architecture/adapter-capability-assembly.md

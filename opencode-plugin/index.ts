@@ -1,8 +1,6 @@
 import {
   assembleAdapterCapabilities,
   disabledBoardCapability,
-  supportedSearchParameters,
-  type AdapterEndpoint,
   type AdapterCapabilityBindings,
 } from "../src/integration/adapter-capability-assembly.ts";
 import { ADAPTER_CAPABILITY_CATALOG } from "../src/integration/adapter-capability-catalog.ts";
@@ -34,11 +32,7 @@ import {
   extractAnswerText,
   extractPromptText,
 } from "../src/integration/agent-attribution.ts";
-import {
-  renderEvidenceSurface,
-  renderRememberSurface,
-  renderSearchSurface,
-} from "../src/integration/agent-surface.ts";
+import { renderRememberSurface } from "../src/integration/agent-surface.ts";
 import { loadWakeState, readWakeConfig, wakeBudgetGate } from "../src/integration/board-wake.ts";
 import {
   configuredAutoRecallLimit,
@@ -49,10 +43,7 @@ import {
   loadOrCreateAgentIdentity,
   renameAgentIdentity,
 } from "../src/integration/agent-identity.ts";
-import {
-  compactSearchContext,
-  memoryDisclosureEntries,
-} from "../src/integration/search-projection.ts";
+import { compactSearchContext } from "../src/integration/search-projection.ts";
 import { SessionRecallFlow } from "../src/integration/session-recall-flow.ts";
 import { RecallBudget } from "../src/integration/recall-budget.ts";
 import { prepareInformationOutput } from "../src/integration/information-output.ts";
@@ -63,10 +54,7 @@ import {
   supportedRememberActions,
 } from "../src/integration/tool-contract.ts";
 import { probeAdapterEndpoint } from "../src/integration/lease-transport.ts";
-import {
-  SEARCH_REQUIRED_PARAMETERS,
-  searchParameterProperties,
-} from "../src/integration/tool-contract.ts";
+import {} from "../src/integration/tool-contract.ts";
 import { messageText } from "../src/integration/tool-observation.ts";
 import type { MemoryContext, MemoryTier, RememberResult } from "../src/core/types.ts";
 import { deriveAnswerOverlapMemoryIds } from "../src/core/feedback.ts";
@@ -511,55 +499,6 @@ export default {
         })
         .then(() => undefined);
 
-    // ---- Shared disclosure projection ------------------------------------
-    const disclosedContext = async (
-      sessionId: string,
-      context: MemoryContext,
-      disclosure: "header" | "evidence",
-    ): Promise<string> => {
-      if (!context.results || context.results.length === 0) {
-        return disclosure === "header" ? "No matching NMG memory found." : "";
-      }
-      try {
-        const decision = (await invoke("sessionActiveGraph", {
-          action: "disclose",
-          sessionId,
-          projectionId: context.activeGraph?.id,
-          disclosure,
-          entries: memoryDisclosureEntries(context, disclosure),
-        })) as { freshMemoryIds?: unknown; foldedMemoryIds?: unknown };
-        const fallback = context.results.map((entry) => entry.memory.id);
-        const freshIds = new Set(
-          Array.isArray(decision?.freshMemoryIds)
-            ? (decision.freshMemoryIds as string[])
-            : fallback,
-        );
-        const foldedIds = Array.isArray(decision?.foldedMemoryIds)
-          ? (decision.foldedMemoryIds as string[])
-          : [];
-        const fresh = context.results.filter((entry) => freshIds.has(entry.memory.id));
-        if (fresh.length === 0) {
-          return disclosure === "header" ? "No new matching NMG memory." : "";
-        }
-        const visible = { ...context, results: fresh } as MemoryContext;
-        return [
-          disclosure === "header" ? renderSearchSurface(visible) : renderEvidenceSurface(visible),
-          foldedIds.length > 0
-            ? `${prompts.in_context_title}\n${foldedIds
-                .map((memoryId) => `- memory=${memoryId}; already_in_context=true`)
-                .join("\n")}`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n");
-      } catch {
-        // Daemon disclosure ledger unavailable: degrade to the raw surface.
-        return disclosure === "header"
-          ? renderSearchSurface(context)
-          : renderEvidenceSurface(context);
-      }
-    };
-
     const toolSessionId = (context: ToolContext, toolName: string): string => {
       const sessionId = String(context?.sessionID ?? "");
       if (sessionId) return sessionId;
@@ -567,59 +506,6 @@ export default {
         `nmg_${toolName} has no session context (this tool must run inside an OpenCode agent loop)`,
       );
     };
-
-    // ---- nmg_search -------------------------------------------------------
-    const searchTool = (endpoint?: AdapterEndpoint): ToolRegistration => ({
-      name: "search",
-      description: prompts.search_description,
-      input: {
-        type: "object",
-        properties: supportedSearchParameters(
-          {
-            // Shared retrieval contract; only the prompt-enriched query text is local.
-            ...searchParameterProperties(),
-            query: { type: "string", description: prompts.search_query_parameter_description },
-          },
-          endpoint,
-        ),
-        required: [...SEARCH_REQUIRED_PARAMETERS],
-        additionalProperties: false,
-      },
-      execute: async (args, context) => {
-        const sessionId = toolSessionId(context, "search");
-        if (!recallFlow.allowSearch(sessionId)) {
-          const reason = recallFlow.searchBlockReason(sessionId);
-          return {
-            content: `${prompts.search_progression_required} (reason=${reason ?? "gated"})`,
-          };
-        }
-        const result = (await invoke("search", {
-          query: args.query,
-          limit: args.limit,
-          maxTier: args.maxTier ?? 3,
-          nodeName: args.nodeName,
-          scope: args.scope,
-          sourceActor: args.sourceActor,
-          includeHistorical: args.includeHistorical === true,
-          graphHops: args.graphHops,
-          eventTimeFrom: args.eventTimeFrom,
-          eventTimeTo: args.eventTimeTo,
-          projectDir: projectDirectory(sessionId),
-          sessionId,
-        })) as MemoryContext;
-        recallFlow.recordSearch(
-          sessionId,
-          result.results.map((entry) => entry.memory.id),
-        );
-        attribution.note(sessionId, result);
-        const surface = await disclosedContext(sessionId, result, "header");
-        return {
-          content: [surface, recallFeedbackAffordance(result.activeGraph?.id)]
-            .filter(Boolean)
-            .join("\n"),
-        };
-      },
-    });
 
     // ---- nmg_remember -----------------------------------------------------
     const rememberTool = (methods?: readonly string[]): ToolRegistration => ({
@@ -957,9 +843,6 @@ export default {
       {
         ...capabilityBindings,
         tools: {
-          nmg_search: (endpoint) => {
-            toolDefinitions.push({ ...searchTool(endpoint), name: "nmg_search" });
-          },
           nmg_remember: (endpoint) => {
             toolDefinitions.push({ ...rememberTool(endpoint?.methods), name: "nmg_remember" });
           },
@@ -976,7 +859,12 @@ export default {
                 requester: "agent:opencode",
                 invoke,
                 legacyBoardVerbs: true,
-                memory: { projectDir: projectDirectory(sessionId), recallFlow, attribution },
+                memory: {
+                  projectDir: projectDirectory(sessionId),
+                  recallFlow,
+                  attribution,
+                  search: { defaultTier: 3, feedback: recallFeedbackAffordance },
+                },
                 boardReads: "project",
                 boardIdentity: () => {
                   const identity = loadOrCreateAgentIdentity(sessionId, "opencode");

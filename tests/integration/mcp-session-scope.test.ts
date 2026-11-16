@@ -13,6 +13,7 @@ import {
   assertAgentActivityContract,
   mcpToolContractText,
 } from "../helpers/agent-activity-contract.ts";
+import { assertSearchToolContract } from "../helpers/search-tool-contract.ts";
 import { assertLabToolContract } from "../helpers/lab-tool-contract.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
@@ -78,8 +79,11 @@ test("one MCP connection isolates concurrent native sessions and refuses a forei
       statement: "ScopeFixture SQLite storage",
       nodeName: "scope",
     });
-    const search = await call(a, "nmg_search", { query: "ScopeFixture SQLite" });
-    const text = JSON.stringify(search);
+    const text = await assertSearchToolContract(
+      async (args) => mcpToolContractText(await call(a, "nmg_search", args)),
+      "ScopeFixture SQLite",
+      /ScopeFixture SQLite storage/u,
+    );
     const projection = text.match(/activeGraphId=([0-9a-f-]+)/)?.[1];
     assert.ok(projection);
     const memoryId = (await service.invoke("search", { query: "ScopeFixture" })).results[0]!.memory
@@ -89,10 +93,13 @@ test("one MCP connection isolates concurrent native sessions and refuses a forei
     assert.match(JSON.stringify(refused), /another session/);
     const missing = await client.callTool({
       name: "nmg_search",
-      arguments: { query: "ScopeFixture", sessionId: a },
+      arguments: { query: "ScopeFixture" },
     });
     assert.equal(missing.isError, true);
     assert.match(JSON.stringify(missing), /metadata/);
+    const forged = await call(b, "nmg_search", { query: "ScopeFixture", sessionId: a });
+    assert.equal(forged.isError, true);
+    assert.match(JSON.stringify(forged), /sessionId/);
   } finally {
     await client.close();
     await adapter.server.close();

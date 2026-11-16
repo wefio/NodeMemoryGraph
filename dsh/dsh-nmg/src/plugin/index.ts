@@ -1,4 +1,4 @@
-import { assembleAdapterCapabilities, disabledBoardCapability, supportedSearchParameters } from '../../../../src/integration/adapter-capability-assembly.ts'
+import { assembleAdapterCapabilities, disabledBoardCapability } from '../../../../src/integration/adapter-capability-assembly.ts'
 import { ADAPTER_CAPABILITY_CATALOG } from '../../../../src/integration/adapter-capability-catalog.ts'
 // NMG adapter for DeepSeek Harness — community-standard dual-face host package.
 //
@@ -31,17 +31,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import { coordinationEnabled as configuredCoordinationEnabled } from '../../../../src/integration/config.ts'
 import { appendRememberTimeContext, COMMON_REMEMBER_ACTIONS, supportedRememberActions } from '../../../../src/integration/tool-contract.ts'
 import { requiresEventTimeReference } from '../../../../src/cli/protocol.ts'
-import {
-  SEARCH_REQUIRED_PARAMETERS,
-  searchParameterProperties,
-} from '../../../../src/integration/tool-contract.ts'
 import { maybeBroadcastToWorld as broadcastWakeEntry } from '../../../../src/integration/board-wake.ts'
 import { loadOrCreateAgentIdentity, renameAgentIdentity } from '../../../../src/integration/agent-identity.ts'
-import { compactSearchContext, memoryDisclosureEntries } from '../../../../src/integration/search-projection.ts'
-import {
-  renderRememberSurface,
-  renderSearchSurface,
-} from '../../../../src/integration/agent-surface.ts'
+import { compactSearchContext } from '../../../../src/integration/search-projection.ts'
+import { renderRememberSurface } from '../../../../src/integration/agent-surface.ts'
 import { loadPrompts, renderDisclosure } from '../../../../src/prompts/load.ts'
 import { RecallBudget } from '../../../../src/integration/recall-budget.ts'
 import { prepareInformationOutput } from '../../../../src/integration/information-output.ts'
@@ -327,52 +320,6 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
     return out
   }
 
-  // The daemon RPC and the CLI fallback carry the same request, so both are
-  // assembled from one place: a field added here reaches either transport.
-  function searchParamsFor(args, sessionId) {
-    const params = {
-      query: args.query,
-      projectDir: workspaceRoot,
-      sessionId,
-      recallCue: args.recallCue,
-      recallRevision: args.recallRevision,
-    }
-    const optional = [
-      ['limit', args.limit],
-      ['maxTier', args.maxTier],
-      ['graphHops', args.graphHops],
-      ['nodeName', args.nodeName],
-      ['sourceActor', args.sourceActor],
-      ['eventTimeFrom', args.eventTimeFrom],
-      ['eventTimeTo', args.eventTimeTo],
-    ]
-    for (const [key, value] of optional) {
-      if (value != null) params[key] = value
-    }
-    if (args.includeHistorical) params.includeHistorical = true
-    if (args.scope) params.scope = coerceScope(args.scope)
-    return params
-  }
-
-  function searchArgvFor(args, tail) {
-    const argv = ['search', args.query]
-    const optional = [
-      ['--limit', args.limit],
-      ['--max-tier', args.maxTier],
-      ['--graph-hops', args.graphHops],
-      ['--node', args.nodeName],
-      ['--source-actor', args.sourceActor],
-      ['--from', args.eventTimeFrom],
-      ['--to', args.eventTimeTo],
-    ]
-    for (const [flag, value] of optional) {
-      if (value != null) argv.push(flag, String(value))
-    }
-    if (args.includeHistorical) argv.push('--include-historical')
-    for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1])
-    return [...argv, ...tail]
-  }
-
   function projectDaemonStatus(raw) {
     const endpoint = resolveDaemon()
     return {
@@ -451,32 +398,6 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
     const generation = ++recallSequence
     recallGenerations.set(sessionId, generation)
     return generation
-  }
-
-  async function disclose(sessionId, activeGraphId, disclosure, entries) {
-    // disclose 只是"这轮已经给过谁"的去重账，daemon 拒绝（例如老版本要 contentHash）
-    // 不该拖垮整次检索 —— 兜底成"全部当新的"，效果与之前一致。
-    let decision: any
-    try {
-      decision = await daemonCall('sessionActiveGraph', {
-        action: 'disclose',
-        sessionId,
-        projectionId: activeGraphId || undefined,
-        disclosure,
-        entries,
-      })
-    } catch {
-      decision = null
-    }
-    return decision && Array.isArray(decision.freshMemoryIds)
-      ? decision
-      : { freshMemoryIds: entries.map((entry) => entry.memoryId), foldedMemoryIds: [] }
-  }
-
-  function foldedDisclosureText(memoryIds) {
-    if (!Array.isArray(memoryIds) || memoryIds.length === 0) return ''
-    return nmgPrompts.in_context_title + '\n' +
-      memoryIds.map((id) => '- memory=' + id + '; already_in_context=true').join('\n')
   }
 
   function extractUserPrompt(message) {
@@ -1146,61 +1067,6 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
   }
 
   // ── tools ──────────────────────────────────────────────────────────────────
-  const searchTool = {
-    name: 'nmg_search',
-    description: nmgPrompts.search_description,
-    parameters: {
-      type: 'object',
-      properties: {
-        // Shared retrieval contract; host-only fields follow it.
-        ...searchParameterProperties(),
-        recallCue: { type: 'string', description: nmgPrompts.search_recall_cue_parameter_description },
-        recallRevision: { type: 'integer', minimum: 1, description: nmgPrompts.search_recall_revision_parameter_description },
-      },
-      required: [...SEARCH_REQUIRED_PARAMETERS],
-    },
-    output: textOutput,
-    async execute(args, exec) {
-      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-      const params = searchParamsFor(args, sessionId)
-      const argv = searchArgvFor(args, [
-        '--project-dir', workspaceRoot, '--session-id', sessionId, '--json',
-      ])
-      const r = await invoke('search', params, argv, exec.signal, null)
-      if (!r.ok) return r.error
-      const disclosure = await disclose(
-        sessionId,
-        r.data.activeGraph && r.data.activeGraph.id,
-        'header',
-        memoryDisclosureEntries(r.data, 'header'),
-      )
-      const freshIds = new Set(disclosure.freshMemoryIds)
-      const data = { ...r.data, results: r.data.results.filter((result) => freshIds.has(result.memory.id)) }
-      nativeEvents.note(sessionId, data)
-      const deferred = data.progressiveDisclosure && data.progressiveDisclosure.deferredMemoryIds
-      const nextStep = Array.isArray(deferred) && deferred.length
-        ? 'More ranked records are folded. Expand selected memory IDs first; deferred IDs: ' + deferred.join(',')
-        : 'Select exact records with nmg_get (memory IDs + activeGraphId).'
-      const forget = data.results.some((result) =>
-        (result.memory.markers || []).some((marker) => marker.kind === 'forget'),
-      )
-      recordActivity(sessionId, {
-        kind: 'search',
-        query: String(args.query || ''),
-        candidates: data.results.length,
-        activeGraphId: (r.data.activeGraph && r.data.activeGraph.id) || null,
-      })
-      return [renderSearchSurface(data, {
-        preamble: renderDisclosure(nmgPrompts.search_disclosure, {}),
-        postamble: renderDisclosure(nmgPrompts.search_disclosure_metadata, {
-          count: String(data.results.length),
-          next_step: nextStep,
-          forget_hint: forget ? nmgPrompts.forget_hint : '',
-        }),
-      }), foldedDisclosureText(disclosure.foldedMemoryIds)].filter(Boolean).join('\n')
-    },
-  }
-
   const rememberTool = {
     name: 'nmg_remember',
     description: 'Save or update durable memory through the shared NMG lifecycle contract. Never save secrets, chatter, unverified model claims, or transient failures. action=feedback rates a recalled graph (shared context-use learning) and is forwarded to the daemon; no labels = rejected.',
@@ -1536,10 +1402,6 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
 
   const capabilityAssembly = assembleAdapterCapabilities(ADAPTER_CAPABILITY_CATALOG.dsh.capabilities, {
     tools: {
-      nmg_search: endpoint => tools.register({
-        ...searchTool,
-        parameters: { ...searchTool.parameters, properties: supportedSearchParameters(searchTool.parameters.properties, endpoint) },
-      }),
       nmg_remember: endpoint => tools.register({
         ...rememberTool,
         parameters: {
@@ -1569,6 +1431,17 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
             memory: {
               projectDir: workspaceRoot,
               retryForeignGraph: true,
+              search: {
+                onSearch: ({ query, ranked, disclosed }) => {
+                  nativeEvents.note(sessionId, disclosed)
+                  recordActivity(sessionId, {
+                    kind: 'search',
+                    query,
+                    candidates: disclosed.results.length,
+                    activeGraphId: ranked.activeGraph?.id ?? null,
+                  })
+                },
+              },
               onEvidenceDisclosed: (request, context) => {
                 nativeEvents.note(sessionId, context)
                 recordActivity(sessionId, {

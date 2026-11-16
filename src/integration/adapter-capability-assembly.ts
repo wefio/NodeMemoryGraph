@@ -4,6 +4,7 @@ import { contextStateViews } from "./context-information.ts";
 import { promptCompletionNudge } from "./completion-nudge.ts";
 import { createGetTool, type SharedGetTool } from "./get-tool.ts";
 import { createLabTool, type SharedLabTool } from "./lab-tool.ts";
+import { createSearchTool, type SharedSearchTool } from "./search-tool.ts";
 import { createStateTool, type SharedStateTool, type StateToolSpace } from "./state-tool.ts";
 import { AgentAttributionFlow, recordVersionedAnswerAttribution } from "./agent-attribution.ts";
 import { collectWakeCandidates } from "./board-wake.ts";
@@ -29,7 +30,6 @@ export type AdapterToolBindings = Partial<
 >;
 
 const TOOL_METHODS: Record<ToolName, NmgMethod> = {
-  nmg_search: "search",
   nmg_remember: "remember",
   nmg_daemon: "status",
   nmg_reason: "lab",
@@ -37,17 +37,6 @@ const TOOL_METHODS: Record<ToolName, NmgMethod> = {
 
 export function endpointSupports(method: NmgMethod, endpoint?: AdapterEndpoint): boolean {
   return endpoint?.methods?.includes(method) ?? true;
-}
-
-export function supportedSearchParameters<T extends Record<string, unknown>>(
-  schema: T,
-  endpoint?: AdapterEndpoint,
-): T {
-  const parameters = endpoint?.searchParameters;
-  if (!parameters) return schema;
-  return Object.fromEntries(
-    Object.entries(schema).filter(([key]) => parameters.includes(key)),
-  ) as T;
 }
 
 export interface ToolObservationInput {
@@ -113,13 +102,20 @@ const SERVICES: CapabilityServices = {
 };
 
 const TOOL_CAPABILITIES = {
-  search: "nmg_search",
   remember: "nmg_remember",
   "daemon-health": "nmg_daemon",
   "reasoning-workspace": "nmg_reason",
 } as const;
 
 const SHARED_TOOLS = {
+  search: {
+    method: "search",
+    create: (endpoint?: AdapterEndpoint) =>
+      createSearchTool(
+        endpointSupports("sessionActiveGraph", endpoint),
+        endpoint?.searchParameters,
+      ),
+  },
   get: {
     method: "get",
     create: (endpoint?: AdapterEndpoint) =>
@@ -157,7 +153,7 @@ export type AdapterCapabilityBindings = {
   tools?: AdapterToolBindings;
   registerTool?: (tool: SharedAdapterTool) => Installation;
 } & { [K in keyof CapabilityServices]?: (services: CapabilityServices[K]) => Installation };
-export type SharedAdapterTool = SharedStateTool | SharedLabTool | SharedGetTool;
+export type SharedAdapterTool = SharedStateTool | SharedLabTool | SharedGetTool | SharedSearchTool;
 
 export interface CapabilityAssembly {
   ready: Promise<void>;

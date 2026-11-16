@@ -1,7 +1,6 @@
 import {
   assembleAdapterCapabilities,
   disabledBoardCapability,
-  supportedSearchParameters,
   type AdapterToolBindings,
   type AdapterCapabilityBindings,
 } from "../../../src/integration/adapter-capability-assembly.ts";
@@ -59,10 +58,9 @@ import {
   stagingDirFor,
 } from "../../../src/cli/archive-staging.ts";
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
-import { memoryDisclosureEntries } from "../../../src/integration/search-projection.ts";
 import { supportedRememberActions } from "../../../src/integration/tool-contract.ts";
 import { advertisedAdapterEndpoint, liveLease } from "../../../src/integration/lease-transport.ts";
-import { searchParameterDescription } from "../../../src/integration/tool-contract.ts";
+export { renderSearchHeaders as formatSearchHeaders } from "../../../src/integration/search-tool.ts";
 import {
   type BoardWakeConfig,
   type BoardWakeState,
@@ -105,7 +103,6 @@ import {
 import {
   renderEvidenceSurface,
   renderRememberSurface,
-  renderSearchSurface,
   searchInformationViews,
 } from "../../../src/integration/agent-surface.ts";
 import {
@@ -157,19 +154,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   let contextStateViews: typeof import("../../../src/integration/context-information.ts").contextStateViews;
   const toolBindings: AdapterToolBindings = {};
   const registerSharedTool: ExtensionAPI["registerTool"] = (tool) => {
-    toolBindings[tool.name as keyof AdapterToolBindings] = (endpoint) => {
-      if (tool.name !== "nmg_search" || !endpoint?.searchParameters) return pi.registerTool(tool);
-      const schema = tool.parameters as typeof tool.parameters & {
-        properties: Record<string, unknown>;
-      };
-      return pi.registerTool({
-        ...tool,
-        parameters: {
-          ...schema,
-          properties: supportedSearchParameters(schema.properties, endpoint),
-        },
-      });
-    };
+    toolBindings[tool.name as keyof AdapterToolBindings] = () => pi.registerTool(tool);
   };
   let collectWakeCandidates: typeof import("../../../src/integration/board-wake.ts").collectWakeCandidates;
   let deliverBoardWakeBatch: typeof import("../../../src/integration/board-wake-batch.ts").deliverBoardWakeBatch;
@@ -281,54 +266,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     return result.snapshot;
   });
 
-  const formatDisclosedContext = async (
-    sessionId: string,
-    context: MemoryContext,
-    disclosure: DisclosureLevel,
-    options: HttpCallOptions = {},
-  ): Promise<string> => {
-    if (context.results.length === 0) {
-      return disclosure === "header" ? "No matching NMG memory found." : "";
-    }
-    try {
-      const decision = (await invoke(
-        "sessionActiveGraph",
-        {
-          action: "disclose",
-          sessionId,
-          projectionId: context.activeGraph?.id,
-          disclosure,
-          entries: memoryDisclosureEntries(context, disclosure),
-        },
-        options,
-      )) as { freshMemoryIds: string[]; foldedMemoryIds: string[] };
-      const freshIds = new Set(decision.freshMemoryIds);
-      const foldedIds = new Set(decision.foldedMemoryIds);
-      const fresh = context.results.filter((result) => freshIds.has(result.memory.id));
-      const folded = context.results.filter((result) => foldedIds.has(result.memory.id));
-      const sections: string[] = [];
-      if (fresh.length > 0) {
-        const visible = { ...context, results: fresh } as MemoryContext;
-        sections.push(
-          disclosure === "header" ? formatSearchHeaders(visible) : formatMemoryContext(visible),
-        );
-      }
-      if (folded.length > 0) {
-        sections.push(
-          nmgPrompts.in_context_title +
-            "\n" +
-            folded.map(({ memory }) => `- memory=${memory.id}; already_in_context=true`).join("\n"),
-        );
-      }
-      if (disclosure === "header" && fresh.length === 0) {
-        const activeGraph = formatActiveGraph(context);
-        if (activeGraph) sections.push(activeGraph);
-      }
-      return sections.join("\n");
-    } catch {
-      return disclosure === "header" ? formatSearchHeaders(context) : formatMemoryContext(context);
-    }
-  };
   type RecallHandshake = Extract<NmgSessionActiveGraphResult, { action: "beginDisclosureTurn" }>;
   let recallTurn:
     | {
@@ -1974,128 +1911,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       },
     });
 
-  registerSharedTool({
-    name: "nmg_search",
-    label: "Search NMG",
-    description: nmgPrompts.search_description,
-    parameters: Type.Object({
-      query: Type.String({
-        description: nmgPrompts.search_query_parameter_description,
-      }),
-      queries: Type.Optional(
-        Type.Array(Type.String(), {
-          description: nmgPrompts.search_queries_parameter_description,
-        }),
-      ),
-      recallCue: Type.Optional(
-        Type.String({ description: nmgPrompts.search_recall_cue_parameter_description }),
-      ),
-      recallRevision: Type.Optional(
-        Type.Integer({
-          minimum: 1,
-          description: nmgPrompts.search_recall_revision_parameter_description,
-        }),
-      ),
-      nodeName: Type.Optional(Type.String()),
-      maxTier: Type.Optional(
-        Type.Union([Type.Literal(0), Type.Literal(1), Type.Literal(2), Type.Literal(3)]),
-      ),
-      limit: Type.Optional(Type.Number({ minimum: 1, maximum: 50 })),
-      scope: Type.Optional(Type.Record(Type.String(), Type.String())),
-      sourceActor: Type.Optional(
-        Type.Union([
-          Type.Literal("user"),
-          Type.Literal("assistant"),
-          Type.Literal("system"),
-          Type.Literal("tool"),
-        ]),
-      ),
-      includeHistorical: Type.Optional(Type.Boolean()),
-      graphHops: Type.Optional(Type.Number({ minimum: 0, maximum: 3 })),
-      eventTimeFrom: Type.Optional(
-        Type.String({ description: searchParameterDescription("eventTimeFrom") }),
-      ),
-      eventTimeTo: Type.Optional(
-        Type.String({ description: searchParameterDescription("eventTimeTo") }),
-      ),
-      secondPass: Type.Optional(Type.Boolean()),
-      initialEvidenceTarget: Type.Optional(Type.Number({ minimum: 1, maximum: 50 })),
-      strongHitTopGap: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
-      strongHitInitialTarget: Type.Optional(Type.Number({ minimum: 1, maximum: 50 })),
-      tieredDisclosure: Type.Optional(Type.Boolean()),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const sessionId = ctx.sessionManager.getSessionId();
-      if (!recallFlow.allowSearch(sessionId)) {
-        await controllerShadow.searchSuppressed(sessionId, params.query);
-        const reason = recallFlow.searchBlockReason(sessionId);
-        return toolResult(
-          { searchSuppressed: true, reason },
-          nmgPrompts.search_progression_required,
-        );
-      }
-      const { recallCue, recallRevision, ...searchParams } = params;
-      const baseParams = {
-        ...searchParams,
-        // Unknown model-supplied properties cannot impersonate a native observation.
-        recallSource: undefined,
-        // Automatic recall remains shallow. An explicit search is the agent's
-        // request to look beyond that cache, so expose all tiers by default;
-        // result/token budgets still bound what is returned.
-        maxTier: params.maxTier ?? 3,
-        projectDir: projectDirectory(),
-        sessionId,
-      };
-      let activeGraphBudget: ActiveGraphBudget | undefined;
-      if (qpp1Mode === "active" && params.limit === undefined) {
-        const probe = (await invoke("search", {
-          ...baseParams,
-          limit: 20,
-          secondPass: false,
-          persistTrace: false,
-        })) as MemoryContext;
-        const envelopes = controllerBudgetEnvelopes(probe);
-        activeGraphBudget = (
-          await controllerShadow.allocate(
-            probe,
-            envelopes.minimum,
-            envelopes.normalMaximum,
-            envelopes.expandedMaximum,
-          )
-        )?.budget;
-      }
-      let result = (await invoke("search", {
-        ...baseParams,
-        ...searchCueParams(sessionId, recallCue, recallRevision),
-        secondPass: params.secondPass ?? qpp2Mode === "active",
-        ...(activeGraphBudget ? { activeGraphBudget, limit: activeGraphBudget.maxEvidence } : {}),
-      })) as MemoryContext;
-      if (controllerRerankMode === "active") {
-        result = await controllerShadow.rerank(result);
-      }
-      const fullResult = result;
-      if (qpp2Mode === "active") {
-        result = await applyLearnedFold(
-          result,
-          controllerShadow,
-          qpp2RetainedMass,
-          params.limit !== undefined,
-        );
-      }
-      recallFlow.recordSearch(
-        sessionId,
-        result.results.map((entry) => entry.memory.id),
-      );
-      const text = await formatDisclosedContext(sessionId, result, "header");
-      const surfaced = [text, recallFeedbackAffordance(fullResult.activeGraph?.id)]
-        .filter(Boolean)
-        .join("\n");
-      await controllerShadow.retrieval(fullResult, sessionId, "tool", surfaced);
-      agentAttributionFlow.note(sessionId, fullResult);
-      return toolResult(result, surfaced);
-    },
-  });
-
   capabilityBindings.registerTool = (tool) =>
     pi.registerTool(
       defineTool({
@@ -2118,6 +1933,37 @@ export default function nmgExtension(pi: ExtensionAPI): void {
               projectDir: projectDirectory(),
               recallFlow,
               attribution: agentAttributionFlow,
+              search: {
+                defaultTier: 3,
+                defaultSecondPass: qpp2Mode === "active",
+                bindRecallCue: (phrase, revision) => searchCueParams(sessionId, phrase, revision),
+                allocate: async (probe) => {
+                  if (qpp1Mode !== "active") return undefined;
+                  const context = await probe();
+                  const { minimum, normalMaximum, expandedMaximum } =
+                    controllerBudgetEnvelopes(context);
+                  return (
+                    await controllerShadow.allocate(
+                      context,
+                      minimum,
+                      normalMaximum,
+                      expandedMaximum,
+                    )
+                  )?.budget;
+                },
+                rank: (result) =>
+                  controllerRerankMode === "active"
+                    ? controllerShadow.rerank(result)
+                    : Promise.resolve(result),
+                fold: (result, explicitLimit) =>
+                  qpp2Mode === "active"
+                    ? applyLearnedFold(result, controllerShadow, qpp2RetainedMass, explicitLimit)
+                    : Promise.resolve(result),
+                onSuppressed: (query) => controllerShadow.searchSuppressed(sessionId, query),
+                feedback: recallFeedbackAffordance,
+                onSearch: ({ ranked, text }) =>
+                  controllerShadow.retrieval(ranked, sessionId, "tool", text),
+              },
               onEvidenceLookup: async (request, result) => {
                 await controllerShadow.disclosure(
                   request.activeGraphId,
@@ -2404,8 +2250,6 @@ function piHistoryMessage(value: unknown): AgentHistoryMessage | undefined {
   return content ? { id: entry.id, actor, content } : undefined;
 }
 
-type DisclosureLevel = "header" | "exact" | "evidence";
-
 const nmgPrompts = loadPrompts();
 export const SKILLOPT_POLICY_CHANNELS = resolveSkillOptPolicyChannels(nmgPrompts.memory_policy);
 export const MEMORY_POLICY = `<nmg_policy>\n${SKILLOPT_POLICY_CHANNELS.agent.text}\n</nmg_policy>`;
@@ -2528,18 +2372,6 @@ export function formatSearchRecommendation(
   return nmgPrompts.search_recommendation;
 }
 
-export function formatSearchHeaders(context: MemoryContext): string {
-  const nextStep = formatProgressiveDisclosure(context) || nmgPrompts.get_hint;
-  return renderSearchSurface(context, {
-    preamble: renderDisclosure(nmgPrompts.search_disclosure, {}),
-    postamble: renderDisclosure(nmgPrompts.search_disclosure_metadata, {
-      count: String(context.results.length),
-      next_step: nextStep,
-      forget_hint: hasForgetMarker(context) ? nmgPrompts.forget_hint : "",
-    }),
-  });
-}
-
 function hasForgetMarker(context: MemoryContext): boolean {
   return (context.results ?? []).some((result) =>
     (result.memory.markers ?? []).some((marker) => marker.kind === "forget"),
@@ -2550,10 +2382,6 @@ function formatProgressiveDisclosure(context: MemoryContext): string {
   const disclosure = context.progressiveDisclosure;
   if (!disclosure || disclosure.deferredMemoryIds.length === 0) return "";
   return `${nmgPrompts.deferred_hint} Memory IDs: ${disclosure.deferredMemoryIds.join(",")}`;
-}
-
-function formatActiveGraph(context: MemoryContext): string {
-  return context.activeGraph ? `activeGraphId=${context.activeGraph.id}` : "";
 }
 
 interface MemoryContextFormatOptions {

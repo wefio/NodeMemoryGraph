@@ -121,15 +121,8 @@ export interface SearchParameterContract {
   required?: boolean;
 }
 
-/**
- * What a memory search accepts, independent of host.
- *
- * Every adapter projects this table into its native schema library — JSON
- * Schema, TypeBox (`Type.Unsafe`), zod (`z.string()`) — so a retrieval
- * capability reaches all of them or none. Host-only fields (`recallCue`,
- * `secondPass`, `queries`) stay in the adapter: they describe a host's own
- * turn machinery, not what the store can be asked.
- */
+/** Baseline search parameters. The shared tool adds fields negotiated with
+ * the owner. Native adapters translate the resulting schema into their SDK. */
 export const SEARCH_TOOL_PARAMETERS: readonly SearchParameterContract[] = [
   {
     name: "query",

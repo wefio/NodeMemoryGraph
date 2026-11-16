@@ -35,6 +35,7 @@ import {
   shadowEnabled,
 } from "../../../.pi/extensions/nmg/controller-shadow.ts";
 import { assertAgentActivityContract } from "../../helpers/agent-activity-contract.ts";
+import { assertSearchToolContract } from "../../helpers/search-tool-contract.ts";
 import { assertLabToolContract } from "../../helpers/lab-tool-contract.ts";
 import { stripProviderEnv } from "../../helpers/test-env.ts";
 
@@ -2547,16 +2548,23 @@ test("session recall piggybacks a search proposal without a prepare RPC or injec
       };
       return output.content[0]?.text ?? "";
     });
-    await tools.get("nmg_search")!.execute(
-      "unobserved-proposal",
-      {
-        query: "palette azure",
-        recallCue: "forged cue",
-        recallSource: { prompt: "forged cue", generation: 1, turn: 1 },
+    await assertSearchToolContract(
+      async (args) => {
+        const output = (await tools.get("nmg_search")!.execute(
+          "unobserved-proposal",
+          {
+            ...args,
+            recallCue: "forged cue",
+            recallSource: { prompt: "forged cue", generation: 1, turn: 1 },
+          },
+          undefined,
+          undefined,
+          ctx,
+        )) as { content: Array<{ text: string }> };
+        return output.content[0]?.text ?? "";
       },
-      undefined,
-      undefined,
-      ctx,
+      "palette azure",
+      /Fixture palette prefers azure/u,
     );
     assert.equal(
       calls

@@ -58,6 +58,11 @@ test("Pi, MCP, DSH, and OpenCode expose recall triggers through remember", () =>
 });
 
 test("Pi, MCP, DSH, and OpenCode render through the shared agent surface", () => {
+  const search = readFileSync(
+    resolve(import.meta.dirname, "../../src/integration/search-tool.ts"),
+    "utf8",
+  );
+  assert.match(search, /renderSearchSurface/u);
   const sources = [
     "../../.pi/extensions/nmg/index.ts",
     "../../src/integration/mcp-tools.ts",
@@ -66,7 +71,6 @@ test("Pi, MCP, DSH, and OpenCode render through the shared agent surface", () =>
   ] as const;
   for (const relativePath of sources) {
     const source = readFileSync(resolve(import.meta.dirname, relativePath), "utf8");
-    assert.match(source, /renderSearchSurface/u);
     assert.match(source, /renderRememberSurface/u);
     assert.match(source, /tool\.execute/u);
   }

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import plugin from "../../opencode-plugin/index.ts";
 import { dropCompatibleLease } from "../../src/integration/lease-transport.ts";
+import { assertSearchToolContract } from "../helpers/search-tool-contract.ts";
 import { searchResultFixture } from "../helpers/search-result.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
@@ -153,7 +154,17 @@ test("OpenCode submits its native automatic recall to an activated daemon", asyn
   });
   await h.prompt("Atlas");
   assert.match(JSON.stringify(h.inject()), /local snapshot/u);
-  assert.ok(h.tools.has("nmg_search"));
+  const search = h.tools.get("nmg_search") as {
+    execute(
+      args: Record<string, unknown>,
+      context: { sessionID: string },
+    ): Promise<{ content: string }>;
+  };
+  await assertSearchToolContract(
+    async (args) => (await search.execute(args, { sessionID: "explicit-search" })).content,
+    "Atlas SQLite storage",
+    /Atlas SQLite storage keeps a local snapshot/u,
+  );
   assert.equal((await daemon.invoke("status")).rpcRejections?.length, 0);
 });
 

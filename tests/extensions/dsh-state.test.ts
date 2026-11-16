@@ -8,6 +8,7 @@ import test from "node:test";
 import { httpHandler } from "../../src/cli/http-server.ts";
 import { NmgService } from "../../src/cli/service.ts";
 import { assertAgentActivityContract } from "../helpers/agent-activity-contract.ts";
+import { assertSearchToolContract } from "../helpers/search-tool-contract.ts";
 import { assertLabToolContract } from "../helpers/lab-tool-contract.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
@@ -598,7 +599,11 @@ test("DSH observes native final tool results and flushes diagnostic attribution 
       statement: "Atlas uses SQLite storage.",
       nodeName: "Atlas",
     });
-    await tools.get("nmg_search")!.execute({ query: "Atlas SQLite storage" }, owner);
+    await assertSearchToolContract(
+      async (args) => String(await tools.get("nmg_search")!.execute(args, owner)),
+      "Atlas SQLite storage",
+      /Atlas uses SQLite storage/u,
+    );
     const before = requests.filter(
       (request) => request.method === "recordActiveGraphAttribution",
     ).length;

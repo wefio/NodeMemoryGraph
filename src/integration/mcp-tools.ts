@@ -23,20 +23,16 @@ export interface NmgMcpOptions {
 import {
   assembleAdapterCapabilities,
   disabledBoardCapability,
-  endpointSupports,
-  supportedSearchParameters,
   type AdapterToolBindings,
   type SharedAdapterTool,
 } from "./adapter-capability-assembly.ts";
 import { ADAPTER_CAPABILITY_CATALOG } from "./adapter-capability-catalog.ts";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { loadPrompts, renderDisclosure } from "../prompts/load.ts";
+import { loadPrompts } from "../prompts/load.ts";
 import { coordinationEnabled } from "./config.ts";
-import { memoryDisclosureEntries } from "./search-projection.ts";
 import { COMMON_REMEMBER_ACTIONS, supportedRememberActions } from "./tool-contract.ts";
-import { searchParameterDescription } from "./tool-contract.ts";
-import { renderRememberSurface, renderSearchSurface } from "./agent-surface.ts";
+import { renderRememberSurface } from "./agent-surface.ts";
 import type { MemoryContext } from "../core/types.ts";
 
 const nmgPrompts = loadPrompts();
@@ -360,74 +356,6 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
     },
   );
 
-  // ── nmg_search ──
-
-  toolBindings.nmg_search = (endpoint) => {
-    const registered = server.registerTool(
-      "nmg_search",
-      {
-        description: nmgPrompts.search_description,
-        inputSchema: supportedSearchParameters(
-          {
-            query: z.string().describe("Focused recall query"),
-            recallCue: z
-              .string()
-              .optional()
-              .describe(nmgPrompts.search_recall_cue_parameter_description),
-            recallRevision: z
-              .number()
-              .int()
-              .positive()
-              .optional()
-              .describe(nmgPrompts.search_recall_revision_parameter_description),
-            limit: z.number().int().min(1).max(50).default(8),
-            maxTier: z.number().int().min(0).max(3).optional(),
-            graphHops: z.number().int().min(0).max(3).optional(),
-            nodeName: z.string().optional(),
-            sourceActor: z.enum(["user", "assistant", "system", "tool"]).optional(),
-            includeHistorical: z.boolean().optional(),
-            scope: z.record(z.string(), z.string()).optional(),
-            eventTimeFrom: z
-              .string()
-              .optional()
-              .describe(searchParameterDescription("eventTimeFrom")),
-            eventTimeTo: z.string().optional().describe(searchParameterDescription("eventTimeTo")),
-            secondPass: z.boolean().optional(),
-          },
-          endpoint,
-        ),
-      },
-      async (params, extra) =>
-        withBinding(extra, async () => {
-          // An explicit preparation must survive until its piggybacked search.
-          if (
-            params.recallRevision === undefined &&
-            endpointSupports("sessionActiveGraph", endpoint)
-          ) {
-            await invoke("sessionActiveGraph", {
-              action: "beginDisclosureTurn",
-              sessionId: binding().sessionId,
-            }).catch(() => undefined);
-          }
-          const r = (await invoke("search", {
-            ...params,
-            sessionId: binding().sessionId,
-          })) as MemoryContext;
-          const disclosed = await discloseContext(r, "header");
-          await options.onContext?.(binding(), disclosed.context).catch(() => undefined);
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: searchH(disclosed.context, disclosed.foldedMemoryIds),
-              },
-            ],
-          };
-        }),
-    );
-    return () => registered.remove();
-  };
-
   // ── nmg_remember ──
 
   toolBindings.nmg_remember = (endpoint) => {
@@ -512,6 +440,12 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
             requester: `agent:mcp:${agentId}`,
             invoke,
             memory: {
+              search: {
+                beginDisclosureTurn: true,
+                onSearch: async ({ disclosed }) => {
+                  await options.onContext?.(binding(), disclosed).catch(() => undefined);
+                },
+              },
               onEvidenceDisclosed: async (_request, context) => {
                 await options.onContext?.(binding(), context).catch(() => undefined);
               },
@@ -532,73 +466,6 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
         }),
     );
     return () => registered.remove();
-  }
-
-  // ── Compact formatters ──
-
-  async function discloseContext(
-    context: MemoryContext,
-    disclosure: "header" | "evidence",
-    projectionId = context.activeGraph?.id,
-  ): Promise<{ context: MemoryContext; foldedMemoryIds: string[] }> {
-    if (!endpointSupports("sessionActiveGraph", options.endpoint))
-      return { context, foldedMemoryIds: [] };
-    const rawDecision = (await invoke("sessionActiveGraph", {
-      action: "disclose",
-      sessionId: binding().sessionId,
-      projectionId,
-      disclosure,
-      entries: memoryDisclosureEntries(context, disclosure),
-    }).catch(() => null)) as {
-      freshMemoryIds?: unknown;
-      foldedMemoryIds?: unknown;
-    } | null;
-    const freshMemoryIds = Array.isArray(rawDecision?.freshMemoryIds)
-      ? rawDecision.freshMemoryIds
-      : context.results.map((result) => result.memory.id);
-    const foldedMemoryIds = Array.isArray(rawDecision?.foldedMemoryIds)
-      ? rawDecision.foldedMemoryIds
-      : [];
-    const freshIds = new Set(freshMemoryIds);
-    return {
-      context: {
-        ...context,
-        results: context.results.filter((result) => freshIds.has(result.memory.id)),
-      },
-      foldedMemoryIds,
-    };
-  }
-
-  function foldedDisclosureText(memoryIds: string[]): string {
-    if (memoryIds.length === 0) return "";
-    return `${nmgPrompts.in_context_title}\n${memoryIds
-      .map((id) => `- memory=${id}; already_in_context=true`)
-      .join("\n")}`;
-  }
-
-  function searchH(r: MemoryContext, foldedMemoryIds: string[] = []): string {
-    const deferred = r.progressiveDisclosure?.deferredMemoryIds;
-    const nextStep =
-      deferred && deferred.length > 0
-        ? `${nmgPrompts.deferred_hint} Memory IDs: ${deferred.join(",")}`
-        : nmgPrompts.get_hint;
-    const forget = r.results.some(({ memory: m }) =>
-      (m.markers ?? []).some((marker) => marker.kind === "forget"),
-    );
-    return [
-      renderSearchSurface(r, {
-        emptyText: "No NMG match.",
-        preamble: renderDisclosure(nmgPrompts.search_disclosure, {}),
-        postamble: renderDisclosure(nmgPrompts.search_disclosure_metadata, {
-          count: String(r.results.length),
-          next_step: nextStep,
-          forget_hint: forget ? nmgPrompts.forget_hint : "",
-        }),
-      }),
-      foldedDisclosureText(foldedMemoryIds),
-    ]
-      .filter(Boolean)
-      .join("\n");
   }
 
   const assembly = assembleAdapterCapabilities(

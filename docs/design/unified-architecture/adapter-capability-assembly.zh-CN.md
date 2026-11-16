@@ -45,7 +45,9 @@ Magpie 保持独立目标。
 的 schema、校验、调用及备用命令参数。
 [`get-tool.ts`](../../../src/integration/get-tool.ts) 负责精确读取、披露去重、
 呈现和备用命令参数。宿主提供项目范围和原生归因或观测绑定。
-Search 与 remember 仍通过各入口的安装绑定装配。
+[共享 Search 工具](../../../src/integration/search-tool.ts) 统一显式检索输入、披露、
+降级提示和候选呈现。宿主绑定回合预算及排序策略，并按需观察结果。
+Remember 仍通过各入口的安装绑定装配。
 
 工具注册取原生绑定和 daemon `hello.methods` 的交集。端点提供
 `hello.searchParameters` 时，工具据此筛选检索字段。
