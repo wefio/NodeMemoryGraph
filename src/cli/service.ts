@@ -122,7 +122,7 @@ import {
   type RunPlanTaskInput,
 } from "../integration/task-coordinator.ts";
 import { requestQueryEmbeddingClient, searchMemoryContext } from "../integration/search.ts";
-import { RecallBudget } from "../integration/recall-budget.ts";
+import { DAEMON_AUTOMATIC_RECALL_MAX_MS, RecallBudget } from "../integration/recall-budget.ts";
 import { simhash64, simhashToHex, simhashFromHex, hammingDistance } from "../core/simhash.ts";
 import { ControllerPolicyChannel } from "../integration/controller-channel.ts";
 import {
@@ -2284,7 +2284,12 @@ export class NmgService {
 
   async #searchImpl(params: NmgSearchParams): Promise<NmgMethodResult["search"]> {
     const budget = params.autoRecall
-      ? new RecallBudget(Math.min(4_500, params.autoRecallBudgetMs ?? 4_500))
+      ? new RecallBudget(
+          Math.min(
+            DAEMON_AUTOMATIC_RECALL_MAX_MS,
+            params.autoRecallBudgetMs ?? DAEMON_AUTOMATIC_RECALL_MAX_MS,
+          ),
+        )
       : undefined;
     try {
       return await this.#searchWithinBudget(params, budget);

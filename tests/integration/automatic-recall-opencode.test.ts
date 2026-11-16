@@ -204,6 +204,8 @@ test("OpenCode uses native location before its first event and exposes the promi
   await h.prompt("scope");
   const search = h.requests.find((request) => request.method === "search");
   assert.equal(search?.params.projectDir, "C:/private/native-project");
+  const searchBudget = search?.params.autoRecallBudgetMs;
+  assert.ok(typeof searchBudget === "number" && searchBudget > 0 && searchBudget <= 1_400);
   assert.ok(h.tools.has("nmg_search"));
   assert.ok(h.tools.has("nmg_get"));
   assert.ok(h.tools.has("nmg_remember"));

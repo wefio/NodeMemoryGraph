@@ -327,6 +327,7 @@ export default {
     const recallHeaders = async (
       sessionId: string,
       request: NonNullable<ReturnType<SessionTaskWindow["prepare"]>>,
+      searchBudgetMs: number,
     ): Promise<MemoryContext | undefined> => {
       const projectDir = projectDirectory(sessionId);
       const context = (await invoke("search", {
@@ -338,6 +339,7 @@ export default {
         // The daemon stages the injected graph for online learning behind the
         // scenes; explicit nmg_search runs stay unstaged.
         autoRecall: true,
+        autoRecallBudgetMs: searchBudgetMs,
         projectDir,
         sessionId,
       })) as MemoryContext;
@@ -361,9 +363,10 @@ export default {
 
     const stagePromptRecall = async (
       event: PromptHookEvent,
-      signal: AbortSignal,
+      budget: RecallBudget,
       retainState: (output: PreparedInformationOutput) => void,
     ) => {
+      const { signal } = budget;
       const sessionId = String(event?.sessionID ?? "");
       await resolveNativeSession(sessionId, signal);
       const prompt = textOfPrompt(event?.prompt);
@@ -389,7 +392,7 @@ export default {
       retainState(prepareInformationOutput(base, { format: "context" }));
       const request = taskWindow.prepare(sessionId, prompt, decision);
       const context = request
-        ? await recallHeaders(sessionId, request).catch(() => undefined)
+        ? await recallHeaders(sessionId, request, budget.searchBudgetMs()).catch(() => undefined)
         : undefined;
       signal.throwIfAborted();
       const output = context
@@ -410,8 +413,8 @@ export default {
       const budget = new RecallBudget(PROMPT_BUDGET_MS, controller.signal);
       preparations.set(sessionId, controller);
       try {
-        const pending = await budget.run("automatic.context", (signal) =>
-          stagePromptRecall(event, signal, (output) => {
+        const pending = await budget.run("automatic.context", () =>
+          stagePromptRecall(event, budget, (output) => {
             if (preparations.get(sessionId) === controller && output.text)
               stageInjection(sessionId, { output });
           }),

@@ -46,12 +46,17 @@ test("Codex automatically recalls unified SQLite memory from the owning project 
   let service: NmgService | undefined;
   const output: string[] = [];
   const methods: string[] = [];
+  let searchBudget: unknown;
   const hook = new CodexHook(
     {
       dataDirectory: directory,
       environment: { NMG_ENABLE_COORDINATION: "0" },
       invoke: async (method, params) => {
         methods.push(method);
+        if (method === "search") {
+          assert.ok(params && typeof params === "object" && "autoRecallBudgetMs" in params);
+          searchBudget = params.autoRecallBudgetMs;
+        }
         return service!.invoke(method as NmgMethod, params);
       },
       writeOutput: async (content) => {
@@ -102,6 +107,7 @@ test("Codex automatically recalls unified SQLite memory from the owning project 
       prompt: "What did we previously decide about Atlas SQLite deployment backup?",
     });
     assert.deepEqual(methods.slice(0, 3), ["state", "sessionActiveGraph", "search"]);
+    assert.ok(typeof searchBudget === "number" && searchBudget > 0 && searchBudget <= 1_400);
     assert.match(output.join("\n"), /ProjectRecallMarker/);
     assert.doesNotMatch(
       output.join("\n"),

@@ -524,10 +524,9 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
     )
   }
 
-  async function autoRecall(query, sessionId, signal) {
+  async function autoRecall(query, sessionId, searchBudgetMs, signal) {
     const limit = clampInt(process.env.NMG_AUTO_RECALL_LIMIT, 1, 50, 13)
     const tier = clampInt(process.env.NMG_AUTO_RECALL_TIER, 0, 3, 1)
-    const budget = signal
     try {
       const context = await daemonCall('search', {
         query,
@@ -536,9 +535,10 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
         graphHops: 1,
         tieredDisclosure: true,
         autoRecall: true,
+        autoRecallBudgetMs: searchBudgetMs,
         projectDir: workspaceRoot,
         sessionId,
-      }, budget)
+      }, signal)
       if (context) return context
     } catch {
       return null
@@ -553,7 +553,7 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
       '--session-id', sessionId,
       '--json',
     ]
-    const result = await nmgJson(argv, budget)
+    const result = await nmgJson(argv, signal)
     return result.ok ? result.data : null
   }
 
@@ -582,7 +582,8 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
           if (recallGenerations.get(sessionId) !== generation) return
           // Keep historical snapshots for the indicator. Only this generation
           // can contribute a fresh automatic fragment to model input.
-          const context = await budget.run('search', (signal) => autoRecall(query, sessionId, signal))
+          const context = await budget.run('search', (signal) =>
+            autoRecall(query, sessionId, budget.searchBudgetMs(), signal))
           if (recallGenerations.get(sessionId) !== generation) return
           const recall = context ? compactSearchContext(context) : null
           if (!recall || !Array.isArray(recall.candidates) || recall.candidates.length === 0) {

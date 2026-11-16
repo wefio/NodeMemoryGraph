@@ -2,7 +2,7 @@ import type { EmbeddingClient } from "../core/embedding-provider.ts";
 import type { MemoryVectorIndex, MemoryVectorQuery } from "../core/memory/backend.ts";
 import { HashingVectorEmbedder } from "../core/vector.ts";
 import { memoryEmbeddingModelId } from "../core/store/search-ranking.ts";
-import { RecallBudget } from "../integration/recall-budget.ts";
+import { DAEMON_AUTOMATIC_RECALL_MAX_MS, RecallBudget } from "../integration/recall-budget.ts";
 import type { NmgSearchParams } from "./protocol.ts";
 
 const hashing = new HashingVectorEmbedder();
@@ -55,7 +55,7 @@ export class LocalMemoryEmbeddings {
     mode: MemoryVectorQuery["mode"],
   ): Promise<{ semantic?: MemoryVectorQuery; reason?: string }> {
     const budget = params.autoRecall
-      ? new RecallBudget(Math.min(850, params.autoRecallBudgetMs ?? 850))
+      ? new RecallBudget(Math.min(DAEMON_AUTOMATIC_RECALL_MAX_MS, params.autoRecallBudgetMs ?? 850))
       : undefined;
     try {
       const load = () => client.embedQueries([text]);

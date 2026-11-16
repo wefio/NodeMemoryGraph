@@ -664,7 +664,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       if (!demand) return surfaceResult(currentOutput());
       let context = (await automaticInvoke("search", {
         query: demand.query,
-        autoRecallBudgetMs: Math.max(1, Math.floor(Math.min(4_500, budget.remainingMs - 100))),
+        autoRecallBudgetMs: budget.searchBudgetMs(),
         projectDir: projectDirectory(),
         sessionId,
         maxTier: Math.min(configuredAutoRecallTier(), demand.maxTier) as MemoryTier,

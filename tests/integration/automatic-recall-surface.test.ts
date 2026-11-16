@@ -38,9 +38,11 @@ test("automatic recall budgets wrappers and admits only whole source-bound previ
     if (view.source?.kind === "memory") assert.ok(!output.text.includes(view.body));
   }
   assert.match(output.text, /candidate preview; not exact evidence/);
-  assert.match(
-    output.text,
-    /degraded retrieval: mode=lexical; reason=automatic_recall_embedding_deadline/u,
+  assert.equal(
+    output.text.match(
+      /degraded retrieval: mode=lexical; reason=automatic_recall_embedding_deadline/gu,
+    )?.length,
+    1,
   );
   assert.deepEqual(
     confirmInformationOutput(output, { sessionId: "s", text: output.text.slice(1) }).entries,

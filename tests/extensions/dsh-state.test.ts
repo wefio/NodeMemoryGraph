@@ -652,6 +652,8 @@ test("DSH automatic context is budgeted and unconfirmed; a new empty turn exclud
     assert.match(text, /Atlas uses SQLite/);
     assert.ok(text.length <= 16_000);
     assert.match(text, /candidate preview; not exact evidence/);
+    const searchBudget = requests.find((r) => r.method === "search")?.params.autoRecallBudgetMs;
+    assert.ok(typeof searchBudget === "number" && searchBudget > 0 && searchBudget <= 1_400);
     assert.equal(
       requests.some((r) => r.params.action === "disclose"),
       false,
