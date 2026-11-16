@@ -8,11 +8,86 @@ import test from "node:test";
 import { NmgService } from "../../src/cli/service.ts";
 import { httpHandler } from "../../src/cli/http-server.ts";
 import { NmgStore } from "../../src/core/store.ts";
+import { stgStorePath } from "../../src/core/stg.ts";
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
+
+test("activated daemon uses the project file's existing namespace for scoped memory", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-project-namespace-"));
+  const projectDir = join(directory, "project");
+  const project = new NmgService({
+    databasePath: stgStorePath(projectDir),
+    environment: {},
+    memoryBackend: { kind: "sqlite", namespace: "project-origin", local: true },
+  });
+  const service = new NmgService({
+    databasePath: join(directory, "nmg.sqlite"),
+    environment: {},
+    memoryBackend: { kind: "sqlite", namespace: "main-origin", local: true },
+  });
+  try {
+    const existing = await project.invoke("remember", {
+      statement: "The project keeps the calibration fixture on site",
+      nodeName: "Calibration",
+      residence: "stg",
+      sessionId: "owner",
+    });
+    await project.close();
+    const scoped = { projectDir, sessionId: "owner" };
+    const shared = await service.invoke("remember", {
+      statement: "Calibration documents use common terminology",
+      nodeName: "Calibration glossary",
+    });
+    const recalled = await service.invoke("search", { ...scoped, query: "calibration" });
+    assert.deepEqual(
+      new Set(recalled.results.map(({ memory }) => memory.id)),
+      new Set([existing.memory.id, shared.memory.id]),
+    );
+    assert.equal(
+      (await service.invoke("get", { ...scoped, memoryIds: [existing.memory.id] })).results[0]
+        ?.memory.id,
+      existing.memory.id,
+    );
+    assert.deepEqual(
+      (
+        await service.invoke("get", {
+          ...scoped,
+          sessionId: "foreign",
+          memoryIds: [existing.memory.id],
+        })
+      ).results,
+      [],
+    );
+    const created = await service.invoke("remember", {
+      ...scoped,
+      statement: "A calibration label belongs to this project",
+      nodeName: "Label",
+      residence: "stg",
+    });
+    assert.equal(
+      (await service.invoke("get", { ...scoped, memoryIds: [created.memory.id] })).results[0]
+        ?.memory.id,
+      created.memory.id,
+    );
+    const db = new DatabaseSync(stgStorePath(projectDir), { readOnly: true });
+    try {
+      assert.equal(
+        db.prepare("SELECT namespace FROM nmg_local_memory").get()?.namespace,
+        "project-origin",
+      );
+      assert.equal(db.prepare("SELECT count(*) AS n FROM nmg_memory_head").get()?.n, 1);
+    } finally {
+      db.close();
+    }
+  } finally {
+    await project.close();
+    await service.close();
+    removeTempDirectory(directory);
+  }
+});
 
 test("activated daemon accepts the Pi automatic recall envelope and enforces MCP event bounds", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-adapter-recall-"));

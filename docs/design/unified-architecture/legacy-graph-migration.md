@@ -81,6 +81,9 @@ Board and local run data. Existing project STG files are converted atomically on
 first use in this profile. A project-scoped read against an absent STG uses the
 shared database.
 
+An activated project SQLite file supplies its own namespace. First activation
+inherits the main daemon's namespace when the project file has no marker.
+
 Local activation also imports historical claim outcomes and posterior counters
 in one transaction. The migration receipt preserves the original vote
 deduplication key across upgrades and restarts. Existing local namespaces

@@ -24,8 +24,9 @@ SQLite code. Route local coordination through explicit board/run/activity ports
 while retaining the shared SQLite file for pure-local use.
 
 Select the local SQLite engine through an activation record published in the
-same transaction as graph import and the legacy write fence. A daemon reopening
-that file follows the record. Codex state and disclosure use the shared session
+same transaction as graph import and the legacy write fence. The record belongs
+to the physical SQLite file. A project opened through a different daemon keeps
+its existing namespace and memory identities. Codex state and disclosure use the shared session
 runtime and project recall reads the unified backend.
 
 SQLite carries record vectors across activation with their model identifiers

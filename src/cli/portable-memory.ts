@@ -6,6 +6,7 @@ import { MemoryLifecycleError } from "../core/memory/lifecycle.ts";
 import type { MemoryBackend } from "../core/memory/backend.ts";
 import { openMemoryBackend } from "../core/memory/open.ts";
 import type { MemoryBackendOptions } from "../core/memory/open.ts";
+import { activatedLocalMemory } from "../core/memory/sqlite-backend.ts";
 import type {
   NmgGetParams,
   NmgHelloResult,
@@ -473,7 +474,8 @@ export class PortableMemoryService {
     const found = this.projects.get(path);
     if (found) return found;
     if (!create && !existsSync(path)) return undefined;
-    const opened = this.open({ ...this.options, path })
+    const namespace = activatedLocalMemory(path) ?? this.options.namespace;
+    const opened = this.open({ ...this.options, path, namespace })
       .then((backend) => new MemoryEngine(backend))
       .catch((error: unknown) => {
         this.projects.delete(path);
