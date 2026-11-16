@@ -4,6 +4,11 @@ import { contextStateViews } from "./context-information.ts";
 import { promptCompletionNudge } from "./completion-nudge.ts";
 import { createGetTool, type SharedGetTool } from "./get-tool.ts";
 import { createLabTool, type SharedLabTool } from "./lab-tool.ts";
+import {
+  createRememberTool,
+  type RememberToolOptions,
+  type SharedRememberTool,
+} from "./remember-tool.ts";
 import { createSearchTool, type SharedSearchTool } from "./search-tool.ts";
 import { createStateTool, type SharedStateTool, type StateToolSpace } from "./state-tool.ts";
 import { AgentAttributionFlow, recordVersionedAnswerAttribution } from "./agent-attribution.ts";
@@ -30,7 +35,6 @@ export type AdapterToolBindings = Partial<
 >;
 
 const TOOL_METHODS: Record<ToolName, NmgMethod> = {
-  nmg_remember: "remember",
   nmg_daemon: "status",
   nmg_reason: "lab",
 };
@@ -102,12 +106,16 @@ const SERVICES: CapabilityServices = {
 };
 
 const TOOL_CAPABILITIES = {
-  remember: "nmg_remember",
   "daemon-health": "nmg_daemon",
   "reasoning-workspace": "nmg_reason",
 } as const;
 
 const SHARED_TOOLS = {
+  remember: {
+    method: "remember",
+    create: (endpoint?: AdapterEndpoint, options?: RememberToolOptions) =>
+      createRememberTool(endpoint?.methods, options),
+  },
   search: {
     method: "search",
     create: (endpoint?: AdapterEndpoint) =>
@@ -151,9 +159,11 @@ export function disabledBoardCapability(enabled: boolean): readonly AdapterCapab
 
 export type AdapterCapabilityBindings = {
   tools?: AdapterToolBindings;
+  rememberOptions?: RememberToolOptions;
   registerTool?: (tool: SharedAdapterTool) => Installation;
 } & { [K in keyof CapabilityServices]?: (services: CapabilityServices[K]) => Installation };
-export type SharedAdapterTool = SharedStateTool | SharedLabTool | SharedGetTool | SharedSearchTool;
+export type SharedAdapterTool =
+  SharedStateTool | SharedLabTool | SharedGetTool | SharedSearchTool | SharedRememberTool;
 
 export interface CapabilityAssembly {
   ready: Promise<void>;
@@ -192,7 +202,7 @@ function capabilityInstaller(
     if (!register) throw new Error(`${capability}: missing native tool registration`);
     if (shared)
       return withEndpoint(shared.method, endpoint, (discovered) =>
-        register(shared.create(discovered)),
+        register(shared.create(discovered, bindings.rememberOptions)),
       );
     const spaces: StateToolSpace[] = state.map((id) => STATE_CAPABILITIES[id]);
     return withEndpoint("state", endpoint, () => register(createStateTool(spaces)));

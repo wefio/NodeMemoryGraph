@@ -8,6 +8,7 @@ import test from "node:test";
 import { httpHandler } from "../../src/cli/http-server.ts";
 import { NmgService } from "../../src/cli/service.ts";
 import { assertAgentActivityContract } from "../helpers/agent-activity-contract.ts";
+import { assertRememberToolContract } from "../helpers/remember-tool-contract.ts";
 import { assertSearchToolContract } from "../helpers/search-tool-contract.ts";
 import { assertLabToolContract } from "../helpers/lab-tool-contract.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
@@ -34,6 +35,7 @@ test("DSH remember exposes and forwards the historical event clock to its HTTP o
     assert.equal(saved.params.timeZone, "Asia/Shanghai");
     const result = await service.invoke("search", { query: "DshHistoricalClockMarker" });
     assert.equal(result.results[0]?.memory.eventTime, "2025-05-09T00:00:00.000Z");
+    await assertRememberToolContract(async (args) => String(await remember.execute(args, context)));
   });
 });
 
@@ -533,7 +535,9 @@ test("DSH native search and forget use the activated daemon contract", async () 
       const removed = await tools
         .get("nmg_remember")!
         .execute({ action: "forget", memoryId: write.memory.id }, {});
-      assert.match(JSON.stringify(removed), /deleted/u);
+      assert.match(String(removed), /withdrawn from normal retrieval/u);
+      const exact = await service.invoke("get", { memoryIds: [write.memory.id] });
+      assert.deepEqual(exact.missingMemoryIds, [write.memory.id]);
     },
     true,
   );

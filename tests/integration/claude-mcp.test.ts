@@ -15,6 +15,7 @@ import {
   assertAgentActivityContract,
   mcpToolContractText,
 } from "../helpers/agent-activity-contract.ts";
+import { assertRememberToolContract } from "../helpers/remember-tool-contract.ts";
 import { assertSearchToolContract } from "../helpers/search-tool-contract.ts";
 import { assertLabToolContract } from "../helpers/lab-tool-contract.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
@@ -188,6 +189,9 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     assert.match(textOf(exact), /stable Active Graph session/u);
     assert.match(textOf(exact), new RegExp(memoryId, "u"));
 
+    await assertRememberToolContract(async (args) =>
+      mcpToolContractText(await client.callTool({ name: "nmg_remember", arguments: args })),
+    );
     await assertAgentActivityContract(async (args) =>
       mcpToolContractText(await client.callTool({ name: "nmg_state", arguments: args })),
     );

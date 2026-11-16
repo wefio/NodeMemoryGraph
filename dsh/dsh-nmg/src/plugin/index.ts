@@ -29,12 +29,10 @@ import { randomUUID } from 'node:crypto'
 import { connect } from 'node:net'
 import type { Context } from '@deepseek-ai/cordis'
 import { coordinationEnabled as configuredCoordinationEnabled } from '../../../../src/integration/config.ts'
-import { appendRememberTimeContext, COMMON_REMEMBER_ACTIONS, supportedRememberActions } from '../../../../src/integration/tool-contract.ts'
 import { requiresEventTimeReference } from '../../../../src/cli/protocol.ts'
 import { maybeBroadcastToWorld as broadcastWakeEntry } from '../../../../src/integration/board-wake.ts'
 import { loadOrCreateAgentIdentity, renameAgentIdentity } from '../../../../src/integration/agent-identity.ts'
 import { compactSearchContext } from '../../../../src/integration/search-projection.ts'
-import { renderRememberSurface } from '../../../../src/integration/agent-surface.ts'
 import { loadPrompts, renderDisclosure } from '../../../../src/prompts/load.ts'
 import { RecallBudget } from '../../../../src/integration/recall-budget.ts'
 import { prepareInformationOutput } from '../../../../src/integration/information-output.ts'
@@ -309,17 +307,6 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
     return { ok: true, data }
   }
 
-  function scopeArgs(scope) {
-    if (scope === null || typeof scope !== 'object') return []
-    return Object.keys(scope).map((key) => ['--scope', String(key) + '=' + String(scope[key])])
-  }
-
-  function coerceScope(scope) {
-    const out = {}
-    for (const key of Object.keys(scope || {})) out[key] = String(scope[key])
-    return out
-  }
-
   function projectDaemonStatus(raw) {
     const endpoint = resolveDaemon()
     return {
@@ -342,21 +329,6 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
     return nmgJson(cliArgs, signal)
   }
 
-  async function invokeRpcOnly(method, params, signal) {
-    try {
-      let raw = await daemonCall(method, params, signal)
-      if (raw == null) {
-        await ensureDaemon(signal)
-        raw = await daemonCall(method, params, signal)
-      }
-      return raw == null
-        ? { ok: false, error: 'NMG daemon is unavailable for ' + method }
-        : { ok: true, data: raw }
-    } catch (error) {
-      if (error instanceof NmgRpcError) return { ok: false, error: 'NMG ' + method + ': ' + error.message }
-      return { ok: false, error: 'NMG call aborted' }
-    }
-  }
 
   // ── automatic recall (DSH-native: systemPrompt.context) ───────────────────
   //
@@ -1067,176 +1039,6 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
   }
 
   // ── tools ──────────────────────────────────────────────────────────────────
-  const rememberTool = {
-    name: 'nmg_remember',
-    description: 'Save or update durable memory through the shared NMG lifecycle contract. Never save secrets, chatter, unverified model claims, or transient failures. action=feedback rates a recalled graph (shared context-use learning) and is forwarded to the daemon; no labels = rejected.',
-    parameters: {
-      type: 'object',
-      properties: {
-        action: { type: 'string', enum: [...COMMON_REMEMBER_ACTIONS], description: 'Memory action (default save).' },
-        memoryId: { type: 'string', description: 'Existing memory for forget/resolve/reopen/claim_outcome.' },
-        newMemoryId: { type: 'string', description: 'Newer memory for supersede/relate.' },
-        supersededMemoryId: { type: 'string', description: 'Older memory replaced by newMemoryId.' },
-        relatedMemoryId: { type: 'string', description: 'Existing memory related to newMemoryId.' },
-        relatedMemoryIds: { type: 'array', items: { type: 'string' }, description: 'Evidence anchors for resolve/reopen.' },
-        relationJudgement: { type: 'string', enum: ['conflict', 'distinct', 'refines', 'related', 'same_entity'] },
-        relationConfidence: { type: 'number', description: 'Relation confidence 0..1.' },
-        resolutionReason: { type: 'string', description: 'Reason for supersede/resolve/reopen.' },
-        semanticTaskId: { type: 'string', description: 'Independent task identity for claim_outcome.' },
-        activeGraphId: { type: 'string', description: 'Active graph that produced the evaluated claim or the recall being rated (feedback).' },
-        taskSuccess: { type: 'boolean', description: 'feedback: the recalled context helped the task complete.' },
-        userCorrection: { type: 'boolean', description: 'feedback: the user visibly corrected a claim the recall led to.' },
-        evidenceSufficient: { type: 'boolean', description: 'feedback: the recalled evidence was sufficient (recall quality, not answer correctness).' },
-        expansionUseful: { type: 'boolean', description: 'feedback: expanding a folded memory added real value.' },
-        excessiveNoise: { type: 'boolean', description: 'feedback: the injected recall was mostly noise.' },
-        noMemoryNeeded: { type: 'boolean', description: 'feedback: no memory context was needed at all.' },
-        memoryMisleading: { type: 'boolean', description: 'feedback: the recalled memory itself was wrong/stale/contradictory for this use.' },
-        feedbackNote: { type: 'string', description: 'feedback: concise reason for the labels.' },
-        claimOutcome: { type: 'string', enum: ['supported', 'contradicted'] },
-        claimSourceLineage: { type: 'string', description: 'Stable attributable source lineage.' },
-        claimIndexes: { type: 'array', items: { type: 'integer' } },
-        claimWeight: { type: 'number', description: 'Claim reliability in (0,1].' },
-        statement: { type: 'string', description: 'Self-contained semantic statement.' },
-        nodeName: { type: 'string', description: 'Stable node grouping related memories.' },
-        memoryType: { type: 'string', enum: ['fact', 'state', 'event', 'preference', 'constraint', 'strategy'], description: 'Memory type.' },
-        recallTriggers: { type: 'array', maxItems: 16, items: { type: 'string', minLength: 1, maxLength: 80 }, description: nmgPrompts.recall_triggers_parameter_description },
-        stateKey: { type: 'string', description: 'Replaceable property identity; a new value in the same scope supersedes the old.' },
-        sourceActor: { type: 'string', enum: ['user', 'assistant', 'system', 'tool'], description: 'Evidence actor (default user).' },
-        truthStatus: { type: 'string', enum: ['asserted', 'inferred', 'unverified', 'verified'], description: 'Truth status.' },
-        evidence: { type: 'string', description: 'Exact supporting source excerpt.' },
-        eventTime: { type: 'string', description: 'ISO event time when it differs from write time.' },
-        referenceTime: { type: 'string', description: 'Source ISO timestamp with Z/offset anchoring eventTime, for historical replay.' },
-        timeZone: { type: 'string', description: "Source IANA time zone; defaults to referenceTime's offset." },
-        tier: { type: 'integer', description: 'Initial tier 0..3.' },
-        importance: { type: 'number', description: 'Importance 0..1.' },
-        residence: { type: 'string', enum: ['ltg', 'stg'], description: 'ltg (durable) or stg (session/task-local).' },
-        writeReason: { type: 'string', description: 'Durable-write justification.' },
-        scope: { type: 'object', additionalProperties: true, description: 'Applicability scope, e.g. {"project":"nmg"}.' },
-        tesserae: { type: 'array', maxItems: 10, items: { type: 'object', properties: { path: { type: 'string', description: 'Project-relative file path the bookmark points into.' }, snippet: { type: 'string', description: 'Exact short content excerpt from that file used for relocation.' }, label: { type: 'string', description: 'Optional one-line searchable label.' }, kind: { type: 'string', description: 'Optional kind: code | doc | note.' } }, required: ['path', 'snippet'] }, description: 'Optional file bookmarks (tesserae): point this memory at file locations you actually saw. One bookmark per {path, snippet} — snippet is the relocation key, so copy it verbatim from the file.' },
-      },
-      required: [],
-    },
-    output: textOutput,
-    async execute(args, exec) {
-      const action = args.action || 'save'
-      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-      if (action === 'feedback') {
-        const labelled = [
-          'taskSuccess',
-          'userCorrection',
-          'evidenceSufficient',
-          'expansionUseful',
-          'excessiveNoise',
-          'noMemoryNeeded',
-          'memoryMisleading',
-        ].some((key) => args[key] !== undefined)
-        if (!labelled) return 'nmg_remember feedback requires at least one label.'
-        // Shared layer: forward thin to the daemon-owned online learner. The
-        // daemon trains only on the exact graph the feedback names (no
-        // latest-staged fallback).
-        const result = await invokeRpcOnly(
-          'recordFeedback',
-          {
-            activeGraphId: args.activeGraphId,
-            sessionId,
-            taskSuccess: args.taskSuccess,
-            userCorrection: args.userCorrection,
-            evidenceSufficient: args.evidenceSufficient,
-            expansionUseful: args.expansionUseful,
-            excessiveNoise: args.excessiveNoise,
-            noMemoryNeeded: args.noMemoryNeeded,
-            memoryMisleading: args.memoryMisleading,
-            note: args.feedbackNote,
-            semanticTaskId: args.semanticTaskId,
-          },
-          exec.signal,
-        )
-        if (!result.ok) return result.error
-        // Real feedback addressed the recall it names (the affordance rode with
-        // the recall output; nothing queued to clear).
-        const stagedStack = recallBatch.get(sessionId)
-        if (Array.isArray(stagedStack) && stagedStack[0]) stagedStack[0].fedBack = true
-        const data = result.data as
-          | { trained?: boolean; reward?: number; loss?: number }
-          | null
-          | undefined
-        return data && data.trained
-          ? 'Retrieval feedback applied: one online router update (reward=' + data.reward +
-            (data.loss != null ? ', loss=' + Number(data.loss).toFixed(4) : '') + ').'
-          : 'Retrieval feedback processed but not applied (no staged decision or no usable label); skipped.'
-      }
-      if (action === 'claim_outcome') {
-        if (!args.memoryId || !args.claimOutcome || !args.semanticTaskId || !args.claimSourceLineage) {
-          return 'nmg_remember claim_outcome requires memoryId, claimOutcome, semanticTaskId, and claimSourceLineage.'
-        }
-        const result = await invokeRpcOnly('recordClaimOutcomes', {
-          semanticTaskId: args.semanticTaskId,
-          activeGraphId: args.activeGraphId,
-          sessionId,
-          collectionOrigin: 'natural',
-          projectDir: workspaceRoot,
-          votes: [{
-            memoryId: args.memoryId,
-            claimIndexes: args.claimIndexes,
-            outcome: args.claimOutcome,
-            source: 'task',
-            sourceLineage: args.claimSourceLineage,
-            weight: args.claimWeight,
-          }],
-        }, exec.signal)
-        return result.ok ? JSON.stringify(result.data) : result.error
-      }
-      if (action !== 'save') {
-        const params: Record<string, any> = { action, projectDir: workspaceRoot, sessionId }
-        if (args.memoryId) params.memoryId = args.memoryId
-        if (args.newMemoryId) params.newMemoryId = args.newMemoryId
-        if (args.supersededMemoryId) params.supersededMemoryId = args.supersededMemoryId
-        if (args.relatedMemoryId) params.relatedMemoryId = args.relatedMemoryId
-        if (args.relatedMemoryIds) params.relatedMemoryIds = args.relatedMemoryIds
-        if (args.relationJudgement) params.relationJudgement = args.relationJudgement
-        if (args.relationConfidence != null) params.confidence = args.relationConfidence
-        if (args.resolutionReason) params.reason = args.resolutionReason
-        const result = await invokeRpcOnly('resolveRemember', params, exec.signal)
-        return result.ok ? JSON.stringify(result.data) : result.error
-      }
-      if (!args.statement || !args.nodeName) {
-        return 'nmg_remember save requires statement and nodeName.'
-      }
-      const params: Record<string, any> = { statement: args.statement, nodeName: args.nodeName, projectDir: workspaceRoot, sessionId }
-      if (args.tesserae && Array.isArray(args.tesserae)) params.tesserae = args.tesserae
-      if (args.memoryType) params.memoryType = args.memoryType
-      if (args.recallTriggers) params.recallTriggers = args.recallTriggers
-      if (args.stateKey) params.stateKey = args.stateKey
-      if (args.sourceActor) params.sourceActor = args.sourceActor
-      if (args.truthStatus) params.truthStatus = args.truthStatus
-      if (args.evidence) params.evidence = args.evidence
-      if (args.eventTime) params.eventTime = args.eventTime
-      if (args.tier != null) params.tier = args.tier
-      if (args.importance != null) params.importance = args.importance
-      if (args.residence) params.residence = args.residence
-      if (args.writeReason) params.writeReason = args.writeReason
-      if (args.scope) params.scope = coerceScope(args.scope)
-      const argv = ['remember', args.statement, '--node', args.nodeName]
-      if (args.memoryType) argv.push('--type', args.memoryType)
-      for (const trigger of args.recallTriggers || []) argv.push('--recall-trigger', trigger)
-      if (args.stateKey) argv.push('--state-key', args.stateKey)
-      if (args.sourceActor) argv.push('--actor', args.sourceActor)
-      if (args.truthStatus) argv.push('--truth', args.truthStatus)
-      if (args.evidence) argv.push('--evidence', args.evidence)
-      if (args.eventTime) argv.push('--event-time', args.eventTime)
-      if (args.tier != null) argv.push('--tier', String(args.tier))
-      if (args.importance != null) argv.push('--importance', String(args.importance))
-      if (args.residence) argv.push('--residence', args.residence)
-      if (args.writeReason) argv.push('--write-reason', args.writeReason)
-      for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1])
-      argv.push('--project-dir', workspaceRoot, '--json')
-      appendRememberTimeContext(args, params, argv)
-      const r = await invoke('remember', params, argv, exec.signal, null)
-      if (!r.ok) return r.error
-      return renderRememberSurface(r.data)
-    },
-  }
-
   class ToolTransportError extends Error {}
 
   async function resolveBoardIdentity(agent, signal) {
@@ -1256,17 +1058,17 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
 
   // State needs a resident owner. Do not replay refused writes or fall back to CLI.
   async function invokeRegisteredTool(method, params, signal, cliFallback) {
-    if (cliFallback) {
+    if (cliFallback && !(method === 'remember' && resolveDaemon())) {
       const result = await invoke(method, params, cliFallback, signal, null)
       if (!result.ok) throw new ToolTransportError(result.error)
       return result.data
     }
     try {
       const data = await daemonCall(method, params, signal, true)
-      if (data == null) throw new Error('NMG daemon is unavailable for state')
+      if (data == null) throw new Error('NMG daemon is unavailable for ' + method)
       return data
     } catch (error) {
-      throw new ToolTransportError('NMG state request failed: ' + String(error.message || error))
+      throw new ToolTransportError('NMG ' + method + ' request failed: ' + String(error.message || error))
     }
   }
 
@@ -1402,16 +1204,6 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
 
   const capabilityAssembly = assembleAdapterCapabilities(ADAPTER_CAPABILITY_CATALOG.dsh.capabilities, {
     tools: {
-      nmg_remember: endpoint => tools.register({
-        ...rememberTool,
-        parameters: {
-          ...rememberTool.parameters,
-          properties: {
-            ...rememberTool.parameters.properties,
-            action: { ...rememberTool.parameters.properties.action, enum: supportedRememberActions(endpoint?.methods) },
-          },
-        },
-      }),
       nmg_daemon: () => registerNativeTool(daemonTool),
     },
     registerTool: tool => registerNativeTool({
@@ -1431,6 +1223,12 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
             memory: {
               projectDir: workspaceRoot,
               retryForeignGraph: true,
+              remember: {
+                onFeedback: () => {
+                  const stagedStack = recallBatch.get(sessionId)
+                  if (stagedStack?.[0]) stagedStack[0].fedBack = true
+                },
+              },
               search: {
                 onSearch: ({ query, ranked, disclosed }) => {
                   nativeEvents.note(sessionId, disclosed)

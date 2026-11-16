@@ -1,7 +1,13 @@
-import type { NmgMethod, NmgSearchParams } from "../cli/protocol.ts";
-import type { ActiveGraphBudget, MemoryContext } from "../core/types.ts";
+import type { NmgMethod, NmgMethodResult, NmgSearchParams } from "../cli/protocol.ts";
+import type {
+  ActiveGraphBudget,
+  EvidenceCollectionOrigin,
+  MemoryActor,
+  MemoryContext,
+} from "../core/types.ts";
 import { loadPrompts } from "../prompts/load.ts";
 import type { AgentAttributionFlow } from "./agent-attribution.ts";
+import type { SelectedEvidence } from "./evidence.ts";
 import { memoryDisclosureEntries } from "./search-projection.ts";
 import type { SessionRecallFlow } from "./session-recall-flow.ts";
 
@@ -37,6 +43,48 @@ export interface AdapterSearchBinding {
   }) => void | Promise<void>;
 }
 
+export interface RememberFeedbackLabels {
+  taskSuccess?: boolean;
+  userCorrection?: boolean;
+  evidenceSufficient?: boolean;
+  expansionUseful?: boolean;
+  excessiveNoise?: boolean;
+  noMemoryNeeded?: boolean;
+  memoryMisleading?: boolean;
+  note?: string;
+  semanticTaskId?: string;
+}
+
+export interface AdapterRememberBinding {
+  provenance?: {
+    provider: string;
+    lookup(
+      evidence: string | undefined,
+      actor: MemoryActor,
+    ):
+      | {
+          version: string;
+          reason?: string;
+          source?: SelectedEvidence;
+        }
+      | undefined;
+    requireWitness?: boolean;
+  };
+  latestFeedback?: boolean;
+  observeFeedback?: (
+    graphId: string | undefined,
+    labels: RememberFeedbackLabels,
+  ) => Promise<{ recorded: boolean; activeGraphId?: string | null }>;
+  onFeedback?: (result: NmgMethodResult["recordFeedback"]) => void;
+  claimOrigin?: EvidenceCollectionOrigin;
+  claimGraph?: (memoryId: string) => string | null | undefined;
+  onVerifiedClaim?: (
+    graphId: string | undefined,
+    memoryId: string,
+    outcome: "supported" | "contradicted",
+  ) => Promise<void>;
+}
+
 export interface AdapterToolSession {
   sessionId: string;
   requester: string;
@@ -54,6 +102,7 @@ export interface AdapterToolSession {
     recallFlow?: SessionRecallFlow;
     attribution?: AgentAttributionFlow;
     search?: AdapterSearchBinding;
+    remember?: AdapterRememberBinding;
     retryForeignGraph?: boolean;
     onEvidenceLookup?: (request: EvidenceLookup, result: MemoryContext) => void | Promise<void>;
     onEvidenceDisclosed?: (request: EvidenceLookup, result: MemoryContext) => void | Promise<void>;

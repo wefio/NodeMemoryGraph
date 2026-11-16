@@ -58,7 +58,12 @@ folding, rendering, and CLI fallback arguments. Hosts supply project scope and
 native attribution or observation bindings. The [shared Search tool](../../../src/integration/search-tool.ts)
 owns explicit retrieval inputs, disclosure, diagnostics, and candidate rendering.
 Hosts bind their recall-flow and controller options and observe the output when needed.
-Remember uses per-entry installer bindings.
+The [shared Remember tool](../../../src/integration/remember-tool.ts) validates
+and routes saves, memory lifecycle actions, feedback, and claim outcomes.
+Pi binds exact excerpts from native session history. DSH and MCP can record
+independent task outcomes, and OpenCode omits the claim outcome action.
+The shared tool supplies fallback command arguments when the command can carry
+the requested provenance. Hosts select and execute the transport.
 
 Tool registration intersects native bindings with the connected daemon's
 `hello.methods`. The search schema also uses `hello.searchParameters` when

@@ -35,6 +35,7 @@ import {
   shadowEnabled,
 } from "../../../.pi/extensions/nmg/controller-shadow.ts";
 import { assertAgentActivityContract } from "../../helpers/agent-activity-contract.ts";
+import { assertRememberToolContract } from "../../helpers/remember-tool-contract.ts";
 import { assertSearchToolContract } from "../../helpers/search-tool-contract.ts";
 import { assertLabToolContract } from "../../helpers/lab-tool-contract.ts";
 import { stripProviderEnv } from "../../helpers/test-env.ts";
@@ -2544,6 +2545,14 @@ test("session recall piggybacks a search proposal without a prepare RPC or injec
     const lab = tools.get("nmg_lab")!;
     await assertLabToolContract(async (args) => {
       const output = (await lab.execute("lab-contract", args, undefined, undefined, ctx)) as {
+        content: Array<{ text: string }>;
+      };
+      return output.content[0]?.text ?? "";
+    });
+    await assertRememberToolContract(async (args) => {
+      const output = (await tools
+        .get("nmg_remember")!
+        .execute("remember-contract", args, undefined, undefined, ctx)) as {
         content: Array<{ text: string }>;
       };
       return output.content[0]?.text ?? "";

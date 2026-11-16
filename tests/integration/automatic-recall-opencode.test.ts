@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import plugin from "../../opencode-plugin/index.ts";
 import { dropCompatibleLease } from "../../src/integration/lease-transport.ts";
+import { assertRememberToolContract } from "../helpers/remember-tool-contract.ts";
 import { assertSearchToolContract } from "../helpers/search-tool-contract.ts";
 import { searchResultFixture } from "../helpers/search-result.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
@@ -164,6 +165,13 @@ test("OpenCode submits its native automatic recall to an activated daemon", asyn
     async (args) => (await search.execute(args, { sessionID: "explicit-search" })).content,
     "Atlas SQLite storage",
     /Atlas SQLite storage keeps a local snapshot/u,
+  );
+  const remember = h.tools.get("nmg_remember") as typeof search & {
+    input: { properties: { action: { enum: string[] } } };
+  };
+  assert.ok(!remember.input.properties.action.enum.includes("claim_outcome"));
+  await assertRememberToolContract(
+    async (args) => (await remember.execute(args, { sessionID: "remember-contract" })).content,
   );
   assert.equal((await daemon.invoke("status")).rpcRejections?.length, 0);
 });

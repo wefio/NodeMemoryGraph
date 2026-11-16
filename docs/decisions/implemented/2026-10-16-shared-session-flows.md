@@ -54,7 +54,9 @@ session-bound routing, writer fence capture and board read effects. Native
 bindings handle tool registration, identity, transport and host receipts.
 The same native registrar mounts Lab, exact memory lookup, and explicit search
 from their shared schemas and implementations. Search and exact lookup share
-the disclosure ledger projection.
+the disclosure ledger projection. Remember uses the same registrar, with shared
+write, feedback, and resolution flows and a native evidence selector where the
+host exposes session history.
 
 ## Alternatives considered
 

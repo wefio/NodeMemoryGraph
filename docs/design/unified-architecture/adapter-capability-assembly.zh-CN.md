@@ -47,7 +47,10 @@ Magpie 保持独立目标。
 呈现和备用命令参数。宿主提供项目范围和原生归因或观测绑定。
 [共享 Search 工具](../../../src/integration/search-tool.ts) 统一显式检索输入、披露、
 降级提示和候选呈现。宿主绑定回合预算及排序策略，并按需观察结果。
-Remember 仍通过各入口的安装绑定装配。
+[共享 Remember 工具](../../../src/integration/remember-tool.ts) 统一校验和处理持久写入、
+记忆生命周期操作、反馈及声明结果。Pi 可以从原生历史绑定精确证据。DSH 和 MCP 可以记录
+独立任务的结果，OpenCode 的工具不注册声明结果操作。
+备用命令能携带所需的证据来源时，共享工具才提供命令参数。宿主负责实际传输。
 
 工具注册取原生绑定和 daemon `hello.methods` 的交集。端点提供
 `hello.searchParameters` 时，工具据此筛选检索字段。

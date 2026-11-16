@@ -13,6 +13,7 @@ import {
   assertAgentActivityContract,
   mcpToolContractText,
 } from "../helpers/agent-activity-contract.ts";
+import { assertRememberToolContract } from "../helpers/remember-tool-contract.ts";
 import { assertSearchToolContract } from "../helpers/search-tool-contract.ts";
 import { assertLabToolContract } from "../helpers/lab-tool-contract.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
@@ -43,6 +44,9 @@ test("one MCP connection isolates concurrent native sessions and refuses a forei
     await adapter.ready;
     await adapter.server.connect(serverTransport);
     await client.connect(clientTransport);
+    await assertRememberToolContract(async (args) =>
+      mcpToolContractText(await call(a, "nmg_remember", args)),
+    );
     await assertAgentActivityContract(async (args) =>
       mcpToolContractText(await call(a, "nmg_state", args)),
     );

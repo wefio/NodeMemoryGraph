@@ -14,25 +14,20 @@ import {
 } from "../../src/integration/adapter-capability-catalog.ts";
 import type { SharedStateTool } from "../../src/integration/state-tool.ts";
 
-test("only declared memory tools install and omissions fail before registration", async () => {
+test("declared subsets use a single native tool registration binding", async () => {
   const registered: string[] = [];
   const bindings = {
     registerTool: (tool: SharedAdapterTool) => {
-      registered.push(tool.name.slice(4));
+      registered.push(tool.name);
     },
   };
-  const memory = ["search", "get", "remember"] as const;
-  assert.throws(() => assembleAdapterCapabilities(memory, bindings), /nmg_remember/);
+  assert.throws(
+    () => assembleAdapterCapabilities(["search", "daemon-health"], bindings),
+    /missing binding nmg_daemon/,
+  );
   assert.equal(registered.length, 0);
-  const assembly = assembleAdapterCapabilities(memory, {
-    ...bindings,
-    tools: {
-      nmg_remember: () => {
-        registered.push("remember");
-      },
-    },
-  });
-  assert.deepEqual(registered, ["search", "get", "remember"]);
+  const assembly = assembleAdapterCapabilities(["search", "get", "remember"], bindings);
+  assert.deepEqual(registered, ["nmg_search", "nmg_get", "nmg_remember"]);
   await assembly.ready;
   assert.equal(assembly.describe()[0]?.state, "assembled");
 });
@@ -70,11 +65,6 @@ test("tools intersect their native declaration with the connected daemon", async
       registerTool: (tool) => {
         names.push(tool.name.slice(4));
       },
-      tools: {
-        nmg_remember: () => {
-          names.push("remember");
-        },
-      },
     },
     { endpoint: Promise.resolve({ methods: ["search", "remember"] }) },
   );
@@ -90,11 +80,6 @@ test("failed asynchronous installation rolls back accepted bindings in reverse o
       return () => {
         disposed.push(tool.name.slice(4));
       };
-    },
-    tools: {
-      nmg_remember: () => () => {
-        disposed.push("remember");
-      },
     },
   });
   await assert.rejects(
@@ -138,11 +123,6 @@ test("synchronous host rejection stops registration and releases previously acce
           return () => {
             calls.push("release search");
           };
-        },
-        tools: {
-          nmg_remember: () => {
-            calls.push("remember");
-          },
         },
       }),
     /host rejected get/,

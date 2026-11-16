@@ -32,7 +32,6 @@ import {
   extractAnswerText,
   extractPromptText,
 } from "../src/integration/agent-attribution.ts";
-import { renderRememberSurface } from "../src/integration/agent-surface.ts";
 import { loadWakeState, readWakeConfig, wakeBudgetGate } from "../src/integration/board-wake.ts";
 import {
   configuredAutoRecallLimit,
@@ -49,14 +48,9 @@ import { RecallBudget } from "../src/integration/recall-budget.ts";
 import { prepareInformationOutput } from "../src/integration/information-output.ts";
 import type { PreparedInformationOutput } from "../src/core/information-view.ts";
 import { SessionTaskWindow } from "../src/integration/session-task-window.ts";
-import {
-  COMMON_REMEMBER_ACTIONS,
-  supportedRememberActions,
-} from "../src/integration/tool-contract.ts";
 import { probeAdapterEndpoint } from "../src/integration/lease-transport.ts";
-import {} from "../src/integration/tool-contract.ts";
 import { messageText } from "../src/integration/tool-observation.ts";
-import type { MemoryContext, MemoryTier, RememberResult } from "../src/core/types.ts";
+import type { MemoryContext, MemoryTier } from "../src/core/types.ts";
 import { deriveAnswerOverlapMemoryIds } from "../src/core/feedback.ts";
 import type { NmgStateResult, NmgSessionActiveGraphResult } from "../src/cli/protocol.ts";
 import { recallInput } from "../src/core/recall-matcher.ts";
@@ -507,334 +501,6 @@ export default {
       );
     };
 
-    // ---- nmg_remember -----------------------------------------------------
-    const rememberTool = (methods?: readonly string[]): ToolRegistration => ({
-      name: "remember",
-      description: prompts.remember_description,
-      input: {
-        type: "object",
-        properties: {
-          action: {
-            type: "string",
-            enum: supportedRememberActions(methods),
-            description: prompts.remember_action_parameter_description,
-          },
-          memoryId: {
-            type: "string",
-            description: prompts.remember_memory_id_parameter_description,
-          },
-          newMemoryId: {
-            type: "string",
-            description: prompts.remember_new_memory_id_parameter_description,
-          },
-          supersededMemoryId: {
-            type: "string",
-            description: prompts.remember_superseded_memory_id_parameter_description,
-          },
-          relatedMemoryId: {
-            type: "string",
-            description: prompts.remember_related_memory_id_parameter_description,
-          },
-          relatedMemoryIds: { type: "array", items: { type: "string" } },
-          relationJudgement: {
-            type: "string",
-            enum: ["conflict", "distinct", "refines", "related", "same_entity"],
-            description: prompts.remember_relation_judgement_parameter_description,
-          },
-          relationConfidence: { type: "number", minimum: 0, maximum: 1 },
-          resolutionReason: { type: "string" },
-          activeGraphId: {
-            type: "string",
-            description: prompts.active_graph_id_parameter_description,
-          },
-          taskSuccess: {
-            type: "boolean",
-            description: prompts.feedback_label_parameter_description,
-          },
-          userCorrection: {
-            type: "boolean",
-            description: prompts.feedback_label_parameter_description,
-          },
-          evidenceSufficient: {
-            type: "boolean",
-            description: prompts.feedback_label_parameter_description,
-          },
-          expansionUseful: {
-            type: "boolean",
-            description: prompts.feedback_label_parameter_description,
-          },
-          excessiveNoise: {
-            type: "boolean",
-            description: prompts.feedback_label_parameter_description,
-          },
-          noMemoryNeeded: {
-            type: "boolean",
-            description: prompts.feedback_label_parameter_description,
-          },
-          memoryMisleading: {
-            type: "boolean",
-            description: prompts.feedback_misleading_parameter_description,
-          },
-          feedbackNote: {
-            type: "string",
-            description: prompts.feedback_note_parameter_description,
-          },
-          statement: { type: "string" },
-          nodeName: { type: "string", description: prompts.node_name_parameter_description },
-          recallTriggers: {
-            type: "array",
-            items: { type: "string", minLength: 1, maxLength: 80 },
-            maxItems: 16,
-            description: prompts.recall_triggers_parameter_description,
-          },
-          memoryType: {
-            type: "string",
-            enum: ["constraint", "event", "fact", "preference", "state", "strategy"],
-          },
-          eventTime: { type: "string" },
-          referenceTime: {
-            type: "string",
-            description:
-              "Source ISO timestamp with Z/offset anchoring eventTime, for historical replay.",
-          },
-          timeZone: {
-            type: "string",
-            description: "Source IANA time zone; defaults to referenceTime's offset.",
-          },
-          expiresAt: { type: "string" },
-          truthStatus: {
-            type: "string",
-            enum: ["asserted", "inferred", "unverified", "verified"],
-          },
-          sourceActor: {
-            type: "string",
-            enum: ["assistant", "system", "tool", "user"],
-            description: prompts.source_actor_parameter_description,
-          },
-          evidence: { type: "string", description: prompts.evidence_parameter_description },
-          writeReason: { type: "string" },
-          tier: { type: "integer", minimum: 0, maximum: 3 },
-          importance: { type: "number", minimum: 0, maximum: 1 },
-          scope: { type: "object", additionalProperties: { type: "string" } },
-          unsafe: { type: "boolean" },
-          externalSource: {
-            type: "object",
-            properties: {
-              source: {
-                type: "string",
-                description: prompts.external_source_parameter_description,
-              },
-              retrievedAt: { type: "string" },
-              hash: { type: "string" },
-            },
-            required: ["source"],
-            additionalProperties: false,
-          },
-          boardSource: {
-            type: "object",
-            properties: { taskId: { type: "string" }, entryId: { type: "string" } },
-            required: ["taskId", "entryId"],
-            additionalProperties: false,
-          },
-        },
-        additionalProperties: false,
-      },
-      execute: async (args, context) => {
-        const sessionId = toolSessionId(context, "remember");
-        const projectDir = projectDirectory(sessionId);
-        const action = typeof args.action === "string" ? args.action : "save";
-        if (!COMMON_REMEMBER_ACTIONS.includes(action as (typeof COMMON_REMEMBER_ACTIONS)[number])) {
-          return { content: `Unsupported remember action: ${action}` };
-        }
-        if (action === "claim_outcome") {
-          return {
-            content:
-              "action=claim_outcome needs exact-match evidence binding, which the OpenCode host " +
-              "cannot derive from session history. Record the outcome through a harness with " +
-              "evidence selection (Pi) or the daemon CLI instead.",
-          };
-        }
-        if (action === "feedback") {
-          const labels = {
-            taskSuccess: args.taskSuccess,
-            userCorrection: args.userCorrection,
-            evidenceSufficient: args.evidenceSufficient,
-            expansionUseful: args.expansionUseful,
-            excessiveNoise: args.excessiveNoise,
-            noMemoryNeeded: args.noMemoryNeeded,
-            memoryMisleading: args.memoryMisleading,
-            note: args.feedbackNote,
-          };
-          if (Object.values(labels).every((value) => value === undefined)) {
-            return { content: "action=feedback requires at least one label or feedbackNote" };
-          }
-          try {
-            await invoke("recordFeedback", {
-              activeGraphId: args.activeGraphId,
-              sessionId,
-              ...labels,
-            });
-            return { content: "Retrieval feedback processed." };
-          } catch {
-            return { content: "Retrieval feedback processed (daemon unavailable; skipped)." };
-          }
-        }
-        if (action === "forget") {
-          if (!args.memoryId) return { content: "action=forget requires memoryId" };
-          await invoke("resolveRemember", {
-            action: "forget",
-            memoryId: args.memoryId,
-            projectDir,
-            sessionId,
-          });
-          return {
-            content:
-              "Memory withdrawn from normal retrieval. The tombstone remains for audit; " +
-              "this is not physical privacy erasure.",
-          };
-        }
-        if (action === "resolve" || action === "reopen") {
-          if (!args.memoryId) return { content: `action=${action} requires memoryId` };
-          await invoke("resolveRemember", {
-            action,
-            memoryId: args.memoryId,
-            relatedMemoryIds: Array.isArray(args.relatedMemoryIds)
-              ? (args.relatedMemoryIds as unknown[]).filter(
-                  (id): id is string => typeof id === "string",
-                )
-              : undefined,
-            reason: args.resolutionReason,
-            projectDir,
-            sessionId,
-          });
-          return {
-            content:
-              action === "resolve"
-                ? "Open memory marked resolved; it is now eligible for ordinary retention policy."
-                : "Memory reopened and restored to indexed storage with its related evidence anchors.",
-          };
-        }
-        if (action === "supersede") {
-          if (!args.newMemoryId || !args.supersededMemoryId) {
-            return { content: "action=supersede requires newMemoryId and supersededMemoryId" };
-          }
-          await invoke("resolveRemember", {
-            action,
-            newMemoryId: args.newMemoryId,
-            supersededMemoryId: args.supersededMemoryId,
-            reason: args.resolutionReason,
-            projectDir,
-            sessionId,
-          });
-          return { content: "Older memory superseded by the new value." };
-        }
-        if (action === "relate") {
-          if (!args.newMemoryId || !args.relatedMemoryId || !args.relationJudgement) {
-            return {
-              content: "action=relate requires newMemoryId, relatedMemoryId, and relationJudgement",
-            };
-          }
-          await invoke("resolveRemember", {
-            action,
-            newMemoryId: args.newMemoryId,
-            relatedMemoryId: args.relatedMemoryId,
-            relationJudgement: args.relationJudgement,
-            confidence: args.relationConfidence,
-            projectDir,
-            sessionId,
-          });
-          return {
-            content:
-              "Semantic relation recorded as a reversible pending proposal; node identities remain separate.",
-          };
-        }
-        // action=save
-        const statement = typeof args.statement === "string" ? args.statement.trim() : "";
-        const nodeName = typeof args.nodeName === "string" ? args.nodeName.trim() : "";
-        if (!statement || !nodeName) {
-          return { content: "saving a memory requires statement and nodeName" };
-        }
-        const external = args.externalSource as
-          { source?: string; retrievedAt?: string; hash?: string } | undefined;
-        if (external && !/^(?:file|web):.+/u.test(String(external.source ?? ""))) {
-          return { content: "externalSource.source must start with web: or file:" };
-        }
-        const board = args.boardSource as { taskId?: string; entryId?: string } | undefined;
-        const sourceActor = (
-          typeof args.sourceActor === "string" ? args.sourceActor : "assistant"
-        ) as "assistant" | "system" | "tool" | "user";
-        // OpenCode exposes no exact-match session-history API, so a pasted
-        // quote from a non-assistant actor degrades provenance instead of
-        // pretending free text is a bound witness.
-        const degradedProvenance =
-          Boolean((args.evidence as string | undefined)?.trim()) &&
-          sourceActor !== "assistant" &&
-          !external;
-        const markers: Array<{ kind: string; attributes: Record<string, unknown> }> = [
-          ...(external
-            ? [
-                {
-                  kind: "external_source",
-                  attributes: {
-                    source: String(external.source),
-                    retrievedAt: external.retrievedAt ?? new Date().toISOString(),
-                    ...(external.hash ? { hash: external.hash } : {}),
-                  },
-                },
-              ]
-            : []),
-          ...(board
-            ? [
-                {
-                  kind: "board_origin",
-                  attributes: { taskId: board.taskId, entryId: board.entryId },
-                },
-              ]
-            : []),
-          ...(degradedProvenance
-            ? [
-                {
-                  kind: "provenance_degraded",
-                  attributes: {
-                    provider: "opencode",
-                    historyReferenceVersion: "opencode.plugin.v1",
-                    reason: "session_history_api_unavailable",
-                  },
-                },
-              ]
-            : []),
-        ];
-        const remembered = (await invoke("remember", {
-          statement,
-          nodeName,
-          recallTriggers: Array.isArray(args.recallTriggers)
-            ? (args.recallTriggers as unknown[]).filter((t): t is string => typeof t === "string")
-            : undefined,
-          memoryType: args.memoryType,
-          eventTime: args.eventTime,
-          referenceTime: args.referenceTime,
-          timeZone: args.timeZone,
-          expiresAt: args.expiresAt,
-          truthStatus: args.truthStatus,
-          sourceActor,
-          evidence: args.evidence,
-          writeReason: args.writeReason,
-          writeSource: "agent",
-          tier: args.tier,
-          importance: args.importance,
-          scope: args.scope,
-          ...(args.unsafe === true ? { unsafe: true } : {}),
-          externalSource: external,
-          markers: markers.length > 0 ? markers : undefined,
-          projectDir,
-          sessionId,
-        })) as RememberResult;
-        const markerNote =
-          markers.length > 0 ? `(markers: ${markers.map((marker) => marker.kind).join(", ")})` : "";
-        return { content: renderRememberSurface(remembered, { postamble: markerNote }) };
-      },
-    });
-
     // The SDK retains transform callbacks and applies them per request. Resolve
     // shared capabilities during setup; the callback only publishes native tools.
     const toolDefinitions: ToolRegistration[] = [];
@@ -842,11 +508,7 @@ export default {
       ADAPTER_CAPABILITY_CATALOG.opencode.capabilities,
       {
         ...capabilityBindings,
-        tools: {
-          nmg_remember: (endpoint) => {
-            toolDefinitions.push({ ...rememberTool(endpoint?.methods), name: "nmg_remember" });
-          },
-        },
+        rememberOptions: { allowUnsafe: true, claimOutcome: "disabled" },
         registerTool: (tool) => {
           toolDefinitions.push({
             name: tool.name,
@@ -857,13 +519,27 @@ export default {
               const output = await tool.execute(args, {
                 sessionId,
                 requester: "agent:opencode",
-                invoke,
+                invoke: (method, params, cliFallback) =>
+                  invokeDaemon(method, params, { dataDir, fallbackArgs: cliFallback ?? null }),
                 legacyBoardVerbs: true,
                 memory: {
                   projectDir: projectDirectory(sessionId),
                   recallFlow,
                   attribution,
                   search: { defaultTier: 3, feedback: recallFeedbackAffordance },
+                  remember: {
+                    latestFeedback: true,
+                    provenance: {
+                      provider: "opencode",
+                      lookup: (_evidence, actor) =>
+                        actor === "assistant"
+                          ? undefined
+                          : {
+                              version: "opencode.plugin.v1",
+                              reason: "session_history_api_unavailable",
+                            },
+                    },
+                  },
                 },
                 boardReads: "project",
                 boardIdentity: () => {

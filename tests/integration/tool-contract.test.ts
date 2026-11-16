@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 
+import { createRememberTool } from "../../src/integration/remember-tool.ts";
 import {
   COMMON_BOARD_ACTIONS,
   COMMON_REMEMBER_ACTIONS,
@@ -31,47 +32,29 @@ test("host-neutral action contracts are unique and Pi only adds host-owned actio
   );
 });
 
-test("Pi, MCP, DSH, and OpenCode schemas consume the shared action contract", () => {
-  const sources = [
-    ["../../.pi/extensions/nmg/index.ts", /tool\.inputSchema/u, /supportedRememberActions/u],
-    ["../../src/integration/mcp-tools.ts", /tool\.inputSchema/u, /COMMON_REMEMBER_ACTIONS/u],
-    ["../../dsh/dsh-nmg/src/plugin/index.ts", /tool\.inputSchema/u, /COMMON_REMEMBER_ACTIONS/u],
-    ["../../opencode-plugin/index.ts", /tool\.inputSchema/u, /COMMON_REMEMBER_ACTIONS/u],
-  ] as const;
-  for (const [relativePath, boardContract, rememberContract] of sources) {
-    const source = readFileSync(resolve(import.meta.dirname, relativePath), "utf8");
-    assert.match(source, boardContract);
-    assert.match(source, rememberContract);
-  }
+test("shared remember schema exposes recall triggers and only supported actions", () => {
+  const tool = createRememberTool(["remember", "resolveRemember"]);
+  assert.ok(Object.hasOwn(tool.inputSchema.properties, "recallTriggers"));
+  assert.deepEqual(tool.inputSchema.properties.action.enum, [
+    "save",
+    "supersede",
+    "relate",
+    "forget",
+    "resolve",
+    "reopen",
+  ]);
 });
 
-test("Pi, MCP, DSH, and OpenCode expose recall triggers through remember", () => {
-  for (const relativePath of [
-    "../../.pi/extensions/nmg/index.ts",
-    "../../src/integration/mcp-tools.ts",
-    "../../dsh/dsh-nmg/src/plugin/index.ts",
-    "../../opencode-plugin/index.ts",
-  ]) {
-    const source = readFileSync(resolve(import.meta.dirname, relativePath), "utf8");
-    assert.match(source, /recallTriggers/u, `${relativePath} must forward recallTriggers`);
-  }
-});
-
-test("Pi, MCP, DSH, and OpenCode render through the shared agent surface", () => {
-  const search = readFileSync(
-    resolve(import.meta.dirname, "../../src/integration/search-tool.ts"),
-    "utf8",
-  );
-  assert.match(search, /renderSearchSurface/u);
+test("Pi, MCP, DSH, and OpenCode register and call shared definitions", () => {
   const sources = [
     "../../.pi/extensions/nmg/index.ts",
     "../../src/integration/mcp-tools.ts",
     "../../dsh/dsh-nmg/src/plugin/index.ts",
     "../../opencode-plugin/index.ts",
-  ] as const;
-  for (const relativePath of sources) {
-    const source = readFileSync(resolve(import.meta.dirname, relativePath), "utf8");
-    assert.match(source, /renderRememberSurface/u);
+  ];
+  for (const path of sources) {
+    const source = readFileSync(resolve(import.meta.dirname, path), "utf8");
+    assert.match(source, /tool\.inputSchema/u);
     assert.match(source, /tool\.execute/u);
   }
 });
