@@ -53,7 +53,9 @@ DSH 保留会话队列及端点存活检查。准备不会写入投递回执，�
 入口合同测试发现约定目录下的公开插件入口，解析 Pi 清单包装入口，
 并将 DSH／MCP 入口与能力目录核对，同时检查各入口消费自己的声明。
 受控宿主和 MCP 回归测试执行实际工具及上下文行为。
-本改动没有升级运行中的宿主。[原生复验](../../experiments/runtime/native-plugin-capabilities-2026-11-12.zh-CN.md#2026-11-13-能力装配复验)
+Pi、OpenCode、Codex MCP、Claude MCP 和 DSH 用各自注册的状态工具运行同一份
+[`agentActivity` 合同测试](../../../tests/helpers/agent-activity-contract.ts)。
+[原生复验](../../experiments/runtime/native-plugin-capabilities-2026-11-12.zh-CN.md#2026-11-13-能力装配复验)
 使用已安装的 DSH 服务及私有 OpenCode HTTP 宿主和回环模型，覆盖延迟工具转换及压缩恢复。
 尚未覆盖完整 DSH Agent 执行、生产 provider 或真实空闲唤醒。
 

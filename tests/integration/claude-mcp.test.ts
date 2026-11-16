@@ -11,6 +11,10 @@ import type { NmgMethodResult } from "../../src/cli/protocol.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { SqliteMemoryBackend } from "../../src/core/memory/sqlite-backend.ts";
 import { SEARCH_TOOL_PARAMETERS } from "../../src/integration/tool-contract.ts";
+import {
+  assertAgentActivityContract,
+  mcpToolContractText,
+} from "../helpers/agent-activity-contract.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 // The spawned MCP server inherits this process's environment; drop any ambient
@@ -178,27 +182,9 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     assert.match(textOf(exact), /stable Active Graph session/u);
     assert.match(textOf(exact), new RegExp(memoryId, "u"));
 
-    const busy = await client.callTool({
-      name: "nmg_state",
-      arguments: {
-        space: "board",
-        action: "write",
-        operation: "agentActivity",
-        activity: { state: "busy", capabilities: ["manual-coordination"] },
-      },
-    });
-    assert.match(textOf(busy), /processing=busy/);
-    assert.match(textOf(busy), /manual-coordination/);
-    const idle = await client.callTool({
-      name: "nmg_state",
-      arguments: {
-        space: "board",
-        action: "write",
-        operation: "agentActivity",
-        activity: { state: "idle" },
-      },
-    });
-    assert.match(textOf(idle), /processing=idle/);
+    await assertAgentActivityContract(async (args) =>
+      mcpToolContractText(await client.callTool({ name: "nmg_state", arguments: args })),
+    );
 
     const roster = await client.callTool({
       name: "nmg_state",

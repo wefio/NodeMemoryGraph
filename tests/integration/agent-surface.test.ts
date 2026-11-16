@@ -304,10 +304,12 @@ test("compact rendering also protects consumers of older raw diagnostic DTOs", (
 
 test("degraded reason codes are stable and arbitrary provider prose stays private", () => {
   for (const [reason, expected] of [
+    ["automatic_recall_embedding_deadline", "automatic_recall_embedding_deadline"],
     ["embedding_unavailable", "embedding_unavailable"],
     ["embedding_index_not_ready", "embedding_index_not_ready"],
     ["embedding_index_missing_targets", "embedding_index_missing_targets"],
     ["embedding_http_429", "embedding_http_429"],
+    ["automatic_recall_embedding_deadline: provider-only-detail", "unknown"],
     ["request failed: provider-only-detail", "unknown"],
     [undefined, "unknown"],
   ]) {
@@ -315,9 +317,11 @@ test("degraded reason codes are stable and arbitrary provider prose stays privat
     memory.retrieval = { mode: "lexical", degraded: true, reason };
     assert.match(renderSearchSurface(memory), new RegExp(`reason=${expected}\\]`, "u"));
   }
-  const healthy = context();
-  healthy.retrieval = { mode: "hybrid", degraded: false };
-  assert.doesNotMatch(renderSearchSurface(healthy), /degraded retrieval/u);
+  for (const mode of ["hybrid", "lexical"] as const) {
+    const healthy = context();
+    healthy.retrieval = { mode, degraded: false };
+    assert.doesNotMatch(renderSearchSurface(healthy), /degraded retrieval/u);
+  }
 });
 
 test("shared remember surface bounds semantic follow-up candidates", () => {

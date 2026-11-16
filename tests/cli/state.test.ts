@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { NmgService } from "../../src/cli/service.ts";
+import { stateOperation } from "../../src/integration/state.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
@@ -36,6 +37,30 @@ async function enable(service: NmgService, sessionId = "owner") {
 }
 
 const board = { space: "board", taskId: "test", agentId: "author" } as const;
+
+test("shared state validation distinguishes operation, direction, and space", () => {
+  for (const action of ["read", "write"] as const) {
+    const activity = { action, operation: "agentActivity" };
+    assert.equal(stateOperation({ ...activity, space: "board" }), "agentActivity");
+    assert.throws(() => stateOperation({ ...activity, space: "ag" }), {
+      code: "INVALID_PARAMS",
+      message: "agentActivity requires space=board",
+      parameter: "space",
+    });
+  }
+  assert.equal(stateOperation({ action: "read", space: "ag" }), "read");
+  for (const [action, space, operation] of [
+    ["read", "ag", "replace"],
+    ["write", "ag", "read"],
+    ["read", "board", "put"],
+    ["write", "board", "set"],
+  ] as const) {
+    assert.throws(() => stateOperation({ action, space, operation }), {
+      code: "INVALID_PARAMS",
+      message: `unsupported ${space} ${action} operation: ${operation}`,
+    });
+  }
+});
 
 test("state is an advertised additive RPC with AG and board operations", async () => {
   await withService(async (service) => {
@@ -124,6 +149,16 @@ test("state AG refuses stale, foreign and forged operation input without changin
 
 test("state rejects unknown spaces, operations and mismatched read/write directions", async () => {
   await withService(async (service) => {
+    for (const action of ["read", "write"] as const) {
+      await assert.rejects(
+        service.invoke("state", { action, space: "ag", operation: "agentActivity" }),
+        {
+          code: "INVALID_PARAMS",
+          message: "agentActivity requires space=board",
+          parameter: "space",
+        },
+      );
+    }
     for (const params of [
       { action: "read", space: "unknown" },
       { action: "read", space: "ag", operation: "replace", sessionId: "owner" },

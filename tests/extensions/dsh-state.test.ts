@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { httpHandler } from "../../src/cli/http-server.ts";
 import { NmgService } from "../../src/cli/service.ts";
+import { assertAgentActivityContract } from "../helpers/agent-activity-contract.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
@@ -806,6 +807,27 @@ test("DSH registers one state tool, keeps AG usable without coordination, and re
     assert.equal(board.action === "read" && board.entries.length, 0);
     assert.equal(subprocessCalls(), 0);
   });
+});
+
+test("DSH runs the shared agentActivity contract as the native session", async () => {
+  await withHost(
+    true,
+    async ({ tools, requests }) => {
+      const tool = tools.get("nmg_state")!;
+      const host = { agent: { id: "activity-session" }, signal: new AbortController().signal };
+      await assertAgentActivityContract(async (args) => String(await tool.execute(args, host)));
+      const forwarded = requests.filter(
+        (r) => r.method === "state" && r.params.operation === "agentActivity",
+      );
+      assert.ok(forwarded.length > 0);
+      for (const request of forwarded) {
+        assert.equal(request.params.agentId, "activity-session");
+        assert.equal(request.params.sessionId, "activity-session");
+        assert.equal(request.params.space, "board");
+      }
+    },
+    true,
+  );
 });
 
 test("DSH forwards event objects and pins mutation identity to its registered actor", async () => {

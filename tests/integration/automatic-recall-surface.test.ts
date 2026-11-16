@@ -12,7 +12,11 @@ test("automatic recall budgets wrappers and admits only whole source-bound previ
     ),
     relations: [],
     activeGraph: { id: "graph" },
-    retrieval: { mode: "lexical", degraded: true, reason: "embedding_unavailable" },
+    retrieval: {
+      mode: "lexical",
+      degraded: true,
+      reason: "automatic_recall_embedding_deadline",
+    },
   } as never);
   const output = prepareAutomaticRecallSurface(context, {
     preamble: "Automatic candidates; retrieve exact evidence before use.",
@@ -34,7 +38,10 @@ test("automatic recall budgets wrappers and admits only whole source-bound previ
     if (view.source?.kind === "memory") assert.ok(!output.text.includes(view.body));
   }
   assert.match(output.text, /candidate preview; not exact evidence/);
-  assert.match(output.text, /degraded retrieval/);
+  assert.match(
+    output.text,
+    /degraded retrieval: mode=lexical; reason=automatic_recall_embedding_deadline/u,
+  );
   assert.deepEqual(
     confirmInformationOutput(output, { sessionId: "s", text: output.text.slice(1) }).entries,
     [],

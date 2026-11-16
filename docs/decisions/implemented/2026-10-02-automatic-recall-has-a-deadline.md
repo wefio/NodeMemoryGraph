@@ -16,7 +16,7 @@ The user selected a five-second total waiting budget. One shared absolute `Recal
 
 Completed search headers form a fallback checkpoint before optional reranking, disclosure and telemetry. On deadline, the adapter returns already available context and ignores late data. If search itself has not returned, no candidates from its later response are injected. Best-effort disclosure may repeat headers when the disclosure ledger misses the deadline.
 
-The daemon's automatic search receives the remaining hook budget, capped at 4.5 seconds to leave time for transport and rendering. Query embedding uses that shared search deadline across local and shared stores. On expiry, lexical results remain available and the result names `automatic_recall_embedding_deadline`; this is not a provider-health diagnosis. Explicit searches do not inherit the automatic deadline.
+The daemon's automatic search receives the remaining hook budget, capped at 4.5 seconds to leave time for transport and rendering. Query embedding uses that shared search deadline across local and shared stores. On expiry, lexical results remain available and the shared Agent Surface displays `automatic_recall_embedding_deadline`. Provider failures use a separate diagnostic. Explicit searches do not inherit the automatic deadline.
 
 Pi records phase durations and outcomes in message `details.recallTiming`. `/nmg recall timing` displays the latest timing without recording prompts or credentials. The normative hook contract is in [session memory hooks](../../design/session-memory-lifecycle-hooks-2026-08-10.md#自动召回等待预算).
 

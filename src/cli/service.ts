@@ -43,13 +43,7 @@ import {
   prepareSessionActiveGraphSurface,
   prepareTaskBoardSurface,
 } from "../integration/agent-surface.ts";
-import {
-  STATE_AG_FIELDS,
-  STATE_AG_READ_OPERATIONS,
-  STATE_AG_WRITE_OPERATIONS,
-  STATE_BOARD_READ_OPERATIONS,
-  STATE_BOARD_WRITE_OPERATIONS,
-} from "../integration/state.ts";
+import { STATE_AG_FIELDS, stateOperation } from "../integration/state.ts";
 import {
   captureMemoryReferenceTargets,
   createMemoryReferences,
@@ -963,20 +957,11 @@ export class NmgService {
     const params = objectParams(value);
     const action = requiredEnum(params, "action", ["read", "write"] as const);
     const space = requiredEnum(params, "space", ["ag", "board"] as const);
-    const operation = optionalString(params, "operation") ?? (action === "read" ? "read" : "");
-    const allowed =
-      space === "ag"
-        ? action === "read"
-          ? STATE_AG_READ_OPERATIONS
-          : STATE_AG_WRITE_OPERATIONS
-        : action === "read"
-          ? STATE_BOARD_READ_OPERATIONS
-          : STATE_BOARD_WRITE_OPERATIONS;
-    if (!(allowed as readonly string[]).includes(operation))
-      throw new NmgProtocolError(
-        "INVALID_PARAMS",
-        `unsupported ${space} ${action} operation: ${operation}`,
-      );
+    const operation = stateOperation({
+      action,
+      space,
+      operation: optionalString(params, "operation"),
+    });
     if (space === "ag") return this.#stateAg(action, operation, params);
     return this.#stateBoard(action, operation, params);
   }

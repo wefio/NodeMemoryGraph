@@ -34,6 +34,7 @@ import {
   ControllerShadowBridge,
   shadowEnabled,
 } from "../../../.pi/extensions/nmg/controller-shadow.ts";
+import { assertAgentActivityContract } from "../../helpers/agent-activity-contract.ts";
 import { stripProviderEnv } from "../../helpers/test-env.ts";
 
 // The extension spawns its own daemon from this process's environment; drop any
@@ -1098,6 +1099,14 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
   };
   try {
     const { handlers, tools, commands } = extensionHarness();
+    await assertAgentActivityContract(async (args) => {
+      const result = (await tools
+        .get("nmg_state")!
+        .execute("agent-activity-contract", args, undefined, undefined, { sessionManager })) as {
+        content: Array<{ text: string }>;
+      };
+      return result.content[0]?.text ?? "";
+    });
     const remember = (await tools.get("nmg_remember")!.execute(
       "remember",
       {

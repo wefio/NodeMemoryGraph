@@ -9,6 +9,10 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { NmgService } from "../../src/cli/service.ts";
 import { createNmgMcpServer } from "../../src/integration/mcp-tools.ts";
 import { codexMcpBinding } from "../../codex-plugin/session.ts";
+import {
+  assertAgentActivityContract,
+  mcpToolContractText,
+} from "../helpers/agent-activity-contract.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
 stripProviderEnv();
@@ -37,6 +41,9 @@ test("one MCP connection isolates concurrent native sessions and refuses a forei
     await adapter.ready;
     await adapter.server.connect(serverTransport);
     await client.connect(clientTransport);
+    await assertAgentActivityContract(async (args) =>
+      mcpToolContractText(await call(a, "nmg_state", args)),
+    );
     await Promise.all(
       [a, b].map((id) =>
         call(id, "nmg_state", {

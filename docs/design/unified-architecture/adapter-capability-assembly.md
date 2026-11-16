@@ -68,8 +68,11 @@ not write a delivery receipt or authorize a memory claim.
 The entry-point contract test discovers conventional public plugin entries,
 resolves the Pi manifest wrapper and checks DSH/MCP entries against the catalog.
 It also verifies that each descriptor is consumed by its entry point. Controlled
-host and MCP regression tests exercise actual tools and context behavior. This
-change does not upgrade a running host. The retained
+host and MCP regression tests exercise actual tools and context behavior.
+Pi, OpenCode, Codex MCP, Claude MCP and DSH run the same
+[`agentActivity` contract](../../../tests/helpers/agent-activity-contract.ts)
+through their registered state tools. Each harness supplies its invocation.
+The retained
 [native recheck](../../experiments/runtime/native-plugin-capabilities-2026-11-12.md#capability-assembly-recheck-2026-11-13)
 exercises installed DSH services and a private OpenCode HTTP host with a loopback
 model, including deferred tool transformation and compaction recovery. It does

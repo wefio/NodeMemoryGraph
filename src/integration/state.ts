@@ -1,4 +1,4 @@
-import type { NmgStateResult } from "../cli/protocol.ts";
+import { NmgProtocolError, type NmgStateResult } from "../cli/protocol.ts";
 import { renderLabOutput } from "./lab-capabilities.ts";
 import {
   COORDINATION_OPERATIONS,
@@ -87,6 +87,8 @@ export function stateOperation(params: {
   space: string;
   operation?: string;
 }): string {
+  if (params.space === "ag" && params.operation === "agentActivity")
+    throw new NmgProtocolError("INVALID_PARAMS", "agentActivity requires space=board", "space");
   if (
     params.space === "ag" &&
     Object.entries(params).some(
@@ -109,8 +111,9 @@ export function stateOperation(params: {
     !["read", "write"].includes(params.action) ||
     !(table as readonly string[]).includes(operation)
   )
-    throw new Error(
-      `Unsupported state space/direction/operation: ${params.space} ${params.action} ${operation}`,
+    throw new NmgProtocolError(
+      "INVALID_PARAMS",
+      `unsupported ${params.space} ${params.action} operation: ${operation}`,
     );
   return operation;
 }

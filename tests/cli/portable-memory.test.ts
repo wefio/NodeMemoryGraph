@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { NmgService } from "../../src/cli/service.ts";
 import { httpHandler } from "../../src/cli/http-server.ts";
 import { NmgStore } from "../../src/core/store.ts";
@@ -367,6 +368,7 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
   const directory = mkdtempSync(join(tmpdir(), "nmg-portable-vector-"));
   const path = join(directory, "memory.sqlite");
   let documentCalls = 0;
+  let slowQueries = false;
   const server = createServer(async (request, response) => {
     const parts = [];
     for await (const chunk of request) parts.push(chunk);
@@ -374,6 +376,8 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
       requests: Array<{ taskType: string }>;
     };
     documentCalls += requests.filter((item) => item.taskType === "RETRIEVAL_DOCUMENT").length;
+    if (slowQueries && requests.some((item) => item.taskType === "RETRIEVAL_QUERY"))
+      await delay(120);
     response.end(JSON.stringify({ embeddings: requests.map(() => ({ values: [1, 0] })) }));
   });
   await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
@@ -411,6 +415,26 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
     });
     assert.equal(hybrid.retrieval?.mode, "hybrid");
     assert.ok(hybrid.results[0]!.lexicalScore > 0);
+    slowQueries = true;
+    const fallback = await service.invoke("search", {
+      query: "logistics depot",
+      retrievalMode: "hybrid",
+      autoRecall: true,
+      autoRecallBudgetMs: 20,
+    });
+    assert.deepEqual(fallback.retrieval, {
+      mode: "lexical",
+      degraded: true,
+      reason: "automatic_recall_embedding_deadline",
+    });
+    assert.equal(fallback.results[0]?.memory.id, original.memory.id);
+    const explicit = await service.invoke("search", {
+      query: "logistics depot",
+      retrievalMode: "hybrid",
+    });
+    assert.equal(explicit.retrieval?.mode, "hybrid");
+    assert.equal(explicit.results[0]?.vectorScore, 1);
+    slowQueries = false;
     const next = await service.invoke("remember", {
       statement: "The freight terminal is in Bergen",
       nodeName: "Terminal",
