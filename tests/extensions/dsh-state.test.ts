@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { httpHandler } from "../../src/cli/http-server.ts";
 import { NmgService } from "../../src/cli/service.ts";
+import { assertGetToolContract } from "../helpers/get-tool-contract.ts";
 import { assertAgentActivityContract } from "../helpers/agent-activity-contract.ts";
 import { assertRememberToolContract } from "../helpers/remember-tool-contract.ts";
 import { assertSearchToolContract } from "../helpers/search-tool-contract.ts";
@@ -532,6 +533,11 @@ test("DSH native search and forget use the activated daemon contract", async () 
       const output = await tools.get("nmg_lab")!.execute({ action: "list" }, {});
       assert.match(JSON.stringify(output), /recall_gate/u);
       assert.equal((await service.invoke("status")).rpcRejections?.length, 0);
+      await assertGetToolContract(
+        async (args) => String(await tools.get("nmg_get")!.execute(args, context)),
+        write.memory.id,
+        /Atlas codifies the DSH memory contract/u,
+      );
       const removed = await tools
         .get("nmg_remember")!
         .execute({ action: "forget", memoryId: write.memory.id }, {});
@@ -760,7 +766,11 @@ test("DSH carries a weak commit reminder for one turn and does not infer success
 test("DSH registers one state tool, keeps AG usable without coordination, and rejects Lab daily-state writes", async () => {
   await withHost(false, async ({ tools, service, subprocessCalls }) => {
     assert.ok(tools.has("nmg_state"));
-    assert.ok(tools.has("nmg_daemon"));
+    const health = await tools.get("nmg_daemon")!.execute({ action: "status" }, context);
+    assert.match(
+      String(health),
+      /NMG daemon: running pid=\d+ endpoint=127\.0\.0\.1:\d+ compatible=true/u,
+    );
     assert.equal(tools.has("nmg_board"), false);
     const lab = tools.get("nmg_lab")!;
     assert.equal(lab.parameters.properties.capability.enum?.includes("working_state"), false);

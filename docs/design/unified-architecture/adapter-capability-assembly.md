@@ -64,6 +64,9 @@ Pi binds exact excerpts from native session history. DSH and MCP can record
 independent task outcomes, and OpenCode omits the claim outcome action.
 The shared tool supplies fallback command arguments when the command can carry
 the requested provenance. Hosts select and execute the transport.
+The optional reasoning scratchpad and daemon health tool also use the shared
+registration. Pi keeps the scratchpad opt-in, and DSH supplies its native
+daemon address for health output.
 
 Tool registration intersects native bindings with the connected daemon's
 `hello.methods`. The search schema also uses `hello.searchParameters` when
@@ -94,17 +97,20 @@ host and MCP regression tests exercise actual tools and context behavior.
 Pi, OpenCode, Codex MCP, Claude MCP and DSH run the same
 [`agentActivity` contract](../../../tests/helpers/agent-activity-contract.ts)
 through their registered state tools. Each harness supplies its invocation.
+They also run the same [Search](../../../tests/helpers/search-tool-contract.ts),
+[Get](../../../tests/helpers/get-tool-contract.ts), and
+[Remember](../../../tests/helpers/remember-tool-contract.ts) contracts.
 The retained
 [native recheck](../../experiments/runtime/native-plugin-capabilities-2026-11-12.md#capability-assembly-recheck-2026-11-13)
 exercises installed DSH services and a private OpenCode HTTP host with a loopback
 model, including deferred tool transformation and compaction recovery. It does
 not cover full DSH Agent execution, production providers or live idle wake.
 
-The shared layer already has tool/action contracts, Agent Surface rendering,
+The shared layer provides tool/action contracts, Agent Surface rendering,
 `SessionRecallFlow`, `RecallBudget`, context preparation and endpoint/session
-binding. Hosts still register and orchestrate parts separately. In particular,
-`HarnessConnection` negotiates service methods/capabilities; it does not assemble
-host events or grant a host an injection interface.
+binding. Hosts translate native registration and lifecycle signals.
+`HarnessConnection` negotiates service methods and capabilities. Context
+injection requires a native host binding.
 
 ## Three responsibilities
 

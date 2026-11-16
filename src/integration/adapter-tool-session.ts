@@ -93,6 +93,7 @@ export interface AdapterToolSession {
     params: Record<string, unknown>,
     cliFallback?: string[],
   ): Promise<unknown>;
+  daemonAddress?: () => string | undefined;
   boardIdentity?: () => StateToolIdentity | Promise<StateToolIdentity>;
   boardReads?: "receipt" | "project";
   legacyBoardVerbs?: boolean;

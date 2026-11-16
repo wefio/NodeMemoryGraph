@@ -307,21 +307,10 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
     return { ok: true, data }
   }
 
-  function projectDaemonStatus(raw) {
-    const endpoint = resolveDaemon()
-    return {
-      running: true,
-      pid: endpoint && endpoint.pid != null ? endpoint.pid : null,
-      endpoint: endpoint ? endpoint.host + ':' + endpoint.port : null,
-      compatible: true,
-      status: raw,
-    }
-  }
-
-  async function invoke(method, params, cliArgs, signal, project) {
+  async function invoke(method, params, cliArgs, signal) {
     try {
       const raw = await daemonCall(method, params, signal)
-      if (raw != null) return { ok: true, data: project ? project(raw) : raw }
+      if (raw != null) return { ok: true, data: raw }
     } catch (error) {
       if (error instanceof NmgRpcError) return { ok: false, error: 'NMG ' + method + ': ' + error.message }
       return { ok: false, error: 'NMG call aborted' }
@@ -1059,7 +1048,7 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
   // State needs a resident owner. Do not replay refused writes or fall back to CLI.
   async function invokeRegisteredTool(method, params, signal, cliFallback) {
     if (cliFallback && !(method === 'remember' && resolveDaemon())) {
-      const result = await invoke(method, params, cliFallback, signal, null)
+      const result = await invoke(method, params, cliFallback, signal)
       if (!result.ok) throw new ToolTransportError(result.error)
       return result.data
     }
@@ -1070,30 +1059,6 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
     } catch (error) {
       throw new ToolTransportError('NMG ' + method + ' request failed: ' + String(error.message || error))
     }
-  }
-
-  const daemonTool = {
-    name: 'nmg_daemon',
-    description: 'Read-only NMG daemon health check. The adapter may ensure a daemon is running for requests, but it does not expose lifecycle ownership or stop it on plugin disposal.',
-    parameters: {
-      type: 'object',
-      properties: {
-        action: { type: 'string', enum: ['status'], description: 'Health check.' },
-      },
-      required: ['action'],
-    },
-    output: textOutput,
-    async execute(args, exec) {
-      const argv = ['daemon', args.action, '--json']
-      const r = await invoke('status', {}, argv, exec.signal, projectDaemonStatus)
-      if (!r.ok) return r.error
-      const data = r.data
-      if (args.action === 'status') {
-        if (!data.running) return 'NMG daemon: not running (one-shot CLI still works in-process).'
-        return 'NMG daemon: running pid=' + data.pid + ' endpoint=' + data.endpoint + ' compatible=' + data.compatible
-      }
-      return JSON.stringify(data)
-    },
   }
 
   // DSH-native automatic recall: a named systemPrompt.context contribution. The
@@ -1203,9 +1168,6 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
   }
 
   const capabilityAssembly = assembleAdapterCapabilities(ADAPTER_CAPABILITY_CATALOG.dsh.capabilities, {
-    tools: {
-      nmg_daemon: () => registerNativeTool(daemonTool),
-    },
     registerTool: tool => registerNativeTool({
       name: tool.name,
       description: tool.description,
@@ -1219,6 +1181,10 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
           const result = await tool.execute(args, {
             sessionId,
             requester: 'agent:dsh',
+            daemonAddress: () => {
+              const endpoint = resolveDaemon()
+              return endpoint && endpoint.host + ':' + endpoint.port
+            },
             invoke: (method, params, cliFallback) => invokeRegisteredTool(method, params, exec?.signal, cliFallback),
             memory: {
               projectDir: workspaceRoot,

@@ -22,8 +22,8 @@ test("declared subsets use a single native tool registration binding", async () 
     },
   };
   assert.throws(
-    () => assembleAdapterCapabilities(["search", "daemon-health"], bindings),
-    /missing binding nmg_daemon/,
+    () => assembleAdapterCapabilities(["search", "automatic-recall"], bindings),
+    /automatic-recall: missing native binding/,
   );
   assert.equal(registered.length, 0);
   const assembly = assembleAdapterCapabilities(["search", "get", "remember"], bindings);

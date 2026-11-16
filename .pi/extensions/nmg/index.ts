@@ -1,7 +1,6 @@
 import {
   assembleAdapterCapabilities,
   disabledBoardCapability,
-  type AdapterToolBindings,
   type AdapterCapabilityBindings,
 } from "../../../src/integration/adapter-capability-assembly.ts";
 import { ADAPTER_CAPABILITY_CATALOG } from "../../../src/integration/adapter-capability-catalog.ts";
@@ -118,12 +117,7 @@ import {
   contextNotice,
 } from "../../../src/integration/context-information.ts";
 import { deriveAnswerOverlapMemoryIds } from "../../../src/core/feedback.ts";
-import {
-  REASONING_EDGE_KINDS,
-  REASONING_NODE_KINDS,
-  REASONING_STATUSES,
-  type ReasoningCheckpoint,
-} from "../../../src/lab/reasoning-workspace.ts";
+import type { ReasoningCheckpoint } from "../../../src/lab/reasoning-workspace.ts";
 import {
   ControllerShadowBridge,
   shadowCollectionOrigin,
@@ -150,15 +144,10 @@ function projectDirectory(): string {
 
 export default function nmgExtension(pi: ExtensionAPI): void {
   let contextStateViews: typeof import("../../../src/integration/context-information.ts").contextStateViews;
-  const toolBindings: AdapterToolBindings = {};
-  const registerSharedTool: ExtensionAPI["registerTool"] = (tool) => {
-    toolBindings[tool.name as keyof AdapterToolBindings] = () => pi.registerTool(tool);
-  };
   let collectWakeCandidates: typeof import("../../../src/integration/board-wake.ts").collectWakeCandidates;
   let deliverBoardWakeBatch: typeof import("../../../src/integration/board-wake-batch.ts").deliverBoardWakeBatch;
   let reportHarnessActivity: typeof import("../../../src/integration/board-wake-batch.ts").reportHarnessActivity;
   const capabilityBindings: AdapterCapabilityBindings = {
-    tools: toolBindings,
     rememberOptions: { allowUnsafe: true, claimOutcome: "native-evidence" },
     "answer-attribution": ({ create }) => {
       agentAttributionFlow = create(32);
@@ -1234,136 +1223,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     // is injected again on the next turn; compaction alone never promotes
     // temporary state into durable NMG storage.
   });
-
-  if (labToolsEnabled) {
-    registerSharedTool({
-      name: "nmg_reason",
-      label: "NMG Reasoning Scratchpad",
-      description: nmgPrompts.reason_description,
-      parameters: Type.Object({
-        action: Type.Union(
-          [
-            Type.Literal("add"),
-            Type.Literal("update"),
-            Type.Literal("link"),
-            Type.Literal("checkpoint"),
-            Type.Literal("clear"),
-          ],
-          { description: nmgPrompts.reason_action_parameter_description },
-        ),
-        nodeId: Type.Optional(
-          Type.String({
-            description: nmgPrompts.reason_node_id_parameter_description,
-          }),
-        ),
-        kind: Type.Optional(
-          Type.Union(
-            REASONING_NODE_KINDS.map((kind) => Type.Literal(kind)),
-            { description: nmgPrompts.reason_kind_parameter_description },
-          ),
-        ),
-        content: Type.Optional(
-          Type.String({
-            description: nmgPrompts.reason_content_parameter_description,
-          }),
-        ),
-        status: Type.Optional(
-          Type.Union(
-            REASONING_STATUSES.map((status) => Type.Literal(status)),
-            { description: nmgPrompts.reason_status_parameter_description },
-          ),
-        ),
-        importance: Type.Optional(
-          Type.Number({
-            minimum: 0,
-            maximum: 1,
-            description: nmgPrompts.reason_importance_parameter_description,
-          }),
-        ),
-        evidenceRefs: Type.Optional(
-          Type.Array(Type.String(), {
-            description: nmgPrompts.reason_evidence_refs_parameter_description,
-          }),
-        ),
-        sourceId: Type.Optional(
-          Type.String({
-            description: nmgPrompts.reason_source_id_parameter_description,
-          }),
-        ),
-        targetId: Type.Optional(
-          Type.String({
-            description: nmgPrompts.reason_target_id_parameter_description,
-          }),
-        ),
-        relation: Type.Optional(
-          Type.Union(
-            REASONING_EDGE_KINDS.map((relation) => Type.Literal(relation)),
-            { description: nmgPrompts.reason_relation_parameter_description },
-          ),
-        ),
-      }),
-      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-        const sessionId = ctx.sessionManager.getSessionId();
-        const status = (await invokeDaemon(await connection(), "lab", {
-          action: "status",
-          capability: "reasoning_workspace",
-          sessionId,
-        })) as { activation?: unknown };
-        if (!status.activation) {
-          await invokeDaemon(await connection(), "lab", {
-            action: "enable",
-            capability: "reasoning_workspace",
-            scope: "session",
-            sessionId,
-            requester: "agent:pi",
-            reason: "nmg_reason requested a session scratchpad",
-          });
-        }
-        const input =
-          params.action === "link"
-            ? {
-                sourceId: params.sourceId,
-                targetId: params.targetId,
-                type: params.relation,
-              }
-            : params.action === "update"
-              ? {
-                  nodeId: params.nodeId,
-                  content: params.content,
-                  status: params.status,
-                  importance: params.importance,
-                  evidenceRefs: params.evidenceRefs,
-                }
-              : params.action === "add"
-                ? {
-                    kind: params.kind,
-                    content: params.content,
-                    status: params.status,
-                    importance: params.importance,
-                    evidenceRefs: params.evidenceRefs,
-                  }
-                : {};
-        const invoked = await invokeDaemon(await connection(), "lab", {
-          action: "invoke",
-          capability: "reasoning_workspace",
-          sessionId,
-          operation: params.action === "checkpoint" ? "checkpoint" : params.action,
-          input,
-        });
-        if (params.action === "clear") return toolResult(invoked, "Reasoning scratchpad cleared.");
-        const checkpoint =
-          params.action === "checkpoint"
-            ? invoked
-            : await invokeDaemon(await connection(), "lab", {
-                action: "invoke",
-                capability: "reasoning_workspace",
-                sessionId,
-                operation: "checkpoint",
-              });
-        return toolResult({ invoked, checkpoint }, JSON.stringify(checkpoint, null, 2));
-      },
-    });
-  }
 
   capabilityBindings.registerTool = (tool) =>
     pi.registerTool(

@@ -13,6 +13,7 @@ import {
   assertAgentActivityContract,
   mcpToolContractText,
 } from "../helpers/agent-activity-contract.ts";
+import { assertGetToolContract } from "../helpers/get-tool-contract.ts";
 import { assertRememberToolContract } from "../helpers/remember-tool-contract.ts";
 import { assertSearchToolContract } from "../helpers/search-tool-contract.ts";
 import { assertLabToolContract } from "../helpers/lab-tool-contract.ts";
@@ -92,6 +93,12 @@ test("one MCP connection isolates concurrent native sessions and refuses a forei
     assert.ok(projection);
     const memoryId = (await service.invoke("search", { query: "ScopeFixture" })).results[0]!.memory
       .id;
+    await assertGetToolContract(
+      async (args) => mcpToolContractText(await call(a, "nmg_get", args)),
+      memoryId,
+      /ScopeFixture SQLite storage/u,
+      projection,
+    );
     const refused = await call(b, "nmg_get", { memoryIds: [memoryId], activeGraphId: projection });
     assert.equal(refused.isError, true);
     assert.match(JSON.stringify(refused), /another session/);

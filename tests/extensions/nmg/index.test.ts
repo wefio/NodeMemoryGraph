@@ -34,6 +34,7 @@ import {
   ControllerShadowBridge,
   shadowEnabled,
 } from "../../../.pi/extensions/nmg/controller-shadow.ts";
+import { assertGetToolContract } from "../../helpers/get-tool-contract.ts";
 import { assertAgentActivityContract } from "../../helpers/agent-activity-contract.ts";
 import { assertRememberToolContract } from "../../helpers/remember-tool-contract.ts";
 import { assertSearchToolContract } from "../../helpers/search-tool-contract.ts";
@@ -146,6 +147,14 @@ test("Lab reasoning tool persists scratch state and injects it only after compac
       getSessionId: () => "reasoning-session",
       getSessionFile: () => "reasoning-session.jsonl",
     };
+    await assert.rejects(
+      tools
+        .get("nmg_reason")!
+        .execute("reason-invalid", { action: "add", kind: "hypothesis" }, undefined, undefined, {
+          sessionManager,
+        }),
+      /nmg_reason add requires content/u,
+    );
     const added = (await tools.get("nmg_reason")!.execute(
       "reason-add",
       {
@@ -1057,12 +1066,18 @@ test("Pi sends its live automatic recall and exact lookup to the unified SQLite 
       { sessionManager },
     )) as { message?: { content: string } };
     assert.match(result.message?.content ?? "", /CedarStore/u);
-    const exact = await tools
-      .get("nmg_get")!
-      .execute("contract-get", { memoryIds: [stored.memory.id] }, undefined, undefined, {
-        sessionManager,
-      });
-    assert.match(JSON.stringify(exact), /CedarStore/u);
+    await assertGetToolContract(
+      async (args) => {
+        const output = (await tools
+          .get("nmg_get")!
+          .execute("contract-get", args, undefined, undefined, { sessionManager })) as {
+          content: Array<{ text: string }>;
+        };
+        return output.content[0]?.text ?? "";
+      },
+      stored.memory.id,
+      /CedarStore/u,
+    );
     const connection = await connectDaemon(databasePath);
     const status = await invokeDaemon(connection, "status", {});
     assert.deepEqual((status as { rpcRejections?: unknown[] }).rpcRejections, []);

@@ -10,6 +10,7 @@ import { httpHandler } from "../../src/cli/http-server.ts";
 import { dropCompatibleLease } from "../../src/integration/lease-transport.ts";
 import { deliverBoardWake } from "../../src/integration/board-wake.ts";
 import { requireBoardEventCapability } from "../../src/integration/state.ts";
+import { assertGetToolContract } from "../helpers/get-tool-contract.ts";
 import { assertAgentActivityContract } from "../helpers/agent-activity-contract.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 stripProviderEnv();
@@ -88,10 +89,14 @@ test("real OpenCode registration forwards event payloads and public status to pr
       sessionId: context.sessionID,
     });
     assert.equal(dated.results[0]?.memory.eventTime, "2025-05-09T00:00:00.000Z");
-    const exact = await tools
-      .get("nmg_get")!
-      .execute({ memoryIds: [dated.results[0]!.memory.id] }, context);
-    assert.match(JSON.stringify(exact), /OpenCodeHistoricalClockMarker/u);
+    await assertGetToolContract(
+      async (args) => {
+        const output = (await tools.get("nmg_get")!.execute(args, context)) as { content: string };
+        return output.content;
+      },
+      dated.results[0]!.memory.id,
+      /OpenCodeHistoricalClockMarker/u,
+    );
     const created = await state.execute(
       {
         action: "write",

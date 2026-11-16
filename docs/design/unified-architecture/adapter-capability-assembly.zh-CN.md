@@ -51,6 +51,8 @@ Magpie 保持独立目标。
 记忆生命周期操作、反馈及声明结果。Pi 可以从原生历史绑定精确证据。DSH 和 MCP 可以记录
 独立任务的结果，OpenCode 的工具不注册声明结果操作。
 备用命令能携带所需的证据来源时，共享工具才提供命令参数。宿主负责实际传输。
+可选推理便笺和 daemon 健康检查也走同一注册入口。Pi 的推理便笺需显式启用，
+DSH 提供健康检查输出所需的原生 daemon 地址。
 
 工具注册取原生绑定和 daemon `hello.methods` 的交集。端点提供
 `hello.searchParameters` 时，工具据此筛选检索字段。
@@ -72,13 +74,16 @@ DSH 保留会话队列及端点存活检查。准备不会写入投递回执，�
 受控宿主和 MCP 回归测试执行实际工具及上下文行为。
 Pi、OpenCode、Codex MCP、Claude MCP 和 DSH 用各自注册的状态工具运行同一份
 [`agentActivity` 合同测试](../../../tests/helpers/agent-activity-contract.ts)。
+五个宿主也运行相同的 [Search](../../../tests/helpers/search-tool-contract.ts)、
+[Get](../../../tests/helpers/get-tool-contract.ts) 和
+[Remember](../../../tests/helpers/remember-tool-contract.ts) 合同。
 [原生复验](../../experiments/runtime/native-plugin-capabilities-2026-11-12.zh-CN.md#2026-11-13-能力装配复验)
 使用已安装的 DSH 服务及私有 OpenCode HTTP 宿主和回环模型，覆盖延迟工具转换及压缩恢复。
 尚未覆盖完整 DSH Agent 执行、生产 provider 或真实空闲唤醒。
 
-共享层已有工具／动作合同、Agent Surface、`SessionRecallFlow`、`RecallBudget`、
-上下文准备及端点／会话绑定，但各宿主仍分别注册和编排部分行为。
-其中 `HarnessConnection` 协商服务方法与能力，不负责装配宿主事件，也不会凭声明让宿主拥有上下文写入接口。
+共享层提供工具／动作合同、Agent Surface、`SessionRecallFlow`、`RecallBudget`、
+上下文准备及端点／会话绑定。宿主转换原生注册和生命周期信号。
+`HarnessConnection` 协商服务方法和能力。上下文注入需要宿主提供原生绑定。
 
 ## 三层职责
 

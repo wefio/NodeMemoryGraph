@@ -3,7 +3,13 @@ import type { NmgHelloResult, NmgMethod } from "../cli/protocol.ts";
 import { contextStateViews } from "./context-information.ts";
 import { promptCompletionNudge } from "./completion-nudge.ts";
 import { createGetTool, type SharedGetTool } from "./get-tool.ts";
-import { createLabTool, type SharedLabTool } from "./lab-tool.ts";
+import { createDaemonHealthTool, type SharedDaemonHealthTool } from "./daemon-health-tool.ts";
+import {
+  createLabTool,
+  createReasonTool,
+  type SharedLabTool,
+  type SharedReasonTool,
+} from "./lab-tool.ts";
 import {
   createRememberTool,
   type RememberToolOptions,
@@ -28,17 +34,7 @@ import {
 
 export type CapabilityCleanup = () => void | Promise<void>;
 type Installation = void | CapabilityCleanup | Promise<void | CapabilityCleanup>;
-type ToolName = (typeof TOOL_CAPABILITIES)[keyof typeof TOOL_CAPABILITIES];
 export type AdapterEndpoint = Pick<NmgHelloResult, "methods" | "searchParameters">;
-export type AdapterToolBindings = Partial<
-  Record<ToolName, (endpoint?: AdapterEndpoint) => Installation>
->;
-
-const TOOL_METHODS: Record<ToolName, NmgMethod> = {
-  nmg_daemon: "status",
-  nmg_reason: "lab",
-};
-
 export function endpointSupports(method: NmgMethod, endpoint?: AdapterEndpoint): boolean {
   return endpoint?.methods?.includes(method) ?? true;
 }
@@ -105,12 +101,9 @@ const SERVICES: CapabilityServices = {
   },
 };
 
-const TOOL_CAPABILITIES = {
-  "daemon-health": "nmg_daemon",
-  "reasoning-workspace": "nmg_reason",
-} as const;
-
 const SHARED_TOOLS = {
+  "daemon-health": { method: "status", create: createDaemonHealthTool },
+  "reasoning-workspace": { method: "lab", create: createReasonTool },
   remember: {
     method: "remember",
     create: (endpoint?: AdapterEndpoint, options?: RememberToolOptions) =>
@@ -135,22 +128,14 @@ const STATE_CAPABILITIES = { "state.ag": "ag", "state.board": "board" } as const
 type StateCapability = keyof typeof STATE_CAPABILITIES;
 
 export type AdapterCapability =
-  | keyof typeof TOOL_CAPABILITIES
-  | keyof typeof SHARED_TOOLS
-  | keyof CapabilityServices
-  | StateCapability;
+  keyof typeof SHARED_TOOLS | keyof CapabilityServices | StateCapability;
 export const ADAPTER_CAPABILITY_IDS = [
-  ...Object.keys(TOOL_CAPABILITIES),
   ...Object.keys(SHARED_TOOLS),
   ...Object.keys(SERVICES),
   ...Object.keys(STATE_CAPABILITIES),
 ] as readonly AdapterCapability[];
 export function adapterToolCapability(capability: AdapterCapability): boolean {
-  return (
-    Object.hasOwn(TOOL_CAPABILITIES, capability) ||
-    Object.hasOwn(SHARED_TOOLS, capability) ||
-    isStateCapability(capability)
-  );
+  return Object.hasOwn(SHARED_TOOLS, capability) || isStateCapability(capability);
 }
 
 export function disabledBoardCapability(enabled: boolean): readonly AdapterCapability[] {
@@ -158,12 +143,17 @@ export function disabledBoardCapability(enabled: boolean): readonly AdapterCapab
 }
 
 export type AdapterCapabilityBindings = {
-  tools?: AdapterToolBindings;
   rememberOptions?: RememberToolOptions;
   registerTool?: (tool: SharedAdapterTool) => Installation;
 } & { [K in keyof CapabilityServices]?: (services: CapabilityServices[K]) => Installation };
 export type SharedAdapterTool =
-  SharedStateTool | SharedLabTool | SharedGetTool | SharedSearchTool | SharedRememberTool;
+  | SharedStateTool
+  | SharedLabTool
+  | SharedGetTool
+  | SharedSearchTool
+  | SharedRememberTool
+  | SharedDaemonHealthTool
+  | SharedReasonTool;
 
 export interface CapabilityAssembly {
   ready: Promise<void>;
@@ -207,11 +197,7 @@ function capabilityInstaller(
     const spaces: StateToolSpace[] = state.map((id) => STATE_CAPABILITIES[id]);
     return withEndpoint("state", endpoint, () => register(createStateTool(spaces)));
   }
-  const tool = TOOL_CAPABILITIES[capability as keyof typeof TOOL_CAPABILITIES];
-  if (!tool) return serviceInstaller(capability as keyof CapabilityServices, bindings);
-  const bind = bindings.tools?.[tool];
-  if (!bind) throw new Error(`${capability}: missing binding ${tool}`);
-  return withEndpoint(TOOL_METHODS[tool], endpoint, bind);
+  return serviceInstaller(capability as keyof CapabilityServices, bindings);
 }
 
 function serviceInstaller<K extends keyof CapabilityServices>(
