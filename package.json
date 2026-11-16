@@ -115,6 +115,7 @@
     "eval:hierarchy": "node --experimental-strip-types evals/hierarchy-scale/run.ts",
     "index:embeddings": "node --experimental-strip-types scripts/index-qwen3.ts",
     "index:status": "node --experimental-strip-types scripts/embedding-status.ts",
+    "test:embedding-requests": "node --experimental-strip-types --test tests/core/embedding-provider.test.ts",
     "index:ann": "node --experimental-strip-types scripts/build-ann.ts",
     "package:check": "node --experimental-strip-types tools/verify-package.ts",
     "prepack": "npm run build",
