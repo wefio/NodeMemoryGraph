@@ -1,5 +1,6 @@
 import {
   assembleAdapterCapabilities,
+  disabledBoardCapability,
   supportedSearchParameters,
   type AdapterEndpoint,
   type AdapterCapabilityBindings,
@@ -37,9 +38,6 @@ import {
   renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
-  renderTaskBoardSurface,
-  type TaskBoardDirectoryEntry,
-  type TaskBoardSurfaceResult,
 } from "../src/integration/agent-surface.ts";
 import { loadWakeState, readWakeConfig, wakeBudgetGate } from "../src/integration/board-wake.ts";
 import {
@@ -60,15 +58,7 @@ import { RecallBudget } from "../src/integration/recall-budget.ts";
 import { prepareInformationOutput } from "../src/integration/information-output.ts";
 import type { PreparedInformationOutput } from "../src/core/information-view.ts";
 import { SessionTaskWindow } from "../src/integration/session-task-window.ts";
-import {
-  captureStateInvocation,
-  COORDINATION_OPERATIONS,
-  requireBoardEventCapability,
-  renderStateOutput,
-  stateOperation,
-  STATE_OPERATIONS,
-} from "../src/integration/state.ts";
-import { assembleBoardStateParams, resolveBoardOperation } from "./state-args.ts";
+import type { StateToolArguments } from "../src/integration/state-tool.ts";
 import {
   COMMON_REMEMBER_ACTIONS,
   supportedRememberActions,
@@ -78,10 +68,8 @@ import {
   SEARCH_REQUIRED_PARAMETERS,
   searchParameterProperties,
 } from "../src/integration/tool-contract.ts";
-import type { TaskBoardToolResult } from "../src/integration/tool-contract.ts";
 import { messageText } from "../src/integration/tool-observation.ts";
 import type { MemoryContext, MemoryTier, RememberResult } from "../src/core/types.ts";
-import { TASK_BOARD_VERDICTS, WORLD_BOARD_ID } from "../src/core/types.ts";
 import { deriveAnswerOverlapMemoryIds } from "../src/core/feedback.ts";
 import type { NmgStateResult, NmgSessionActiveGraphResult } from "../src/cli/protocol.ts";
 import { recallInput } from "../src/core/recall-matcher.ts";
@@ -1026,230 +1014,6 @@ export default {
       },
     });
 
-    // ---- nmg_state (working state + board channel) ------------------------
-    const boardState = async (params: Record<string, unknown>): Promise<TaskBoardToolResult> => {
-      const wrapped = (await invoke("state", params)) as NmgStateResult;
-      return wrapped?.result as TaskBoardToolResult;
-    };
-
-    const renameBoardAgent = (
-      sessionId: string,
-      identity: { id: string; agentName: string },
-      requestedName: string,
-    ): string => {
-      const newName = requestedName.trim();
-      if (!newName) {
-        return `当前 agent 名：${identity.agentName}（id=${identity.id}）。用法：nmg_state space=board action=write operation=rename agentName=<新名>`;
-      }
-      renameAgentIdentity({
-        anchor: process.env.NMG_AGENT_ID?.trim() || sessionId,
-        id: identity.id,
-        agentName: newName,
-      });
-      return `已改名：${newName}（id=${identity.id}）——定向 to= 可用新名或 id。`;
-    };
-
-    const boardControlResult = async (
-      sessionId: string,
-      identity: { id: string; agentName: string },
-      args: Record<string, unknown>,
-    ): Promise<string | undefined> => {
-      const operation = resolveBoardOperation(args);
-      if (operation === "rename") {
-        return renameBoardAgent(sessionId, identity, String(args.agentName ?? ""));
-      }
-      if (operation !== "subscribe" && operation !== "unsubscribe") return undefined;
-      const result = await boardState({
-        action: "write",
-        space: "board",
-        operation,
-        taskId: String(args.taskId ?? WORLD_BOARD_ID),
-        sessionId,
-        agentId: identity.id,
-      });
-      const joined = result as { action: string; taskId?: string };
-      return operation === "unsubscribe"
-        ? `已退出频道 ${joined?.taskId ?? args.taskId}：不再接收该频道新条目的唤醒通知（重新加入用 nmg_state space=board action=write operation=subscribe）。`
-        : `已加入频道 ${String(joined?.taskId ?? args.taskId)}：接收该频道新条目的唤醒通知（未订阅频道保持安静）。`;
-    };
-
-    const boardToolResult = async (
-      sessionId: string,
-      args: Record<string, unknown>,
-    ): Promise<string> => {
-      const identity = loadOrCreateAgentIdentity(sessionId, "opencode");
-      const control = await boardControlResult(sessionId, identity, args);
-      if (control !== undefined) return control;
-      const taskId = String(args.taskId ?? "").trim() || WORLD_BOARD_ID;
-      const params = assembleBoardStateParams(args, sessionId, identity);
-      await requireBoardEventCapability(params, () => invoke("hello", {}));
-      if (COORDINATION_OPERATIONS.has(String(params.operation)))
-        return renderStateOutput((await invoke("state", params)) as NmgStateResult);
-      const result = await boardState(params);
-      const entries = result.entries ?? (result.entry ? [result.entry] : []);
-      if (result.action === "read" && entries.length > 0) {
-        await Promise.allSettled([
-          ...entries.map((entry) =>
-            invoke("sessionActiveGraph", {
-              action: "observe",
-              sessionId,
-              kind: "board_projection",
-              sourceId: `board:${taskId}:${entry.id}`,
-              nodeId: `board:${taskId}`,
-              statement: `[task-board ${taskId} #${entry.id} ${entry.kind} by ${entry.agentId}] ${entry.content}`,
-            }),
-          ),
-          invoke("sessionActiveGraph", { action: "activate", sessionId }),
-          // Reading is a delivery receipt for open entries — the wake loop
-          // should not re-push what this session has already seen. Same echo
-          // boundary as the loop: the poster's own entries are never pushed.
-          ...entries
-            .filter((entry) => entry.status === "open")
-            .filter(
-              (entry) => !(entry.sourceSessionId === sessionId || entry.agentId === identity.id),
-            )
-            .map((entry) =>
-              invoke("taskBoard", {
-                action: "recordDelivery",
-                entryId: entry.id,
-                sessionId,
-                agentId: identity.id,
-                source: "read",
-              }),
-            ),
-        ]);
-      }
-      let directory: TaskBoardDirectoryEntry[] = [];
-      if (result.action === "read" && taskId === WORLD_BOARD_ID) {
-        const lobby = await boardState({
-          action: "read",
-          space: "board",
-          operation: "list",
-          agentId: identity.id,
-        }).catch(() => null);
-        directory = ((lobby as { boards?: TaskBoardDirectoryEntry[] } | null)?.boards ??
-          []) as TaskBoardDirectoryEntry[];
-      }
-      return renderTaskBoardSurface(result as unknown as TaskBoardSurfaceResult, {
-        taskId,
-        directory,
-      });
-    };
-
-    const stateTool = (): ToolRegistration => ({
-      name: "state",
-      description: prompts.state_description,
-      input: {
-        type: "object",
-        properties: {
-          action: { type: "string", enum: ["read", "write"] },
-          space: { type: "string", enum: ["ag", "board"] },
-          operation: { type: "string", enum: [...STATE_OPERATIONS] },
-          notification: {
-            type: "object",
-            additionalProperties: true,
-            description:
-              "Explicit notice: key, scopes [direct|channel|event], optional recipients (stable IDs), invite:true to enroll invitees and sender in taskId. Reuse key for retries.",
-          },
-          eventId: { type: "string" },
-          event: {
-            type: "object",
-            additionalProperties: true,
-            description:
-              "Event create/mutation payload; updates require expectedRevision, kind and text.",
-          },
-          activity: {
-            type: "object",
-            additionalProperties: true,
-            description:
-              "Session processing report for agentActivity: state busy/idle/unknown, optional capabilities and ttlSeconds.",
-          },
-          text: { type: "string" },
-          reason: { type: "string" },
-          ttlSeconds: { type: "integer", minimum: 60, maximum: 86400 },
-          taskId: { type: "string", description: prompts.board_task_id_parameter_description },
-          content: { type: "string", description: prompts.board_content_parameter_description },
-          kind: {
-            type: "string",
-            enum: ["blocker", "decision", "goal", "handoff", "note", "question", "result"],
-          },
-          entryId: { type: "string" },
-          resolution: { type: "string" },
-          leaseSeconds: { type: "integer", minimum: 60, maximum: 86400 },
-          digest: {
-            type: "string",
-            description: "deliver only: sha256 identity of the artifact you hand in",
-          },
-          ref: { type: "string", description: "deliver only: where the artifact can be read" },
-          summary: { type: "string", description: "deliver only: what the artifact contains" },
-          verdict: {
-            type: "string",
-            enum: [...TASK_BOARD_VERDICTS],
-            description: "judge only: accepted | rejected | undecidable",
-          },
-          afterCursor: { type: "string" },
-          limit: { type: "integer", minimum: 1, maximum: 200 },
-          includeResolved: { type: "boolean" },
-          to: {
-            type: "string",
-            description: "定向投递：stable agent_name 只唤醒该 agent（discover 选人）",
-          },
-          need: { type: "string", description: "discover 的找人需求描述（可选）" },
-          capabilities: { type: "string", description: "discover 按能力过滤（可选）" },
-          agentName: { type: "string", description: "rename 的新显示名（id 不变）" },
-        },
-        required: ["action", "space"],
-        additionalProperties: false,
-      },
-      execute: async (args, context) => {
-        const sessionId = toolSessionId(context, "state");
-        if (args.space === "ag") {
-          const operation = stateOperation({
-            action: String(args.action),
-            space: "ag",
-            operation: args.operation === undefined ? undefined : String(args.operation),
-          });
-          const captured = await captureStateInvocation(
-            {
-              action: String(args.action),
-              space: "ag",
-              operation,
-              text: args.text,
-              reason: args.reason,
-              ttlSeconds: args.ttlSeconds,
-              sessionId,
-              requester: "agent:opencode",
-            },
-            (boundSessionId: string) =>
-              invoke("state", {
-                action: "read",
-                space: "ag",
-                operation: "status",
-                sessionId: boundSessionId,
-              }),
-          );
-          const result = (await invoke("state", captured)) as NmgStateResult;
-          return { content: renderStateOutput(result) };
-        }
-        if (!coordinationEnabled()) {
-          return { content: "Board coordination is disabled (NMG_ENABLE_COORDINATION)." };
-        }
-        const action = String(args.action);
-        if (
-          (action === "deliver" && !args.digest) ||
-          (action === "judge" && (!args.verdict || !args.reason))
-        ) {
-          return {
-            content:
-              action === "deliver"
-                ? "deliver requires digest: the sha256 identity of the artifact being handed in"
-                : "judge requires verdict (accepted|rejected|undecidable) and reason: the ruling is recorded in the entry and survives a restart",
-          };
-        }
-        return { content: await boardToolResult(sessionId, args) };
-      },
-    });
-
     // The SDK retains transform callbacks and applies them per request. Resolve
     // shared capabilities during setup; the callback only publishes native tools.
     const toolDefinitions: ToolRegistration[] = [];
@@ -1267,12 +1031,42 @@ export default {
           nmg_remember: (endpoint) => {
             toolDefinitions.push({ ...rememberTool(endpoint?.methods), name: "nmg_remember" });
           },
-          nmg_state: () => {
-            toolDefinitions.push({ ...stateTool(), name: "nmg_state" });
-          },
+        },
+        registerTool: (tool) => {
+          toolDefinitions.push({
+            name: tool.name,
+            description: tool.description,
+            input: tool.inputSchema,
+            async execute(args, context) {
+              const sessionId = toolSessionId(context, "state");
+              const output = await tool.execute(args as StateToolArguments, {
+                sessionId,
+                requester: "agent:opencode",
+                invoke,
+                legacyBoardVerbs: true,
+                boardReads: "project",
+                boardIdentity: () => {
+                  const identity = loadOrCreateAgentIdentity(sessionId, "opencode");
+                  return {
+                    ...identity,
+                    saveName: (agentName) =>
+                      renameAgentIdentity({
+                        anchor: process.env.NMG_AGENT_ID?.trim() || sessionId,
+                        id: identity.id,
+                        agentName,
+                      }),
+                  };
+                },
+              });
+              return { content: output.text };
+            },
+          });
         },
       },
-      { endpoint: probeAdapterEndpoint(dataDir) },
+      {
+        endpoint: probeAdapterEndpoint(dataDir),
+        disabled: disabledBoardCapability(coordinationEnabled()),
+      },
     );
     await capabilityAssembly.ready;
     let registered: Promise<unknown>;

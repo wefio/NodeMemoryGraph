@@ -1,4 +1,4 @@
-import { assembleAdapterCapabilities, supportedSearchParameters } from '../../../../src/integration/adapter-capability-assembly.ts'
+import { assembleAdapterCapabilities, disabledBoardCapability, supportedSearchParameters } from '../../../../src/integration/adapter-capability-assembly.ts'
 import { ADAPTER_CAPABILITY_CATALOG } from '../../../../src/integration/adapter-capability-catalog.ts'
 // NMG adapter for DeepSeek Harness — community-standard dual-face host package.
 //
@@ -35,7 +35,6 @@ import {
   SEARCH_REQUIRED_PARAMETERS,
   searchParameterProperties,
 } from '../../../../src/integration/tool-contract.ts'
-import { stateRequiresBoardEvents } from '../../../../src/integration/state.ts'
 import { maybeBroadcastToWorld as broadcastWakeEntry } from '../../../../src/integration/board-wake.ts'
 import { loadOrCreateAgentIdentity, renameAgentIdentity } from '../../../../src/integration/agent-identity.ts'
 import { compactSearchContext, memoryDisclosureEntries } from '../../../../src/integration/search-projection.ts'
@@ -49,7 +48,6 @@ import { RecallBudget } from '../../../../src/integration/recall-budget.ts'
 import { prepareInformationOutput } from '../../../../src/integration/information-output.ts'
 import { DshNativeEvents } from './native-events.ts'
 import { contextOnlineLearningEnabled } from '../../../../src/lab/context-router-online.ts'
-import { STATE_OPERATIONS, STATE_AG_FIELDS, stateOperation, captureStateInvocation, renderStateOutput } from '../../../../src/integration/state.ts'
 import { renderLabOutput } from '../../../../src/integration/lab-capabilities.ts'
 
 const nmgPrompts = loadPrompts()
@@ -1446,125 +1444,32 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
     },
   }
 
-  const stateTool = {
-    name: 'nmg_state',
-    description: nmgPrompts.state_description,
-    parameters: {
-      type: 'object',
-      properties: {
-        action: { type: 'string', enum: ['read', 'write'] },
-        space: { type: 'string', enum: ['ag', 'board'] },
-        operation: { type: 'string', enum: STATE_OPERATIONS },
-        notification: { type: 'object', additionalProperties: true, description: 'Explicit notice: key, scopes [direct|channel|event], optional recipients (stable IDs); invite:true enrolls invitees and sender in taskId. Reuse key for retries.' },
-        eventId: { type: 'string' },
-        event: { type: 'object', additionalProperties: true, description: 'Event payload; mutation requires expectedRevision, kind and text.' },
-        activity: { type: 'object', additionalProperties: true, description: 'Session processing report for agentActivity: state busy/idle/unknown, optional capabilities and ttlSeconds.' },
-        text: { type: 'string' },
-        digest: { type: 'string' }, ref: { type: 'string' }, summary: { type: 'string' },
-        verdict: { type: 'string', enum: ['accepted', 'rejected', 'undecidable'] },
-        agentName: { type: 'string', description: 'New display name for rename; other operations use the native session identity.' },
-        taskId: { type: 'string', description: 'Task channel; omit for the shared world channel.' },
-        content: { type: 'string', description: 'Entry text (put).' },
-        kind: { type: 'string', enum: ['goal', 'note', 'question', 'result', 'handoff', 'decision', 'blocker'], description: 'Entry kind (put).' },
-        entryId: { type: 'string', description: 'Entry to resolve/claim/release.' },
-        resolution: { type: 'string', description: 'Resolution note (resolve).' },
-        reason: { type: 'string', description: 'Reason for acknowledge/subscribe/unsubscribe.' },
-        afterCursor: { type: 'string', description: 'Opaque cursor: id of the last seen entry (read).' },
-        limit: { type: 'integer', description: 'Max entries (read).' },
-        includeResolved: { type: 'boolean', description: 'Include resolved entries (read).' },
-        ttlSeconds: { type: 'integer', description: 'Entry lifetime 60..2592000 (put).' },
-        to: { type: 'string', description: 'Directed delivery to a stable agent name (put).' },
-        leaseSeconds: { type: 'integer', description: 'Claim lease 60..86400 (claim).' },
-        capabilities: { type: 'string', description: 'Capability substring filter (discover).' },
-      },
-      required: ['action', 'space'],
-    },
-    output: textOutput,
-    async execute(args, exec) {
-      // AG 空间只认 STATE_AG_FIELDS 里的键。工具 schema 是 board/ag 共用的一张表，
-      // 模型照着 schema 给 ag 带上 limit/kind 之类就会撞上 "Unsupported AG state field"。
-      // 既然这些字段在 ag 语义下本来也无效，就地按空间裁掉，别把参数校验错误丢给模型。
-      const scoped = args.space === 'ag'
-        ? Object.fromEntries(Object.entries(args).filter(([key]) => (STATE_AG_FIELDS as readonly string[]).includes(key)))
-        : args
-      const operation = stateOperation(scoped)
-      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id).trim() : ''
-      if (!sessionId) throw new Error('NMG state requires a native DSH Agent session')
-      const result = args.space === 'ag'
-        ? await executeAgState(scoped, operation, sessionId, exec.signal)
-        : await executeBoardState(args, operation, exec.agent, exec.signal)
-      return result.ok ? renderStateOutput(result.data) : result.error
-    },
-  }
+  class StateTransportError extends Error {}
 
-  // State calls need a resident owner: no CLI fallback, lifecycle takeover or
-  // automatic replay of a refused domain mutation.
-  async function invokeState(params, signal) {
-    try {
-      if (stateRequiresBoardEvents(params)) {
-        const hello = await daemonCall('hello', {}, signal, true)
-        if (!hello || !hello.capabilities || !hello.capabilities.includes('board-events')) throw new Error('NMG daemon does not advertise board-events')
-      }
-      const data = await daemonCall('state', params, signal, true)
-      return data == null
-        ? { ok: false, error: 'NMG daemon is unavailable for state' }
-        : { ok: true, data }
-    } catch (error) {
-      return { ok: false, error: 'NMG state request failed: ' + String(error.message || error) }
-    }
-  }
-
-  async function executeAgState(args, operation, sessionId, signal) {
-    const params = await captureStateInvocation({
-      action: args.action, space: 'ag', operation, text: args.text,
-      sessionId, requester: 'agent:dsh', reason: args.reason, ttlSeconds: args.ttlSeconds,
-    }, async sessionId => {
-      const status = await invokeState({ action: 'read', space: 'ag', operation: 'status', sessionId }, signal)
-      if (!status.ok) throw new Error(status.error)
-      return status.data
-    })
-    return invokeState(params, signal)
-  }
-
-  async function executeBoardState(args, operation, agent, signal) {
-    if (!coordinationEnabled) throw new Error('Board coordination is disabled')
+  async function resolveBoardIdentity(agent, signal) {
     if (hostDisposed) throw new Error('DSH adapter has been disposed')
+    if (disposedAgents.has(agent)) throw new Error('DSH Agent session has ended')
     const sessionId = String(agent.id)
-    if (disposedAgents.has(agent))
-      throw new Error('DSH Agent session has ended')
     lastAgents.set(sessionId, agent)
     await preparePresenceOwner(signal)
     const previous = boardRegistrations.get(sessionId)
-    const parent = previous?.parentId
-      ? lastAgents.get(previous.parentId)
-      : undefined
-    const identity = await registerBoardTarget(
-      { sessionId, agent, parent },
-      signal,
-    )
-    const requestedName = String(args.agentName || '').trim()
-    if (operation === 'rename' && !requestedName)
-      throw new Error('rename requires agentName')
-    const result = await invokeState(
-      {
-        ...args,
-        operation,
-        taskId: args.taskId || WAKE_WORLD_TASK,
-        sessionId,
-        sourceSessionId: sessionId,
-        agentId: identity.id,
-        id: identity.id,
-        agentName: operation === 'rename' ? requestedName : identity.agentName,
-      },
-      signal,
-    )
-    if (operation === 'rename' && result.ok)
-      renameAgentIdentity({
-        anchor: sessionId,
-        id: identity.id,
-        agentName: requestedName,
-      })
-    return result
+    const parent = previous?.parentId ? lastAgents.get(previous.parentId) : undefined
+    const identity = await registerBoardTarget({ sessionId, agent, parent }, signal)
+    return {
+      ...identity,
+      saveName: agentName => renameAgentIdentity({ anchor: sessionId, id: identity.id, agentName }),
+    }
+  }
+
+  // State needs a resident owner. Do not replay refused writes or fall back to CLI.
+  async function invokeSharedState(method, params, signal) {
+    try {
+      const data = await daemonCall(method, params, signal, true)
+      if (data == null) throw new Error('NMG daemon is unavailable for state')
+      return data
+    } catch (error) {
+      throw new StateTransportError('NMG state request failed: ' + String(error.message || error))
+    }
   }
 
   const daemonTool = {
@@ -1747,6 +1652,14 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
   // First poll on next tick (let the event loop settle).
   const initialWakeDisposer = coordinationEnabled ? ctx.timeout(boardWakeOnce, 0) : undefined
 
+  function registerNativeTool(definition) {
+    const release = (handle: unknown) => typeof handle === 'function'
+      ? async () => { await handle() }
+      : undefined
+    const handle = tools.register(definition)
+    return handle instanceof Promise ? handle.then(release) : release(handle)
+  }
+
   const capabilityAssembly = assembleAdapterCapabilities(ADAPTER_CAPABILITY_CATALOG.dsh.capabilities, {
     tools: {
       nmg_search: endpoint => tools.register({
@@ -1764,9 +1677,31 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
           },
         },
       }),
-      nmg_state: () => tools.register(stateTool),
       nmg_lab: () => tools.register(labTool),
+      nmg_daemon: () => registerNativeTool(daemonTool),
     },
+    registerTool: tool => registerNativeTool({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema,
+      output: textOutput,
+      async execute(args, exec) {
+        const sessionId = String(exec?.agent?.id ?? '').trim()
+        if (!sessionId) throw new Error('NMG state requires a native DSH Agent session')
+        try {
+          const result = await tool.execute(args, {
+            sessionId,
+            requester: 'agent:dsh',
+            invoke: (method, params) => invokeSharedState(method, params, exec.signal),
+            boardIdentity: () => resolveBoardIdentity(exec.agent, exec.signal),
+          })
+          return result.text
+        } catch (error) {
+          if (error instanceof StateTransportError) return error.message
+          throw error
+        }
+      },
+    }),
     'automatic-recall': ({ prepare }) => {
       prepareAutomaticRecallSurface = prepare
       const remove = [
@@ -1793,9 +1728,8 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
       reportHarnessActivity = activity
     },
     'tool-observation': ({ observe }) => ctx.on('tools/result', (exec, result) => nativeEvents.observe(exec, result, observe)),
-  }, { endpoint: readAdapterEndpoint() })
+  }, { endpoint: readAdapterEndpoint(), disabled: disabledBoardCapability(coordinationEnabled) })
   const disposers = [
-    tools.register(daemonTool),
     contextDisposer,
     ctx.on('agent/disposed', onAgentDisposed),
   ]

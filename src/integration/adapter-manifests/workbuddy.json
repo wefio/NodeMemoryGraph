@@ -1,0 +1,9 @@
+{
+  "$schema": "./adapter-manifest.schema.json",
+  "entry": "workbuddy-plugin/nmg-hook.ts",
+  "capabilities": [
+    "automatic-recall",
+    "completion-nudge",
+    "board-delivery"
+  ]
+}

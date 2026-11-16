@@ -1,0 +1,18 @@
+{
+  "$schema": "./adapter-manifest.schema.json",
+  "entry": ".pi/extensions/nmg/index.ts",
+  "capabilities": [
+    "reasoning-workspace",
+    "lab",
+    "remember",
+    "get",
+    "search",
+    "state.ag",
+    "state.board",
+    "automatic-recall",
+    "state-context",
+    "answer-attribution",
+    "tool-observation",
+    "board-delivery"
+  ]
+}

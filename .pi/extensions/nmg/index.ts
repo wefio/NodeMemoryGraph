@@ -1,5 +1,6 @@
 import {
   assembleAdapterCapabilities,
+  disabledBoardCapability,
   supportedSearchParameters,
   type AdapterToolBindings,
   type AdapterCapabilityBindings,
@@ -21,13 +22,7 @@ import { registerWorkingStateView } from "./working-state-view.ts";
 import { join } from "node:path";
 
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import {
-  captureStateInvocation,
-  COORDINATION_OPERATIONS,
-  stateOperation,
-  renderStateOutput,
-  STATE_BOARD_READ_OPERATIONS,
-} from "../../../src/integration/state.ts";
+import type { StateToolArguments } from "../../../src/integration/state-tool.ts";
 import type {
   NmgStateResult,
   NmgSessionActiveGraphResult,
@@ -46,7 +41,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Box, Text } from "@earendil-works/pi-tui";
-import { Type, type Static } from "typebox";
+import { Type } from "typebox";
 
 import {
   connectDaemon,
@@ -66,13 +61,9 @@ import {
 } from "../../../src/cli/archive-staging.ts";
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import { memoryDisclosureEntries } from "../../../src/integration/search-projection.ts";
-import {
-  PI_BOARD_ACTIONS,
-  supportedRememberActions,
-} from "../../../src/integration/tool-contract.ts";
+import { supportedRememberActions } from "../../../src/integration/tool-contract.ts";
 import { advertisedAdapterEndpoint, liveLease } from "../../../src/integration/lease-transport.ts";
 import { searchParameterDescription } from "../../../src/integration/tool-contract.ts";
-import type { TaskBoardToolResult } from "../../../src/integration/tool-contract.ts";
 import {
   type BoardWakeConfig,
   type BoardWakeState,
@@ -97,10 +88,8 @@ import {
 } from "../../../src/integration/session-task-window.ts";
 import { messageText } from "../../../src/integration/tool-observation.ts";
 import { renderLabOutput } from "../../../src/integration/lab-capabilities.ts";
-import { TASK_BOARD_VERDICTS } from "../../../src/core/types.ts";
 import { resolveSkillOptPolicyChannels } from "../../../src/lab/skillopt-policy.ts";
 import type { ActiveGraphBudget, MemoryContext, MemoryTier } from "../../../src/core/types.ts";
-import { WORLD_BOARD_ID } from "../../../src/core/types.ts";
 import {
   configuredAutoRecallLimit,
   configuredAutoRecallTier,
@@ -120,7 +109,6 @@ import {
   renderRememberSurface,
   renderSearchSurface,
   searchInformationViews,
-  renderTaskBoardSurface,
 } from "../../../src/integration/agent-surface.ts";
 import {
   selectEvidence,
@@ -134,7 +122,6 @@ import type {
 import { prepareInformationOutput } from "../../../src/integration/information-output.ts";
 import {
   checkpointInformationViews,
-  contextBoardEntries,
   contextNotice,
 } from "../../../src/integration/context-information.ts";
 import { deriveAnswerOverlapMemoryIds } from "../../../src/core/feedback.ts";
@@ -166,29 +153,6 @@ function databasePath(): string {
 
 function projectDirectory(): string {
   return process.env.NMG_PROJECT_DIR || process.cwd();
-}
-
-/** Name what a board verb is missing before the call leaves this process: the
- *  daemon refuses the same calls, but a named local refusal is what an agent can
- *  act on. Kept out of the tool's `execute` so the handler stays under the
- *  complexity ceiling (the repo extracts, it does not exempt). */
-function assertBoardVerbCall(params: {
-  action?: string;
-  digest?: string | undefined;
-  verdict?: string | undefined;
-  reason?: string | undefined;
-}): void {
-  if (params.action === "deliver" && !params.digest) {
-    throw new Error("deliver requires digest: the sha256 identity of the artifact being handed in");
-  }
-  if (params.action === "judge" && !params.verdict) {
-    throw new Error("judge requires verdict: accepted | rejected | undecidable");
-  }
-  if (params.action === "judge" && !params.reason) {
-    throw new Error(
-      "judge requires reason: the ruling is recorded in the entry and survives a restart",
-    );
-  }
 }
 
 export default function nmgExtension(pi: ExtensionAPI): void {
@@ -1338,7 +1302,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   });
 
   if (labToolsEnabled) {
-    pi.registerTool({
+    registerSharedTool({
       name: "nmg_reason",
       label: "NMG Reasoning Scratchpad",
       description: nmgPrompts.reason_description,
@@ -2247,329 +2211,38 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     },
   });
 
-  const invokeStateBoard = async (params: Record<string, unknown>) => {
-    const operation = String(params.action);
-    const action = (STATE_BOARD_READ_OPERATIONS as readonly string[]).includes(operation)
-      ? "read"
-      : "write";
-    const result = (await invoke("state", {
-      ...params,
-      action,
-      space: "board",
-      operation,
-    })) as NmgStateResult;
-    return result.result;
-  };
-
-  async function renameBoardAgent(
-    sessionId: string,
-    agentId: string,
-    agentName: string,
-    requestedName?: string,
-  ) {
-    const newName = String(requestedName ?? "").trim();
-    if (!newName) {
-      return toolResult(
-        { action: "rename", agentName, id: agentId },
-        `当前 agent 名：${agentName}（id=${agentId}）。用法：nmg_state action=write space=board operation=rename agentName=<新名>`,
-      );
-    }
-    const anchor = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
-    renameAgentIdentity({ anchor, id: agentId, agentName: newName });
-    const result = (await invokeStateBoard({
-      action: "rename",
-      id: agentId,
-      agentName: newName,
-    })) as { action: "rename"; agentName: string; id: string };
-    return toolResult(
-      result,
-      `已改名：${result.agentName}（id=${result.id}）——reload 后保持；定向 to= 可用新名或 id。`,
-    );
-  }
-
-  const boardParameters = Type.Object({
-    action: Type.Union(
-      PI_BOARD_ACTIONS.map((action) => Type.Literal(action)),
-      { description: nmgPrompts.board_action_parameter_description },
-    ),
-    taskId: Type.Optional(
-      Type.String({
-        description: nmgPrompts.board_task_id_parameter_description,
-      }),
-    ),
-    content: Type.Optional(
-      Type.String({
-        description: nmgPrompts.board_content_parameter_description,
-      }),
-    ),
-    kind: Type.Optional(
-      Type.Union([
-        Type.Literal("blocker"),
-        Type.Literal("decision"),
-        Type.Literal("goal"),
-        Type.Literal("handoff"),
-        Type.Literal("note"),
-        Type.Literal("question"),
-        Type.Literal("result"),
-      ]),
-    ),
-    entryId: Type.Optional(Type.String()),
-    resolution: Type.Optional(Type.String()),
-    reason: Type.Optional(Type.String()),
-    leaseSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 86_400 })),
-    digest: Type.Optional(
-      Type.String({
-        description:
-          "deliver only: the sha256 identity of the artifact you are handing in; the judge recomputes it",
-      }),
-    ),
-    ref: Type.Optional(
-      Type.String({
-        description:
-          "deliver only: where the artifact can be read (a path or URL the judge can open)",
-      }),
-    ),
-    summary: Type.Optional(
-      Type.String({
-        description: "deliver only: what the artifact contains, in one line",
-      }),
-    ),
-    verdict: Type.Optional(
-      Type.Union(
-        TASK_BOARD_VERDICTS.map((value) => Type.Literal(value)),
-        {
-          description:
-            "judge only: your ruling on someone else's deliverable. The deliverer can never judge it",
-        },
-      ),
-    ),
-    afterCursor: Type.Optional(
-      Type.String({
-        description: "不透明游标：上一条已读 entry 的 id（增量读续点）",
-      }),
-    ),
-    limit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
-    includeResolved: Type.Optional(Type.Boolean()),
-    ttlSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 2_592_000 })),
-    // A2A find→direct: put with to=<stable agent_name> wakes only that
-    // agent's LLM (others read-but-stay-silent). discover lists online
-    // agents so the caller can pick a to= target.
-    to: Type.Optional(
-      Type.String({
-        description:
-          "定向投递：stable agent_name 只唤醒该 agent；其他订阅者 read 可见但静默（需先 discover 选人）",
-      }),
-    ),
-    need: Type.Optional(Type.String({ description: "discover 的找人需求描述（可选）" })),
-    capabilities: Type.Optional(
-      Type.String({
-        description: "discover 按能力过滤（可选，如 'stg,audit'）",
-      }),
-    ),
-    agentName: Type.Optional(
-      Type.String({
-        description: "rename 的新显示名（id 不变，reload 后保持）",
-      }),
-    ),
-  });
-  const boardTool = defineTool({
-    name: "nmg_board",
-    label: "NMG Task Board",
-    description: nmgPrompts.board_description,
-    parameters: boardParameters,
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const sessionId = ctx.sessionManager.getSessionId();
-      // Identity chain: explicit NMG_AGENT_ID wins, then the session id (stable
-      // across a session), then the pid as a last resort. A pid alone would
-      // change every launch and fragment cross-session attribution.
-      const identity = loadOrCreateAgentIdentity(sessionId, "pi");
-      const agentId = identity.id;
-      const agentName = identity.agentName;
-      assertBoardVerbCall(params);
-      // taskId is optional: without one, entries land on the shared world
-      // channel (the lobby), which every Agent reads by default — no channel
-      // name needs to be agreed on in advance. Explicit taskIds open named
-      // channels that are surfaced in the world channel's lobby.
-      const taskId = params.taskId?.trim() || WORLD_BOARD_ID;
-      // Runtime rename: change this agent's display name (id unchanged — it is
-      // the stable routing key). Persisted in the per-agent identity file so
-      // it survives reload; mirrored to the registry so discover shows it.
-      if (params.action === "rename") {
-        return renameBoardAgent(sessionId, agentId, agentName, params.agentName);
-      }
-      // Unsubscribe/subscribe are session-scoped (whether THIS session keeps
-      // getting wake notices for a channel), handled apart from entry reads.
-      // Topic-based membership: subscribe joins a channel (named channels only
-      // notify their members), unsubscribe leaves it. The world channel is the
-      // default member channel; unsubscribe there mutes the world channel.
-      if (params.action === "unsubscribe" || params.action === "subscribe") {
-        const result = (await invokeStateBoard({
-          action: params.action,
-          taskId,
-          sessionId,
-          agentId,
-        })) as { action: "unsubscribe" | "subscribe"; taskId: string };
-        return toolResult(
-          result,
-          params.action === "unsubscribe"
-            ? `已退出频道 ${result.taskId}：不再接收该频道新条目的唤醒通知（用 nmg_state action=write space=board operation=subscribe 重新加入）。`
-            : `已加入频道 ${result.taskId}：接收该频道新条目的唤醒通知（未订阅的频道不会打扰你）。`,
-        );
-      }
-      const result = (await invokeStateBoard({
-        ...params,
-        taskId,
-        agentId,
-        agentName,
-        sourceSessionId: sessionId,
-      })) as TaskBoardToolResult;
-      const entries = result.entries ?? (result.entry ? [result.entry] : []);
-      if (result.action === "read") {
-        const projectedEntries = contextBoardEntries(entries, params.includeResolved === true);
-        await Promise.allSettled(
-          projectedEntries.map((entry) =>
-            invoke("sessionActiveGraph", {
-              action: "observe",
-              sessionId,
-              kind: "board_projection",
-              sourceId: `board:${taskId}:${entry.id}`,
-              nodeId: `board:${taskId}`,
-              statement: `[task-board ${taskId} #${entry.id} ${entry.kind} by ${entry.agentId}] ${entry.content}`,
-            }),
-          ),
-        );
-        if (projectedEntries.length > 0) {
-          await invoke("sessionActiveGraph", {
-            action: "activate",
-            sessionId,
-          }).catch(() => undefined);
-        }
-        // Reading is a delivery: write a receipt for every open, non-own-echo
-        // entry returned, so the wake loop does not re-push entries this
-        // session has already seen (flow constraint — 'already read' never
-        // re-wakes, per cross-agent feedback on world #9). Same echo boundary
-        // as the loop: the poster's own entries are never pushed anyway.
-        // await allSettled so receipts are durable before the read returns;
-        // a transient failure just risks one extra push (at-least-once).
-        const receipts = entries
-          .filter((entry) => {
-            if (entry.status !== "open") return false;
-            return !(
-              entry.sourceSessionId === sessionId ||
-              (entry.sourceSessionId == null && entry.agentId === agentId)
-            );
-          })
-          .map((entry) =>
-            invoke("taskBoard", {
-              action: "recordDelivery",
-              entryId: entry.id,
-              sessionId,
-              agentId,
-              source: "read",
-            }),
-          );
-        await Promise.allSettled(receipts);
-      }
-      // Reading the world channel surfaces the lobby: the directory of active
-      // named channels, so an Agent that knows no channel name can discover
-      // and join one.
-      let directory: Array<{
-        taskId: string;
-        entryCount: number;
-        lastUpdatedAt: string;
-      }> = [];
-      if (result.action === "read" && taskId === WORLD_BOARD_ID) {
-        const lobby = (await invokeStateBoard({ action: "list", agentId })) as {
-          action: "list";
-          boards: Array<{
-            taskId: string;
-            entryCount: number;
-            lastUpdatedAt: string;
-          }>;
-        };
-        directory = lobby.boards ?? [];
-      }
-      return toolResult(result, formatTaskBoardResult(result, taskId, directory));
-    },
-  });
-
-  registerSharedTool({
-    name: "nmg_state",
-    label: "NMG state",
-    description: nmgPrompts.state_description,
-    parameters: Type.Object({
-      ...boardParameters.properties,
-      action: Type.Union([Type.Literal("read"), Type.Literal("write")]),
-      space: Type.Union([Type.Literal("ag"), Type.Literal("board")]),
-      operation: Type.Optional(Type.String()),
-      notification: Type.Optional(
-        Type.Record(Type.String(), Type.Unknown(), {
-          description:
-            "Explicit notice: key, scopes [direct|channel|event], optional recipients (stable IDs), invite:true to subscribe invitees and sender to taskId. Reuse key on retries.",
-        }),
-      ),
-      eventId: Type.Optional(Type.String()),
-      event: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
-      activity: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
-      text: Type.Optional(Type.String()),
-    }),
-    async execute(id, args, signal, onUpdate, ctx) {
-      const operation = stateOperation(args);
-      if (args.space === "ag") {
-        const sessionId = ctx.sessionManager.getSessionId();
-        const active = await connection();
-        const captured = await captureStateInvocation(
-          {
-            action: args.action,
-            space: "ag",
-            operation,
-            text: args.text,
-            reason: args.reason,
-            ttlSeconds: args.ttlSeconds,
+  capabilityBindings.registerTool = (tool) =>
+    pi.registerTool(
+      defineTool({
+        name: tool.name,
+        label: tool.label,
+        description: tool.description,
+        parameters: Type.Unsafe<StateToolArguments>(tool.inputSchema),
+        async execute(_id, args, signal, _onUpdate, ctx) {
+          const sessionId = ctx.sessionManager.getSessionId();
+          const output = await tool.execute(args, {
             sessionId,
             requester: "agent:pi",
-          },
-          (sessionId) =>
-            invokeDaemon(active, "state", {
-              action: "read",
-              space: "ag",
-              operation: "status",
-              sessionId,
-            }),
-        );
-        const result = (await invokeDaemon(active, "state", captured)) as NmgStateResult;
-        const details = {
-          ...result,
-          ...(result.result.action === "invoke" ? { output: result.result.output } : {}),
-          workingStateBinding: captured.workingStateBinding,
-        };
-        return toolResult(details, renderStateOutput(result));
-      }
-      if (!coordinationToolsEnabled) throw new Error("Board coordination is disabled");
-      if (COORDINATION_OPERATIONS.has(operation)) {
-        const sessionId = ctx.sessionManager.getSessionId();
-        const identity = loadOrCreateAgentIdentity(sessionId);
-        const result = (await invoke("state", {
-          ...args,
-          operation,
-          agentId: identity.id,
-          sessionId,
-          sourceSessionId: sessionId,
-        })) as NmgStateResult;
-        return toolResult(result, renderStateOutput(result));
-      }
-      return boardTool.execute(
-        id,
-        {
-          ...args,
-          action: operation as Static<typeof boardParameters>["action"],
+            invoke: async (method, params) =>
+              invokeDaemon(await connection(), method, params, { signal }),
+            boardReads: "project",
+            boardIdentity: () => {
+              const identity = loadOrCreateAgentIdentity(sessionId, "pi");
+              return {
+                ...identity,
+                saveName: (agentName) =>
+                  renameAgentIdentity({
+                    anchor: process.env.NMG_AGENT_ID?.trim() || sessionId,
+                    id: identity.id,
+                    agentName,
+                  }),
+              };
+            },
+          });
+          return toolResult(output.details, output.text);
         },
-        signal,
-        onUpdate,
-        ctx,
-      );
-    },
-  });
+      }),
+    );
 
   // ---- Board wake loop ----------------------------------------------
   // Notification for an idle Agent: poll the subscribed spaces (the world
@@ -2682,7 +2355,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const capabilityAssembly = assembleAdapterCapabilities(
     ADAPTER_CAPABILITY_CATALOG.pi.capabilities,
     capabilityBindings,
-    { endpoint: advertisedAdapterEndpoint(liveLease(wakeDataDir)) },
+    {
+      endpoint: advertisedAdapterEndpoint(liveLease(wakeDataDir)),
+      disabled: [
+        ...disabledBoardCapability(coordinationToolsEnabled),
+        ...(labToolsEnabled ? [] : (["reasoning-workspace"] as const)),
+      ],
+    },
   );
   pi.on("session_shutdown", async () => {
     await capabilityAssembly.dispose();
@@ -2998,18 +2677,6 @@ export function formatMemoryContext(
 
 function toolResult(details: unknown, text: string) {
   return { content: [{ type: "text" as const, text }], details };
-}
-
-function formatTaskBoardResult(
-  result: TaskBoardToolResult,
-  taskId: string,
-  directory: Array<{
-    taskId: string;
-    entryCount: number;
-    lastUpdatedAt: string;
-  }> = [],
-): string {
-  return renderTaskBoardSurface(result, { taskId, directory });
 }
 
 function formatRememberResult(value: unknown): string {

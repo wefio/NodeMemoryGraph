@@ -22,6 +22,7 @@ export interface NmgMcpOptions {
 }
 import {
   assembleAdapterCapabilities,
+  disabledBoardCapability,
   endpointSupports,
   supportedSearchParameters,
   type AdapterToolBindings,
@@ -32,13 +33,7 @@ import { z } from "zod";
 import { loadPrompts, renderDisclosure } from "../prompts/load.ts";
 import { coordinationEnabled } from "./config.ts";
 import { renderLabOutput } from "./lab-capabilities.ts";
-import {
-  STATE_OPERATIONS,
-  stateOperation,
-  renderStateOutput,
-  captureStateInvocation,
-} from "./state.ts";
-import type { NmgStateResult } from "../cli/protocol.ts";
+import type { SharedStateTool, StateToolArguments } from "./state-tool.ts";
 import { memoryDisclosureEntries } from "./search-projection.ts";
 import { COMMON_REMEMBER_ACTIONS, supportedRememberActions } from "./tool-contract.ts";
 import { searchParameterDescription } from "./tool-contract.ts";
@@ -47,7 +42,7 @@ import {
   renderRememberSurface,
   renderSearchSurface,
 } from "./agent-surface.ts";
-import { WORLD_BOARD_ID, type MemoryContext } from "../core/types.ts";
+import type { MemoryContext } from "../core/types.ts";
 
 const nmgPrompts = loadPrompts();
 
@@ -590,128 +585,37 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
     lastBoardHeartbeatAt.set(binding().agentId, Date.now());
   }
 
-  toolBindings.nmg_state = () => {
+  const agentNames = new Map<string, string>();
+  function registerTool(tool: SharedStateTool) {
+    const schema = z.fromJSONSchema(
+      tool.inputSchema as unknown as Parameters<typeof z.fromJSONSchema>[0],
+    );
     const registered = server.registerTool(
-      "nmg_state",
-      {
-        description: nmgPrompts.state_description,
-        inputSchema: {
-          action: z.enum(["read", "write"]),
-          space: z.enum(["ag", "board"]),
-          operation: z.enum(STATE_OPERATIONS).optional(),
-          notification: z
-            .record(z.string(), z.unknown())
-            .optional()
-            .describe(
-              "Explicit notice: key, scopes [direct|channel|event], optional recipients (stable IDs), invite:true enrolls invitees and sender in taskId; reuse key for retries.",
-            ),
-          eventId: z.string().optional(),
-          event: z
-            .record(z.string(), z.unknown())
-            .optional()
-            .describe(
-              "Event create/mutation payload; mutations require expectedRevision, kind and text.",
-            ),
-          activity: z
-            .record(z.string(), z.unknown())
-            .optional()
-            .describe(
-              "Session processing report for agentActivity: state busy/idle/unknown, optional capabilities and ttlSeconds.",
-            ),
-          text: z.string().optional(),
-          agentName: z.string().optional(),
-          taskId: z.string().optional().describe(nmgPrompts.board_task_id_parameter_description),
-          content: z.string().optional().describe(nmgPrompts.board_content_parameter_description),
-          kind: z
-            .enum(["blocker", "decision", "goal", "handoff", "note", "question", "result"])
-            .optional(),
-          entryId: z.string().optional(),
-          resolution: z.string().optional(),
-          reason: z.string().optional(),
-          digest: z
-            .string()
-            .optional()
-            .describe("deliver only: the sha256 identity of the artifact being handed in"),
-          ref: z.string().optional().describe("deliver only: where the artifact can be read"),
-          summary: z
-            .string()
-            .optional()
-            .describe("deliver only: what the artifact contains, in one line"),
-          verdict: z
-            .enum(["accepted", "rejected", "undecidable"])
-            .optional()
-            .describe("judge only: your ruling on someone else's deliverable"),
-          leaseSeconds: z.number().int().min(60).max(86_400).optional(),
-          afterCursor: z.string().optional(),
-          limit: z.number().int().min(1).max(200).optional(),
-          includeResolved: z.boolean().optional(),
-          ttlSeconds: z.number().int().min(60).max(2_592_000).optional(),
-          to: z
-            .string()
-            .optional()
-            .describe("Stable agent name returned by discover for directed put"),
-          capabilities: z.string().optional().describe("Capability substring used by discover"),
-        },
-      },
+      tool.name,
+      { description: tool.description, inputSchema: schema },
       async (params, extra) =>
         withBinding(extra, async () => {
-          const operation = stateOperation(params);
-          if (params.space === "ag") {
-            const captured = await captureStateInvocation(
-              {
-                action: params.action,
-                space: "ag",
-                operation,
-                text: params.text,
-                reason: params.reason,
-                ttlSeconds: params.ttlSeconds,
-                sessionId: binding().sessionId,
-                requester: `agent:mcp:${binding().agentId}`,
-              },
-              (sessionId) =>
-                invoke("state", { action: "read", space: "ag", operation: "status", sessionId }),
-            );
-            const result = (await invoke("state", captured)) as NmgStateResult;
-            return { content: [{ type: "text" as const, text: renderStateOutput(result) }] };
-          }
-          if (!coordinationEnabled()) throw new Error("Board coordination is disabled");
-          await heartbeatBoardAgent();
-          const result = (await invoke("state", {
-            ...params,
-            operation,
-            taskId: params.taskId?.trim() || WORLD_BOARD_ID,
-            agentId: binding().agentId,
-            id: binding().agentId,
-            agentName: params.agentName ?? binding().agentId,
-            sourceSessionId: binding().sessionId,
-            sessionId: binding().sessionId,
-          })) as NmgStateResult;
-          await receiptBoardRead(result.result);
-          return { content: [{ type: "text" as const, text: renderStateOutput(result) }] };
+          const { sessionId, agentId } = binding();
+          const output = await tool.execute(params as StateToolArguments, {
+            sessionId,
+            requester: `agent:mcp:${agentId}`,
+            invoke,
+            boardReads: "receipt",
+            boardIdentity: async () => {
+              await heartbeatBoardAgent();
+              return {
+                id: agentId,
+                agentName: agentNames.get(agentId) ?? agentId,
+                saveName: (name) => {
+                  agentNames.set(agentId, name);
+                },
+              };
+            },
+          });
+          return { content: [{ type: "text" as const, text: output.text }] };
         }),
     );
     return () => registered.remove();
-  };
-
-  async function receiptBoardRead(result: NmgStateResult["result"]): Promise<void> {
-    if (result.action !== "read") return;
-    const receipts = result.entries
-      .filter(
-        (entry) =>
-          entry.status === "open" &&
-          entry.sourceSessionId !== binding().sessionId &&
-          !(entry.sourceSessionId == null && entry.agentId === binding().agentId),
-      )
-      .map((entry) =>
-        invoke("taskBoard", {
-          action: "recordDelivery",
-          entryId: entry.id,
-          sessionId: binding().sessionId,
-          agentId: binding().agentId,
-          source: "read",
-        }),
-      );
-    await Promise.allSettled(receipts);
   }
 
   // ── Compact formatters ──
@@ -806,8 +710,8 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
 
   const assembly = assembleAdapterCapabilities(
     options.capabilities ?? ADAPTER_CAPABILITY_CATALOG.mcp.capabilities,
-    { tools: toolBindings },
-    { endpoint: options.endpoint },
+    { tools: toolBindings, registerTool },
+    { endpoint: options.endpoint, disabled: disabledBoardCapability(coordinationEnabled()) },
   );
   return {
     server,

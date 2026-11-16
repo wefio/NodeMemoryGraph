@@ -50,10 +50,12 @@ test("MCP adapter permits coordination to be explicitly disabled", async () => {
   try {
     await client.connect(transport);
     const tools = await client.listTools();
-    assert.equal(
-      tools.tools.some((tool) => tool.name === "nmg_state"),
-      true,
-    );
+    const state = tools.tools.find((tool) => tool.name === "nmg_state");
+    assert.ok(state);
+    const space = state.inputSchema.properties?.space as
+      { const?: string; enum?: string[] } | undefined;
+    assert.deepEqual(space?.enum ?? [space?.const], ["ag"]);
+    assert.equal(Object.hasOwn(state.inputSchema.properties ?? {}, "activity"), false);
     assert.equal(
       tools.tools.some((tool) => tool.name === "nmg_search"),
       true,

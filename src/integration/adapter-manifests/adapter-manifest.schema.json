@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NMG adapter capability manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "entry",
+    "capabilities"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "entry": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "answer-attribution",
+          "automatic-recall",
+          "board-delivery",
+          "completion-nudge",
+          "daemon-health",
+          "get",
+          "lab",
+          "reasoning-workspace",
+          "remember",
+          "search",
+          "state-context",
+          "state.ag",
+          "state.board",
+          "tool-observation"
+        ]
+      }
+    }
+  }
+}

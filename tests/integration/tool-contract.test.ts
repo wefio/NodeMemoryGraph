@@ -33,10 +33,10 @@ test("host-neutral action contracts are unique and Pi only adds host-owned actio
 
 test("Pi, MCP, DSH, and OpenCode schemas consume the shared action contract", () => {
   const sources = [
-    ["../../.pi/extensions/nmg/index.ts", /PI_BOARD_ACTIONS/u, /supportedRememberActions/u],
-    ["../../src/integration/mcp-tools.ts", /STATE_OPERATIONS/u, /COMMON_REMEMBER_ACTIONS/u],
-    ["../../dsh/dsh-nmg/src/plugin/index.ts", /STATE_OPERATIONS/u, /COMMON_REMEMBER_ACTIONS/u],
-    ["../../opencode-plugin/index.ts", /STATE_OPERATIONS/u, /COMMON_REMEMBER_ACTIONS/u],
+    ["../../.pi/extensions/nmg/index.ts", /tool\.inputSchema/u, /supportedRememberActions/u],
+    ["../../src/integration/mcp-tools.ts", /tool\.inputSchema/u, /COMMON_REMEMBER_ACTIONS/u],
+    ["../../dsh/dsh-nmg/src/plugin/index.ts", /tool\.inputSchema/u, /COMMON_REMEMBER_ACTIONS/u],
+    ["../../opencode-plugin/index.ts", /tool\.inputSchema/u, /COMMON_REMEMBER_ACTIONS/u],
   ] as const;
   for (const [relativePath, boardContract, rememberContract] of sources) {
     const source = readFileSync(resolve(import.meta.dirname, relativePath), "utf8");
@@ -69,7 +69,7 @@ test("Pi, MCP, DSH, and OpenCode render through the shared agent surface", () =>
     assert.match(source, /renderSearchSurface/u);
     assert.match(source, /renderEvidenceSurface/u);
     assert.match(source, /renderRememberSurface/u);
-    assert.match(source, /renderTaskBoardSurface|renderStateOutput/u);
+    assert.match(source, /tool\.execute/u);
   }
 });
 

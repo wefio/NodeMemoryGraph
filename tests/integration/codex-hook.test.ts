@@ -13,6 +13,7 @@ import { NmgStore } from "../../src/core/store.ts";
 import { stgStorePath } from "../../src/core/stg.ts";
 import type { NmgMethod } from "../../src/cli/protocol.ts";
 import { ADAPTER_CAPABILITY_CATALOG } from "../../src/integration/adapter-capability-catalog.ts";
+import { adapterToolCapability } from "../../src/integration/adapter-capability-assembly.ts";
 import { captureStateInvocation } from "../../src/integration/state.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
@@ -21,7 +22,7 @@ stripProviderEnv();
 const id = "00000000-0000-7000-8000-000000000001";
 const turn = "00000000-0000-7000-8000-000000000002";
 const capabilities = ADAPTER_CAPABILITY_CATALOG.codex.capabilities.filter(
-  (capability) => !["memory-tools", "state-tool", "lab-tools"].includes(capability),
+  (capability) => !adapterToolCapability(capability),
 );
 
 test("Codex automatically recalls unified SQLite memory from the owning project and session", async () => {

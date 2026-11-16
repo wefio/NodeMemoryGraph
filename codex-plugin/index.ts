@@ -1,6 +1,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createNmgMcpServer } from "../src/integration/mcp-tools.ts";
 import { ADAPTER_CAPABILITY_CATALOG } from "../src/integration/adapter-capability-catalog.ts";
+import { adapterToolCapability } from "../src/integration/adapter-capability-assembly.ts";
 import {
   compatibleLease,
   dropCompatibleLease,
@@ -14,7 +15,6 @@ import { CodexTurnTraces } from "./turn-traces.ts";
 import { CodexHook } from "./hook.ts";
 
 const declared = ADAPTER_CAPABILITY_CATALOG.codex.capabilities;
-const toolCapabilities = new Set(["memory-tools", "state-tool", "lab-tools"]);
 
 export function createCodexAdapter(dataDirectory = resolveNmgDataDir()) {
   const sessions = new CodexSessionStore(dataDirectory);
@@ -36,7 +36,7 @@ export function createCodexAdapter(dataDirectory = resolveNmgDataDir()) {
   return {
     mcp: async () =>
       createNmgMcpServer({
-        capabilities: declared.filter((capability) => toolCapabilities.has(capability)),
+        capabilities: declared.filter(adapterToolCapability),
         resolveBinding: (metadata) => sessions.resolve(codexMcpBinding(metadata)),
         onContext: (binding, context) => traces.note(binding as CodexBinding, context),
         invoke,
@@ -51,7 +51,7 @@ export function createCodexAdapter(dataDirectory = resolveNmgDataDir()) {
           invoke: (method, params, signal) =>
             invoke(method, params, signal ? AbortSignal.any([signal, deadline]) : deadline),
         },
-        declared.filter((capability) => !toolCapabilities.has(capability)),
+        declared.filter((capability) => !adapterToolCapability(capability)),
       );
     },
   };

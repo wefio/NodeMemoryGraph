@@ -2,6 +2,7 @@ import { prepareAutomaticRecallSurface } from "./agent-surface.ts";
 import type { NmgHelloResult, NmgMethod } from "../cli/protocol.ts";
 import { contextStateViews } from "./context-information.ts";
 import { promptCompletionNudge } from "./completion-nudge.ts";
+import { createStateTool, type SharedStateTool, type StateToolSpace } from "./state-tool.ts";
 import { AgentAttributionFlow, recordVersionedAnswerAttribution } from "./agent-attribution.ts";
 import { collectWakeCandidates } from "./board-wake.ts";
 import {
@@ -19,7 +20,7 @@ import {
 
 export type CapabilityCleanup = () => void | Promise<void>;
 type Installation = void | CapabilityCleanup | Promise<void | CapabilityCleanup>;
-type ToolName = "nmg_search" | "nmg_get" | "nmg_remember" | "nmg_state" | "nmg_lab";
+type ToolName = (typeof TOOL_CAPABILITIES)[keyof typeof TOOL_CAPABILITIES];
 export type AdapterEndpoint = Pick<NmgHelloResult, "methods" | "searchParameters">;
 export type AdapterToolBindings = Partial<
   Record<ToolName, (endpoint?: AdapterEndpoint) => Installation>
@@ -29,8 +30,9 @@ const TOOL_METHODS: Record<ToolName, NmgMethod> = {
   nmg_search: "search",
   nmg_get: "get",
   nmg_remember: "remember",
-  nmg_state: "state",
   nmg_lab: "lab",
+  nmg_daemon: "status",
+  nmg_reason: "lab",
 };
 
 export function endpointSupports(method: NmgMethod, endpoint?: AdapterEndpoint): boolean {
@@ -111,14 +113,35 @@ const SERVICES: CapabilityServices = {
 };
 
 const TOOL_CAPABILITIES = {
-  "memory-tools": ["nmg_search", "nmg_get", "nmg_remember"],
-  "state-tool": ["nmg_state"],
-  "lab-tools": ["nmg_lab"],
+  search: "nmg_search",
+  get: "nmg_get",
+  remember: "nmg_remember",
+  lab: "nmg_lab",
+  "daemon-health": "nmg_daemon",
+  "reasoning-workspace": "nmg_reason",
 } as const;
 
-export type AdapterCapability = keyof typeof TOOL_CAPABILITIES | keyof CapabilityServices;
+const STATE_CAPABILITIES = { "state.ag": "ag", "state.board": "board" } as const;
+type StateCapability = keyof typeof STATE_CAPABILITIES;
+
+export type AdapterCapability =
+  keyof typeof TOOL_CAPABILITIES | keyof CapabilityServices | StateCapability;
+export const ADAPTER_CAPABILITY_IDS = [
+  ...Object.keys(TOOL_CAPABILITIES),
+  ...Object.keys(SERVICES),
+  ...Object.keys(STATE_CAPABILITIES),
+] as readonly AdapterCapability[];
+export function adapterToolCapability(capability: AdapterCapability): boolean {
+  return Object.hasOwn(TOOL_CAPABILITIES, capability) || isStateCapability(capability);
+}
+
+export function disabledBoardCapability(enabled: boolean): readonly AdapterCapability[] {
+  return enabled ? [] : ["state.board"];
+}
+
 export type AdapterCapabilityBindings = {
   tools?: AdapterToolBindings;
+  registerTool?: (tool: SharedStateTool) => Installation;
 } & { [K in keyof CapabilityServices]?: (services: CapabilityServices[K]) => Installation };
 
 export interface CapabilityAssembly {
@@ -130,28 +153,37 @@ export interface CapabilityAssembly {
   dispose(): Promise<void>;
 }
 
-function capabilityInstallers(
+function isStateCapability(capability: AdapterCapability): capability is StateCapability {
+  return Object.hasOwn(STATE_CAPABILITIES, capability);
+}
+
+function withEndpoint(
+  method: NmgMethod,
+  endpoint: AdapterEndpoint | Promise<AdapterEndpoint | undefined> | undefined,
+  bind: (discovered?: AdapterEndpoint) => Installation,
+): () => Installation {
+  const install = (discovered?: AdapterEndpoint) =>
+    endpointSupports(method, discovered) ? bind(discovered) : undefined;
+  return () => (endpoint instanceof Promise ? endpoint.then(install) : install(endpoint));
+}
+
+function capabilityInstaller(
   capability: AdapterCapability,
   bindings: AdapterCapabilityBindings,
-  endpoint?: AdapterEndpoint | Promise<AdapterEndpoint | undefined>,
-): Array<() => Installation> {
-  if (Object.hasOwn(TOOL_CAPABILITIES, capability)) {
-    const names = TOOL_CAPABILITIES[capability as keyof typeof TOOL_CAPABILITIES];
-    for (const name of names) {
-      const bind = bindings.tools?.[name];
-      if (typeof bind !== "function") throw new Error(`${capability}: missing binding ${name}`);
-    }
-    // Keep the host's existing order within a shared tool group.
-    return Object.entries(bindings.tools ?? {})
-      .filter(([name]) => (names as readonly string[]).includes(name))
-      .map(([name, bind]) => {
-        const method = TOOL_METHODS[name as ToolName];
-        const install = (discovered?: AdapterEndpoint) =>
-          endpointSupports(method, discovered) ? bind(discovered) : undefined;
-        return () => (endpoint instanceof Promise ? endpoint.then(install) : install(endpoint));
-      });
+  endpoint: AdapterEndpoint | Promise<AdapterEndpoint | undefined> | undefined,
+  state: readonly StateCapability[],
+): () => Installation {
+  if (isStateCapability(capability)) {
+    const register = bindings.registerTool;
+    if (!register) throw new Error(`${capability}: missing native tool registration`);
+    const spaces: StateToolSpace[] = state.map((id) => STATE_CAPABILITIES[id]);
+    return withEndpoint("state", endpoint, () => register(createStateTool(spaces)));
   }
-  return [serviceInstaller(capability as keyof CapabilityServices, bindings)];
+  const tool = TOOL_CAPABILITIES[capability as keyof typeof TOOL_CAPABILITIES];
+  if (!tool) return serviceInstaller(capability as keyof CapabilityServices, bindings);
+  const bind = bindings.tools?.[tool];
+  if (!bind) throw new Error(`${capability}: missing binding ${tool}`);
+  return withEndpoint(TOOL_METHODS[tool], endpoint, bind);
 }
 
 function serviceInstaller<K extends keyof CapabilityServices>(
@@ -179,20 +211,28 @@ export function assembleAdapterCapabilities(
 ): CapabilityAssembly {
   const disabled = new Set(options.disabled);
   if (new Set(capabilities).size !== capabilities.length) throw new Error("Duplicate capability");
-  const plans = capabilities.map((capability) => ({
-    capability,
-    state: disabled.has(capability) ? ("disabled" as const) : ("pending" as const),
-    install: disabled.has(capability)
-      ? []
-      : capabilityInstallers(capability, bindings, options.endpoint),
-  }));
+  const state = capabilities.filter(isStateCapability).filter((id) => !disabled.has(id));
+  const plans: CapabilityPlan[] = [];
+  for (const capability of capabilities) {
+    if (disabled.has(capability)) {
+      plans.push({ capabilities: [capability], state: "disabled" });
+      continue;
+    }
+    const isState = isStateCapability(capability);
+    if (isState && state[0] !== capability) continue;
+    plans.push({
+      capabilities: isState ? state : [capability],
+      state: "pending",
+      install: capabilityInstaller(capability, bindings, options.endpoint, state),
+    });
+  }
   return installCapabilities(plans);
 }
 
 type CapabilityPlan = {
-  capability: AdapterCapability;
+  capabilities: readonly AdapterCapability[];
   state: "assembled" | "pending" | "disabled" | "failed" | "disposed";
-  install: Array<() => Installation>;
+  install?: () => Installation;
 };
 
 class InstallationScope {
@@ -202,33 +242,26 @@ class InstallationScope {
   closing: Promise<void> | undefined;
 
   install(plan: CapabilityPlan): void {
-    const pending: Promise<void>[] = [];
-    for (const install of plan.install) {
-      const slot = this.cleanups.length;
-      this.cleanups.push(undefined);
-      const result = install();
-      if (result instanceof Promise) {
-        const accepted = result.then((cleanup) => this.accept(slot, cleanup));
-        this.pending.push(accepted);
-        pending.push(accepted);
-      } else {
-        this.cleanups[slot] = result || undefined;
-      }
-    }
-    if (pending.length === 0) {
+    const slot = this.cleanups.length;
+    this.cleanups.push(undefined);
+    const result = plan.install?.();
+    if (!(result instanceof Promise)) {
+      this.cleanups[slot] = result || undefined;
       plan.state = "assembled";
       return;
     }
     this.pending.push(
-      Promise.all(pending).then(
-        () => {
-          plan.state = this.closed ? "disposed" : "assembled";
-        },
-        (error) => {
-          plan.state = "failed";
-          throw error;
-        },
-      ),
+      result
+        .then((cleanup) => this.accept(slot, cleanup))
+        .then(
+          () => {
+            plan.state = this.closed ? "disposed" : "assembled";
+          },
+          (error) => {
+            plan.state = "failed";
+            throw error;
+          },
+        ),
     );
   }
 
@@ -289,7 +322,10 @@ function installCapabilities(plans: CapabilityPlan[]): CapabilityAssembly {
   void ready.catch(() => undefined);
   return {
     ready,
-    describe: () => plans.map(({ capability, state }) => ({ capability, state })),
+    describe: () =>
+      plans.flatMap(({ capabilities, state }) =>
+        capabilities.map((capability) => ({ capability, state })),
+      ),
     dispose: async () => {
       scope.closed = true;
       await Promise.allSettled(scope.pending);

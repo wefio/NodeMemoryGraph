@@ -326,6 +326,8 @@ routes:
     paths:
       - src/integration/adapter-capability-assembly.ts
       - src/integration/adapter-capability-catalog.ts
+      - src/integration/adapter-manifests/**
+      - src/integration/state-tool.ts
       - src/integration/completion-nudge.ts
     owners:
       - docs/design/unified-architecture/adapter-capability-assembly.md

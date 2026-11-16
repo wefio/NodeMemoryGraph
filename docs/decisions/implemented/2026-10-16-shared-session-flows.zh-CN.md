@@ -39,6 +39,10 @@ TUI、Shadow 桥、提示组合留在 pi 侧：那是 pi 的表面，不是共�
 移入 `tests/integration/session-flows.test.ts`；pi 适配器测试只保留 pi 自身接线
 的行为。
 
+[能力装配](../../design/unified-architecture/adapter-capability-assembly.zh-CN.md)
+在原生注册前校验各入口的 JSON 能力清单。AG 和黑板声明组成一个共享状态工具，
+由它负责参数校验、会话路由、写入栅栏和读取效果。宿主绑定负责注册、身份、传输和原生回执。
+
 ## Alternatives considered
 
 - 流转留在 pi，OpenCode 适配器复制一份。拒绝：复制的策略会漂移并陈旧——正是

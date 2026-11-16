@@ -14,13 +14,14 @@
 
 ## 可执行装配
 
+每个公开入口有一份 [JSON 能力清单](../../../src/integration/adapter-manifests)。
 [`adapter-capability-catalog.ts`](../../../src/integration/adapter-capability-catalog.ts)
-声明当前入口已迁移的能力。各入口通过
+用共享 JSON Schema 校验清单，Schema 的能力名与可执行注册表一致。各入口通过
 [`assembleAdapterCapabilities`](../../../src/integration/adapter-capability-assembly.ts)
 消费声明并提供可执行的原生绑定。该目录描述装配覆盖情况，
 [宿主矩阵](../harness-capability-matrix.zh-CN.md)继续负责整体宿主覆盖情况。
 
-共享模块装配记忆工具组（search、get、remember）、状态及 Lab 工具、召回准备、
+共享模块装配记忆工具（search、get、remember）、状态及 Lab 工具、召回准备、
 Owner 状态投影、工具结果观察、诊断归因、黑板投递及被动完成提醒。
 各入口只选择已实现的绑定。Kimi 当前装配共享提醒，其旧黑板轮询仍是本地代码。
 MCP 装配显式工具。Codex 包按每次原生请求绑定共享工具服务，装配上下文、状态、观察与
@@ -28,12 +29,18 @@ prompt 时黑板 hook。[插件指南](../../../codex-plugin/README.zh-CN.md)负
 Magpie 保持独立目标。
 
 装配器在注册前检查全部必需绑定。缺工具、缺生命周期绑定及重复能力会使启动失败。
-禁用模块有明确状态，不执行绑定。保留原生 schema 和工具组内的既有顺序。
+禁用模块有明确状态，不执行绑定。
 安装函数可返回原生清理函数或 Promise，异步宿主等待 `ready`。
 失败会释放已接受的注册，卸载后才被接受的注册也会清理。
 `dispose()` 只释放一次，`describe()` 报告 pending、assembled、disabled、failed、disposed。
 这些是装配状态，不证明真实 hook 已激活或功能已启用。
 端点方法、会话所有权和 writer 栅栏继续由既有操作路径检查。
+
+`state.ag` 和 `state.board` 装配为一个 `nmg_state`。
+[`state-tool.ts`](../../../src/integration/state-tool.ts) 统一定义输入 schema、
+操作校验、RPC 参数、写入栅栏、黑板读取效果及结果呈现。
+宿主注册一次共享定义，提供会话身份、传输、黑板身份以及支持的读取效果。
+关闭协作时，注册工具仅展示 AG 空间及其操作。记忆与 Lab 工具仍通过各入口的安装绑定装配。
 
 工具注册取原生绑定和 daemon `hello.methods` 的交集。端点提供
 `hello.searchParameters` 时，工具据此筛选检索字段。

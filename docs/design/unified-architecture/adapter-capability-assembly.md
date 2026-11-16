@@ -16,14 +16,15 @@ remain open to adjustment.
 
 ## Executable assembly
 
+Each public entry has a [JSON capability manifest](../../../src/integration/adapter-manifests).
 [`adapter-capability-catalog.ts`](../../../src/integration/adapter-capability-catalog.ts)
-declares the migrated features of all current entry points. Each consumes
-its declaration through
+validates each manifest against the shared JSON Schema. The schema's capability
+IDs match the executable registry. Each entry consumes its manifest through
 [`assembleAdapterCapabilities`](../../../src/integration/adapter-capability-assembly.ts)
 and supplies executable native bindings. This catalog describes assembly coverage;
 the [host matrix](../harness-capability-matrix.md) retains overall host coverage.
 
-The shared modules install the memory tool group (`search`, `get`, `remember`),
+The shared modules install the memory tools (`search`, `get`, `remember`),
 state and Lab tools, recall preparation, owner-state projection, tool-result
 observation, diagnostic attribution, board delivery and passive completion nudges.
 Each entry selects only its implemented bindings. Kimi currently assembles its
@@ -34,14 +35,22 @@ session-generation behavior. Magpie remains a separate target.
 
 The assembler validates every required binding before registration. Missing
 tools, missing lifecycle bindings and duplicate capabilities fail setup. Disabled
-modules are explicit and execute no binding. Existing native schemas and tool
-order are retained within a group. Installers can return native cleanup callbacks
+modules are explicit and execute no binding. Installers can return native cleanup callbacks
 or promises; asynchronous hosts await `ready`. Failure releases accepted
 registrations, including callbacks accepted after disposal. `dispose()` releases
 registrations once, and `describe()` reports pending, assembled, disabled, failed
 or disposed states. These are assembly states, not live-hook or enabled-state
 certificates. Endpoint methods, session ownership and writer fences are still
 checked by the existing operation paths.
+
+`state.ag` and `state.board` compose one `nmg_state` tool. The
+[`state-tool.ts`](../../../src/integration/state-tool.ts) definition owns the
+input schema, operation validation, bound RPC arguments, writer fence capture,
+board read effects and rendering. The native registration receives the shared
+definition once. The host supplies session identity, transport, and the board
+identity and read effects it supports. Disabling coordination omits the board
+space and its operations from the registered tool. Memory and Lab tools still
+use per-entry installer bindings.
 
 Tool registration intersects native bindings with the connected daemon's
 `hello.methods`. The search schema also uses `hello.searchParameters` when

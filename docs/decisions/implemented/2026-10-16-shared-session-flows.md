@@ -47,6 +47,12 @@ surface, not shared loop state. Their tests moved to
 `tests/integration/session-flows.test.ts`; pi-adapter tests keep only behavior
 pi itself wires.
 
+The [capability assembly](../../design/unified-architecture/adapter-capability-assembly.md)
+validates per-entry JSON manifests before native registration. AG and board
+declarations mount one shared state tool. The tool owns argument validation,
+session-bound routing, writer fence capture and board read effects. Native
+bindings handle tool registration, identity, transport and host receipts.
+
 ## Alternatives considered
 
 - Keep the flows in pi and copy them into the OpenCode adapter. Rejected:
