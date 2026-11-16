@@ -52,6 +52,7 @@ validates per-entry JSON manifests before native registration. AG and board
 declarations mount one shared state tool. The tool owns argument validation,
 session-bound routing, writer fence capture and board read effects. Native
 bindings handle tool registration, identity, transport and host receipts.
+The same native registrar mounts Lab from its shared schema and implementation.
 
 ## Alternatives considered
 

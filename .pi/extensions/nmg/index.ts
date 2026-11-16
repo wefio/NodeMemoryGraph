@@ -22,7 +22,6 @@ import { registerWorkingStateView } from "./working-state-view.ts";
 import { join } from "node:path";
 
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import type { StateToolArguments } from "../../../src/integration/state-tool.ts";
 import type {
   NmgStateResult,
   NmgSessionActiveGraphResult,
@@ -87,7 +86,6 @@ import {
   SessionTaskWindow,
 } from "../../../src/integration/session-task-window.ts";
 import { messageText } from "../../../src/integration/tool-observation.ts";
-import { renderLabOutput } from "../../../src/integration/lab-capabilities.ts";
 import { resolveSkillOptPolicyChannels } from "../../../src/lab/skillopt-policy.ts";
 import type { ActiveGraphBudget, MemoryContext, MemoryTier } from "../../../src/core/types.ts";
 import {
@@ -1431,68 +1429,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     });
   }
 
-  registerSharedTool({
-    name: "nmg_lab",
-    label: "NMG Lab capabilities",
-    description: nmgPrompts.lab_description,
-    parameters: Type.Object({
-      action: Type.Union([
-        Type.Literal("list"),
-        Type.Literal("status"),
-        Type.Literal("enable"),
-        Type.Literal("disable"),
-        Type.Literal("invoke"),
-      ]),
-      capability: Type.Optional(
-        Type.Union([
-          Type.Literal("reasoning_workspace"),
-          Type.Literal("recall_gate"),
-          Type.Literal("memory_graph_reasoner"),
-          Type.Literal("controller_shadow"),
-          Type.Literal("controller_controlled"),
-          Type.Literal("controller_active"),
-        ]),
-      ),
-      reason: Type.Optional(Type.String()),
-      ttlSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 86400 })),
-      operation: Type.Optional(Type.String()),
-      input: Type.Optional(Type.Unknown()),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const sessionId = ctx.sessionManager.getSessionId();
-      if (String(params.capability) === "working_state")
-        throw new Error("Working state uses nmg_state");
-      if (params.action !== "list" && !params.capability) {
-        throw new Error(`${params.action} requires capability`);
-      }
-      if (params.action === "enable" && !params.reason) throw new Error("enable requires reason");
-      if (params.action === "invoke" && !params.operation)
-        throw new Error("invoke requires operation");
-      if (
-        params.capability === "recall_gate" &&
-        ["enable", "disable", "clear", "correct", "remove"].includes(
-          params.action === "invoke" ? (params.operation ?? "") : params.action,
-        )
-      ) {
-        recallTurn = undefined;
-        retainedHandshake = undefined;
-      }
-      const active = await connection();
-      const result = await invokeDaemon(active, "lab", {
-        action: params.action,
-        capability: params.capability,
-        sessionId,
-        scope: params.action === "enable" ? "session" : undefined,
-        requester: params.action === "enable" ? "agent:pi" : undefined,
-        reason: params.reason,
-        ttlSeconds: params.ttlSeconds,
-        operation: params.operation,
-        input: params.input,
-      });
-      return toolResult(result, renderLabOutput(result));
-    },
-  });
-
   toolBindings.nmg_remember = (endpoint) =>
     pi.registerTool({
       name: "nmg_remember",
@@ -2217,7 +2153,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         name: tool.name,
         label: tool.label,
         description: tool.description,
-        parameters: Type.Unsafe<StateToolArguments>(tool.inputSchema),
+        parameters: Type.Unsafe<Record<string, unknown>>(tool.inputSchema),
         async execute(_id, args, signal, _onUpdate, ctx) {
           const sessionId = ctx.sessionManager.getSessionId();
           const output = await tool.execute(args, {
@@ -2225,6 +2161,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             requester: "agent:pi",
             invoke: async (method, params) =>
               invokeDaemon(await connection(), method, params, { signal }),
+            invalidateRecallGate: () => {
+              recallTurn = undefined;
+              retainedHandshake = undefined;
+            },
             boardReads: "project",
             boardIdentity: () => {
               const identity = loadOrCreateAgentIdentity(sessionId, "pi");

@@ -48,7 +48,6 @@ import { RecallBudget } from '../../../../src/integration/recall-budget.ts'
 import { prepareInformationOutput } from '../../../../src/integration/information-output.ts'
 import { DshNativeEvents } from './native-events.ts'
 import { contextOnlineLearningEnabled } from '../../../../src/lab/context-router-online.ts'
-import { renderLabOutput } from '../../../../src/integration/lab-capabilities.ts'
 
 const nmgPrompts = loadPrompts()
 
@@ -1462,7 +1461,12 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
   }
 
   // State needs a resident owner. Do not replay refused writes or fall back to CLI.
-  async function invokeSharedState(method, params, signal) {
+  async function invokeRegisteredTool(method, params, signal, cliFallback) {
+    if (cliFallback) {
+      const result = await invoke(method, params, cliFallback, signal, null)
+      if (!result.ok) throw new StateTransportError(result.error)
+      return result.data
+    }
     try {
       const data = await daemonCall(method, params, signal, true)
       if (data == null) throw new Error('NMG daemon is unavailable for state')
@@ -1493,64 +1497,6 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
         return 'NMG daemon: running pid=' + data.pid + ' endpoint=' + data.endpoint + ' compatible=' + data.compatible
       }
       return JSON.stringify(data)
-    },
-  }
-
-  function labParameterError(args) {
-    if (args.action !== 'list' && !args.capability) return args.action + ' requires capability.'
-    if (args.action === 'enable' && !args.reason) return 'enable requires reason.'
-    if (args.action === 'invoke' && !args.operation) return 'invoke requires operation.'
-    return null
-  }
-
-  function labCliArgs(args, sessionId) {
-    const argv = ['lab', args.action]
-    if (args.capability) argv.push(args.capability)
-    if (args.action !== 'list') argv.push('--session-id', sessionId)
-    if (args.action === 'enable') {
-      argv.push('--requester', 'agent:dsh', '--reason', args.reason)
-      if (args.ttlSeconds != null) argv.push('--ttl-seconds', String(args.ttlSeconds))
-    }
-    if (args.action === 'invoke') {
-      argv.push('--operation', args.operation)
-      if (args.input != null) argv.push('--input-json', JSON.stringify(args.input))
-    }
-    argv.push('--json')
-    return argv
-  }
-
-  async function executeLab(args, exec) {
-    if (args.capability === 'working_state') throw new Error('Working state uses nmg_state')
-    const error = labParameterError(args)
-    if (error) return error
-    const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-    const params = {
-      action: args.action, capability: args.capability, sessionId,
-      requester: args.action === 'enable' ? 'agent:dsh' : undefined,
-      reason: args.reason, ttlSeconds: args.ttlSeconds, operation: args.operation, input: args.input,
-    }
-    const result = await invoke('lab', params, labCliArgs(args, sessionId), exec.signal, null)
-    return result.ok ? renderLabOutput(result.data) : result.error
-  }
-
-  const labTool = {
-    name: 'nmg_lab',
-    description: nmgPrompts.lab_description,
-    parameters: {
-      type: 'object',
-      properties: {
-        action: { type: 'string', enum: ['list', 'status', 'enable', 'disable', 'invoke'] },
-        capability: { type: 'string', enum: ['reasoning_workspace', 'recall_gate', 'memory_graph_reasoner', 'controller_shadow', 'controller_controlled', 'controller_active'] },
-        reason: { type: 'string' },
-        ttlSeconds: { type: 'integer' },
-        operation: { type: 'string' },
-        input: { type: 'object', additionalProperties: true },
-      },
-      required: ['action'],
-    },
-    output: textOutput,
-    async execute(args, exec) {
-      return executeLab(args, exec)
     },
   }
 
@@ -1677,7 +1623,6 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
           },
         },
       }),
-      nmg_lab: () => tools.register(labTool),
       nmg_daemon: () => registerNativeTool(daemonTool),
     },
     registerTool: tool => registerNativeTool({
@@ -1686,13 +1631,14 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
       parameters: tool.inputSchema,
       output: textOutput,
       async execute(args, exec) {
-        const sessionId = String(exec?.agent?.id ?? '').trim()
+        const sessionId = String(exec?.agent?.id ?? '').trim() ||
+          (tool.requiresNativeSession ? '' : hostSessionId)
         if (!sessionId) throw new Error('NMG state requires a native DSH Agent session')
         try {
           const result = await tool.execute(args, {
             sessionId,
             requester: 'agent:dsh',
-            invoke: (method, params) => invokeSharedState(method, params, exec.signal),
+            invoke: (method, params, cliFallback) => invokeRegisteredTool(method, params, exec?.signal, cliFallback),
             boardIdentity: () => resolveBoardIdentity(exec.agent, exec.signal),
           })
           return result.text

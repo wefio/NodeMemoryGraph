@@ -58,7 +58,6 @@ import { RecallBudget } from "../src/integration/recall-budget.ts";
 import { prepareInformationOutput } from "../src/integration/information-output.ts";
 import type { PreparedInformationOutput } from "../src/core/information-view.ts";
 import { SessionTaskWindow } from "../src/integration/session-task-window.ts";
-import type { StateToolArguments } from "../src/integration/state-tool.ts";
 import {
   COMMON_REMEMBER_ACTIONS,
   supportedRememberActions,
@@ -1039,7 +1038,7 @@ export default {
             input: tool.inputSchema,
             async execute(args, context) {
               const sessionId = toolSessionId(context, "state");
-              const output = await tool.execute(args as StateToolArguments, {
+              const output = await tool.execute(args, {
                 sessionId,
                 requester: "agent:opencode",
                 invoke,

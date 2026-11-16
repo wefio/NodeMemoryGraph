@@ -8,6 +8,7 @@ import test from "node:test";
 import { httpHandler } from "../../src/cli/http-server.ts";
 import { NmgService } from "../../src/cli/service.ts";
 import { assertAgentActivityContract } from "../helpers/agent-activity-contract.ts";
+import { assertLabToolContract } from "../helpers/lab-tool-contract.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
@@ -754,6 +755,7 @@ test("DSH registers one state tool, keeps AG usable without coordination, and re
     assert.equal(tools.has("nmg_board"), false);
     const lab = tools.get("nmg_lab")!;
     assert.equal(lab.parameters.properties.capability.enum?.includes("working_state"), false);
+    await assertLabToolContract(async (args) => String(await lab.execute(args, context)));
     await assert.rejects(
       lab.execute({ action: "enable", capability: "working_state", reason: "test" }, context),
       /nmg_state/u,

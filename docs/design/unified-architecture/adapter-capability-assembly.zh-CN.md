@@ -40,7 +40,9 @@ Magpie 保持独立目标。
 [`state-tool.ts`](../../../src/integration/state-tool.ts) 统一定义输入 schema、
 操作校验、RPC 参数、写入栅栏、黑板读取效果及结果呈现。
 宿主注册一次共享定义，提供会话身份、传输、黑板身份以及支持的读取效果。
-关闭协作时，注册工具仅展示 AG 空间及其操作。记忆与 Lab 工具仍通过各入口的安装绑定装配。
+关闭协作时，注册工具仅展示 AG 空间及其操作。
+`lab` 通过同一原生绑定注册，共用 [Lab 定义](../../../src/integration/lab-tool.ts)
+的 schema、校验、调用及备用命令参数。记忆工具仍通过各入口的安装绑定装配。
 
 工具注册取原生绑定和 daemon `hello.methods` 的交集。端点提供
 `hello.searchParameters` 时，工具据此筛选检索字段。

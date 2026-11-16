@@ -29,13 +29,18 @@ export interface StateToolIdentity {
   saveName?: (name: string) => void;
 }
 
-export interface StateToolSession {
+export interface AdapterToolSession {
   sessionId: string;
   requester: string;
-  invoke(method: NmgMethod, params: Record<string, unknown>): Promise<unknown>;
+  invoke(
+    method: NmgMethod,
+    params: Record<string, unknown>,
+    cliFallback?: string[],
+  ): Promise<unknown>;
   boardIdentity?: () => StateToolIdentity | Promise<StateToolIdentity>;
   boardReads?: "receipt" | "project";
   legacyBoardVerbs?: boolean;
+  invalidateRecallGate?: () => void;
 }
 
 const prompts = loadPrompts();
@@ -100,10 +105,11 @@ function stateToolSchema(spaces: readonly StateToolSpace[]) {
 export function createStateTool(spaces: readonly StateToolSpace[]) {
   return {
     name: "nmg_state" as const,
+    requiresNativeSession: true,
     label: "NMG state",
     description: prompts.state_description,
     inputSchema: stateToolSchema(spaces),
-    async execute(input: StateToolArguments, session: StateToolSession) {
+    async execute(input: Record<string, unknown>, session: AdapterToolSession) {
       if (!spaces.includes(input.space as StateToolSpace)) {
         if (input.space === "board") throw new Error("Board coordination is disabled");
         throw new Error(`NMG state space is unavailable: ${input.space}`);
@@ -161,7 +167,7 @@ export function assembleBoardStateParams(
   };
 }
 
-async function invokeAg(input: StateToolArguments, operation: string, session: StateToolSession) {
+async function invokeAg(input: StateToolArguments, operation: string, session: AdapterToolSession) {
   const { sessionId, requester } = session;
   const params = await captureStateInvocation({ ...input, operation, sessionId, requester }, () =>
     session.invoke("state", { action: "read", space: "ag", operation: "status", sessionId }),
@@ -191,7 +197,7 @@ function checkBoardInput(input: StateToolArguments, operation: string): void {
 async function invokeBoard(
   input: StateToolArguments,
   operation: string,
-  session: StateToolSession,
+  session: AdapterToolSession,
 ) {
   checkBoardInput(input, operation);
   if (!session.boardIdentity) throw new Error("Board coordination is disabled");
@@ -239,7 +245,7 @@ function boardText(result: NmgStateResult): string {
 
 async function afterBoardRead(
   result: NmgStateResult["result"],
-  session: StateToolSession,
+  session: AdapterToolSession,
   identity: StateToolIdentity,
   taskId: string,
   includeResolved: boolean,

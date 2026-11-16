@@ -63,7 +63,7 @@ test("disabled features are explicit and do not execute their bindings", async (
   const assembly = assembleAdapterCapabilities(["lab"], {}, { disabled: ["lab"] });
   await assembly.ready;
   assert.equal(assembly.describe()[0]?.state, "disabled");
-  assert.throws(() => assembleAdapterCapabilities(["lab"], {}), /nmg_lab/);
+  assert.throws(() => assembleAdapterCapabilities(["lab"], {}), /missing native tool registration/);
 });
 
 test("tools intersect their native declaration with the connected daemon", async () => {
@@ -71,8 +71,8 @@ test("tools intersect their native declaration with the connected daemon", async
   const assembly = assembleAdapterCapabilities(
     ["search", "get", "remember", "state.ag", "lab"],
     {
-      registerTool: () => {
-        names.push("state");
+      registerTool: (tool) => {
+        names.push(tool.name);
       },
       tools: {
         nmg_search: () => {
@@ -83,9 +83,6 @@ test("tools intersect their native declaration with the connected daemon", async
         },
         nmg_remember: () => {
           names.push("remember");
-        },
-        nmg_lab: () => {
-          names.push("lab");
         },
       },
     },
@@ -223,6 +220,7 @@ test("state spaces assemble one shared tool and expose only declared operations"
       declared,
       {
         registerTool: (tool) => {
+          assert.equal(tool.name, "nmg_state");
           tools.push(tool);
         },
       },

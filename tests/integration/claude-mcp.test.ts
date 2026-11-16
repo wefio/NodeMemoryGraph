@@ -15,6 +15,7 @@ import {
   assertAgentActivityContract,
   mcpToolContractText,
 } from "../helpers/agent-activity-contract.ts";
+import { assertLabToolContract } from "../helpers/lab-tool-contract.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 // The spawned MCP server inherits this process's environment; drop any ambient
@@ -216,13 +217,9 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     });
     assert.match(textOf(read), /Review the adapter boundary/u);
 
-    const capabilities = await client.callTool({
-      name: "nmg_lab",
-      arguments: { action: "list" },
-    });
-    assert.match(textOf(capabilities), /reasoning_workspace/u);
-    assert.match(textOf(capabilities), /recall_gate/u);
-    assert.doesNotMatch(textOf(capabilities), /working_state/u);
+    await assertLabToolContract(async (args) =>
+      mcpToolContractText(await client.callTool({ name: "nmg_lab", arguments: args })),
+    );
     await client.callTool({
       name: "nmg_lab",
       arguments: { action: "enable", capability: "recall_gate", reason: "MCP session-only pilot" },

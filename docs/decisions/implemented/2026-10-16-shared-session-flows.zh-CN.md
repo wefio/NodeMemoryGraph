@@ -42,6 +42,7 @@ TUI、Shadow 桥、提示组合留在 pi 侧：那是 pi 的表面，不是共�
 [能力装配](../../design/unified-architecture/adapter-capability-assembly.zh-CN.md)
 在原生注册前校验各入口的 JSON 能力清单。AG 和黑板声明组成一个共享状态工具，
 由它负责参数校验、会话路由、写入栅栏和读取效果。宿主绑定负责注册、身份、传输和原生回执。
+Lab 复用同一个原生注册接口，共用 schema 和处理函数。
 
 ## Alternatives considered
 

@@ -49,8 +49,11 @@ input schema, operation validation, bound RPC arguments, writer fence capture,
 board read effects and rendering. The native registration receives the shared
 definition once. The host supplies session identity, transport, and the board
 identity and read effects it supports. Disabling coordination omits the board
-space and its operations from the registered tool. Memory and Lab tools still
-use per-entry installer bindings.
+space and its operations from the registered tool.
+`lab` uses the same native registration with the shared
+[`lab-tool.ts`](../../../src/integration/lab-tool.ts) schema, validation and
+invocation. Its fallback arguments belong to the shared definition. Memory
+tools still use per-entry installer bindings.
 
 Tool registration intersects native bindings with the connected daemon's
 `hello.methods`. The search schema also uses `hello.searchParameters` when

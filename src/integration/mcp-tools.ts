@@ -26,14 +26,13 @@ import {
   endpointSupports,
   supportedSearchParameters,
   type AdapterToolBindings,
+  type SharedAdapterTool,
 } from "./adapter-capability-assembly.ts";
 import { ADAPTER_CAPABILITY_CATALOG } from "./adapter-capability-catalog.ts";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { loadPrompts, renderDisclosure } from "../prompts/load.ts";
 import { coordinationEnabled } from "./config.ts";
-import { renderLabOutput } from "./lab-capabilities.ts";
-import type { SharedStateTool, StateToolArguments } from "./state-tool.ts";
 import { memoryDisclosureEntries } from "./search-projection.ts";
 import { COMMON_REMEMBER_ACTIONS, supportedRememberActions } from "./tool-contract.ts";
 import { searchParameterDescription } from "./tool-contract.ts";
@@ -514,49 +513,6 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
     return () => registered.remove();
   };
 
-  toolBindings.nmg_lab = () => {
-    const registered = server.registerTool(
-      "nmg_lab",
-      {
-        description: nmgPrompts.lab_description,
-        inputSchema: {
-          action: z.enum(["list", "status", "enable", "disable", "invoke"]),
-          capability: z
-            .enum([
-              "reasoning_workspace",
-              "recall_gate",
-              "memory_graph_reasoner",
-              "controller_shadow",
-              "controller_controlled",
-              "controller_active",
-            ])
-            .optional(),
-          reason: z.string().optional(),
-          ttlSeconds: z.number().int().min(60).max(86_400).optional(),
-          operation: z.string().optional(),
-          input: z.unknown().optional(),
-        },
-      },
-      async (params, extra) =>
-        withBinding(extra, async () => {
-          if (params.action !== "list" && !params.capability)
-            throw new Error(`${params.action} requires capability`);
-          if (params.action === "enable" && !params.reason)
-            throw new Error("enable requires reason");
-          if (params.action === "invoke" && !params.operation)
-            throw new Error("invoke requires operation");
-          const result = await invoke("lab", {
-            ...params,
-            sessionId: binding().sessionId,
-            scope: params.action === "enable" ? "session" : undefined,
-            requester: params.action === "enable" ? `agent:mcp:${binding().agentId}` : undefined,
-          });
-          return { content: [{ type: "text" as const, text: renderLabOutput(result) }] };
-        }),
-    );
-    return () => registered.remove();
-  };
-
   // ── Unified state and board identity ──
 
   // Presence follows the adapter-supplied request binding, including multiplexed hosts.
@@ -586,7 +542,7 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
   }
 
   const agentNames = new Map<string, string>();
-  function registerTool(tool: SharedStateTool) {
+  function registerTool(tool: SharedAdapterTool) {
     const schema = z.fromJSONSchema(
       tool.inputSchema as unknown as Parameters<typeof z.fromJSONSchema>[0],
     );
@@ -596,7 +552,7 @@ export function createNmgMcpServer(options: NmgMcpOptions) {
       async (params, extra) =>
         withBinding(extra, async () => {
           const { sessionId, agentId } = binding();
-          const output = await tool.execute(params as StateToolArguments, {
+          const output = await tool.execute(params as Record<string, unknown>, {
             sessionId,
             requester: `agent:mcp:${agentId}`,
             invoke,
