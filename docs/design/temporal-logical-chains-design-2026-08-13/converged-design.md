@@ -32,4 +32,4 @@ The previous draft used Mem0, Zep/Graphiti, TH-RAG, MMR, chronological passage a
 
 ## Source references
 
-See [`SearchOptions`](../../../src/core/types.ts), [chain expansion and appended budget](../../../src/core/store/retrieval.ts), [chain persistence and DAG checks](../../../src/core/store/base.ts), [logical-chain projection](../../../src/integration/chain-projection.ts), and the [chain test suite](../../../tests/core/memory-chains.test.ts).
+See [`SearchOptions`](../../../src/core/types.ts), [chain expansion and appended budget](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts), [chain persistence and DAG checks](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts), [logical-chain projection](../../../src/integration/chain-projection.ts), and the [chain test suite](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/memory-chains.test.ts).

@@ -30,6 +30,6 @@
 
 ## 当前评测代码边界
 
-当前 OmniMemEval bridge 保留显式合成链注入，并默认设为 `none`。当前活动的注入代码路径处理 `logical`；`temporal`／`both` 分支以注释形式保留为实验历史。Bridge 的链构造与检索选项属于评测 instrumentation，不是产品运行时行为。见 [`evals/omnimemeval/bridge.ts`](../../evals/omnimemeval/bridge.ts)、[`src/core/store/retrieval.ts`](../../src/core/store/retrieval.ts) 和[链设计沿革](temporal-logical-chains-design-2026-08-13.zh-CN.md)。
+当前 OmniMemEval bridge 保留显式合成链注入，并默认设为 `none`。当前活动的注入代码路径处理 `logical`；`temporal`／`both` 分支以注释形式保留为实验历史。Bridge 的链构造与检索选项属于评测 instrumentation，不是产品运行时行为。见 [`evals/omnimemeval/bridge.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/evals/omnimemeval/bridge.ts)、[`src/core/store/retrieval.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts) 和[链设计沿革](temporal-logical-chains-design-2026-08-13.zh-CN.md)。
 
 原协议还列出了长链窗口、logical 顺序近似、DAG 分叉，以及区分检索展开与呈现等开放问题。除非当前 owner 或实验给出结论，它们仍是研究问题。

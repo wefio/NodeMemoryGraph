@@ -47,7 +47,7 @@ model file; it writes nothing back to the database.
 ## Boundaries
 
 The BPID identity-matching probe of the same model lives in
-[`evals/topology/bpid-neural-probe.ts`](../topology/bpid-neural-probe.ts). It
+[`evals/topology/bpid-neural-probe.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/evals/topology/bpid-neural-probe.ts). It
 trains on `.benchmarks/bpid/data/data_release/matching_dataset.jsonl` (not in
 this repository) over the same three seeds and fails a run whose rejection
 precision drops below 0.95 or whose relevant retention drops below 0.99.

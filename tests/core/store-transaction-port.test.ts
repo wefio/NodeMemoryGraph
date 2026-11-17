@@ -13,12 +13,12 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
 
-import { NmgStore } from "../../src/core/store.ts";
-import type { TransactionPort } from "../../src/core/store/base.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
+import type { TransactionPort } from "../../src/core/store/store-ctor.ts";
 
-function withStore(t: TestContext, run: (store: NmgStore) => void): void {
+function withStore(t: TestContext, run: (store: SqliteLocalDaemonState) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "nmg-port-"));
-  const store = new NmgStore(join(dir, "nmg.sqlite"));
+  const store = new SqliteLocalDaemonState(join(dir, "nmg.sqlite"));
   t.after(() => {
     try {
       store.close();
@@ -38,7 +38,7 @@ const entry = (content: string) => ({
   expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
 });
 
-const contents = (store: NmgStore): string[] =>
+const contents = (store: SqliteLocalDaemonState): string[] =>
   store
     .readTaskBoard({ taskId: "port-channel", includeResolved: true })
     .entries.map((row) => row.content)
@@ -82,7 +82,7 @@ test("a transition may not open another transition of its own", (t) => {
 test("a port from another store is refused", (t) => {
   withStore(t, (first) => {
     const dir = mkdtempSync(join(tmpdir(), "nmg-port-other-"));
-    const second = new NmgStore(join(dir, "nmg.sqlite"));
+    const second = new SqliteLocalDaemonState(join(dir, "nmg.sqlite"));
     t.after(() => {
       second.close();
       rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });

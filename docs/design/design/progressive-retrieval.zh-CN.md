@@ -57,7 +57,7 @@ Inbox/Delta + surface anchors + fine-grained record semantics
 
 daemon 一次搜索内，相同 embedding 批次共享向量，不共享 Store 读取。
 新调用重新准备，失败或空结果可重试。每次使用仍检查 scope、索引健康和期限。
-精确批次身份与向量复制隔离见[实现](../../../src/integration/search.ts)。
+精确批次身份与向量复制隔离见[实现](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/integration/search.ts)。
 
 ### 证据组装
 

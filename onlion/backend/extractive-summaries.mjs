@@ -66,39 +66,3 @@ export function extractiveNodeSummary(statements, date) {
   const terms = topTerms([...statements], 6).join(', ');
   return `${date ? `${date} ` : ''}${terms}`.trim();
 }
-
-/** Extractive LeafSummaryProvider: same shape as the LLM providers, no I/O. */
-export function createExtractiveLeafProvider() {
-  return {
-    model: 'aml-extractive-v1',
-    summarize: ({ statements }) => extractiveDigest(statements),
-  };
-}
-
-/** Materialize dirty leaf blocks, write leaf digests, then refresh the node
- *  tier for multi-block nodes (the store's minBlocks gate keeps single-block
- *  nodes unduplicated). With OR fts semantics the node tier is a coarser
- *  index over leaf digests, valuable once vector routing and multi-node
- *  stores join; leaf FTS remains the primary lexical routing surface.
- *  Retries stale leaf rejections once. */
-export function runExtractiveLeafSummaries(store, { limit = 64 } = {}) {
-  const provider = createExtractiveLeafProvider();
-  let written = 0;
-  for (const nodeId of store.dirtyLeafNodeIds()) store.rebuildLeafBlocks(nodeId);
-  let tasks = store.pendingLeafSummaries({ limit });
-  for (let pass = 0; pass < 2 && tasks.length; pass++) {
-    const rejected = [];
-    for (const task of tasks) {
-      const persisted = store.setLeafSummary(
-        task.blockId, extractiveDigest(task.statements), provider.model, task.membersKey,
-      );
-      if (persisted) written++;
-      else rejected.push(task);
-    }
-    tasks = rejected.length ? store.pendingLeafSummaries({ limit }) : [];
-  }
-  for (const task of store.pendingNodeSummaries({ limit })) {
-    if (store.setNodeSummary(task.nodeId, extractiveDigest(task.statements, { maxChars: 500 }), provider.model, task.memberCount)) written++;
-  }
-  return written;
-}

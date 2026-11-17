@@ -6,7 +6,7 @@
 
 ## Schema 与迁移清单
 
-[Store schema](../../../src/core/store/schema.ts) 拥有主要表，并组合[协调 schema](../../../src/core/store/coordination-schema.ts)和[任务声明](../../../src/integration/task-unit-declaration-store.ts)。它涵盖历史与语义记忆、图与检索索引、任务协调与运行记录、文件书签。[Store 构造函数](../../../src/core/store/base.ts)在可写打开时启用外键并执行迁移；只读打开不迁移。
+[Store schema](../../../src/core/store/schema.ts) 拥有主要表，并组合[协调 schema](../../../src/core/store/coordination-schema.ts)和[任务声明](../../../src/integration/task-unit-declaration-store.ts)。它涵盖历史与语义记忆、图与检索索引、任务协调与运行记录、文件书签。[Store 构造函数](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts)在可写打开时启用外键并执行迁移；只读打开不迁移。
 
 全新内存数据库执行 `migrate` 后有 57 张普通表、5 张虚拟表和 22 张 SQLite 内部 shadow 表。`PRAGMA user_version` 为 0，`PRAGMA foreign_key_check` 没有返回行。计数不含 `sqlite_` 对象；空白测试库不能证明已有数据的完整性。Schema 并非单条 `user_version` 序列：`migrate` 使用幂等 DDL、列探测和回填。向量和词法 FTS 迁移使用保存点；旧表改名和标记替换没有共同事务。Agent 注册表重建有自己的事务。这是已检查机制的地图，不是对每条迁移的完整审计。
 

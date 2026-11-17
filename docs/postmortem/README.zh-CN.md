@@ -94,7 +94,7 @@
 | wrong-tree verification        | 0002     |                                                                                                                                                  |
 | mutant-in-tree reading         | 0003     | the sweep's lock: `agent:verify` refuses, and a new sweep refuses to start, while a sweep holds the tree (`tools/mutation-lock.ts`)              |
 | mislabelled flake              | 0004     | an intermittent failure is recorded with its reproduction attempt and rate, or left open - never as "flaky" (`skills/repo-development/SKILL.md`) |
-| undrainable backlog            | 0005     | [store 回归](../../tests/core/store/maintenance.test.ts)、[服务回归](../../tests/cli/service.test.ts)                                            |
+| undrainable backlog            | 0005     | [store 回归](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/store/maintenance.test.ts)、[服务回归](../../tests/cli/service.test.ts)                                            |
 | submission concurrency ceiling | 0006     | run at concurrency 1 and gate on `onlion/scripts/soak-endpoint.mjs`; no deployment between the start and the end of a scored run                 |
 | -----                          | -------- | ------------                                                                                                                                     |
 

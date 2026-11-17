@@ -10,7 +10,7 @@ hybrid 位置绑定缺陷。用八个 tier-2 FTS 命中构成有界 fixture；�
 一次受控的仅时间窗口运行在五条合格时返回七条。这不能估计生产出现频率或总体召回损失。
 
 修复只把重复的 `ORDER BY` ID 绑定移至全部 `WHERE` 参数之后。
-九项[绑定契约](../../../tests/core/store/hybrid-bindings.test.ts)覆盖正确 ID、含端点边界、
+九项[绑定契约](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/store/hybrid-bindings.test.ts)覆盖正确 ID、含端点边界、
 缺日期／scope 键、拒绝记录、重复顺序稳定性、FTS-only／vector-only／forced／no-hit
 对照，以及公共 second-pass context。连同既有检索／评分测试，57/57 通过。
 context fixture 显式请求 QPP 扩展：最初假定最大 limit 必须返回更多记录，但 QPP

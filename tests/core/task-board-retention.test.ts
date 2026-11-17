@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import { claimAndDeliver } from "../support/task-board-behavior.ts";
 
 const PAST = "2000-01-01T00:00:00.000Z";
@@ -19,9 +19,9 @@ const NOW = "2026-01-01T00:00:00.000Z";
  *  is the entry both attributable and past its TTL. */
 const WHEN_LIVE = "1999-12-31T23:59:00.000Z";
 
-function withStore(run: (store: NmgStore) => void): void {
+function withStore(run: (store: SqliteLocalDaemonState) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-retention-"));
-  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  const store = new SqliteLocalDaemonState(join(directory, "nmg.sqlite"));
   try {
     run(store);
   } finally {
@@ -30,7 +30,7 @@ function withStore(run: (store: NmgStore) => void): void {
   }
 }
 
-function expiredEntry(store: NmgStore, content = "an entry that is past its TTL") {
+function expiredEntry(store: SqliteLocalDaemonState, content = "an entry that is past its TTL") {
   const entry = store.putTaskBoardEntry({
     taskId: "retention-channel",
     agentId: "scout-a",

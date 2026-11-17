@@ -21,7 +21,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import {
   ENTRY_BOUND_FACT,
   RUN_CANCELLED_FACT,
@@ -34,9 +34,9 @@ const REMOVE_TEMP_TREE = { recursive: true, force: true, maxRetries: 5, retryDel
 const NEVER = new Date(Date.now() + 86_400_000).toISOString();
 const CHANNEL = "board";
 
-function withStore(run: (store: NmgStore) => void): void {
+function withStore(run: (store: SqliteLocalDaemonState) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-managed-adopt-"));
-  const store = new NmgStore(join(directory, "test.sqlite"));
+  const store = new SqliteLocalDaemonState(join(directory, "test.sqlite"));
   try {
     run(store);
   } finally {
@@ -45,7 +45,7 @@ function withStore(run: (store: NmgStore) => void): void {
   }
 }
 
-function publish(store: NmgStore, content: string, taskId = CHANNEL): string {
+function publish(store: SqliteLocalDaemonState, content: string, taskId = CHANNEL): string {
   return store.putTaskBoardEntry({
     taskId,
     agentId: "host",
@@ -55,7 +55,7 @@ function publish(store: NmgStore, content: string, taskId = CHANNEL): string {
   }).id;
 }
 
-function register(store: NmgStore, runId: string): void {
+function register(store: SqliteLocalDaemonState, runId: string): void {
   store.registerTaskRun({
     runId,
     planDigest: "plan-a",
@@ -65,7 +65,7 @@ function register(store: NmgStore, runId: string): void {
   });
 }
 
-function freeze(store: NmgStore, runId: string, taskId: string, position = 0): void {
+function freeze(store: SqliteLocalDaemonState, runId: string, taskId: string, position = 0): void {
   store.freezeTaskRunTask({
     runId,
     taskId,
@@ -77,7 +77,7 @@ function freeze(store: NmgStore, runId: string, taskId: string, position = 0): v
   });
 }
 
-function bindings(store: NmgStore, runId: string) {
+function bindings(store: SqliteLocalDaemonState, runId: string) {
   return store
     .taskRunFacts(runId)
     .filter((fact) => fact.kind === ENTRY_BOUND_FACT)

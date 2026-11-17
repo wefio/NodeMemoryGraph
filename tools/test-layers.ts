@@ -64,8 +64,6 @@ export const OVERRIDES: ReadonlyMap<string, { layer: TestLayer; reason: string }
   // Each of these crosses a process boundary through a helper, so the file itself never
   // mentions it. The unit seal found them; without the entry the seal fails them again.
   ["tests/evals/official/python.test.ts", { layer: "e2e", reason: "probes a Python runtime" }],
-  ["tests/evals/topology/bpid.test.ts", { layer: "e2e", reason: "runs the topology driver" }],
-  ["tests/evals/topology/run.test.ts", { layer: "e2e", reason: "runs the topology driver" }],
   [
     "tests/evals/resource-observability.test.ts",
     { layer: "e2e", reason: "samples the process tree of a live daemon" },

@@ -8,7 +8,7 @@ import { httpHandler } from "../../src/cli/http-server.ts";
 import type { ServerState } from "../../src/cli/lifecycle.ts";
 import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 import { createTestRuntime, type TestEffectScope } from "./cordis-adapter.ts";
@@ -19,7 +19,7 @@ export interface TestWorkspace {
 
 export interface TestDatabase {
   path: string;
-  store: NmgStore;
+  store: SqliteLocalDaemonState;
 }
 
 export interface TestDaemon {
@@ -85,7 +85,7 @@ export function testDatabase(): TestPlugin {
   return (context, runtime) => {
     const workspace = runtime.workspace();
     const path = join(workspace.path, "nmg.sqlite");
-    const store = new NmgStore(path);
+    const store = new SqliteLocalDaemonState(path);
     runtime.provide(DATABASE, { path, store } satisfies TestDatabase);
     context.effect(() => () => store.close(), "test-database");
   };

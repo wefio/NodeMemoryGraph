@@ -21,12 +21,12 @@ the row limit. SQL predicates, candidate bounds, priority expression, score
 weights, vector representation and public APIs are unchanged. Filtering remains
 in SQL rather than a compensating post-query pass.
 
-The [store contracts](../../../tests/core/store/hybrid-bindings.test.ts) exercise
+The [store contracts](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/store/hybrid-bindings.test.ts) exercise
 positive FTS hits without filters, each time bound, both bounds, multi-key scope
 and their conjunction. They check inclusivity, missing fields, exclusions,
 repeatable ordering, public second-pass context, and FTS-only/vector-only,
 no-hit hybrid and forced-candidate controls. The
-[scoring parity contract](../../../tests/core/store/vector-scoring.test.ts)
+[scoring parity contract](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/store/vector-scoring.test.ts)
 compares positive-FTS hybrid results, not just the no-hit fallback.
 
 ## Alternatives considered

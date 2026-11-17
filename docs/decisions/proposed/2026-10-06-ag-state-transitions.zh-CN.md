@@ -58,7 +58,7 @@ AG 的定位沿用 [design.md Definition](../../design/design.md#definition) 与
 
 ### 2.1 参考黑板：分层短读与显式维护，不复制共享状态机
 
-现有黑板的可复用部分由 [`TaskBoardEntry/TaskBoardPreview`](../../../src/core/types.ts)、[`readTaskBoardPreviews/readInboxTaskBoard`](../../../src/core/store/base.ts) 与 [`renderTaskBoardSurface`](../../../src/integration/agent-surface.ts) 承载。借鉴的是读取和维护语义，不要求 AG 使用同一 DTO 或调用黑板写入：
+现有黑板的可复用部分由 [`TaskBoardEntry/TaskBoardPreview`](../../../src/core/types.ts)、[`readTaskBoardPreviews/readInboxTaskBoard`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts) 与 [`renderTaskBoardSurface`](../../../src/integration/agent-surface.ts) 承载。借鉴的是读取和维护语义，不要求 AG 使用同一 DTO 或调用黑板写入：
 
 | 黑板做法 | AG 中的对应 | 不直接搬用的部分 |
 | --- | --- | --- |

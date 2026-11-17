@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import { parseAgentActivity } from "../../src/core/agent-activity.ts";
 import {
   executeCoordinationState,
@@ -12,7 +12,7 @@ import {
 
 test("board activity combines independent reports and capabilities with lease and session isolation", () => {
   const dir = mkdtempSync(join(tmpdir(), "nmg-activity-"));
-  const store = new NmgStore(join(dir, "fixture.sqlite"));
+  const store = new SqliteLocalDaemonState(join(dir, "fixture.sqlite"));
   try {
     assert.equal(store.readAgentActivity("agent", "s").state, "unknown");
     const write = (activity: Record<string, unknown>) =>

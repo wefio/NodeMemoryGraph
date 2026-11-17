@@ -105,5 +105,5 @@ Identity merge 与 compression merge 必须分开：前者需要身份依据，�
 
 - [`src/core/edge-activation.ts`](../../src/core/edge-activation.ts)
 - [`src/core/types.ts`](../../src/core/types.ts)
-- [`src/core/store/retrieval.ts`](../../src/core/store/retrieval.ts)
+- [`src/core/store/retrieval.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)
 - [分层激活设计](hierarchical-activation.zh-CN.md)

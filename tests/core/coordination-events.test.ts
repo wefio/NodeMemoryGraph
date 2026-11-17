@@ -3,12 +3,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 
-function fixture(run: (store: NmgStore, path: string) => void): void {
+function fixture(run: (store: SqliteLocalDaemonState, path: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "nmg-events-"));
   const path = join(dir, "store.sqlite"),
-    store = new NmgStore(path);
+    store = new SqliteLocalDaemonState(path);
   try {
     run(store, path);
   } finally {
@@ -63,7 +63,7 @@ test("event history keeps channel evolution, ended discussions and failure indep
     assert.equal(closed.status, "ended");
     assert.equal(closed.outcome, "failed");
     store.pruneExpiredTaskBoardEntries("2099-01-01T00:00:00.000Z");
-    const reopened = new NmgStore(path);
+    const reopened = new SqliteLocalDaemonState(path);
     try {
       const result = reopened.readCoordinationEvent(e.id, { afterRevision: 0, limit: 3 });
       assert.deepEqual(

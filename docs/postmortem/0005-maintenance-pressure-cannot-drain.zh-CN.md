@@ -35,7 +35,7 @@
 
 ## Guardrails added
 
-- [Store 维护回归](../../tests/core/store/maintenance.test.ts)：已替代／休眠压力、有效记录正对照、停止条件、重新激活，以及空检查保留性能聚合。
+- [Store 维护回归](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/store/maintenance.test.ts)：已替代／休眠压力、有效记录正对照、停止条件、重新激活，以及空检查保留性能聚合。
 - [服务回归](../../tests/cli/service.test.ts)：通过 RPC 与 event-loop 切片处理真实文件库积压，保留历史记忆。
 - [维护契约](../design/design.md)：拥有资格和流水语义。不能仅因 `rowsTouched` 为零抑制 semantic 流水，因为排空 trace 信号也会改变持久状态。
 

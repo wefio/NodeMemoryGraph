@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import { dispatchPlan, type DispatchBoard } from "../../src/integration/ooo-dispatch.ts";
 import { workDigest } from "../../src/integration/work-identity.ts";
 
 /** The adopter owns numeric declaration/acceptance. The store sees only the existing board header. */
 test("a numeric adopter uses the real board's lease, delivery and outside verdict without a patch declaration", async () => {
-  const store = new NmgStore(":memory:");
+  const store = new SqliteLocalDaemonState(":memory:");
   try {
     const channel = "numeric-adopter";
     const declaration = Object.freeze({

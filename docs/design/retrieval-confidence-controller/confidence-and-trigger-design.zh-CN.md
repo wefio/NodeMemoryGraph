@@ -67,4 +67,4 @@ Pi 的 `ControllerShadowBridge` 是可选适配器，不是通用检索路径。
 
 ## 源码参考
 
-核心分数与遍历位于 [`qpp.ts`](../../../src/core/qpp.ts) 和 [`retrieval.ts`](../../../src/core/store/retrieval.ts)。调用方配置见 [`config.ts`](../../../src/integration/config.ts)，评测默认值见 [`OmniMemEval bridge`](../../../evals/omnimemeval/bridge.ts)；控制器门控见 [`controller-channel.ts`](../../../src/integration/controller-channel.ts)、[`controller-shadow.ts`](../../../.pi/extensions/nmg/controller-shadow.ts) 和 [Pi extension](../../../.pi/extensions/nmg/index.ts)。
+核心分数与遍历位于 [`qpp.ts`](../../../src/core/qpp.ts) 和 [`retrieval.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)。调用方配置见 [`config.ts`](../../../src/integration/config.ts)，评测默认值见 [`OmniMemEval bridge`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/evals/omnimemeval/bridge.ts)；控制器门控见 [`controller-channel.ts`](../../../src/integration/controller-channel.ts)、[`controller-shadow.ts`](../../../.pi/extensions/nmg/controller-shadow.ts) 和 [Pi extension](../../../.pi/extensions/nmg/index.ts)。

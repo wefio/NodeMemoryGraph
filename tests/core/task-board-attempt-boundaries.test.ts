@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { NmgStore } from "../../src/core/store.ts";
-import { taskBoardClaimIsLive } from "../../src/core/store/base.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
+import { taskBoardClaimIsLive } from "../../src/core/store/local-sqlite-state-base.ts";
 import { claimAndDeliver } from "../support/task-board-behavior.ts";
 
 const START = "2026-01-01T00:00:00.000Z";
@@ -10,7 +10,7 @@ const LAST_LIVE = "2026-01-01T00:00:59.999Z";
 const AT_EXPIRY = "2026-01-01T00:01:00.000Z";
 
 test("an expired holder starts a fresh attempt even when its identity is unchanged", (t) => {
-  const store = new NmgStore(":memory:");
+  const store = new SqliteLocalDaemonState(":memory:");
   t.after(() => store.close());
   const entry = store.putTaskBoardEntry({
     taskId: "same-holder-expiry",
@@ -99,7 +99,7 @@ test("an expired holder starts a fresh attempt even when its identity is unchang
 });
 
 test("an expiry-boundary takeover changes delivery authority without blacklisting the old actor", (t) => {
-  const store = new NmgStore(":memory:");
+  const store = new SqliteLocalDaemonState(":memory:");
   t.after(() => store.close());
   const entry = store.putTaskBoardEntry({
     taskId: "different-holder-expiry",

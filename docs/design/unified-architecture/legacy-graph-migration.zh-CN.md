@@ -20,6 +20,8 @@
 | 物理格式           | SQLite 的 `memory_records`、`memory_nodes`、`history_records`、`memory_evidence_links`、`node_relations` 和附属表。 | SQLite 使用命名空间、实体与 FTS 表，Lance 使用实体数据与发布版本指针。两套后端均能保留原节点、记忆、证据和边 ID。                                                                              |
 | 本地协作           | Task Board、run、事件和活动由 Store 在 SQLite 保存。                                                                | 服务与编排依赖窄协作接口，既有本地 SQLite 实现继续持有这些数据。SQLite 同时承载记忆时，两组表使用同一个文件。                                                                                  |
 
+[归档版本](https://github.com/wefio/NodeMemoryGraph/tree/3cf3bec2147925f49545775f2ff8aa25e00404f0)保留旧引擎、维护工具和实验。现行迁移测试用 SQLite 数据行构造旧库。AML 服务在请求作用域的 SQLite 快照上使用同一个 MemoryEngine，写入成功后由对象清单发布新快照。
+
 ## 图数据演练
 
 用当前旧版 SQLite 文件的可丢弃副本，调用 `src/core/store/legacy-memory-snapshot.ts` 的 `readLegacyMemorySnapshot(path)`。它在只读事务中读取一致快照，无需升级数据表。把返回的实体交给 `src/core/memory/graph-import.ts` 的 `importMemoryGraph(backend, entities)`，目标可选 SQLite 或 LanceDB 的空命名空间。使用 SQLite 时，演练可以沿用含源数据和 Task Board 的副本文件。

@@ -90,7 +90,7 @@ interface MemoryBackend {
 
 ### SQLite 后端
 
-使用原生事务、索引与查询。从[Store 组装](../../src/core/store.ts)、[基类事务所有权](../../src/core/store/base.ts)和[记忆写入](../../src/core/store/writes.ts)中抽出面向记忆的边界。保留单一事务所有者与同步回调约束。schema 迁移归后端所有。共享领域不变量收拢到引擎边界之后，避免复制进对象适配器。
+使用原生事务、索引与查询。从[Store 组装](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store.ts)、[基类事务所有权](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts)和[记忆写入](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/writes.ts)中抽出面向记忆的边界。保留单一事务所有者与同步回调约束。schema 迁移归后端所有。共享领域不变量收拢到引擎边界之后，避免复制进对象适配器。
 
 ### 原生对象后端
 

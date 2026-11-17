@@ -387,7 +387,7 @@ test("a driver refuses without a daemon, and no driver opens a database of its o
     const source = readFileSync(join(REPOSITORY, "evals", "ooo-execution", driver), "utf8");
     assert.doesNotMatch(
       source,
-      /core\/store|NmgStoreBase/u,
+      /core\/store|SqliteLocalDaemonStateBase/u,
       `${driver} must reach the board through the daemon, not through the store`,
     );
     assert.match(source, /round-client\.ts/u, `${driver} must use the round client`);

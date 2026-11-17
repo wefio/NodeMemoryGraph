@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import {
   BoardAdmission,
   type PatchTaskSpec,
@@ -100,7 +100,7 @@ test("one reader of the same ready task is given the claim, the second is refuse
   // directly - the shape another process has, and the one the round's own check cannot see -
   // must lose the same CAS. Without this the property holds only because one caller asked
   // nicely, and the store would hand the same live claim to two readers.
-  const store = new NmgStore(database);
+  const store = new SqliteLocalDaemonState(database);
   try {
     assert.throws(
       () => store.claimTaskBoardEntry({ taskId: gate.channel, entryId, agentId: "worker-two" }),
@@ -147,7 +147,7 @@ test("a claim the board retires inside the verification window cannot be committ
     expiresAt: new Date(gate.now + 86_400).toISOString(),
   });
   gate.afterVerify = async () => {
-    const store = new NmgStore(database);
+    const store = new SqliteLocalDaemonState(database);
     try {
       store.resolveTaskBoardEntry({
         taskId: gate.channel,
@@ -195,7 +195,7 @@ test("a generic board claim on the round's entry leaves the round's own state al
 
   // The generic board is a second connection to the same file, which is also the multi-process
   // shape: whichever it decides, the round must still be the owner of its own row.
-  const store = new NmgStore(database);
+  const store = new SqliteLocalDaemonState(database);
   try {
     try {
       store.claimTaskBoardEntry({ taskId: gate.channel, entryId, agentId: "impostor" });

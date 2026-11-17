@@ -37,6 +37,6 @@
 - [Fibonacci 渐进式召回](../../design/fibonacci-progressive-recall.zh-CN.md)
 - [检索置信度控制器](../../design/retrieval-confidence-controller.zh-CN.md)
 - [QPP 实现](../../../src/core/qpp.ts)
-- [Store 检索与排序](../../../src/core/store/retrieval.ts) 与 [`search-ranking.ts`](../../../src/core/store/search-ranking.ts)
+- [Store 检索与排序](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts) 与 [`search-ranking.ts`](../../../src/core/store/search-ranking.ts)
 
 当前 QPP 路径不证明拟议的 node-summary 候选剪枝系统存在。当前默认值与边界请查阅这些 owner。本文为保持精简，省略了历史论文列表和外部系统的性能数值；引用或采用前应核实来源。

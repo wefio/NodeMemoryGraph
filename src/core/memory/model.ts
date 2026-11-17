@@ -20,7 +20,13 @@ import type {
   RememberInput,
 } from "../types.ts";
 
-export type MemoryInput = RememberInput & { unsafe?: boolean };
+export type MemoryInput = RememberInput & {
+  unsafe?: boolean;
+  importedEvidence?: Pick<
+    HistoryRecord,
+    "sessionId" | "sourceMessageId" | "role" | "sourceRef" | "content"
+  >;
+};
 
 export function memoryResidence(input: MemoryInput) {
   return input.residence ?? defaultResidence({ ...input, truthStatus: memoryTruthStatus(input) });
@@ -127,6 +133,7 @@ export function searchableMemory(
 }
 
 export function newHistory(input: MemoryInput, id: string, now: string): HistoryRecord {
+  if (input.importedEvidence) return { id, createdAt: now, ...input.importedEvidence };
   return {
     id,
     sessionId: memoryResidence(input) === "stg" ? (input.sessionId ?? null) : null,

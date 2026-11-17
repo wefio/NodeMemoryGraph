@@ -84,53 +84,6 @@ interface Target {
 
 const TARGETS: readonly Target[] = [
   {
-    target: "tests/support/node-graph-behavior.ts",
-    suites: [
-      "tests/support/node-graph-behavior.test.ts",
-      "tests/core/analogy.test.ts",
-      "tests/core/community.test.ts",
-      "tests/core/graph-cycles.test.ts",
-      "tests/core/multi-hop-path.test.ts",
-      "tests/core/store/graph.test.ts",
-    ],
-    mutants: [
-      {
-        name: "node-path-skips-the-first-edge",
-        derive: {
-          within: "linkNodePath",
-          operator: "replace-initializer",
-          variable: "index",
-        },
-        to: "2",
-        expect:
-          "linkNodePath writes adjacent pairs in order and returns the actual relation snapshots",
-      },
-      {
-        name: "node-path-counts-only-unique-endpoints",
-        ast: { within: "linkNodePath" },
-        from: "index < nodeIds.length",
-        to: "index < new Set(nodeIds).size",
-        expect: "linkNodePath preserves repeated endpoints and repeated edge results",
-      },
-      {
-        name: "node-path-swallows-a-later-link-failure",
-        derive: { within: "linkNodePath", operator: "replace-call", call: "store.linkNodes" },
-        to: `(() => {
-          try {
-            return store.linkNodes({
-              sourceNodeId: nodeIds[index - 1]!,
-              targetNodeId: nodeIds[index]!,
-              type: relationType,
-            });
-          } catch {
-            return relations[relations.length - 1]!;
-          }
-        })()`,
-        expect: "linkNodePath propagates a later link failure and leaves the successful prefix",
-      },
-    ],
-  },
-  {
     target: "src/integration/task-semantics.ts",
     suites: [
       "tests/integration/task-semantics.test.ts",
@@ -1381,7 +1334,7 @@ const TARGETS: readonly Target[] = [
     // its job: dropping the grace on a boundary, making it zero, and writing a unit SQLite does not
     // know (which makes the whole expression NULL and excludes every row instead of failing loudly).
     target: "src/core/store/clock.ts",
-    suites: ["tests/core/store/current-value-window.test.ts"],
+    suites: ["tests/core/store/clock.test.ts"],
     mutants: [
       {
         name: "the-window-does-not-grace-valid-from",
@@ -1393,19 +1346,19 @@ const TARGETS: readonly Target[] = [
           in: '"later"',
         },
         to: '"earlier"',
-        expect: "a value stamped a moment in the future is current, not missing",
+        expect: "the SQLite clock grace admits near-boundary rows without admitting distant rows",
       },
       {
         name: "the-window-does-not-grace-expiry",
         derive: { within: "notExpired", operator: "replace-argument", call: "clockNow", arg: 0 },
         to: '"later"',
-        expect: "the freshness half widens one grace into the past and no further",
+        expect: "the SQLite clock grace admits near-boundary rows without admitting distant rows",
       },
       {
         name: "the-grace-is-zero",
         derive: { operator: "replace-initializer", variable: "CLOCK_GRACE_MS" },
         to: "0",
-        expect: "a value stamped a moment in the future is current, not missing",
+        expect: "the SQLite clock grace admits near-boundary rows without admitting distant rows",
       },
       {
         name: "the-grace-uses-a-unit-sqlite-does-not-know",
@@ -1415,7 +1368,7 @@ const TARGETS: readonly Target[] = [
           text: "${seconds} seconds",
         },
         to: "${CLOCK_GRACE_MS} milliseconds",
-        expect: "a just-written memory is never read as not active",
+        expect: "the SQLite clock grace admits near-boundary rows without admitting distant rows",
       },
     ],
   },

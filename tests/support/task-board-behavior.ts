@@ -1,4 +1,4 @@
-import type { NmgStore } from "../../src/core/store.ts";
+import type { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import type { TaskBoardEntry } from "../../src/core/types.ts";
 
 interface ClaimAndDeliverInput {
@@ -10,7 +10,7 @@ interface ClaimAndDeliverInput {
 
 /** Acts on an existing entry. The two store writes are not an atomic transaction. */
 export function claimAndDeliver(
-  store: NmgStore,
+  store: SqliteLocalDaemonState,
   entry: Pick<TaskBoardEntry, "taskId" | "id">,
   input: ClaimAndDeliverInput,
 ): TaskBoardEntry {

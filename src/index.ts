@@ -1,4 +1,5 @@
-export { NmgStore } from "./core/store.ts";
+export { MemoryEngine } from "./core/memory/engine.ts";
+export { openMemoryBackend } from "./core/memory/open.ts";
 export type {
   CoordinationEvent,
   CoordinationEventChange,
@@ -20,12 +21,6 @@ export { OpenAIEmbeddingClient } from "./core/openai-embedding.ts";
 export { GeminiEmbeddingClient } from "./core/embedding-providers/gemini.ts";
 export { configuredProvider, createEmbeddingClientFromEnv } from "./core/embedding-provider.ts";
 export type { EmbeddingClient, EmbeddingProvider } from "./core/embedding-provider.ts";
-export {
-  syncLeafEmbeddings,
-  syncNodeEmbeddings,
-  syncRecordEmbeddings,
-} from "./core/embedding-sync.ts";
-export type { RecordEmbeddingClient, RecordEmbeddingSyncResult } from "./core/embedding-sync.ts";
 export {
   configuredGraphHops,
   configuredQpp1Mode,
@@ -86,9 +81,7 @@ export {
   PI_WORKING_STATE_INPUT_CAPABILITY,
 } from "./integration/working-state-input.ts";
 export type { WorkingStateInput } from "./integration/working-state-input.ts";
-export { retainEvidence } from "./integration/evidence.ts";
 export type { AgentHistoryMessage, AgentHistorySnapshot } from "./integration/evidence.ts";
-export { searchMemoryContext } from "./integration/search.ts";
 export { renderTemporalEvidence } from "./integration/temporal-evidence.ts";
 export { projectAmlMemory, projectAmlMultimodalMemory } from "./integration/aml-projection.ts";
 export type { AmlMemoryRow, AmlMultimodalMemoryRow } from "./integration/aml-projection.ts";
@@ -113,14 +106,6 @@ export {
   resolveMemoryReferences,
 } from "./integration/memory-reference.ts";
 export type { MemoryReferenceTarget } from "./integration/memory-reference.ts";
-export type { QueryEmbeddingClient } from "./integration/search.ts";
-export {
-  createLeafSummaryProviderFromEnv,
-  drainLeafSummaries,
-  LEAF_SUMMARY_PROMPT_VERSION,
-  OpenAiLeafSummaryProvider,
-} from "./integration/leaf-summarizer.ts";
-export type { LeafSummaryDrainResult } from "./integration/leaf-summarizer.ts";
 export { UsearchAnnIndex } from "./core/ann.ts";
 export { decideMemoryLoad } from "./core/gate.ts";
 export { SessionActiveGraphRuntime } from "./core/session-active-graph.ts";

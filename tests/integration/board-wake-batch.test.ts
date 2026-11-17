@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import {
   prepareBoardWakeBatch,
   deliverBoardWakeBatch,
@@ -94,7 +94,7 @@ test("batch sends once, receipts only admitted entries, and failed enqueue consu
 
 test("pending channel replies survive coalescing and receipts cannot pin the first page", () => {
   const dir = mkdtempSync(join(tmpdir(), "nmg-wake-page-"));
-  const store = new NmgStore(join(dir, "store.sqlite"));
+  const store = new SqliteLocalDaemonState(join(dir, "store.sqlite"));
   try {
     store.setBoardChannelSubscription({
       agentId: "receiver",

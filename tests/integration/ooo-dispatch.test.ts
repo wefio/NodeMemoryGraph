@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import {
   dispatchPlan,
   type DispatchBoard,
@@ -359,7 +359,7 @@ test("a worker that starts its own session is not reported as fusion", async () 
 
 test("the session decision is a run fact naming the unit, its attempt and its entry", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-dispatch-"));
-  const store = new NmgStore(join(directory, "test.sqlite"));
+  const store = new SqliteLocalDaemonState(join(directory, "test.sqlite"));
   try {
     registerRun(store, {
       runId: "run-1",

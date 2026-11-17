@@ -31,7 +31,7 @@ Pi records phase durations and outcomes in message `details.recallTiming`. `/nmg
 
 Latency protection trades late semantic information for a timely turn. Cancellation stops waiting and aborts supported HTTP operations; it cannot preempt synchronous JavaScript/SQLite work or guarantee that an embedding provider cancels a request already in flight. Late provider data cannot replace the returned graph. There are no new live-provider calls or benchmark requirements in the regression tests.
 
-The deterministic [hook regressions](../../../tests/extensions/nmg/recall-budget.test.ts) drive the actual Pi handler with slow search/disclosure, and the [shared regressions](../../../tests/integration/recall-budget.test.ts) verify lexical preservation, late-vector isolation and explicit-search behavior.
+The deterministic [hook regressions](../../../tests/extensions/nmg/recall-budget.test.ts) drive the actual Pi handler with slow search/disclosure, and the [shared regressions](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/integration/recall-budget.test.ts) verify lexical preservation, late-vector isolation and explicit-search behavior.
 The [provider request contract](../../../tests/core/embedding-provider.test.ts) verifies the HTTP request before transport and supplies synthetic responses. Provider availability, rate limits and region access are runtime observations.
 
 ## Deferred

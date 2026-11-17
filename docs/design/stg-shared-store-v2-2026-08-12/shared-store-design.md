@@ -18,7 +18,7 @@ memory_records.session_id:
 - A query without a session ID may see only `session_id IS NULL`; it must not become an unrestricted read.
 - `cached_from_ltg` copies are shared project-local hints; LTG remains authoritative. Session-owned rows are removed by the explicit session purge path.
 
-The current retrieval predicates are in [`src/core/store/retrieval.ts`](../../../src/core/store/retrieval.ts), and the shared store path/purge wrapper is in [`src/core/stg.ts`](../../../src/core/stg.ts).
+The current retrieval predicates are in [`src/core/store/retrieval.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts), and the shared store path/purge wrapper is in [`src/core/stg.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/stg.ts).
 
 ## Historical anonymous-read leak
 
@@ -44,8 +44,8 @@ A checkpoint does not authenticate the session or alter row-visibility semantics
 
 ## Source and test references
 
-- [Project-local STG helpers](../../../src/core/stg.ts)
-- [Session-filtered read paths](../../../src/core/store/retrieval.ts)
-- [Session-scoped writes and purge implementation](../../../src/core/store/writes.ts)
-- [Store constructor, pragmas, close, and checkpoint-on-open](../../../src/core/store/base.ts)
-- [STG v2 behavior tests](../../../tests/core/stg-v2.test.ts)
+- [Project-local STG helpers](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/stg.ts)
+- [Session-filtered read paths](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)
+- [Session-scoped writes and purge implementation](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/writes.ts)
+- [Store constructor, pragmas, close, and checkpoint-on-open](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts)
+- [STG v2 behavior tests](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/stg-v2.test.ts)

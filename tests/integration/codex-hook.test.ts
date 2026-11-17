@@ -9,8 +9,8 @@ import { CodexSessionStore } from "../../codex-plugin/session-store.ts";
 import { codexHookBinding } from "../../codex-plugin/session.ts";
 import { NmgService } from "../../src/cli/service.ts";
 import { runCli } from "../../src/cli/main.ts";
-import { NmgStore } from "../../src/core/store.ts";
-import { stgStorePath } from "../../src/core/stg.ts";
+import { LegacySqliteFixture } from "../helpers/legacy-sqlite-fixture.ts";
+import { stgStorePath } from "../../src/core/stg-projection.ts";
 import type { NmgMethod } from "../../src/cli/protocol.ts";
 import { ADAPTER_CAPABILITY_CATALOG } from "../../src/integration/adapter-capability-catalog.ts";
 import { adapterToolCapability } from "../../src/integration/adapter-capability-assembly.ts";
@@ -29,15 +29,15 @@ test("Codex automatically recalls unified SQLite memory from the owning project 
   const directory = mkdtempSync(join(tmpdir(), "nmg-codex-local-memory-"));
   const databasePath = join(directory, "memory.sqlite");
   const project = join(directory, "project");
-  const source = new NmgStore(stgStorePath(project));
+  const source = new LegacySqliteFixture(stgStorePath(project));
   const owner = `codex-${id}`;
-  const captured = source.remember({
+  const captured = source.insertMemory({
     statement: "Atlas SQLite deployment keeps the owner backup in ProjectRecallMarker",
     nodeName: "Atlas SQLite project",
     residence: "stg",
     sessionId: owner,
   });
-  source.remember({
+  source.insertMemory({
     statement: "Atlas SQLite deployment keeps another backup in OtherSessionMarker",
     nodeName: "Atlas SQLite project",
     residence: "stg",
@@ -67,9 +67,9 @@ test("Codex automatically recalls unified SQLite memory from the owning project 
     capabilities,
   );
   try {
-    const legacy = new NmgStore(databasePath);
+    const legacy = new LegacySqliteFixture(databasePath);
     try {
-      legacy.remember({
+      legacy.insertMemory({
         statement: "Atlas SQLite deployment keeps a durable rollout guide",
         nodeName: "Atlas SQLite rollout",
         markers: [{ kind: "annotation", attributes: { note: "anchor_ref" } }],
@@ -148,7 +148,6 @@ test("Codex automatically recalls unified SQLite memory from the owning project 
       (await service.invoke("get", { memoryIds: [mainWrite.memory.id] })).results.length,
       1,
     );
-    assert.throws(() => new NmgStore(databasePath), /unified memory engine/);
     const readBoard = await service.invoke("taskBoard", {
       action: "read",
       taskId: "local-cutover",

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import type { TaskBoardEntry } from "../../src/core/types.ts";
 import { claimAndDeliver } from "../support/task-board-behavior.ts";
 
@@ -14,9 +14,9 @@ import { claimAndDeliver } from "../support/task-board-behavior.ts";
  * not be the claimer's self-report, and a verdict must never outlive the
  * artifact it judged. Each test fails by name when the mechanism is removed. */
 
-function withStore(run: (store: NmgStore) => void): void {
+function withStore(run: (store: SqliteLocalDaemonState) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-board-deliverable-"));
-  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  const store = new SqliteLocalDaemonState(join(directory, "nmg.sqlite"));
   try {
     run(store);
   } finally {
@@ -27,7 +27,7 @@ function withStore(run: (store: NmgStore) => void): void {
 
 const EXPIRES = "2099-01-01T00:00:00.000Z";
 
-function workItem(store: NmgStore, taskId = "round-1"): TaskBoardEntry {
+function workItem(store: SqliteLocalDaemonState, taskId = "round-1"): TaskBoardEntry {
   return store.putTaskBoardEntry({
     taskId,
     agentId: "coordinator",

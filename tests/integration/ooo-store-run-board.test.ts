@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import { dispatchPlan, type PlanWorker } from "../../src/integration/ooo-dispatch.ts";
 import type { SessionPlan } from "../../src/integration/ooo-execution.ts";
 import { StoreRunBoard, type AcceptanceAnswer } from "../../src/integration/ooo-runner.ts";
@@ -58,7 +58,7 @@ function tasks() {
 }
 
 /** A run registered, frozen and adopted: what the runner owns before any unit runs. */
-function openRun(store: NmgStore, taskIds: readonly string[] = ["P", "T"]): void {
+function openRun(store: SqliteLocalDaemonState, taskIds: readonly string[] = ["P", "T"]): void {
   registerRun(store, {
     runId: RUN,
     planDigest: "d1",
@@ -121,9 +121,9 @@ function legality(): SessionPlan {
   return { tasks: [], declarations: {} };
 }
 
-async function withStore(run: (store: NmgStore) => Promise<void>): Promise<void> {
+async function withStore(run: (store: SqliteLocalDaemonState) => Promise<void>): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "nmg-run-board-"));
-  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  const store = new SqliteLocalDaemonState(join(directory, "nmg.sqlite"));
   try {
     await run(store);
   } finally {
@@ -318,7 +318,7 @@ test("the board answers what is legal and why, and asking changes nothing", asyn
 });
 
 /** The entry a task's binding holds, read from the run's own record. */
-function bindingEntry(store: NmgStore, taskId: string): string {
+function bindingEntry(store: SqliteLocalDaemonState, taskId: string): string {
   const fact = store
     .taskRunFacts(RUN)
     .filter((candidate) => candidate.taskId === taskId && candidate.entryId !== null)

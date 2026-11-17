@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import { NmgService } from "../../src/cli/service.ts";
 import {
   RUN_CANCELLED_FACT,
@@ -40,9 +40,9 @@ const REMOVE_TEMP_TREE = { recursive: true, force: true, maxRetries: 5, retryDel
 const NEVER = new Date(Date.now() + 86_400_000).toISOString();
 const CHANNEL = "board";
 
-function withStore(run: (store: NmgStore) => void): void {
+function withStore(run: (store: SqliteLocalDaemonState) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-managed-write-"));
-  const store = new NmgStore(join(directory, "test.sqlite"));
+  const store = new SqliteLocalDaemonState(join(directory, "test.sqlite"));
   try {
     run(store);
   } finally {
@@ -51,7 +51,7 @@ function withStore(run: (store: NmgStore) => void): void {
   }
 }
 
-function publish(store: NmgStore, content: string, taskId = CHANNEL): string {
+function publish(store: SqliteLocalDaemonState, content: string, taskId = CHANNEL): string {
   return store.putTaskBoardEntry({
     taskId,
     agentId: "host",
@@ -62,7 +62,12 @@ function publish(store: NmgStore, content: string, taskId = CHANNEL): string {
 }
 
 /** Register a run, freeze one task, and adopt an entry as that task's own. */
-function adopt(store: NmgStore, runId: string, taskId: string, entryId: string): void {
+function adopt(
+  store: SqliteLocalDaemonState,
+  runId: string,
+  taskId: string,
+  entryId: string,
+): void {
   store.registerTaskRun({
     runId,
     planDigest: "plan-a",
@@ -83,7 +88,7 @@ function adopt(store: NmgStore, runId: string, taskId: string, entryId: string):
 }
 
 function claim(
-  store: NmgStore,
+  store: SqliteLocalDaemonState,
   entryId: string,
   agentId = "worker-one",
   taskId = CHANNEL,
@@ -91,7 +96,10 @@ function claim(
   return store.claimTaskBoardEntry({ taskId, entryId, agentId, leaseSeconds: 600 });
 }
 
-function runFacts(store: NmgStore, runId: string): Array<{ kind: string; sequence: number }> {
+function runFacts(
+  store: SqliteLocalDaemonState,
+  runId: string,
+): Array<{ kind: string; sequence: number }> {
   return store.taskRunFacts(runId).map((fact) => ({
     kind: fact.kind,
     sequence: fact.sequence,
@@ -360,7 +368,7 @@ test("a daemon board verb routes a managed entry through the run's transition", 
 
     // Adopt the entry from another connection to the same file: the shape the coordinator has when
     // it is not the daemon's own process.
-    const adopter = new NmgStore(databasePath);
+    const adopter = new SqliteLocalDaemonState(databasePath);
     try {
       adopt(adopter, "run-1", "T1", entryId);
     } finally {
@@ -379,7 +387,7 @@ test("a daemon board verb routes a managed entry through the run's transition", 
 
     // The daemon's own store wrote the transition into the run's log, in the transaction that moved
     // the board: the fact is there with nobody else having written it.
-    const reader = new NmgStore(databasePath);
+    const reader = new SqliteLocalDaemonState(databasePath);
     try {
       const fact = reader
         .taskRunFacts("run-1")
@@ -393,7 +401,7 @@ test("a daemon board verb routes a managed entry through the run's transition", 
     // A managed entry's write is the coordinator's to make, and the daemon's protocol has no verb
     // for it: the same file through the store directly is refused, which is what stops a client
     // from moving the entry beside its run.
-    const bystander = new NmgStore(databasePath);
+    const bystander = new SqliteLocalDaemonState(databasePath);
     try {
       assert.throws(
         () => claim(bystander, entryId, "worker-two"),

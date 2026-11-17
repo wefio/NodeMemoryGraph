@@ -26,7 +26,7 @@ try {
       // created_at is the AML alias of event_time, not write time.
       assert.equal(row.created_at, message.chat_time ? new Date(message.chat_time).toISOString() : undefined);
       assert.ok(row.stored_at);
-      assert.equal(service.store.getMemory(row.id).statement, message.content);
+      assert.equal((await service.record(row.id)).statement, message.content);
     }
   }
   assert.equal(ordinary.memories.find(row => row.event_time === '2023-01-21T00:00:00.000Z').content, messages[1].content);
@@ -37,6 +37,6 @@ try {
   writeFileSync('.runtime/verification/native-temporal.json', JSON.stringify({ status: 'passed', mode: 'offline-native-sqlite-no-provider', ordinary, temporal }, null, 2));
   console.log('PASS: actual AmlMemoryService ingestion -> native store/search -> shared AML projection; 3 source records unchanged; conditional timestamps and unknown-time semantics verified.');
 } finally {
-  service.close();
+  await service.close();
   for (const suffix of ['', '-wal', '-shm']) rmSync(resolve(`/tmp/nmg/${key}.sqlite${suffix}`), { force: true });
 }

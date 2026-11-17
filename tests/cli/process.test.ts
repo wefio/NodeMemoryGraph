@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { NmgStore } from "../../src/core/store.ts";
+import { LegacySqliteFixture } from "../helpers/legacy-sqlite-fixture.ts";
 import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
@@ -63,26 +63,19 @@ test("search compact JSON exposes bounded headers without exact evidence", () =>
   const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-compact-"));
   const statement = `Durable detail ${"x".repeat(420)}`;
   try {
-    const legacy = new NmgStore(join(directory, "nmg.sqlite"));
+    const legacy = new LegacySqliteFixture(join(directory, "nmg.sqlite"));
     let memoryId: string;
     try {
-      const remembered = legacy.remember({ statement, nodeName: "Compact projection" });
+      const remembered = legacy.insertMemory({ statement, nodeName: "Compact projection" });
       memoryId = remembered.memory.id;
-      const support = legacy.remember({
+      const support = legacy.insertMemory({
         statement: "Supporting chain evidence for the compact projection.",
         nodeName: "Compact projection support",
       });
-      const chain = legacy.createMemoryChain({
-        chainType: "logical",
-        topic: "Compact projection chain",
-      });
+      const chain = legacy.insertChain("logical", "Compact projection chain");
       for (const memberId of [memoryId, support.memory.id])
-        legacy.addMemoryToChain({ chainId: chain.id, memoryId: memberId });
-      legacy.addMemoryChainEdge({
-        chainId: chain.id,
-        sourceMemoryId: memoryId,
-        targetMemoryId: support.memory.id,
-      });
+        legacy.insertChainMember(chain, memberId);
+      legacy.insertChainEdge(chain, memoryId, support.memory.id);
     } finally {
       legacy.close();
     }

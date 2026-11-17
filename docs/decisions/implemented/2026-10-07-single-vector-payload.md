@@ -44,7 +44,7 @@ marker on failure, including inside a caller-owned transaction. Existing binary
 bytes, keys and timestamps are preserved. Unverified legacy text is retained
 when the binary shape does not match its declared dimensions.
 
-The [storage regressions](../../../tests/core/store/vector-storage.test.ts)
+The [storage regressions](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/store/vector-storage.test.ts)
 cover atomic rollback, repeated opens, model-specific readers and writers,
 legacy fallback, and Chinese/punctuation FTS without vector payload reads.
 Deleting duplicate values releases logical storage; existing database files do

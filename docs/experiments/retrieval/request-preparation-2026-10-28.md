@@ -46,7 +46,7 @@ implementation hashes, call counts and both arms' latency distribution:
 - [First run](artifacts/2026-10-28-request-reuse.json)
 - [Repeat](artifacts/2026-10-28-request-reuse-repeat.json)
 
-The separate [contract tests](../../../tests/integration/query-embedding-request.test.ts)
+The separate [contract tests](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/integration/query-embedding-request.test.ts)
 exercise real Store reads, deletion between reads, concurrent consumers, failed
 and empty response retries, mutation isolation, automatic cancellation and
 lexical-only selection. A loopback HTTP provider test exercises the actual

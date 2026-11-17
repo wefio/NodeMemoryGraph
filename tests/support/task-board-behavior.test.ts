@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import type { TaskBoardEntry } from "../../src/core/types.ts";
 import { claimAndDeliver } from "./task-board-behavior.ts";
 
 const WHEN_LIVE = "1999-12-31T23:59:00.000Z";
 const LATER = "1999-12-31T23:59:30.000Z";
 
-function withStore(run: (store: NmgStore) => void): void {
-  const store = new NmgStore(":memory:");
+function withStore(run: (store: SqliteLocalDaemonState) => void): void {
+  const store = new SqliteLocalDaemonState(":memory:");
   try {
     run(store);
   } finally {
@@ -17,7 +17,7 @@ function withStore(run: (store: NmgStore) => void): void {
   }
 }
 
-function workItem(store: NmgStore): TaskBoardEntry {
+function workItem(store: SqliteLocalDaemonState): TaskBoardEntry {
   return store.putTaskBoardEntry({
     taskId: "clocked-work",
     agentId: "coordinator",

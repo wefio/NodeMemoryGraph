@@ -14,6 +14,8 @@ benchmark data
   -> report
 ```
 
+当前适配器使用 AML HTTP API，需要设置 `NMG_OMNI_API_URL`。本地桥接器及下文的 `benchmark:omni` 命令保存在[归档版本](https://github.com/wefio/NodeMemoryGraph/tree/3cf3bec2147925f49545775f2ff8aa25e00404f0)。
+
 ## 目录布局
 
 本目录中的文件按职责切分：

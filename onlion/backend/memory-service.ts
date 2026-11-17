@@ -1,16 +1,16 @@
 import { createHash } from "node:crypto";
-import { NmgStore } from "../../src/core/store.ts";
-import { syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
+import { MemoryEngine } from "../../src/core/memory/engine.ts";
+import type { MemoryInput } from "../../src/core/memory/model.ts";
+import { SqliteMemoryBackend } from "../../src/core/memory/sqlite-backend.ts";
 import { EmbeddingPreparation } from "./embedding-session.mjs";
-import { searchMemoryContext } from "../../src/integration/search.ts";
 import {
   projectAmlMemory,
   projectAmlMultimodalMemory,
 } from "../../src/integration/aml-projection.ts";
 import { normalizeContent, type AmlContent } from "../../src/integration/multimodal-content.ts";
-import { extractiveNodeSummary, runExtractiveLeafSummaries } from "./extractive-summaries.mjs";
+import { extractiveNodeSummary } from "./extractive-summaries.mjs";
 import type { EmbeddingClient } from "../../src/core/embedding-provider.ts";
-import type { RememberInput, MemorySearchResult } from "../../src/core/types.ts";
+import type { MemorySearchResult } from "../../src/core/types.ts";
 
 type ClauseContribution = {
   /** Position of the clause in the request's clause list. */
@@ -68,17 +68,7 @@ export const CORE_SOURCE = "workspace:src";
 export const AML_SEARCH_PROFILE = Object.freeze({
   maxTier: 3 as const,
   graphHops: 1,
-  expandChains: true,
-  // Neighbourhood budget for chain expansion; five members measured as the
-  // useful point (see the append-only decision record).
-  chainExpansionMaxMembers: 5,
-  secondPass: true,
-  vectorGranularity: "records" as const,
-  leafBlockRouting: true,
-  progressiveWarmDisclosure: false,
-  tieredDisclosure: false,
   persistTrace: false,
-  perf: false,
 });
 
 type Message = {
@@ -106,14 +96,21 @@ function projectResult(result: MemorySearchResult, query: string) {
 /** Request-scoped daemon core for AML. R2 transaction/receipt ownership stays
  * with the HTTP adapter; there is no background runner or harness state. */
 export class AmlMemoryService {
-  private store: NmgStore;
+  private readonly backend: SqliteMemoryBackend;
+  private readonly engine: MemoryEngine;
+  private readonly client?: EmbeddingClient;
   constructor(
     key: string,
-    private client?: EmbeddingClient,
-    options: { /** Whether search may backfill vectorless records: false on the read path. */
-    allowBackfill?: boolean } = {},
+    client?: EmbeddingClient,
+    options: {
+      /** Whether search may backfill vectorless records: false on the read path. */
+      allowBackfill?: boolean;
+    } = {},
   ) {
-    this.store = new NmgStore(`/tmp/nmg/${key}.sqlite`, undefined, { scopeWriteIndex: true });
+    this.backend = new SqliteMemoryBackend(`/tmp/nmg/${key}.sqlite`, key, true);
+    this.backend.activateSnapshot();
+    this.engine = new MemoryEngine(this.backend);
+    this.client = client;
     this.allowBackfill = options.allowBackfill;
   }
   private allowBackfill?: boolean;
@@ -125,7 +122,11 @@ export class AmlMemoryService {
   private async backfillVectors(): Promise<void> {
     if (!this.client) return;
     try {
-      await syncRecordEmbeddings(this.store, this.client, 32, { maxBatches: 1 });
+      const docs = this.backend.vectorIndex.pending(this.client.indexId, 32);
+      if (docs.length) {
+        const vectors = await this.client.embedDocuments(docs.map((document) => document.text));
+        this.backend.vectorIndex.save(this.client.indexId, docs, vectors);
+      }
       this.lastBackfillError = null;
     } catch (error) {
       // EmbeddingPreparation is control flow, not a failure: `runPart` expects it to unwind the
@@ -153,7 +154,7 @@ export class AmlMemoryService {
       ),
       sessionDate,
     );
-    const inputs: RememberInput[] = messages.map((message): RememberInput => {
+    const inputs = messages.map((message): MemoryInput => {
       const sourceRef = `aml:${createHash("sha256")
         .update(JSON.stringify([userId, sessionId, requestId, message.source_message_id]))
         .digest("hex")}`;
@@ -168,13 +169,6 @@ export class AmlMemoryService {
       // collapsing into one plain-text memory; the content hash below stays in
       // marker attributes instead of polluting the retrieval statement.
       const statement = view;
-      const history = this.store.appendHistory({
-        content: source,
-        role: message.role,
-        sessionId,
-        sourceMessageId: message.source_message_id,
-        sourceRef,
-      });
       return {
         statement,
         nodeName: `AML session ${sessionId}`,
@@ -184,7 +178,13 @@ export class AmlMemoryService {
         // view changes indexing text, never who asserted the evidence.
         sourceActor: message.role,
         truthStatus: "asserted",
-        evidenceHistoryId: history.id,
+        importedEvidence: {
+          role: message.role,
+          sessionId,
+          content: source,
+          sourceMessageId: message.source_message_id,
+          sourceRef,
+        },
         eventTime: message.chat_time,
         scope: { aml_user: userId },
         tier: 2,
@@ -213,7 +213,17 @@ export class AmlMemoryService {
     });
     // Same ordered, transactional primitive as daemon rememberBatch. The
     // outer manifest commit also makes multiple internal batches atomic.
-    this.store.rememberMany(inputs);
+    const operationId = createHash("sha256")
+      .update(
+        JSON.stringify([
+          userId,
+          sessionId,
+          requestId,
+          messages.map((message) => message.source_message_id),
+        ]),
+      )
+      .digest("hex");
+    await this.engine.rememberMany(inputs, operationId);
     // Bounded like the search path: a fold must not embed a whole partition's backlog in one
     // request. Without the cap the cost and the duration of one fold are unbounded in the number
     // of vectorless records, so a single call can both burn the provider budget and run into the
@@ -225,14 +235,35 @@ export class AmlMemoryService {
     // are already stored; leaving them vectorless costs lexical scoring until a later fold
     // backfills them, which is strictly better than failing the write.
     if (this.client) await this.backfillVectors();
-    // After embeddings: leaf-summary staleness must not trigger extra
-    // embedding batches in records-granularity mode.
-    runExtractiveLeafSummaries(this.store);
     return { added: messages.length };
   }
 
-  close() {
-    this.store.close();
+  async close() {
+    await this.backend.close();
+  }
+
+  async record(id: string) {
+    return this.engine.record(id);
+  }
+
+  private async searchFeature(text: string, limit: number) {
+    const options = { ...AML_SEARCH_PROFILE, limit };
+    const client = this.client;
+    if (!client || !this.backend.vectorIndex.has(client.indexId))
+      return this.engine.search(text, options);
+    try {
+      const [vector] = await client.embedQueries([text]);
+      if (vector?.length && this.backend.vectorIndex.has(client.indexId, vector.length))
+        return this.engine.search(text, options, {
+          indexId: client.indexId,
+          vector,
+          mode: "hybrid",
+          granularity: "records",
+        });
+    } catch (error) {
+      if (error instanceof EmbeddingPreparation) throw error;
+    }
+    return this.engine.search(text, options);
   }
 
   /** Search the ranked clauses into one page and the append-only clauses into a
@@ -252,20 +283,7 @@ export class AmlMemoryService {
     appendOnly: readonly boolean[] = [],
     features?: readonly (readonly string[])[],
   ) {
-    if (this.client) {
-      const health = this.store.embeddingIndexHealth(this.client.indexId);
-      if (!health || health.pending.records || !health.targets.includes("records")) {
-        // A pure-read search declines the backfill: the write path owns vector
-        // materialisation (inline at accept, bounded in the fold). Skipping it keeps the
-        // read path free of document embedding and of SQLite change - which is what lets
-        // a search answer without staging or committing anything.
-        if (this.allowBackfill === false) {
-          /* fall through: vectorless records score lexically until a fold backfills */
-        } else {
-          await this.backfillVectors();
-        }
-      }
-    }
+    if (this.allowBackfill !== false) await this.backfillVectors();
     // Track which clauses surfaced each memory, so a caller can see whether the
     // retrieval dimension it added actually contributed to the page.
     const byId = new Map<string, FusedCandidate>();
@@ -276,16 +294,7 @@ export class AmlMemoryService {
       // legacy rows whose pre-upgrade scope differs. No session filter.
       const texts = features?.[index]?.length ? features[index]! : [query];
       for (const text of texts) {
-        const context = await searchMemoryContext(this.store, this.client, text, {
-          ...AML_SEARCH_PROFILE,
-          limit,
-          activeGraphBudget: {
-            maxNodes: limit,
-            maxEvidence: limit,
-            maxTierBudget: limit,
-            maxTokens: Math.max(1000, limit * 300),
-          },
-        });
+        const context = await this.searchFeature(text, limit);
         records ||= context.retrieval?.mode === "hybrid";
         if (appendOnly[index]) {
           for (const result of context.results) {

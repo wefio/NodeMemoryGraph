@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import { StoreRunBoard, type RunBoardOptions } from "../../src/integration/ooo-runner.ts";
 import { workDigest } from "../../src/integration/work-identity.ts";
 import {
@@ -32,7 +32,7 @@ const definition = {
   patchEditable: [FILE],
 };
 
-function open(store: NmgStore): string {
+function open(store: SqliteLocalDaemonState): string {
   registerRun(store, {
     runId: RUN,
     planDigest: "plan",
@@ -68,7 +68,7 @@ function options(workspace: RunBoardOptions["workspace"]): RunBoardOptions {
 test("a restarted adopter judges against the original frozen bytes, not the current workspace", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-declaration-restore-"));
   const path = join(directory, "nmg.sqlite");
-  let store = new NmgStore(path);
+  let store = new SqliteLocalDaemonState(path);
   try {
     const entryId = open(store);
     const board = new StoreRunBoard(
@@ -95,7 +95,7 @@ test("a restarted adopter judges against the original frozen bytes, not the curr
         }),
     });
     store.close();
-    store = new NmgStore(path);
+    store = new SqliteLocalDaemonState(path);
     const restored = new StoreRunBoard(
       store,
       options(() => {
@@ -122,7 +122,7 @@ test("a restarted adopter judges against the original frozen bytes, not the curr
 });
 
 test("invalid input freezing rolls back the claim and its facts", () => {
-  const store = new NmgStore(":memory:");
+  const store = new SqliteLocalDaemonState(":memory:");
   try {
     const entryId = open(store);
     const before = {
@@ -144,7 +144,7 @@ test("invalid input freezing rolls back the claim and its facts", () => {
 });
 
 test("a frozen task definition compares permissions and effect, not only its instruction", () => {
-  const store = new NmgStore(":memory:");
+  const store = new SqliteLocalDaemonState(":memory:");
   try {
     open(store);
     for (const changed of [
@@ -166,7 +166,7 @@ test("a frozen task definition compares permissions and effect, not only its ins
 });
 
 test("a renewed claim restores its original inputs and a fresh attempt freezes new ones", () => {
-  const store = new NmgStore(":memory:");
+  const store = new SqliteLocalDaemonState(":memory:");
   try {
     const entryId = open(store);
     let bytes = "original";
@@ -201,7 +201,7 @@ test("a renewed claim restores its original inputs and a fresh attempt freezes n
 });
 
 test("a legacy attempt without input evidence refuses reads and judgment rather than rebuilding it", async () => {
-  const store = new NmgStore(":memory:");
+  const store = new SqliteLocalDaemonState(":memory:");
   try {
     const entryId = open(store);
     coordinatedBoardWrite(store, {
@@ -247,7 +247,7 @@ test("a legacy attempt without input evidence refuses reads and judgment rather 
 });
 
 test("unsupported or corrupted attempt input records fail closed without replacing their task definition", () => {
-  const store = new NmgStore(":memory:");
+  const store = new SqliteLocalDaemonState(":memory:");
   try {
     open(store);
     const frozen = new StoreRunBoard(

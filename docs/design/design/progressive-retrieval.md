@@ -138,7 +138,7 @@ cross-corpus measurements do not grant runtime admission.
 Within one daemon search, identical embedding batches share vectors, never
 Store reads. New calls use fresh preparation; failures/empty results can retry.
 Scope, index-health and deadline checks remain per use. See
-[implementation](../../../src/integration/search.ts) for exact batch identity
+implementation for exact batch identity
 and copied-vector isolation.
 
 ### Evidence assembly

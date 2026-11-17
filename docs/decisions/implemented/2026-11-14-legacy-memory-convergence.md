@@ -48,3 +48,5 @@ entry points use MemoryEngine. First use backs up and migrates a legacy SQLite
 file. The migration command accepts the main file and selected projects together.
 The old schema is available in the backup. The runtime uses migrated chains and
 hierarchy signals, and the package excludes the old store implementation.
+
+The active tree carries the migration reader and one memory engine. AML reads and writes through that engine over its request-scoped SQLite snapshots. The archived revision preserves the removed code and dependent experiments.

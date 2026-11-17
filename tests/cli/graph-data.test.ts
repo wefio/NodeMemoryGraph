@@ -8,7 +8,7 @@ import test from "node:test";
 import { readGraphData } from "../../src/cli/graph-data.ts";
 import { openInspectDb } from "../../src/cli/inspect-data.ts";
 import { NmgService } from "../../src/cli/service.ts";
-import { NmgStore } from "../../src/core/store.ts";
+import { LegacySqliteFixture } from "../helpers/legacy-sqlite-fixture.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 // In-process NmgService inherits process.env; keep recall lexical (test-env.ts).
@@ -18,23 +18,23 @@ test("graph projection reads nodes, memories, and all three edge layers", async 
   const directory = mkdtempSync(join(tmpdir(), "nmg-graph-"));
   const databasePath = join(directory, "nmg.sqlite");
   const service = new NmgService({ databasePath, environment: {} });
-  const old = new NmgStore(databasePath);
+  const old = new LegacySqliteFixture(databasePath);
   try {
-    old.remember({
+    old.insertMemory({
       statement: "The Atlas project must remain offline-first.",
       nodeName: "Atlas architecture",
       memoryType: "constraint",
       evidence: "The Atlas project must remain offline-first.",
       scope: { project: "atlas" },
     });
-    const sync = old.remember({
+    const sync = old.insertMemory({
       statement: "Atlas sync runs nightly.",
       nodeName: "Atlas sync",
       memoryType: "fact",
       evidence: "Atlas sync runs nightly.",
       scope: { project: "atlas" },
     });
-    old.remember({
+    old.insertMemory({
       statement: "Atlas sync runs hourly.",
       nodeName: "Atlas deploy",
       memoryType: "fact",
