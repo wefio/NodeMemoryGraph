@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   assembleBoardStateParams,
   resolveBoardOperation,
-} from "../../opencode-plugin/state-args.ts";
+} from "../../src/integration/state-tool.ts";
 
 const identity = { id: "sess_agent", agentName: "sess_agent" };
 

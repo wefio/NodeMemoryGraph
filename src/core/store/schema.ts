@@ -107,8 +107,138 @@ function repairAnchorMarker(value: unknown): void {
   if (marker.kind === "anchor_ref") marker.kind = "tessera_ref";
 }
 
+export function ensureLocalDaemonSchema(db: DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS retrieval_traces (
+      id TEXT PRIMARY KEY,
+      session_id TEXT,
+      query TEXT NOT NULL,
+      result_memory_ids_json TEXT NOT NULL,
+      result_node_ids_json TEXT NOT NULL,
+      expanded_node_ids_json TEXT NOT NULL,
+      disclosed_memory_ids_json TEXT NOT NULL DEFAULT '[]',
+      attributed_memory_ids_json TEXT NOT NULL DEFAULT '[]',
+      useful_memory_ids_json TEXT NOT NULL,
+      contradicted_memory_ids_json TEXT NOT NULL DEFAULT '[]',
+      rejected_memory_ids_json TEXT NOT NULL DEFAULT '[]',
+      relation_ids_json TEXT NOT NULL DEFAULT '[]',
+      task_id TEXT NOT NULL DEFAULT '',
+      active_graph_budget_json TEXT NOT NULL DEFAULT '{}',
+      active_graph_usage_json TEXT NOT NULL DEFAULT '{}',
+      selections_json TEXT NOT NULL DEFAULT '[]',
+      expansions_json TEXT NOT NULL DEFAULT '[]',
+      budget_ledger_json TEXT NOT NULL DEFAULT '[]',
+      ambiguity REAL NOT NULL,
+      fallback_used INTEGER NOT NULL,
+      conflict_observed INTEGER NOT NULL,
+      qpp_json TEXT NOT NULL DEFAULT '{}',
+      timings_json TEXT NOT NULL DEFAULT '{}',
+      filter_usage_json TEXT NOT NULL DEFAULT '{}',
+      signals_drained_at TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS perf_aggregates (
+      section TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      sum REAL NOT NULL DEFAULT 0,
+      sum_sq REAL NOT NULL DEFAULT 0,
+      buckets_json TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (section)
+    );
+
+    CREATE TABLE IF NOT EXISTS task_board_entries (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      -- Legacy internal column kept for schema compatibility with existing
+      -- stores. It is no longer generated, read, or exposed: ordering and the
+      -- opaque continuation cursor are derived from (created_at, id), where
+      -- the id embeds a per-channel monotonic counter that never recycles
+      -- (see task_board_counters). New writes store 0 here.
+      sequence INTEGER NOT NULL DEFAULT 0,
+      agent_id TEXT NOT NULL,
+      source_session_id TEXT,
+      kind TEXT NOT NULL CHECK (
+        kind IN ('blocker', 'decision', 'goal', 'handoff', 'note', 'question', 'result')
+      ),
+      content TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      resolved_at TEXT,
+      resolved_by TEXT,
+      resolution TEXT
+    );
+
+    -- Global monotonic counter for task-board entry ids. Kept in a separate
+    -- table so deletion (expiry/resolve) never recycles a counter: the id
+    -- embeds the counter, so same-millisecond entries stay in insertion order
+    -- deterministically AND the id is globally unique across all channels
+    -- (the entries table uses id as its PRIMARY KEY).
+    CREATE TABLE IF NOT EXISTS task_board_counters (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      counter INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_task_board_task_status_created
+      ON task_board_entries(task_id, status, created_at, id);
+    CREATE INDEX IF NOT EXISTS idx_task_board_expiry
+      ON task_board_entries(expires_at);
+
+    -- Task run records: what a run froze and what it appended, in the same database,
+    -- connection and transaction as the board. Named for what they store rather than
+    -- for the feature that first needed them, because a run log is general: a plan
+    -- can be executed by anything that can read a board.
+    --
+    -- Three tables and no fourth: the manifest is immutable, the facts are appended,
+    -- and the per-task current view is derived from the two (src/integration) instead
+    -- of stored, so nothing here can compete with the board as a second truth.
+    CREATE TABLE IF NOT EXISTS task_run_manifest (
+      run_id TEXT PRIMARY KEY,
+      plan_digest TEXT NOT NULL,
+      policy TEXT NOT NULL,
+      revision TEXT NOT NULL,
+      retention TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    ${TASK_UNIT_DECLARATION_SCHEMA}
+
+    -- Appended run facts, keyed by run and sequence. The unique key is the fact's own
+    -- identity, so a caller that retries after a lost response appends once: run,
+    -- kind, task and attempt name the fact, and an empty task id is how a run-level
+    -- fact (a cancellation, a plan revision) avoids colliding with a task's.
+    CREATE TABLE IF NOT EXISTS task_run_facts (
+      run_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      task_id TEXT NOT NULL DEFAULT '',
+      attempt INTEGER NOT NULL DEFAULT 0,
+      entry_id TEXT,
+      payload TEXT,
+      recorded_at TEXT NOT NULL,
+      PRIMARY KEY (run_id, sequence),
+      UNIQUE (run_id, kind, task_id, attempt)
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_run_facts_task
+      ON task_run_facts(run_id, task_id, sequence);
+    CREATE INDEX IF NOT EXISTS idx_task_run_facts_entry
+      ON task_run_facts(run_id, entry_id);
+  `);
+  ensureRetrievalTraceColumns(db);
+  ensurePerfAggregateColumns(db);
+  ensureTaskBoardColumns(db);
+  ensureTaskBoardDeliverableColumns(db);
+  ensureCoordinationSchema(db);
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_retrieval_traces_created_at ON retrieval_traces(created_at)",
+  );
+}
+
 export function migrate(db: DatabaseSync): void {
   migrateLegacyTesseraeTables(db);
+  ensureLocalDaemonSchema(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS history_records (
       id TEXT PRIMARY KEY,
@@ -360,45 +490,6 @@ export function migrate(db: DatabaseSync): void {
       updated_at TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS retrieval_traces (
-      id TEXT PRIMARY KEY,
-      session_id TEXT,
-      query TEXT NOT NULL,
-      result_memory_ids_json TEXT NOT NULL,
-      result_node_ids_json TEXT NOT NULL,
-      expanded_node_ids_json TEXT NOT NULL,
-      disclosed_memory_ids_json TEXT NOT NULL DEFAULT '[]',
-      attributed_memory_ids_json TEXT NOT NULL DEFAULT '[]',
-      useful_memory_ids_json TEXT NOT NULL,
-      contradicted_memory_ids_json TEXT NOT NULL DEFAULT '[]',
-      rejected_memory_ids_json TEXT NOT NULL DEFAULT '[]',
-      relation_ids_json TEXT NOT NULL DEFAULT '[]',
-      task_id TEXT NOT NULL DEFAULT '',
-      active_graph_budget_json TEXT NOT NULL DEFAULT '{}',
-      active_graph_usage_json TEXT NOT NULL DEFAULT '{}',
-      selections_json TEXT NOT NULL DEFAULT '[]',
-      expansions_json TEXT NOT NULL DEFAULT '[]',
-      budget_ledger_json TEXT NOT NULL DEFAULT '[]',
-      ambiguity REAL NOT NULL,
-      fallback_used INTEGER NOT NULL,
-      conflict_observed INTEGER NOT NULL,
-      qpp_json TEXT NOT NULL DEFAULT '{}',
-      timings_json TEXT NOT NULL DEFAULT '{}',
-      filter_usage_json TEXT NOT NULL DEFAULT '{}',
-      signals_drained_at TEXT,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS perf_aggregates (
-      section TEXT NOT NULL,
-      count INTEGER NOT NULL DEFAULT 0,
-      sum REAL NOT NULL DEFAULT 0,
-      sum_sq REAL NOT NULL DEFAULT 0,
-      buckets_json TEXT NOT NULL DEFAULT '[]',
-      updated_at TEXT NOT NULL,
-      PRIMARY KEY (section)
-    );
-
     CREATE TABLE IF NOT EXISTS maintenance_runs (
       id TEXT PRIMARY KEY,
       phase TEXT NOT NULL,
@@ -553,39 +644,6 @@ export function migrate(db: DatabaseSync): void {
       created_at TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS task_board_entries (
-      id TEXT PRIMARY KEY,
-      task_id TEXT NOT NULL,
-      -- Legacy internal column kept for schema compatibility with existing
-      -- stores. It is no longer generated, read, or exposed: ordering and the
-      -- opaque continuation cursor are derived from (created_at, id), where
-      -- the id embeds a per-channel monotonic counter that never recycles
-      -- (see task_board_counters). New writes store 0 here.
-      sequence INTEGER NOT NULL DEFAULT 0,
-      agent_id TEXT NOT NULL,
-      source_session_id TEXT,
-      kind TEXT NOT NULL CHECK (
-        kind IN ('blocker', 'decision', 'goal', 'handoff', 'note', 'question', 'result')
-      ),
-      content TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
-      created_at TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      resolved_at TEXT,
-      resolved_by TEXT,
-      resolution TEXT
-    );
-
-    -- Global monotonic counter for task-board entry ids. Kept in a separate
-    -- table so deletion (expiry/resolve) never recycles a counter: the id
-    -- embeds the counter, so same-millisecond entries stay in insertion order
-    -- deterministically AND the id is globally unique across all channels
-    -- (the entries table uses id as its PRIMARY KEY).
-    CREATE TABLE IF NOT EXISTS task_board_counters (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      counter INTEGER NOT NULL DEFAULT 0
-    );
-
     -- Memory tesserae (bookmarks): content-anchored file locations a memory
     -- points into. Independent searchable source (label/path/snippet FTS);
     -- memory ↔ tessera linkage rides the open-string markers channel
@@ -646,50 +704,6 @@ export function migrate(db: DatabaseSync): void {
       ON memory_maintenance_proposals(status, created_at);
     CREATE INDEX IF NOT EXISTS idx_edge_task_observations_pair
       ON edge_task_observations(left_node_id, right_node_id, created_at);
-    CREATE INDEX IF NOT EXISTS idx_task_board_task_status_created
-      ON task_board_entries(task_id, status, created_at, id);
-    CREATE INDEX IF NOT EXISTS idx_task_board_expiry
-      ON task_board_entries(expires_at);
-
-    -- Task run records: what a run froze and what it appended, in the same database,
-    -- connection and transaction as the board. Named for what they store rather than
-    -- for the feature that first needed them, because a run log is general: a plan
-    -- can be executed by anything that can read a board.
-    --
-    -- Three tables and no fourth: the manifest is immutable, the facts are appended,
-    -- and the per-task current view is derived from the two (src/integration) instead
-    -- of stored, so nothing here can compete with the board as a second truth.
-    CREATE TABLE IF NOT EXISTS task_run_manifest (
-      run_id TEXT PRIMARY KEY,
-      plan_digest TEXT NOT NULL,
-      policy TEXT NOT NULL,
-      revision TEXT NOT NULL,
-      retention TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-
-    ${TASK_UNIT_DECLARATION_SCHEMA}
-
-    -- Appended run facts, keyed by run and sequence. The unique key is the fact's own
-    -- identity, so a caller that retries after a lost response appends once: run,
-    -- kind, task and attempt name the fact, and an empty task id is how a run-level
-    -- fact (a cancellation, a plan revision) avoids colliding with a task's.
-    CREATE TABLE IF NOT EXISTS task_run_facts (
-      run_id TEXT NOT NULL,
-      sequence INTEGER NOT NULL,
-      kind TEXT NOT NULL,
-      task_id TEXT NOT NULL DEFAULT '',
-      attempt INTEGER NOT NULL DEFAULT 0,
-      entry_id TEXT,
-      payload TEXT,
-      recorded_at TEXT NOT NULL,
-      PRIMARY KEY (run_id, sequence),
-      UNIQUE (run_id, kind, task_id, attempt)
-    );
-    CREATE INDEX IF NOT EXISTS idx_task_run_facts_task
-      ON task_run_facts(run_id, task_id, sequence);
-    CREATE INDEX IF NOT EXISTS idx_task_run_facts_entry
-      ON task_run_facts(run_id, entry_id);
   `);
   ensureMemoryColumns(db);
   ensureHistoryColumns(db);
@@ -699,16 +713,11 @@ export function migrate(db: DatabaseSync): void {
   ensureNodeColumns(db);
   ensureRelationColumns(db);
   ensureTopologyProposalColumns(db);
-  ensureRetrievalTraceColumns(db);
   ensureNodeRetrievalSignalColumns(db);
-  ensurePerfAggregateColumns(db);
   ensureDeltaColumns(db);
   ensureLeafSummaryColumns(db);
   ensureNodeSummaryColumns(db);
   ensureBinaryVectors(db);
-  ensureTaskBoardColumns(db);
-  ensureTaskBoardDeliverableColumns(db);
-  ensureCoordinationSchema(db);
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_history_source_message
       ON history_records(session_id, source_message_id)
@@ -717,8 +726,6 @@ export function migrate(db: DatabaseSync): void {
       ON memory_records(memory_type, state_key, status);
     CREATE INDEX IF NOT EXISTS idx_memory_records_residence_expiry
       ON memory_records(residence, expires_at, status);
-    CREATE INDEX IF NOT EXISTS idx_retrieval_traces_created_at
-      ON retrieval_traces(created_at);
     UPDATE memory_records SET promoted_at = created_at
       WHERE residence = 'ltg' AND promoted_at IS NULL;
     INSERT OR IGNORE INTO memory_evidence_links (memory_id, history_id)
@@ -728,6 +735,7 @@ export function migrate(db: DatabaseSync): void {
     INSERT OR IGNORE INTO leaf_block_status(node_id, dirty, updated_at)
     SELECT id, 1, updated_at FROM memory_nodes WHERE status = 'active';
   `);
+  ensureLegacyChains(db);
   normalizeStoredEventTimes(db);
   ensureMemoryFts(db);
 }
@@ -1225,13 +1233,9 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
   }
 
   ensureTaskBoardPresenceSchema(db);
+}
 
-  // ── Memory chains: static ordered-reference DAG forests over memory_records ──
-  // A chain is a small, independent, internally-acyclic sequence of memory
-  // references; node reuse gives cross-chain intersection (a memory may belong
-  // to many chains). Time chains order by event_time (position derived from it
-  // at write time); logical chains carry explicit write-time order. Chains store
-  // dependencies only — inference/reasoning is the reasoner's job, not theirs.
+function ensureLegacyChains(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS memory_chains (
       id TEXT PRIMARY KEY,

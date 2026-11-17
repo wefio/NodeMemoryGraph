@@ -37,7 +37,8 @@ DSH 激活时撤下旧项目注册 `dsh:<project>`。历史消息和事件角色
 ## 会话处理状态
 
 黑板为每个 Agent／会话组合提供共享处理状态，通过 `nmg_state space=board`
-的 `agentActivity` 读取与写入。显式指定会话，使同一 Agent 的忙碌会话和可用会话可以并存。
+的 `agentActivity` 读取与写入。共享校验会提示选了 `space=ag` 的调用方改用 board。
+显式指定会话，使同一 Agent 的忙碌会话和可用会话可以并存。
 任务派生的 `agentStatus.activity` 继续表达已登记工作。发现列表通过带会话来源标签的
 InformationView，并列呈现处理报告、任务与公开状态说明。
 

@@ -1,18 +1,251 @@
+import { openLocalMemory } from "../../src/cli/local-memory-migration.ts";
+import { hasLegacyMemoryTables } from "../../src/core/memory/sqlite-legacy-retirement.ts";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, truncateSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, truncateSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { NmgService } from "../../src/cli/service.ts";
+import { runCli } from "../../src/cli/main.ts";
 import { httpHandler } from "../../src/cli/http-server.ts";
 import { NmgStore } from "../../src/core/store.ts";
+import { stgStorePath } from "../../src/core/stg.ts";
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
+import { activatedLocalMemory } from "../../src/core/memory/sqlite-backend.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
+
+test("default service migrates an old SQLite file before serving memory", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-default-migration-"));
+  const databasePath = join(directory, "nmg.sqlite");
+  const legacy = new NmgStore(databasePath);
+  const { memory } = legacy.remember({
+    statement: "The signed inventory is stored in the original warehouse",
+    nodeName: "Original warehouse",
+  });
+  const retained = legacy.remember({
+    statement: "The retained inventory references the retired warehouse",
+    nodeName: "Retired warehouse",
+  }).memory;
+  legacy.setMemoryStorageState(retained.id, "dormant");
+  legacy.close();
+  const service = new NmgService({ databasePath, environment: {} });
+  try {
+    assert.ok((await service.invoke("hello")).capabilities.includes("portable-memory"));
+    assert.equal(
+      (await service.invoke("get", { memoryIds: [memory.id] })).results[0]?.memory.id,
+      memory.id,
+    );
+    assert.equal(
+      (await service.invoke("get", { memoryIds: [retained.id] })).results[0]?.memory.storageState,
+      "dormant",
+    );
+    const matches = await service.invoke("search", {
+      query: "inventory warehouse",
+      includeHistorical: true,
+    });
+    assert.deepEqual(
+      matches.results.map(({ memory }) => memory.id),
+      [memory.id],
+    );
+    assert.ok(activatedLocalMemory(databasePath));
+    const backup = readdirSync(directory).find((name) =>
+      name.startsWith("nmg.sqlite.before-unified-"),
+    );
+    assert.ok(backup);
+    const source = new DatabaseSync(join(directory, backup), { readOnly: true });
+    try {
+      assert.ok(source.prepare("SELECT id FROM memory_records WHERE id=?").get(memory.id));
+      assert.equal(activatedLocalMemory(join(directory, backup)), undefined);
+    } finally {
+      source.close();
+    }
+    const current = new DatabaseSync(databasePath);
+    try {
+      assert.equal(hasLegacyMemoryTables(current), false);
+      assert.throws(() => new NmgStore(databasePath), /uses the unified memory engine/);
+      assert.equal(hasLegacyMemoryTables(current), false);
+    } finally {
+      current.close();
+    }
+  } finally {
+    await service.close();
+    removeTempDirectory(directory);
+  }
+});
+
+test("legacy retirement rolls back if a retained table references a retired table", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-retire-reference-"));
+  const path = join(directory, "nmg.sqlite");
+  try {
+    const legacy = new NmgStore(path);
+    const { memory } = legacy.remember({
+      statement: "An archived record still supports the external report.",
+      nodeName: "Archived record",
+    });
+    legacy.close();
+    const db = new DatabaseSync(path);
+    try {
+      db.exec(
+        "CREATE TABLE report (memory_id TEXT REFERENCES memory_records(id) ON DELETE CASCADE)",
+      );
+      db.prepare("INSERT INTO report VALUES (?)").run(memory.id);
+    } finally {
+      db.close();
+    }
+
+    await assert.rejects(openLocalMemory(path, "rollback"), /memory_records: referenced by report/);
+    assert.equal(activatedLocalMemory(path), undefined);
+    const restored = new DatabaseSync(path, { readOnly: true });
+    try {
+      assert.ok(restored.prepare("SELECT 1 FROM memory_records WHERE id=?").get(memory.id));
+      assert.equal(restored.prepare("SELECT memory_id FROM report").get()?.memory_id, memory.id);
+      assert.equal(restored.prepare("SELECT count(*) AS n FROM nmg_memory_entities").get()?.n, 0);
+    } finally {
+      restored.close();
+    }
+  } finally {
+    removeTempDirectory(directory);
+  }
+});
+
+test("one daemon migrate command backs up and activates the main and selected projects", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-migrate-projects-"));
+  const main = join(directory, "nmg.sqlite");
+  const project = join(directory, "project");
+  const stg = stgStorePath(project);
+  const missing = join(directory, "missing");
+  try {
+    for (const path of [main, stg]) {
+      const fixture = new NmgStore(path);
+      fixture.remember({
+        statement: "Archive checkpoint stored in SQLite",
+        nodeName: "Checkpoint",
+      });
+      fixture.close();
+    }
+    const argv = [
+      "daemon",
+      "migrate",
+      "--db",
+      main,
+      "--project-dir",
+      project,
+      "--project-dir",
+      missing,
+      "--project-dir",
+      project,
+      "--json",
+    ];
+    let output = "";
+    const io = {
+      stdout: {
+        write: (text: string) => {
+          output += text;
+          return true;
+        },
+      },
+      stderr: {
+        write: (text: string) => {
+          assert.fail(text);
+        },
+      },
+    };
+    assert.equal(await runCli(argv, io), 0);
+    const receipt = JSON.parse(output);
+    assert.ok(existsSync(receipt.backupPath));
+    assert.equal(receipt.projectDatabases.length, 1);
+    assert.equal(receipt.projectDatabases[0].databasePath, stg);
+    assert.ok(existsSync(receipt.projectDatabases[0].backupPath));
+    assert.equal(activatedLocalMemory(stg), receipt.namespace);
+    assert.equal(existsSync(stgStorePath(missing)), false);
+    output = "";
+    assert.equal(await runCli(argv, io), 0);
+    assert.equal(JSON.parse(output).backupPath, undefined);
+    assert.equal(JSON.parse(output).projectDatabases[0].backupPath, undefined);
+  } finally {
+    removeTempDirectory(directory);
+  }
+});
+
+test("activated daemon uses the project file's existing namespace for scoped memory", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-project-namespace-"));
+  const projectDir = join(directory, "project");
+  const project = new NmgService({
+    databasePath: stgStorePath(projectDir),
+    environment: {},
+    memoryBackend: { kind: "sqlite", namespace: "project-origin", local: true },
+  });
+  const service = new NmgService({
+    databasePath: join(directory, "nmg.sqlite"),
+    environment: {},
+    memoryBackend: { kind: "sqlite", namespace: "main-origin", local: true },
+  });
+  try {
+    const existing = await project.invoke("remember", {
+      statement: "The project keeps the calibration fixture on site",
+      nodeName: "Calibration",
+      residence: "stg",
+      sessionId: "owner",
+    });
+    await project.close();
+    const scoped = { projectDir, sessionId: "owner" };
+    const shared = await service.invoke("remember", {
+      statement: "Calibration documents use common terminology",
+      nodeName: "Calibration glossary",
+    });
+    const recalled = await service.invoke("search", { ...scoped, query: "calibration" });
+    assert.deepEqual(
+      new Set(recalled.results.map(({ memory }) => memory.id)),
+      new Set([existing.memory.id, shared.memory.id]),
+    );
+    assert.equal(
+      (await service.invoke("get", { ...scoped, memoryIds: [existing.memory.id] })).results[0]
+        ?.memory.id,
+      existing.memory.id,
+    );
+    assert.deepEqual(
+      (
+        await service.invoke("get", {
+          ...scoped,
+          sessionId: "foreign",
+          memoryIds: [existing.memory.id],
+        })
+      ).results,
+      [],
+    );
+    const created = await service.invoke("remember", {
+      ...scoped,
+      statement: "A calibration label belongs to this project",
+      nodeName: "Label",
+      residence: "stg",
+    });
+    assert.equal(
+      (await service.invoke("get", { ...scoped, memoryIds: [created.memory.id] })).results[0]
+        ?.memory.id,
+      created.memory.id,
+    );
+    const db = new DatabaseSync(stgStorePath(projectDir), { readOnly: true });
+    try {
+      assert.equal(
+        db.prepare("SELECT namespace FROM nmg_local_memory").get()?.namespace,
+        "project-origin",
+      );
+      assert.equal(db.prepare("SELECT count(*) AS n FROM nmg_memory_head").get()?.n, 1);
+    } finally {
+      db.close();
+    }
+  } finally {
+    await project.close();
+    await service.close();
+    removeTempDirectory(directory);
+  }
+});
 
 test("activated daemon accepts the Pi automatic recall envelope and enforces MCP event bounds", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-adapter-recall-"));
@@ -72,6 +305,57 @@ test("activated daemon accepts the Pi automatic recall envelope and enforces MCP
     );
   } finally {
     await service.close();
+    removeTempDirectory(directory);
+  }
+});
+
+test("unified automatic search uses the admitted turn's nearby context before retrieval", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-nearby-context-"));
+  const local = new NmgService({
+    databasePath: join(directory, "memory.sqlite"),
+    environment: {},
+    memoryBackend: { kind: "sqlite", namespace: "nearby-context", local: true },
+  });
+  const projectDir = join(directory, "project");
+  const sessionId = "session-a";
+  const query = "这次呢？";
+  try {
+    const { memory } = await local.invoke("remember", {
+      statement: "HarborAtlasMarker restores the SQLite backup in the maintenance window",
+      nodeName: "HarborAtlasMarker",
+    });
+    for (const prompt of ["请测试 HarborAtlasMarker 的 SQLite 备份恢复工作", query]) {
+      await local.invoke("sessionActiveGraph", {
+        action: "beginDisclosureTurn",
+        sessionId,
+        projectDir,
+        prompt,
+      });
+    }
+    const options = {
+      query,
+      projectDir,
+      sessionId,
+      retrievalMode: "fts5",
+      autoRecall: true,
+      persistTrace: false,
+    } as const;
+    const recalled = await local.invoke("search", options);
+    assert.equal(recalled.results[0]?.memory.id, memory.id);
+    assert.equal(recalled.activeGraph?.query, query);
+    for (const variation of [
+      { autoRecall: false },
+      { sessionId: "session-b" },
+      { projectDir: join(directory, "another-project") },
+    ]) {
+      const separate = await local.invoke("search", { ...options, ...variation });
+      assert.equal(
+        separate.results.some((entry) => entry.memory.id === memory.id),
+        false,
+      );
+    }
+  } finally {
+    await local.close();
     removeTempDirectory(directory);
   }
 });
@@ -292,6 +576,7 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
   const directory = mkdtempSync(join(tmpdir(), "nmg-portable-vector-"));
   const path = join(directory, "memory.sqlite");
   let documentCalls = 0;
+  let slowQueries = false;
   const server = createServer(async (request, response) => {
     const parts = [];
     for await (const chunk of request) parts.push(chunk);
@@ -299,6 +584,8 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
       requests: Array<{ taskType: string }>;
     };
     documentCalls += requests.filter((item) => item.taskType === "RETRIEVAL_DOCUMENT").length;
+    if (slowQueries && requests.some((item) => item.taskType === "RETRIEVAL_QUERY"))
+      await delay(120);
     response.end(JSON.stringify({ embeddings: requests.map(() => ({ values: [1, 0] })) }));
   });
   await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
@@ -316,6 +603,7 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
     nodeName: "Depot",
   });
   legacy.upsertExternalEmbeddings(indexId, [{ memoryId: original.memory.id, vector: [1, 0] }]);
+  legacy.upsertExternalNodeEmbeddings(indexId, [{ nodeId: original.node.id, vector: [1, 0] }]);
   legacy.close();
   let service = new NmgService({
     databasePath: path,
@@ -329,6 +617,18 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
     });
     assert.equal(pure.results[0]?.memory.id, original.memory.id);
     assert.equal(pure.results[0]?.vectorScore, 1);
+    const migrated = new DatabaseSync(path, { readOnly: true });
+    try {
+      assert.equal(hasLegacyMemoryTables(migrated), false);
+      assert.equal(
+        migrated
+          .prepare("SELECT id FROM nmg_memory_route_vectors WHERE model=? AND kind='node'")
+          .get(indexId)?.id,
+        original.node.id,
+      );
+    } finally {
+      migrated.close();
+    }
     assert.equal(documentCalls, 0);
     const hybrid = await service.invoke("search", {
       query: "logistics depot",
@@ -336,6 +636,26 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
     });
     assert.equal(hybrid.retrieval?.mode, "hybrid");
     assert.ok(hybrid.results[0]!.lexicalScore > 0);
+    slowQueries = true;
+    const fallback = await service.invoke("search", {
+      query: "logistics depot",
+      retrievalMode: "hybrid",
+      autoRecall: true,
+      autoRecallBudgetMs: 20,
+    });
+    assert.deepEqual(fallback.retrieval, {
+      mode: "lexical",
+      degraded: true,
+      reason: "automatic_recall_embedding_deadline",
+    });
+    assert.equal(fallback.results[0]?.memory.id, original.memory.id);
+    const explicit = await service.invoke("search", {
+      query: "logistics depot",
+      retrievalMode: "hybrid",
+    });
+    assert.equal(explicit.retrieval?.mode, "hybrid");
+    assert.equal(explicit.results[0]?.vectorScore, 1);
+    slowQueries = false;
     const next = await service.invoke("remember", {
       statement: "The freight terminal is in Bergen",
       nodeName: "Terminal",

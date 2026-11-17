@@ -12,9 +12,18 @@ When Pi automatic pre-turn context preparation runs, the whole `before_agent_sta
 
 Completed typed items still pass through the same information-view admission protocol. Timeout does not restore a raw-header fallback or write disclosure history. Attribution uses only memory IDs admitted into the final output.
 
-Daemon automatic search uses the caller's remaining budget, capped at 4.5 seconds. Project and shared-store query embeddings share that deadline; expiry retains lexical results and a degradation reason. This automatic deadline does not bound explicit `nmg_search`.
+Hosts pass their remaining time with 100 milliseconds reserved for completing
+the response. The daemon caps the supplied budget at 4.5 seconds across both
+local search paths. Unified local memory defaults to 850 milliseconds for callers
+that omit the budget. Project and shared-store query embeddings share the deadline.
+On expiry, lexical results remain available. Explicit `nmg_search` uses the
+provider timeout.
 
 ## Cancellation and diagnostics
+
+Agent-facing search results retain `automatic_recall_embedding_deadline` when
+query embedding exceeds the automatic recall budget. Automatic context displays
+this code once per recall result in its diagnostics.
 
 Supported HTTP requests abort together with response-body reading. The asynchronous deadline cannot preempt synchronous JavaScript/SQLite, and cancellation of an issued provider request does not guarantee remote cancellation.
 

@@ -483,7 +483,7 @@ let daemonLimitWarningIssued = false;
 const DAEMON_READY_POLL_MS = 25;
 // Env-tunable: hosted CI Windows runners start node cold (Defender scan, cold
 // pnpm/node cache) and can exceed the 10s default before the daemon answers.
-const DAEMON_READY_TIMEOUT_MS = integerEnvironment("NMG_DAEMON_READY_TIMEOUT_MS", 10_000);
+export const DAEMON_READY_TIMEOUT_MS = integerEnvironment("NMG_DAEMON_READY_TIMEOUT_MS", 10_000);
 
 function readyState(statePath: string): ServerState | undefined {
   const state = readServerState(statePath);

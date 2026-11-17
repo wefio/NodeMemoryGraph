@@ -31,7 +31,37 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
       dimensions INTEGER NOT NULL, vector BLOB NOT NULL,
       PRIMARY KEY(namespace, model, id));
       CREATE TABLE IF NOT EXISTS nmg_memory_vector_import (
-        namespace TEXT PRIMARY KEY);`);
+        namespace TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS nmg_memory_route_vectors (
+        namespace TEXT NOT NULL, model TEXT NOT NULL, kind TEXT NOT NULL,
+        id TEXT NOT NULL, vector BLOB NOT NULL,
+        PRIMARY KEY(namespace, model, kind, id));
+      CREATE TABLE IF NOT EXISTS nmg_memory_route_members (
+        namespace TEXT NOT NULL, memory_id TEXT NOT NULL, leaf_id TEXT NOT NULL,
+        PRIMARY KEY(namespace, memory_id, leaf_id));`);
+  }
+
+  importLegacyHierarchy(): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO nmg_memory_route_vectors
+      SELECT ?, model, 'node', node_id, COALESCE(vector_blob, vector_json) FROM node_embeddings
+      WHERE COALESCE(vector_blob, vector_json) IS NOT NULL`,
+      )
+      .run(this.namespace);
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO nmg_memory_route_vectors
+      SELECT ?, model, 'leaf', block_id, COALESCE(vector_blob, vector_json) FROM leaf_embeddings
+      WHERE COALESCE(vector_blob, vector_json) IS NOT NULL`,
+      )
+      .run(this.namespace);
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO nmg_memory_route_members
+      SELECT ?, memory_id, block_id FROM memory_leaf_members`,
+      )
+      .run(this.namespace);
   }
 
   importLegacy(): void {
@@ -146,9 +176,7 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
       const score = cosineSimilarity(semantic.vector, scoringVector({ vector: value }));
       return Number.isFinite(score) ? score : 0;
     });
-    const hierarchy =
-      semantic.granularity !== "records" &&
-      db.prepare("SELECT 1 FROM nmg_memory_vector_import WHERE namespace=?").get(this.namespace);
+    const hierarchy = semantic.granularity !== "records";
     const rows = db
       .prepare(
         `WITH eligible AS (
@@ -180,6 +208,7 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
 }
 
 const INDEXABLE_MEMORY = `json_extract(m.payload, '$.status') <> 'deleted'
+  AND json_extract(m.payload, '$.storageState') IS NULL
   AND NOT EXISTS (SELECT 1 FROM json_each(m.payload, '$.markers') marker
     WHERE json_extract(marker.value, '$.kind')='forget')`;
 const MISSING_VECTOR = `m.namespace=? AND m.kind='memory' AND ${INDEXABLE_MEMORY}
@@ -187,12 +216,14 @@ const MISSING_VECTOR = `m.namespace=? AND m.kind='memory' AND ${INDEXABLE_MEMORY
     WHERE v.namespace=m.namespace AND v.model=? AND v.id=m.id)`;
 
 const HIERARCHY_SCORE = `max(coalesce((
-  SELECT nmg_memory_cosine(COALESCE(n.vector_blob,n.vector_json))
-  FROM node_embeddings n WHERE n.node_id=m.node AND n.model=?
+  SELECT nmg_memory_cosine(n.vector)
+  FROM nmg_memory_route_vectors n
+  WHERE n.namespace=m.namespace AND n.kind='node' AND n.id=m.node AND n.model=?
 ), 0), coalesce((
-  SELECT max(nmg_memory_cosine(COALESCE(l.vector_blob,l.vector_json)))
-  FROM memory_leaf_members member JOIN leaf_embeddings l ON l.block_id=member.block_id
-  WHERE member.memory_id=m.id AND l.model=?
+  SELECT max(nmg_memory_cosine(l.vector))
+  FROM nmg_memory_route_members member JOIN nmg_memory_route_vectors l
+    ON l.namespace=member.namespace AND l.kind='leaf' AND l.id=member.leaf_id
+  WHERE member.namespace=m.namespace AND member.memory_id=m.id AND l.model=?
 ), 0))`;
 
 function validateVectors(vectors: readonly number[][], expected: number): void {

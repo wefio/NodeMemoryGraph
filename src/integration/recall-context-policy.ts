@@ -1,5 +1,9 @@
 import type { MemorySearchResult } from "../core/types.ts";
-import { isTaskContinuation } from "./session-task-window.ts";
+import {
+  isSubstantiveTaskPrompt,
+  isTaskContinuation,
+  TASK_CONTEXT_SEPARATOR,
+} from "./session-task-window.ts";
 
 export type RecallDisplayMode = "compact" | "full";
 interface RecallContextState {
@@ -32,6 +36,10 @@ function overlap(query: Set<string>, text: Set<string>): number {
   return [...query].filter((term) => text.has(term)).length / query.size;
 }
 
+function previousPrompt(prompts: readonly string[], current: string): string | undefined {
+  return prompts.findLast((prompt) => prompt !== current && !isTaskContinuation(prompt));
+}
+
 /** Bounded user-only context. Ranking preserves every candidate and its retrieval scores. */
 export class RecallContextPolicy {
   readonly #sessions = new Map<string, RecallContextState>();
@@ -55,6 +63,17 @@ export class RecallContextPolicy {
     state.prompts = state.prompts.slice(-3);
   }
 
+  automaticQuery(sessionId: string, project: string, query: string): string {
+    if (query.includes(TASK_CONTEXT_SEPARATOR) || !isTaskContinuation(query)) return query;
+    const current = query.replace(/\s+/gu, " ").trim();
+    const state = this.#sessions.get(sessionId);
+    if (state?.project !== project || state.prompts.at(-1) !== current) return query;
+    const prior = previousPrompt(state.prompts, current);
+    return prior && isSubstantiveTaskPrompt(prior)
+      ? `${query}${TASK_CONTEXT_SEPARATOR}${prior}`
+      : query;
+  }
+
   mode(sessionId: string): RecallDisplayMode {
     return this.#modes.get(sessionId) ?? "compact";
   }
@@ -73,14 +92,13 @@ export class RecallContextPolicy {
     query: string,
     results: readonly MemorySearchResult[],
   ): MemorySearchResult[] {
-    const current = query.split("\nRecent task context:")[0]!.trim();
+    const current = query.split(TASK_CONTEXT_SEPARATOR)[0]!.trim();
     const currentTerms = terms(current);
     const state = this.#sessions.get(sessionId);
     const prompts = state?.project === project ? state.prompts : [];
-    const recent = prompts.filter((prompt) => prompt !== current && !isTaskContinuation(prompt));
     // Only the latest distinct topic can supplement a continuation. A current
     // substantive request must overlap that topic before history can affect rank.
-    const previous = terms(recent.at(-1) ?? "");
+    const previous = terms(previousPrompt(prompts, current) ?? "");
     const history =
       isTaskContinuation(current) || overlap(currentTerms, previous) > 0
         ? previous

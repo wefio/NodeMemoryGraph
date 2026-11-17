@@ -2,7 +2,7 @@ import type { EmbeddingClient } from "../core/embedding-provider.ts";
 import type { MemoryVectorIndex, MemoryVectorQuery } from "../core/memory/backend.ts";
 import { HashingVectorEmbedder } from "../core/vector.ts";
 import { memoryEmbeddingModelId } from "../core/store/search-ranking.ts";
-import { RecallBudget } from "../integration/recall-budget.ts";
+import { DAEMON_AUTOMATIC_RECALL_MAX_MS, RecallBudget } from "../integration/recall-budget.ts";
 import type { NmgSearchParams } from "./protocol.ts";
 
 const hashing = new HashingVectorEmbedder();
@@ -18,12 +18,17 @@ type IndexUpdate = { pending: boolean; task: Promise<void> };
 /** Provider I/O stays outside SQLite transactions. Missing vectors remain durable work. */
 export class LocalMemoryEmbeddings {
   private readonly configured: () => EmbeddingClient | undefined;
+  private readonly unavailable: () => boolean;
   private readonly jobs = new Map<MemoryVectorIndex, Map<string, IndexUpdate>>();
   private readonly failures = new Map<string, number>();
   private closing = false;
 
-  constructor(configured: () => EmbeddingClient | undefined) {
+  constructor(
+    configured: () => EmbeddingClient | undefined,
+    unavailable: () => boolean = () => false,
+  ) {
     this.configured = configured;
+    this.unavailable = unavailable;
   }
 
   async query(
@@ -37,7 +42,9 @@ export class LocalMemoryEmbeddings {
     if (params.retrievalMode === "fts5") return {};
     const client = params.retrievalMode === "hashing" ? hashingClient : this.configured();
     if (!client)
-      return params.retrievalMode === "hybrid" || params.retrievalMode === "qwen3"
+      return this.unavailable() ||
+        params.retrievalMode === "hybrid" ||
+        params.retrievalMode === "qwen3"
         ? { reason: "embedding_unavailable" }
         : {};
     if (this.coolingDown(client)) return { reason: "embedding_unavailable" };
@@ -55,7 +62,7 @@ export class LocalMemoryEmbeddings {
     mode: MemoryVectorQuery["mode"],
   ): Promise<{ semantic?: MemoryVectorQuery; reason?: string }> {
     const budget = params.autoRecall
-      ? new RecallBudget(Math.min(850, params.autoRecallBudgetMs ?? 850))
+      ? new RecallBudget(Math.min(DAEMON_AUTOMATIC_RECALL_MAX_MS, params.autoRecallBudgetMs ?? 850))
       : undefined;
     try {
       const load = () => client.embedQueries([text]);
@@ -87,11 +94,12 @@ export class LocalMemoryEmbeddings {
     if (index && client) this.schedule(index, client);
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> | undefined {
     this.closing = true;
-    await Promise.all(
-      [...this.jobs.values()].flatMap((jobs) => [...jobs.values()].map(({ task }) => task)),
+    const tasks = [...this.jobs.values()].flatMap((jobs) =>
+      [...jobs.values()].map(({ task }) => task),
     );
+    if (tasks.length) return Promise.all(tasks).then(() => undefined);
   }
 
   private schedule(index: MemoryVectorIndex, client: IndexClient): void {

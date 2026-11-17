@@ -182,7 +182,12 @@ test("WorkBuddy confirms a reply batch only after the output sink accepts it", a
       receipts.push(body.params);
     return jsonRpc(result);
   }) as typeof fetch;
-  const payload = { hook_event_name: "UserPromptSubmit", session_id: "receiver", prompt: "" };
+  const payload = {
+    hook_event_name: "UserPromptSubmit",
+    session_id: "receiver",
+    prompt: "",
+    cwd: directory,
+  };
   const options = { dir: directory, environment: { NMG_AGENT_ID: "receiver" } };
   try {
     for (let i = 0; i < 8; i++)

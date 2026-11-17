@@ -1,4 +1,6 @@
 export const AUTOMATIC_RECALL_BUDGET_MS = 5_000;
+export const DAEMON_AUTOMATIC_RECALL_MAX_MS = 4_500;
+const RECALL_RESPONSE_RESERVE_MS = 100;
 
 export class RecallDeadlineExceeded extends Error {
   constructor(milliseconds: number) {
@@ -32,6 +34,16 @@ export class RecallBudget {
 
   get remainingMs(): number {
     return Math.max(0, this.#milliseconds - (performance.now() - this.#startedAt));
+  }
+
+  /** Leave time for the daemon result to be returned and rendered by the host. */
+  searchBudgetMs(): number {
+    return Math.max(
+      1,
+      Math.floor(
+        Math.min(DAEMON_AUTOMATIC_RECALL_MAX_MS, this.remainingMs - RECALL_RESPONSE_RESERVE_MS),
+      ),
+    );
   }
 
   get expired(): boolean {

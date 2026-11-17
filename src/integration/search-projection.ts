@@ -85,6 +85,7 @@ export function compactSearchContext(context: MemoryContext): CompactSearchConte
  * The original MemoryContext and daemon health retain the full diagnostic.
  */
 export function compactRetrievalReason(reason?: string): string {
+  if (reason === "automatic_recall_embedding_deadline") return reason;
   if (
     reason &&
     /^embedding_(?:unavailable|index_not_ready|index_missing_targets|http_[45]\d\d)$/u.test(reason)

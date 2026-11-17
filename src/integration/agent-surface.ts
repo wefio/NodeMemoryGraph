@@ -341,7 +341,6 @@ export function compactSearchInformationViews(
 ): InformationView[] {
   const labels = [
     "[candidate preview; not exact evidence]",
-    degradedRetrievalNote(compact.retrieval),
     compact.activeGraphId ? `activeGraphId=${compact.activeGraphId}` : "",
   ].filter(Boolean);
   const displayed =
@@ -370,12 +369,10 @@ export function compactSearchInformationViews(
       requiredLabels: ["[bookmark; not exact evidence]"],
     });
   }
+  const retrievalNote = degradedRetrievalNote(compact.retrieval);
   if (views.length === 0)
-    views.push({
-      purpose: "diagnostic",
-      body: "No matching NMG memory found.",
-      requiredLabels: [degradedRetrievalNote(compact.retrieval)].filter(Boolean),
-    });
+    views.push({ purpose: "diagnostic", body: "No matching NMG memory found." });
+  if (retrievalNote) views.unshift({ purpose: "diagnostic", body: retrievalNote });
   return views;
 }
 

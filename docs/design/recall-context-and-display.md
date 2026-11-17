@@ -5,6 +5,13 @@
 **Status:** current
 **Related:** [InformationView](state-spaces.md), [automatic recall budget](session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.md)
 
+## Query preparation
+
+Unified local automatic recall uses the nearby context before retrieval for an
+admitted short continuation. The current request can carry one preceding
+substantive user message from the same session and project. An already expanded
+query is used as supplied, and the Active Graph retains the original request.
+
 ## Candidate ordering
 
 The shared daemon search path reorders session-bound results after retrieval and

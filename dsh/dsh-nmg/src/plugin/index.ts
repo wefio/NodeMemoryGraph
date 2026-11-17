@@ -1,4 +1,4 @@
-import { assembleAdapterCapabilities, supportedSearchParameters } from '../../../../src/integration/adapter-capability-assembly.ts'
+import { assembleAdapterCapabilities, disabledBoardCapability } from '../../../../src/integration/adapter-capability-assembly.ts'
 import { ADAPTER_CAPABILITY_CATALOG } from '../../../../src/integration/adapter-capability-catalog.ts'
 // NMG adapter for DeepSeek Harness — community-standard dual-face host package.
 //
@@ -29,28 +29,15 @@ import { randomUUID } from 'node:crypto'
 import { connect } from 'node:net'
 import type { Context } from '@deepseek-ai/cordis'
 import { coordinationEnabled as configuredCoordinationEnabled } from '../../../../src/integration/config.ts'
-import { appendRememberTimeContext, COMMON_REMEMBER_ACTIONS, supportedRememberActions } from '../../../../src/integration/tool-contract.ts'
 import { requiresEventTimeReference } from '../../../../src/cli/protocol.ts'
-import {
-  SEARCH_REQUIRED_PARAMETERS,
-  searchParameterProperties,
-} from '../../../../src/integration/tool-contract.ts'
-import { stateRequiresBoardEvents } from '../../../../src/integration/state.ts'
 import { maybeBroadcastToWorld as broadcastWakeEntry } from '../../../../src/integration/board-wake.ts'
 import { loadOrCreateAgentIdentity, renameAgentIdentity } from '../../../../src/integration/agent-identity.ts'
-import { compactSearchContext, memoryDisclosureEntries } from '../../../../src/integration/search-projection.ts'
-import {
-  renderEvidenceSurface,
-  renderRememberSurface,
-  renderSearchSurface,
-} from '../../../../src/integration/agent-surface.ts'
+import { compactSearchContext } from '../../../../src/integration/search-projection.ts'
 import { loadPrompts, renderDisclosure } from '../../../../src/prompts/load.ts'
 import { RecallBudget } from '../../../../src/integration/recall-budget.ts'
 import { prepareInformationOutput } from '../../../../src/integration/information-output.ts'
 import { DshNativeEvents } from './native-events.ts'
 import { contextOnlineLearningEnabled } from '../../../../src/lab/context-router-online.ts'
-import { STATE_OPERATIONS, STATE_AG_FIELDS, stateOperation, captureStateInvocation, renderStateOutput } from '../../../../src/integration/state.ts'
-import { renderLabOutput } from '../../../../src/integration/lab-capabilities.ts'
 
 const nmgPrompts = loadPrompts()
 
@@ -61,11 +48,6 @@ class NmgRpcError extends Error {
     super(message)
     this.name = 'NmgRpcError'
   }
-}
-
-/** 跨会话/过期的 activeGraphId 与 get 的组合会撞这个 —— 丢掉 id 重试即可。 */
-function isForeignActiveGraph(message: string): boolean {
-  return /active graph .* (belongs to another session|does not exist)/i.test(message)
 }
 
 export const inject = ['tools', 'subprocess', 'sandboxPolicy', 'systemPrompt', 'timer']
@@ -325,78 +307,10 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
     return { ok: true, data }
   }
 
-  function scopeArgs(scope) {
-    if (scope === null || typeof scope !== 'object') return []
-    return Object.keys(scope).map((key) => ['--scope', String(key) + '=' + String(scope[key])])
-  }
-
-  function coerceScope(scope) {
-    const out = {}
-    for (const key of Object.keys(scope || {})) out[key] = String(scope[key])
-    return out
-  }
-
-  // The daemon RPC and the CLI fallback carry the same request, so both are
-  // assembled from one place: a field added here reaches either transport.
-  function searchParamsFor(args, sessionId) {
-    const params = {
-      query: args.query,
-      projectDir: workspaceRoot,
-      sessionId,
-      recallCue: args.recallCue,
-      recallRevision: args.recallRevision,
-    }
-    const optional = [
-      ['limit', args.limit],
-      ['maxTier', args.maxTier],
-      ['graphHops', args.graphHops],
-      ['nodeName', args.nodeName],
-      ['sourceActor', args.sourceActor],
-      ['eventTimeFrom', args.eventTimeFrom],
-      ['eventTimeTo', args.eventTimeTo],
-    ]
-    for (const [key, value] of optional) {
-      if (value != null) params[key] = value
-    }
-    if (args.includeHistorical) params.includeHistorical = true
-    if (args.scope) params.scope = coerceScope(args.scope)
-    return params
-  }
-
-  function searchArgvFor(args, tail) {
-    const argv = ['search', args.query]
-    const optional = [
-      ['--limit', args.limit],
-      ['--max-tier', args.maxTier],
-      ['--graph-hops', args.graphHops],
-      ['--node', args.nodeName],
-      ['--source-actor', args.sourceActor],
-      ['--from', args.eventTimeFrom],
-      ['--to', args.eventTimeTo],
-    ]
-    for (const [flag, value] of optional) {
-      if (value != null) argv.push(flag, String(value))
-    }
-    if (args.includeHistorical) argv.push('--include-historical')
-    for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1])
-    return [...argv, ...tail]
-  }
-
-  function projectDaemonStatus(raw) {
-    const endpoint = resolveDaemon()
-    return {
-      running: true,
-      pid: endpoint && endpoint.pid != null ? endpoint.pid : null,
-      endpoint: endpoint ? endpoint.host + ':' + endpoint.port : null,
-      compatible: true,
-      status: raw,
-    }
-  }
-
-  async function invoke(method, params, cliArgs, signal, project) {
+  async function invoke(method, params, cliArgs, signal) {
     try {
       const raw = await daemonCall(method, params, signal)
-      if (raw != null) return { ok: true, data: project ? project(raw) : raw }
+      if (raw != null) return { ok: true, data: raw }
     } catch (error) {
       if (error instanceof NmgRpcError) return { ok: false, error: 'NMG ' + method + ': ' + error.message }
       return { ok: false, error: 'NMG call aborted' }
@@ -404,21 +318,6 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
     return nmgJson(cliArgs, signal)
   }
 
-  async function invokeRpcOnly(method, params, signal) {
-    try {
-      let raw = await daemonCall(method, params, signal)
-      if (raw == null) {
-        await ensureDaemon(signal)
-        raw = await daemonCall(method, params, signal)
-      }
-      return raw == null
-        ? { ok: false, error: 'NMG daemon is unavailable for ' + method }
-        : { ok: true, data: raw }
-    } catch (error) {
-      if (error instanceof NmgRpcError) return { ok: false, error: 'NMG ' + method + ': ' + error.message }
-      return { ok: false, error: 'NMG call aborted' }
-    }
-  }
 
   // ── automatic recall (DSH-native: systemPrompt.context) ───────────────────
   //
@@ -462,32 +361,6 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
     return generation
   }
 
-  async function disclose(sessionId, activeGraphId, disclosure, entries) {
-    // disclose 只是"这轮已经给过谁"的去重账，daemon 拒绝（例如老版本要 contentHash）
-    // 不该拖垮整次检索 —— 兜底成"全部当新的"，效果与之前一致。
-    let decision: any
-    try {
-      decision = await daemonCall('sessionActiveGraph', {
-        action: 'disclose',
-        sessionId,
-        projectionId: activeGraphId || undefined,
-        disclosure,
-        entries,
-      })
-    } catch {
-      decision = null
-    }
-    return decision && Array.isArray(decision.freshMemoryIds)
-      ? decision
-      : { freshMemoryIds: entries.map((entry) => entry.memoryId), foldedMemoryIds: [] }
-  }
-
-  function foldedDisclosureText(memoryIds) {
-    if (!Array.isArray(memoryIds) || memoryIds.length === 0) return ''
-    return nmgPrompts.in_context_title + '\n' +
-      memoryIds.map((id) => '- memory=' + id + '; already_in_context=true').join('\n')
-  }
-
   function extractUserPrompt(message) {
     const parts = []
     if (!message || typeof message !== 'object') return ''
@@ -524,10 +397,9 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
     )
   }
 
-  async function autoRecall(query, sessionId, signal) {
+  async function autoRecall(query, sessionId, searchBudgetMs, signal) {
     const limit = clampInt(process.env.NMG_AUTO_RECALL_LIMIT, 1, 50, 13)
     const tier = clampInt(process.env.NMG_AUTO_RECALL_TIER, 0, 3, 1)
-    const budget = signal
     try {
       const context = await daemonCall('search', {
         query,
@@ -536,9 +408,10 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
         graphHops: 1,
         tieredDisclosure: true,
         autoRecall: true,
+        autoRecallBudgetMs: searchBudgetMs,
         projectDir: workspaceRoot,
         sessionId,
-      }, budget)
+      }, signal)
       if (context) return context
     } catch {
       return null
@@ -553,7 +426,7 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
       '--session-id', sessionId,
       '--json',
     ]
-    const result = await nmgJson(argv, budget)
+    const result = await nmgJson(argv, signal)
     return result.ok ? result.data : null
   }
 
@@ -582,7 +455,8 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
           if (recallGenerations.get(sessionId) !== generation) return
           // Keep historical snapshots for the indicator. Only this generation
           // can contribute a fresh automatic fragment to model input.
-          const context = await budget.run('search', (signal) => autoRecall(query, sessionId, signal))
+          const context = await budget.run('search', (signal) =>
+            autoRecall(query, sessionId, budget.searchBudgetMs(), signal))
           if (recallGenerations.get(sessionId) !== generation) return
           const recall = context ? compactSearchContext(context) : null
           if (!recall || !Array.isArray(recall.candidates) || recall.candidates.length === 0) {
@@ -1154,498 +1028,37 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
   }
 
   // ── tools ──────────────────────────────────────────────────────────────────
-  const searchTool = {
-    name: 'nmg_search',
-    description: nmgPrompts.search_description,
-    parameters: {
-      type: 'object',
-      properties: {
-        // Shared retrieval contract; host-only fields follow it.
-        ...searchParameterProperties(),
-        recallCue: { type: 'string', description: nmgPrompts.search_recall_cue_parameter_description },
-        recallRevision: { type: 'integer', minimum: 1, description: nmgPrompts.search_recall_revision_parameter_description },
-      },
-      required: [...SEARCH_REQUIRED_PARAMETERS],
-    },
-    output: textOutput,
-    async execute(args, exec) {
-      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-      const params = searchParamsFor(args, sessionId)
-      const argv = searchArgvFor(args, [
-        '--project-dir', workspaceRoot, '--session-id', sessionId, '--json',
-      ])
-      const r = await invoke('search', params, argv, exec.signal, null)
-      if (!r.ok) return r.error
-      const disclosure = await disclose(
-        sessionId,
-        r.data.activeGraph && r.data.activeGraph.id,
-        'header',
-        memoryDisclosureEntries(r.data, 'header'),
-      )
-      const freshIds = new Set(disclosure.freshMemoryIds)
-      const data = { ...r.data, results: r.data.results.filter((result) => freshIds.has(result.memory.id)) }
-      nativeEvents.note(sessionId, data)
-      const deferred = data.progressiveDisclosure && data.progressiveDisclosure.deferredMemoryIds
-      const nextStep = Array.isArray(deferred) && deferred.length
-        ? 'More ranked records are folded. Expand selected memory IDs first; deferred IDs: ' + deferred.join(',')
-        : 'Select exact records with nmg_get (memory IDs + activeGraphId).'
-      const forget = data.results.some((result) =>
-        (result.memory.markers || []).some((marker) => marker.kind === 'forget'),
-      )
-      recordActivity(sessionId, {
-        kind: 'search',
-        query: String(args.query || ''),
-        candidates: data.results.length,
-        activeGraphId: (r.data.activeGraph && r.data.activeGraph.id) || null,
-      })
-      return [renderSearchSurface(data, {
-        preamble: renderDisclosure(nmgPrompts.search_disclosure, {}),
-        postamble: renderDisclosure(nmgPrompts.search_disclosure_metadata, {
-          count: String(data.results.length),
-          next_step: nextStep,
-          forget_hint: forget ? nmgPrompts.forget_hint : '',
-        }),
-      }), foldedDisclosureText(disclosure.foldedMemoryIds)].filter(Boolean).join('\n')
-    },
-  }
+  class ToolTransportError extends Error {}
 
-  const getTool = {
-    name: 'nmg_get',
-    description: nmgPrompts.get_description,
-    parameters: {
-      type: 'object',
-      properties: {
-        memoryIds: { type: 'array', items: { type: 'string' }, description: 'Memory IDs from nmg_search.' },
-        activeGraphId: { type: 'string', description: 'activeGraphId returned by the matching nmg_search.' },
-        graphHops: { type: 'integer', description: 'Graph expansion 0..3.' },
-      },
-      required: ['memoryIds'],
-    },
-    output: textOutput,
-    async execute(args, exec) {
-      const ids = Array.isArray(args.memoryIds) ? args.memoryIds : []
-      if (ids.length === 0) return 'nmg_get requires at least one memory ID.'
-      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-      const params: Record<string, unknown> = { memoryIds: ids, projectDir: workspaceRoot, sessionId }
-      if (args.activeGraphId) params.activeGraphId = args.activeGraphId
-      if (args.graphHops != null) params.graphHops = args.graphHops
-      const argv = ['get'].concat(ids)
-      if (args.activeGraphId) argv.push('--active-graph-id', args.activeGraphId)
-      if (args.graphHops != null) argv.push('--graph-hops', String(args.graphHops))
-      argv.push('--project-dir', workspaceRoot, '--session-id', sessionId, '--json')
-      let r = await invoke('get', params, argv, exec.signal, null)
-      // 上一轮 search 拿到的 activeGraphId 属于**上一轮**的 session（DSH 每轮新 agent id），
-      // 直接带进来会被 daemon 拒。丢掉 id 重试一次：证据照给，只是不记"这次用了"的账。
-      if (!r.ok && args.activeGraphId && isForeignActiveGraph(String(r.error))) {
-        delete params.activeGraphId
-        const retryArgv = ['get'].concat(ids)
-        if (args.graphHops != null) retryArgv.push('--graph-hops', String(args.graphHops))
-        retryArgv.push('--project-dir', workspaceRoot, '--session-id', sessionId, '--json')
-        r = await invoke('get', params, retryArgv, exec.signal, null)
-        if (r.ok) (r as { staleActiveGraph?: boolean }).staleActiveGraph = true
-      }
-      if (!r.ok) return r.error
-      const disclosure = await disclose(
-        sessionId,
-        args.activeGraphId,
-        'evidence',
-        memoryDisclosureEntries(r.data, 'evidence'),
-      )
-      const freshIds = new Set(disclosure.freshMemoryIds)
-      const visible = { ...r.data, results: r.data.results.filter((result) => freshIds.has(result.memory.id)) }
-      nativeEvents.note(sessionId, visible)
-      const forget = visible.results.some((result) =>
-        (result.memory.markers || []).some((marker) => marker.kind === 'forget'),
-      )
-      recordActivity(sessionId, {
-        kind: 'get',
-        requested: ids.length,
-        candidates: visible.results.length,
-        memoryIds: visible.results.map((result) => result.memory.id).slice(0, 8),
-      })
-      return [renderEvidenceSurface(visible, {
-        preamble: renderDisclosure(nmgPrompts.get_disclosure, {}),
-        postamble: renderDisclosure(nmgPrompts.get_disclosure_metadata, {
-          count: String(r.data.results.length),
-          next_step: '',
-          forget_hint: forget ? nmgPrompts.forget_hint : '',
-        }),
-        missingMemoryIds: Array.isArray(r.data.missingMemoryIds) ? r.data.missingMemoryIds : undefined,
-      }), foldedDisclosureText(disclosure.foldedMemoryIds)].filter(Boolean).join('\n')
-    },
-  }
-
-  const rememberTool = {
-    name: 'nmg_remember',
-    description: 'Save or update durable memory through the shared NMG lifecycle contract. Never save secrets, chatter, unverified model claims, or transient failures. action=feedback rates a recalled graph (shared context-use learning) and is forwarded to the daemon; no labels = rejected.',
-    parameters: {
-      type: 'object',
-      properties: {
-        action: { type: 'string', enum: [...COMMON_REMEMBER_ACTIONS], description: 'Memory action (default save).' },
-        memoryId: { type: 'string', description: 'Existing memory for forget/resolve/reopen/claim_outcome.' },
-        newMemoryId: { type: 'string', description: 'Newer memory for supersede/relate.' },
-        supersededMemoryId: { type: 'string', description: 'Older memory replaced by newMemoryId.' },
-        relatedMemoryId: { type: 'string', description: 'Existing memory related to newMemoryId.' },
-        relatedMemoryIds: { type: 'array', items: { type: 'string' }, description: 'Evidence anchors for resolve/reopen.' },
-        relationJudgement: { type: 'string', enum: ['conflict', 'distinct', 'refines', 'related', 'same_entity'] },
-        relationConfidence: { type: 'number', description: 'Relation confidence 0..1.' },
-        resolutionReason: { type: 'string', description: 'Reason for supersede/resolve/reopen.' },
-        semanticTaskId: { type: 'string', description: 'Independent task identity for claim_outcome.' },
-        activeGraphId: { type: 'string', description: 'Active graph that produced the evaluated claim or the recall being rated (feedback).' },
-        taskSuccess: { type: 'boolean', description: 'feedback: the recalled context helped the task complete.' },
-        userCorrection: { type: 'boolean', description: 'feedback: the user visibly corrected a claim the recall led to.' },
-        evidenceSufficient: { type: 'boolean', description: 'feedback: the recalled evidence was sufficient (recall quality, not answer correctness).' },
-        expansionUseful: { type: 'boolean', description: 'feedback: expanding a folded memory added real value.' },
-        excessiveNoise: { type: 'boolean', description: 'feedback: the injected recall was mostly noise.' },
-        noMemoryNeeded: { type: 'boolean', description: 'feedback: no memory context was needed at all.' },
-        memoryMisleading: { type: 'boolean', description: 'feedback: the recalled memory itself was wrong/stale/contradictory for this use.' },
-        feedbackNote: { type: 'string', description: 'feedback: concise reason for the labels.' },
-        claimOutcome: { type: 'string', enum: ['supported', 'contradicted'] },
-        claimSourceLineage: { type: 'string', description: 'Stable attributable source lineage.' },
-        claimIndexes: { type: 'array', items: { type: 'integer' } },
-        claimWeight: { type: 'number', description: 'Claim reliability in (0,1].' },
-        statement: { type: 'string', description: 'Self-contained semantic statement.' },
-        nodeName: { type: 'string', description: 'Stable node grouping related memories.' },
-        memoryType: { type: 'string', enum: ['fact', 'state', 'event', 'preference', 'constraint', 'strategy'], description: 'Memory type.' },
-        recallTriggers: { type: 'array', maxItems: 16, items: { type: 'string', minLength: 1, maxLength: 80 }, description: nmgPrompts.recall_triggers_parameter_description },
-        stateKey: { type: 'string', description: 'Replaceable property identity; a new value in the same scope supersedes the old.' },
-        sourceActor: { type: 'string', enum: ['user', 'assistant', 'system', 'tool'], description: 'Evidence actor (default user).' },
-        truthStatus: { type: 'string', enum: ['asserted', 'inferred', 'unverified', 'verified'], description: 'Truth status.' },
-        evidence: { type: 'string', description: 'Exact supporting source excerpt.' },
-        eventTime: { type: 'string', description: 'ISO event time when it differs from write time.' },
-        referenceTime: { type: 'string', description: 'Source ISO timestamp with Z/offset anchoring eventTime, for historical replay.' },
-        timeZone: { type: 'string', description: "Source IANA time zone; defaults to referenceTime's offset." },
-        tier: { type: 'integer', description: 'Initial tier 0..3.' },
-        importance: { type: 'number', description: 'Importance 0..1.' },
-        residence: { type: 'string', enum: ['ltg', 'stg'], description: 'ltg (durable) or stg (session/task-local).' },
-        writeReason: { type: 'string', description: 'Durable-write justification.' },
-        scope: { type: 'object', additionalProperties: true, description: 'Applicability scope, e.g. {"project":"nmg"}.' },
-        tesserae: { type: 'array', maxItems: 10, items: { type: 'object', properties: { path: { type: 'string', description: 'Project-relative file path the bookmark points into.' }, snippet: { type: 'string', description: 'Exact short content excerpt from that file used for relocation.' }, label: { type: 'string', description: 'Optional one-line searchable label.' }, kind: { type: 'string', description: 'Optional kind: code | doc | note.' } }, required: ['path', 'snippet'] }, description: 'Optional file bookmarks (tesserae): point this memory at file locations you actually saw. One bookmark per {path, snippet} — snippet is the relocation key, so copy it verbatim from the file.' },
-      },
-      required: [],
-    },
-    output: textOutput,
-    async execute(args, exec) {
-      const action = args.action || 'save'
-      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-      if (action === 'feedback') {
-        const labelled = [
-          'taskSuccess',
-          'userCorrection',
-          'evidenceSufficient',
-          'expansionUseful',
-          'excessiveNoise',
-          'noMemoryNeeded',
-          'memoryMisleading',
-        ].some((key) => args[key] !== undefined)
-        if (!labelled) return 'nmg_remember feedback requires at least one label.'
-        // Shared layer: forward thin to the daemon-owned online learner. The
-        // daemon trains only on the exact graph the feedback names (no
-        // latest-staged fallback).
-        const result = await invokeRpcOnly(
-          'recordFeedback',
-          {
-            activeGraphId: args.activeGraphId,
-            sessionId,
-            taskSuccess: args.taskSuccess,
-            userCorrection: args.userCorrection,
-            evidenceSufficient: args.evidenceSufficient,
-            expansionUseful: args.expansionUseful,
-            excessiveNoise: args.excessiveNoise,
-            noMemoryNeeded: args.noMemoryNeeded,
-            memoryMisleading: args.memoryMisleading,
-            note: args.feedbackNote,
-            semanticTaskId: args.semanticTaskId,
-          },
-          exec.signal,
-        )
-        if (!result.ok) return result.error
-        // Real feedback addressed the recall it names (the affordance rode with
-        // the recall output; nothing queued to clear).
-        const stagedStack = recallBatch.get(sessionId)
-        if (Array.isArray(stagedStack) && stagedStack[0]) stagedStack[0].fedBack = true
-        const data = result.data as
-          | { trained?: boolean; reward?: number; loss?: number }
-          | null
-          | undefined
-        return data && data.trained
-          ? 'Retrieval feedback applied: one online router update (reward=' + data.reward +
-            (data.loss != null ? ', loss=' + Number(data.loss).toFixed(4) : '') + ').'
-          : 'Retrieval feedback processed but not applied (no staged decision or no usable label); skipped.'
-      }
-      if (action === 'claim_outcome') {
-        if (!args.memoryId || !args.claimOutcome || !args.semanticTaskId || !args.claimSourceLineage) {
-          return 'nmg_remember claim_outcome requires memoryId, claimOutcome, semanticTaskId, and claimSourceLineage.'
-        }
-        const result = await invokeRpcOnly('recordClaimOutcomes', {
-          semanticTaskId: args.semanticTaskId,
-          activeGraphId: args.activeGraphId,
-          sessionId,
-          collectionOrigin: 'natural',
-          projectDir: workspaceRoot,
-          votes: [{
-            memoryId: args.memoryId,
-            claimIndexes: args.claimIndexes,
-            outcome: args.claimOutcome,
-            source: 'task',
-            sourceLineage: args.claimSourceLineage,
-            weight: args.claimWeight,
-          }],
-        }, exec.signal)
-        return result.ok ? JSON.stringify(result.data) : result.error
-      }
-      if (action !== 'save') {
-        const params: Record<string, any> = { action, projectDir: workspaceRoot, sessionId }
-        if (args.memoryId) params.memoryId = args.memoryId
-        if (args.newMemoryId) params.newMemoryId = args.newMemoryId
-        if (args.supersededMemoryId) params.supersededMemoryId = args.supersededMemoryId
-        if (args.relatedMemoryId) params.relatedMemoryId = args.relatedMemoryId
-        if (args.relatedMemoryIds) params.relatedMemoryIds = args.relatedMemoryIds
-        if (args.relationJudgement) params.relationJudgement = args.relationJudgement
-        if (args.relationConfidence != null) params.confidence = args.relationConfidence
-        if (args.resolutionReason) params.reason = args.resolutionReason
-        const result = await invokeRpcOnly('resolveRemember', params, exec.signal)
-        return result.ok ? JSON.stringify(result.data) : result.error
-      }
-      if (!args.statement || !args.nodeName) {
-        return 'nmg_remember save requires statement and nodeName.'
-      }
-      const params: Record<string, any> = { statement: args.statement, nodeName: args.nodeName, projectDir: workspaceRoot, sessionId }
-      if (args.tesserae && Array.isArray(args.tesserae)) params.tesserae = args.tesserae
-      if (args.memoryType) params.memoryType = args.memoryType
-      if (args.recallTriggers) params.recallTriggers = args.recallTriggers
-      if (args.stateKey) params.stateKey = args.stateKey
-      if (args.sourceActor) params.sourceActor = args.sourceActor
-      if (args.truthStatus) params.truthStatus = args.truthStatus
-      if (args.evidence) params.evidence = args.evidence
-      if (args.eventTime) params.eventTime = args.eventTime
-      if (args.tier != null) params.tier = args.tier
-      if (args.importance != null) params.importance = args.importance
-      if (args.residence) params.residence = args.residence
-      if (args.writeReason) params.writeReason = args.writeReason
-      if (args.scope) params.scope = coerceScope(args.scope)
-      const argv = ['remember', args.statement, '--node', args.nodeName]
-      if (args.memoryType) argv.push('--type', args.memoryType)
-      for (const trigger of args.recallTriggers || []) argv.push('--recall-trigger', trigger)
-      if (args.stateKey) argv.push('--state-key', args.stateKey)
-      if (args.sourceActor) argv.push('--actor', args.sourceActor)
-      if (args.truthStatus) argv.push('--truth', args.truthStatus)
-      if (args.evidence) argv.push('--evidence', args.evidence)
-      if (args.eventTime) argv.push('--event-time', args.eventTime)
-      if (args.tier != null) argv.push('--tier', String(args.tier))
-      if (args.importance != null) argv.push('--importance', String(args.importance))
-      if (args.residence) argv.push('--residence', args.residence)
-      if (args.writeReason) argv.push('--write-reason', args.writeReason)
-      for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1])
-      argv.push('--project-dir', workspaceRoot, '--json')
-      appendRememberTimeContext(args, params, argv)
-      const r = await invoke('remember', params, argv, exec.signal, null)
-      if (!r.ok) return r.error
-      return renderRememberSurface(r.data)
-    },
-  }
-
-  const stateTool = {
-    name: 'nmg_state',
-    description: nmgPrompts.state_description,
-    parameters: {
-      type: 'object',
-      properties: {
-        action: { type: 'string', enum: ['read', 'write'] },
-        space: { type: 'string', enum: ['ag', 'board'] },
-        operation: { type: 'string', enum: STATE_OPERATIONS },
-        notification: { type: 'object', additionalProperties: true, description: 'Explicit notice: key, scopes [direct|channel|event], optional recipients (stable IDs); invite:true enrolls invitees and sender in taskId. Reuse key for retries.' },
-        eventId: { type: 'string' },
-        event: { type: 'object', additionalProperties: true, description: 'Event payload; mutation requires expectedRevision, kind and text.' },
-        activity: { type: 'object', additionalProperties: true, description: 'Session processing report for agentActivity: state busy/idle/unknown, optional capabilities and ttlSeconds.' },
-        text: { type: 'string' },
-        digest: { type: 'string' }, ref: { type: 'string' }, summary: { type: 'string' },
-        verdict: { type: 'string', enum: ['accepted', 'rejected', 'undecidable'] },
-        agentName: { type: 'string', description: 'New display name for rename; other operations use the native session identity.' },
-        taskId: { type: 'string', description: 'Task channel; omit for the shared world channel.' },
-        content: { type: 'string', description: 'Entry text (put).' },
-        kind: { type: 'string', enum: ['goal', 'note', 'question', 'result', 'handoff', 'decision', 'blocker'], description: 'Entry kind (put).' },
-        entryId: { type: 'string', description: 'Entry to resolve/claim/release.' },
-        resolution: { type: 'string', description: 'Resolution note (resolve).' },
-        reason: { type: 'string', description: 'Reason for acknowledge/subscribe/unsubscribe.' },
-        afterCursor: { type: 'string', description: 'Opaque cursor: id of the last seen entry (read).' },
-        limit: { type: 'integer', description: 'Max entries (read).' },
-        includeResolved: { type: 'boolean', description: 'Include resolved entries (read).' },
-        ttlSeconds: { type: 'integer', description: 'Entry lifetime 60..2592000 (put).' },
-        to: { type: 'string', description: 'Directed delivery to a stable agent name (put).' },
-        leaseSeconds: { type: 'integer', description: 'Claim lease 60..86400 (claim).' },
-        capabilities: { type: 'string', description: 'Capability substring filter (discover).' },
-      },
-      required: ['action', 'space'],
-    },
-    output: textOutput,
-    async execute(args, exec) {
-      // AG 空间只认 STATE_AG_FIELDS 里的键。工具 schema 是 board/ag 共用的一张表，
-      // 模型照着 schema 给 ag 带上 limit/kind 之类就会撞上 "Unsupported AG state field"。
-      // 既然这些字段在 ag 语义下本来也无效，就地按空间裁掉，别把参数校验错误丢给模型。
-      const scoped = args.space === 'ag'
-        ? Object.fromEntries(Object.entries(args).filter(([key]) => (STATE_AG_FIELDS as readonly string[]).includes(key)))
-        : args
-      const operation = stateOperation(scoped)
-      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id).trim() : ''
-      if (!sessionId) throw new Error('NMG state requires a native DSH Agent session')
-      const result = args.space === 'ag'
-        ? await executeAgState(scoped, operation, sessionId, exec.signal)
-        : await executeBoardState(args, operation, exec.agent, exec.signal)
-      return result.ok ? renderStateOutput(result.data) : result.error
-    },
-  }
-
-  // State calls need a resident owner: no CLI fallback, lifecycle takeover or
-  // automatic replay of a refused domain mutation.
-  async function invokeState(params, signal) {
-    try {
-      if (stateRequiresBoardEvents(params)) {
-        const hello = await daemonCall('hello', {}, signal, true)
-        if (!hello || !hello.capabilities || !hello.capabilities.includes('board-events')) throw new Error('NMG daemon does not advertise board-events')
-      }
-      const data = await daemonCall('state', params, signal, true)
-      return data == null
-        ? { ok: false, error: 'NMG daemon is unavailable for state' }
-        : { ok: true, data }
-    } catch (error) {
-      return { ok: false, error: 'NMG state request failed: ' + String(error.message || error) }
-    }
-  }
-
-  async function executeAgState(args, operation, sessionId, signal) {
-    const params = await captureStateInvocation({
-      action: args.action, space: 'ag', operation, text: args.text,
-      sessionId, requester: 'agent:dsh', reason: args.reason, ttlSeconds: args.ttlSeconds,
-    }, async sessionId => {
-      const status = await invokeState({ action: 'read', space: 'ag', operation: 'status', sessionId }, signal)
-      if (!status.ok) throw new Error(status.error)
-      return status.data
-    })
-    return invokeState(params, signal)
-  }
-
-  async function executeBoardState(args, operation, agent, signal) {
-    if (!coordinationEnabled) throw new Error('Board coordination is disabled')
+  async function resolveBoardIdentity(agent, signal) {
     if (hostDisposed) throw new Error('DSH adapter has been disposed')
+    if (disposedAgents.has(agent)) throw new Error('DSH Agent session has ended')
     const sessionId = String(agent.id)
-    if (disposedAgents.has(agent))
-      throw new Error('DSH Agent session has ended')
     lastAgents.set(sessionId, agent)
     await preparePresenceOwner(signal)
     const previous = boardRegistrations.get(sessionId)
-    const parent = previous?.parentId
-      ? lastAgents.get(previous.parentId)
-      : undefined
-    const identity = await registerBoardTarget(
-      { sessionId, agent, parent },
-      signal,
-    )
-    const requestedName = String(args.agentName || '').trim()
-    if (operation === 'rename' && !requestedName)
-      throw new Error('rename requires agentName')
-    const result = await invokeState(
-      {
-        ...args,
-        operation,
-        taskId: args.taskId || WAKE_WORLD_TASK,
-        sessionId,
-        sourceSessionId: sessionId,
-        agentId: identity.id,
-        id: identity.id,
-        agentName: operation === 'rename' ? requestedName : identity.agentName,
-      },
-      signal,
-    )
-    if (operation === 'rename' && result.ok)
-      renameAgentIdentity({
-        anchor: sessionId,
-        id: identity.id,
-        agentName: requestedName,
-      })
-    return result
-  }
-
-  const daemonTool = {
-    name: 'nmg_daemon',
-    description: 'Read-only NMG daemon health check. The adapter may ensure a daemon is running for requests, but it does not expose lifecycle ownership or stop it on plugin disposal.',
-    parameters: {
-      type: 'object',
-      properties: {
-        action: { type: 'string', enum: ['status'], description: 'Health check.' },
-      },
-      required: ['action'],
-    },
-    output: textOutput,
-    async execute(args, exec) {
-      const argv = ['daemon', args.action, '--json']
-      const r = await invoke('status', {}, argv, exec.signal, projectDaemonStatus)
-      if (!r.ok) return r.error
-      const data = r.data
-      if (args.action === 'status') {
-        if (!data.running) return 'NMG daemon: not running (one-shot CLI still works in-process).'
-        return 'NMG daemon: running pid=' + data.pid + ' endpoint=' + data.endpoint + ' compatible=' + data.compatible
-      }
-      return JSON.stringify(data)
-    },
-  }
-
-  function labParameterError(args) {
-    if (args.action !== 'list' && !args.capability) return args.action + ' requires capability.'
-    if (args.action === 'enable' && !args.reason) return 'enable requires reason.'
-    if (args.action === 'invoke' && !args.operation) return 'invoke requires operation.'
-    return null
-  }
-
-  function labCliArgs(args, sessionId) {
-    const argv = ['lab', args.action]
-    if (args.capability) argv.push(args.capability)
-    if (args.action !== 'list') argv.push('--session-id', sessionId)
-    if (args.action === 'enable') {
-      argv.push('--requester', 'agent:dsh', '--reason', args.reason)
-      if (args.ttlSeconds != null) argv.push('--ttl-seconds', String(args.ttlSeconds))
+    const parent = previous?.parentId ? lastAgents.get(previous.parentId) : undefined
+    const identity = await registerBoardTarget({ sessionId, agent, parent }, signal)
+    return {
+      ...identity,
+      saveName: agentName => renameAgentIdentity({ anchor: sessionId, id: identity.id, agentName }),
     }
-    if (args.action === 'invoke') {
-      argv.push('--operation', args.operation)
-      if (args.input != null) argv.push('--input-json', JSON.stringify(args.input))
-    }
-    argv.push('--json')
-    return argv
   }
 
-  async function executeLab(args, exec) {
-    if (args.capability === 'working_state') throw new Error('Working state uses nmg_state')
-    const error = labParameterError(args)
-    if (error) return error
-    const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-    const params = {
-      action: args.action, capability: args.capability, sessionId,
-      requester: args.action === 'enable' ? 'agent:dsh' : undefined,
-      reason: args.reason, ttlSeconds: args.ttlSeconds, operation: args.operation, input: args.input,
+  // State needs a resident owner. Do not replay refused writes or fall back to CLI.
+  async function invokeRegisteredTool(method, params, signal, cliFallback) {
+    if (cliFallback && !(method === 'remember' && resolveDaemon())) {
+      const result = await invoke(method, params, cliFallback, signal)
+      if (!result.ok) throw new ToolTransportError(result.error)
+      return result.data
     }
-    const result = await invoke('lab', params, labCliArgs(args, sessionId), exec.signal, null)
-    return result.ok ? renderLabOutput(result.data) : result.error
-  }
-
-  const labTool = {
-    name: 'nmg_lab',
-    description: nmgPrompts.lab_description,
-    parameters: {
-      type: 'object',
-      properties: {
-        action: { type: 'string', enum: ['list', 'status', 'enable', 'disable', 'invoke'] },
-        capability: { type: 'string', enum: ['reasoning_workspace', 'recall_gate', 'memory_graph_reasoner', 'controller_shadow', 'controller_controlled', 'controller_active'] },
-        reason: { type: 'string' },
-        ttlSeconds: { type: 'integer' },
-        operation: { type: 'string' },
-        input: { type: 'object', additionalProperties: true },
-      },
-      required: ['action'],
-    },
-    output: textOutput,
-    async execute(args, exec) {
-      return executeLab(args, exec)
-    },
+    try {
+      const data = await daemonCall(method, params, signal, true)
+      if (data == null) throw new Error('NMG daemon is unavailable for ' + method)
+      return data
+    } catch (error) {
+      throw new ToolTransportError('NMG ' + method + ' request failed: ' + String(error.message || error))
+    }
   }
 
   // DSH-native automatic recall: a named systemPrompt.context contribution. The
@@ -1746,26 +1159,72 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
   // First poll on next tick (let the event loop settle).
   const initialWakeDisposer = coordinationEnabled ? ctx.timeout(boardWakeOnce, 0) : undefined
 
+  function registerNativeTool(definition) {
+    const release = (handle: unknown) => typeof handle === 'function'
+      ? async () => { await handle() }
+      : undefined
+    const handle = tools.register(definition)
+    return handle instanceof Promise ? handle.then(release) : release(handle)
+  }
+
   const capabilityAssembly = assembleAdapterCapabilities(ADAPTER_CAPABILITY_CATALOG.dsh.capabilities, {
-    tools: {
-      nmg_search: endpoint => tools.register({
-        ...searchTool,
-        parameters: { ...searchTool.parameters, properties: supportedSearchParameters(searchTool.parameters.properties, endpoint) },
-      }),
-      nmg_get: () => tools.register(getTool),
-      nmg_remember: endpoint => tools.register({
-        ...rememberTool,
-        parameters: {
-          ...rememberTool.parameters,
-          properties: {
-            ...rememberTool.parameters.properties,
-            action: { ...rememberTool.parameters.properties.action, enum: supportedRememberActions(endpoint?.methods) },
-          },
-        },
-      }),
-      nmg_state: () => tools.register(stateTool),
-      nmg_lab: () => tools.register(labTool),
-    },
+    registerTool: tool => registerNativeTool({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema,
+      output: textOutput,
+      async execute(args, exec) {
+        const sessionId = String(exec?.agent?.id ?? '').trim() ||
+          (tool.requiresNativeSession ? '' : hostSessionId)
+        if (!sessionId) throw new Error('NMG state requires a native DSH Agent session')
+        try {
+          const result = await tool.execute(args, {
+            sessionId,
+            requester: 'agent:dsh',
+            daemonAddress: () => {
+              const endpoint = resolveDaemon()
+              return endpoint && endpoint.host + ':' + endpoint.port
+            },
+            invoke: (method, params, cliFallback) => invokeRegisteredTool(method, params, exec?.signal, cliFallback),
+            memory: {
+              projectDir: workspaceRoot,
+              retryForeignGraph: true,
+              remember: {
+                onFeedback: () => {
+                  const stagedStack = recallBatch.get(sessionId)
+                  if (stagedStack?.[0]) stagedStack[0].fedBack = true
+                },
+              },
+              search: {
+                onSearch: ({ query, ranked, disclosed }) => {
+                  nativeEvents.note(sessionId, disclosed)
+                  recordActivity(sessionId, {
+                    kind: 'search',
+                    query,
+                    candidates: disclosed.results.length,
+                    activeGraphId: ranked.activeGraph?.id ?? null,
+                  })
+                },
+              },
+              onEvidenceDisclosed: (request, context) => {
+                nativeEvents.note(sessionId, context)
+                recordActivity(sessionId, {
+                  kind: 'get',
+                  requested: request.memoryIds.length,
+                  candidates: context.results.length,
+                  memoryIds: context.results.map(result => result.memory.id).slice(0, 8),
+                })
+              },
+            },
+            boardIdentity: () => resolveBoardIdentity(exec.agent, exec.signal),
+          })
+          return result.text
+        } catch (error) {
+          if (error instanceof ToolTransportError) return error.message
+          throw error
+        }
+      },
+    }),
     'automatic-recall': ({ prepare }) => {
       prepareAutomaticRecallSurface = prepare
       const remove = [
@@ -1792,9 +1251,8 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
       reportHarnessActivity = activity
     },
     'tool-observation': ({ observe }) => ctx.on('tools/result', (exec, result) => nativeEvents.observe(exec, result, observe)),
-  }, { endpoint: readAdapterEndpoint() })
+  }, { endpoint: readAdapterEndpoint(), disabled: disabledBoardCapability(coordinationEnabled) })
   const disposers = [
-    tools.register(daemonTool),
     contextDisposer,
     ctx.on('agent/disposed', onAgentDisposed),
   ]

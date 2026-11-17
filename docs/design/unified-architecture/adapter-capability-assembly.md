@@ -16,14 +16,15 @@ remain open to adjustment.
 
 ## Executable assembly
 
+Each public entry has a [JSON capability manifest](../../../src/integration/adapter-manifests).
 [`adapter-capability-catalog.ts`](../../../src/integration/adapter-capability-catalog.ts)
-declares the migrated features of all current entry points. Each consumes
-its declaration through
+validates each manifest against the shared JSON Schema. The schema's capability
+IDs match the executable registry. Each entry consumes its manifest through
 [`assembleAdapterCapabilities`](../../../src/integration/adapter-capability-assembly.ts)
 and supplies executable native bindings. This catalog describes assembly coverage;
 the [host matrix](../harness-capability-matrix.md) retains overall host coverage.
 
-The shared modules install the memory tool group (`search`, `get`, `remember`),
+The shared modules install the memory tools (`search`, `get`, `remember`),
 state and Lab tools, recall preparation, owner-state projection, tool-result
 observation, diagnostic attribution, board delivery and passive completion nudges.
 Each entry selects only its implemented bindings. Kimi currently assembles its
@@ -34,14 +35,38 @@ session-generation behavior. Magpie remains a separate target.
 
 The assembler validates every required binding before registration. Missing
 tools, missing lifecycle bindings and duplicate capabilities fail setup. Disabled
-modules are explicit and execute no binding. Existing native schemas and tool
-order are retained within a group. Installers can return native cleanup callbacks
+modules are explicit and execute no binding. Installers can return native cleanup callbacks
 or promises; asynchronous hosts await `ready`. Failure releases accepted
 registrations, including callbacks accepted after disposal. `dispose()` releases
 registrations once, and `describe()` reports pending, assembled, disabled, failed
 or disposed states. These are assembly states, not live-hook or enabled-state
 certificates. Endpoint methods, session ownership and writer fences are still
 checked by the existing operation paths.
+
+`state.ag` and `state.board` compose one `nmg_state` tool. The
+[`state-tool.ts`](../../../src/integration/state-tool.ts) definition owns the
+input schema, operation validation, bound RPC arguments, writer fence capture,
+board read effects and rendering. The native registration receives the shared
+definition once. The host supplies session identity, transport, and the board
+identity and read effects it supports. Disabling coordination omits the board
+space and its operations from the registered tool.
+`lab` uses the same native registration with the shared
+[`lab-tool.ts`](../../../src/integration/lab-tool.ts) schema, validation and
+invocation. Its fallback arguments belong to the shared definition.
+[`get-tool.ts`](../../../src/integration/get-tool.ts) owns exact lookup, disclosure
+folding, rendering, and CLI fallback arguments. Hosts supply project scope and
+native attribution or observation bindings. The [shared Search tool](../../../src/integration/search-tool.ts)
+owns explicit retrieval inputs, disclosure, diagnostics, and candidate rendering.
+Hosts bind their recall-flow and controller options and observe the output when needed.
+The [shared Remember tool](../../../src/integration/remember-tool.ts) validates
+and routes saves, memory lifecycle actions, feedback, and claim outcomes.
+Pi binds exact excerpts from native session history. DSH and MCP can record
+independent task outcomes, and OpenCode omits the claim outcome action.
+The shared tool supplies fallback command arguments when the command can carry
+the requested provenance. Hosts select and execute the transport.
+The optional reasoning scratchpad and daemon health tool also use the shared
+registration. Pi keeps the scratchpad opt-in, and DSH supplies its native
+daemon address for health output.
 
 Tool registration intersects native bindings with the connected daemon's
 `hello.methods`. The search schema also uses `hello.searchParameters` when
@@ -68,18 +93,24 @@ not write a delivery receipt or authorize a memory claim.
 The entry-point contract test discovers conventional public plugin entries,
 resolves the Pi manifest wrapper and checks DSH/MCP entries against the catalog.
 It also verifies that each descriptor is consumed by its entry point. Controlled
-host and MCP regression tests exercise actual tools and context behavior. This
-change does not upgrade a running host. The retained
+host and MCP regression tests exercise actual tools and context behavior.
+Pi, OpenCode, Codex MCP, Claude MCP and DSH run the same
+[`agentActivity` contract](../../../tests/helpers/agent-activity-contract.ts)
+through their registered state tools. Each harness supplies its invocation.
+They also run the same [Search](../../../tests/helpers/search-tool-contract.ts),
+[Get](../../../tests/helpers/get-tool-contract.ts), and
+[Remember](../../../tests/helpers/remember-tool-contract.ts) contracts.
+The retained
 [native recheck](../../experiments/runtime/native-plugin-capabilities-2026-11-12.md#capability-assembly-recheck-2026-11-13)
 exercises installed DSH services and a private OpenCode HTTP host with a loopback
 model, including deferred tool transformation and compaction recovery. It does
 not cover full DSH Agent execution, production providers or live idle wake.
 
-The shared layer already has tool/action contracts, Agent Surface rendering,
+The shared layer provides tool/action contracts, Agent Surface rendering,
 `SessionRecallFlow`, `RecallBudget`, context preparation and endpoint/session
-binding. Hosts still register and orchestrate parts separately. In particular,
-`HarnessConnection` negotiates service methods/capabilities; it does not assemble
-host events or grant a host an injection interface.
+binding. Hosts translate native registration and lifecycle signals.
+`HarnessConnection` negotiates service methods and capabilities. Context
+injection requires a native host binding.
 
 ## Three responsibilities
 

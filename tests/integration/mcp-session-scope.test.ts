@@ -9,6 +9,14 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { NmgService } from "../../src/cli/service.ts";
 import { createNmgMcpServer } from "../../src/integration/mcp-tools.ts";
 import { codexMcpBinding } from "../../codex-plugin/session.ts";
+import {
+  assertAgentActivityContract,
+  mcpToolContractText,
+} from "../helpers/agent-activity-contract.ts";
+import { assertGetToolContract } from "../helpers/get-tool-contract.ts";
+import { assertRememberToolContract } from "../helpers/remember-tool-contract.ts";
+import { assertSearchToolContract } from "../helpers/search-tool-contract.ts";
+import { assertLabToolContract } from "../helpers/lab-tool-contract.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
 stripProviderEnv();
@@ -37,6 +45,15 @@ test("one MCP connection isolates concurrent native sessions and refuses a forei
     await adapter.ready;
     await adapter.server.connect(serverTransport);
     await client.connect(clientTransport);
+    await assertRememberToolContract(async (args) =>
+      mcpToolContractText(await call(a, "nmg_remember", args)),
+    );
+    await assertAgentActivityContract(async (args) =>
+      mcpToolContractText(await call(a, "nmg_state", args)),
+    );
+    await assertLabToolContract(async (args) =>
+      mcpToolContractText(await call(a, "nmg_lab", args)),
+    );
     await Promise.all(
       [a, b].map((id) =>
         call(id, "nmg_state", {
@@ -67,21 +84,33 @@ test("one MCP connection isolates concurrent native sessions and refuses a forei
       statement: "ScopeFixture SQLite storage",
       nodeName: "scope",
     });
-    const search = await call(a, "nmg_search", { query: "ScopeFixture SQLite" });
-    const text = JSON.stringify(search);
+    const text = await assertSearchToolContract(
+      async (args) => mcpToolContractText(await call(a, "nmg_search", args)),
+      "ScopeFixture SQLite",
+      /ScopeFixture SQLite storage/u,
+    );
     const projection = text.match(/activeGraphId=([0-9a-f-]+)/)?.[1];
     assert.ok(projection);
     const memoryId = (await service.invoke("search", { query: "ScopeFixture" })).results[0]!.memory
       .id;
+    await assertGetToolContract(
+      async (args) => mcpToolContractText(await call(a, "nmg_get", args)),
+      memoryId,
+      /ScopeFixture SQLite storage/u,
+      projection,
+    );
     const refused = await call(b, "nmg_get", { memoryIds: [memoryId], activeGraphId: projection });
     assert.equal(refused.isError, true);
     assert.match(JSON.stringify(refused), /another session/);
     const missing = await client.callTool({
       name: "nmg_search",
-      arguments: { query: "ScopeFixture", sessionId: a },
+      arguments: { query: "ScopeFixture" },
     });
     assert.equal(missing.isError, true);
     assert.match(JSON.stringify(missing), /metadata/);
+    const forged = await call(b, "nmg_search", { query: "ScopeFixture", sessionId: a });
+    assert.equal(forged.isError, true);
+    assert.match(JSON.stringify(forged), /sessionId/);
   } finally {
     await client.close();
     await adapter.server.close();

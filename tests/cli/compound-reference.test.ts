@@ -1,3 +1,4 @@
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { mkdtempSync } from "node:fs";
@@ -79,7 +80,7 @@ test("shared search displays a copied compound reference that exact get resolves
       canonical.results[0]!.memory.accessCount + 1,
     );
     assert.deepEqual(stable(copied), stable(canonical));
-    const store = new NmgStore(join(directory, "nmg.sqlite"));
+    const store = new SqliteLocalDaemonState(join(directory, "nmg.sqlite"));
     try {
       const trace = store.retrievalTrace(context.activeGraph!.traceIds![0]!, "reference-reader")!;
       assert.deepEqual(trace.disclosedMemoryIds, [saved.memory.id]);
@@ -175,7 +176,7 @@ test("references require their exact owned graph while canonical IDs need no gra
           activeGraphId: context.activeGraph!.id,
           sessionId,
         }),
-        /absent or not owned/u,
+        /absent or not owned|belongs to another session/u,
       );
     }
     await assert.rejects(
@@ -184,7 +185,7 @@ test("references require their exact owned graph while canonical IDs need no gra
         activeGraphId: "missing-graph",
         sessionId: "owner",
       }),
-      /absent or not owned/u,
+      /absent or not owned|belongs to another session/u,
     );
     await assert.rejects(
       service.invoke("get", {
@@ -235,7 +236,7 @@ test("private project references do not resolve in another project or session", 
     );
     await assert.rejects(
       service.invoke("get", { ...params, sessionId: "foreign" }),
-      /absent or not owned/u,
+      /absent or not owned|belongs to another session/u,
     );
     await assert.rejects(
       service.invoke("get", { ...params, projectDir: undefined }),
@@ -306,12 +307,12 @@ test("ordinary HTTP JSON-RPC accepts mixed canonical and copied references", asy
 
 test("shared library helpers resolve a captured scope without a host-specific decoder", async () => {
   await withService(async (service, directory) => {
-    const saved = await service.invoke("remember", {
-      statement: "SQLite stores Atlas project data.",
-      nodeName: "Atlas storage",
-    });
     const store = new NmgStore(join(directory, "nmg.sqlite"));
     try {
+      const saved = store.remember({
+        statement: "SQLite stores Atlas project data.",
+        nodeName: "Atlas storage",
+      });
       const context = store.searchContext("SQLite Atlas", {
         sessionId: "library-reader",
         limit: 1,
@@ -329,7 +330,7 @@ test("shared library helpers resolve a captured scope without a host-specific de
           activeGraphId: context.activeGraph!.id,
           sessionId: "library-reader",
         }),
-        /absent or not owned/u,
+        /absent or not owned|belongs to another session/u,
       );
     } finally {
       store.close();
@@ -360,7 +361,7 @@ test("expired private projections fail instead of rebinding a reference to the l
           memoryIds: [key],
           activeGraphId: context.activeGraph!.id,
         }),
-        /absent or not owned/u,
+        /absent or not owned|belongs to another session/u,
       );
       const canonical = await restarted.invoke("get", {
         memoryIds: [saved.memory.id],

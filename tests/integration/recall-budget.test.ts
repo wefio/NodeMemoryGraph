@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { NmgStore } from "../../src/core/store.ts";
+import { LocalMemoryEmbeddings } from "../../src/cli/local-memory-embeddings.ts";
 import { RecallBudget } from "../../src/integration/recall-budget.ts";
 import { searchMemoryContext } from "../../src/integration/search.ts";
 
@@ -12,6 +13,40 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+
+test("unified query embedding can use more than 850ms of a caller-supplied budget", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const vector = deferred<number[][]>();
+  const embedDocuments = async () => [];
+  const client = {
+    model: "fixture",
+    profile: "fixture",
+    indexId: "fixture",
+    embedDocuments,
+    embed: embedDocuments,
+    embedQueries: () => vector.promise,
+  };
+  const embeddings = new LocalMemoryEmbeddings(() => client);
+  const index = {
+    has: () => true,
+    stats: () => ({ indexed: 1, pending: 0 }),
+    pending: () => [],
+    save() {},
+    candidates: () => [],
+  };
+  try {
+    const response = embeddings.query(
+      "fixture",
+      { query: "fixture", autoRecall: true, autoRecallBudgetMs: 1_400 },
+      [index],
+    );
+    t.mock.timers.tick(900);
+    vector.resolve([[1, 0]]);
+    assert.deepEqual((await response).semantic?.vector, [1, 0]);
+  } finally {
+    await embeddings.close();
+  }
+});
 
 test("an automatic embedding deadline returns lexical hits and ignores a late vector", async (t) => {
   const store = new NmgStore(":memory:");

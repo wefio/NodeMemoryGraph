@@ -328,7 +328,7 @@ test("candidate rows retain preview, degradation and graph references under inde
   };
   const original = structuredClone(context);
   const views = searchInformationViews(context);
-  const first = prepareInformationOutput([views[0]!], { format: "context" });
+  const first = prepareInformationOutput(views.slice(0, 2), { format: "context" });
   const output = prepareInformationOutput(views, {
     format: "context",
     maxCharacters: first.text.length + 20,

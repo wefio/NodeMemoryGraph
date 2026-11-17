@@ -2,6 +2,21 @@ import { prepareAutomaticRecallSurface } from "./agent-surface.ts";
 import type { NmgHelloResult, NmgMethod } from "../cli/protocol.ts";
 import { contextStateViews } from "./context-information.ts";
 import { promptCompletionNudge } from "./completion-nudge.ts";
+import { createGetTool, type SharedGetTool } from "./get-tool.ts";
+import { createDaemonHealthTool, type SharedDaemonHealthTool } from "./daemon-health-tool.ts";
+import {
+  createLabTool,
+  createReasonTool,
+  type SharedLabTool,
+  type SharedReasonTool,
+} from "./lab-tool.ts";
+import {
+  createRememberTool,
+  type RememberToolOptions,
+  type SharedRememberTool,
+} from "./remember-tool.ts";
+import { createSearchTool, type SharedSearchTool } from "./search-tool.ts";
+import { createStateTool, type SharedStateTool, type StateToolSpace } from "./state-tool.ts";
 import { AgentAttributionFlow, recordVersionedAnswerAttribution } from "./agent-attribution.ts";
 import { collectWakeCandidates } from "./board-wake.ts";
 import {
@@ -19,33 +34,9 @@ import {
 
 export type CapabilityCleanup = () => void | Promise<void>;
 type Installation = void | CapabilityCleanup | Promise<void | CapabilityCleanup>;
-type ToolName = "nmg_search" | "nmg_get" | "nmg_remember" | "nmg_state" | "nmg_lab";
 export type AdapterEndpoint = Pick<NmgHelloResult, "methods" | "searchParameters">;
-export type AdapterToolBindings = Partial<
-  Record<ToolName, (endpoint?: AdapterEndpoint) => Installation>
->;
-
-const TOOL_METHODS: Record<ToolName, NmgMethod> = {
-  nmg_search: "search",
-  nmg_get: "get",
-  nmg_remember: "remember",
-  nmg_state: "state",
-  nmg_lab: "lab",
-};
-
 export function endpointSupports(method: NmgMethod, endpoint?: AdapterEndpoint): boolean {
   return endpoint?.methods?.includes(method) ?? true;
-}
-
-export function supportedSearchParameters<T extends Record<string, unknown>>(
-  schema: T,
-  endpoint?: AdapterEndpoint,
-): T {
-  const parameters = endpoint?.searchParameters;
-  if (!parameters) return schema;
-  return Object.fromEntries(
-    Object.entries(schema).filter(([key]) => parameters.includes(key)),
-  ) as T;
 }
 
 export interface ToolObservationInput {
@@ -110,16 +101,59 @@ const SERVICES: CapabilityServices = {
   },
 };
 
-const TOOL_CAPABILITIES = {
-  "memory-tools": ["nmg_search", "nmg_get", "nmg_remember"],
-  "state-tool": ["nmg_state"],
-  "lab-tools": ["nmg_lab"],
+const SHARED_TOOLS = {
+  "daemon-health": { method: "status", create: createDaemonHealthTool },
+  "reasoning-workspace": { method: "lab", create: createReasonTool },
+  remember: {
+    method: "remember",
+    create: (endpoint?: AdapterEndpoint, options?: RememberToolOptions) =>
+      createRememberTool(endpoint?.methods, options),
+  },
+  search: {
+    method: "search",
+    create: (endpoint?: AdapterEndpoint) =>
+      createSearchTool(
+        endpointSupports("sessionActiveGraph", endpoint),
+        endpoint?.searchParameters,
+      ),
+  },
+  get: {
+    method: "get",
+    create: (endpoint?: AdapterEndpoint) =>
+      createGetTool(endpointSupports("sessionActiveGraph", endpoint)),
+  },
+  lab: { method: "lab", create: createLabTool },
 } as const;
+const STATE_CAPABILITIES = { "state.ag": "ag", "state.board": "board" } as const;
+type StateCapability = keyof typeof STATE_CAPABILITIES;
 
-export type AdapterCapability = keyof typeof TOOL_CAPABILITIES | keyof CapabilityServices;
+export type AdapterCapability =
+  keyof typeof SHARED_TOOLS | keyof CapabilityServices | StateCapability;
+export const ADAPTER_CAPABILITY_IDS = [
+  ...Object.keys(SHARED_TOOLS),
+  ...Object.keys(SERVICES),
+  ...Object.keys(STATE_CAPABILITIES),
+] as readonly AdapterCapability[];
+export function adapterToolCapability(capability: AdapterCapability): boolean {
+  return Object.hasOwn(SHARED_TOOLS, capability) || isStateCapability(capability);
+}
+
+export function disabledBoardCapability(enabled: boolean): readonly AdapterCapability[] {
+  return enabled ? [] : ["state.board"];
+}
+
 export type AdapterCapabilityBindings = {
-  tools?: AdapterToolBindings;
+  rememberOptions?: RememberToolOptions;
+  registerTool?: (tool: SharedAdapterTool) => Installation;
 } & { [K in keyof CapabilityServices]?: (services: CapabilityServices[K]) => Installation };
+export type SharedAdapterTool =
+  | SharedStateTool
+  | SharedLabTool
+  | SharedGetTool
+  | SharedSearchTool
+  | SharedRememberTool
+  | SharedDaemonHealthTool
+  | SharedReasonTool;
 
 export interface CapabilityAssembly {
   ready: Promise<void>;
@@ -130,28 +164,40 @@ export interface CapabilityAssembly {
   dispose(): Promise<void>;
 }
 
-function capabilityInstallers(
+function isStateCapability(capability: AdapterCapability): capability is StateCapability {
+  return Object.hasOwn(STATE_CAPABILITIES, capability);
+}
+
+function withEndpoint(
+  method: NmgMethod,
+  endpoint: AdapterEndpoint | Promise<AdapterEndpoint | undefined> | undefined,
+  bind: (discovered?: AdapterEndpoint) => Installation,
+): () => Installation {
+  const install = (discovered?: AdapterEndpoint) =>
+    endpointSupports(method, discovered) ? bind(discovered) : undefined;
+  return () => (endpoint instanceof Promise ? endpoint.then(install) : install(endpoint));
+}
+
+function capabilityInstaller(
   capability: AdapterCapability,
   bindings: AdapterCapabilityBindings,
-  endpoint?: AdapterEndpoint | Promise<AdapterEndpoint | undefined>,
-): Array<() => Installation> {
-  if (Object.hasOwn(TOOL_CAPABILITIES, capability)) {
-    const names = TOOL_CAPABILITIES[capability as keyof typeof TOOL_CAPABILITIES];
-    for (const name of names) {
-      const bind = bindings.tools?.[name];
-      if (typeof bind !== "function") throw new Error(`${capability}: missing binding ${name}`);
-    }
-    // Keep the host's existing order within a shared tool group.
-    return Object.entries(bindings.tools ?? {})
-      .filter(([name]) => (names as readonly string[]).includes(name))
-      .map(([name, bind]) => {
-        const method = TOOL_METHODS[name as ToolName];
-        const install = (discovered?: AdapterEndpoint) =>
-          endpointSupports(method, discovered) ? bind(discovered) : undefined;
-        return () => (endpoint instanceof Promise ? endpoint.then(install) : install(endpoint));
-      });
+  endpoint: AdapterEndpoint | Promise<AdapterEndpoint | undefined> | undefined,
+  state: readonly StateCapability[],
+): () => Installation {
+  const shared = Object.hasOwn(SHARED_TOOLS, capability)
+    ? SHARED_TOOLS[capability as keyof typeof SHARED_TOOLS]
+    : undefined;
+  if (isStateCapability(capability) || shared) {
+    const register = bindings.registerTool;
+    if (!register) throw new Error(`${capability}: missing native tool registration`);
+    if (shared)
+      return withEndpoint(shared.method, endpoint, (discovered) =>
+        register(shared.create(discovered, bindings.rememberOptions)),
+      );
+    const spaces: StateToolSpace[] = state.map((id) => STATE_CAPABILITIES[id]);
+    return withEndpoint("state", endpoint, () => register(createStateTool(spaces)));
   }
-  return [serviceInstaller(capability as keyof CapabilityServices, bindings)];
+  return serviceInstaller(capability as keyof CapabilityServices, bindings);
 }
 
 function serviceInstaller<K extends keyof CapabilityServices>(
@@ -179,20 +225,28 @@ export function assembleAdapterCapabilities(
 ): CapabilityAssembly {
   const disabled = new Set(options.disabled);
   if (new Set(capabilities).size !== capabilities.length) throw new Error("Duplicate capability");
-  const plans = capabilities.map((capability) => ({
-    capability,
-    state: disabled.has(capability) ? ("disabled" as const) : ("pending" as const),
-    install: disabled.has(capability)
-      ? []
-      : capabilityInstallers(capability, bindings, options.endpoint),
-  }));
+  const state = capabilities.filter(isStateCapability).filter((id) => !disabled.has(id));
+  const plans: CapabilityPlan[] = [];
+  for (const capability of capabilities) {
+    if (disabled.has(capability)) {
+      plans.push({ capabilities: [capability], state: "disabled" });
+      continue;
+    }
+    const isState = isStateCapability(capability);
+    if (isState && state[0] !== capability) continue;
+    plans.push({
+      capabilities: isState ? state : [capability],
+      state: "pending",
+      install: capabilityInstaller(capability, bindings, options.endpoint, state),
+    });
+  }
   return installCapabilities(plans);
 }
 
 type CapabilityPlan = {
-  capability: AdapterCapability;
+  capabilities: readonly AdapterCapability[];
   state: "assembled" | "pending" | "disabled" | "failed" | "disposed";
-  install: Array<() => Installation>;
+  install?: () => Installation;
 };
 
 class InstallationScope {
@@ -202,33 +256,26 @@ class InstallationScope {
   closing: Promise<void> | undefined;
 
   install(plan: CapabilityPlan): void {
-    const pending: Promise<void>[] = [];
-    for (const install of plan.install) {
-      const slot = this.cleanups.length;
-      this.cleanups.push(undefined);
-      const result = install();
-      if (result instanceof Promise) {
-        const accepted = result.then((cleanup) => this.accept(slot, cleanup));
-        this.pending.push(accepted);
-        pending.push(accepted);
-      } else {
-        this.cleanups[slot] = result || undefined;
-      }
-    }
-    if (pending.length === 0) {
+    const slot = this.cleanups.length;
+    this.cleanups.push(undefined);
+    const result = plan.install?.();
+    if (!(result instanceof Promise)) {
+      this.cleanups[slot] = result || undefined;
       plan.state = "assembled";
       return;
     }
     this.pending.push(
-      Promise.all(pending).then(
-        () => {
-          plan.state = this.closed ? "disposed" : "assembled";
-        },
-        (error) => {
-          plan.state = "failed";
-          throw error;
-        },
-      ),
+      result
+        .then((cleanup) => this.accept(slot, cleanup))
+        .then(
+          () => {
+            plan.state = this.closed ? "disposed" : "assembled";
+          },
+          (error) => {
+            plan.state = "failed";
+            throw error;
+          },
+        ),
     );
   }
 
@@ -289,7 +336,10 @@ function installCapabilities(plans: CapabilityPlan[]): CapabilityAssembly {
   void ready.catch(() => undefined);
   return {
     ready,
-    describe: () => plans.map(({ capability, state }) => ({ capability, state })),
+    describe: () =>
+      plans.flatMap(({ capabilities, state }) =>
+        capabilities.map((capability) => ({ capability, state })),
+      ),
     dispose: async () => {
       scope.closed = true;
       await Promise.allSettled(scope.pending);

@@ -7,6 +7,11 @@ import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { httpHandler } from "../../src/cli/http-server.ts";
 import { NmgService } from "../../src/cli/service.ts";
+import { assertGetToolContract } from "../helpers/get-tool-contract.ts";
+import { assertAgentActivityContract } from "../helpers/agent-activity-contract.ts";
+import { assertRememberToolContract } from "../helpers/remember-tool-contract.ts";
+import { assertSearchToolContract } from "../helpers/search-tool-contract.ts";
+import { assertLabToolContract } from "../helpers/lab-tool-contract.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
@@ -31,6 +36,7 @@ test("DSH remember exposes and forwards the historical event clock to its HTTP o
     assert.equal(saved.params.timeZone, "Asia/Shanghai");
     const result = await service.invoke("search", { query: "DshHistoricalClockMarker" });
     assert.equal(result.results[0]?.memory.eventTime, "2025-05-09T00:00:00.000Z");
+    await assertRememberToolContract(async (args) => String(await remember.execute(args, context)));
   });
 });
 
@@ -527,10 +533,17 @@ test("DSH native search and forget use the activated daemon contract", async () 
       const output = await tools.get("nmg_lab")!.execute({ action: "list" }, {});
       assert.match(JSON.stringify(output), /recall_gate/u);
       assert.equal((await service.invoke("status")).rpcRejections?.length, 0);
+      await assertGetToolContract(
+        async (args) => String(await tools.get("nmg_get")!.execute(args, context)),
+        write.memory.id,
+        /Atlas codifies the DSH memory contract/u,
+      );
       const removed = await tools
         .get("nmg_remember")!
         .execute({ action: "forget", memoryId: write.memory.id }, {});
-      assert.match(JSON.stringify(removed), /deleted/u);
+      assert.match(String(removed), /withdrawn from normal retrieval/u);
+      const exact = await service.invoke("get", { memoryIds: [write.memory.id] });
+      assert.deepEqual(exact.missingMemoryIds, [write.memory.id]);
     },
     true,
   );
@@ -596,7 +609,11 @@ test("DSH observes native final tool results and flushes diagnostic attribution 
       statement: "Atlas uses SQLite storage.",
       nodeName: "Atlas",
     });
-    await tools.get("nmg_search")!.execute({ query: "Atlas SQLite storage" }, owner);
+    await assertSearchToolContract(
+      async (args) => String(await tools.get("nmg_search")!.execute(args, owner)),
+      "Atlas SQLite storage",
+      /Atlas uses SQLite storage/u,
+    );
     const before = requests.filter(
       (request) => request.method === "recordActiveGraphAttribution",
     ).length;
@@ -651,6 +668,8 @@ test("DSH automatic context is budgeted and unconfirmed; a new empty turn exclud
     assert.match(text, /Atlas uses SQLite/);
     assert.ok(text.length <= 16_000);
     assert.match(text, /candidate preview; not exact evidence/);
+    const searchBudget = requests.find((r) => r.method === "search")?.params.autoRecallBudgetMs;
+    assert.ok(typeof searchBudget === "number" && searchBudget > 0 && searchBudget <= 1_400);
     assert.equal(
       requests.some((r) => r.params.action === "disclose"),
       false,
@@ -747,10 +766,15 @@ test("DSH carries a weak commit reminder for one turn and does not infer success
 test("DSH registers one state tool, keeps AG usable without coordination, and rejects Lab daily-state writes", async () => {
   await withHost(false, async ({ tools, service, subprocessCalls }) => {
     assert.ok(tools.has("nmg_state"));
-    assert.ok(tools.has("nmg_daemon"));
+    const health = await tools.get("nmg_daemon")!.execute({ action: "status" }, context);
+    assert.match(
+      String(health),
+      /NMG daemon: running pid=\d+ endpoint=127\.0\.0\.1:\d+ compatible=true/u,
+    );
     assert.equal(tools.has("nmg_board"), false);
     const lab = tools.get("nmg_lab")!;
     assert.equal(lab.parameters.properties.capability.enum?.includes("working_state"), false);
+    await assertLabToolContract(async (args) => String(await lab.execute(args, context)));
     await assert.rejects(
       lab.execute({ action: "enable", capability: "working_state", reason: "test" }, context),
       /nmg_state/u,
@@ -806,6 +830,27 @@ test("DSH registers one state tool, keeps AG usable without coordination, and re
     assert.equal(board.action === "read" && board.entries.length, 0);
     assert.equal(subprocessCalls(), 0);
   });
+});
+
+test("DSH runs the shared agentActivity contract as the native session", async () => {
+  await withHost(
+    true,
+    async ({ tools, requests }) => {
+      const tool = tools.get("nmg_state")!;
+      const host = { agent: { id: "activity-session" }, signal: new AbortController().signal };
+      await assertAgentActivityContract(async (args) => String(await tool.execute(args, host)));
+      const forwarded = requests.filter(
+        (r) => r.method === "state" && r.params.operation === "agentActivity",
+      );
+      assert.ok(forwarded.length > 0);
+      for (const request of forwarded) {
+        assert.equal(request.params.agentId, "activity-session");
+        assert.equal(request.params.sessionId, "activity-session");
+        assert.equal(request.params.space, "board");
+      }
+    },
+    true,
+  );
 });
 
 test("DSH forwards event objects and pins mutation identity to its registered actor", async () => {

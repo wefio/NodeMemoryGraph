@@ -284,8 +284,8 @@ export const CLASSIFICATIONS: readonly ClassifiedSite[] = [
     reason: "Frozen-definition retries compare all normalized fields, including permission paths.",
   },
   {
-    path: "src/core/store/maintenance.ts",
-    scope: "withMaintenance.recordActiveGraphAttribution",
+    path: "src/core/store/retrieval-diagnostics.ts",
+    scope: "withRetrievalDiagnostics.recordActiveGraphAttribution",
     word: "patch",
     count: 1,
     classification: "mechanism",

@@ -43,6 +43,8 @@ export function resolveRepoRoot(): string {
 
 export interface InvokeContext {
   dataDir?: string;
+  /** Shared tool arguments. null means the command cannot preserve the request. */
+  fallbackArgs?: readonly string[] | null;
 }
 
 /**
@@ -56,12 +58,15 @@ export async function invokeDaemon(
   context: InvokeContext = {},
 ): Promise<unknown> {
   const dataDir = context.dataDir ?? resolveNmgDataDir();
+  const fallback = context.fallbackArgs !== null && CLI_FALLBACK_METHODS.has(method);
   let lease = await compatibleLease(dataDir).catch(() => null);
   if (lease) {
     try {
       return await rpcCall(lease, method, params);
     } catch (error) {
       dropCompatibleLease(dataDir);
+      // A running owner may have committed the write before the reply was lost.
+      if (method === "remember" && context.fallbackArgs !== undefined) throw error;
       lease = await compatibleLease(dataDir).catch(() => null);
       if (lease) {
         try {
@@ -70,12 +75,13 @@ export async function invokeDaemon(
           // Both lease attempts failed; fall back to the CLI below.
         }
       }
-      if (!CLI_FALLBACK_METHODS.has(method)) {
+      if (!fallback) {
         throw bookkeepingUnavailable(method, error);
       }
     }
   }
-  if (CLI_FALLBACK_METHODS.has(method)) return cliFallback(method, params);
+  if (fallback)
+    return context.fallbackArgs ? cliJson(context.fallbackArgs) : cliFallback(method, params);
   throw noLeaseForBookkeeping(method);
 }
 

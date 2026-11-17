@@ -16,8 +16,8 @@
  */
 import { workDigest } from "./work-identity.ts";
 import { recordPatchInputs, restorePatchInputs } from "./ooo-declaration-store.ts";
-import type { NmgStore } from "../core/store.ts";
-import { taskBoardClaimIsLive } from "../core/store/base.ts";
+import type { SqliteLocalDaemonState } from "../core/store/local-daemon-state.ts";
+import { taskBoardClaimIsLive } from "../core/store/local-sqlite-state-base.ts";
 import { TASK_BOARD_VERDICTS } from "../core/types.ts";
 import type { DispatchBoard, DispatchEntry, DispatchTicket } from "./ooo-dispatch.ts";
 import type { PatchTaskSpec, ProbeOperation, ProbePlan } from "./ooo-board.ts";
@@ -64,7 +64,7 @@ export interface RunBoardOptions {
 }
 
 /** One task of the frozen plan, as the store has it. */
-type RunTask = ReturnType<NmgStore["taskRunTasks"]>[number];
+type RunTask = ReturnType<SqliteLocalDaemonState["taskRunTasks"]>[number];
 
 /** One binding: the entry a task's work is carried by. */
 type RunBinding = ReturnType<typeof taskRunStatus>["bindings"][number];
@@ -72,10 +72,10 @@ type RunBinding = ReturnType<typeof taskRunStatus>["bindings"][number];
 /** The store's board for one run, satisfying the loop's port and nothing else. */
 export class StoreRunBoard implements DispatchBoard<FrozenPatchWork> {
   readonly channel: string;
-  readonly #store: NmgStore;
+  readonly #store: SqliteLocalDaemonState;
   readonly #options: RunBoardOptions;
 
-  constructor(store: NmgStore, options: RunBoardOptions) {
+  constructor(store: SqliteLocalDaemonState, options: RunBoardOptions) {
     this.#store = store;
     this.#options = options;
     this.channel = options.channel;

@@ -14,13 +14,14 @@
 
 ## 可执行装配
 
+每个公开入口有一份 [JSON 能力清单](../../../src/integration/adapter-manifests)。
 [`adapter-capability-catalog.ts`](../../../src/integration/adapter-capability-catalog.ts)
-声明当前入口已迁移的能力。各入口通过
+用共享 JSON Schema 校验清单，Schema 的能力名与可执行注册表一致。各入口通过
 [`assembleAdapterCapabilities`](../../../src/integration/adapter-capability-assembly.ts)
 消费声明并提供可执行的原生绑定。该目录描述装配覆盖情况，
 [宿主矩阵](../harness-capability-matrix.zh-CN.md)继续负责整体宿主覆盖情况。
 
-共享模块装配记忆工具组（search、get、remember）、状态及 Lab 工具、召回准备、
+共享模块装配记忆工具（search、get、remember）、状态及 Lab 工具、召回准备、
 Owner 状态投影、工具结果观察、诊断归因、黑板投递及被动完成提醒。
 各入口只选择已实现的绑定。Kimi 当前装配共享提醒，其旧黑板轮询仍是本地代码。
 MCP 装配显式工具。Codex 包按每次原生请求绑定共享工具服务，装配上下文、状态、观察与
@@ -28,12 +29,30 @@ prompt 时黑板 hook。[插件指南](../../../codex-plugin/README.zh-CN.md)负
 Magpie 保持独立目标。
 
 装配器在注册前检查全部必需绑定。缺工具、缺生命周期绑定及重复能力会使启动失败。
-禁用模块有明确状态，不执行绑定。保留原生 schema 和工具组内的既有顺序。
+禁用模块有明确状态，不执行绑定。
 安装函数可返回原生清理函数或 Promise，异步宿主等待 `ready`。
 失败会释放已接受的注册，卸载后才被接受的注册也会清理。
 `dispose()` 只释放一次，`describe()` 报告 pending、assembled、disabled、failed、disposed。
 这些是装配状态，不证明真实 hook 已激活或功能已启用。
 端点方法、会话所有权和 writer 栅栏继续由既有操作路径检查。
+
+`state.ag` 和 `state.board` 装配为一个 `nmg_state`。
+[`state-tool.ts`](../../../src/integration/state-tool.ts) 统一定义输入 schema、
+操作校验、RPC 参数、写入栅栏、黑板读取效果及结果呈现。
+宿主注册一次共享定义，提供会话身份、传输、黑板身份以及支持的读取效果。
+关闭协作时，注册工具仅展示 AG 空间及其操作。
+`lab` 通过同一原生绑定注册，共用 [Lab 定义](../../../src/integration/lab-tool.ts)
+的 schema、校验、调用及备用命令参数。
+[`get-tool.ts`](../../../src/integration/get-tool.ts) 负责精确读取、披露去重、
+呈现和备用命令参数。宿主提供项目范围和原生归因或观测绑定。
+[共享 Search 工具](../../../src/integration/search-tool.ts) 统一显式检索输入、披露、
+降级提示和候选呈现。宿主绑定回合预算及排序策略，并按需观察结果。
+[共享 Remember 工具](../../../src/integration/remember-tool.ts) 统一校验和处理持久写入、
+记忆生命周期操作、反馈及声明结果。Pi 可以从原生历史绑定精确证据。DSH 和 MCP 可以记录
+独立任务的结果，OpenCode 的工具不注册声明结果操作。
+备用命令能携带所需的证据来源时，共享工具才提供命令参数。宿主负责实际传输。
+可选推理便笺和 daemon 健康检查也走同一注册入口。Pi 的推理便笺需显式启用，
+DSH 提供健康检查输出所需的原生 daemon 地址。
 
 工具注册取原生绑定和 daemon `hello.methods` 的交集。端点提供
 `hello.searchParameters` 时，工具据此筛选检索字段。
@@ -53,13 +72,18 @@ DSH 保留会话队列及端点存活检查。准备不会写入投递回执，�
 入口合同测试发现约定目录下的公开插件入口，解析 Pi 清单包装入口，
 并将 DSH／MCP 入口与能力目录核对，同时检查各入口消费自己的声明。
 受控宿主和 MCP 回归测试执行实际工具及上下文行为。
-本改动没有升级运行中的宿主。[原生复验](../../experiments/runtime/native-plugin-capabilities-2026-11-12.zh-CN.md#2026-11-13-能力装配复验)
+Pi、OpenCode、Codex MCP、Claude MCP 和 DSH 用各自注册的状态工具运行同一份
+[`agentActivity` 合同测试](../../../tests/helpers/agent-activity-contract.ts)。
+五个宿主也运行相同的 [Search](../../../tests/helpers/search-tool-contract.ts)、
+[Get](../../../tests/helpers/get-tool-contract.ts) 和
+[Remember](../../../tests/helpers/remember-tool-contract.ts) 合同。
+[原生复验](../../experiments/runtime/native-plugin-capabilities-2026-11-12.zh-CN.md#2026-11-13-能力装配复验)
 使用已安装的 DSH 服务及私有 OpenCode HTTP 宿主和回环模型，覆盖延迟工具转换及压缩恢复。
 尚未覆盖完整 DSH Agent 执行、生产 provider 或真实空闲唤醒。
 
-共享层已有工具／动作合同、Agent Surface、`SessionRecallFlow`、`RecallBudget`、
-上下文准备及端点／会话绑定，但各宿主仍分别注册和编排部分行为。
-其中 `HarnessConnection` 协商服务方法与能力，不负责装配宿主事件，也不会凭声明让宿主拥有上下文写入接口。
+共享层提供工具／动作合同、Agent Surface、`SessionRecallFlow`、`RecallBudget`、
+上下文准备及端点／会话绑定。宿主转换原生注册和生命周期信号。
+`HarnessConnection` 协商服务方法和能力。上下文注入需要宿主提供原生绑定。
 
 ## 三层职责
 

@@ -69,3 +69,12 @@ Check embedding health any time recall quality is in doubt:
 ```text
 nmg status --json   # reports embedding provider, index health, and reason
 ```
+
+## Check provider requests offline
+
+From the repository, run `npm run test:embedding-requests`. The suite captures
+the requests built by the real OpenAI-compatible, Cloudflare, Jina and Gemini
+clients before fetch can connect. It checks URL, method, authentication header
+type, and the JSON payload for query and document inputs. The suite uses fixture
+credentials and responses. The fixtures do not show whether a provider will
+accept the request from a particular account or region.

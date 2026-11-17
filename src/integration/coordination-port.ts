@@ -1,8 +1,8 @@
-import type { NmgStore } from "../core/store.ts";
+import type { SqliteLocalDaemonState } from "../core/store/local-daemon-state.ts";
 
 /** Local run/board transaction boundary. It is never implemented by a memory backend. */
 export type CoordinationPort = Pick<
-  NmgStore,
+  SqliteLocalDaemonState,
   | "taskRunFacts"
   | "taskRunManifest"
   | "taskRunForEntry"
@@ -18,7 +18,7 @@ export type CoordinationPort = Pick<
 
 export type TaskBoardPort = CoordinationPort &
   Pick<
-    NmgStore,
+    SqliteLocalDaemonState,
     | "postBoardMessage"
     | "readTaskBoard"
     | "listCoordinationEvents"
@@ -49,7 +49,7 @@ export type TaskBoardPort = CoordinationPort &
   >;
 
 export type CoordinationStatePort = Pick<
-  NmgStore,
+  SqliteLocalDaemonState,
   | "reportAgentActivity"
   | "readAgentActivity"
   | "setAgentStatusNote"

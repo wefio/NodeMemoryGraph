@@ -10,6 +10,7 @@
  */
 import { DatabaseSync } from "node:sqlite";
 import { memoryFtsLink } from "../core/store/fts-index.ts";
+import { useUnifiedInspectViews } from "./inspect-memory-views.ts";
 
 export interface InspectMemoryRow {
   id: string;
@@ -52,9 +53,17 @@ export interface InspectTraceDetail extends InspectTraceRow {
 }
 
 type Row = Record<string, unknown>;
+const unifiedReaders = new WeakSet<DatabaseSync>();
 
 export function openInspectDb(databasePath: string): DatabaseSync {
-  return new DatabaseSync(databasePath, { readOnly: true });
+  const db = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    if (useUnifiedInspectViews(db)) unifiedReaders.add(db);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 }
 
 export function listMemories(db: DatabaseSync, limit = 500): InspectMemoryRow[] {
@@ -87,21 +96,8 @@ export function searchMemories(db: DatabaseSync, query: string, limit = 200): In
       .map((token) => `"${token.replaceAll('"', '""')}"*`)
       .join(" ");
     try {
-      const link = memoryFtsLink(db);
-      return mapMemoryRows(
-        db
-          .prepare(
-            `SELECT m.id, m.statement, m.memory_type, m.tier, m.importance, m.status,
-                    m.created_at, n.canonical_name AS node_name
-             FROM memory_fts f ${link.join}
-             JOIN memory_records m ON m.id = ${link.id}
-             JOIN memory_nodes n ON n.id = m.node_id
-             WHERE memory_fts MATCH ? AND m.status IN ('active', 'disputed')
-             ORDER BY bm25(memory_fts), f.rowid
-             LIMIT ?`,
-          )
-          .all(ftsQuery, clampLimit(limit, 5_000)) as Row[],
-      );
+      const matches = inspectFts(db, ftsQuery, limit);
+      if (matches.length) return matches;
     } catch {
       // Malformed FTS syntax (unbalanced quotes, stray operators): fall through.
     }
@@ -120,6 +116,28 @@ export function searchMemories(db: DatabaseSync, query: string, limit = 200): In
          LIMIT ?`,
       )
       .all(pattern, pattern, clampLimit(limit, 5_000)) as Row[],
+  );
+}
+
+function inspectFts(db: DatabaseSync, query: string, limit: number): InspectMemoryRow[] {
+  const unified = unifiedReaders.has(db);
+  const table = unified ? "nmg_memory_fts" : "memory_fts";
+  const link = unified ? { join: "", id: "substr(f.key, 8)" } : memoryFtsLink(db);
+  const boundary = unified
+    ? "AND f.namespace=(SELECT namespace FROM nmg_local_memory WHERE id=1)"
+    : "";
+  return mapMemoryRows(
+    db
+      .prepare(
+        `SELECT m.id, m.statement, m.memory_type, m.tier, m.importance, m.status,
+            m.created_at, n.canonical_name AS node_name
+     FROM ${table} f ${link.join}
+     JOIN memory_records m ON m.id=${link.id}
+     JOIN memory_nodes n ON n.id=m.node_id
+     WHERE ${table} MATCH ? AND m.status IN ('active', 'disputed') ${boundary}
+     ORDER BY bm25(${table}), f.rowid LIMIT ?`,
+      )
+      .all(query, clampLimit(limit, 5_000)) as Row[],
   );
 }
 

@@ -272,6 +272,7 @@ export class CodexHook {
               ...request,
               limit: Math.min(request.limit, configuredAutoRecallLimit()),
               autoRecall: true,
+              autoRecallBudgetMs: budget.searchBudgetMs(),
               tieredDisclosure: true,
               sessionId: binding.sessionId,
               projectDir: binding.projectDir,

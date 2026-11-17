@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
 import test from "node:test";
 
 import {
@@ -55,49 +54,124 @@ test("Cloudflare and Jina presets own their defaults and index namespaces", () =
   assert.notEqual(jina.indexId, cloudflare.indexId);
 });
 
-test("Gemini provider batches inputs and distinguishes query from document tasks", async () => {
-  const requests: Array<{ taskType: string; apiKey: string | undefined }> = [];
-  const server = createServer((request, response) => {
-    let body = "";
-    request.on("data", (chunk) => (body += chunk));
-    request.on("end", () => {
-      const payload = JSON.parse(body) as {
-        requests: Array<{ taskType: string }>;
-      };
-      requests.push({
-        taskType: payload.requests[0]!.taskType,
-        apiKey: request.headers["x-goog-api-key"] as string | undefined,
-      });
-      response.setHeader("content-type", "application/json");
-      response.end(
-        JSON.stringify({
-          embeddings: payload.requests.map((_item, index) => ({ values: [index, 1] })),
-        }),
-      );
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  assert(address && typeof address === "object");
+const query = "查什么？";
+const documents = ["第一条", "第二条"];
+const dimensions = 2;
+const key = "fixture-only";
+const geminiModel = "models/gemini-embedding-001";
 
-  try {
+function geminiBody(inputs: string[], taskType: string) {
+  return {
+    requests: inputs.map((text) => ({
+      model: geminiModel,
+      content: { parts: [{ text }] },
+      taskType,
+      outputDimensionality: dimensions,
+    })),
+  };
+}
+
+const requestContracts = {
+  openai: {
+    environment: {
+      NMG_EMBED_BASE_URL: "https://embedding.example/v1/",
+      NMG_EMBED_MODEL: "example/text-embedding",
+      NMG_EMBED_QUERY_TEMPLATE: "Q>{text}",
+    },
+    url: "https://embedding.example/v1/embeddings",
+    queryBody: { model: "example/text-embedding", input: [`Q>${query}`], dimensions },
+    documentBody: { model: "example/text-embedding", input: documents, dimensions },
+  },
+  cloudflare: {
+    environment: { CLOUDFLARE_ACCOUNT_ID: "fixture-account" },
+    url: "https://api.cloudflare.com/client/v4/accounts/fixture-account/ai/v1/embeddings",
+    queryBody: { model: "@cf/baai/bge-m3", input: [query], dimensions },
+    documentBody: { model: "@cf/baai/bge-m3", input: documents, dimensions },
+  },
+  jina: {
+    environment: {},
+    url: "https://api.jina.ai/v1/embeddings",
+    queryBody: {
+      model: "jina-embeddings-v3",
+      input: [query],
+      task: "retrieval.query",
+      dimensions,
+    },
+    documentBody: {
+      model: "jina-embeddings-v3",
+      input: documents,
+      task: "retrieval.passage",
+      dimensions,
+    },
+  },
+  gemini: {
+    environment: { NMG_EMBED_MODEL: geminiModel },
+    url: `https://generativelanguage.googleapis.com/v1beta/${geminiModel}:batchEmbedContents`,
+    queryBody: geminiBody([query], "RETRIEVAL_QUERY"),
+    documentBody: geminiBody(documents, "RETRIEVAL_DOCUMENT"),
+  },
+};
+
+for (const [provider, contract] of Object.entries(requestContracts)) {
+  test(`${provider} embedding request contract runs without external fetch`, async (t) => {
+    const bodies: unknown[] = [];
+    const gemini = provider === "gemini";
+    const captureRequest: typeof globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      assert.equal(request.url, contract.url);
+      assert.equal(request.method, "POST");
+      assert.equal(request.headers.get("content-type"), "application/json");
+      assert.equal(request.headers.get("authorization"), gemini ? null : `Bearer ${key}`);
+      assert.equal(request.headers.get("x-goog-api-key"), gemini ? key : null);
+      bodies.push(await request.json());
+      const vectors =
+        bodies.length === 1
+          ? [[0, 1]]
+          : [
+              [0, 1],
+              [1, 1],
+            ];
+      return Response.json(
+        gemini
+          ? { embeddings: vectors.map((values) => ({ values })) }
+          : { data: vectors.map((embedding, index) => ({ index, embedding })) },
+      );
+    };
+    const fetch = t.mock.method(globalThis, "fetch", captureRequest);
     const client = createEmbeddingClientFromEnv({
-      NMG_EMBED_PROVIDER: "gemini",
-      GEMINI_API_KEY: "secret",
-      NMG_EMBED_BASE_URL: `http://127.0.0.1:${address.port}`,
+      ...contract.environment,
+      NMG_EMBED_PROVIDER: provider,
+      NMG_EMBED_API_KEY: key,
+      NMG_EMBED_DIMENSIONS: String(dimensions),
     })!;
-    assert.deepEqual(await client.embedQueries(["q"]), [[0, 1]]);
-    assert.deepEqual(await client.embedDocuments(["a", "b"]), [
+    assert.deepEqual(await client.embedQueries([]), []);
+    assert.equal(fetch.mock.callCount(), 0);
+    assert.deepEqual(await client.embedQueries([query]), [[0, 1]]);
+    assert.deepEqual(await client.embedDocuments(documents), [
       [0, 1],
       [1, 1],
     ]);
-    assert.deepEqual(requests, [
-      { taskType: "RETRIEVAL_QUERY", apiKey: "secret" },
-      { taskType: "RETRIEVAL_DOCUMENT", apiKey: "secret" },
-    ]);
-  } finally {
-    server.close();
+    assert.deepEqual(bodies, [contract.queryBody, contract.documentBody]);
+  });
+}
+
+test("Gemini HTTP refusals can be reproduced with synthetic responses", async (t) => {
+  const client = createEmbeddingClientFromEnv({
+    NMG_EMBED_PROVIDER: "gemini",
+    NMG_EMBED_API_KEY: key,
+  })!;
+  let status = 403;
+  const fetch = t.mock.method(globalThis, "fetch", async () =>
+    Response.json({ error: { message: "fixture provider diagnostic" } }, { status }),
+  );
+  for (const code of [403, 429]) {
+    status = code;
+    await assert.rejects(
+      client.embedQueries([query]),
+      new RegExp(`^Error: embedding server returned ${code}:`, "u"),
+    );
   }
+  assert.equal(fetch.mock.callCount(), 2);
 });
 
 test("provider configuration reports missing credentials without exposing secrets", () => {

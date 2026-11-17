@@ -1,0 +1,7 @@
+{
+  "$schema": "./adapter-manifest.schema.json",
+  "entry": "kimi-plugin/nmg-hook.mjs",
+  "capabilities": [
+    "completion-nudge"
+  ]
+}

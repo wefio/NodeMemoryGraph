@@ -1,0 +1,18 @@
+{
+  "$schema": "./adapter-manifest.schema.json",
+  "entry": "codex-plugin/index.ts",
+  "capabilities": [
+    "search",
+    "get",
+    "remember",
+    "state.ag",
+    "state.board",
+    "lab",
+    "automatic-recall",
+    "state-context",
+    "answer-attribution",
+    "tool-observation",
+    "board-delivery",
+    "completion-nudge"
+  ]
+}

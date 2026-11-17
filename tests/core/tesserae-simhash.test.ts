@@ -195,8 +195,13 @@ test("tessera simhash: legacy rows without a fingerprint are backfilled by the f
     });
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(join(dirname(projectDir), "nmg.sqlite"));
-    db.prepare("UPDATE tesserae SET file_simhash = NULL").run();
-    db.close();
+    try {
+      db.prepare(
+        "UPDATE nmg_memory_entities SET payload=json_remove(payload, '$.fileSimhash') WHERE kind='tessera'",
+      ).run();
+    } finally {
+      db.close();
+    }
 
     // First search while the file still exists: the backfill pass stamps the
     // fingerprint from current content, and the hit carries it immediately.
@@ -257,8 +262,13 @@ test("tessera simhash: backfill skips files that are unreadable, stamping nothin
     });
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(join(dirname(projectDir), "nmg.sqlite"));
-    db.prepare("UPDATE tesserae SET file_simhash = NULL").run();
-    db.close();
+    try {
+      db.prepare(
+        "UPDATE nmg_memory_entities SET payload=json_remove(payload, '$.fileSimhash') WHERE kind='tessera'",
+      ).run();
+    } finally {
+      db.close();
+    }
 
     const searched = await service.invoke("search", {
       query: "pipeline drains batches",
@@ -332,13 +342,19 @@ test("tessera fts: rows missing from the fts index are rebuilt and then backfill
       assert.match(String(hit?.fileSimhash ?? ""), /^[0-9a-f]{16}$/u, "backfill stamps after heal");
 
       const check = new DatabaseSync(databasePath, { readOnly: true });
-      const docsize = (
-        check.prepare("SELECT COUNT(*) AS n FROM tesserae_fts_docsize").get() as { n: number }
-      ).n;
-      const content = (check.prepare("SELECT COUNT(*) AS n FROM tesserae").get() as { n: number })
-        .n;
-      check.close();
-      assert.equal(docsize, content, "fts index converges to the content table");
+      try {
+        const docsize = (
+          check.prepare("SELECT COUNT(*) AS n FROM nmg_memory_tessera_fts").get() as { n: number }
+        ).n;
+        const content = (
+          check
+            .prepare("SELECT COUNT(*) AS n FROM nmg_memory_entities WHERE kind='tessera'")
+            .get() as { n: number }
+        ).n;
+        assert.equal(docsize, content, "fts index converges to the content table");
+      } finally {
+        check.close();
+      }
     } finally {
       healed.close();
     }

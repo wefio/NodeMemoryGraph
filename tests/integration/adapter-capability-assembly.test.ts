@@ -2,32 +2,32 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { assembleAdapterCapabilities } from "../../src/integration/adapter-capability-assembly.ts";
-import { ADAPTER_CAPABILITY_CATALOG } from "../../src/integration/adapter-capability-catalog.ts";
+import {
+  ADAPTER_CAPABILITY_IDS,
+  assembleAdapterCapabilities,
+  type SharedAdapterTool,
+} from "../../src/integration/adapter-capability-assembly.ts";
+import {
+  ADAPTER_CAPABILITY_CATALOG,
+  ADAPTER_MANIFEST_SCHEMA,
+  readAdapterManifest,
+} from "../../src/integration/adapter-capability-catalog.ts";
+import type { SharedStateTool } from "../../src/integration/state-tool.ts";
 
-test("declared memory tools install as a group and omissions fail before registration", async () => {
+test("declared subsets use a single native tool registration binding", async () => {
   const registered: string[] = [];
   const bindings = {
-    tools: {
-      nmg_search: () => {
-        registered.push("search");
-      },
-      nmg_get: () => {
-        registered.push("get");
-      },
+    registerTool: (tool: SharedAdapterTool) => {
+      registered.push(tool.name);
     },
   };
-  assert.throws(() => assembleAdapterCapabilities(["memory-tools"], bindings), /nmg_remember/);
+  assert.throws(
+    () => assembleAdapterCapabilities(["search", "automatic-recall"], bindings),
+    /automatic-recall: missing native binding/,
+  );
   assert.equal(registered.length, 0);
-  const assembly = assembleAdapterCapabilities(["memory-tools"], {
-    tools: {
-      ...bindings.tools,
-      nmg_remember: () => {
-        registered.push("remember");
-      },
-    },
-  });
-  assert.deepEqual(registered, ["search", "get", "remember"]);
+  const assembly = assembleAdapterCapabilities(["search", "get", "remember"], bindings);
+  assert.deepEqual(registered, ["nmg_search", "nmg_get", "nmg_remember"]);
   await assembly.ready;
   assert.equal(assembly.describe()[0]?.state, "assembled");
 });
@@ -51,33 +51,19 @@ test("native bindings receive shared executable context and observation implemen
 });
 
 test("disabled features are explicit and do not execute their bindings", async () => {
-  const assembly = assembleAdapterCapabilities(["lab-tools"], {}, { disabled: ["lab-tools"] });
+  const assembly = assembleAdapterCapabilities(["lab"], {}, { disabled: ["lab"] });
   await assembly.ready;
   assert.equal(assembly.describe()[0]?.state, "disabled");
-  assert.throws(() => assembleAdapterCapabilities(["lab-tools"], {}), /nmg_lab/);
+  assert.throws(() => assembleAdapterCapabilities(["lab"], {}), /missing native tool registration/);
 });
 
 test("tools intersect their native declaration with the connected daemon", async () => {
   const names: string[] = [];
   const assembly = assembleAdapterCapabilities(
-    ["memory-tools", "state-tool", "lab-tools"],
+    ["search", "get", "remember", "state.ag", "lab"],
     {
-      tools: {
-        nmg_search: () => {
-          names.push("search");
-        },
-        nmg_get: () => {
-          names.push("get");
-        },
-        nmg_remember: () => {
-          names.push("remember");
-        },
-        nmg_state: () => {
-          names.push("state");
-        },
-        nmg_lab: () => {
-          names.push("lab");
-        },
+      registerTool: (tool) => {
+        names.push(tool.name.slice(4));
       },
     },
     { endpoint: Promise.resolve({ methods: ["search", "remember"] }) },
@@ -88,20 +74,12 @@ test("tools intersect their native declaration with the connected daemon", async
 
 test("failed asynchronous installation rolls back accepted bindings in reverse order", async () => {
   const disposed: string[] = [];
-  const assembly = assembleAdapterCapabilities(["memory-tools", "state-tool"], {
-    tools: {
-      nmg_search: () => () => {
-        disposed.push("search");
-      },
-      nmg_get: () => () => {
-        disposed.push("get");
-      },
-      nmg_remember: () => () => {
-        disposed.push("remember");
-      },
-      nmg_state: async () => {
-        throw new Error("host rejected state");
-      },
+  const assembly = assembleAdapterCapabilities(["search", "get", "remember", "state.ag"], {
+    registerTool: (tool) => {
+      if (tool.name === "nmg_state") return Promise.reject(new Error("host rejected state"));
+      return () => {
+        disposed.push(tool.name.slice(4));
+      };
     },
   });
   await assert.rejects(
@@ -139,17 +117,12 @@ test("synchronous host rejection stops registration and releases previously acce
   const calls: string[] = [];
   assert.throws(
     () =>
-      assembleAdapterCapabilities(["memory-tools"], {
-        tools: {
-          nmg_search: () => () => {
+      assembleAdapterCapabilities(["search", "get", "remember"], {
+        registerTool: (tool) => {
+          if (tool.name === "nmg_get") throw new Error("host rejected get");
+          return () => {
             calls.push("release search");
-          },
-          nmg_get: () => {
-            throw new Error("host rejected get");
-          },
-          nmg_remember: () => {
-            calls.push("remember");
-          },
+          };
         },
       }),
     /host rejected get/,
@@ -185,6 +158,56 @@ test("shared observation never promotes a failed or no-op commit into a success 
   assert.equal(nudges, 0);
 });
 
+test("the manifest schema validates real capability IDs and rejects duplicate or unknown claims", () => {
+  const valid = { entry: "fixture.ts", capabilities: ["state.ag"] };
+  assert.deepEqual(readAdapterManifest("fixture", valid), valid);
+  assert.deepEqual(
+    new Set(ADAPTER_MANIFEST_SCHEMA.properties.capabilities.items.enum),
+    new Set(ADAPTER_CAPABILITY_IDS),
+  );
+  for (const input of [
+    { ...valid, capabilities: ["state.unknown"] },
+    { ...valid, capabilities: ["state.ag", "state.ag"] },
+    { ...valid, capabilities: "state.ag" },
+    { ...valid, unexpected: true },
+  ]) {
+    assert.throws(() => readAdapterManifest("fixture", input), /Invalid NMG capability manifest/u);
+  }
+});
+
+test("state spaces assemble one shared tool and expose only declared operations", async () => {
+  for (const [declared, disabled, spaces] of [
+    [["state.ag"], [], ["ag"]],
+    [["state.board"], [], ["board"]],
+    [["state.ag", "state.board"], [], ["ag", "board"]],
+    [["state.ag", "state.board"], ["state.board"], ["ag"]],
+  ] as const) {
+    const tools: SharedStateTool[] = [];
+    const assembly = assembleAdapterCapabilities(
+      declared,
+      {
+        registerTool: (tool) => {
+          assert.equal(tool.name, "nmg_state");
+          tools.push(tool);
+        },
+      },
+      { disabled },
+    );
+    await assembly.ready;
+    assert.equal(tools.length, 1);
+    const fields = tools[0]!.inputSchema.properties;
+    assert.deepEqual(fields.space.enum, spaces);
+    assert.equal(
+      fields.operation.enum.includes("enable"),
+      (spaces as readonly string[]).includes("ag"),
+    );
+    assert.equal(
+      fields.operation.enum.includes("agentActivity"),
+      (spaces as readonly string[]).includes("board"),
+    );
+  }
+});
+
 test("public plugin entry points participate in the executable capability catalog", () => {
   const root = resolve(import.meta.dirname, "../..");
   const entries = Object.values(ADAPTER_CAPABILITY_CATALOG).map((entry) => entry.entry);
@@ -217,10 +240,7 @@ test("public plugin entry points participate in the executable capability catalo
   }
   assert.ok(discovered.length > 0);
   for (const entry of discovered)
-    assert.ok(
-      entries.includes(entry as (typeof entries)[number]),
-      `${entry} has no capability declaration`,
-    );
+    assert.ok(entries.includes(entry), `${entry} has no capability declaration`);
   for (const [id, descriptor] of Object.entries(ADAPTER_CAPABILITY_CATALOG)) {
     const source = readFileSync(resolve(root, descriptor.entry), "utf8");
     assert.ok(

@@ -62,3 +62,9 @@ npm run index:status       # 查看索引健康状态（目标、待处理项、
 ```text
 nmg status --json   # 报告 embedding provider、索引健康状态及原因
 ```
+
+## 离线检查供应商请求
+
+在仓库中运行 `npm run test:embedding-requests`。测试在联网前捕获 OpenAI 兼容、
+Cloudflare、Jina 和 Gemini 客户端实际生成的请求，检查 URL、HTTP 方法、认证头类型，
+以及查询和文档输入的 JSON 请求体。凭据和响应均为测试数据。账号权限和地区可用性由供应商决定。

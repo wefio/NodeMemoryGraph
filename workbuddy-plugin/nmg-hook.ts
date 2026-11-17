@@ -213,7 +213,7 @@ export async function recallHeaders(payload: HookPayload, dir = dataDir()): Prom
           graphHops: RECALL_GRAPH_HOPS,
           tieredDisclosure: true,
           autoRecall: true,
-          autoRecallBudgetMs: Math.max(1, Math.floor(Math.min(4_500, budget.remainingMs - 100))),
+          autoRecallBudgetMs: budget.searchBudgetMs(),
           sessionId: recallSessionId,
           projectDir:
             typeof payload?.cwd === "string" && payload.cwd.trim() ? payload.cwd : process.cwd(),

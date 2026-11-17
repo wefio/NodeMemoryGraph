@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
+import { NmgStore } from "../../src/core/store.ts";
 import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
@@ -62,62 +63,29 @@ test("search compact JSON exposes bounded headers without exact evidence", () =>
   const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-compact-"));
   const statement = `Durable detail ${"x".repeat(420)}`;
   try {
-    const remembered = runLauncher([
-      "remember",
-      statement,
-      "--node",
-      "Compact projection",
-      "--json",
-      "--data-dir",
-      directory,
-    ]) as { memory: { id: string } };
-    const supporting = runLauncher([
-      "remember",
-      "Supporting chain evidence for the compact projection.",
-      "--node",
-      "Compact projection support",
-      "--json",
-      "--data-dir",
-      directory,
-    ]) as { memory: { id: string } };
-    const chain = runLauncher([
-      "chain",
-      "create",
-      "--type",
-      "logical",
-      "--topic",
-      "Compact projection chain",
-      "--json",
-      "--data-dir",
-      directory,
-    ]) as { id: string };
-    for (const memoryId of [remembered.memory.id, supporting.memory.id]) {
-      runLauncher([
-        "chain",
-        "add",
-        "--chain",
-        chain.id,
-        "--memory",
-        memoryId,
-        "--json",
-        "--data-dir",
-        directory,
-      ]);
+    const legacy = new NmgStore(join(directory, "nmg.sqlite"));
+    let memoryId: string;
+    try {
+      const remembered = legacy.remember({ statement, nodeName: "Compact projection" });
+      memoryId = remembered.memory.id;
+      const support = legacy.remember({
+        statement: "Supporting chain evidence for the compact projection.",
+        nodeName: "Compact projection support",
+      });
+      const chain = legacy.createMemoryChain({
+        chainType: "logical",
+        topic: "Compact projection chain",
+      });
+      for (const memberId of [memoryId, support.memory.id])
+        legacy.addMemoryToChain({ chainId: chain.id, memoryId: memberId });
+      legacy.addMemoryChainEdge({
+        chainId: chain.id,
+        sourceMemoryId: memoryId,
+        targetMemoryId: support.memory.id,
+      });
+    } finally {
+      legacy.close();
     }
-    runLauncher([
-      "chain",
-      "edge",
-      "add",
-      "--chain",
-      chain.id,
-      "--from",
-      remembered.memory.id,
-      "--to",
-      supporting.memory.id,
-      "--json",
-      "--data-dir",
-      directory,
-    ]);
     // A clean environment (no embedding provider configured) keeps plain
     // lexical the normal mode: no retrieval metadata is projected. A configured
     // provider that fails to construct is the explicit-degradation case and is
@@ -133,7 +101,7 @@ test("search compact JSON exposes bounded headers without exact evidence", () =>
       activeGraph?: unknown;
     };
 
-    assert.equal(compact.candidates[0]?.id, remembered.memory.id);
+    assert.equal(compact.candidates[0]?.id, memoryId);
     assert.equal(compact.logicalChainCount, 1);
     assert.deepEqual(compact.candidates[0]?.chains, ["Compact projection chain"]);
     assert.ok(compact.candidates[0]!.preview.length > 160);
@@ -297,7 +265,7 @@ test("packaged graph command writes a self-contained HTML export", () => {
   }
 });
 
-test("packaged node rollback restores a journaled merge", () => {
+test("packaged launcher rejects retired node transforms and preserves memory", () => {
   const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-process-rollback-"));
   try {
     const first = runLauncher([
@@ -318,27 +286,24 @@ test("packaged node rollback restores a journaled merge", () => {
       "--data-dir",
       directory,
     ]) as { memory: { id: string }; node: { id: string } };
-    const merged = runLauncher([
-      "node",
-      "merge",
-      first.node.id,
-      second.node.id,
-      "--target-name",
-      "Atlas conventions",
-      "--json",
-      "--data-dir",
-      directory,
-    ]) as { id: string };
-    const rolledBack = runLauncher([
-      "node",
-      "rollback",
-      merged.id,
-      "--json",
-      "--data-dir",
-      directory,
-    ]) as { rolledBackAt: string | null };
-    assert.ok(rolledBack.rolledBackAt);
-
+    const refused = spawnSync(
+      process.execPath,
+      [
+        launcher,
+        "node",
+        "merge",
+        first.node.id,
+        second.node.id,
+        "--target-name",
+        "Atlas conventions",
+        "--json",
+        "--data-dir",
+        directory,
+      ],
+      { cwd: root, encoding: "utf8" },
+    );
+    assert.equal(refused.status, 1);
+    assert.match(refused.stderr, /mergeNodes is not supported by portable memory/u);
     const restored = runLauncher([
       "get",
       first.memory.id,
@@ -368,7 +333,7 @@ test("packaged launcher rejects unknown options with a usage exit code", () => {
   assert.match(result.stderr, /unknown option: --typo/);
 });
 
-test("CLI writes and reads project STG and exposes scoped sync", () => {
+test("CLI writes and reads session-owned project STG", () => {
   const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-process-stg-"));
   const projectDir = resolve(directory, "project");
   try {
@@ -399,30 +364,6 @@ test("CLI writes and reads project STG and exposes scoped sync", () => {
       directory,
     ]) as { results: Array<{ memory: { id: string } }> };
     assert.equal(expanded.results[0]?.memory.id, local.memory.id);
-
-    runLauncher([
-      "remember",
-      "Atlas durable storage uses SQLite",
-      "--node",
-      "Atlas storage",
-      "--scope",
-      "project=atlas",
-      "--json",
-      "--data-dir",
-      directory,
-    ]);
-    const synced = runLauncher([
-      "stg",
-      "sync",
-      "--project-dir",
-      projectDir,
-      "--scope",
-      "project=atlas",
-      "--json",
-      "--data-dir",
-      directory,
-    ]) as { copied: number };
-    assert.equal(synced.copied, 1);
   } finally {
     removeTempDirectory(directory);
   }
@@ -493,17 +434,6 @@ test("HTTP daemon starts once, serves CLI requests, and stops cleanly", () => {
     ]) as { results: unknown[] };
     assert.equal(searched.results.length, 1);
 
-    const maintained = runLauncher([
-      "retention",
-      "candidates",
-      "--dormant-after-days",
-      "1",
-      "--json",
-      "--data-dir",
-      directory,
-    ]) as { candidates: unknown[] };
-    assert.ok(Array.isArray(maintained.candidates));
-
     const archived = runLauncher([
       "retention",
       "archive",
@@ -522,78 +452,6 @@ test("HTTP daemon starts once, serves CLI requests, and stops cleanly", () => {
       directory,
     ]) as { storageState: string };
     assert.equal(restored.storageState, "indexed");
-    const chainPeer = runLauncher([
-      "remember",
-      "Cobalt follows amber in the explicit test sequence.",
-      "--node",
-      "Explicit test sequence",
-      "--json",
-      "--data-dir",
-      directory,
-    ]) as { memory: { id: string } };
-    const chain = runLauncher([
-      "chain",
-      "create",
-      "--type",
-      "logical",
-      "--topic",
-      "Daemon chain roundtrip",
-      "--json",
-      "--data-dir",
-      directory,
-    ]) as { id: string };
-    runLauncher([
-      "chain",
-      "edge",
-      "add",
-      "--chain",
-      chain.id,
-      "--from",
-      remembered.memory.id,
-      "--to",
-      chainPeer.memory.id,
-      "--json",
-      "--data-dir",
-      directory,
-    ]);
-    const loadedChain = runLauncher([
-      "chain",
-      "get",
-      "--chain",
-      chain.id,
-      "--json",
-      "--data-dir",
-      directory,
-    ]) as { edges: unknown[]; topologicalOrder: string[] };
-    assert.equal(loadedChain.edges.length, 1);
-    assert.deepEqual(loadedChain.topologicalOrder, [remembered.memory.id, chainPeer.memory.id]);
-    const removedEdge = runLauncher([
-      "chain",
-      "edge",
-      "remove",
-      "--chain",
-      chain.id,
-      "--from",
-      remembered.memory.id,
-      "--to",
-      chainPeer.memory.id,
-      "--json",
-      "--data-dir",
-      directory,
-    ]) as { removed: boolean };
-    assert.equal(removedEdge.removed, true);
-    const removedMember = runLauncher([
-      "chain",
-      "remove",
-      "--chain",
-      chain.id,
-      "--memory",
-      chainPeer.memory.id,
-      "--json",
-      "--data-dir",
-      directory,
-    ]) as { removed: boolean };
-    assert.equal(removedMember.removed, true);
     const deleted = runLauncher([
       "memory",
       "delete",

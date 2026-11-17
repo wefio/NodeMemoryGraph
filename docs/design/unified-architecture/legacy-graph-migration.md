@@ -7,20 +7,20 @@
 
 ## Behavior and data comparison
 
-The legacy path is `NmgService` → `NmgStore` and its write, retrieval, graph,
-and maintenance mixins. The explicit profile routes memory through
+The legacy path used `NmgService` → `NmgStore` and its write, retrieval, graph,
+and maintenance mixins. The default routes local memory through
 `MemoryEngine` → `MemoryBackend` → SQLite or LanceDB.
 
-| Responsibility | Legacy path | Unified engine and remaining difference |
-| --- | --- | --- |
-| Admission and write defaults | Service applies admission, records rejected writes and unsafe bypass, sets truth defaults. Store normalizes markers and derives provisional residence. | Shared admission, marker and default-residence rules. Accepted writes publish with their audit event. Policy rejection records a separate metadata-only event. The full SQLite snapshot imports original audit records. |
-| Evidence | History rows, source-message dedupe by session, primary evidence and additional links. | Preserves cited IDs. Writes reuse the same session and source-message pair, and reject different content or actor at that identity. |
-| Deduplication and state | Scoped SQL exact match, normalized recent candidates, optional duplicate judgment, near-match suggestions, scope-aware state-key aliases and state replacement. | Normalized exact matching, scoped state replacement, update evidence role and application of imported aliases. Alias inference, candidate policy and temporal boundary cases are open. |
-| Node identity and graph | SQLite graph tables with node redirects, merges/splits, evidence and relation metadata. | Node/edge payloads and bounded expansion. Reuses active LTG node IDs by name, including imported IDs. Spelling variants, provisional-node identity, topology transforms and retrieval semantics still differ. |
-| Retrieval | Native SQLite candidate queries and indexes, with scope/actor and time filters, vector/FTS, AG and history. | Lexical, vector and hybrid retrieval, exact get, event-time bounds and project-scoped host recall. Supersession-aware ranking and legacy chain expansion heuristics remain distinct. |
-| Lifecycle and surrounding records | Deletion, markers, promotion, retention, chains, tesserae, feedback, session data, audit, and projections. | Unified lifecycle writes cover withdrawal, resolution, reopening, supersession, relation proposals and claim outcomes. Local SQLite projects existing chain membership and edges and indexes file bookmarks. Explicit search and get can resolve file locations. The daemon owns session projections and feedback. Chain editing and legacy topology and retention operations require separate migration. |
-| Physical layout | `memory_records`, `memory_nodes`, `history_records`, `memory_evidence_links`, `node_relations` and auxiliary SQLite tables. | Native SQLite namespace/entity/FTS tables, or Lance entity data plus published head. Both encode node, memory, evidence and edge domain values with the original IDs on import. |
-| Local coordination | Task Board, run, events and activity in SQLite behind the store. | Service and orchestration see narrow coordination ports. The existing local SQLite implementation remains the owner. When SQLite also holds memory, both sets of tables use the same file. |
+| Responsibility                    | Legacy path                                                                                                                                                     | Unified engine and remaining difference                                                                                                                                                                                                                                                                                                                                                                   |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Admission and write defaults      | Service applies admission, records rejected writes and unsafe bypass, sets truth defaults. Store normalizes markers and derives provisional residence.          | Shared admission, marker and default-residence rules. Accepted writes publish with their audit event. Policy rejection records a separate metadata-only event. The full SQLite snapshot imports original audit records.                                                                                                                                                                                   |
+| Evidence                          | History rows, source-message dedupe by session, primary evidence and additional links.                                                                          | Preserves cited IDs. Writes reuse the same session and source-message pair, and reject different content or actor at that identity.                                                                                                                                                                                                                                                                       |
+| Deduplication and state           | Scoped SQL exact match, normalized recent candidates, optional duplicate judgment, near-match suggestions, scope-aware state-key aliases and state replacement. | Normalized exact matching, scoped state replacement, update evidence role and application of imported aliases. Alias inference, candidate policy and temporal boundary cases are open.                                                                                                                                                                                                                    |
+| Node identity and graph           | SQLite graph tables with node redirects, merges/splits, evidence and relation metadata.                                                                         | Node/edge payloads and bounded expansion. Reuses active LTG node IDs by name, including imported IDs. Spelling variants, provisional-node identity, topology transforms and retrieval semantics still differ.                                                                                                                                                                                             |
+| Retrieval                         | Native SQLite candidate queries and indexes, with scope/actor and time filters, vector/FTS, AG and history.                                                     | Lexical, vector and hybrid retrieval, exact get, event-time bounds and project-scoped host recall. Supersession-aware ranking and legacy chain expansion heuristics remain distinct.                                                                                                                                                                                                                      |
+| Lifecycle and surrounding records | Deletion, markers, promotion, retention, chains, tesserae, feedback, session data, audit, and projections.                                                      | Unified lifecycle writes cover withdrawal, resolution, reopening, supersession, relation proposals and claim outcomes. Local SQLite projects existing chain membership and edges and indexes file bookmarks. Explicit search and get can resolve file locations. The daemon owns session projections and feedback. Chain editing and legacy topology and retention operations require separate migration. |
+| Physical layout                   | `memory_records`, `memory_nodes`, `history_records`, `memory_evidence_links`, `node_relations` and auxiliary SQLite tables.                                     | Native SQLite namespace/entity/FTS tables, or Lance entity data plus published head. Both encode node, memory, evidence and edge domain values with the original IDs on import.                                                                                                                                                                                                                           |
+| Local coordination                | Task Board, run, events and activity in SQLite behind the store.                                                                                                | Service and orchestration see narrow coordination ports. The existing local SQLite implementation remains the owner. When SQLite also holds memory, both sets of tables use the same file.                                                                                                                                                                                                                |
 
 ## Rehearse the domain graph
 
@@ -55,9 +55,10 @@ On a local copy, pass `{ fullSqlite: true }` to the snapshot reader and use
 alias, audit and file-reference rows in one transaction in a fresh namespace.
 Existing legacy evidence and predecessor links keep their original IDs and
 session provenance. Retrieval still checks the session of the memory returned,
-and new links use the engine's access checks. Dormant and quarantined rows, node
-redirects, and dangling graph references still fail installation. Original
-SQLite tables, including coordination and derived indexes, stay in the copy.
+and new links use the engine's access checks. Dormant and quarantined records
+are imported with their retention state and can be requested by ID. Search
+excludes them. Dangling graph references fail installation. Original SQLite
+tables retain node redirect history, coordination, and derived indexes.
 
 On 2026-11-15, rehearsal on online backups of the owner's main SQLite and project
 STG compared 1,249 and 3 memory IDs respectively. The paths agreed on all 982
@@ -72,14 +73,32 @@ before retrying.
 
 ## Local default after activation
 
-On a stopped local daemon, `nmg daemon migrate --db FILE --json` takes the
-daemon lease and makes an online SQLite backup beside the database. It imports
-the graph, fences legacy graph writes and publishes the local namespace marker
-in one SQLite transaction. Regular daemon starts and direct local CLI calls
-automatically use the marked namespace. The main file continues to hold Task
-Board and local run data. Existing project STG files are converted atomically on
-first use in this profile. A project-scoped read against an absent STG uses the
-shared database.
+The local daemon opens the unified engine before advertising its endpoint. A new
+SQLite database initializes directly. A legacy file receives a SQLite backup
+before activation. The engine imports the graph, chain projection, vectors and
+claim outcomes, drops the retired tables and publishes the namespace marker in
+one transaction. The same cleanup runs on files activated by a build that
+retained the old tables. Direct CLI memory calls use this activation. Task Board,
+local run data and retrieval diagnostics share the main SQLite file.
+
+To migrate the main file and known projects together, stop the owner and run
+the following command.
+
+```sh
+nmg daemon migrate --db FILE --project-dir PROJECT_A --project-dir PROJECT_B --json
+```
+
+Each file commits independently and reports its backup. Reruns preserve the
+namespace and skip files whose old tables are already gone. Other existing
+project files migrate on first access.
+A project-scoped read against an absent file uses the shared file.
+The unified owner supports export, archival and restoration by ID. The backup
+holds the original schema and legacy maintenance data for historical inspection
+or restoration. The shipped runtime uses the unified engine and the local
+coordination store.
+
+An activated project SQLite file supplies its own namespace. First activation
+inherits the main daemon's namespace when the project file has no marker.
 
 Local activation also imports historical claim outcomes and posterior counters
 in one transaction. The migration receipt preserves the original vote

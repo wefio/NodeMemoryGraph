@@ -16,7 +16,7 @@ The user selected a five-second total waiting budget. One shared absolute `Recal
 
 Completed search headers form a fallback checkpoint before optional reranking, disclosure and telemetry. On deadline, the adapter returns already available context and ignores late data. If search itself has not returned, no candidates from its later response are injected. Best-effort disclosure may repeat headers when the disclosure ledger misses the deadline.
 
-The daemon's automatic search receives the remaining hook budget, capped at 4.5 seconds to leave time for transport and rendering. Query embedding uses that shared search deadline across local and shared stores. On expiry, lexical results remain available and the result names `automatic_recall_embedding_deadline`; this is not a provider-health diagnosis. Explicit searches do not inherit the automatic deadline.
+The daemon's automatic search receives the remaining hook budget, capped at 4.5 seconds, with time reserved for transport and rendering. Both local memory routes honor the supplied budget. Query embedding uses that shared search deadline across local and shared stores. On expiry, lexical results remain available and the shared Agent Surface displays `automatic_recall_embedding_deadline` once per automatic recall result. Provider failures use a separate diagnostic. Explicit searches do not inherit the automatic deadline.
 
 Pi records phase durations and outcomes in message `details.recallTiming`. `/nmg recall timing` displays the latest timing without recording prompts or credentials. The normative hook contract is in [session memory hooks](../../design/session-memory-lifecycle-hooks-2026-08-10.md#自动召回等待预算).
 
@@ -32,6 +32,7 @@ Pi records phase durations and outcomes in message `details.recallTiming`. `/nmg
 Latency protection trades late semantic information for a timely turn. Cancellation stops waiting and aborts supported HTTP operations; it cannot preempt synchronous JavaScript/SQLite work or guarantee that an embedding provider cancels a request already in flight. Late provider data cannot replace the returned graph. There are no new live-provider calls or benchmark requirements in the regression tests.
 
 The deterministic [hook regressions](../../../tests/extensions/nmg/recall-budget.test.ts) drive the actual Pi handler with slow search/disclosure, and the [shared regressions](../../../tests/integration/recall-budget.test.ts) verify lexical preservation, late-vector isolation and explicit-search behavior.
+The [provider request contract](../../../tests/core/embedding-provider.test.ts) verifies the HTTP request before transport and supplies synthetic responses. Provider availability, rate limits and region access are runtime observations.
 
 ## Deferred
 

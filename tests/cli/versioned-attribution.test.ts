@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import { NmgService } from "../../src/cli/service.ts";
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import { answerAttributionReferences } from "../../src/core/feedback.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
@@ -33,7 +33,7 @@ test("versioned native answer attribution enforces owner and statement version w
     };
     const result = await service.invoke("recordActiveGraphAttribution", params);
     assert.deepEqual(result.attributedMemoryIds, [saved.memory.id]);
-    const store = new NmgStore(path);
+    const store = new SqliteLocalDaemonState(path);
     try {
       const trace = store.retrievalTrace(context.activeGraph!.traceIds![0]!, "owner")!;
       assert.deepEqual(trace.attributedMemoryIds, [saved.memory.id]);

@@ -13,6 +13,7 @@ import { NmgStore } from "../../src/core/store.ts";
 import { stgStorePath } from "../../src/core/stg.ts";
 import type { NmgMethod } from "../../src/cli/protocol.ts";
 import { ADAPTER_CAPABILITY_CATALOG } from "../../src/integration/adapter-capability-catalog.ts";
+import { adapterToolCapability } from "../../src/integration/adapter-capability-assembly.ts";
 import { captureStateInvocation } from "../../src/integration/state.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
@@ -21,7 +22,7 @@ stripProviderEnv();
 const id = "00000000-0000-7000-8000-000000000001";
 const turn = "00000000-0000-7000-8000-000000000002";
 const capabilities = ADAPTER_CAPABILITY_CATALOG.codex.capabilities.filter(
-  (capability) => !["memory-tools", "state-tool", "lab-tools"].includes(capability),
+  (capability) => !adapterToolCapability(capability),
 );
 
 test("Codex automatically recalls unified SQLite memory from the owning project and session", async () => {
@@ -46,12 +47,17 @@ test("Codex automatically recalls unified SQLite memory from the owning project 
   let service: NmgService | undefined;
   const output: string[] = [];
   const methods: string[] = [];
+  let searchBudget: unknown;
   const hook = new CodexHook(
     {
       dataDirectory: directory,
       environment: { NMG_ENABLE_COORDINATION: "0" },
       invoke: async (method, params) => {
         methods.push(method);
+        if (method === "search") {
+          assert.ok(params && typeof params === "object" && "autoRecallBudgetMs" in params);
+          searchBudget = params.autoRecallBudgetMs;
+        }
         return service!.invoke(method as NmgMethod, params);
       },
       writeOutput: async (content) => {
@@ -102,6 +108,7 @@ test("Codex automatically recalls unified SQLite memory from the owning project 
       prompt: "What did we previously decide about Atlas SQLite deployment backup?",
     });
     assert.deepEqual(methods.slice(0, 3), ["state", "sessionActiveGraph", "search"]);
+    assert.ok(typeof searchBudget === "number" && searchBudget > 0 && searchBudget <= 1_400);
     assert.match(output.join("\n"), /ProjectRecallMarker/);
     assert.doesNotMatch(
       output.join("\n"),
@@ -141,20 +148,13 @@ test("Codex automatically recalls unified SQLite memory from the owning project 
       (await service.invoke("get", { memoryIds: [mainWrite.memory.id] })).results.length,
       1,
     );
-    const oldWriter = new NmgStore(databasePath);
-    try {
-      assert.throws(
-        () =>
-          oldWriter.remember({
-            statement: "An obsolete writer attempted publication",
-            nodeName: "Obsolete",
-          }),
-        /unified memory engine/,
-      );
-      assert.equal(oldWriter.readTaskBoard({ taskId: "local-cutover" }).entries.length, 1);
-    } finally {
-      oldWriter.close();
-    }
+    assert.throws(() => new NmgStore(databasePath), /unified memory engine/);
+    const readBoard = await service.invoke("taskBoard", {
+      action: "read",
+      taskId: "local-cutover",
+      agentId: "test",
+    });
+    assert.ok(readBoard.action === "read" && readBoard.entries.length === 1);
   } finally {
     await service?.close();
     removeTempDirectory(directory);

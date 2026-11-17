@@ -1,3 +1,5 @@
+import { SqliteLocalDaemonState } from "../../../src/core/store/local-daemon-state.ts";
+import { openLocalMemory } from "../../../src/cli/local-memory-migration.ts";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,7 +26,6 @@ import { loadPrompts } from "../../../src/prompts/load.ts";
 import { SEARCH_TOOL_PARAMETERS } from "../../../src/integration/tool-contract.ts";
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
 import { NmgStore } from "../../../src/core/store.ts";
-import { SqliteMemoryBackend } from "../../../src/core/memory/sqlite-backend.ts";
 import { connectDaemon, invokeDaemon } from "../../../src/cli/daemon-client.ts";
 import { renameAgentIdentity } from "../../../src/integration/agent-identity.ts";
 import type { MemoryContext } from "../../../src/core/types.ts";
@@ -34,6 +35,11 @@ import {
   ControllerShadowBridge,
   shadowEnabled,
 } from "../../../.pi/extensions/nmg/controller-shadow.ts";
+import { assertGetToolContract } from "../../helpers/get-tool-contract.ts";
+import { assertAgentActivityContract } from "../../helpers/agent-activity-contract.ts";
+import { assertRememberToolContract } from "../../helpers/remember-tool-contract.ts";
+import { assertSearchToolContract } from "../../helpers/search-tool-contract.ts";
+import { assertLabToolContract } from "../../helpers/lab-tool-contract.ts";
 import { stripProviderEnv } from "../../helpers/test-env.ts";
 
 // The extension spawns its own daemon from this process's environment; drop any
@@ -142,6 +148,14 @@ test("Lab reasoning tool persists scratch state and injects it only after compac
       getSessionId: () => "reasoning-session",
       getSessionFile: () => "reasoning-session.jsonl",
     };
+    await assert.rejects(
+      tools
+        .get("nmg_reason")!
+        .execute("reason-invalid", { action: "add", kind: "hypothesis" }, undefined, undefined, {
+          sessionManager,
+        }),
+      /nmg_reason add requires content/u,
+    );
     const added = (await tools.get("nmg_reason")!.execute(
       "reason-add",
       {
@@ -159,7 +173,11 @@ test("Lab reasoning tool persists scratch state and injects it only after compac
     };
     assert.match(added.details.invoked.output.id, /^reason_/u);
     assert.match(added.content[0]!.text, /not verified fact/u);
-    assert.equal(existsSync(join(directory, "nmg.sqlite")), false);
+    const scratchOwner = await connectDaemon(join(directory, "nmg.sqlite"));
+    const { items } = (await invokeDaemon(scratchOwner, "exportMemories", {})) as {
+      items: unknown[];
+    };
+    assert.deepEqual(items, []);
 
     const ordinary = (await handlers.get("before_agent_start")!(
       { prompt: "continue", systemPrompt: "base" },
@@ -195,7 +213,7 @@ test("Lab reasoning tool persists scratch state and injects it only after compac
     else process.env.NMG_ENABLE_LAB_TOOLS = previousLab;
     if (previousCoordination === undefined) delete process.env.NMG_ENABLE_COORDINATION;
     else process.env.NMG_ENABLE_COORDINATION = previousCoordination;
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -1038,8 +1056,7 @@ test("Pi sends its live automatic recall and exact lookup to the unified SQLite 
     nodeName: "Atlas storage",
   });
   legacy.close();
-  const backend = new SqliteMemoryBackend(databasePath, "pi-contract");
-  backend.activateLocal();
+  const { backend } = await openLocalMemory(databasePath, "pi-contract");
   await backend.close();
   const { handlers, tools } = extensionHarness();
   const sessionManager = {
@@ -1053,12 +1070,18 @@ test("Pi sends its live automatic recall and exact lookup to the unified SQLite 
       { sessionManager },
     )) as { message?: { content: string } };
     assert.match(result.message?.content ?? "", /CedarStore/u);
-    const exact = await tools
-      .get("nmg_get")!
-      .execute("contract-get", { memoryIds: [stored.memory.id] }, undefined, undefined, {
-        sessionManager,
-      });
-    assert.match(JSON.stringify(exact), /CedarStore/u);
+    await assertGetToolContract(
+      async (args) => {
+        const output = (await tools
+          .get("nmg_get")!
+          .execute("contract-get", args, undefined, undefined, { sessionManager })) as {
+          content: Array<{ text: string }>;
+        };
+        return output.content[0]?.text ?? "";
+      },
+      stored.memory.id,
+      /CedarStore/u,
+    );
     const connection = await connectDaemon(databasePath);
     const status = await invokeDaemon(connection, "status", {});
     assert.deepEqual((status as { rpcRejections?: unknown[] }).rpcRejections, []);
@@ -1098,6 +1121,14 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
   };
   try {
     const { handlers, tools, commands } = extensionHarness();
+    await assertAgentActivityContract(async (args) => {
+      const result = (await tools
+        .get("nmg_state")!
+        .execute("agent-activity-contract", args, undefined, undefined, { sessionManager })) as {
+        content: Array<{ text: string }>;
+      };
+      return result.content[0]?.text ?? "";
+    });
     const remember = (await tools.get("nmg_remember")!.execute(
       "remember",
       {
@@ -1483,7 +1514,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     assert.match(boardRead.content[0].text, /Agent B should verify the parser tests/u);
     {
       renameAgentIdentity({ anchor: "agent-b", id: "agent-b", agentName: "Inbox reviewer" });
-      const store = new NmgStore(join(directory, "nmg.sqlite"));
+      const store = new SqliteLocalDaemonState(join(directory, "nmg.sqlite"));
       const directed = {
         taskId: "atlas-inbox",
         agentId: "agent-a",
@@ -1521,7 +1552,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     // B has now 'read' the handoff, so the wake loop will not re-push it.
     // (Cross-agent feedback, world #9: already-read entries must not re-wake.)
     {
-      const store = new NmgStore(join(directory, "nmg.sqlite"));
+      const store = new SqliteLocalDaemonState(join(directory, "nmg.sqlite"));
       try {
         assert.equal(
           store.hasTaskBoardDelivery({
@@ -1892,15 +1923,22 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     assert.equal(isProcessAlive(started!.pid), false);
     const remaining = readServerState(serverStatePath(join(directory, "nmg.sqlite")));
     assert.equal(remaining ? isProcessAlive(remaining.pid) : false, false);
-    const store = new NmgStore(join(directory, "nmg.sqlite"));
-    assert.equal(store.getMemory(oldDatabase.details.memory.id)?.status, "superseded");
-    assert.equal(
-      store
-        .exportMemories({ sourceActor: "system" })
-        .items.some((item) => item.memory.statement.includes("Edited src/storage.ts")),
-      false,
-    );
+    const store = new SqliteLocalDaemonState(join(directory, "nmg.sqlite"));
+    const { NmgService } = await import("../../../src/cli/service.ts");
+    const unified = new NmgService({
+      databasePath: join(directory, "nmg.sqlite"),
+      environment: {},
+    });
     try {
+      const { items } = await unified.invoke("exportMemories");
+      const older = items.find(({ memory }) => memory.id === oldDatabase.details.memory.id);
+      assert.equal(older?.memory.status, "superseded");
+      assert.ok(
+        !items.some(
+          ({ memory }) =>
+            memory.sourceActor === "system" && memory.statement.includes("Edited src/storage.ts"),
+        ),
+      );
       const trace = store.retrievalTrace(
         searched.details.activeGraph.traceIds[0],
         "http-test-session",
@@ -1911,6 +1949,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       // Close the in-process store first so the daemon's SQLite close (WAL
       // checkpoint) is not blocked by our own connection; then shut the owned
       // daemon down before the temp dir is removed.
+      await unified.close();
       store.close();
       await handlers.get("session_shutdown")!({}, { sessionManager }).catch((error) =>
         console.error("session_shutdown error:", error),
@@ -1970,17 +2009,17 @@ test("remember from a board source attaches a board_origin marker", async () => 
       undefined,
       { sessionManager },
     )) as { details: { memory: { id: string } } };
-    const store = new NmgStore(join(directory, "nmg.sqlite"));
-    try {
-      const memory = store.getMemory(saved.details.memory.id);
-      assert.ok(memory, "board-sourced memory persisted");
-      const marker = memory.markers.find((candidate) => candidate.kind === "board_origin");
-      assert.ok(marker, "board_origin marker attached");
-      assert.equal(marker.attributes?.taskId, "board-origin-test-2026-08-12");
-      assert.equal(marker.attributes?.entryId, "entry-42");
-    } finally {
-      store.close();
-    }
+    const connection = await connectDaemon(join(directory, "nmg.sqlite"));
+    const evidence = (await invokeDaemon(connection, "get", {
+      memoryIds: [saved.details.memory.id],
+      sessionId: sessionManager.getSessionId(),
+    })) as MemoryContext;
+    const memory = evidence.results[0]?.memory;
+    assert.ok(memory, "board-sourced memory persisted");
+    const marker = memory.markers.find((candidate) => candidate.kind === "board_origin");
+    assert.ok(marker, "board_origin marker attached");
+    assert.equal(marker.attributes?.taskId, "board-origin-test-2026-08-12");
+    assert.equal(marker.attributes?.entryId, "entry-42");
     await handlers.get("session_shutdown")!({}, { sessionManager });
   } finally {
     process.env.NMG_DATA_DIR = previous;
@@ -2042,7 +2081,7 @@ test("agent_end derives and persists answer-overlap attribution on the trace", a
       },
       { sessionManager },
     );
-    const store = new NmgStore(join(directory, "nmg.sqlite"));
+    const store = new SqliteLocalDaemonState(join(directory, "nmg.sqlite"));
     try {
       const trace = store.retrievalTrace(
         searched.details.activeGraph!.traceIds[0],
@@ -2531,16 +2570,37 @@ test("session recall piggybacks a search proposal without a prepare RPC or injec
     });
     store.close();
     const lab = tools.get("nmg_lab")!;
-    await tools.get("nmg_search")!.execute(
-      "unobserved-proposal",
-      {
-        query: "palette azure",
-        recallCue: "forged cue",
-        recallSource: { prompt: "forged cue", generation: 1, turn: 1 },
+    await assertLabToolContract(async (args) => {
+      const output = (await lab.execute("lab-contract", args, undefined, undefined, ctx)) as {
+        content: Array<{ text: string }>;
+      };
+      return output.content[0]?.text ?? "";
+    });
+    await assertRememberToolContract(async (args) => {
+      const output = (await tools
+        .get("nmg_remember")!
+        .execute("remember-contract", args, undefined, undefined, ctx)) as {
+        content: Array<{ text: string }>;
+      };
+      return output.content[0]?.text ?? "";
+    });
+    await assertSearchToolContract(
+      async (args) => {
+        const output = (await tools.get("nmg_search")!.execute(
+          "unobserved-proposal",
+          {
+            ...args,
+            recallCue: "forged cue",
+            recallSource: { prompt: "forged cue", generation: 1, turn: 1 },
+          },
+          undefined,
+          undefined,
+          ctx,
+        )) as { content: Array<{ text: string }> };
+        return output.content[0]?.text ?? "";
       },
-      undefined,
-      undefined,
-      ctx,
+      "palette azure",
+      /Fixture palette prefers azure/u,
     );
     assert.equal(
       calls

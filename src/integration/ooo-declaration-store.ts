@@ -1,5 +1,5 @@
-import type { NmgStore } from "../core/store.ts";
-import type { TransactionPort } from "../core/store/base.ts";
+import type { SqliteLocalDaemonState } from "../core/store/local-daemon-state.ts";
+import type { TransactionPort } from "../core/store/store-ctor.ts";
 import type { TaskUnitDeclaration } from "./task-unit-declaration-store.ts";
 import { preparePatchWork, type FrozenPatchWork, type FrozenPatchTask } from "./ooo-patch.ts";
 
@@ -16,7 +16,7 @@ interface FrozenInputs {
 
 /** Persist only attempt inputs and normalization parameters, not another task definition. */
 export function recordPatchInputs(
-  store: NmgStore,
+  store: SqliteLocalDaemonState,
   runId: string,
   declaration: FrozenPatchWork,
   port: TransactionPort,
@@ -71,7 +71,7 @@ function frozenInputs(payload: string | null): FrozenInputs {
 
 /** Read-only reconstruction: missing input evidence never means "read today's workspace". */
 export function restorePatchInputs(
-  store: Pick<NmgStore, "taskRunFacts">,
+  store: Pick<SqliteLocalDaemonState, "taskRunFacts">,
   runId: string,
   task: TaskUnitDeclaration,
   attempt: number,

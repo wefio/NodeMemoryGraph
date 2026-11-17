@@ -29,7 +29,7 @@
 import type { LegalityAnswer, SessionPlan } from "./ooo-execution.ts";
 import { nextSessionMove } from "./ooo-fusion-plan.ts";
 import { decideSessionMove } from "./ooo-session-facts.ts";
-import type { NmgStore } from "../core/store.ts";
+import type { SqliteLocalDaemonState } from "../core/store/local-daemon-state.ts";
 
 /** What a worker reports about its own run. The product's run surface records no worker metrics, so
  *  this shape is the port's, not a store column. */
@@ -225,7 +225,7 @@ export interface DispatchPlanInput<Declaration extends WorkDeclaration = WorkDec
    *  same rule plus the cancellation fact read from the run's log, scoped to the unit's own task - and
    *  the move lands as a run fact. Omitted, the move is `nextSessionMove`'s pure answer and nothing is
    *  written. */
-  sessionMoves?: { store: NmgStore; runId: string };
+  sessionMoves?: { store: SqliteLocalDaemonState; runId: string };
 }
 
 export interface DispatchOutcome {

@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { NmgStore } from "../../src/core/store.ts";
-import type { TransactionPort } from "../../src/core/store/base.ts";
+import { SqliteLocalDaemonState } from "../core/store/local-daemon-state.ts";
+import type { TransactionPort } from "../core/store/store-ctor.ts";
 import { acceptedFact, deriveStatus } from "./task-semantics.ts";
 import { checkResultValid, sameCheck, type CheckTicket, type CheckResult } from "./check-ticket.ts";
 import {
@@ -318,7 +318,7 @@ export interface BoardAdmissionOptions {
 
 /** Experiment-only authority. Uses the real board store, not a second queue.
  * Mutable execution state lives in SQLite; workers never open the database. */
-export class BoardAdmission extends NmgStore {
+export class BoardAdmission extends SqliteLocalDaemonState {
   now = Date.now();
   afterVerify: () => Promise<void> = async () => {};
   afterCommit: () => Promise<void> = async () => {};

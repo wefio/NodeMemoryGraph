@@ -3,6 +3,8 @@ import { RecallPool } from "../core/recall-pool.ts";
 import type { MemoryTier, MemoryGateDecision } from "../core/types.ts";
 import { excerpt } from "./tool-observation.ts";
 
+export const TASK_CONTEXT_SEPARATOR = "\nRecent task context:\n";
+
 interface SessionTaskState {
   anchors: string[];
   pool: RecallPool;
@@ -51,9 +53,7 @@ export class SessionTaskWindow {
     if (gate.mode === "none" && !continued) return null;
     const withPrior = prior.length > 0 && (gate.mode === "retrieve" || continued);
     return {
-      query: [normalized, withPrior ? `Recent task context:\n${prior}` : ""]
-        .filter(Boolean)
-        .join("\n"),
+      query: withPrior ? `${normalized}${TASK_CONTEXT_SEPARATOR}${prior}` : normalized,
       ...gateBudget(gate),
     };
   }
@@ -110,7 +110,7 @@ function gateBudget(
   };
 }
 
-function isSubstantiveTaskPrompt(prompt: string): boolean {
+export function isSubstantiveTaskPrompt(prompt: string): boolean {
   if (prompt.length >= 40) return true;
   return /(?:[A-Za-z][\w.-]{2,}[-_/][\w./-]+|\b(?:fix|implement|debug|test|build|refactor|install|configure)\b|(?:修复|实现|测试|构建|重构|安装|配置|设计))/iu.test(
     prompt,
@@ -119,7 +119,10 @@ function isSubstantiveTaskPrompt(prompt: string): boolean {
 
 export function isTaskContinuation(prompt: string): boolean {
   if (prompt.length > 100) return false;
-  return /(?:\b(?:continue|again|retry|reload|try|proceed|go on|fix it|test it)\b|(?:继续|再试|重试|试试|开始吧|接着|改吧|修一下|好了|可以了|然后呢))/iu.test(
-    prompt,
+  return (
+    /^(?:这次呢|试一下)[。！？?!，,]*$/u.test(prompt.trim()) ||
+    /(?:\b(?:continue|again|retry|reload|try|proceed|go on|fix it|test it)\b|(?:继续|再试|重试|试试|开始吧|接着|改吧|修一下|好了|可以了|然后呢))/iu.test(
+      prompt,
+    )
   );
 }

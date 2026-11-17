@@ -1,71 +1,37 @@
+import { Unsafe } from "typebox";
+import { Value } from "typebox/value";
 import type { AdapterCapability } from "./adapter-capability-assembly.ts";
+import manifestSchema from "./adapter-manifests/adapter-manifest.schema.json" with { type: "json" };
+import codex from "./adapter-manifests/codex.json" with { type: "json" };
+import dsh from "./adapter-manifests/dsh.json" with { type: "json" };
+import kimi from "./adapter-manifests/kimi.json" with { type: "json" };
+import mcp from "./adapter-manifests/mcp.json" with { type: "json" };
+import opencode from "./adapter-manifests/opencode.json" with { type: "json" };
+import pi from "./adapter-manifests/pi.json" with { type: "json" };
+import workbuddy from "./adapter-manifests/workbuddy.json" with { type: "json" };
 
-/** Implemented bindings only. Host lifecycle validation remains separate.
- * Consumers select this declaration instead of maintaining their own tool list.
- */
+export interface AdapterManifest {
+  readonly entry: string;
+  readonly capabilities: readonly AdapterCapability[];
+}
+
+const schema = Unsafe<AdapterManifest>(manifestSchema);
+export const ADAPTER_MANIFEST_SCHEMA = manifestSchema;
+
+export function readAdapterManifest(id: string, manifest: unknown): AdapterManifest {
+  if (!Value.Check(schema, manifest)) throw new Error(`Invalid NMG capability manifest: ${id}`);
+  return Object.freeze({
+    entry: manifest.entry,
+    capabilities: Object.freeze([...manifest.capabilities]),
+  });
+}
+
 export const ADAPTER_CAPABILITY_CATALOG = {
-  codex: {
-    entry: "codex-plugin/index.ts",
-    capabilities: [
-      "memory-tools",
-      "state-tool",
-      "lab-tools",
-      "automatic-recall",
-      "state-context",
-      "answer-attribution",
-      "tool-observation",
-      "completion-nudge",
-      "board-delivery",
-    ],
-  },
-  pi: {
-    entry: ".pi/extensions/nmg/index.ts",
-    capabilities: [
-      "lab-tools",
-      "memory-tools",
-      "state-tool",
-      "automatic-recall",
-      "state-context",
-      "answer-attribution",
-      "tool-observation",
-      "board-delivery",
-    ],
-  },
-  opencode: {
-    entry: "opencode-plugin/index.ts",
-    capabilities: [
-      "memory-tools",
-      "state-tool",
-      "automatic-recall",
-      "state-context",
-      "answer-attribution",
-      "tool-observation",
-      "board-delivery",
-    ],
-  },
-  dsh: {
-    entry: "dsh/dsh-nmg/src/plugin/index.ts",
-    capabilities: [
-      "memory-tools",
-      "state-tool",
-      "lab-tools",
-      "automatic-recall",
-      "state-context",
-      "answer-attribution",
-      "tool-observation",
-      "board-delivery",
-    ],
-  },
-  mcp: {
-    entry: "claude-plugins/nmg-memory/agents/memory-copilot.ts",
-    capabilities: ["memory-tools", "state-tool", "lab-tools"],
-  },
-  workbuddy: {
-    entry: "workbuddy-plugin/nmg-hook.ts",
-    capabilities: ["automatic-recall", "completion-nudge", "board-delivery"],
-  },
-  kimi: {
-    entry: "kimi-plugin/nmg-hook.mjs",
-    capabilities: ["completion-nudge"],
-  },
-} as const satisfies Record<string, { entry: string; capabilities: readonly AdapterCapability[] }>;
+  codex: readAdapterManifest("codex", codex),
+  dsh: readAdapterManifest("dsh", dsh),
+  kimi: readAdapterManifest("kimi", kimi),
+  mcp: readAdapterManifest("mcp", mcp),
+  opencode: readAdapterManifest("opencode", opencode),
+  pi: readAdapterManifest("pi", pi),
+  workbuddy: readAdapterManifest("workbuddy", workbuddy),
+};

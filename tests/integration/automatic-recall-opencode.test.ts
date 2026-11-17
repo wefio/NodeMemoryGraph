@@ -5,6 +5,8 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import plugin from "../../opencode-plugin/index.ts";
 import { dropCompatibleLease } from "../../src/integration/lease-transport.ts";
+import { assertRememberToolContract } from "../helpers/remember-tool-contract.ts";
+import { assertSearchToolContract } from "../helpers/search-tool-contract.ts";
 import { searchResultFixture } from "../helpers/search-result.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
@@ -153,7 +155,24 @@ test("OpenCode submits its native automatic recall to an activated daemon", asyn
   });
   await h.prompt("Atlas");
   assert.match(JSON.stringify(h.inject()), /local snapshot/u);
-  assert.ok(h.tools.has("nmg_search"));
+  const search = h.tools.get("nmg_search") as {
+    execute(
+      args: Record<string, unknown>,
+      context: { sessionID: string },
+    ): Promise<{ content: string }>;
+  };
+  await assertSearchToolContract(
+    async (args) => (await search.execute(args, { sessionID: "explicit-search" })).content,
+    "Atlas SQLite storage",
+    /Atlas SQLite storage keeps a local snapshot/u,
+  );
+  const remember = h.tools.get("nmg_remember") as typeof search & {
+    input: { properties: { action: { enum: string[] } } };
+  };
+  assert.ok(!remember.input.properties.action.enum.includes("claim_outcome"));
+  await assertRememberToolContract(
+    async (args) => (await remember.execute(args, { sessionID: "remember-contract" })).content,
+  );
   assert.equal((await daemon.invoke("status")).rpcRejections?.length, 0);
 });
 
@@ -204,6 +223,8 @@ test("OpenCode uses native location before its first event and exposes the promi
   await h.prompt("scope");
   const search = h.requests.find((request) => request.method === "search");
   assert.equal(search?.params.projectDir, "C:/private/native-project");
+  const searchBudget = search?.params.autoRecallBudgetMs;
+  assert.ok(typeof searchBudget === "number" && searchBudget > 0 && searchBudget <= 1_400);
   assert.ok(h.tools.has("nmg_search"));
   assert.ok(h.tools.has("nmg_get"));
   assert.ok(h.tools.has("nmg_remember"));

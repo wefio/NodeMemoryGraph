@@ -1,16 +1,25 @@
+import { openLocalMemory } from "../../src/cli/local-memory-migration.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { connectDaemon, invokeDaemon } from "../../src/cli/daemon-client.ts";
+import { connectDaemon, invokeDaemon, shutdownOwnedDaemon } from "../../src/cli/daemon-client.ts";
 import type { NmgMethodResult } from "../../src/cli/protocol.ts";
 import { NmgStore } from "../../src/core/store.ts";
-import { SqliteMemoryBackend } from "../../src/core/memory/sqlite-backend.ts";
 import { SEARCH_TOOL_PARAMETERS } from "../../src/integration/tool-contract.ts";
+import {
+  assertAgentActivityContract,
+  mcpToolContractText,
+} from "../helpers/agent-activity-contract.ts";
+import { assertGetToolContract } from "../helpers/get-tool-contract.ts";
+import { assertRememberToolContract } from "../helpers/remember-tool-contract.ts";
+import { assertSearchToolContract } from "../helpers/search-tool-contract.ts";
+import { assertLabToolContract } from "../helpers/lab-tool-contract.ts";
+import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 // The spawned MCP server inherits this process's environment; drop any ambient
@@ -32,6 +41,7 @@ function textOf(result: Awaited<ReturnType<Client["callTool"]>>): string {
 
 test("MCP adapter permits coordination to be explicitly disabled", async () => {
   const dataDir = mkdtempSync(resolve(tmpdir(), "nmg-claude-mcp-default-"));
+  const owner = await connectDaemon(resolve(dataDir, "nmg.sqlite"));
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: ["--experimental-strip-types", serverPath],
@@ -46,17 +56,20 @@ test("MCP adapter permits coordination to be explicitly disabled", async () => {
   try {
     await client.connect(transport);
     const tools = await client.listTools();
-    assert.equal(
-      tools.tools.some((tool) => tool.name === "nmg_state"),
-      true,
-    );
+    const state = tools.tools.find((tool) => tool.name === "nmg_state");
+    assert.ok(state);
+    const space = state.inputSchema.properties?.space as
+      { const?: string; enum?: string[] } | undefined;
+    assert.deepEqual(space?.enum ?? [space?.const], ["ag"]);
+    assert.equal(Object.hasOwn(state.inputSchema.properties ?? {}, "activity"), false);
     assert.equal(
       tools.tools.some((tool) => tool.name === "nmg_search"),
       true,
     );
   } finally {
     await client.close().catch(() => undefined);
-    rmSync(dataDir, { recursive: true, force: true });
+    await shutdownOwnedDaemon(owner);
+    removeTempDirectory(dataDir);
   }
 });
 
@@ -158,47 +171,37 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
       memoryIds: [memoryId],
     })) as NmgMethodResult["get"];
     assert.equal(dated.results[0]?.memory.eventTime, "2025-05-09T00:00:00.000Z");
-    const recalled = await client.callTool({
-      name: "nmg_search",
-      arguments: { query: "stable Active Graph session", limit: 4 },
-    });
-    const activeGraphId = /activeGraphId=([^\s]+)/u.exec(textOf(recalled))?.[1];
+    const recalled = await assertSearchToolContract(
+      async (args) =>
+        mcpToolContractText(await client.callTool({ name: "nmg_search", arguments: args })),
+      "stable Active Graph session",
+      /stable Active Graph session/u,
+    );
+    const activeGraphId = /activeGraphId=([^\s]+)/u.exec(recalled)?.[1];
     assert.ok(activeGraphId);
-    const memoryReference = /memory=([^;]+);/u.exec(textOf(recalled))?.[1];
-    assert.ok(memoryReference?.startsWith("ref:"));
+    const memoryReference = /memory=([^;]+);/u.exec(recalled)?.[1];
+    assert.ok(memoryReference);
+    assert.match(memoryReference, /^ref:/u);
     const repeated = await client.callTool({
       name: "nmg_search",
       arguments: { query: "stable Active Graph session", limit: 4 },
     });
     assert.match(textOf(repeated), /already_in_context=true/u);
-    const exact = await client.callTool({
-      name: "nmg_get",
-      arguments: { memoryIds: [memoryReference], activeGraphId },
-    });
-    assert.match(textOf(exact), /stable Active Graph session/u);
-    assert.match(textOf(exact), new RegExp(memoryId, "u"));
+    const exact = await assertGetToolContract(
+      async (args) =>
+        mcpToolContractText(await client.callTool({ name: "nmg_get", arguments: args })),
+      memoryReference,
+      /stable Active Graph session/u,
+      activeGraphId,
+    );
+    assert.match(exact, new RegExp(memoryId, "u"));
 
-    const busy = await client.callTool({
-      name: "nmg_state",
-      arguments: {
-        space: "board",
-        action: "write",
-        operation: "agentActivity",
-        activity: { state: "busy", capabilities: ["manual-coordination"] },
-      },
-    });
-    assert.match(textOf(busy), /processing=busy/);
-    assert.match(textOf(busy), /manual-coordination/);
-    const idle = await client.callTool({
-      name: "nmg_state",
-      arguments: {
-        space: "board",
-        action: "write",
-        operation: "agentActivity",
-        activity: { state: "idle" },
-      },
-    });
-    assert.match(textOf(idle), /processing=idle/);
+    await assertRememberToolContract(async (args) =>
+      mcpToolContractText(await client.callTool({ name: "nmg_remember", arguments: args })),
+    );
+    await assertAgentActivityContract(async (args) =>
+      mcpToolContractText(await client.callTool({ name: "nmg_state", arguments: args })),
+    );
 
     const roster = await client.callTool({
       name: "nmg_state",
@@ -228,13 +231,9 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     });
     assert.match(textOf(read), /Review the adapter boundary/u);
 
-    const capabilities = await client.callTool({
-      name: "nmg_lab",
-      arguments: { action: "list" },
-    });
-    assert.match(textOf(capabilities), /reasoning_workspace/u);
-    assert.match(textOf(capabilities), /recall_gate/u);
-    assert.doesNotMatch(textOf(capabilities), /working_state/u);
+    await assertLabToolContract(async (args) =>
+      mcpToolContractText(await client.callTool({ name: "nmg_lab", arguments: args })),
+    );
     await client.callTool({
       name: "nmg_lab",
       arguments: { action: "enable", capability: "recall_gate", reason: "MCP session-only pilot" },
@@ -328,7 +327,7 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     const daemon = await connectDaemon(resolve(dataDir, "nmg.sqlite")).catch(() => null);
     if (daemon) await invokeDaemon(daemon, "shutdown", {}).catch(() => undefined);
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-    rmSync(dataDir, { recursive: true, force: true });
+    removeTempDirectory(dataDir);
   }
 });
 
@@ -365,12 +364,8 @@ test("MCP adapter exposes shared logical-chain structure", async () => {
     targetMemoryId: ids[1]!,
   });
   store.close();
-  const backend = new SqliteMemoryBackend(databasePath, "claude-chain-contract");
-  try {
-    backend.activateLocal();
-  } finally {
-    await backend.close();
-  }
+  const { backend } = await openLocalMemory(databasePath, "claude-chain-contract");
+  await backend.close();
 
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -423,6 +418,6 @@ test("MCP adapter exposes shared logical-chain structure", async () => {
     const daemon = await connectDaemon(databasePath).catch(() => null);
     if (daemon) await invokeDaemon(daemon, "shutdown", {}).catch(() => undefined);
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-    rmSync(dataDir, { recursive: true, force: true });
+    removeTempDirectory(dataDir);
   }
 });

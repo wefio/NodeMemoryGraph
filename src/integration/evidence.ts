@@ -1,4 +1,3 @@
-import type { NmgStore } from "../core/store.ts";
 import { MAX_EVIDENCE_SOURCE_CHARACTERS, type MemoryActor } from "../core/types.ts";
 
 export interface AgentHistoryMessage {
@@ -46,7 +45,16 @@ export function selectEvidence(
 
 /** Retain one admitted source message without copying the whole transcript. */
 export function retainEvidence(
-  store: NmgStore,
+  store: {
+    getHistoryBySourceMessage(sessionId: string, sourceMessageId: string): { id: string } | null;
+    appendHistory(input: {
+      role: MemoryActor;
+      content: string;
+      sessionId: string;
+      sourceMessageId: string;
+      sourceRef?: string;
+    }): { id: string };
+  },
   evidence: string | undefined,
   sourceActor: MemoryActor,
   history: AgentHistorySnapshot,

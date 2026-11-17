@@ -1,0 +1,16 @@
+{
+  "$schema": "./adapter-manifest.schema.json",
+  "entry": "opencode-plugin/index.ts",
+  "capabilities": [
+    "search",
+    "get",
+    "remember",
+    "state.ag",
+    "state.board",
+    "automatic-recall",
+    "state-context",
+    "answer-attribution",
+    "tool-observation",
+    "board-delivery"
+  ]
+}

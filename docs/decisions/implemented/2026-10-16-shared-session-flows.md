@@ -47,6 +47,17 @@ surface, not shared loop state. Their tests moved to
 `tests/integration/session-flows.test.ts`; pi-adapter tests keep only behavior
 pi itself wires.
 
+The [capability assembly](../../design/unified-architecture/adapter-capability-assembly.md)
+validates per-entry JSON manifests before native registration. AG and board
+declarations mount one shared state tool. The tool owns argument validation,
+session-bound routing, writer fence capture and board read effects. Native
+bindings handle tool registration, identity, transport and host receipts.
+The same native registrar mounts Lab, exact memory lookup, and explicit search
+from their shared schemas and implementations. Search and exact lookup share
+the disclosure ledger projection. Remember uses the same registrar, with shared
+write, feedback, and resolution flows and a native evidence selector where the
+host exposes session history.
+
 ## Alternatives considered
 
 - Keep the flows in pi and copy them into the OpenCode adapter. Rejected:

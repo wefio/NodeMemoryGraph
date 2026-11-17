@@ -1,0 +1,12 @@
+{
+  "$schema": "./adapter-manifest.schema.json",
+  "entry": "claude-plugins/nmg-memory/agents/memory-copilot.ts",
+  "capabilities": [
+    "search",
+    "get",
+    "remember",
+    "state.ag",
+    "state.board",
+    "lab"
+  ]
+}

@@ -1,7 +1,6 @@
 import {
   assembleAdapterCapabilities,
-  supportedSearchParameters,
-  type AdapterEndpoint,
+  disabledBoardCapability,
   type AdapterCapabilityBindings,
 } from "../src/integration/adapter-capability-assembly.ts";
 import { ADAPTER_CAPABILITY_CATALOG } from "../src/integration/adapter-capability-catalog.ts";
@@ -33,14 +32,6 @@ import {
   extractAnswerText,
   extractPromptText,
 } from "../src/integration/agent-attribution.ts";
-import {
-  renderEvidenceSurface,
-  renderRememberSurface,
-  renderSearchSurface,
-  renderTaskBoardSurface,
-  type TaskBoardDirectoryEntry,
-  type TaskBoardSurfaceResult,
-} from "../src/integration/agent-surface.ts";
 import { loadWakeState, readWakeConfig, wakeBudgetGate } from "../src/integration/board-wake.ts";
 import {
   configuredAutoRecallLimit,
@@ -51,37 +42,15 @@ import {
   loadOrCreateAgentIdentity,
   renameAgentIdentity,
 } from "../src/integration/agent-identity.ts";
-import {
-  compactSearchContext,
-  memoryDisclosureEntries,
-} from "../src/integration/search-projection.ts";
+import { compactSearchContext } from "../src/integration/search-projection.ts";
 import { SessionRecallFlow } from "../src/integration/session-recall-flow.ts";
 import { RecallBudget } from "../src/integration/recall-budget.ts";
 import { prepareInformationOutput } from "../src/integration/information-output.ts";
 import type { PreparedInformationOutput } from "../src/core/information-view.ts";
 import { SessionTaskWindow } from "../src/integration/session-task-window.ts";
-import {
-  captureStateInvocation,
-  COORDINATION_OPERATIONS,
-  requireBoardEventCapability,
-  renderStateOutput,
-  stateOperation,
-  STATE_OPERATIONS,
-} from "../src/integration/state.ts";
-import { assembleBoardStateParams, resolveBoardOperation } from "./state-args.ts";
-import {
-  COMMON_REMEMBER_ACTIONS,
-  supportedRememberActions,
-} from "../src/integration/tool-contract.ts";
 import { probeAdapterEndpoint } from "../src/integration/lease-transport.ts";
-import {
-  SEARCH_REQUIRED_PARAMETERS,
-  searchParameterProperties,
-} from "../src/integration/tool-contract.ts";
-import type { TaskBoardToolResult } from "../src/integration/tool-contract.ts";
 import { messageText } from "../src/integration/tool-observation.ts";
-import type { MemoryContext, MemoryTier, RememberResult } from "../src/core/types.ts";
-import { TASK_BOARD_VERDICTS, WORLD_BOARD_ID } from "../src/core/types.ts";
+import type { MemoryContext, MemoryTier } from "../src/core/types.ts";
 import { deriveAnswerOverlapMemoryIds } from "../src/core/feedback.ts";
 import type { NmgStateResult, NmgSessionActiveGraphResult } from "../src/cli/protocol.ts";
 import { recallInput } from "../src/core/recall-matcher.ts";
@@ -327,6 +296,7 @@ export default {
     const recallHeaders = async (
       sessionId: string,
       request: NonNullable<ReturnType<SessionTaskWindow["prepare"]>>,
+      searchBudgetMs: number,
     ): Promise<MemoryContext | undefined> => {
       const projectDir = projectDirectory(sessionId);
       const context = (await invoke("search", {
@@ -338,6 +308,7 @@ export default {
         // The daemon stages the injected graph for online learning behind the
         // scenes; explicit nmg_search runs stay unstaged.
         autoRecall: true,
+        autoRecallBudgetMs: searchBudgetMs,
         projectDir,
         sessionId,
       })) as MemoryContext;
@@ -361,9 +332,10 @@ export default {
 
     const stagePromptRecall = async (
       event: PromptHookEvent,
-      signal: AbortSignal,
+      budget: RecallBudget,
       retainState: (output: PreparedInformationOutput) => void,
     ) => {
+      const { signal } = budget;
       const sessionId = String(event?.sessionID ?? "");
       await resolveNativeSession(sessionId, signal);
       const prompt = textOfPrompt(event?.prompt);
@@ -389,7 +361,7 @@ export default {
       retainState(prepareInformationOutput(base, { format: "context" }));
       const request = taskWindow.prepare(sessionId, prompt, decision);
       const context = request
-        ? await recallHeaders(sessionId, request).catch(() => undefined)
+        ? await recallHeaders(sessionId, request, budget.searchBudgetMs()).catch(() => undefined)
         : undefined;
       signal.throwIfAborted();
       const output = context
@@ -410,8 +382,8 @@ export default {
       const budget = new RecallBudget(PROMPT_BUDGET_MS, controller.signal);
       preparations.set(sessionId, controller);
       try {
-        const pending = await budget.run("automatic.context", (signal) =>
-          stagePromptRecall(event, signal, (output) => {
+        const pending = await budget.run("automatic.context", () =>
+          stagePromptRecall(event, budget, (output) => {
             if (preparations.get(sessionId) === controller && output.text)
               stageInjection(sessionId, { output });
           }),
@@ -521,55 +493,6 @@ export default {
         })
         .then(() => undefined);
 
-    // ---- Shared disclosure projection ------------------------------------
-    const disclosedContext = async (
-      sessionId: string,
-      context: MemoryContext,
-      disclosure: "header" | "evidence",
-    ): Promise<string> => {
-      if (!context.results || context.results.length === 0) {
-        return disclosure === "header" ? "No matching NMG memory found." : "";
-      }
-      try {
-        const decision = (await invoke("sessionActiveGraph", {
-          action: "disclose",
-          sessionId,
-          projectionId: context.activeGraph?.id,
-          disclosure,
-          entries: memoryDisclosureEntries(context, disclosure),
-        })) as { freshMemoryIds?: unknown; foldedMemoryIds?: unknown };
-        const fallback = context.results.map((entry) => entry.memory.id);
-        const freshIds = new Set(
-          Array.isArray(decision?.freshMemoryIds)
-            ? (decision.freshMemoryIds as string[])
-            : fallback,
-        );
-        const foldedIds = Array.isArray(decision?.foldedMemoryIds)
-          ? (decision.foldedMemoryIds as string[])
-          : [];
-        const fresh = context.results.filter((entry) => freshIds.has(entry.memory.id));
-        if (fresh.length === 0) {
-          return disclosure === "header" ? "No new matching NMG memory." : "";
-        }
-        const visible = { ...context, results: fresh } as MemoryContext;
-        return [
-          disclosure === "header" ? renderSearchSurface(visible) : renderEvidenceSurface(visible),
-          foldedIds.length > 0
-            ? `${prompts.in_context_title}\n${foldedIds
-                .map((memoryId) => `- memory=${memoryId}; already_in_context=true`)
-                .join("\n")}`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n");
-      } catch {
-        // Daemon disclosure ledger unavailable: degrade to the raw surface.
-        return disclosure === "header"
-          ? renderSearchSurface(context)
-          : renderEvidenceSurface(context);
-      }
-    };
-
     const toolSessionId = (context: ToolContext, toolName: string): string => {
       const sessionId = String(context?.sessionID ?? "");
       if (sessionId) return sessionId;
@@ -578,675 +501,6 @@ export default {
       );
     };
 
-    // ---- nmg_search -------------------------------------------------------
-    const searchTool = (endpoint?: AdapterEndpoint): ToolRegistration => ({
-      name: "search",
-      description: prompts.search_description,
-      input: {
-        type: "object",
-        properties: supportedSearchParameters(
-          {
-            // Shared retrieval contract; only the prompt-enriched query text is local.
-            ...searchParameterProperties(),
-            query: { type: "string", description: prompts.search_query_parameter_description },
-          },
-          endpoint,
-        ),
-        required: [...SEARCH_REQUIRED_PARAMETERS],
-        additionalProperties: false,
-      },
-      execute: async (args, context) => {
-        const sessionId = toolSessionId(context, "search");
-        if (!recallFlow.allowSearch(sessionId)) {
-          const reason = recallFlow.searchBlockReason(sessionId);
-          return {
-            content: `${prompts.search_progression_required} (reason=${reason ?? "gated"})`,
-          };
-        }
-        const result = (await invoke("search", {
-          query: args.query,
-          limit: args.limit,
-          maxTier: args.maxTier ?? 3,
-          nodeName: args.nodeName,
-          scope: args.scope,
-          sourceActor: args.sourceActor,
-          includeHistorical: args.includeHistorical === true,
-          graphHops: args.graphHops,
-          eventTimeFrom: args.eventTimeFrom,
-          eventTimeTo: args.eventTimeTo,
-          projectDir: projectDirectory(sessionId),
-          sessionId,
-        })) as MemoryContext;
-        recallFlow.recordSearch(
-          sessionId,
-          result.results.map((entry) => entry.memory.id),
-        );
-        attribution.note(sessionId, result);
-        const surface = await disclosedContext(sessionId, result, "header");
-        return {
-          content: [surface, recallFeedbackAffordance(result.activeGraph?.id)]
-            .filter(Boolean)
-            .join("\n"),
-        };
-      },
-    });
-
-    // ---- nmg_get ----------------------------------------------------------
-    const getTool = (): ToolRegistration => ({
-      name: "get",
-      description: prompts.get_description,
-      input: {
-        type: "object",
-        properties: {
-          memoryIds: {
-            type: "array",
-            items: { type: "string" },
-            minItems: 1,
-            maxItems: 50,
-            description: "Memory IDs from nmg_search.",
-          },
-          activeGraphId: {
-            type: "string",
-            description: prompts.active_graph_id_parameter_description,
-          },
-          graphHops: { type: "integer", minimum: 0, maximum: 3 },
-        },
-        required: ["memoryIds"],
-        additionalProperties: false,
-      },
-      execute: async (args, context) => {
-        const sessionId = toolSessionId(context, "get");
-        const memoryIds = Array.isArray(args.memoryIds)
-          ? (args.memoryIds as unknown[]).filter(
-              (id): id is string => typeof id === "string" && id.trim().length > 0,
-            )
-          : [];
-        if (memoryIds.length === 0) return { content: "nmg_get requires memoryIds." };
-        if (!recallFlow.allowGet(sessionId)) {
-          return {
-            content:
-              "Recall tool budget exhausted for this user turn. Answer from the evidence already " +
-              "on the surface, or state what remains uncertain.",
-          };
-        }
-        const activeGraphId =
-          (typeof args.activeGraphId === "string" && args.activeGraphId.trim()) ||
-          attribution.latestActiveGraphIdForMemories(sessionId, memoryIds) ||
-          undefined;
-        const result = (await invoke("get", {
-          memoryIds,
-          activeGraphId,
-          graphHops: args.graphHops,
-          projectDir: projectDirectory(sessionId),
-          sessionId,
-        })) as MemoryContext & { missingMemoryIds?: string[] };
-        recallFlow.recordGet(
-          sessionId,
-          result.results.map((entry) => entry.memory.id),
-        );
-        attribution.note(sessionId, result);
-        const missing = Array.isArray(result.missingMemoryIds) ? result.missingMemoryIds : [];
-        const surface = await disclosedContext(sessionId, result, "evidence");
-        return {
-          content: [surface, missing.length > 0 ? `MISSING: ${missing.join(", ")}` : ""]
-            .filter(Boolean)
-            .join("\n"),
-        };
-      },
-    });
-
-    // ---- nmg_remember -----------------------------------------------------
-    const rememberTool = (methods?: readonly string[]): ToolRegistration => ({
-      name: "remember",
-      description: prompts.remember_description,
-      input: {
-        type: "object",
-        properties: {
-          action: {
-            type: "string",
-            enum: supportedRememberActions(methods),
-            description: prompts.remember_action_parameter_description,
-          },
-          memoryId: {
-            type: "string",
-            description: prompts.remember_memory_id_parameter_description,
-          },
-          newMemoryId: {
-            type: "string",
-            description: prompts.remember_new_memory_id_parameter_description,
-          },
-          supersededMemoryId: {
-            type: "string",
-            description: prompts.remember_superseded_memory_id_parameter_description,
-          },
-          relatedMemoryId: {
-            type: "string",
-            description: prompts.remember_related_memory_id_parameter_description,
-          },
-          relatedMemoryIds: { type: "array", items: { type: "string" } },
-          relationJudgement: {
-            type: "string",
-            enum: ["conflict", "distinct", "refines", "related", "same_entity"],
-            description: prompts.remember_relation_judgement_parameter_description,
-          },
-          relationConfidence: { type: "number", minimum: 0, maximum: 1 },
-          resolutionReason: { type: "string" },
-          activeGraphId: {
-            type: "string",
-            description: prompts.active_graph_id_parameter_description,
-          },
-          taskSuccess: {
-            type: "boolean",
-            description: prompts.feedback_label_parameter_description,
-          },
-          userCorrection: {
-            type: "boolean",
-            description: prompts.feedback_label_parameter_description,
-          },
-          evidenceSufficient: {
-            type: "boolean",
-            description: prompts.feedback_label_parameter_description,
-          },
-          expansionUseful: {
-            type: "boolean",
-            description: prompts.feedback_label_parameter_description,
-          },
-          excessiveNoise: {
-            type: "boolean",
-            description: prompts.feedback_label_parameter_description,
-          },
-          noMemoryNeeded: {
-            type: "boolean",
-            description: prompts.feedback_label_parameter_description,
-          },
-          memoryMisleading: {
-            type: "boolean",
-            description: prompts.feedback_misleading_parameter_description,
-          },
-          feedbackNote: {
-            type: "string",
-            description: prompts.feedback_note_parameter_description,
-          },
-          statement: { type: "string" },
-          nodeName: { type: "string", description: prompts.node_name_parameter_description },
-          recallTriggers: {
-            type: "array",
-            items: { type: "string", minLength: 1, maxLength: 80 },
-            maxItems: 16,
-            description: prompts.recall_triggers_parameter_description,
-          },
-          memoryType: {
-            type: "string",
-            enum: ["constraint", "event", "fact", "preference", "state", "strategy"],
-          },
-          eventTime: { type: "string" },
-          referenceTime: {
-            type: "string",
-            description:
-              "Source ISO timestamp with Z/offset anchoring eventTime, for historical replay.",
-          },
-          timeZone: {
-            type: "string",
-            description: "Source IANA time zone; defaults to referenceTime's offset.",
-          },
-          expiresAt: { type: "string" },
-          truthStatus: {
-            type: "string",
-            enum: ["asserted", "inferred", "unverified", "verified"],
-          },
-          sourceActor: {
-            type: "string",
-            enum: ["assistant", "system", "tool", "user"],
-            description: prompts.source_actor_parameter_description,
-          },
-          evidence: { type: "string", description: prompts.evidence_parameter_description },
-          writeReason: { type: "string" },
-          tier: { type: "integer", minimum: 0, maximum: 3 },
-          importance: { type: "number", minimum: 0, maximum: 1 },
-          scope: { type: "object", additionalProperties: { type: "string" } },
-          unsafe: { type: "boolean" },
-          externalSource: {
-            type: "object",
-            properties: {
-              source: {
-                type: "string",
-                description: prompts.external_source_parameter_description,
-              },
-              retrievedAt: { type: "string" },
-              hash: { type: "string" },
-            },
-            required: ["source"],
-            additionalProperties: false,
-          },
-          boardSource: {
-            type: "object",
-            properties: { taskId: { type: "string" }, entryId: { type: "string" } },
-            required: ["taskId", "entryId"],
-            additionalProperties: false,
-          },
-        },
-        additionalProperties: false,
-      },
-      execute: async (args, context) => {
-        const sessionId = toolSessionId(context, "remember");
-        const projectDir = projectDirectory(sessionId);
-        const action = typeof args.action === "string" ? args.action : "save";
-        if (!COMMON_REMEMBER_ACTIONS.includes(action as (typeof COMMON_REMEMBER_ACTIONS)[number])) {
-          return { content: `Unsupported remember action: ${action}` };
-        }
-        if (action === "claim_outcome") {
-          return {
-            content:
-              "action=claim_outcome needs exact-match evidence binding, which the OpenCode host " +
-              "cannot derive from session history. Record the outcome through a harness with " +
-              "evidence selection (Pi) or the daemon CLI instead.",
-          };
-        }
-        if (action === "feedback") {
-          const labels = {
-            taskSuccess: args.taskSuccess,
-            userCorrection: args.userCorrection,
-            evidenceSufficient: args.evidenceSufficient,
-            expansionUseful: args.expansionUseful,
-            excessiveNoise: args.excessiveNoise,
-            noMemoryNeeded: args.noMemoryNeeded,
-            memoryMisleading: args.memoryMisleading,
-            note: args.feedbackNote,
-          };
-          if (Object.values(labels).every((value) => value === undefined)) {
-            return { content: "action=feedback requires at least one label or feedbackNote" };
-          }
-          try {
-            await invoke("recordFeedback", {
-              activeGraphId: args.activeGraphId,
-              sessionId,
-              ...labels,
-            });
-            return { content: "Retrieval feedback processed." };
-          } catch {
-            return { content: "Retrieval feedback processed (daemon unavailable; skipped)." };
-          }
-        }
-        if (action === "forget") {
-          if (!args.memoryId) return { content: "action=forget requires memoryId" };
-          await invoke("resolveRemember", {
-            action: "forget",
-            memoryId: args.memoryId,
-            projectDir,
-            sessionId,
-          });
-          return {
-            content:
-              "Memory withdrawn from normal retrieval. The tombstone remains for audit; " +
-              "this is not physical privacy erasure.",
-          };
-        }
-        if (action === "resolve" || action === "reopen") {
-          if (!args.memoryId) return { content: `action=${action} requires memoryId` };
-          await invoke("resolveRemember", {
-            action,
-            memoryId: args.memoryId,
-            relatedMemoryIds: Array.isArray(args.relatedMemoryIds)
-              ? (args.relatedMemoryIds as unknown[]).filter(
-                  (id): id is string => typeof id === "string",
-                )
-              : undefined,
-            reason: args.resolutionReason,
-            projectDir,
-            sessionId,
-          });
-          return {
-            content:
-              action === "resolve"
-                ? "Open memory marked resolved; it is now eligible for ordinary retention policy."
-                : "Memory reopened and restored to indexed storage with its related evidence anchors.",
-          };
-        }
-        if (action === "supersede") {
-          if (!args.newMemoryId || !args.supersededMemoryId) {
-            return { content: "action=supersede requires newMemoryId and supersededMemoryId" };
-          }
-          await invoke("resolveRemember", {
-            action,
-            newMemoryId: args.newMemoryId,
-            supersededMemoryId: args.supersededMemoryId,
-            reason: args.resolutionReason,
-            projectDir,
-            sessionId,
-          });
-          return { content: "Older memory superseded by the new value." };
-        }
-        if (action === "relate") {
-          if (!args.newMemoryId || !args.relatedMemoryId || !args.relationJudgement) {
-            return {
-              content: "action=relate requires newMemoryId, relatedMemoryId, and relationJudgement",
-            };
-          }
-          await invoke("resolveRemember", {
-            action,
-            newMemoryId: args.newMemoryId,
-            relatedMemoryId: args.relatedMemoryId,
-            relationJudgement: args.relationJudgement,
-            confidence: args.relationConfidence,
-            projectDir,
-            sessionId,
-          });
-          return {
-            content:
-              "Semantic relation recorded as a reversible pending proposal; node identities remain separate.",
-          };
-        }
-        // action=save
-        const statement = typeof args.statement === "string" ? args.statement.trim() : "";
-        const nodeName = typeof args.nodeName === "string" ? args.nodeName.trim() : "";
-        if (!statement || !nodeName) {
-          return { content: "saving a memory requires statement and nodeName" };
-        }
-        const external = args.externalSource as
-          { source?: string; retrievedAt?: string; hash?: string } | undefined;
-        if (external && !/^(?:file|web):.+/u.test(String(external.source ?? ""))) {
-          return { content: "externalSource.source must start with web: or file:" };
-        }
-        const board = args.boardSource as { taskId?: string; entryId?: string } | undefined;
-        const sourceActor = (
-          typeof args.sourceActor === "string" ? args.sourceActor : "assistant"
-        ) as "assistant" | "system" | "tool" | "user";
-        // OpenCode exposes no exact-match session-history API, so a pasted
-        // quote from a non-assistant actor degrades provenance instead of
-        // pretending free text is a bound witness.
-        const degradedProvenance =
-          Boolean((args.evidence as string | undefined)?.trim()) &&
-          sourceActor !== "assistant" &&
-          !external;
-        const markers: Array<{ kind: string; attributes: Record<string, unknown> }> = [
-          ...(external
-            ? [
-                {
-                  kind: "external_source",
-                  attributes: {
-                    source: String(external.source),
-                    retrievedAt: external.retrievedAt ?? new Date().toISOString(),
-                    ...(external.hash ? { hash: external.hash } : {}),
-                  },
-                },
-              ]
-            : []),
-          ...(board
-            ? [
-                {
-                  kind: "board_origin",
-                  attributes: { taskId: board.taskId, entryId: board.entryId },
-                },
-              ]
-            : []),
-          ...(degradedProvenance
-            ? [
-                {
-                  kind: "provenance_degraded",
-                  attributes: {
-                    provider: "opencode",
-                    historyReferenceVersion: "opencode.plugin.v1",
-                    reason: "session_history_api_unavailable",
-                  },
-                },
-              ]
-            : []),
-        ];
-        const remembered = (await invoke("remember", {
-          statement,
-          nodeName,
-          recallTriggers: Array.isArray(args.recallTriggers)
-            ? (args.recallTriggers as unknown[]).filter((t): t is string => typeof t === "string")
-            : undefined,
-          memoryType: args.memoryType,
-          eventTime: args.eventTime,
-          referenceTime: args.referenceTime,
-          timeZone: args.timeZone,
-          expiresAt: args.expiresAt,
-          truthStatus: args.truthStatus,
-          sourceActor,
-          evidence: args.evidence,
-          writeReason: args.writeReason,
-          writeSource: "agent",
-          tier: args.tier,
-          importance: args.importance,
-          scope: args.scope,
-          ...(args.unsafe === true ? { unsafe: true } : {}),
-          externalSource: external,
-          markers: markers.length > 0 ? markers : undefined,
-          projectDir,
-          sessionId,
-        })) as RememberResult;
-        const markerNote =
-          markers.length > 0 ? `(markers: ${markers.map((marker) => marker.kind).join(", ")})` : "";
-        return { content: renderRememberSurface(remembered, { postamble: markerNote }) };
-      },
-    });
-
-    // ---- nmg_state (working state + board channel) ------------------------
-    const boardState = async (params: Record<string, unknown>): Promise<TaskBoardToolResult> => {
-      const wrapped = (await invoke("state", params)) as NmgStateResult;
-      return wrapped?.result as TaskBoardToolResult;
-    };
-
-    const renameBoardAgent = (
-      sessionId: string,
-      identity: { id: string; agentName: string },
-      requestedName: string,
-    ): string => {
-      const newName = requestedName.trim();
-      if (!newName) {
-        return `当前 agent 名：${identity.agentName}（id=${identity.id}）。用法：nmg_state space=board action=write operation=rename agentName=<新名>`;
-      }
-      renameAgentIdentity({
-        anchor: process.env.NMG_AGENT_ID?.trim() || sessionId,
-        id: identity.id,
-        agentName: newName,
-      });
-      return `已改名：${newName}（id=${identity.id}）——定向 to= 可用新名或 id。`;
-    };
-
-    const boardControlResult = async (
-      sessionId: string,
-      identity: { id: string; agentName: string },
-      args: Record<string, unknown>,
-    ): Promise<string | undefined> => {
-      const operation = resolveBoardOperation(args);
-      if (operation === "rename") {
-        return renameBoardAgent(sessionId, identity, String(args.agentName ?? ""));
-      }
-      if (operation !== "subscribe" && operation !== "unsubscribe") return undefined;
-      const result = await boardState({
-        action: "write",
-        space: "board",
-        operation,
-        taskId: String(args.taskId ?? WORLD_BOARD_ID),
-        sessionId,
-        agentId: identity.id,
-      });
-      const joined = result as { action: string; taskId?: string };
-      return operation === "unsubscribe"
-        ? `已退出频道 ${joined?.taskId ?? args.taskId}：不再接收该频道新条目的唤醒通知（重新加入用 nmg_state space=board action=write operation=subscribe）。`
-        : `已加入频道 ${String(joined?.taskId ?? args.taskId)}：接收该频道新条目的唤醒通知（未订阅频道保持安静）。`;
-    };
-
-    const boardToolResult = async (
-      sessionId: string,
-      args: Record<string, unknown>,
-    ): Promise<string> => {
-      const identity = loadOrCreateAgentIdentity(sessionId, "opencode");
-      const control = await boardControlResult(sessionId, identity, args);
-      if (control !== undefined) return control;
-      const taskId = String(args.taskId ?? "").trim() || WORLD_BOARD_ID;
-      const params = assembleBoardStateParams(args, sessionId, identity);
-      await requireBoardEventCapability(params, () => invoke("hello", {}));
-      if (COORDINATION_OPERATIONS.has(String(params.operation)))
-        return renderStateOutput((await invoke("state", params)) as NmgStateResult);
-      const result = await boardState(params);
-      const entries = result.entries ?? (result.entry ? [result.entry] : []);
-      if (result.action === "read" && entries.length > 0) {
-        await Promise.allSettled([
-          ...entries.map((entry) =>
-            invoke("sessionActiveGraph", {
-              action: "observe",
-              sessionId,
-              kind: "board_projection",
-              sourceId: `board:${taskId}:${entry.id}`,
-              nodeId: `board:${taskId}`,
-              statement: `[task-board ${taskId} #${entry.id} ${entry.kind} by ${entry.agentId}] ${entry.content}`,
-            }),
-          ),
-          invoke("sessionActiveGraph", { action: "activate", sessionId }),
-          // Reading is a delivery receipt for open entries — the wake loop
-          // should not re-push what this session has already seen. Same echo
-          // boundary as the loop: the poster's own entries are never pushed.
-          ...entries
-            .filter((entry) => entry.status === "open")
-            .filter(
-              (entry) => !(entry.sourceSessionId === sessionId || entry.agentId === identity.id),
-            )
-            .map((entry) =>
-              invoke("taskBoard", {
-                action: "recordDelivery",
-                entryId: entry.id,
-                sessionId,
-                agentId: identity.id,
-                source: "read",
-              }),
-            ),
-        ]);
-      }
-      let directory: TaskBoardDirectoryEntry[] = [];
-      if (result.action === "read" && taskId === WORLD_BOARD_ID) {
-        const lobby = await boardState({
-          action: "read",
-          space: "board",
-          operation: "list",
-          agentId: identity.id,
-        }).catch(() => null);
-        directory = ((lobby as { boards?: TaskBoardDirectoryEntry[] } | null)?.boards ??
-          []) as TaskBoardDirectoryEntry[];
-      }
-      return renderTaskBoardSurface(result as unknown as TaskBoardSurfaceResult, {
-        taskId,
-        directory,
-      });
-    };
-
-    const stateTool = (): ToolRegistration => ({
-      name: "state",
-      description: prompts.state_description,
-      input: {
-        type: "object",
-        properties: {
-          action: { type: "string", enum: ["read", "write"] },
-          space: { type: "string", enum: ["ag", "board"] },
-          operation: { type: "string", enum: [...STATE_OPERATIONS] },
-          notification: {
-            type: "object",
-            additionalProperties: true,
-            description:
-              "Explicit notice: key, scopes [direct|channel|event], optional recipients (stable IDs), invite:true to enroll invitees and sender in taskId. Reuse key for retries.",
-          },
-          eventId: { type: "string" },
-          event: {
-            type: "object",
-            additionalProperties: true,
-            description:
-              "Event create/mutation payload; updates require expectedRevision, kind and text.",
-          },
-          activity: {
-            type: "object",
-            additionalProperties: true,
-            description:
-              "Session processing report for agentActivity: state busy/idle/unknown, optional capabilities and ttlSeconds.",
-          },
-          text: { type: "string" },
-          reason: { type: "string" },
-          ttlSeconds: { type: "integer", minimum: 60, maximum: 86400 },
-          taskId: { type: "string", description: prompts.board_task_id_parameter_description },
-          content: { type: "string", description: prompts.board_content_parameter_description },
-          kind: {
-            type: "string",
-            enum: ["blocker", "decision", "goal", "handoff", "note", "question", "result"],
-          },
-          entryId: { type: "string" },
-          resolution: { type: "string" },
-          leaseSeconds: { type: "integer", minimum: 60, maximum: 86400 },
-          digest: {
-            type: "string",
-            description: "deliver only: sha256 identity of the artifact you hand in",
-          },
-          ref: { type: "string", description: "deliver only: where the artifact can be read" },
-          summary: { type: "string", description: "deliver only: what the artifact contains" },
-          verdict: {
-            type: "string",
-            enum: [...TASK_BOARD_VERDICTS],
-            description: "judge only: accepted | rejected | undecidable",
-          },
-          afterCursor: { type: "string" },
-          limit: { type: "integer", minimum: 1, maximum: 200 },
-          includeResolved: { type: "boolean" },
-          to: {
-            type: "string",
-            description: "定向投递：stable agent_name 只唤醒该 agent（discover 选人）",
-          },
-          need: { type: "string", description: "discover 的找人需求描述（可选）" },
-          capabilities: { type: "string", description: "discover 按能力过滤（可选）" },
-          agentName: { type: "string", description: "rename 的新显示名（id 不变）" },
-        },
-        required: ["action", "space"],
-        additionalProperties: false,
-      },
-      execute: async (args, context) => {
-        const sessionId = toolSessionId(context, "state");
-        if (args.space === "ag") {
-          const operation = stateOperation({
-            action: String(args.action),
-            space: "ag",
-            operation: args.operation === undefined ? undefined : String(args.operation),
-          });
-          const captured = await captureStateInvocation(
-            {
-              action: String(args.action),
-              space: "ag",
-              operation,
-              text: args.text,
-              reason: args.reason,
-              ttlSeconds: args.ttlSeconds,
-              sessionId,
-              requester: "agent:opencode",
-            },
-            (boundSessionId: string) =>
-              invoke("state", {
-                action: "read",
-                space: "ag",
-                operation: "status",
-                sessionId: boundSessionId,
-              }),
-          );
-          const result = (await invoke("state", captured)) as NmgStateResult;
-          return { content: renderStateOutput(result) };
-        }
-        if (!coordinationEnabled()) {
-          return { content: "Board coordination is disabled (NMG_ENABLE_COORDINATION)." };
-        }
-        const action = String(args.action);
-        if (
-          (action === "deliver" && !args.digest) ||
-          (action === "judge" && (!args.verdict || !args.reason))
-        ) {
-          return {
-            content:
-              action === "deliver"
-                ? "deliver requires digest: the sha256 identity of the artifact being handed in"
-                : "judge requires verdict (accepted|rejected|undecidable) and reason: the ruling is recorded in the entry and survives a restart",
-          };
-        }
-        return { content: await boardToolResult(sessionId, args) };
-      },
-    });
-
     // The SDK retains transform callbacks and applies them per request. Resolve
     // shared capabilities during setup; the callback only publishes native tools.
     const toolDefinitions: ToolRegistration[] = [];
@@ -1254,22 +508,62 @@ export default {
       ADAPTER_CAPABILITY_CATALOG.opencode.capabilities,
       {
         ...capabilityBindings,
-        tools: {
-          nmg_search: (endpoint) => {
-            toolDefinitions.push({ ...searchTool(endpoint), name: "nmg_search" });
-          },
-          nmg_get: () => {
-            toolDefinitions.push({ ...getTool(), name: "nmg_get" });
-          },
-          nmg_remember: (endpoint) => {
-            toolDefinitions.push({ ...rememberTool(endpoint?.methods), name: "nmg_remember" });
-          },
-          nmg_state: () => {
-            toolDefinitions.push({ ...stateTool(), name: "nmg_state" });
-          },
+        rememberOptions: { allowUnsafe: true, claimOutcome: "disabled" },
+        registerTool: (tool) => {
+          toolDefinitions.push({
+            name: tool.name,
+            description: tool.description,
+            input: tool.inputSchema,
+            async execute(args, context) {
+              const sessionId = toolSessionId(context, tool.name.slice(4));
+              const output = await tool.execute(args, {
+                sessionId,
+                requester: "agent:opencode",
+                invoke: (method, params, cliFallback) =>
+                  invokeDaemon(method, params, { dataDir, fallbackArgs: cliFallback ?? null }),
+                legacyBoardVerbs: true,
+                memory: {
+                  projectDir: projectDirectory(sessionId),
+                  recallFlow,
+                  attribution,
+                  search: { defaultTier: 3, feedback: recallFeedbackAffordance },
+                  remember: {
+                    latestFeedback: true,
+                    provenance: {
+                      provider: "opencode",
+                      lookup: (_evidence, actor) =>
+                        actor === "assistant"
+                          ? undefined
+                          : {
+                              version: "opencode.plugin.v1",
+                              reason: "session_history_api_unavailable",
+                            },
+                    },
+                  },
+                },
+                boardReads: "project",
+                boardIdentity: () => {
+                  const identity = loadOrCreateAgentIdentity(sessionId, "opencode");
+                  return {
+                    ...identity,
+                    saveName: (agentName) =>
+                      renameAgentIdentity({
+                        anchor: process.env.NMG_AGENT_ID?.trim() || sessionId,
+                        id: identity.id,
+                        agentName,
+                      }),
+                  };
+                },
+              });
+              return { content: output.text };
+            },
+          });
         },
       },
-      { endpoint: probeAdapterEndpoint(dataDir) },
+      {
+        endpoint: probeAdapterEndpoint(dataDir),
+        disabled: disabledBoardCapability(coordinationEnabled()),
+      },
     );
     await capabilityAssembly.ready;
     let registered: Promise<unknown>;

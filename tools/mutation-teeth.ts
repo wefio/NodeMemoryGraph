@@ -217,7 +217,7 @@ const TARGETS: readonly Target[] = [
     ],
   },
   {
-    target: "src/core/store/base.ts",
+    target: "src/core/store/local-sqlite-state-base.ts",
     suites: [
       "tests/core/task-board-retention.test.ts",
       "tests/core/task-board-deliverable.test.ts",

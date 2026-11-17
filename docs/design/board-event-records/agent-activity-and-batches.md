@@ -50,6 +50,7 @@ or subscriptions to particular native Agents requires an explicit domain action.
 
 The blackboard owns a shared processing state for each Agent/session pair.
 `agentActivity` reads and writes this state through `nmg_state space=board`.
+The shared validator points callers who select `space=ag` to the board.
 The session is explicit so one busy session can coexist with another available
 session of the same Agent. Task-derived `agentStatus.activity` continues to
 describe registered work. Discovery exposes processing reports alongside tasks
