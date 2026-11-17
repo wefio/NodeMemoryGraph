@@ -2,17 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
 
-One command, one pinned protocol, one table: `npm run eval:retrieval` measures
-the shared NMG product retrieval and Agent Surface used by automatic recall,
-`nmg_search`, Pi-class adapters, the daemon, and the OmniMemEval bridge as a
-pure retriever, without an answer model or judge. Dataset adapters and scoring
-remain benchmark-owned; candidate generation, projection, exact evidence,
-chains, redaction, and display budgets do not.
-
-Existing audit scripts (`evals/omnimemeval/research/audits/audit-*-retrieval.*`) measure text
-coverage of the rendered context and lose rank information. This runner keeps
-rank: every gold evidence records its first-hit rank inside the returned
-candidates.
+This document records the pinned local SQLite retrieval protocol and its results.
+For new evaluations, use the [AML HTTP guide](../omnimemeval/README.md).
 
 ## Protocol (pinned)
 
@@ -115,54 +106,14 @@ Reports land in `evals/results/retrieval/<run-id>/` (gitignored):
 `table.md`. The manifest pins dataset sha256, git commit (+dirty flag), Node
 and NMG versions, retrieval mode and every budget knob.
 
-```powershell
-npm run eval:retrieval                          # all five datasets, pinned samples
-npm run eval:retrieval -- --dataset locomo      # one dataset
-npm run eval:retrieval -- --dataset personamem,halumem
-npm run eval:retrieval -- --dataset longmemeval --full
-npm run eval:retrieval -- --summaries           # leaf-block summary arm (LLM endpoint)
-```
-
-Re-running with unchanged data and config reuses the ingested stores and
-reproduces metrics bit-for-bit (only wall-clock latency varies).
+The historical setup and commands are in the
+[archived retrieval README](https://github.com/wefio/NodeMemoryGraph/blob/codex/archive-legacy-memory-engine-3cf3bec2/evals/retrieval/README.md).
 
 ## Environment
 
-Canonical runner: `npm run eval:retrieval -- [options]`. The TypeScript runner
-loads `.env` and the optional `.env.nmg-bgefix`, then checks the configured
-embedding service before running. The package script also sets the LME heap
-limit. There is no Shell launcher in the benchmark call path.
-
-Two external services, both configured by env (no models ship with NMG):
-
-- **Embeddings (product/summary arms)**: BGE-small-en-v1.5 served by the sole
-  service entrypoint `evals/omnimemeval/bge_server.py` on `127.0.0.1:8000`.
-  GPU setup (one time,
-  PyTorch CUDA wheel ~3GB, venv lives in gitignored `.benchmarks/bge-venv`):
-  ```bash
-  uv venv .benchmarks/bge-venv
-  uv pip install --python .benchmarks/bge-venv/Scripts/python.exe torch --index-url https://download.pytorch.org/whl/cu126
-  uv pip install --python .benchmarks/bge-venv/Scripts/python.exe sentence-transformers fastapi "uvicorn[standard]"
-  .benchmarks/bge-venv/Scripts/python.exe evals/omnimemeval/bge_server.py --device cuda
-  ```
-  `uv run --with` can resolve PyPI's CPU-only torch on Windows, so it is not a
-  supported launch path. Invoke the prepared interpreter directly. With no
-  `--device`, the service selects CUDA when visible and CPU otherwise;
-  `--device cuda` and `--device cpu` force the choice. Explicit CUDA fails
-  instead of silently falling back. `/health` reports the actual Python,
-  PyTorch, device and dynamic-batcher state. Concurrent requests enter a
-  bounded queue and are merged up to `BGE_MAX_BATCH_TEXTS` (default 256) after
-  `BGE_BATCH_WAIT_MS` (default 5 ms); `BGE_MAX_QUEUE_REQUESTS` bounds admission.
-- **LLM (summaries arm / write-time judge)**: default is the OpenCode **Go**
-  subscription endpoint `https://opencode.ai/zen/go/v1` with
-  `deepseek-v4-flash` (`OPENCODE_API_KEY` in `.env`; included in the Go
-  model list, zero data retention). Go quota: $12 per 5h / $30 per week /
-  $60 per month; deepseek-v4-flash ≈ 7,600 requests per 5h. Fallback when
-  quota is exhausted: DeepSeek official (`NMG_SUMMARY_BASE_URL=https://api.deepseek.com`,
-  `NMG_SUMMARY_MODEL=deepseek-chat`, `NMG_SUMMARY_API_KEY=$DEEPSEEK_API_KEY`).
-  Note: the Go gateway currently ignores `thinking: {type: "disabled"}` —
-  responses carry a `reasoning` field anyway, so latency/cost per call is
-  higher than the official endpoint with thinking off.
+The environments and service settings for these results belong to the archived
+local runner. For an AML HTTP run, the selected service owns embedding and
+retrieval configuration.
 
 ## Results
 

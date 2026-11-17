@@ -20,12 +20,9 @@ exceeding its retrieval budget, or rebuilding an index unnecessarily.
 
 ## Layout
 
-- `omnimemeval/` is the maintained public-suite adapter and its single official
-  execution entry point. Its `research/` subtree contains non-default probes,
-  audits, and ablations.
-- `benchmarks/`, `longmemeval/`, `locomo/`, `personamem/`, and `beam/` preserve
-  the separate local matched-agent runners. They test harness-triggered recall;
-  they are not competing public-data pipelines.
+- `omnimemeval/` contains the maintained AML HTTP client and its upstream
+  evaluation guide. Its `research/` subtree contains probes, audits and ablations.
+- `official/` pins benchmark sources and supplies offline scoring utilities.
 - `controller*`, `topology/`, `retrieval/`, `consolidation/`, `disclosure/`,
   `reasoning-workspace/`, and scale/performance directories are focused research
   families. Use their local README or package script instead of treating the
@@ -36,13 +33,8 @@ their evidence family and must not silently define benchmark or product policy.
 
 ## Pi Agent integration cases
 
-Run `npm run eval:agents` for fresh-process Pi+NMG write/read cases. The runner
-loads `DEEPSEEK_API_KEY` from the process environment or the project `.env`,
-isolates Pi identity and NMG storage per case, and fails fast when credentials
-are unavailable. The suite includes both memory-dependent questions and ordinary
-memory-independent work. A no-memory case must produce the correct answer while
-making no `nmg_search` or `nmg_get` call, so NMG is checked for interference as
-well as recall.
+Historical headless Pi runs measured recall and interference on ordinary tasks.
+See the [archived evaluation guide](https://github.com/wefio/NodeMemoryGraph/blob/codex/archive-legacy-memory-engine-3cf3bec2/evals/README.md) for the setup and results.
 
 ## HaluMem operation-level extraction and update audit
 
@@ -55,7 +47,6 @@ the official judge can accept a labelled interference inference without the
 injected wording having been stored.
 
 ```powershell
-npm run eval:halumem:prepare -- --users 1 --session-start 6 --sessions 1 --reset
 npm run eval:halumem:score -- --users 1 --workers 4
 npm run eval:halumem:promotion-audit -- --user 1 --origin-start 5 `
   --origin-end 6 --observe-through 11 --reset 1
@@ -68,19 +59,9 @@ passing Core's configured consolidation gate. HaluMem contains no tool-success
 or answer-use outcomes; a zero-qualified run is a benchmark-coverage result, not
 a reason to weaken the product gate.
 
-`prepare` replays earlier sessions before emitting a bounded scored slice and
-writes the official `extracted_memories` / `memories_from_system` fields.
-`score` reuses HaluMem's official prompts and judgment functions, omits QA, and
-aggregates only metrics with a non-zero denominator. DeepSeek's valid bare JSON
-is accepted in addition to the fenced JSON required by upstream. Results and
-stores are ignored under `.benchmarks/halumem-nmg/`; see
-`docs/experiments/halumem-operation-evaluation-2026-08-11.md`.
-
-For a harness-policy ablation, first run
-`npm run eval:halumem:agent-extract -- --users 1 --through-session 6`, then pass
-its JSONL to `prepare` with `--agent-extractions`. The extractor sees only the
-dialogue and the current NMG memory policy. It never receives gold memory points
-or questions, and its cache key includes the policy hash and model.
+The scorer accepts existing operation-level artifacts. The original local
+write-set and agent-extraction comparison is recorded in the
+[archived evaluation guide](https://github.com/wefio/NodeMemoryGraph/blob/codex/archive-legacy-memory-engine-3cf3bec2/evals/README.md).
 
 ## Real-use controller calibration
 
@@ -111,17 +92,7 @@ Matched benchmark scoring uses the same fail-closed rule. Each official scored
 row preserves `taskScore`, nullable binary `taskSuccess`, typed/nullable evidence
 sufficiency, Pi tool rounds, provider tokens, and answer latency. A complete
 causal arm comparison emits `matchedProduct.metrics`; partial labels, unpaired
-rows, or an observational candidate emit blockers and `metrics: null`. To attach
-a valid scored artifact to an offline controller gate run:
-
-```powershell
-$env:NMG_CONTROLLER_MATCHED_PRODUCT_REPORT = "evals/.../official-score.json"
-npm run eval:controller -- locomo 4
-```
-
-This imports only the typed metrics. It does not merge benchmark rows into the
-natural shadow-training dataset, and a shadow-only artifact is rejected because
-the candidate did not affect ranking.
+rows, or an observational candidate emit blockers and `metrics: null`.
 
 ## Experiment logs
 
@@ -144,61 +115,13 @@ logs under `docs/` (indexed here so new work can find prior evidence):
 - `docs/design/llm-sufficiency-recall-design.md` — LLM-sufficiency recall design.
 - `docs/experiments/lme-recall-headers-2026-08-04.md` — recall-header refinement verified as format-only (94.15/87.95/82.67 unchanged; answer acc 82.3%).
 
-## Unified OmniMemEval runs
+## OmniMemEval over AML HTTP
 
-LongMemEval, LoCoMo, BEAM, PersonaMem v2 and HaluMem use the same NMG entry
-point. Stable run parameters live in
-`evals/omnimemeval/benchmark.config.json`, rather than being rebuilt on every
-command line. The entry point owns environment encoding, generated run identity
-and resume validation; the pinned
-OmniMemEval scripts continue to own each dataset's parsing, prompts, scoring,
-checkpoint implementation and report schema.
-
-```powershell
-# Complete pipeline using the checked-in configuration.
-npm run benchmark:omni -- longmemeval
-
-# Use a copied config for a bounded or one-off experiment.
-npm run benchmark:omni -- beam --config evals/omnimemeval/canary.config.json
-
-# Resume only from an exact old result directory.
-npm run benchmark:omni -- --resume `
-  .benchmarks/official/OmniMemEval/results/lme/nmg-fixed20-rerun
-
-# Validate the resolved official command without running it.
-npm run benchmark:omni -- personamem-v2 --dry-run
-```
-
-The checked-in config currently records `workers=16`, `llm-workers=16`,
-`top-k=20`, and `num-runs=1`; suite-only official arguments are stored beside
-the suite name. Change that file deliberately or select a copied config rather
-than growing another CLI parameter surface. OmniMemEval isolates benchmark user
-stores, so ingestion/search and answer/judge each use one bounded 16-worker
-pool rather than spawning an unbounded process per item.
-The runner never kills Pi, NMG daemons, embedding servers, or unrelated Python
-processes. External services remain the caller's responsibility.
-
-Resume is fail-closed: the directory must be inside the selected official
-result tree, record `LIB=nmg` and a version, and agree with the active config.
-The suite and version are inferred instead of repeated by the caller. Unsafe
-lifecycle flags are not replayed. Dataset-specific audits remain separate
-commands; they do not change execution or official scoring.
-
-Storage: user stores (`omnimemeval-nmg/*.sqlite`) are keyed by
-`sha256(userId)` and the userId embeds the version label, so every run creates
-~500 fresh ~12 MB stores that are never reused. Embeddings are the shared,
-reusable part: all evals use ONE content-hashed cache at
-`.benchmarks/shared-embedding-cache.sqlite` (keys = `(model, kind, text_hash)`,
-so the same text under the same model maps to the same vector everywhere).
-**Boundary — do not create new per-eval embedding caches.** `OmniMemEvalBridge`
-and the probe/audit scripts default to the shared cache; only pass an explicit
-`embeddingCachePath` (or hardcode a path) when true isolation is required, and
-fold its content back into the shared cache when done
-(`evals/omnimemeval/merge-embedding-caches.mjs`). Measured before merging:
-27% of cached rows (248k) were duplicates across eval variants — the merged
-shared cache is the single source of truth. Run `--prune-stores` after a run
-to drop all stores except the current run's (ingestion rebuilds them; the
-shared embedding cache is what actually makes reruns cheap).
+Run the pinned upstream suite with the NMG HTTP adapter. The
+[OmniMemEval guide](omnimemeval/README.md#run-longmemeval-over-aml-http) covers
+installation, the AML endpoint and namespace, and the LongMemEval command.
+The upstream runner owns checkpoints and the report. Repository-local scoring
+commands can still score artifacts from supported historical runs.
 
 ## One-off measurement scripts
 
@@ -207,11 +130,8 @@ stdout, so redirect it if you want to keep the numbers.
 
 | Command                                      | Measures                                                                                                                       |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `npm run eval:concurrency`                   | Concurrent writers across sessions into a temporary store, then one read per session; prints write/read latency p50, p95, p99. |
-| `npm run eval:perf-overhead`                 | `searchContext` with performance timing on and off, at two store sizes, plus a phase profile from one run.                     |
-| `npm run eval:recall-compression`            | The same recall payload in the recall representations, compared by context size.                                               |
 | `npm run benchmark:merge:longmem`            | Merges LongMemEval shard result files into one result set (`merge-longmemeval-shards.ts`).                                     |
-| `npm run benchmark:ablate:reverse-retrieval` | The reverse-retrieval ablation; its arms and runner are described in `omnimemeval/README.md`.                                  |
+| `npm run benchmark:ablate:reverse-retrieval` | Compares reverse-retrieval arms from saved artifacts.                                  |
 
 ## Benchmark roles
 
@@ -230,48 +150,17 @@ number because they measure different distributions and failure modes.
 
 ## Official-protocol benchmark commands
 
-The npm entry points below are the README-independent reproduction surface.
-Dataset placement and overrides are documented in each adapter's README under
-`evals/`; `validate` parses official local data and reports stratified samples
-without a model call.
+Use the [AML HTTP workflow](omnimemeval/README.md#run-longmemeval-over-aml-http)
+to generate new OmniMemEval results. Use the existing offline scorers for their
+supported NMG prediction artifacts.
 
 ```bash
-# LongMemEval development comparison (also see "Reproducible LongMemEval runs")
-npm run eval:longmem -- no-memory 1
-npm run eval:longmem -- oracle 1
-npm run eval:longmem -- nmg-oracle 1
-npm run eval:longmem -- matched 1
 npm run benchmark:score:longmem -- <result-directory>
-
-# LoCoMo / PersonaMem / BEAM share one runner and the same matched modes
-npm run eval:locomo -- validate 1
-npm run eval:personamem -- validate 1
-npm run eval:beam -- validate 1
-
-npm run eval:locomo -- matched 1
-npm run eval:personamem -- matched 1
-npm run eval:beam -- matched 1
 npm run benchmark:score -- <locomo|personamem|beam> <result-directory>
-
-# Deterministic invariants and ablations (no model call)
-npm run eval:quality
-npm run eval:adaptive
-
-# Scale ladder: 100 / 1K / 10K / 100K memories (see evals/scale/README.md)
-npm run eval:scale
 ```
 
-Matched rows retain exact Pi tool rounds, tool calls, provider token usage, and
-answer latency. Official scoring adds a lossless `rowScore`; task success and
-evidence sufficiency remain `null` when the upstream protocol does not define
-them. The scored artifact also contains a fail-closed `matchedProduct` audit.
-The current `nmg-shadow` arm does not alter ranking, so its audit intentionally
-reports `candidate_does_not_affect_ranking` instead of product-gate metrics.
-
-Older LongMemEval diagnostic ablations compared raw-session, flat-hybrid, Lite,
-and Graph variants. They predate the strict three-arm protocol and remain
-documented only as historical mechanism evidence, not as current matched-gate
-or benchmark claims.
+Historical matched local runs and their commands are recorded in the
+[archived evaluation guide](https://github.com/wefio/NodeMemoryGraph/blob/codex/archive-legacy-memory-engine-3cf3bec2/evals/README.md).
 
 ## SkillOpt policy Lab
 
@@ -291,20 +180,10 @@ Use `--allow-insufficient` only for a file-layout/adapter smoke. See
 
 ## Reproducible official-protocol workflow
 
-NMG keeps prediction generation separate from benchmark scoring. A reader run
-writes `report.json` and `predictions.jsonl`; a later scoring command writes
-`official-score.json` without rerunning the reader model.
-
-```powershell
-npm run benchmark:setup
-npm run benchmark:validate
-
-npm run eval:locomo -- matched 1
-npm run benchmark:score -- locomo <result-directory>
-
-npm run eval:longmem -- matched 1
-npm run benchmark:score:longmem -- <result-directory>
-```
+OmniMemEval produces and scores AML runs through the
+[upstream workflow](omnimemeval/README.md#run-longmemeval-over-aml-http).
+For an existing NMG-format `report.json` and `predictions.jsonl`, the offline
+score commands above produce `official-score.json`.
 
 ### Local score snapshots
 
@@ -335,10 +214,8 @@ benchmark code is not copied into NMG core.
 OmniMemEval and the local Pi runner measure different boundaries. OmniMemEval's
 user-memory track always invokes the backend's `search()` method, so it is the
 preferred backend-retrieval harness and should own public-dataset parsing,
-replay, checkpointing and report generation. The local matched runner remains
-the Pi integration gate because it measures whether the harness triggers recall
-and whether the agent uses the returned evidence. It is not retired when
-OmniMemEval parity passes.
+replay, checkpointing and report generation. Historical local matched Pi runs measured whether the harness triggers recall
+and whether the agent uses the returned evidence.
 
 Judge-backed protocols currently use `deepseek/deepseek-v4-flash` in place of
 the upstream proprietary judge. Those outputs are labelled
@@ -352,33 +229,9 @@ than rubric-score averaging.
 
 ## Matched capability gate
 
-The default `matched` command runs exactly three arms:
-
-1. `no-memory`: Pi without the NMG extension;
-2. `nmg-deterministic`: deterministic NMG with controller shadow disabled;
-3. `nmg-shadow`: the same deterministic NMG retrieval with controller scoring
-   and telemetry enabled, but without changing ranking.
-
-Every NMG arm starts from an independent copy of the same seeded database. All
-three arms use the same reader model, thinking level, user prompt, question IDs
-and official scorer. The runner records a prompt hash per row. Set
-`NMG_BENCH_REPEATS` for repeated stochastic trials; one repeat is only a smoke
-signal.
-
-Other modes (`raw-session`, `flat-hybrid`, `nmg-nodes`, and `nmg-graph`) remain
-diagnostic ablations rather than members of the strict three-arm gate.
-
-The separate backend capability ablation runs the four architecture arms from
-the design checklist over one shared sample/corpus and budget:
-
-```powershell
-npm run eval:longmem -- backend-ablation 1
-```
-
-Its arms are `no-memory`, `flat-hybrid`, `nmg-lite` (`graphHops=0`), and
-`nmg-graph` (`graphHops=1`). Each row records both the complete effective prompt
-hash and a `taskPromptHash` covering the invariant question/instructions. This
-is a matched local development comparison, not a leaderboard run.
+The historical local gate compared no-memory, deterministic NMG and controller
+shadow on the same cases, prompts and scorer. The four-arm backend ablation and
+run settings are in the [archived evaluation guide](https://github.com/wefio/NodeMemoryGraph/blob/codex/archive-legacy-memory-engine-3cf3bec2/evals/README.md).
 
 ## Required measurements
 
@@ -497,11 +350,11 @@ not considered better when the same result comes from a smaller retrieval arm.
 
 ## Adapter verification
 
-Use `npm run benchmark:validate` as the authoritative check for locally
-available official data. Do not preserve ad-hoc model scores in this document:
-they become stale when sampling, prompts, retrieval policy, or model versions
-change. Every benchmark client uses `--no-extensions` and loads at most one
-explicit NMG instance; the no-memory control loads none.
+Run the installer and simulated AML HTTP contracts with:
+
+```bash
+node --experimental-strip-types --test tests/evals/omnimemeval-install.test.ts tests/evals/omnimemeval-http-client.test.ts
+```
 
 ## Consolidation policy audit
 
@@ -531,19 +384,11 @@ pressure, so a high total cannot be mistaken for one hot node.
 
 ## Topology identity-gate audit
 
-`npm run eval:topology` uses LoCoMo's stable speaker identities to construct
-same-person early/late node pairs and cross-person negative pairs. It measures
-the production `same_as` assessment gate, competing-identity withdrawal, and
-the invariant that assessment never mutates topology. Candidate generation is
-deliberately held constant, so the result is not an alias-resolution or
-end-to-end automatic-merge score. See
-`docs/experiments/topology-gate-evaluation-2026-08-09.md`.
+Historical topology runs use LoCoMo's stable speaker identities.
+See the [experiment record](../docs/experiments/topology-gate-evaluation-2026-08-09.md).
 
-`npm run eval:topology:bpid` adds multi-field identity hard negatives, while
 `npm run eval:topology:namesakes` optionally reads the official CC BY 4.0
-Namesakes Entities JSONL to measure alias-like positive recall and rejection of
-same-name references to a different entity. Both report candidate-generation
-curves and remain read-only: neither score is allowed to authorize a merge.
+Namesakes Entities JSONL to measure alias-like positive recall and rejection of\nsame-name references to a different entity. This is a read-only audit.
 Namesakes data belongs under `.benchmarks/namesakes/data/` and is not committed.
 See `docs/experiments/topology-bpid-evaluation-2026-08-09.md` and
 `docs/experiments/topology-namesakes-evaluation.md`.

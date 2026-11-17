@@ -4,8 +4,7 @@
 
 These files are diagnostic or hypothesis-testing utilities. They do not define
 the public benchmark execution path, official prompts, or NMG runtime defaults.
-Use the parent directory's `run.ts`, `benchmark.config.json`, `bridge.ts`, and
-`README.md` for reproducible suite execution.
+For new benchmark runs, follow the [AML HTTP guide](../README.md).
 
 ## Layout
 

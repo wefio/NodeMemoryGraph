@@ -13,8 +13,8 @@ network, persistence, and isolation boundaries under test.
 
 ## Decision
 
-The shared Python client has an opt-in HTTP transport alongside its default
-NDJSON subprocess. The [integration owner](../../../evals/omnimemeval/README.md#integration-boundary)
+The shared Python client uses AML HTTP as its transport. The archived local
+implementation remains available for historical reproduction. The [integration owner](../../../evals/omnimemeval/README.md#integration-boundary)
 defines configuration, identity mapping, response validation, and unsupported
 operations. HTTP runs skip local embedding-provider preflight because the
 deployed service owns that dependency.
@@ -41,8 +41,8 @@ identify an API error code; absent historical response bodies remain unknown.
 
 ## Consequences
 
-One runner retains upstream parsing, answer prompts, scoring, and checkpoints
-for local and remote Add/Search evaluations. Remote operation-level HaluMem and
+The pinned upstream runner owns parsing, answer prompts, scoring, and checkpoints
+for AML HTTP evaluations. Remote operation-level HaluMem and
 destructive streaming lifecycles remain unsupported. Namespace reuse is limited
 to intentional resume; reclamation requires separate authorization.
 

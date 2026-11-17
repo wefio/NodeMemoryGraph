@@ -136,30 +136,9 @@ Answer/judge stages also require their own LLM budget:
 
 ## Reproduction
 
-The preserved shell block is historical, not the normal current NMG entry.
-For an authorized new/resumed run, first follow the
-[config-driven workflow](../../.pi/skills/omnimemeval-eval/SKILL.md), which owns
-checkpoint/configuration checks and the runner entry. The commands below can
-invoke paid answer/judge stages; this documentation review grants no run budget
-and executed none of them.
-
-```bash
-# BEAM 100K (complete result above)
-cd .benchmarks/official/OmniMemEval
-PYTHONUTF8=1 NMG_CHAIN_INJECTION=logical \
-  bash scripts/run_beam_eval.sh --lib nmg --env .env.nmg-opencode \
-  --version <version-label>
-
-# Remaining suites share the same entry points
-./scripts/run_lme_eval.sh   --lib nmg --env .env.nmg-opencode --from-step 3
-./scripts/run_locomo_eval.sh --lib nmg --env .env.nmg-opencode
-./scripts/run_pmv2_eval.sh  --lib nmg --env .env.nmg-opencode --from-step 3
-./scripts/run_halumem_eval.sh --lib nmg --env .env.nmg-opencode
-```
-
-The NMG adapter bridge lives at `evals/omnimemeval/bridge.ts`; per-user stores
-under `.benchmarks/omnimemeval-nmg/`, shared embedding cache at
-`.benchmarks/shared-embedding-cache.sqlite`.
+The results above used the archived local harness. See the [archived report](https://github.com/wefio/NodeMemoryGraph/tree/codex/archive-legacy-memory-engine-3cf3bec2)
+for its run commands and [the AML HTTP guide](../../evals/omnimemeval/README.md)
+for new runs.
 
 ### Embedding availability contract
 

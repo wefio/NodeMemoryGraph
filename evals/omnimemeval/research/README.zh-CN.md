@@ -2,8 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) · [术语](README.terms.yaml)
 
-这些文件是诊断或假设检验工具。它们不定义公开的 benchmark 执行路径、官方 prompt 或 NMG 运行时默认值。可复现的 suite 执行请使用父目录的 `run.ts`、`benchmark.config.json`、`bridge.ts` 与
-`README.md`。
+这些文件是诊断或假设检验工具。它们不定义公开的 benchmark 执行路径、官方 prompt 或 NMG 运行时默认值。新的评测运行见 [AML HTTP 指南](../README.zh-CN.md)。
 
 ## 布局
 

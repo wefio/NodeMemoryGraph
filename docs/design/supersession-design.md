@@ -46,7 +46,7 @@ A separate, explicit state-key rule applies when a write has `memoryType: "state
 - The Pi remember surface shows up to three possible stale values and says similarity alone is insufficient. If the Agent confirms a genuine same-scope replacement, it calls `nmg_remember` with `action=supersede`, `newMemoryId`, and `supersededMemoryId`.
 - `NmgStore.recordFeedback({ supersede })` is a write-path maintenance method. With both IDs it applies full supersession; with only the stale ID it marks that record `disputed` because the replacement has not yet been written. The later new-value write can then surface it as a candidate.
 - The daemon/MCP `recordFeedback` method is a different API: it consumes labeled automatic-recall feedback for the online learner and requires the named graph. Do not conflate it with `NmgStore.recordFeedback` or with `recordClaimOutcomes`.
-- `evals/omnimemeval/bridge.ts` has an evaluation-only external-judge path. It drops candidates known not to be strictly older than the incoming event (unknown candidate or incoming times remain eligible), keeps only strong `transition`/`polarity` priorities, caps the judge set at three, and applies accepted results. This harness behavior does not make the core store call an LLM or establish that product callers use the same judge.
+- The archived OmniMemEval bridge used an evaluation-only external-judge path. It drops candidates known not to be strictly older than the incoming event (unknown candidate or incoming times remain eligible), keeps only strong `transition`/`polarity` priorities, caps the judge set at three, and applies accepted results. This harness behavior does not make the core store call an LLM or establish that product callers use the same judge.
 
 ## Retrieval projection
 
