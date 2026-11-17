@@ -41,7 +41,7 @@ The second pass re-selects cumulative Fibonacci prefixes from one over-sampled c
 | `searchContextWithSecondPass()` | `secondPass` on | Convenience wrapper; an explicit option can override it. |
 | CLI `nmg search` | off | `--second-pass` opts in. |
 | Pi extension | `NMG_QPP2_MODE=off` | Active QPP2 turns on progressive retrieval and attempts the learned fold; the fold still needs an actuating controller channel. |
-| `OmniMemEvalBridge` | `secondPass` on | Its constructor option can override this evaluation-specific default. |
+| Archived local OmniMemEval bridge | `secondPass` on | Its constructor option can override this evaluation-specific default. |
 
 Do not read one caller's default as the product-wide default. The Pi `NMG_QPP1_MODE` is separate: it defaults to `shadow`; allocation is wired only for an explicit Pi search without a caller-supplied `limit`, and the returned budget remains hard-bounded.
 
@@ -67,4 +67,4 @@ The Pi `ControllerShadowBridge` is an optional adapter, not the universal retrie
 
 ## Source references
 
-The core score and walk live in [`qpp.ts`](../../../src/core/qpp.ts) and [`retrieval.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts). Caller settings are in [`config.ts`](../../../src/integration/config.ts), the evaluation default is in [`OmniMemEval bridge`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/evals/omnimemeval/bridge.ts), and controller gating is in [`controller-channel.ts`](../../../src/integration/controller-channel.ts), [`controller-shadow.ts`](../../../.pi/extensions/nmg/controller-shadow.ts), and the [Pi extension](../../../.pi/extensions/nmg/index.ts).
+The core score and walk live in [`qpp.ts`](../../../src/core/qpp.ts) and [`retrieval.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts). Caller settings are in [`config.ts`](../../../src/integration/config.ts), the historical evaluation default is in [`OmniMemEval bridge`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/evals/omnimemeval/bridge.ts), and controller gating is in [`controller-channel.ts`](../../../src/integration/controller-channel.ts), [`controller-shadow.ts`](../../../.pi/extensions/nmg/controller-shadow.ts), and the [Pi extension](../../../.pi/extensions/nmg/index.ts).

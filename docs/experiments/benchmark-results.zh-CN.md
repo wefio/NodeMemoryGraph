@@ -99,26 +99,7 @@ NMG 在 [OmniMemEval](https://github.com/MemTensor/OmniMemEval) 用户记忆 ben
 
 ## 复现
 
-保留的 shell 块是历史记录，不是当前 NMG 的常规入口。获授权的新运行／续跑须先遵循
-[配置驱动工作流](../../.pi/skills/omnimemeval-eval/SKILL.md)，由其拥有 checkpoint／配置
-检查及 runner 入口。下列命令可能执行付费 answer／judge 阶段；本轮文档审阅不授予运行
-预算，也未执行其中任何命令。
-
-```bash
-# BEAM 100K (complete result above)
-cd .benchmarks/official/OmniMemEval
-PYTHONUTF8=1 NMG_CHAIN_INJECTION=logical \
-  bash scripts/run_beam_eval.sh --lib nmg --env .env.nmg-opencode \
-  --version <version-label>
-
-# Remaining suites share the same entry points
-./scripts/run_lme_eval.sh   --lib nmg --env .env.nmg-opencode --from-step 3
-./scripts/run_locomo_eval.sh --lib nmg --env .env.nmg-opencode
-./scripts/run_pmv2_eval.sh  --lib nmg --env .env.nmg-opencode --from-step 3
-./scripts/run_halumem_eval.sh --lib nmg --env .env.nmg-opencode
-```
-
-NMG adapter bridge 位于 `evals/omnimemeval/bridge.ts`；每用户 store 在 `.benchmarks/omnimemeval-nmg/` 下，共享 embedding cache 为 `.benchmarks/shared-embedding-cache.sqlite`。
+以上结果使用归档版的本地评测。原始运行命令见[归档记录](https://github.com/wefio/NodeMemoryGraph/tree/codex/archive-legacy-memory-engine-3cf3bec2)，新的评测运行见 [NMG HTTP 指南](../../evals/omnimemeval/README.zh-CN.md)。
 
 ### Embedding 可用性契约
 

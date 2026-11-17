@@ -68,14 +68,14 @@ class NmgRemoteError(RuntimeError):
 
 
 class NmgClient:
-    """Delegate memory operations to the AML HTTP API."""
+    """Delegate memory operations to the NMG HTTP service."""
 
     def __init__(self) -> None:
         self._remote_url = os.environ.get("NMG_OMNI_API_URL", "").rstrip("/")
         self._remote_token = os.environ.get("NMG_OMNI_API_TOKEN", "")
         self._remote_namespace = os.environ.get("NMG_OMNI_API_NAMESPACE", "").strip()
         if not self._remote_url:
-            raise ValueError("Set NMG_OMNI_API_URL to the AML API endpoint")
+            raise ValueError("Set NMG_OMNI_API_URL to the NMG HTTP service endpoint")
         self._validate_remote_configuration()
 
     def add(
@@ -105,7 +105,7 @@ class NmgClient:
         This is used by operation-level memory benchmarks.  The ordinary
         OmniMemEval ``add`` contract intentionally remains write-only.
         """
-        raise RuntimeError("AML Add receipts do not expose materialized memory records")
+        raise RuntimeError("NMG HTTP Add receipts do not expose materialized memory records")
 
     def search(self, query: str, user_id: str, top_k: int) -> str:
         result = self._request(

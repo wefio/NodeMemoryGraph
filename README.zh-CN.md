@@ -87,7 +87,7 @@ skills/nmg-memory/SKILL.md，再选择当前环境支持的最佳接入方式。
 | [Kimi Code CLI](kimi-plugin/README.zh-CN.md) | MCP 工具加可选提醒、在场登记和 prompt 时黑板轮询 | 只装 hook 没有记忆工具、自动召回或状态承载 |
 | 其他可调用工具的 Agent | [CLI + Skill](#agent-无关-cli) 保存、搜索并展开记忆 | 需要 Agent 能执行 CLI 并读取 Skill；自动召回取决于宿主 |
 
-适配器负责宿主工具和传输。Pi、Claude MCP、DSH 和 benchmark 桥共用 Agent Surface，
+适配器负责宿主工具和传输。Pi、Claude MCP 和 DSH 共用 Agent Surface，
 提供精简搜索、精确证据、remember 后续操作、任务板输出、脱敏和逻辑链投影；
 宿主特定的生命周期、工具 schema 和传输回退仍属于各自适配器。更多边界见
 [适配能力矩阵](docs/design/harness-capability-matrix.zh-CN.md)。各连接的安装和日常操作见

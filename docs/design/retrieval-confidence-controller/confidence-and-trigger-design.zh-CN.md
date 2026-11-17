@@ -41,7 +41,7 @@ NQC = clamp(stdev(direct strengths) / mean(direct strengths), 0, 1)
 | `searchContextWithSecondPass()` | `secondPass` 开启 | 便捷包装方法；显式选项可以覆盖默认值。 |
 | CLI `nmg search` | 关闭 | 使用 `--second-pass` 显式启用。 |
 | Pi extension | `NMG_QPP2_MODE=off` | QPP2 active 会启用渐进检索并尝试 learned fold；fold 仍需要可执行动作的控制器通道。 |
-| `OmniMemEvalBridge` | `secondPass` 开启 | 构造选项可以覆盖这个仅适用于评测桥接器的默认值。 |
+| 归档版本地 OmniMemEval bridge | `secondPass` 开启 | 构造选项可以覆盖这个仅适用于评测桥接器的默认值。 |
 
 不要把某个调用方的默认值理解成产品全局默认。Pi 的 `NMG_QPP1_MODE` 是另一项配置：默认 `shadow`；只有显式 Pi 搜索处于 active 且调用方没有提供 `limit` 时才接入 allocation，返回的预算仍受硬上限约束。
 
@@ -67,4 +67,4 @@ Pi 的 `ControllerShadowBridge` 是可选适配器，不是通用检索路径。
 
 ## 源码参考
 
-核心分数与遍历位于 [`qpp.ts`](../../../src/core/qpp.ts) 和 [`retrieval.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)。调用方配置见 [`config.ts`](../../../src/integration/config.ts)，评测默认值见 [`OmniMemEval bridge`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/evals/omnimemeval/bridge.ts)；控制器门控见 [`controller-channel.ts`](../../../src/integration/controller-channel.ts)、[`controller-shadow.ts`](../../../.pi/extensions/nmg/controller-shadow.ts) 和 [Pi extension](../../../.pi/extensions/nmg/index.ts)。
+核心分数与遍历位于 [`qpp.ts`](../../../src/core/qpp.ts) 和 [`retrieval.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)。调用方配置见 [`config.ts`](../../../src/integration/config.ts)，历史评测默认值见 [`OmniMemEval bridge`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/evals/omnimemeval/bridge.ts)；控制器门控见 [`controller-channel.ts`](../../../src/integration/controller-channel.ts)、[`controller-shadow.ts`](../../../.pi/extensions/nmg/controller-shadow.ts) 和 [Pi extension](../../../.pi/extensions/nmg/index.ts)。

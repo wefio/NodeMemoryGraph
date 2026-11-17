@@ -10,7 +10,7 @@
 |---|---|---|---|---|
 | 原生答案版本归因 | hello capability `versioned-answer-attribution` | 能力可用，由调用方选择 | 自有投影、已完成回复及匹配的陈述指纹产生诊断重合 | [Codex 契约](../../../codex-plugin/README.zh-CN.md)，确定性原生 fixture 已验证 |
 | 统一记忆后端 | `nmg daemon migrate` 或 `NmgServiceOptions.memoryBackend` | SQLite 遵循启用标记 | SQLite 与协作共用文件；LanceDB 使用 URI | 本地副本和 S3 协议夹具已验证。[后端契约](../unified-architecture/native-backends.zh-CN.md) · [启用流程](../unified-architecture/legacy-graph-migration.zh-CN.md) |
-| OmniMemEval deployed HTTP transport | `NMG_OMNI_API_URL`、`NMG_OMNI_API_TOKEN`、`NMG_OMNI_API_NAMESPACE` | OFF；默认本地 NDJSON 桥 | 带鉴权和显式 namespace 的同步 AML Add/Search；不做本地 embedding 预检，不支持重定向、删除或操作级物化记录 | 显式启用，验证范围由各实验限定；[Benchmark 集成](../../../evals/omnimemeval/README.zh-CN.md#集成边界) |
+| OmniMemEval NMG HTTP | `NMG_OMNI_API_URL`、`NMG_OMNI_API_TOKEN`、`NMG_OMNI_API_NAMESPACE` | 必填 | 带显式命名空间的同步 HTTP Add/Search | [集成指南](../../../evals/omnimemeval/README.zh-CN.md) |
 | Board presence, events and Agent status | `board-events`、`board-agent-activity`、`board-agent-presence`、`board-wake-batches`；`nmg_state space=board` | 跟随共享黑板 gate，记录创建为显式动作 | 版本历史、范围通知、邀请订阅与退出、任务状态，以及[会话在线状态与处理报告](../board-event-records/agent-activity-and-batches.zh-CN.md) | 源码验证与部署分开 |
 | Automatic recall deadline and timing | 无 env gate；Pi `/nmg recall timing` 查看诊断 | ON | [五秒绝对等待预算](../session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.zh-CN.md)；显式搜索不受自动期限约束；实现位于 `src/integration/recall-budget.ts` 与 Pi／WorkBuddy adapters | 默认开启；共享 integration owner |
 | Maintained AG working state | `nmg_state space=ag action=write operation=enable`／`nmg state write ag enable` | writer OFF | 有界 session lease；`replace(text)`／`clear()`；拒绝过期、secret、超预算写入；disable／过期撤销 writer 但保留文本；Pi 每个用户回合通过共享 InformationView 原子携带状态 | opt-in writer；仅确定性机制；[state spaces](../state-spaces.zh-CN.md) |
@@ -37,10 +37,10 @@
 | Controlled daemon code reload | 显式 `nmg daemon reload`；owner 能力 `controlled-reload`；内部 `daemon run --reload-ticket` | OFF（仅操作员动作） | 独占交接、排空已接受调用、持票替代、持久数据保留、易失 AG／租约清空；缺少能力与孤儿门禁 fail closed | 隔离契约测试；没有自动生产替换 |
 | Agent identity／capabilities | `NMG_AGENT_ID`、`NMG_AGENT_CAPABILITIES`、`NMG_AGENT_ONLINE_MS`、`DSH_SESSION_ID` | 自动 | board／agent 注册身份 | 配置 |
 | Paths | `NMG_DATA_DIR`、`NMG_PROJECT_DIR`、`HOME`、`USERPROFILE` | 依环境 | data／project 目录 | 配置 |
-| Model selection | `NMG_EMBED_MODEL`、`NMG_SUMMARY_MODEL`、`NMG_JUDGE_MODEL`、`EVAL_MODEL`、`ANSWER_MODEL` | provider 默认值 | 选择 embedding、summarizer、judge、eval、answer 模型 | 配置 |
+| Model selection | `NMG_EMBED_MODEL`、`NMG_SUMMARY_MODEL`、`EVAL_MODEL`、`ANSWER_MODEL` | provider 默认值 | 选择 embedding、summarizer、上游答题和评分模型 | 配置 |
 | Retrieval backend mode（RPC 参数，非 env） | `retrievalMode` | `legacy` | `legacy`／`fts5`／`hashing`／`qwen3`／`hybrid` | 配置／knob |
 | 在线召回反馈 | 沿用 online-learning 默认值 | ON | 评分邀请带 activeGraphId，`nmg_remember action=feedback` 为该图提交显式标签并返回训练结果。共享 MCP 与原生工具使用同一 RPC。提示归属为 `src/prompts/nmg-prompts.yaml` 的 `recall_feedback_affordance` | [反馈用法](../../../skills/nmg-memory/references/adapter-usage.zh-CN.md)，确定性契约已验证 |
-| Benchmark venv directory | `NMG_BENCH_VENV`、`NMG_HALUMEM_PYTHON` | `bge-venv` | `.benchmarks/` 下的共享 Python 3.13 benchmark venv；缺失时 runner 发出警告，不静默回退到 PATH 中的 Python | 已实现（2026-09-11）；benchmark harness |
+| HaluMem 评分 Python | `NMG_HALUMEM_PYTHON` | `.benchmarks/bge-venv` | 离线操作评分使用的解释器路径 | `evals/halumem/score.ts` |
 | Pi first-output timing observer | `/nmg-latency on\|off\|status` | OFF；会话替换／分支导航／reload 时重置 | host-event observer；无 probe request，不改变等待策略；加载本身不会启用采集 | opt-in；[lifecycle contract](../session-memory-lifecycle-hooks-2026-08-10.zh-CN.md) |
 
 ## 仓库文档试点

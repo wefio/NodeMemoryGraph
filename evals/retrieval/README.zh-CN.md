@@ -2,14 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) · [术语](README.terms.yaml)
 
-一条命令、一份固定协议、一张表：`npm run eval:retrieval` 把自动回忆、
-`nmg_search`、Pi 级 adapter、daemon 与 OmniMemEval 桥共用的 NMG 产品检索与
-Agent Surface 当作纯 retriever 来测量，不需要答案模型或判定器。数据集适配与
-打分仍归 benchmark 所有；候选生成、投影、精确证据、链、脱敏与显示预算不归它。
-
-既有的审计脚本（`evals/omnimemeval/research/audits/audit-*-retrieval.*`）测量
-渲染后上下文的文本覆盖率，并丢失排序信息。本 runner 保留排序：每条金标证据
-记录它在返回候选中的首次命中排名。
+本文记录历史本地 SQLite 检索协议和评测结果。新的评测见 [NMG HTTP 指南](../omnimemeval/README.zh-CN.md)。
 
 ## 协议（固定）
 
@@ -96,50 +89,11 @@ PersonaMem 按偏好类型。
 manifest 固定 dataset sha256、git commit（含 dirty 标记）、Node 与 NMG 版本、
 检索模式与每个预算旋钮。
 
-```powershell
-npm run eval:retrieval                          # all five datasets, pinned samples
-npm run eval:retrieval -- --dataset locomo      # one dataset
-npm run eval:retrieval -- --dataset personamem,halumem
-npm run eval:retrieval -- --dataset longmemeval --full
-npm run eval:retrieval -- --summaries           # leaf-block summary arm (LLM endpoint)
-```
-
-在数据与配置不变的情况下重跑会复用已摄取的存储，并逐位复现指标（只有墙钟延迟
-不同）。
+历史设置和命令见[归档检索指南](https://github.com/wefio/NodeMemoryGraph/blob/codex/archive-legacy-memory-engine-3cf3bec2/evals/retrieval/README.zh-CN.md)。
 
 ## 环境
 
-规范 runner：`npm run eval:retrieval -- [options]`。TypeScript runner 加载
-`.env` 与可选的 `.env.nmg-bgefix`，然后在运行之前检查所配置的嵌入服务。package
-脚本还设置 LME 堆上限。benchmark 调用路径中没有 Shell 启动器。
-
-两个外部服务，都由环境变量配置（NMG 不自带模型）：
-
-- **嵌入（产品/摘要臂）**：BGE-small-en-v1.5，由唯一服务入口
-  `evals/omnimemeval/bge_server.py` 在 `127.0.0.1:8000` 提供。
-  GPU 设置（一次性，PyTorch CUDA wheel 约 3GB，venv 位于被 git 忽略的
-  `.benchmarks/bge-venv`）：
-  ```bash
-  uv venv .benchmarks/bge-venv
-  uv pip install --python .benchmarks/bge-venv/Scripts/python.exe torch --index-url https://download.pytorch.org/whl/cu126
-  uv pip install --python .benchmarks/bge-venv/Scripts/python.exe sentence-transformers fastapi "uvicorn[standard]"
-  .benchmarks/bge-venv/Scripts/python.exe evals/omnimemeval/bge_server.py --device cuda
-  ```
-  `uv run --with` 在 Windows 上可能解析出 PyPI 的纯 CPU torch，因此它不是受支持
-  的启动路径。请直接调用准备好的解释器。不给 `--device` 时，服务在可见时选
-  CUDA，否则选 CPU；`--device cuda` 与 `--device cpu` 强制该选择。显式 CUDA 失败
-  时会报错而不是静默回退。`/health` 报告实际的 Python、PyTorch、设备与动态批处理
-  状态。并发请求进入一个有界队列，在 `BGE_BATCH_WAIT_MS`（默认 5 ms）之后合并到
-  最多 `BGE_MAX_BATCH_TEXTS`（默认 256）；`BGE_MAX_QUEUE_REQUESTS` 限定准入。
-- **LLM（摘要臂 / 写入时判定器）**：默认是 OpenCode **Go** 订阅端点
-  `https://opencode.ai/zen/go/v1` 配 `deepseek-v4-flash`（`.env` 中的
-  `OPENCODE_API_KEY`；包含在 Go 模型列表中，零数据保留）。Go 配额：每 5 小时
-  $12 / 每周 $30 / 每月 $60；deepseek-v4-flash 约每 5 小时 7,600 次请求。
-  配额耗尽时的回退：DeepSeek 官方（
-  `NMG_SUMMARY_BASE_URL=https://api.deepseek.com`、
-  `NMG_SUMMARY_MODEL=deepseek-chat`、`NMG_SUMMARY_API_KEY=$DEEPSEEK_API_KEY`）。
-  注意：Go 网关当前忽略 `thinking: {type: "disabled"}` —— 响应仍带 `reasoning`
-  字段，因此每次调用的延迟/成本高于关闭 thinking 的官方端点。
+这些结果的环境和服务设置属于归档版的本地 runner。NMG HTTP 评测的向量和检索配置由选定的服务负责。
 
 ## 结果
 

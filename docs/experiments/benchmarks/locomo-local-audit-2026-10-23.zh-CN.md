@@ -29,18 +29,7 @@ LLM-as-Judge（1,540 题，流水线完整、零失败零跳过）。对用户�
 
 ## 配置
 
-- 基准：LoCoMo 全部 1,540 题，官方锁定检出
-  `D:/Github/.benchmarks/official/OmniMemEval`，经仓库 runner 启动
-  （`npm run benchmark:omni -- locomo --config evals/omnimemeval/locomo-audit.config.json`）。
-- 记忆库：`nmg`（本地桥接 `evals/omnimemeval/bridge.ts`，直连 SQLite 存储）
-  ——受支持的本地路径；线上跑使用的 `nmgremote` 客户端未安装在本检出。
-- 全新隔离语料：`NMG_OMNI_DATA_DIR=<repo>/.benchmarks/omnimemeval-nmg-audit1023`。
-
-本记录最初瞄准锁定的 OmniMemEval python 管线（`npm run benchmark:omni -- locomo
---config evals/omnimemeval/locomo-audit.config.json`，`--lib nmg`）；该路线在反复
-出现后台静默启动失败后放弃，实际交付的采集走 onlion worker 入口（见方法说明）。
-线上跑使用的 `nmgremote` 客户端未安装在本检出。
-
+- 基准：LoCoMo 全部 1,540 题。原先尝试通过归档适配器直连本地 SQLite，但后台启动失败。实际采集使用 onlion worker 入口，见方法说明。[归档配置](https://github.com/wefio/NodeMemoryGraph/blob/codex/archive-legacy-memory-engine-3cf3bec2/docs/experiments/benchmarks/locomo-local-audit-2026-10-23.zh-CN.md)
 - 嵌入：本地 BGE 服务，`BAAI/bge-small-en-v1.5`，CUDA
   （`bge-venv`，已验证 `/health` `device:cuda`）。
 - 检索侧在桥接允许的范围内对齐线上 AML 档案：

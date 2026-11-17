@@ -99,7 +99,7 @@ memory/state store is needed to express this composition.
 
 The cloud application boundary serves the shared memory DTOs and Agent Surface through authenticated HTTP. Its required surface includes search, exact get/evidence, governed remember/batch/resolution, and the session disclosure/attribution operations needed by enabled recall features. It enforces the [storage contract](../unified-architecture.md#storage-contract) on writes and advertises only implemented capabilities. Tool names and fields remain shared even when local and remote routing differ.
 
-The existing [AML service](../../../onlion/backend/memory-service.ts) supplies an import/search application profile. Its Add/Search envelope alone does not establish the full interactive memory interface. Preserve AML's import semantics at its own boundary; route the interactive surface and AML through the same engine without treating imported history as Agent-confirmed statements.
+The NMG HTTP service provides Add and Search for importing and querying conversation history. The interactive memory interface and this service use the same engine. Imported history retains its source attribution. [Service README](../../../onlion/README.md)
 
 The cloud session owner may outlive an HTTP invocation. Its lifecycle must retain or deliberately invalidate AG/disclosure handles and leases; session-state writes are not implemented by opening a fresh unrelated session on every request. A service restart can expire a handle and return a typed refusal. The binding re-establishes an authorized session and performs a fresh read; it never borrows a newer writer fence to replay an old mutation.
 

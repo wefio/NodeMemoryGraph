@@ -34,19 +34,10 @@ serve as the baseline arm for controlled query-decomposition experiments
 
 ## Configuration
 
-- Benchmark: LoCoMo, all 1,540 questions, official pinned checkout
-  `D:/Github/.benchmarks/official/OmniMemEval` via the repo runner
-  (`npm run benchmark:omni -- locomo --config evals/omnimemeval/locomo-audit.config.json`).
-- Memory lib: `nmg` (local bridge `evals/omnimemeval/bridge.ts`, direct
-  SQLite store) — the sanctioned local path; the `nmgremote` client used by
-  the online run is not installed in this checkout.
-  This record initially targeted the pinned OmniMemEval python pipeline
-  (`npm run benchmark:omni -- locomo --config evals/omnimemeval/locomo-audit.config.json`
-  with `--lib nmg`); that route was abandoned after repeated silent background
-  spawn failures, and the delivered capture goes through the onlion worker entry
-  instead (see Method notes). The nmgremote client used by the online run is not
-  installed in this checkout.
-- Fresh isolated corpus: `NMG_OMNI_DATA_DIR=<repo>/.benchmarks/omnimemeval-nmg-audit1023`.
+- Benchmark: LoCoMo, all 1,540 questions. The attempted local SQLite route
+  used the archived OmniMemEval adapter and stalled during background launch.
+  The actual capture used the onlion worker entry (see Method notes).
+  [Archived run settings](https://github.com/wefio/NodeMemoryGraph/blob/codex/archive-legacy-memory-engine-3cf3bec2/docs/experiments/benchmarks/locomo-local-audit-2026-10-23.md)
 - Embedding: local BGE server, `BAAI/bge-small-en-v1.5`, CUDA
   (`bge-venv`, verified `/health` `device:cuda`).
 - Retrieval mirrors of the online AML profile where the bridge allows:

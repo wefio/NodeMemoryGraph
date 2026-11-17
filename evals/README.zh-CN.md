@@ -19,11 +19,8 @@ benchmark 问题，同时破坏来源、超出检索预算，或者不必要地�
 
 ## 布局
 
-- `omnimemeval/` 是维护中的公开套件适配器及其单一官方执行入口。它的
-  `research/` 子树存放非默认的探针、审计与消融。
-- `benchmarks/`、`longmemeval/`、`locomo/`、`personamem/` 与 `beam/` 保留
-  彼此独立的本地 matched agent runner。它们测试 harness 触发的回忆；它们
-  不是互相竞争的公开数据流水线。
+- `omnimemeval/` 包含 NMG HTTP 客户端和上游评测指南。`research/` 子树包含探针、审计与消融工具。
+- `official/` 固定上游版本并提供离线评分工具。
 - `controller*`、`topology/`、`retrieval/`、`consolidation/`、`disclosure/`、
   `reasoning-workspace/` 以及规模/性能目录是聚焦的研究族。请使用它们各自的
   本地 README 或 package 脚本，不要把目录根当作命令面。
@@ -33,11 +30,7 @@ benchmark 问题，同时破坏来源、超出检索预算，或者不必要地�
 
 ## Pi Agent 集成用例
 
-跑 `npm run eval:agents` 得到全新进程的 Pi+NMG 写/读用例。该 runner 从进程
-环境或项目 `.env` 加载 `DEEPSEEK_API_KEY`，按用例隔离 Pi 身份与 NMG 存储，
-并在凭据不可用时快速失败。该套件同时包含依赖记忆的问题与普通的、不依赖记忆
-的工作。no-memory 用例必须在不调用 `nmg_search` 或 `nmg_get` 的情况下给出
-正确答案，因此 NMG 既被检查回忆能力，也被检查是否造成干扰。
+历史无头 Pi 评测测量自动召回及普通任务中的干扰，运行条件和记录见[归档评测指南](https://github.com/wefio/NodeMemoryGraph/blob/codex/archive-legacy-memory-engine-3cf3bec2/evals/README.zh-CN.md)。
 
 ## HaluMem 操作级抽取与更新审计
 
@@ -48,7 +41,6 @@ HaluMem 与 OmniMemEval 的 QA runner 分开评测，因为它的官方操作协
 干扰推断。
 
 ```powershell
-npm run eval:halumem:prepare -- --users 1 --session-start 6 --sessions 1 --reset
 npm run eval:halumem:score -- --users 1 --workers 4
 npm run eval:halumem:promotion-audit -- --user 1 --origin-start 5 `
   --origin-end 6 --observe-through 11 --reset 1
@@ -59,17 +51,7 @@ npm run eval:halumem:promotion-audit -- --user 1 --origin-start 5 `
 Core 所配置 consolidation 闸门的候选。HaluMem 不含工具成功或答案被使用的
 结果；一次零合格运行是 benchmark 覆盖度的结果，不是削弱产品闸门的理由。
 
-`prepare` 先重放更早的会话，再输出一个有界的打分切片，并写入官方的
-`extracted_memories` / `memories_from_system` 字段。`score` 复用 HaluMem 的
-官方提示词与判定函数，跳过 QA，并且只聚合分母非零的指标。除了上游要求的围栏
-JSON 之外，DeepSeek 合法的裸 JSON 也被接受。结果与存储以
-`.benchmarks/halumem-nmg/` 下被忽略的形式存在；见
-`docs/experiments/halumem-operation-evaluation-2026-08-11.md`。
-
-做 harness 策略消融时，先跑
-`npm run eval:halumem:agent-extract -- --users 1 --through-session 6`，再把它的
-JSONL 通过 `--agent-extractions` 传给 `prepare`。抽取器只看到对话与当前的
-NMG 记忆策略。它永远拿不到金标记忆点或问题，其缓存键包含策略哈希与模型。
+评分命令可读取已有的操作级结果。原始本地写入集及 Agent 抽取对照流程见[归档评测指南](https://github.com/wefio/NodeMemoryGraph/blob/codex/archive-legacy-memory-engine-3cf3bec2/evals/README.zh-CN.md)。
 
 ## 真实使用控制器标定
 
@@ -95,15 +77,7 @@ matched benchmark 打分使用同一条失败即关闭的规则。每条官方�
 `taskScore`、可为空的二元 `taskSuccess`、类型化/可为空的证据充分性、Pi 工具
 轮次、provider token 与答案延迟。完整的因果臂比较会输出
 `matchedProduct.metrics`；标签不完整、行不成对、或候选是观察性的，都会输出
-blocker 与 `metrics: null`。要把一份合法的打分制品附加到离线控制器闸门运行：
-
-```powershell
-$env:NMG_CONTROLLER_MATCHED_PRODUCT_REPORT = "evals/.../official-score.json"
-npm run eval:controller -- locomo 4
-```
-
-这里只导入类型化指标。它不会把 benchmark 行合并进自然 shadow 训练数据集，
-并且仅 shadow 的制品会被拒绝，因为候选没有影响排序。
+blocker 与 `metrics: null`。
 
 ## 实验日志
 
@@ -126,54 +100,9 @@ npm run eval:controller -- locomo 4
 - `docs/experiments/lme-recall-headers-2026-08-04.md` —— recall-header 细化经
   核实仅为格式变化（94.15/87.95/82.67 不变；answer acc 82.3%）。
 
-## 统一 OmniMemEval 运行
+## 通过 NMG HTTP 运行 OmniMemEval
 
-LongMemEval、LoCoMo、BEAM、PersonaMem v2 与 HaluMem 使用同一个 NMG 入口点。
-稳定的运行参数保存在 `evals/omnimemeval/benchmark.config.json`，而不是在每条
-命令行上重建。该入口点拥有环境编码、生成的运行身份与续跑校验；被固定版本的
-OmniMemEval 脚本继续拥有各数据集自己的解析、提示词、打分、检查点实现与报告
-schema。
-
-```powershell
-# Complete pipeline using the checked-in configuration.
-npm run benchmark:omni -- longmemeval
-
-# Use a copied config for a bounded or one-off experiment.
-npm run benchmark:omni -- beam --config evals/omnimemeval/canary.config.json
-
-# Resume only from an exact old result directory.
-npm run benchmark:omni -- --resume `
-  .benchmarks/official/OmniMemEval/results/lme/nmg-fixed20-rerun
-
-# Validate the resolved official command without running it.
-npm run benchmark:omni -- personamem-v2 --dry-run
-```
-
-签入仓库的配置目前记录 `workers=16`、`llm-workers=16`、`top-k=20` 与
-`num-runs=1`；仅套件使用的官方参数存在套件名旁边。请有意识地修改该文件或
-选择一份复制的配置，而不是再长出一个 CLI 参数面。OmniMemEval 隔离 benchmark
-用户存储，因此摄取/检索与作答/判定各自使用一个有界的 16-worker 池，而不是
-为每个条目生成数量不设限的进程。
-该 runner 从不杀掉 Pi、NMG daemon、嵌入服务或无关的 Python 进程。外部服务
-仍是调用方的责任。
-
-续跑是失败即关闭的：目录必须位于所选官方结果树内，记录 `LIB=nmg` 与版本，
-并与生效配置一致。套件与版本由 runner 推断，而不是由调用方重复。不安全的
-生命周期标志不会被重放。数据集专属审计仍是独立命令；它们不改变执行，也不
-改变官方打分。
-
-存储：用户存储（`omnimemeval-nmg/*.sqlite`）以 `sha256(userId)` 为键，而
-userId 内嵌版本标签，因此每次运行都会创建约 500 个全新的约 12 MB 存储，且
-永不复用。嵌入是可共享、可复用的部分：所有评测共用
-`.benchmarks/shared-embedding-cache.sqlite` 这一份按内容哈希的缓存（键为
-`(model, kind, text_hash)`，因此同一模型下的同一文本在任何地方都映射到同一
-向量）。**边界 —— 不要新建按评测划分的嵌入缓存。** `OmniMemEvalBridge` 与
-探针/审计脚本默认使用共享缓存；只有在确实需要隔离时才传显式的
-`embeddingCachePath`（或硬编码路径），并在完成时把其内容折回共享缓存
-（`evals/omnimemeval/merge-embedding-caches.mjs`）。合并前测得：27% 的缓存行
-（248k）在各评测变体之间重复 —— 合并后的共享缓存是唯一事实来源。运行结束后
-用 `--prune-stores` 丢弃除本次运行之外的所有存储（摄取会重建它们；真正让
-重跑变便宜的是共享嵌入缓存）。
+使用固定版本的上游套件和 NMG HTTP 适配器。[OmniMemEval 指南](omnimemeval/README.zh-CN.md#通过-nmg-http-运行-longmemeval)提供安装、NMG HTTP 端点与命名空间配置，以及 LongMemEval 命令。上游 runner 负责检查点与报告。仓库的评分命令仍可用于支持的历史结果。
 
 ## 一次性测量脚本
 
@@ -182,11 +111,8 @@ userId 内嵌版本标签，因此每次运行都会创建约 500 个全新的�
 
 | Command                                      | Measures                                                                                                                       |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `npm run eval:concurrency`                   | Concurrent writers across sessions into a temporary store, then one read per session; prints write/read latency p50, p95, p99. |
-| `npm run eval:perf-overhead`                 | `searchContext` with performance timing on and off, at two store sizes, plus a phase profile from one run.                     |
-| `npm run eval:recall-compression`            | The same recall payload in the recall representations, compared by context size.                                               |
 | `npm run benchmark:merge:longmem`            | Merges LongMemEval shard result files into one result set (`merge-longmemeval-shards.ts`).                                     |
-| `npm run benchmark:ablate:reverse-retrieval` | The reverse-retrieval ablation; its arms and runner are described in `omnimemeval/README.md`.                                  |
+| `npm run benchmark:ablate:reverse-retrieval` | 对已有结果执行反向检索消融。                                  |
 
 ## Benchmark 角色
 
@@ -205,45 +131,14 @@ userId 内嵌版本标签，因此每次运行都会创建约 500 个全新的�
 
 ## 官方协议 benchmark 命令
 
-下面这些 npm 入口点是不依赖 README 的复现面。数据放置与覆盖项记录在 `evals/`
-下各 adapter 的 README 中；`validate` 解析官方本地数据并在不调用模型的情况下
-报告分层样本。
+使用 [NMG HTTP 流程](omnimemeval/README.zh-CN.md#通过-nmg-http-运行-longmemeval)生成新的 OmniMemEval 结果。对评分器支持的 NMG 预测制品可以离线评分。
 
 ```bash
-# LongMemEval development comparison (also see "Reproducible LongMemEval runs")
-npm run eval:longmem -- no-memory 1
-npm run eval:longmem -- oracle 1
-npm run eval:longmem -- nmg-oracle 1
-npm run eval:longmem -- matched 1
-npm run benchmark:score:longmem -- <result-directory>
-
-# LoCoMo / PersonaMem / BEAM share one runner and the same matched modes
-npm run eval:locomo -- validate 1
-npm run eval:personamem -- validate 1
-npm run eval:beam -- validate 1
-
-npm run eval:locomo -- matched 1
-npm run eval:personamem -- matched 1
-npm run eval:beam -- matched 1
-npm run benchmark:score -- <locomo|personamem|beam> <result-directory>
-
-# Deterministic invariants and ablations (no model call)
-npm run eval:quality
-npm run eval:adaptive
-
-# Scale ladder: 100 / 1K / 10K / 100K memories (see evals/scale/README.md)
-npm run eval:scale
+npm run benchmark:score:longmem -- <结果目录>
+npm run benchmark:score -- <locomo|personamem|beam> <结果目录>
 ```
 
-matched 行保留确切的 Pi 工具轮次、工具调用、provider token 用量与答案延迟。
-官方打分额外给出无损的 `rowScore`；当上游协议没有定义任务成功与证据充分性时，
-它们保持为 `null`。打分制品还包含一份失败即关闭的 `matchedProduct` 审计。
-当前的 `nmg-shadow` 臂不改变排序，因此其审计有意报出
-`candidate_does_not_affect_ranking`，而不是产品闸门指标。
-
-更早的 LongMemEval 诊断消融比较了 raw-session、flat-hybrid、Lite 与 Graph
-变体。它们早于严格三臂协议，仅作为历史机制证据保留，不是当前的 matched-gate
-或 benchmark 主张。
+本地 matched 实验及其命令见[归档评测指南](https://github.com/wefio/NodeMemoryGraph/blob/codex/archive-legacy-memory-engine-3cf3bec2/evals/README.zh-CN.md)。
 
 ## SkillOpt policy Lab
 
@@ -262,20 +157,7 @@ npm run eval:skillopt:export
 
 ## 可复现的官方协议工作流
 
-NMG 把预测生成与 benchmark 打分分开。reader 运行写出 `report.json` 与
-`predictions.jsonl`；之后的打分命令写出 `official-score.json`，而无需重跑
-reader 模型。
-
-```powershell
-npm run benchmark:setup
-npm run benchmark:validate
-
-npm run eval:locomo -- matched 1
-npm run benchmark:score -- locomo <result-directory>
-
-npm run eval:longmem -- matched 1
-npm run benchmark:score:longmem -- <result-directory>
-```
+OmniMemEval 通过[上游流程](omnimemeval/README.zh-CN.md#通过-nmg-http-运行-longmemeval)运行并评分。已有 NMG 格式的 `report.json` 与 `predictions.jsonl` 时，上面的离线评分命令可生成 `official-score.json`。
 
 ### 本地分数快照
 
@@ -301,9 +183,7 @@ core。
 
 OmniMemEval 与本地 Pi runner 测量不同的边界。OmniMemEval 的用户记忆赛道总是
 调用后端的 `search()` 方法，因此它是首选的 backend-retrieval harness，应当
-拥有公开数据集的解析、重放、检查点与报告生成。本地 matched runner 仍是 Pi
-集成闸门，因为它测量 harness 是否触发回忆、以及 agent 是否使用返回的证据。
-即使 OmniMemEval 达到对等，它也不会退役。
+拥有公开数据集的解析、重放、检查点与报告生成。历史本地 matched 实验测量宿主是否触发召回，以及 Agent 是否使用了返回的证据。
 
 由判定器支撑的协议目前用 `deepseek/deepseek-v4-flash` 替代上游的专有判定器。
 这些输出被标注为 `official-protocol/deepseek-judge`；LoCoMo 与 PersonaMem 被
@@ -314,29 +194,7 @@ PersonaMem 使用其官方选项抽取规则，BEAM 使用其 rubric 量表。BE
 
 ## Matched 能力闸门
 
-默认的 `matched` 命令恰好运行三个臂：
-
-1. `no-memory`：不带 NMG 扩展的 Pi；
-2. `nmg-deterministic`：关闭控制器 shadow 的确定性 NMG；
-3. `nmg-shadow`：同样的确定性 NMG 检索，开启控制器打分与遥测，但不改变排序。
-
-每个 NMG 臂都从同一份种子数据库的独立副本开始。三个臂使用相同的 reader 模型、
-thinking 等级、用户提示词、问题 ID 与官方打分器。runner 为每行记录提示词哈希。
-用 `NMG_BENCH_REPEATS` 设置重复的随机试验；一次重复只是冒烟信号。
-
-其他模式（`raw-session`、`flat-hybrid`、`nmg-nodes` 与 `nmg-graph`）仍是
-诊断消融，不属于严格三臂闸门。
-
-独立的 backend 能力消融在同一个共享样本/语料与预算上运行设计清单里的四个
-架构臂：
-
-```powershell
-npm run eval:longmem -- backend-ablation 1
-```
-
-其臂为 `no-memory`、`flat-hybrid`、`nmg-lite`（`graphHops=0`）与
-`nmg-graph`（`graphHops=1`）。每行同时记录完整的生效提示词哈希，以及覆盖不变
-问题/指令的 `taskPromptHash`。这是匹配的本地开发比较，不是 leaderboard 运行。
+本地 matched 实验使用相同样本、提示词和评分器比较无记忆、确定性 NMG 与控制器 shadow。四臂后端消融约束与复现命令见[归档评测指南](https://github.com/wefio/NodeMemoryGraph/blob/codex/archive-legacy-memory-engine-3cf3bec2/evals/README.zh-CN.md)。
 
 ## 必须测量的项
 
@@ -443,10 +301,11 @@ AgentBench/OpenClaw 生命周期插件，而 NMG 的运行时集成目标是 Pi�
 
 ## 适配器校验
 
-用 `npm run benchmark:validate` 作为本地可用官方数据的权威检查。不要在本文件中
-保留临时的模型分数：当采样、提示词、检索策略或模型版本变化时它们就会过期。
-每个 benchmark 客户端都使用 `--no-extensions` 并且至多加载一个显式 NMG 实例；
-no-memory 对照一个都不加载。
+下面的命令运行安装器测试与模拟 NMG HTTP 合同测试。
+
+```bash
+node --experimental-strip-types --test tests/evals/omnimemeval-install.test.ts tests/evals/omnimemeval-http-client.test.ts
+```
 
 ## Consolidation 策略审计
 
@@ -471,15 +330,9 @@ transform 与回滚。它从不记录结果、运行维护、晋升记忆或执�
 
 ## 拓扑身份闸门审计
 
-`npm run eval:topology` 用 LoCoMo 稳定的说话人身份构造同人早晚节点对与跨人
-负对。它测量生产中的 `same_as` 评估闸门、竞争身份撤回，以及"评估永不改变拓扑"
-这一不变量。候选生成被刻意保持不变，因此结果不是别名消解或端到端自动合并的
-分数。见 `docs/experiments/topology-gate-evaluation-2026-08-09.md`。
+LoCoMo 稳定说话人身份用于历史拓扑实验。[实验记录](../docs/experiments/topology-gate-evaluation-2026-08-09.zh-CN.md)
 
-`npm run eval:topology:bpid` 增加多字段身份硬负例，
-`npm run eval:topology:namesakes` 则可选地读取官方 CC BY 4.0 Namesakes
-Entities JSONL，以测量类别名正例召回与对"同名但指向不同实体"的拒绝。两者都
-报告候选生成曲线且保持只读：两个分数都不被允许授权一次合并。Namesakes 数据
+`npm run eval:topology:namesakes` 读取官方 CC BY 4.0 Namesakes Entities JSONL，测量类别名正例召回及同名负例拒绝。它为只读评测。Namesakes 数据
 属于 `.benchmarks/namesakes/data/` 且不提交。见
 `docs/experiments/topology-bpid-evaluation-2026-08-09.md` 与
 `docs/experiments/topology-namesakes-evaluation.md`。

@@ -1,18 +1,16 @@
-# onlion — AML cloud memory service
+# NMG HTTP service (onlion)
 
 [简体中文](README.zh-CN.md)
 
-The Git-managed source of the cloud memory application behind NMG's AML
-Add/Search boundary. It imports the canonical root `src/` — one NMG
-implementation for CLI/daemon and this service, no vendored second tree.
-Rationale and boundaries: [the owning decision](../docs/decisions/implemented/2026-10-22-onlion-aml-cloud-service.md).
+The NMG HTTP service exposes memory Add and Search. The service and the CLI
+share the memory implementation under `src/`.
+[Service design decision](../docs/decisions/implemented/2026-10-22-onlion-aml-cloud-service.md)
 
 ## Layout
 
 - `backend/worker.mjs` — HTTP surface, authentication, R2 snapshot and receipt
   transaction wiring.
-- `backend/memory-service.ts` — the thin AML adapter over the daemon core:
-  message mapping, fixed search profile, projection.
+- `backend/memory-service.ts` — maps HTTP requests and projects search results.
 - `backend/extractive-summaries.mjs` — deterministic, LLM-free retrieval-index
   summaries through the store's provider mechanism.
 - `backend/storage.mjs`, `sqlite.mjs`, `page-delta.mjs` — R2 manifest
@@ -116,8 +114,8 @@ and [the append-only decision](../docs/decisions/implemented/2026-10-23-onlion-a
 
 ## Non-goals
 
-No official AML evaluation, production deployment or full benchmark score is
-claimed from this package. Remote deletion, async Add, HaluMem
+The included verification covers the service contract and packaging. Remote
+deletion, async Add, HaluMem
 materialized-operation scoring and streaming lifecycles are out of scope; see
 [the integration boundary](../evals/omnimemeval/README.md#integration-boundary)
 for the evaluation adapter that targets this service.

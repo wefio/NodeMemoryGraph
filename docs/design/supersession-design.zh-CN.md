@@ -46,7 +46,7 @@ Core 有两种确定性入口：
 - Pi remember surface 会展示最多三个可能的旧值，并明确说明相似度不足以作出判断。Agent 确认是同 scope 的真实取代后，再以 `action=supersede`、`newMemoryId` 和 `supersededMemoryId` 调用 `nmg_remember`。
 - `NmgStore.recordFeedback({ supersede })` 是写路径维护方法。两个 ID 都提供时执行完整 supersession；只提供旧 ID 时将其标为 `disputed`，因为新值尚未写入。之后写入新值时，旧记录可作为候选返回。
 - daemon/MCP 的 `recordFeedback` 是另一个 API：它消费自动召回的带标签反馈以供在线 learner 使用，并要求指定 graph。不要将它与 `NmgStore.recordFeedback` 或 `recordClaimOutcomes` 混为一谈。
-- `evals/omnimemeval/bridge.ts` 有评测专用的外部 judge 路径。对于已知时间，若候选并非严格早于新事件则会剔除；候选时间或新事件时间未知时仍保留。它只保留 `transition`／`polarity` 强信号，最多给 judge 三条，再应用接受结果。这种 harness 行为不表示 core store 会调用 LLM，也不能证明产品调用方使用相同 judge。
+- 归档版 OmniMemEval bridge 有评测专用的外部 judge 路径。对于已知时间，若候选并非严格早于新事件则会剔除；候选时间或新事件时间未知时仍保留。它只保留 `transition`／`polarity` 强信号，最多给 judge 三条，再应用接受结果。这种 harness 行为不表示 core store 会调用 LLM，也不能证明产品调用方使用相同 judge。
 
 ## 检索投影
 

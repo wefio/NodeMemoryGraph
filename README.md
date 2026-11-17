@@ -102,8 +102,8 @@ you choose an integration.
 | [Kimi Code CLI](kimi-plugin/README.md) | MCP tools plus optional reminders, presence and prompt-time board polling | Hook alone has no memory tools, automatic recall or state carriage |
 | Other tool-capable agents | [CLI + Skill](#agent-independent-cli) to save, search and open memory | The agent must run the CLI and read the Skill; automatic recall depends on the host |
 
-Adapters expose native tools and transport the calls. Pi, Claude MCP, DSH, and
-the benchmark bridge share the Agent Surface for compact search, exact evidence,
+Adapters expose native tools and transport the calls. Pi, Claude MCP and DSH
+share the Agent Surface for compact search, exact evidence,
 remember follow-up, Task Board output, redaction, and logical-chain projection.
 Host-specific lifecycle, tool schemas and transport fallbacks remain in adapters.
 See the [capability matrix](docs/design/harness-capability-matrix.md) for details.
