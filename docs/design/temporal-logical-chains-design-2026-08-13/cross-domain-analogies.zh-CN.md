@@ -34,4 +34,4 @@ Memory-chain expansion、graph-neighborhood retrieval、cycle diagnostics 和结
 
 ## 源码参考
 
-参见 [`src/core/store/analogy.ts`](../../../src/core/store/analogy.ts)、[`tests/core/analogy.test.ts`](../../../tests/core/analogy.test.ts)、[memory-chain 实现](../../../src/core/store/base.ts)和 [chain retrieval 路径](../../../src/core/store/retrieval.ts)。
+参见 [`src/core/store/analogy.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/analogy.ts)、[`tests/core/analogy.test.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/analogy.test.ts)、[memory-chain 实现](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts)和 [chain retrieval 路径](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)。

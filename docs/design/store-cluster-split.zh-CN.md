@@ -12,9 +12,9 @@
 
 ## 当前源码边界
 
-截至 2026-10-16 的源码检查，[`src/core/store.ts`](../../src/core/store.ts) 在 `NmgStoreBase` 上组合 `withGraph`、`withAnalogy`、`withCommunity`、`withRetrieval`、`withWrites` 和 `withMaintenance`。这与 2026-08 记录中的四 cluster 组合和清单不同。
+截至 2026-10-16 的源码检查，[`src/core/store.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store.ts) 在 `NmgStoreBase` 上组合 `withGraph`、`withAnalogy`、`withCommunity`、`withRetrieval`、`withWrites` 和 `withMaintenance`。这与 2026-08 记录中的四 cluster 组合和清单不同。
 
-[`tests/core/store/cluster-dag.test.ts`](../../tests/core/store/cluster-dag.test.ts) 仍保留结构性 guard，用于检查 cluster ownership、mixin 组装和 import 边界。这只是对源码／测试的检查；本次文档审计没有运行该测试。
+[`tests/core/store/cluster-dag.test.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/store/cluster-dag.test.ts) 仍保留结构性 guard，用于检查 cluster ownership、mixin 组装和 import 边界。这只是对源码／测试的检查；本次文档审计没有运行该测试。
 
 ## 证据边界
 
@@ -22,10 +22,10 @@
 
 ## 当前源码参考
 
-- [Store 组装](../../src/core/store.ts)
-- [基类与共享 helpers](../../src/core/store/base.ts)
-- [Graph cluster](../../src/core/store/graph.ts)
-- [Retrieval cluster](../../src/core/store/retrieval.ts)
-- [Write cluster](../../src/core/store/writes.ts)
-- [Maintenance cluster](../../src/core/store/maintenance.ts)
-- [Cluster 边界 guard](../../tests/core/store/cluster-dag.test.ts)
+- [Store 组装](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store.ts)
+- [基类与共享 helpers](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts)
+- [Graph cluster](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/graph.ts)
+- [Retrieval cluster](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)
+- [Write cluster](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/writes.ts)
+- [Maintenance cluster](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/maintenance.ts)
+- [Cluster 边界 guard](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/store/cluster-dag.test.ts)

@@ -4,14 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import { EVENT_NOTICE_CHANNEL } from "../../src/core/coordination-events.ts";
 import type { BoardMessageInput } from "../../src/core/board-notifications.ts";
 
-function fixture(run: (store: NmgStore, db: DatabaseSync) => void) {
+function fixture(run: (store: SqliteLocalDaemonState, db: DatabaseSync) => void) {
   const dir = mkdtempSync(join(tmpdir(), "nmg-notification-atomic-"));
   const path = join(dir, "fixture.sqlite");
-  const store = new NmgStore(path);
+  const store = new SqliteLocalDaemonState(path);
   const db = new DatabaseSync(path);
   try {
     run(store, db);

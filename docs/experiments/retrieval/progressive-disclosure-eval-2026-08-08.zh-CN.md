@@ -42,6 +42,6 @@ HaluMem backend 轨道从 `search()` 开始，只测量内容披露。原文将 
 - [分层披露设计](../../design/tiered-disclosure-design.zh-CN.md)
 - [Fibonacci 渐进式召回](../../design/fibonacci-progressive-recall.zh-CN.md)
 - [检索置信度控制器](../../design/retrieval-confidence-controller.zh-CN.md)
-- 当前检索实现：[`src/core/store/retrieval.ts`](../../../src/core/store/retrieval.ts)
+- 当前检索实现：[`src/core/store/retrieval.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)
 
 这些 owner 取代 2026-08 笔记中的历史默认值与实现描述。

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import { ensureCoordinationSchema } from "../../src/core/store/coordination-schema.ts";
 
-function fixture(run: (store: NmgStore) => void) {
-  const store = new NmgStore(":memory:");
+function fixture(run: (store: SqliteLocalDaemonState) => void) {
+  const store = new SqliteLocalDaemonState(":memory:");
   try {
     run(store);
   } finally {

@@ -10,8 +10,6 @@ import hashlib
 import json
 import os
 import re
-import subprocess
-import threading
 import time
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -70,44 +68,15 @@ class NmgRemoteError(RuntimeError):
 
 
 class NmgClient:
-    """Delegate memory behaviour to the local bridge or deployed AML API."""
+    """Delegate memory operations to the AML HTTP API."""
 
     def __init__(self) -> None:
-        self._process: subprocess.Popen[str] | None = None
         self._remote_url = os.environ.get("NMG_OMNI_API_URL", "").rstrip("/")
         self._remote_token = os.environ.get("NMG_OMNI_API_TOKEN", "")
         self._remote_namespace = os.environ.get("NMG_OMNI_API_NAMESPACE", "").strip()
-        if self._remote_url:
-            self._validate_remote_configuration()
-            return
-        root = Path(os.environ.get("NMG_ROOT", Path.cwd())).resolve()
-        bridge = root / "evals" / "omnimemeval" / "bridge.ts"
-        if not bridge.is_file():
-            raise FileNotFoundError(
-                f"NMG bridge not found at {bridge}; set NMG_ROOT to the NMG checkout"
-            )
-        env = os.environ.copy()
-        env.setdefault(
-            "NMG_OMNI_DATA_DIR",
-            str(root / ".benchmarks" / "omnimemeval-nmg"),
-        )
-        self._process = subprocess.Popen(
-            [
-                os.environ.get("NMG_NODE", "node"),
-                "--experimental-strip-types",
-                str(bridge),
-            ],
-            cwd=root,
-            env=env,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=None,
-            text=True,
-            encoding="utf-8",
-            bufsize=1,
-        )
-        self._lock = threading.Lock()
-        self._next_id = 0
+        if not self._remote_url:
+            raise ValueError("Set NMG_OMNI_API_URL to the AML API endpoint")
+        self._validate_remote_configuration()
 
     def add(
         self,
@@ -136,15 +105,7 @@ class NmgClient:
         This is used by operation-level memory benchmarks.  The ordinary
         OmniMemEval ``add`` contract intentionally remains write-only.
         """
-        del batch_size
-        if self._remote_url:
-            raise RuntimeError("AML Add receipts do not expose materialized memory records")
-        return self._request(
-            "add",
-            userId=user_id,
-            messages=messages,
-            conversationId=conv_id,
-        )
+        raise RuntimeError("AML Add receipts do not expose materialized memory records")
 
     def search(self, query: str, user_id: str, top_k: int) -> str:
         result = self._request(
@@ -173,21 +134,7 @@ class NmgClient:
         self.delete(user_id)
 
     def close(self) -> None:
-        process = getattr(self, "_process", None)
-        if process is None:
-            return
-        if process.poll() is None:
-            try:
-                self._request("close")
-            except (RuntimeError, BrokenPipeError):
-                pass
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
-        self._process = None
+        pass
 
     def _validate_remote_configuration(self) -> None:
         url = urlsplit(self._remote_url)
@@ -311,42 +258,7 @@ class NmgClient:
         return {"text": "\n\n".join(_render_remote_evidence(item, query) for item in data), "candidates": data}
 
     def _request(self, operation: str, **payload: Any) -> dict[str, Any]:
-        if self._remote_url:
-            return self._request_remote(operation, payload)
-        with self._lock:
-            process = self._process
-            if process is None or process.poll() is not None:
-                raise RuntimeError("NMG bridge is not running")
-            assert process.stdin is not None
-            assert process.stdout is not None
-            self._next_id += 1
-            request_id = self._next_id
-            # Keep the line protocol ASCII-only.  OmniMemEval conversations can
-            # contain arbitrary Unicode (including malformed surrogate data in
-            # upstream corpora); JSON escapes preserve the content while making
-            # the Python-to-Node pipe portable on Windows.
-            process.stdin.write(
-                json.dumps(
-                    {"id": request_id, "op": operation, **payload},
-                    ensure_ascii=True,
-                )
-                + "\n"
-            )
-            process.stdin.flush()
-            line = process.stdout.readline()
-            if not line:
-                raise RuntimeError("NMG bridge closed without a response")
-            response = json.loads(line)
-            if response.get("id") != request_id:
-                raise RuntimeError(
-                    "NMG bridge response id mismatch: "
-                    f"expected {request_id!r}, got {response.get('id')!r}; "
-                    f"bridge error: {response.get('error')!r}"
-                )
-            if response.get("error"):
-                raise RuntimeError(str(response["error"]))
-            result = response.get("result")
-            return result if isinstance(result, dict) else {}
+        return self._request_remote(operation, payload)
 
     def __enter__(self) -> "NmgClient":
         return self

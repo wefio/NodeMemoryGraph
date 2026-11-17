@@ -10,7 +10,6 @@ import {
   normalizeEventTime,
   parseEventTime,
 } from "../../src/core/event-time.ts";
-import { NmgStore } from "../../src/core/store.ts";
 import { migrate } from "../../src/core/store/schema.ts";
 
 const NOW = new Date("2026-11-07T10:30:00+08:00");
@@ -102,32 +101,6 @@ test("extractChineseEventWindow reads 之前/之后 as an open side", () => {
   assert.deepEqual(extractChineseEventWindow("9月19日之前去过哪里", NOW), {
     to: "2026-09-19T23:59:59.999Z",
   });
-});
-
-test("a Chinese event time is accepted on write and found by its window", () => {
-  const store = new NmgStore(":memory:");
-  try {
-    const record = store.remember({
-      statement: "在东京见了客户",
-      nodeName: "行程",
-      eventTime: "2026年9月19日",
-    });
-    assert.equal(record.memory.eventTime, "2026-09-19T00:00:00.000Z");
-    const hit = store.search("东京 客户", {
-      eventTimeFrom: "2026-09-19",
-      eventTimeTo: "2026-09-19",
-    });
-    assert.deepEqual(
-      hit.map((result) => result.memory.id),
-      [record.memory.id],
-    );
-    assert.deepEqual(
-      store.search("东京 客户", { eventTimeFrom: "2026-09-20" }).map((result) => result.memory.id),
-      [],
-    );
-  } finally {
-    store.close();
-  }
 });
 
 test("reopening a store repairs event times written before canonicalization", () => {

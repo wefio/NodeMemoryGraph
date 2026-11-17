@@ -67,4 +67,4 @@ The original draft cites [claude-memory-system issue #53](https://github.com/nik
 
 ## Source references
 
-See [`src/core/simhash.ts`](../../src/core/simhash.ts), the [tessera fingerprint service](../../src/cli/service.ts), [tessera storage and retrieval](../../src/core/store/retrieval.ts), [`supersedeCandidates`](../../src/core/store/writes.ts), and the [supersession design](supersession-design.md).
+See [`src/core/simhash.ts`](../../src/core/simhash.ts), the [tessera fingerprint service](../../src/cli/service.ts), [tessera storage and retrieval](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts), [`supersedeCandidates`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/writes.ts), and the [supersession design](supersession-design.md).

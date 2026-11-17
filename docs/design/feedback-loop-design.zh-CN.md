@@ -66,4 +66,4 @@ Pi controller-shadow bridge 区分精确的 recall disclosure、诊断性的回�
 
 ## 源码参考
 
-参见 [`RecordFeedbackInput`](../../src/core/types.ts)、[`NmgStore` 写路径](../../src/core/store/writes.ts)、[claim outcome 存储](../../src/core/store/maintenance.ts)、[daemon service](../../src/cli/service.ts)、[Pi memory surface](../../src/integration/agent-surface.ts)、[controller-shadow bridge](../../.pi/extensions/nmg/controller-shadow.ts) 与 [OmniMemEval bridge](../../evals/omnimemeval/bridge.ts)。
+参见 [`RecordFeedbackInput`](../../src/core/types.ts)、[`NmgStore` 写路径](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/writes.ts)、[claim outcome 存储](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/maintenance.ts)、[daemon service](../../src/cli/service.ts)、[Pi memory surface](../../src/integration/agent-surface.ts)、[controller-shadow bridge](../../.pi/extensions/nmg/controller-shadow.ts) 与 [OmniMemEval bridge](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/evals/omnimemeval/bridge.ts)。

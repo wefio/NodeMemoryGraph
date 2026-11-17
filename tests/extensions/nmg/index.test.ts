@@ -7,10 +7,8 @@ import { join } from "node:path";
 import test from "node:test";
 
 import nmgExtension, {
-  applyLearnedFold,
   composeNmgContextMessage,
   composeNmgSystemPrompt,
-  controllerBudgetEnvelopes,
   formatMemoryContext,
   formatSearchRecommendation,
   formatSearchHeaders,
@@ -25,16 +23,10 @@ import nmgExtension, {
 import { loadPrompts } from "../../../src/prompts/load.ts";
 import { SEARCH_TOOL_PARAMETERS } from "../../../src/integration/tool-contract.ts";
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
-import { NmgStore } from "../../../src/core/store.ts";
+import { LegacySqliteFixture } from "../../helpers/legacy-sqlite-fixture.ts";
 import { connectDaemon, invokeDaemon } from "../../../src/cli/daemon-client.ts";
 import { renameAgentIdentity } from "../../../src/integration/agent-identity.ts";
 import type { MemoryContext } from "../../../src/core/types.ts";
-import { ControllerRuntime } from "../../../src/lab/controller-runtime.ts";
-import { CONTROLLER_FEATURE_PROTOCOL_VERSION } from "../../../src/lab/controller-protocol.ts";
-import {
-  ControllerShadowBridge,
-  shadowEnabled,
-} from "../../../.pi/extensions/nmg/controller-shadow.ts";
 import { assertGetToolContract } from "../../helpers/get-tool-contract.ts";
 import { assertAgentActivityContract } from "../../helpers/agent-activity-contract.ts";
 import { assertRememberToolContract } from "../../helpers/remember-tool-contract.ts";
@@ -217,59 +209,6 @@ test("Lab reasoning tool persists scratch state and injects it only after compac
   }
 });
 
-test("QPP actuation keeps hard envelopes and learned folds lossless in the Active Graph", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-qpp-actuation-"));
-  const store = new NmgStore(join(directory, "nmg.sqlite"));
-  try {
-    for (const [name, statement] of [
-      ["alpha", "Project alpha uses SQLite"],
-      ["beta", "Project beta uses PostgreSQL"],
-      ["gamma", "Project gamma uses files"],
-    ] as const) {
-      store.remember({ statement, nodeName: name });
-    }
-    const context = store.searchContext("project storage", {
-      limit: 3,
-      maxTier: 3,
-      persistTrace: false,
-    });
-    assert.equal(context.results.length, 3);
-    const envelopes = controllerBudgetEnvelopes(context);
-    assert.equal(envelopes.normalMaximum.maxEvidence, 20);
-    assert.equal(envelopes.normalMaximum.maxTokens, 6_000);
-    assert.equal(envelopes.expandedMaximum.maxEvidence, 50);
-    assert.equal(envelopes.expandedMaximum.maxTokens, 10_000);
-
-    const visibleId = context.results[0]!.memory.id;
-    const deferredIds = context.results.slice(1).map((result) => result.memory.id);
-    const folded = await applyLearnedFold(
-      context,
-      {
-        fold: async () => ({
-          visibleMemoryIds: [visibleId],
-          foldedMemoryIds: deferredIds,
-          trainingSteps: 1,
-        }),
-      },
-      0.98,
-      false,
-    );
-    assert.deepEqual(
-      folded.results.map((result) => result.memory.id),
-      [visibleId],
-    );
-    assert.deepEqual(folded.progressiveDisclosure?.deferredMemoryIds, deferredIds);
-    assert.deepEqual(folded.activeGraph?.memoryIds, context.activeGraph?.memoryIds);
-    assert.equal(
-      (await applyLearnedFold(context, { fold: async () => null }, 0.98, true)).results.length,
-      3,
-    );
-  } finally {
-    store.close();
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
 test("search recommendation distinguishes advisory from hard guardrails", () => {
   const context = {
     results: [],
@@ -373,367 +312,6 @@ test("remember cannot attribute an unbound Assistant inference to the user", asy
     ),
     /sourceActor=user requires an exact matching evidence excerpt/u,
   );
-});
-
-test("controller shadow bridge logs answer attribution without learning from it", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-controller-shadow-"));
-  const store = new NmgStore(join(directory, "nmg.sqlite"));
-  // Isolate the ambient NMG_CONTROLLER_SHADOW: running tests under the
-  // sample-collection env (NMG_CONTROLLER_SHADOW=1) must not flip the
-  // shadowEnabled(undefined) default assertion.
-  const previousShadow = process.env.NMG_CONTROLLER_SHADOW;
-  delete process.env.NMG_CONTROLLER_SHADOW;
-  try {
-    assert.equal(shadowEnabled(undefined), false);
-    assert.equal(shadowEnabled("true"), true);
-    const disabled = new ControllerShadowBridge(directory, false);
-    const saved = store.remember({
-      statement: "Atlas uses SQLite",
-      nodeName: "Atlas",
-    });
-    const context = store.searchContext("Atlas database", {
-      sessionId: "session-a",
-      persistTrace: false,
-    });
-    await disabled.retrieval(context, "session-a", "tool");
-    assert.equal(existsSync(join(directory, "controller-shadow-events.jsonl")), false);
-
-    const enabled = new ControllerShadowBridge(directory, true);
-    const envelopes = controllerBudgetEnvelopes(context);
-    assert.equal(
-      await enabled.allocate(
-        context,
-        envelopes.minimum,
-        envelopes.normalMaximum,
-        envelopes.expandedMaximum,
-      ),
-      null,
-      "an untrained controller must not actuate",
-    );
-    await enabled.retrieval(context, "session-a", "tool", "injected header");
-    await enabled.searchSuppressed("wrong-session", "ignored query");
-    await enabled.searchSuppressed("session-a", "same query again");
-    await enabled.attribution(
-      context.activeGraph!.id,
-      "wrong-session",
-      [saved.memory.id],
-      [saved.memory.id],
-    );
-    assert.equal(existsSync(join(directory, "controller-shadow-state.json")), false);
-    await enabled.disclosure(
-      context.activeGraph!.id,
-      "session-a",
-      [saved.memory.id],
-      [saved.memory.id],
-    );
-    assert.equal(
-      existsSync(join(directory, "controller-shadow-state.json")),
-      false,
-      "disclosure alone must not train the controller",
-    );
-    await enabled.attribution(
-      context.activeGraph!.id,
-      "session-a",
-      [saved.memory.id],
-      [saved.memory.id],
-    );
-    assert.equal(
-      existsSync(join(directory, "controller-shadow-state.json")),
-      false,
-      "answer overlap is diagnostic and must not persist controller state",
-    );
-    assert.equal(
-      await enabled.allocate(
-        context,
-        envelopes.minimum,
-        envelopes.normalMaximum,
-        envelopes.expandedMaximum,
-      ),
-      null,
-      "answer overlap must not unlock active allocation",
-    );
-    assert.equal(
-      await enabled.verifiedClaimOutcome(
-        context.activeGraph!.id,
-        "wrong-session",
-        saved.memory.id,
-        "supported",
-      ),
-      false,
-    );
-    assert.equal(
-      await enabled.verifiedClaimOutcome(
-        context.activeGraph!.id,
-        "session-a",
-        saved.memory.id,
-        "supported",
-      ),
-      true,
-    );
-    assert.equal(
-      await enabled.verifiedClaimOutcome(
-        context.activeGraph!.id,
-        "session-a",
-        saved.memory.id,
-        "contradicted",
-      ),
-      true,
-    );
-    await enabled.outcome("session-a", [
-      { role: "assistant", usage: { input: 120, output: 30 } },
-      { role: "toolResult" },
-    ]);
-    assert.equal(enabled.latestActiveGraphId("session-a"), context.activeGraph!.id);
-    assert.equal(enabled.latestActiveGraphId("wrong-session"), null);
-    assert.deepEqual(enabled.pendingFeedback("session-a"), {
-      activeGraphId: context.activeGraph!.id,
-      semanticTaskId: context.activeGraph!.taskId,
-    });
-    assert.equal(enabled.pendingFeedback("session-a"), null, "feedback nudge is one-shot");
-    assert.equal(
-      enabled.pendingClaimOutcome("session-a"),
-      null,
-      "an already verified claim outcome must suppress the advisory claim reminder",
-    );
-    assert.equal(
-      await enabled.feedback(context.activeGraph!.id, "wrong-session", {
-        evidenceSufficient: true,
-      }),
-      false,
-    );
-    assert.equal(
-      await enabled.feedback(context.activeGraph!.id, "session-a", {
-        taskSuccess: true,
-        evidenceSufficient: true,
-        expansionUseful: false,
-        excessiveNoise: false,
-        noMemoryNeeded: false,
-        note: "explicit test label",
-      }),
-      true,
-    );
-    // A repeated agent_end must not duplicate the same graph outcome.
-    await enabled.outcome("session-a", []);
-    const events = readFileSync(join(directory, "controller-shadow-events.jsonl"), "utf8")
-      .trim()
-      .split("\n");
-    assert.equal(events.length, 8);
-    const retrieval = JSON.parse(events[0]!) as {
-      type: string;
-      costs: { injectedCharacters: number; injectedEstimatedTokens: number };
-    };
-    assert.equal(retrieval.type, "retrieval");
-    assert.equal(retrieval.costs.injectedCharacters, "injected header".length);
-    assert.equal(retrieval.costs.injectedEstimatedTokens, 4);
-    const flow = JSON.parse(events[1]!) as {
-      type: string;
-      action: string;
-      query: string;
-    };
-    assert.equal(flow.type, "tool_flow");
-    assert.equal(flow.action, "search_suppressed");
-    assert.equal(flow.query, "same query again");
-    assert.equal(JSON.parse(events[2]!).type, "disclosure");
-    assert.equal(JSON.parse(events[3]!).type, "attribution");
-    const verifiedPositive = JSON.parse(events[4]!) as {
-      type: string;
-      method: string;
-      attributedMemoryIds: string[];
-    };
-    assert.equal(verifiedPositive.type, "attribution");
-    assert.equal(verifiedPositive.method, "verified_claim_support");
-    assert.deepEqual(verifiedPositive.attributedMemoryIds, [saved.memory.id]);
-    const verifiedNegative = JSON.parse(events[5]!) as {
-      method: string;
-      attributedMemoryIds: string[];
-    };
-    assert.equal(verifiedNegative.method, "verified_claim_support");
-    assert.deepEqual(verifiedNegative.attributedMemoryIds, []);
-    const outcome = JSON.parse(events[6]!) as {
-      type: string;
-      toolRounds: number;
-      inputTokens: number;
-      outputTokens: number;
-    };
-    assert.equal(outcome.type, "outcome");
-    assert.equal(outcome.toolRounds, 1);
-    assert.equal(outcome.inputTokens, 120);
-    assert.equal(outcome.outputTokens, 30);
-    const feedback = JSON.parse(events[7]!) as {
-      type: string;
-      collectionOrigin: string;
-      semanticTaskId: string;
-      taskSuccess: boolean;
-      evidenceSufficient: boolean;
-    };
-    assert.equal(feedback.type, "feedback");
-    assert.equal(feedback.collectionOrigin, "natural");
-    assert.equal(feedback.semanticTaskId, context.activeGraph!.taskId);
-    assert.equal(feedback.taskSuccess, true);
-    assert.equal(feedback.evidenceSufficient, true);
-  } finally {
-    if (previousShadow === undefined) delete process.env.NMG_CONTROLLER_SHADOW;
-    else process.env.NMG_CONTROLLER_SHADOW = previousShadow;
-    store.close();
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test("trained controller actuation is explicit, bounded, and auditable", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-controller-actuation-"));
-  const store = new NmgStore(join(directory, "nmg.sqlite"));
-  try {
-    const memories = [
-      store.remember({ statement: "Atlas uses SQLite", nodeName: "Atlas" }),
-      store.remember({
-        statement: "Borealis uses PostgreSQL",
-        nodeName: "Borealis",
-      }),
-      store.remember({
-        statement: "Cygnus uses object storage",
-        nodeName: "Cygnus",
-      }),
-    ];
-    const context = store.searchContext("project storage database", {
-      sessionId: "candidate-session",
-      limit: 3,
-      persistTrace: false,
-    });
-    const runtime = new ControllerRuntime(join(directory, "controller-shadow-state.json"));
-    assert.equal(runtime.observeVerifiedEvidence(context, [memories[2]!.memory.id]), true);
-
-    const bridge = new ControllerShadowBridge(directory, true, 128, "controlled", {
-      mode: "controlled",
-    });
-    const envelopes = controllerBudgetEnvelopes(context);
-    assert.ok(
-      await bridge.allocate(
-        context,
-        envelopes.minimum,
-        envelopes.normalMaximum,
-        envelopes.expandedMaximum,
-      ),
-    );
-    await bridge.rerank(context);
-
-    const actuations = readFileSync(join(directory, "controller-shadow-events.jsonl"), "utf8")
-      .trim()
-      .split("\n")
-      .map(
-        (line) =>
-          JSON.parse(line) as {
-            type: string;
-            action: string;
-            changed: boolean;
-            controllerMode: string;
-            candidateSha256: string;
-            featureProtocolVersion: number;
-          },
-      );
-    assert.deepEqual(
-      actuations.map((event) => event.action),
-      ["allocate", "rerank"],
-    );
-    assert.ok(actuations.every((event) => event.type === "actuation"));
-    assert.ok(actuations.every((event) => event.controllerMode === "controlled"));
-    assert.ok(actuations.every((event) => event.candidateSha256.length === 64));
-    assert.ok(
-      actuations.every(
-        (event) => event.featureProtocolVersion === CONTROLLER_FEATURE_PROTOCOL_VERSION,
-      ),
-    );
-    assert.ok(actuations.some((event) => event.changed));
-  } finally {
-    store.close();
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test("shadow feedback review selects a disclosed graph instead of a newer header-only graph", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-feedback-selection-"));
-  const store = new NmgStore(join(directory, "nmg.sqlite"));
-  try {
-    const bridge = new ControllerShadowBridge(directory, true);
-    const saved = store.remember({
-      statement: "Atlas uses SQLite",
-      nodeName: "Atlas",
-    });
-    const used = store.searchContext("Atlas database", {
-      sessionId: "session-a",
-      persistTrace: false,
-    });
-    const headerOnly = store.searchContext("Atlas unrelated follow-up", {
-      sessionId: "session-a",
-      persistTrace: false,
-    });
-    await bridge.retrieval(used, "session-a", "tool");
-    await bridge.disclosure(
-      used.activeGraph!.id,
-      "session-a",
-      [saved.memory.id],
-      [saved.memory.id],
-    );
-    await bridge.retrieval(headerOnly, "session-a", "automatic");
-    await bridge.outcome("session-a", []);
-
-    const reminder = bridge.pendingFeedback("session-a");
-    assert.deepEqual(reminder, {
-      activeGraphId: used.activeGraph!.id,
-      semanticTaskId: used.activeGraph!.taskId,
-    });
-    await bridge.feedbackNudgeShown("session-a", reminder!);
-    const claimReminder = bridge.pendingClaimOutcome("session-a");
-    assert.deepEqual(claimReminder, {
-      activeGraphId: used.activeGraph!.id,
-      semanticTaskId: used.activeGraph!.taskId,
-      memoryIds: [saved.memory.id],
-    });
-    assert.equal(bridge.pendingClaimOutcome("session-a"), null, "claim reminder is one-shot");
-    await bridge.claimOutcomeNudgeShown("session-a", claimReminder!);
-    const events = readFileSync(join(directory, "controller-shadow-events.jsonl"), "utf8")
-      .trim()
-      .split("\n")
-      .map(
-        (line) =>
-          JSON.parse(line) as {
-            type: string;
-            action?: string;
-            reason?: string;
-            graphId: string;
-          },
-      );
-    assert.equal(events.at(-2)?.type, "tool_flow");
-    assert.equal(events.at(-2)?.graphId, used.activeGraph!.id);
-    assert.equal(events.at(-2)?.action, "feedback_nudge_shown");
-    assert.equal(events.at(-2)?.reason, "next_user_turn_review");
-    assert.equal(events.at(-1)?.type, "tool_flow");
-    assert.equal(events.at(-1)?.graphId, used.activeGraph!.id);
-    assert.equal(events.at(-1)?.action, "claim_outcome_nudge_shown");
-    assert.equal(events.at(-1)?.reason, "next_user_turn_claim_review");
-  } finally {
-    store.close();
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test("claim-outcome review requires exact get disclosure, not a search preview", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-exact-disclosure-"));
-  const store = new NmgStore(join(directory, "nmg.sqlite"));
-  try {
-    const bridge = new ControllerShadowBridge(directory, true);
-    store.remember({ statement: "Atlas uses SQLite", nodeName: "Atlas" });
-    const previewOnly = store.searchContext("Atlas database", {
-      sessionId: "session-a",
-      persistTrace: false,
-    });
-    await bridge.retrieval(previewOnly, "session-a", "tool", "search preview text");
-    await bridge.outcome("session-a", []);
-
-    assert.equal(bridge.pendingClaimOutcome("session-a"), null);
-  } finally {
-    store.close();
-    rmSync(directory, { recursive: true, force: true });
-  }
 });
 
 test("Pi injects the advisory claim-outcome review only on the next user turn", async () => {
@@ -1050,8 +628,8 @@ test("Pi sends its live automatic recall and exact lookup to the unified SQLite 
     else process.env.NMG_PROJECT_DIR = previousProject;
     rmSync(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   });
-  const legacy = new NmgStore(databasePath);
-  const stored = legacy.remember({
+  const legacy = new LegacySqliteFixture(databasePath);
+  const stored = legacy.insertMemory({
     statement: "Atlas uses CedarStore exclusively for offline storage",
     nodeName: "Atlas storage",
   });
@@ -2560,8 +2138,8 @@ test("session recall piggybacks a search proposal without a prepare RPC or injec
   };
   const ctx = { sessionManager };
   try {
-    const store = new NmgStore(join(directory, "nmg.sqlite"));
-    const saved = store.remember({
+    const store = new LegacySqliteFixture(join(directory, "nmg.sqlite"));
+    const saved = store.insertMemory({
       statement: "Fixture palette prefers azure",
       nodeName: "fixture-palette",
       memoryType: "preference",

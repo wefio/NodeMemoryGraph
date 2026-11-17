@@ -8,7 +8,8 @@ import { MemoryEngine } from "../../src/core/memory/engine.ts";
 import { importMemoryGraph } from "../../src/core/memory/graph-import.ts";
 import { LanceMemoryBackend } from "../../src/core/memory/lance-backend.ts";
 import { SqliteMemoryBackend } from "../../src/core/memory/sqlite-backend.ts";
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
+import { LegacySqliteFixture } from "../helpers/legacy-sqlite-fixture.ts";
 import { readLegacyMemorySnapshot } from "../../src/core/store/legacy-memory-snapshot.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
@@ -92,43 +93,45 @@ test("SQLite installs a full legacy snapshot atomically and can reopen after new
 });
 
 function seedLegacy(path: string) {
-  const store = new NmgStore(path);
+  const store = new LegacySqliteFixture(path);
   try {
-    const previous = store.remember({
+    const previous = store.insertMemory({
       ...state,
       statement: "Atlas region is east",
       validFrom: "2024-01-01T00:00:00.000Z",
     });
-    const current = store.remember({
+    const current = store.insertMemory({
       ...state,
       statement: "Atlas region is west",
       validFrom: liveSince,
       tesserae: [{ path: "deployment.md", snippet: "Atlas region is west" }],
     });
-    const dependency = store.remember({
+    const dependency = store.insertMemory({
       nodeName: "Registry",
       statement: "Registry retains build artifacts",
     });
-    const edge = store.linkNodes({
+    const edge = store.insertRelation({
       sourceNodeId: current.node.id,
       targetNodeId: dependency.node.id,
       type: "depends_on",
       evidenceIds: [current.history.id],
     });
-    store.remember({
+    store.insertMemory({
       nodeName: "Private case",
       statement: "The customer uses an internal registry",
       residence: "stg",
       sessionId: "session-one",
       relatedMemoryIds: [dependency.memory.id],
     });
-    store.putTaskBoardEntry({
+    const coordination = new SqliteLocalDaemonState(path);
+    coordination.putTaskBoardEntry({
       taskId: "delivery",
       agentId: "migration-fixture",
       kind: "note",
       content: "CoordinationMarker",
       expiresAt: "2099-01-01T00:00:00.000Z",
     });
+    coordination.close();
     return { previous, current, dependency, edge };
   } finally {
     store.close();
@@ -191,19 +194,18 @@ for (const kind of ["sqlite", "lancedb"] as const) {
           new Set(shared.results.map((item) => item.memory.id)),
           new Set([current.memory.id, dependency.memory.id]),
         );
-        const source = new NmgStore(path);
+        const source = new SqliteLocalDaemonState(path);
         try {
-          const legacy = source.getContext([current.memory.id]).results[0];
           const imported = shared.results.find((item) => item.memory.id === current.memory.id);
-          assert.ok(legacy && imported);
-          const { evidenceIds, ...memory } = legacy.memory;
-          assert.deepEqual(imported.memory, {
-            ...memory,
-            evidenceIds: imported.memory.evidenceIds,
-          });
-          assert.deepEqual(new Set(imported.memory.evidenceIds), new Set(evidenceIds));
-          assert.deepEqual(imported.node, legacy.node);
-          assert.deepEqual(imported.evidence, legacy.evidence);
+          const original = snapshot.find(
+            (item) => item.kind === "memory" && item.value.id === current.memory.id,
+          );
+          assert.ok(imported && original?.kind === "memory");
+          assert.deepEqual(imported.memory, original.value);
+          assert.deepEqual(
+            new Set(imported.memory.evidenceIds),
+            new Set([current.history.id, previous.history.id]),
+          );
           assert.equal(
             source.readTaskBoard({ taskId: "delivery" }).entries[0]?.content,
             "CoordinationMarker",
@@ -250,6 +252,47 @@ test("rehearsal rejects unsupported retention state and an unrelated nonempty ta
       assert.throws(() => readLegacyMemorySnapshot(path), /dormant or quarantined/);
     } finally {
       db.close();
+    }
+  } finally {
+    removeTempDirectory(directory);
+  }
+});
+
+test("request-scoped SQLite imports a legacy image and keeps its namespace on reopen", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-snapshot-migration-"));
+  const path = join(directory, "partition.sqlite");
+  const { current } = seedLegacy(path);
+  try {
+    const owner = new SqliteMemoryBackend(path, "aml-partition", true);
+    try {
+      owner.activateSnapshot();
+      assert.equal((await new MemoryEngine(owner).get([current.memory.id])).results.length, 1);
+      const source = new DatabaseSync(path, { readOnly: true });
+      try {
+        assert.equal(
+          source.prepare("SELECT 1 FROM sqlite_schema WHERE name='memory_records'").get(),
+          undefined,
+        );
+      } finally {
+        source.close();
+      }
+      await new MemoryEngine(owner).remember({
+        statement: "Atlas archival calibration finished",
+        nodeName: "Atlas maintenance",
+      });
+    } finally {
+      await owner.close();
+    }
+
+    const reopened = new SqliteMemoryBackend(path, "aml-partition", true);
+    try {
+      reopened.activateSnapshot();
+      assert.equal(
+        (await new MemoryEngine(reopened).search("archival calibration")).results.length,
+        1,
+      );
+    } finally {
+      await reopened.close();
     }
   } finally {
     removeTempDirectory(directory);

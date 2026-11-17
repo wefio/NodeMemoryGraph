@@ -7,7 +7,7 @@ An experimental engine and an explicit scoring mode exist. The default vector ro
 ## Current source behavior
 
 - `HierarchicalActivation` is implemented in [`src/core/hierarchical-activation.ts`](../../src/core/hierarchical-activation.ts), with focused tests in [`tests/core/hierarchical-activation.test.ts`](../../tests/core/hierarchical-activation.test.ts).
-- `NmgStore.routeNodesByVector()` defaults `activationMode` to `"cosine"`. A caller may explicitly pass `"hierarchical-activation"`; the ordinary retrieval path does not select that mode by default. See [`src/core/store/graph.ts`](../../src/core/store/graph.ts) and the corresponding declaration in [`src/core/store/retrieval.ts`](../../src/core/store/retrieval.ts).
+- `NmgStore.routeNodesByVector()` defaults `activationMode` to `"cosine"`. A caller may explicitly pass `"hierarchical-activation"`; the ordinary retrieval path does not select that mode by default. See [`src/core/store/graph.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/graph.ts) and the corresponding declaration in [`src/core/store/retrieval.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts).
 - The explicit store route passes candidate vectors to `propagate()` but does not pass neighborhood or `GraphStateSnapshot`. In that path, `g₂` falls back to `g₁`, `h₂` and `h₃` are zero-valued, and `h₁` is an EMA state. The general `propagate()` API can accept neighborhood and medium-/long-term vectors, but that capability is not wired into this store call.
 - `Router.ensureHA()` keeps session-specific instances in an in-memory map keyed by `sessionId`. It does not key them by branch. `Router.toJSON()` serializes only the non-session instance; it does not serialize the session map. This is not evidence of durable or Active-Graph-owned session state.
 - The store comment says a trained state should pass rollout gates before replacing deterministic retrieval. The explicit mode branch itself does not enforce a training-state or benchmark gate. Treat the comment as intent, not an enforced admission check.
@@ -25,7 +25,7 @@ The original proposed interfaces, parameter tables, training losses, and phased 
 
 - [Hierarchical activation engine](../../src/core/hierarchical-activation.ts)
 - [Router and session-instance lifecycle](../../src/core/router.ts)
-- [Explicit vector route and default mode](../../src/core/store/graph.ts)
-- [Retrieval mixin declaration](../../src/core/store/retrieval.ts)
+- [Explicit vector route and default mode](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/graph.ts)
+- [Retrieval mixin declaration](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)
 - [Hierarchical activation tests](../../tests/core/hierarchical-activation.test.ts)
 - [Current implementation lineage](implementation-lineage.md)

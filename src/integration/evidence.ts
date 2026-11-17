@@ -43,35 +43,6 @@ export function selectEvidence(
   return undefined;
 }
 
-/** Retain one admitted source message without copying the whole transcript. */
-export function retainEvidence(
-  store: {
-    getHistoryBySourceMessage(sessionId: string, sourceMessageId: string): { id: string } | null;
-    appendHistory(input: {
-      role: MemoryActor;
-      content: string;
-      sessionId: string;
-      sourceMessageId: string;
-      sourceRef?: string;
-    }): { id: string };
-  },
-  evidence: string | undefined,
-  sourceActor: MemoryActor,
-  history: AgentHistorySnapshot,
-): string | undefined {
-  const selected = selectEvidence(evidence, sourceActor, history);
-  if (!selected) return undefined;
-  const existing = store.getHistoryBySourceMessage(history.sessionId, selected.sourceMessageId);
-  if (existing) return existing.id;
-  return store.appendHistory({
-    content: selected.content,
-    role: selected.actor,
-    sessionId: history.sessionId,
-    sourceMessageId: selected.sourceMessageId,
-    sourceRef: selected.sourceRef,
-  }).id;
-}
-
 function indexOfEvidence(content: string, evidence: string): number {
   const exact = content.indexOf(evidence);
   return exact >= 0 ? exact : content.toLocaleLowerCase().indexOf(evidence.toLocaleLowerCase());

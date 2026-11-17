@@ -18,7 +18,7 @@ memory_records.session_id:
 - 不带 session ID 的查询只能看到 `session_id IS NULL`；不能变成无限制读取。
 - `cached_from_ltg` 拷贝是项目本地共享提示；LTG 仍是权威数据。会话所属行通过显式 session purge 路径删除。
 
-当前检索谓词位于 [`src/core/store/retrieval.ts`](../../../src/core/store/retrieval.ts)，共享 Store 路径和 purge wrapper 位于 [`src/core/stg.ts`](../../../src/core/stg.ts)。
+当前检索谓词位于 [`src/core/store/retrieval.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)，共享 Store 路径和 purge wrapper 位于 [`src/core/stg.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/stg.ts)。
 
 ## 历史匿名读取泄漏
 
@@ -44,8 +44,8 @@ Checkpoint 不会认证 session，也不会改变行可见性语义。行为以�
 
 ## 源码与测试参考
 
-- [项目本地 STG helpers](../../../src/core/stg.ts)
-- [按 session 过滤的读取路径](../../../src/core/store/retrieval.ts)
-- [Session-scoped 写入与 purge 实现](../../../src/core/store/writes.ts)
-- [Store 构造、PRAGMA、关闭与启动时 checkpoint](../../../src/core/store/base.ts)
-- [STG v2 行为测试](../../../tests/core/stg-v2.test.ts)
+- [项目本地 STG helpers](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/stg.ts)
+- [按 session 过滤的读取路径](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)
+- [Session-scoped 写入与 purge 实现](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/writes.ts)
+- [Store 构造、PRAGMA、关闭与启动时 checkpoint](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts)
+- [STG v2 行为测试](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/stg-v2.test.ts)

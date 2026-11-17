@@ -4,14 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import { boardEntryView } from "../../src/core/board-entry-view.ts";
 import { prepareTaskBoardSurface } from "../../src/integration/agent-surface.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
-function withStore(run: (store: NmgStore) => void): void {
+function withStore(run: (store: SqliteLocalDaemonState) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-task-board-"));
-  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  const store = new SqliteLocalDaemonState(join(directory, "nmg.sqlite"));
   try {
     run(store);
   } finally {
@@ -206,19 +206,6 @@ test("compact board views retain delivery and judgment changes without a new cre
       store.readTaskBoardPreviews({ taskId: "parser", afterCursor: entry.id }).previews.length,
       0,
     );
-  });
-});
-
-test("task board content never enters semantic memory search", () => {
-  withStore((store) => {
-    store.putTaskBoardEntry({
-      taskId: "task-a",
-      agentId: "agent-a",
-      kind: "note",
-      content: "uniqueboardtoken should remain coordination-only",
-      expiresAt: "2099-01-01T00:00:00.000Z",
-    });
-    assert.deepEqual(store.search("uniqueboardtoken"), []);
   });
 });
 
@@ -706,7 +693,7 @@ test("delivery receipts are RAII-bound: cleared when the entry resolves or expir
 
 test("task board agent registry: register/heartbeat/discover with capability filter", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-task-board-"));
-  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  const store = new SqliteLocalDaemonState(join(directory, "nmg.sqlite"));
   const originalOnlineMs = process.env.NMG_AGENT_ONLINE_MS;
   try {
     process.env.NMG_AGENT_ONLINE_MS = "600000";
@@ -858,7 +845,7 @@ test("task board serial handoff promotes pending on claim, resolve, and expiry",
         content,
         expiresAt,
       });
-    const stateOf = (store: NmgStore, channel: string, id: string) =>
+    const stateOf = (store: SqliteLocalDaemonState, channel: string, id: string) =>
       store.getTaskBoardEntryById(channel, id)?.serialState ?? null;
 
     // — Claim drives promotion ("回复=接手"): claiming the outstanding lets the

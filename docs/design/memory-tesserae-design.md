@@ -10,8 +10,8 @@
 **Source review, 2026-10-17:** this remains a draft design with dated implementation
 notes, not an end-to-end acceptance record. The inspected owners are
 [`schema.ts`](../../src/core/store/schema.ts),
-[`writes.ts`](../../src/core/store/writes.ts),
-[`retrieval.ts`](../../src/core/store/retrieval.ts) and
+`writes.ts`,
+`retrieval.ts` and
 [`service.ts`](../../src/cli/service.ts). No test, benchmark or external-literature
 verification was run. Historical ticket numbers do not establish current open work.
 
@@ -175,13 +175,7 @@ markers: [{
 }]
 ```
 
-The **tessera reference marker** is a pointer; the separate row holds bookmark
-data. This reuses memory metadata without adding a memory-record column, not
-without any schema work: the implementation creates tessera/FTS tables and has
-legacy rename/fingerprint migrations. `memory_id` has no cascading foreign key,
-and the independent query does not filter memory status. Marker carriage alone
-therefore gives no RAII, deletion, retirement or acceptance guarantee for the
-separate row.
+The **tessera reference marker** points to the separate bookmark row. The file index can return a bookmark independently of the status of its linked memory. Marker carriage alone gives no deletion, retention or acceptance guarantee.
 
 Legacy migration: [contract](memory-tesserae-design/legacy-migration.md).
 

@@ -9,7 +9,7 @@
 
 **源码审阅，2026-10-17：**本文仍是附带日期化实现说明的设计草稿，不是端到端验收记录。
 本轮读取的 owner 为 [`schema.ts`](../../src/core/store/schema.ts)、
-[`writes.ts`](../../src/core/store/writes.ts)、[`retrieval.ts`](../../src/core/store/retrieval.ts)
+[`writes.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/writes.ts)、[`retrieval.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)
 与 [`service.ts`](../../src/cli/service.ts)。未执行测试、benchmark 或外部文献核实。
 历史 ticket 编号不证明相关工作当前仍未完成。
 

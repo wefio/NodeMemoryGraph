@@ -16,7 +16,7 @@
 
 ## 当前实现边界
 
-2026-10-17 只读源码发现，[`rankLexicalCandidates`](../../../src/core/store/retrieval.ts)
+2026-10-17 只读源码发现，[`rankLexicalCandidates`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)
 以 `retrievalMode === "fts5"` 且内部参数 `preserveOrder === false` 为条件。
 纯 [`rerankEqualScoresByQueryCoverage`](../../../src/core/store/search-ranking.ts) helper
 保留输入候选集合，在该输入数组上计算文档频次，并在覆盖度相同时稳定保留原顺序。

@@ -167,7 +167,7 @@ The shared cache is an acceleration layer, not a provider fallback. An exact
 cache hit can succeed while the configured embedding service is offline, so a
 mixture of successful and `fetch failed` rows does **not** establish that the
 service failed partway through a run. In the inspected
-[`runPlan()` entry](../../evals/omnimemeval/run.ts), a configured provider is probed
+[`runPlan()` entry](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/evals/omnimemeval/run.ts), a configured provider is probed
 by attempting one `embedQueries` call with one query before the runner is
 spawned; invalid client configuration can fail before provider I/O. Cache-only mode or no configured
 provider skips that probe. A successful probe establishes point-in-time

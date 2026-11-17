@@ -9,7 +9,7 @@
  *
  * Data source is the real SQLite DB (read-only), not a running store — so it
  * works on any database a CLI/eval produced. Aggregates come through
- * NmgStore's public `perfAggregates()` (single source of truth for sections);
+ * SqliteLocalDaemonState's public `perfAggregates()` (single source of truth for sections);
  * scale + trace stats go straight to the DB (no per-trace API exists).
  *
  * Usage:
@@ -19,7 +19,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { NmgStore } from "../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../src/core/store/local-daemon-state.ts";
 
 interface StoreRow {
   n: number;
@@ -29,7 +29,7 @@ const databasePath = resolve(process.argv[2] ?? ".nmg/nmg.sqlite");
 mkdirSync(dirname(databasePath), { recursive: true });
 
 // ── aggregates through the store API ──
-const store = new NmgStore(databasePath);
+const store = new SqliteLocalDaemonState(databasePath, { readOnly: true });
 const aggregates = store.perfAggregates();
 store.close();
 

@@ -11,8 +11,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { NmgService } from "../../src/cli/service.ts";
 import { runCli } from "../../src/cli/main.ts";
 import { httpHandler } from "../../src/cli/http-server.ts";
-import { NmgStore } from "../../src/core/store.ts";
-import { stgStorePath } from "../../src/core/stg.ts";
+import { LegacySqliteFixture } from "../helpers/legacy-sqlite-fixture.ts";
+import { stgStorePath } from "../../src/core/stg-projection.ts";
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
 import { activatedLocalMemory } from "../../src/core/memory/sqlite-backend.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
@@ -23,16 +23,18 @@ stripProviderEnv();
 test("default service migrates an old SQLite file before serving memory", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-default-migration-"));
   const databasePath = join(directory, "nmg.sqlite");
-  const legacy = new NmgStore(databasePath);
-  const { memory } = legacy.remember({
+  const legacy = new LegacySqliteFixture(databasePath);
+  const { memory } = legacy.insertMemory({
     statement: "The signed inventory is stored in the original warehouse",
     nodeName: "Original warehouse",
   });
-  const retained = legacy.remember({
+  const retained = legacy.insertMemory({
     statement: "The retained inventory references the retired warehouse",
     nodeName: "Retired warehouse",
   }).memory;
-  legacy.setMemoryStorageState(retained.id, "dormant");
+  legacy.db
+    .prepare("UPDATE memory_records SET storage_state='dormant' WHERE id=?")
+    .run(retained.id);
   legacy.close();
   const service = new NmgService({ databasePath, environment: {} });
   try {
@@ -68,7 +70,6 @@ test("default service migrates an old SQLite file before serving memory", async 
     const current = new DatabaseSync(databasePath);
     try {
       assert.equal(hasLegacyMemoryTables(current), false);
-      assert.throws(() => new NmgStore(databasePath), /uses the unified memory engine/);
       assert.equal(hasLegacyMemoryTables(current), false);
     } finally {
       current.close();
@@ -83,8 +84,8 @@ test("legacy retirement rolls back if a retained table references a retired tabl
   const directory = mkdtempSync(join(tmpdir(), "nmg-retire-reference-"));
   const path = join(directory, "nmg.sqlite");
   try {
-    const legacy = new NmgStore(path);
-    const { memory } = legacy.remember({
+    const legacy = new LegacySqliteFixture(path);
+    const { memory } = legacy.insertMemory({
       statement: "An archived record still supports the external report.",
       nodeName: "Archived record",
     });
@@ -122,8 +123,8 @@ test("one daemon migrate command backs up and activates the main and selected pr
   const missing = join(directory, "missing");
   try {
     for (const path of [main, stg]) {
-      const fixture = new NmgStore(path);
-      fixture.remember({
+      const fixture = new LegacySqliteFixture(path);
+      fixture.insertMemory({
         statement: "Archive checkpoint stored in SQLite",
         nodeName: "Checkpoint",
       });
@@ -469,8 +470,8 @@ test("unified SQLite searches and relocates a new bookmark independently of its 
 test("unified lifecycle and claim receipts preserve legacy vote counters through restart", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-lifecycle-contract-"));
   const databasePath = join(directory, "nmg.sqlite");
-  const legacy = new NmgStore(databasePath);
-  const original = legacy.remember({
+  const legacy = new LegacySqliteFixture(databasePath);
+  const original = legacy.insertMemory({
     statement: "The atlas depot uses the old receiver",
     nodeName: "Old receiver",
   });
@@ -480,7 +481,25 @@ test("unified lifecycle and claim receipts preserve legacy vote counters through
     source: "task" as const,
     sourceLineage: "operator-1",
   };
-  legacy.recordClaimOutcomes({ semanticTaskId: "previous-inspection", votes: [vote] });
+  const timestamp = new Date().toISOString();
+  legacy.db
+    .prepare(
+      "INSERT INTO claim_outcome_events (id,memory_id,claim_index,semantic_task_id,source,source_lineage,outcome,weight,created_at) VALUES (?,?,0,?,?,?,?,1,?)",
+    )
+    .run(
+      "legacy-vote",
+      vote.memoryId,
+      "previous-inspection",
+      vote.source,
+      vote.sourceLineage,
+      vote.outcome,
+      timestamp,
+    );
+  legacy.db
+    .prepare(
+      "INSERT INTO claim_posteriors (memory_id,claim_index,claim_text,prior_confidence,alpha,beta,independent_vote_count,updated_at) VALUES (?,0,?,0.5,2,1,1,?)",
+    )
+    .run(vote.memoryId, "The atlas depot uses the old receiver", timestamp);
   legacy.close();
   let service = new NmgService({
     databasePath,
@@ -597,13 +616,13 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
     NMG_EMBED_BASE_URL: `http://127.0.0.1:${address.port}/v1beta`,
   };
   const indexId = createEmbeddingClientFromEnv(environment)!.indexId;
-  const legacy = new NmgStore(path);
-  const original = legacy.remember({
+  const legacy = new LegacySqliteFixture(path);
+  const original = legacy.insertMemory({
     statement: "The logistics depot is in Oslo",
     nodeName: "Depot",
   });
-  legacy.upsertExternalEmbeddings(indexId, [{ memoryId: original.memory.id, vector: [1, 0] }]);
-  legacy.upsertExternalNodeEmbeddings(indexId, [{ nodeId: original.node.id, vector: [1, 0] }]);
+  legacy.insertVector("record", indexId, original.memory.id, [1, 0]);
+  legacy.insertVector("node", indexId, original.node.id, [1, 0]);
   legacy.close();
   let service = new NmgService({
     databasePath: path,

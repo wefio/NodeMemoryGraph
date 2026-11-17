@@ -31,7 +31,7 @@ Pi 将阶段耗时与结果写入消息的 `details.recallTiming`；`/nmg recall
 
 以放弃迟到语义信息换取及时开始用户轮次。取消会停止等待并中止支持取消的 HTTP 操作，不能抢占同步 JavaScript/SQLite 工作，也不保证供应商取消已经发出的嵌入请求。迟到向量不能替换已返回图。回归不新增真实供应商调用或基准支出。
 
-[钩子回归](../../../tests/extensions/nmg/recall-budget.test.ts)以慢搜索和慢披露驱动实际 Pi handler；[共享回归](../../../tests/integration/recall-budget.test.ts)验证词法保留、迟到向量隔离与显式搜索行为。
+[钩子回归](../../../tests/extensions/nmg/recall-budget.test.ts)以慢搜索和慢披露驱动实际 Pi handler；[共享回归](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/integration/recall-budget.test.ts)验证词法保留、迟到向量隔离与显式搜索行为。
 [供应商请求合同](../../../tests/core/embedding-provider.test.ts)在传输前验证 HTTP 请求并提供模拟响应。限流、地区权限和供应商可用性由运行环境决定。
 
 ## 延后

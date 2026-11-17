@@ -43,7 +43,7 @@ node --experimental-strip-types local-trace-ranking-probe.ts \
 ## 边界
 
 同一模型在 BPID 身份匹配上的探针在
-[`evals/topology/bpid-neural-probe.ts`](../topology/bpid-neural-probe.ts)。它用
+[`evals/topology/bpid-neural-probe.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/evals/topology/bpid-neural-probe.ts)。它用
 `.benchmarks/bpid/data/data_release/matching_dataset.jsonl`（不在本仓库）在同样三个
 种子上训练，拒绝精度低于 0.95 或相关保留率低于 0.99 时判该次运行失败。
 

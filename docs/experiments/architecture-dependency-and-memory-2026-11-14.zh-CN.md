@@ -30,7 +30,7 @@ node --experimental-strip-types docs/experiments/architecture-import-matrix-2026
 
 ## 边界观察
 
-- `core → integration` 有三条运行时声明：[active-graph.ts](../../src/core/store/active-graph.ts) 引用 `SOURCE_EXCERPT_CHARS`；[base.ts](../../src/core/store/base.ts) 引用任务单元声明操作和类型；[schema.ts](../../src/core/store/schema.ts) 引用对应 schema。后两条指向同一任务单元模块。
+- `core → integration` 有三条运行时声明：[active-graph.ts](../../src/core/store/active-graph.ts) 引用 `SOURCE_EXCERPT_CHARS`；[base.ts](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts) 引用任务单元声明操作和类型；[schema.ts](../../src/core/store/schema.ts) 引用对应 schema。后两条指向同一任务单元模块。
 - `core → lab` 是一条运行时声明：[hierarchical-activation.ts](../../src/core/hierarchical-activation.ts) 引用 autodiff。源码依赖不证明 Lab 已激活，也不证明默认调用失败。
 - `integration → cli` 是五个文件中的九条声明：四条携带运行时值，五条是 `import type`。运行时值分别是 `resolveNmgDataDir`、`NMG_PROTOCOL_VERSION`、`assertDaemonProtocol` 和 `requiresEventTimeReference`，见 [agent-identity.ts](../../src/integration/agent-identity.ts)、[harness-connection.ts](../../src/integration/harness-connection.ts) 和 [lease-transport.ts](../../src/integration/lease-transport.ts)。纯类型引用出现在后两个文件、[mcp-tools.ts](../../src/integration/mcp-tools.ts) 和 [state.ts](../../src/integration/state.ts)。
 - `integration → lab` 有四条声明：三条携带运行时值，一条为纯类型。`cli → lab` 有五条声明。两者都包含可选功能或纯类型引用，不能当作默认路径实际加载量。
@@ -55,7 +55,7 @@ flowchart LR
 | 职责 | 默认 `NmgStore` 路径 | 显式启用的可替换路径 |
 | --- | --- | --- |
 | 选择与 API | 不设置 `memoryBackend`；[服务分发](../../src/cli/service.ts)调用既有 `#remember`、`#search`、`#get` 等方法。 | 显式设置 `memoryBackend`；[PortableMemoryService](../../src/cli/portable-memory.ts)处理 `remember`、`rememberBatch`、`search`、`get`、`deleteMemory`，拒绝其他非本地方法。`MemoryEngine.linkNodes` 是库方法，此配置没有将它暴露为服务方法。 |
-| 含义与写入 | 服务负责写入策略准入和拒绝记录，再由 Store 的 mixin 链写入。[NmgStore](../../src/core/store.ts)组合 coordination、graph、analogy、community、retrieval、writes 和 maintenance。 | [model.ts](../../src/core/memory/model.ts)、[plan.ts](../../src/core/memory/plan.ts)、[engine.ts](../../src/core/memory/engine.ts)验证输入、规划实体，再通过异步端口提交。稳定操作 ID 支持凭据重放。 |
+| 含义与写入 | 服务负责写入策略准入和拒绝记录，再由 Store 的 mixin 链写入。[NmgStore](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store.ts)组合 coordination、graph、analogy、community、retrieval、writes 和 maintenance。 | [model.ts](../../src/core/memory/model.ts)、[plan.ts](../../src/core/memory/plan.ts)、[engine.ts](../../src/core/memory/engine.ts)验证输入、规划实体，再通过异步端口提交。稳定操作 ID 支持凭据重放。 |
 | 共享基础函数 | 旧路径使用 `assessMemoryWrite`、时间与 claim 辅助函数、Store 排序和行处理工具。 | 新路径也使用其中部分函数，包括 `assessMemoryWrite`、claim、时间校验、marker 归一化和语句归一化。调用位置的准入输入和拒绝写入记账不同；本次未证明行为等价。 |
 | 存储与协作 | `NmgStoreBase` 拥有 SQLite 连接及 board／run 协调事务。项目 STG 使用项目存储与会话范围行，LTG 使用服务存储。 | SQLite 使用 `nmg_memory_head`、`nmg_memory_entities`、`nmg_memory_fts`；默认与本地 board／run 表共用服务 SQLite 文件，但记忆后端与协作分别拥有连接和事务。Lance 在暂存分支保存实体与凭据，再有条件发布 head。 |
 | 检索与高级功能 | 服务协调既有 Store／integration 检索、AG／会话能力和其他协议方法。 | 检索使用后端词法检索与有界图扩展。此配置不暴露 AG、chain、tesserae、向量检索和高级过滤；能力握手和明确拒绝界定实际子集。 |

@@ -26,11 +26,11 @@ flowchart LR
   API --> Objects[(对象存储)]
 ```
 
-依据：[Pi 适配器](../../.pi/extensions/nmg/index.ts)、[daemon 客户端](../../src/cli/daemon-client.ts)、[HTTP 服务](../../src/cli/http-server.ts)、[服务](../../src/cli/service.ts)、[Store 组合](../../src/core/store.ts)、[云端 worker](../../onlion/backend/worker.mjs)及其[记忆服务](../../onlion/backend/memory-service.ts)。两个 SQLite 节点表示不同执行环境，不表示存在两套独立 Store 实现。
+依据：[Pi 适配器](../../.pi/extensions/nmg/index.ts)、[daemon 客户端](../../src/cli/daemon-client.ts)、[HTTP 服务](../../src/cli/http-server.ts)、[服务](../../src/cli/service.ts)、[Store 组合](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store.ts)、[云端 worker](../../onlion/backend/worker.mjs)及其[记忆服务](../../onlion/backend/memory-service.ts)。两个 SQLite 节点表示不同执行环境，不表示存在两套独立 Store 实现。
 
 | 边界 | 状态和证据 | 下次审阅要回答的问题 |
 | --- | --- | --- |
-| Store / Task Board | **关注。** [`NmgStoreBase`](../../src/core/store/base.ts) 负责写事务协调和 Task Board 操作。源码拒绝第二个事务和异步事务回调；共享边界会约束拆分。 | 选一个有代表性的 Board 修改，需要改哪些文件、运行哪些测试？能否在保留同一连接与事务语义的前提下分离职责？ |
+| Store / Task Board | **关注。** [`NmgStoreBase`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts) 负责写事务协调和 Task Board 操作。源码拒绝第二个事务和异步事务回调；共享边界会约束拆分。 | 选一个有代表性的 Board 修改，需要改哪些文件、运行哪些测试？能否在保留同一连接与事务语义的前提下分离职责？ |
 | Lite / Lab | **关注。** [设计](../design/design.zh-CN.md)区分默认 Lite 与按需启用的 Lab。[`NmgService`](../../src/cli/service.ts) 静态导入多个 Lab 模块；仅凭导入不能认定默认路径故障或违反策略。 | 默认路径会加载哪些 Lab 代码？缺失依赖或 Lab 初始化失败是否影响 Lite？ |
 | 本地 / 云端 | **关注。** [Onlion](../../onlion/README.zh-CN.md) 导入共享实现，文档列出不同的 SQLite 与对象存储环境，也描述了模拟 R2 的 Miniflare 测试和独立的真实桶检查；本次没有运行它们。 | 每个适配器有哪些共同用例验证作用域隔离、并发写入、重试和恢复？哪些环境没有覆盖？ |
 | Adapter / Core | **关注。** [共享会话决策](../decisions/implemented/2026-10-16-shared-session-flows.zh-CN.md)描述了从 Pi 提取共享流程；其他适配器仍有各自入口。本次没有比较完整调用路径。 | 选一个有代表性的会话流程，新增适配器需要实现什么、修改哪些核心代码？各适配器行为在哪里不同？ |

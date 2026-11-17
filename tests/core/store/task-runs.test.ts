@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { NmgStore } from "../../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../../src/core/store/local-daemon-state.ts";
 
 /** Windows can still hold a handle to a just-closed store for a few milliseconds, so a plain
  *  recursive remove intermittently fails with EPERM on an otherwise green run. */
@@ -12,9 +12,9 @@ const REMOVE_TEMP_TREE = { recursive: true, force: true, maxRetries: 5, retryDel
 /** Far enough out that nothing here is ever pruned as expired. */
 const NEVER = new Date(Date.now() + 86_400_000).toISOString();
 
-function withStore(run: (store: NmgStore) => void): void {
+function withStore(run: (store: SqliteLocalDaemonState) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-task-runs-"));
-  const store = new NmgStore(join(directory, "test.sqlite"));
+  const store = new SqliteLocalDaemonState(join(directory, "test.sqlite"));
   try {
     run(store);
   } finally {
@@ -24,7 +24,7 @@ function withStore(run: (store: NmgStore) => void): void {
 }
 
 function register(
-  store: NmgStore,
+  store: SqliteLocalDaemonState,
   runId: string,
   planDigest = "plan-a",
   policy = "checks-a",
@@ -33,7 +33,7 @@ function register(
 }
 
 function freeze(
-  store: NmgStore,
+  store: SqliteLocalDaemonState,
   runId: string,
   taskId: string,
   input = `${taskId} input`,
@@ -50,7 +50,7 @@ function freeze(
   });
 }
 
-function put(store: NmgStore, taskId: string, content: string): string {
+function put(store: SqliteLocalDaemonState, taskId: string, content: string): string {
   return store.putTaskBoardEntry({
     taskId,
     agentId: "host",

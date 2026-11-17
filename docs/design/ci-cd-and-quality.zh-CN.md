@@ -128,6 +128,7 @@ npm run agent:verify
 拥有。Full 计划聚合命中 route，按首次出现顺序去重，并运行全部 blocking 命令。
 `ci-and-tests` 把 `verify:static` 展开为 CI contract 的同一组原子检查；跨 route 共享检查只执行
 一次，保留各自状态与 route 归因。CI 仍调用命名的 `verify:static` contract。
+该 route 在产品测试前执行与 CI 相同的隔离单测层。
 
 非 RCP full 计划对相邻独立静态检查使用最多三个并发，包括测试源码类型检查、anchor 解析
 与 policy-word 检查；build、package 和产品测试保持串行屏障。产品测试最多八个 Node 文件

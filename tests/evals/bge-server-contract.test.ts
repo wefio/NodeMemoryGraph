@@ -41,11 +41,11 @@ test("BGE has one Python service entrypoint with explicit device policy", () => 
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
-test("retrieval benchmark no longer routes through a shell launcher", () => {
+test("legacy retrieval benchmark is absent from the active entry points", () => {
   assert.equal(existsSync(resolve(repoRoot, "evals", "retrieval", "bench.sh")), false);
+  assert.equal(existsSync(resolve(repoRoot, "evals", "retrieval", "run.ts")), false);
   const packageJson = JSON.parse(readFileSync(resolve(repoRoot, "package.json"), "utf8")) as {
     scripts: Record<string, string>;
   };
-  assert.match(packageJson.scripts["eval:retrieval"], /evals\/retrieval\/run\.ts/u);
-  assert.doesNotMatch(packageJson.scripts["eval:retrieval"], /\.sh\b/u);
+  assert.equal(packageJson.scripts["eval:retrieval"], undefined);
 });

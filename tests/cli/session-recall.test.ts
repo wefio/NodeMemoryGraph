@@ -5,7 +5,6 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { NmgService } from "../../src/cli/service.ts";
-import { NmgStore } from "../../src/core/store.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
@@ -312,8 +311,7 @@ test("session recall pilot is discoverable and self-service only within a sessio
 
 test("explicit lexical rescue and intent correction affect only later trial entry decisions", async () => {
   await fixture(async (service, directory) => {
-    const store = new NmgStore(join(directory, "nmg.sqlite"));
-    const saved = store.remember({
+    const saved = await service.invoke("remember", {
       statement: "Fixture palette prefers azure",
       nodeName: "fixture-palette",
       memoryType: "preference",
@@ -322,7 +320,6 @@ test("explicit lexical rescue and intent correction affect only later trial entr
       sourceActor: "assistant",
       truthStatus: "unverified",
     });
-    store.close();
     assert.equal(await prepare(service, directory), undefined, "off by default");
     await assert.rejects(correct(service, 1), /not enabled/u);
     await enable(service);

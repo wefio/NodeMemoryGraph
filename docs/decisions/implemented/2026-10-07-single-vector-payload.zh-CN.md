@@ -36,7 +36,7 @@
 迁移 savepoint 在失败时回滚所有向量修改、新增列和版本标记，也支持调用者已有事务。
 已有二进制字节、主键和时间戳保持不变；二进制形状不匹配声明维度时，保留未验证的旧文本。
 
-[存储回归测试](../../../tests/core/store/vector-storage.test.ts)覆盖原子回滚、重复打开、
+[存储回归测试](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/store/vector-storage.test.ts)覆盖原子回滚、重复打开、
 按模型读取/写入、旧格式回退，以及不读取向量载荷的中文/标点 FTS。
 删除重复值减少逻辑存储，但已有数据库文件不一定立即缩小；物理压缩由单独受控的操作完成。
 [受控存储实验](../../experiments/store/single-vector-payload-2026-10-07.md)在页大小不变时比较两个已压缩端点。

@@ -12,7 +12,6 @@ import { httpHandler } from "../../src/cli/http-server.ts";
 import type { ServerState } from "../../src/cli/lifecycle.ts";
 import type { NmgMethodResult } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
-import { NmgStore } from "../../src/core/store.ts";
 import { renderSearchSurface } from "../../src/integration/agent-surface.ts";
 import {
   captureMemoryReferenceTargets,
@@ -307,22 +306,27 @@ test("ordinary HTTP JSON-RPC accepts mixed canonical and copied references", asy
 
 test("shared library helpers resolve a captured scope without a host-specific decoder", async () => {
   await withService(async (service, directory) => {
-    const store = new NmgStore(join(directory, "nmg.sqlite"));
+    const writer = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
     try {
-      const saved = store.remember({
+      const saved = await writer.invoke("remember", {
         statement: "SQLite stores Atlas project data.",
         nodeName: "Atlas storage",
       });
-      const context = store.searchContext("SQLite Atlas", {
+      const context = await writer.invoke("search", {
+        query: "SQLite Atlas",
         sessionId: "library-reader",
         limit: 1,
       });
       const snapshot = captureMemoryReferenceTargets(context.results);
       const key = createMemoryReferences(context, snapshot)[saved.memory.id]!;
-      const current = store.getContext(context.activeGraph!.memoryIds).results;
+      const current = (await writer.invoke("get", { memoryIds: context.activeGraph!.memoryIds }))
+        .results;
       const ids = resolveMemoryReferences([key], snapshot, current);
       assert.deepEqual(ids, [saved.memory.id]);
-      assert.equal(store.getContext(ids).results[0]?.memory.id, saved.memory.id);
+      assert.equal(
+        (await writer.invoke("get", { memoryIds: ids })).results[0]?.memory.id,
+        saved.memory.id,
+      );
       // A durable trace lacks the content witness of a live service projection.
       await assert.rejects(
         service.invoke("get", {
@@ -333,7 +337,7 @@ test("shared library helpers resolve a captured scope without a host-specific de
         /absent or not owned|belongs to another session/u,
       );
     } finally {
-      store.close();
+      await writer.close();
     }
   });
 });

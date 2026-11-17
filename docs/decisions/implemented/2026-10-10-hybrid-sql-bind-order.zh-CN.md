@@ -17,10 +17,10 @@ Hybrid 在 `WHERE` 与 `ORDER BY` 中重复使用词法候选 ID。第二组 ID 
 第二组 FTS ID 绑定在所有时间/scope 参数之后、行数上限之前。SQL 谓词、候选边界、词法
 优先表达式、打分权重、向量表示及公开 API 不变。保留 SQL 过滤，不以评分后的补偿过滤修复。
 
-[Store 契约](../../../tests/core/store/hybrid-bindings.test.ts)覆盖正向 FTS 命中，分别检查
+[Store 契约](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/store/hybrid-bindings.test.ts)覆盖正向 FTS 命中，分别检查
 无过滤、单侧/双侧时间界、多键 scope 及组合；验证边界包含、字段缺失、排除条件、重复排序
 和公开二次检索上下文，并保留 FTS-only、vector-only、无命中 hybrid 回退及 forced-candidate
-对照。[打分等价契约](../../../tests/core/store/vector-scoring.test.ts)直接比较正命中的 hybrid
+对照。[打分等价契约](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/store/vector-scoring.test.ts)直接比较正命中的 hybrid
 结果，不再仅以无 FTS 命中的回退路径作对照。
 
 ## 考虑过的替代方案

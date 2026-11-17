@@ -12,9 +12,9 @@ The earlier attempt and compiler failure are preserved as historical engineering
 
 ## Current source boundary
 
-As source-checked on 2026-10-16, [`src/core/store.ts`](../../src/core/store.ts) composes `withGraph`, `withAnalogy`, `withCommunity`, `withRetrieval`, `withWrites`, and `withMaintenance` over `NmgStoreBase`. This differs from the four-cluster composition and inventories recorded in the 2026-08 note.
+As source-checked on 2026-10-16, [`src/core/store.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store.ts) composes `withGraph`, `withAnalogy`, `withCommunity`, `withRetrieval`, `withWrites`, and `withMaintenance` over `NmgStoreBase`. This differs from the four-cluster composition and inventories recorded in the 2026-08 note.
 
-[`tests/core/store/cluster-dag.test.ts`](../../tests/core/store/cluster-dag.test.ts) retains a structural guard for cluster ownership, the mixin assembly, and import boundaries. This is a source/test inspection only; no test was run during this documentation pass.
+[`tests/core/store/cluster-dag.test.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/store/cluster-dag.test.ts) retains a structural guard for cluster ownership, the mixin assembly, and import boundaries. This is a source/test inspection only; no test was run during this documentation pass.
 
 ## Evidence boundary
 
@@ -22,10 +22,10 @@ The original report recorded 480/480 tests, a clean typecheck and lint/format/bu
 
 ## Current source references
 
-- [Store assembly](../../src/core/store.ts)
-- [Base class and shared helpers](../../src/core/store/base.ts)
-- [Graph cluster](../../src/core/store/graph.ts)
-- [Retrieval cluster](../../src/core/store/retrieval.ts)
-- [Write cluster](../../src/core/store/writes.ts)
-- [Maintenance cluster](../../src/core/store/maintenance.ts)
-- [Cluster boundary guard](../../tests/core/store/cluster-dag.test.ts)
+- [Store assembly](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store.ts)
+- [Base class and shared helpers](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts)
+- [Graph cluster](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/graph.ts)
+- [Retrieval cluster](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)
+- [Write cluster](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/writes.ts)
+- [Maintenance cluster](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/maintenance.ts)
+- [Cluster boundary guard](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/store/cluster-dag.test.ts)

@@ -32,4 +32,4 @@ Temporal chain 保存记录的有序引用；Store 默认按追加顺序加入�
 
 ## 源码参考
 
-参见 [`SearchOptions`](../../../src/core/types.ts)、[链扩展与追加预算](../../../src/core/store/retrieval.ts)、[链持久化与 DAG 检查](../../../src/core/store/base.ts)、[logical-chain 投影](../../../src/integration/chain-projection.ts) 和 [chain 测试套件](../../../tests/core/memory-chains.test.ts)。
+参见 [`SearchOptions`](../../../src/core/types.ts)、[链扩展与追加预算](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)、[链持久化与 DAG 检查](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts)、[logical-chain 投影](../../../src/integration/chain-projection.ts) 和 [chain 测试套件](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/memory-chains.test.ts)。

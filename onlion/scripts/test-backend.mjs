@@ -222,7 +222,7 @@ try {
       "-c",
       `import sys,sqlite3,json
 c=sqlite3.connect(':memory:');c.deserialize(sys.stdin.buffer.read())
-print(json.dumps(c.execute('SELECT count(*),count(DISTINCT source_message_id),count(DISTINCT session_id) FROM history_records').fetchone()))`,
+print(json.dumps(c.execute('SELECT count(*),count(DISTINCT json_extract(payload,"$.sourceMessageId")),count(DISTINCT json_extract(payload,"$.sessionId")) FROM nmg_memory_entities WHERE kind="history"').fetchone()))`,
     ],
     { input: batchImage },
   );
@@ -237,7 +237,7 @@ print(json.dumps(c.execute('SELECT count(*),count(DISTINCT source_message_id),co
       "-c",
       `import sys,sqlite3,json
 c=sqlite3.connect(':memory:');c.deserialize(sys.stdin.buffer.read())
-r=c.execute('select statement,memory_type,source_actor,truth_status,event_time,scope_json,markers_json,write_source,residence,session_id from memory_records order by rowid').fetchall()
+r=c.execute('select json_extract(payload,"$.statement"),json_extract(payload,"$.memoryType"),json_extract(payload,"$.sourceActor"),json_extract(payload,"$.truthStatus"),json_extract(payload,"$.eventTime"),json_extract(payload,"$.scope"),json_extract(payload,"$.markers"),json_extract(payload,"$.writeSource"),json_extract(payload,"$.residence"),json_extract(payload,"$.sessionId") from nmg_memory_entities where kind="memory" order by rowid').fetchall()
 print(json.dumps(r))`,
     ],
     { input: batchImage },
@@ -643,7 +643,7 @@ print(json.dumps(r))`,
         "-c",
         `import sys,sqlite3,json
 +c=sqlite3.connect(':memory:');c.deserialize(sys.stdin.buffer.read())
-+print(json.dumps({'records':c.execute('select id,access_count,pending_access_count from memory_records order by id').fetchall(),'traces':c.execute('select count(*) from retrieval_traces').fetchone()[0],'application_id':c.execute('pragma application_id').fetchone()[0]}))`.replace(
++print(json.dumps({'records':c.execute('select id,json_extract(payload,"$.accessCount"),0 from nmg_memory_entities where kind="memory" order by id').fetchall(),'traces':0 if not c.execute('select 1 from sqlite_schema where name="retrieval_traces"').fetchone() else c.execute('select count(*) from retrieval_traces').fetchone()[0],'application_id':c.execute('pragma application_id').fetchone()[0]}))`.replace(
           /^\+/gm,
           "",
         ),

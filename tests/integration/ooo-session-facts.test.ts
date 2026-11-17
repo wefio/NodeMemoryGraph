@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import { type DispatchTask, type SessionPlan } from "../../src/integration/ooo-execution.ts";
 import {
   SESSION_MOVE_FACT,
@@ -26,9 +26,9 @@ import { RUN_CANCELLED_FACT } from "../../src/integration/task-coordinator.ts";
 /** Windows can still hold a handle to a just-closed store for a few milliseconds. */
 const REMOVE_TEMP_TREE = { recursive: true, force: true, maxRetries: 5, retryDelay: 100 };
 
-function withStore(run: (store: NmgStore) => void): void {
+function withStore(run: (store: SqliteLocalDaemonState) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-session-facts-"));
-  const store = new NmgStore(join(directory, "test.sqlite"));
+  const store = new SqliteLocalDaemonState(join(directory, "test.sqlite"));
   try {
     run(store);
   } finally {
@@ -37,7 +37,7 @@ function withStore(run: (store: NmgStore) => void): void {
   }
 }
 
-function register(store: NmgStore, runId: string): void {
+function register(store: SqliteLocalDaemonState, runId: string): void {
   store.registerTaskRun({
     runId,
     planDigest: "plan-a",

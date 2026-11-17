@@ -69,9 +69,11 @@ export class SqliteMemoryBackend implements MemoryBackend {
   private readonly path: string;
   readonly namespace: string;
   readonly vectorIndex: SqliteMemoryVectors;
+  private readonly requestScoped: boolean;
 
-  constructor(path: string, namespace: string) {
+  constructor(path: string, namespace: string, requestScoped = false) {
     this.path = path;
+    this.requestScoped = requestScoped;
     this.namespace = namespace;
     if (!namespace.trim()) throw new Error("Memory namespace is required");
     if (path === ":memory:")
@@ -96,15 +98,15 @@ export class SqliteMemoryBackend implements MemoryBackend {
 
   async openRead(): Promise<MemoryReadView> {
     this.assertOpen();
-    const db = new DatabaseSync(this.path, { readOnly: true });
+    const db = this.requestScoped ? this.writer : new DatabaseSync(this.path, { readOnly: true });
     try {
-      db.exec("PRAGMA query_only=ON; BEGIN");
+      if (!this.requestScoped) db.exec("PRAGMA query_only=ON; BEGIN");
       const revision = this.revision(db);
       const view = Object.freeze({ revision });
       this.readers.set(view, db);
       return view;
     } catch (error) {
-      db.close();
+      if (db !== this.writer) db.close();
       throw error;
     }
   }
@@ -145,7 +147,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
     const db = this.readers.get(view);
     if (!db) return;
     this.readers.delete(view);
-    db.close();
+    if (db !== this.writer) db.close();
   }
 
   async commit(request: MemoryCommitRequest): Promise<MemoryCommitOutcome> {
@@ -164,6 +166,16 @@ export class SqliteMemoryBackend implements MemoryBackend {
 
   /** Legacy schema can only be retired after a backup of the locked source has been verified. */
   activateLocal(assertLegacyBackup?: () => void): void {
+    this.activate(assertLegacyBackup);
+  }
+
+  /** The object store retains its immutable source image until its manifest publishes. */
+  activateSnapshot(): void {
+    if (!this.requestScoped) throw new Error("Snapshot activation requires request-scoped SQLite");
+    this.activate(() => {});
+  }
+
+  private activate(assertLegacyBackup?: () => void): void {
     this.transaction(() => {
       const current = localNamespace(this.writer);
       if (current ? current !== this.namespace : this.revision(this.writer) !== 0)
@@ -178,7 +190,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
         importLegacySqliteChains(this.writer, this.namespace);
         importLegacySqliteAssociations(this.writer, this.namespace);
         retireLegacyMemoryTables(this.writer);
-      } else if (!current) {
+      } else if (!current && !this.requestScoped) {
         ensureLocalDaemonSchema(this.writer);
       }
       this.reindexLegacyRows();

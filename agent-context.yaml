@@ -17,16 +17,16 @@ capabilities:
 
   - id: retrieval-evaluation
     aliases: [evidence-recall, retrieval-benchmark]
-    summary: Run deterministic rank-aware evidence retrieval evaluation without an answer model or judge.
+    summary: Score retrieval evidence without an answer model or judge.
     paths: [evals/retrieval, tests/evals]
-    entrypoints: [npm run eval:retrieval]
+    entrypoints: [npm run benchmark:score:longmem]
     supports: [locomo, longmemeval, beam, personamem, halumem]
 
   - id: official-memory-benchmarks
     aliases: [omnimemeval]
-    summary: Run the pinned official OmniMemEval answer and judge pipelines through the NMG adapter.
+    summary: Install the AML adapter and score official OmniMemEval results.
     paths: [evals/omnimemeval, evals/official]
-    entrypoints: [npm run benchmark:omni]
+    entrypoints: [npm run benchmark:install:omni-adapter, npm run benchmark:score]
     supports: [locomo, longmemeval, beam, personamem-v2, halumem]
 
   - id: repository-control-plane
@@ -199,6 +199,7 @@ routes:
         - glossary:check
         - check:policy-words
         - rtm:check
+        - test:unit
         - test:product
       advisory: [verify:research, verify:chaos]
 

@@ -122,6 +122,6 @@ NMG adapter bridge 位于 `evals/omnimemeval/bridge.ts`；每用户 store 在 `.
 
 ### Embedding 可用性契约
 
-共享 cache 是加速层，不是 provider 的兜底。当配置的 embedding 服务离线时，一次精确 cache 命中仍可能成功，因此「部分行成功、部分行 `fetch failed`」的混合**并不**证明该服务在一次 run 中途才失败。在所读 [`runPlan()` 入口](../../evals/omnimemeval/run.ts)中，配置了 provider 时，入口在启动 runner 前尝试以一个 query 调用一次 `embedQueries`；客户端配置无效可在 provider I/O 之前失败。Cache-only 模式或未配置 provider 时跳过。探测成功只建立该时点的可用性，不保证整次运行健康，也不能假设每条历史上直接调用上游 shell 的命令都经过此守卫。
+共享 cache 是加速层，不是 provider 的兜底。当配置的 embedding 服务离线时，一次精确 cache 命中仍可能成功，因此「部分行成功、部分行 `fetch failed`」的混合**并不**证明该服务在一次 run 中途才失败。在所读 [`runPlan()` 入口](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/evals/omnimemeval/run.ts)中，配置了 provider 时，入口在启动 runner 前尝试以一个 query 调用一次 `embedQueries`；客户端配置无效可在 provider I/O 之前失败。Cache-only 模式或未配置 provider 时跳过。探测成功只建立该时点的可用性，不保证整次运行健康，也不能假设每条历史上直接调用上游 shell 的命令都经过此守卫。
 
 `NMG_EMBED_CACHE_ONLY=1` 是显式的离线例外。它禁用 embedding-provider I/O，只提供声明的 model／预处理 `indexId`、输入种类及文本哈希下的缓存向量。第一个必需 document／query 缺失会以 `embedding cache-only miss` 错误 fail closed；覆盖范围须包含该次运行需要的输入。部分 checkpoint 不是完整 benchmark 结果。这仅是 embedding 离线模式，不保证 answer／judge 或整次评测均无网络调用。

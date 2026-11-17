@@ -204,14 +204,11 @@ try {
       );
       assert.match(
         service,
-        /syncRecordEmbeddings\(this\.store, this\.client, 32, \{ maxBatches: 1 \}\)/,
-        "both backfill call sites must cap their batches",
+        /vectorIndex\.pending\(this\.client\.indexId, 32\)/,
+        "a backfill must retrieve at most one batch of 32 missing records",
       );
-      assert.equal(
-        (service.match(/syncRecordEmbeddings\(this\.store, this\.client, 32\)/g) ?? []).length,
-        0,
-        "the unbounded backfill form must not come back",
-      );
+      const backfill = service.slice(service.indexOf("private async backfillVectors"), service.indexOf("get backfillStatus"));
+      assert.doesNotMatch(backfill, /\b(?:for|while)\s*\(/, "one fold never drains the backlog");
     }
   }
 

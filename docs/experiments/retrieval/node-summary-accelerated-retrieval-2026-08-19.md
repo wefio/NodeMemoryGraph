@@ -37,6 +37,6 @@ Before implementation, the proposed large-data check was LongMemEval 500 questio
 - [Fibonacci progressive recall](../../design/fibonacci-progressive-recall.md)
 - [Retrieval confidence controller](../../design/retrieval-confidence-controller.md)
 - [QPP implementation](../../../src/core/qpp.ts)
-- [Store retrieval and ranking](../../../src/core/store/retrieval.ts) and [`search-ranking.ts`](../../../src/core/store/search-ranking.ts)
+- [Store retrieval and ranking](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts) and [`search-ranking.ts`](../../../src/core/store/search-ranking.ts)
 
 The current QPP path is not evidence that the proposed node-summary candidate-pruning system exists. Consult these owners for current defaults and bounds. The historical paper list and numerical performance claims from external systems are omitted from this compact record; verify sources before citing or adopting them.

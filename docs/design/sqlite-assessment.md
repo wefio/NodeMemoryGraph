@@ -4,7 +4,7 @@
 
 Historical assessment and recommendations created 2026-07-20. Actions such as “add immediately” were recommendations at that time, not a current TODO list, and do not establish measured performance gains.
 
-Current source check: As of 2026-10-16, the writable store in [`src/core/store/base.ts`](../../src/core/store/base.ts) sets `foreign_keys=ON`, `journal_mode=WAL`, `synchronous=NORMAL`, `cache_size=-64000`, `temp_store=MEMORY`, `mmap_size=268435456`, and `busy_timeout=5000`. The read-only store uses the listed settings except `journal_mode` and `synchronous`. This is a source inspection, not a fresh performance measurement.
+Current source check: As of 2026-10-16, the writable store in [`src/core/store/base.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts) sets `foreign_keys=ON`, `journal_mode=WAL`, `synchronous=NORMAL`, `cache_size=-64000`, `temp_store=MEMORY`, `mmap_size=268435456`, and `busy_timeout=5000`. The read-only store uses the listed settings except `journal_mode` and `synchronous`. This is a source inspection, not a fresh performance measurement.
 
 **Created:** 2026-07-20
 

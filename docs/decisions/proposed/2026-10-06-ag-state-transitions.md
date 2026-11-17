@@ -58,7 +58,7 @@ Avoid repeating the same content in state, recall and evidence within one dynami
 
 ### 2.1 Borrow compact reads and explicit maintenance, not the shared state machine
 
-Existing board primitives live in [`TaskBoardEntry/TaskBoardPreview`](../../../src/core/types.ts), [`readTaskBoardPreviews/readInboxTaskBoard`](../../../src/core/store/base.ts) and [`renderTaskBoardSurface`](../../../src/integration/agent-surface.ts). Borrow their read/maintenance semantics without forcing AG into the same DTO or writing private state to the board:
+Existing board primitives live in [`TaskBoardEntry/TaskBoardPreview`](../../../src/core/types.ts), [`readTaskBoardPreviews/readInboxTaskBoard`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts) and [`renderTaskBoardSurface`](../../../src/integration/agent-surface.ts). Borrow their read/maintenance semantics without forcing AG into the same DTO or writing private state to the board:
 
 | Board mechanism | AG counterpart | What not to import |
 | --- | --- | --- |

@@ -18,7 +18,7 @@ Without `tieredDisclosure`, direct retrieval searches through the caller/budget 
 - `progressiveWarmDisclosure` and `--full-warm` govern a separate presentation window within warm results. They are not the same mechanism as opening storage tiers.
 - The deterministic QPP trigger controls continuation; no calibrated likelihood ratio is used. Core selection and caller defaults are described in [Progressive recall](fibonacci-progressive-recall.md).
 
-The current path is implemented in [`retrieval.ts`](../../src/core/store/retrieval.ts), with its option in [`types.ts`](../../src/core/types.ts). The CLI mapping is in [`commands.ts`](../../src/cli/commands.ts); Pi automatic recall wiring is in [`.pi/extensions/nmg/index.ts`](../../.pi/extensions/nmg/index.ts).
+The current path is implemented in [`retrieval.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts), with its option in [`types.ts`](../../src/core/types.ts). The CLI mapping is in [`commands.ts`](../../src/cli/commands.ts); Pi automatic recall wiring is in [`.pi/extensions/nmg/index.ts`](../../.pi/extensions/nmg/index.ts).
 
 ## Design rationale and proposed statistical extension
 
@@ -50,7 +50,7 @@ Implementation history and current owners are indexed in [implementation lineage
 ## Source references
 
 - [`SearchOptions` and tier budgets](../../src/core/types.ts)
-- [Sequential tier retrieval and QPP continuation](../../src/core/store/retrieval.ts)
+- [Sequential tier retrieval and QPP continuation](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)
 - [CLI option](../../src/cli/commands.ts)
 - [Pi automatic-recall caller](../../.pi/extensions/nmg/index.ts)
 - [Progressive-recall design](fibonacci-progressive-recall.md)

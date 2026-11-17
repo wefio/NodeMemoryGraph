@@ -15,7 +15,7 @@
 - `cached_from_ltg` copies are project-shared search hints; they are not LTG authority. Session-owned STG rows are removed through the explicit purge path; the project file remains.
 - Writable stores use WAL and checkpoint with `PRAGMA wal_checkpoint(TRUNCATE)` on close. The constructor also attempts a best-effort checkpoint on open when a non-empty WAL remains.
 
-These facts are source-checked in [`src/core/stg.ts`](../../src/core/stg.ts), [`src/core/store/base.ts`](../../src/core/store/base.ts), and the session-filtered retrieval/write paths. The design details and trust boundary are in [Shared-store design](stg-shared-store-v2-2026-08-12/shared-store-design.md).
+These facts are source-checked in [`src/core/stg.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/stg.ts), [`src/core/store/base.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts), and the session-filtered retrieval/write paths. The design details and trust boundary are in [Shared-store design](stg-shared-store-v2-2026-08-12/shared-store-design.md).
 
 ## Historical motivation and evidence boundary
 
@@ -27,10 +27,10 @@ The earlier migration plan and industry comparisons are kept as historical conte
 
 ## Current source and test references
 
-- [Project-local STG path and purge entry point](../../src/core/stg.ts)
-- [STG retrieval and row visibility](../../src/core/store/retrieval.ts)
-- [Store schema, connection pragmas, and WAL checkpoint lifecycle](../../src/core/store/base.ts)
-- [Write path](../../src/core/store/writes.ts)
-- [STG v2 tests](../../tests/core/stg-v2.test.ts)
+- [Project-local STG path and purge entry point](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/stg.ts)
+- [STG retrieval and row visibility](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)
+- [Store schema, connection pragmas, and WAL checkpoint lifecycle](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts)
+- [Write path](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/writes.ts)
+- [STG v2 tests](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/stg-v2.test.ts)
 
 Test files are cited as owners; this document does not assert a current test pass. See [implementation lineage](implementation-lineage.md) for the curated history-to-owner index.

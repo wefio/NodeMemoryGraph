@@ -31,7 +31,7 @@ try {
   for (const row of ordinary.memories) {
     assert.ok(Array.isArray(row.content));
     assert.deepEqual(JSON.parse(row.raw_content), ordinary.memories.find(other => other.id === row.id) && JSON.parse(row.raw_content));
-    const memory = Reflect.get(service, 'store').getMemory(row.id);
+    const memory = await service.record(row.id);
     assert.equal(memory.sourceActor, 'user', 'Attribution follows the supplied message role');
     assert.equal(memory.truthStatus, 'asserted');
     assert.doesNotMatch(memory.statement, /base64,/);
@@ -61,6 +61,6 @@ try {
   }, null, 2));
   console.log('PASS: native SQLite Add -> text/image-query retrieval -> original ordered image evidence; role attribution, marker source identity and conditional historical time hold.');
 } finally {
-  service.close();
+  await service.close();
   for (const suffix of ['', '-wal', '-shm']) rmSync(resolve(`/tmp/nmg/${key}.sqlite${suffix}`), { force: true });
 }

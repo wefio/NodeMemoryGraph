@@ -42,7 +42,7 @@ assert.match(
 );
 assert.doesNotMatch(
   source,
-  /function compiledWasm\(\).*callbacks/s,
+  /function compiledWasm\d*\(\) \{[^}]*\bcallbacks\b/,
   "callbacks.wasm must not be wrapped in the lazy factory",
 );
 

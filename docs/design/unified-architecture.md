@@ -90,7 +90,7 @@ Backends may use different analyzers, indexes, ranking and approximate vector se
 
 ### SQLite backend
 
-Use native transactions, indexes and queries. Extract the memory-facing boundary from [the store assembly](../../src/core/store.ts), [base transaction ownership](../../src/core/store/base.ts), and [memory writes](../../src/core/store/writes.ts). Preserve the single owner of each transaction and the synchronous callback rule. Schema migration remains backend-owned. Shared domain invariants move behind the engine boundary rather than being copied into an object adapter.
+Use native transactions, indexes and queries. Extract the memory-facing boundary from the store assembly, base transaction ownership, and memory writes. Preserve the single owner of each transaction and the synchronous callback rule. Schema migration remains backend-owned. Shared domain invariants move behind the engine boundary rather than being copied into an object adapter.
 
 ### Native object backend
 

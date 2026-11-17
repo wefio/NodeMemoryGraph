@@ -39,7 +39,7 @@ limit 为 20，graph hops 为零，禁用 second pass 和轨迹持久化。
 - [首轮](artifacts/2026-10-28-request-reuse.json)
 - [重复轮](artifacts/2026-10-28-request-reuse-repeat.json)
 
-独立的[契约测试](../../../tests/integration/query-embedding-request.test.ts)覆盖真实 Store 读取、
+独立的[契约测试](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/integration/query-embedding-request.test.ts)覆盖真实 Store 读取、
 读取之间删除、并发消费者、失败与空响应重试、修改隔离、自动取消和纯词法选择。
 本地 HTTP provider 测试执行真正的 `NmgService` 多查询路径，验证每次调用拥有独立准备。
 

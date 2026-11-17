@@ -16,6 +16,8 @@ benchmark data
   -> report
 ```
 
+The current adapter uses the AML HTTP API and requires `NMG_OMNI_API_URL`. The local bridge and the `benchmark:omni` recipes below belong to the [archived revision](https://github.com/wefio/NodeMemoryGraph/tree/3cf3bec2147925f49545775f2ff8aa25e00404f0).
+
 ## Layout
 
 The files in this directory are split by responsibility:

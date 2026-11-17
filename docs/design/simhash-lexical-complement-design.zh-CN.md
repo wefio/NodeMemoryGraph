@@ -67,4 +67,4 @@ NMG 已有 `src/core/simhash.ts`，用于 tessera 文件漂移路径。这说明
 
 ## 源码参考
 
-参见 [`src/core/simhash.ts`](../../src/core/simhash.ts)、[tessera 指纹 service](../../src/cli/service.ts)、[tessera 存储与检索](../../src/core/store/retrieval.ts)、[`supersedeCandidates`](../../src/core/store/writes.ts) 和[取代设计](supersession-design.md)。
+参见 [`src/core/simhash.ts`](../../src/core/simhash.ts)、[tessera 指纹 service](../../src/cli/service.ts)、[tessera 存储与检索](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)、[`supersedeCandidates`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/writes.ts) 和[取代设计](supersession-design.md)。

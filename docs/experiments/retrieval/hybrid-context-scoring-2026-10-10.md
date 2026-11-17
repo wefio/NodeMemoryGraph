@@ -12,7 +12,7 @@ one controlled window-only run returned seven when five were eligible. These
 observations do not estimate production frequency or overall recall loss.
 
 The fix moves only the repeated `ORDER BY` ID bindings after all `WHERE`
-parameters. The nine [binding contracts](../../../tests/core/store/hybrid-bindings.test.ts)
+parameters. The nine [binding contracts](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/store/hybrid-bindings.test.ts)
 cover correct eligible IDs, inclusive bounds, missing date/scope keys, rejected
 records, stable repeated ordering, FTS-only/vector-only/forced/no-hit controls and
 public second-pass context. With existing retrieval/scoring tests, 57/57 passed.

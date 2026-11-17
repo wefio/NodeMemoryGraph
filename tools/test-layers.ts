@@ -48,12 +48,11 @@ const SPAWNS_PROCESS =
 const STARTS_PRODUCT = /daemon-client|dist\/cli\/main\.js|bin\/nmg\.mjs/;
 
 /**
- * A real dependency the test neither owns nor mocks: a database file, a temp directory, a
- * listening socket. The assertions are still in process, which keeps the failure readable,
- * but the setup can fail for reasons the code under test did not cause.
+ * A real dependency the test neither owns nor mocks: a SQLite connection (including
+ * in-memory local state), a temp directory, or a listening socket.
  */
 const REAL_DEPENDENCY =
-  /(?:DatabaseSync|node:sqlite|mkdtemp|tmpdir\(\)|createServer|\.listen\(|writeFileSync|mkdirSync|rmSync|NmgStore|\/store\.ts|\/store\/)/;
+  /(?:DatabaseSync|\bnew\s+SqliteLocalDaemonState\s*\(|mkdtemp|tmpdir\(\)|createServer|\.listen\(|writeFileSync|mkdirSync|rmSync)/;
 
 /**
  * Deliberate exceptions, keyed by repository-relative path. Each one must say why the marker
@@ -64,8 +63,6 @@ export const OVERRIDES: ReadonlyMap<string, { layer: TestLayer; reason: string }
   // Each of these crosses a process boundary through a helper, so the file itself never
   // mentions it. The unit seal found them; without the entry the seal fails them again.
   ["tests/evals/official/python.test.ts", { layer: "e2e", reason: "probes a Python runtime" }],
-  ["tests/evals/topology/bpid.test.ts", { layer: "e2e", reason: "runs the topology driver" }],
-  ["tests/evals/topology/run.test.ts", { layer: "e2e", reason: "runs the topology driver" }],
   [
     "tests/evals/resource-observability.test.ts",
     { layer: "e2e", reason: "samples the process tree of a live daemon" },

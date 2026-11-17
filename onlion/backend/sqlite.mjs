@@ -138,6 +138,9 @@ export class DatabaseSync {
       },
     };
   }
+  function(name, options, callback) {
+    this.db.createFunction(name, (_context, value) => callback(value), options);
+  }
   close() {
     if (this.db.pointer) this.db.close();
   }

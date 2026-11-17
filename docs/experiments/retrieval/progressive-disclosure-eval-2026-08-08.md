@@ -42,6 +42,6 @@ The report's `0.7352` is a flat-disclosure score in the described configuration;
 - [Tiered disclosure design](../../design/tiered-disclosure-design.md)
 - [Fibonacci progressive recall](../../design/fibonacci-progressive-recall.md)
 - [Retrieval confidence controller](../../design/retrieval-confidence-controller.md)
-- Current retrieval implementation: [`src/core/store/retrieval.ts`](../../../src/core/store/retrieval.ts)
+- Current retrieval implementation: [`src/core/store/retrieval.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)
 
 These owners supersede the historical defaults and implementation description in the 2026-08 note.

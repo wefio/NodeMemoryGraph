@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { NmgStore } from "../../src/core/store.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import {
   executeCoordinationState,
   prepareCoordinationSurface,
@@ -12,7 +12,7 @@ import {
 test("phase transitions bind confirmations to a proposal and persist independently of notes", () => {
   const dir = mkdtempSync(join(tmpdir(), "nmg-phases-"));
   const path = join(dir, "store.sqlite");
-  const store = new NmgStore(path);
+  const store = new SqliteLocalDaemonState(path);
   try {
     const event = store.createCoordinationEvent({
       agentId: "a",
@@ -95,7 +95,7 @@ test("phase transitions bind confirmations to a proposal and persist independent
     );
     assert.equal("collaboration" in store.readCoordinationEvent(child.id).event, false);
     assert.equal(store.readCoordinationEvent(event.id).changes.length, historyBeforeFailure);
-    const reopened = new NmgStore(path);
+    const reopened = new SqliteLocalDaemonState(path);
     try {
       assert.match(
         JSON.stringify(reopened.readCoordinationEvent(event.id).event),

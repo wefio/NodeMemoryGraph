@@ -4,7 +4,7 @@
 
 创建于 2026-07-20 的历史评估与建议。文中的“立即加”等动作是当时的建议，不是当前待办，也不代表这些建议都带来已测得的性能提升。
 
-当前源码校对：截至 2026-10-16，[`src/core/store/base.ts`](../../src/core/store/base.ts) 的 writable store 已设置 `foreign_keys=ON`、`journal_mode=WAL`、`synchronous=NORMAL`、`cache_size=-64000`、`temp_store=MEMORY`、`mmap_size=268435456` 和 `busy_timeout=5000`；read-only store 使用其中除 `journal_mode`、`synchronous` 外的设置。此处仅核对源码，没有重新测量性能。
+当前源码校对：截至 2026-10-16，[`src/core/store/base.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/base.ts) 的 writable store 已设置 `foreign_keys=ON`、`journal_mode=WAL`、`synchronous=NORMAL`、`cache_size=-64000`、`temp_store=MEMORY`、`mmap_size=268435456` 和 `busy_timeout=5000`；read-only store 使用其中除 `journal_mode`、`synchronous` 外的设置。此处仅核对源码，没有重新测量性能。
 
 **创建日期：**2026-07-20
 

@@ -18,7 +18,7 @@
 - `progressiveWarmDisclosure` 与 `--full-warm` 控制 warm results 内的独立呈现窗口；它们不是存储 tier 开放机制。
 - 是否继续由确定性 QPP trigger 决定；没有使用经过校准的 likelihood ratio。核心选择逻辑与调用方默认值见 [Progressive recall](fibonacci-progressive-recall.md)。
 
-当前实现位于 [`retrieval.ts`](../../src/core/store/retrieval.ts)，选项定义在 [`types.ts`](../../src/core/types.ts)。CLI 映射位于 [`commands.ts`](../../src/cli/commands.ts)；Pi automatic recall 接线位于 [`.pi/extensions/nmg/index.ts`](../../.pi/extensions/nmg/index.ts)。
+当前实现位于 [`retrieval.ts`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)，选项定义在 [`types.ts`](../../src/core/types.ts)。CLI 映射位于 [`commands.ts`](../../src/cli/commands.ts)；Pi automatic recall 接线位于 [`.pi/extensions/nmg/index.ts`](../../.pi/extensions/nmg/index.ts)。
 
 ## 设计理由与拟议的统计扩展
 
@@ -50,7 +50,7 @@ Latency、deep-evidence recall、context economy 与 tier dynamics 被列为可�
 ## 源码参考
 
 - [`SearchOptions` 与 tier budgets](../../src/core/types.ts)
-- [顺序 tier 检索与 QPP continuation](../../src/core/store/retrieval.ts)
+- [顺序 tier 检索与 QPP continuation](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts)
 - [CLI 选项](../../src/cli/commands.ts)
 - [Pi automatic-recall 调用方](../../.pi/extensions/nmg/index.ts)
 - [Progressive-recall 设计](fibonacci-progressive-recall.md)

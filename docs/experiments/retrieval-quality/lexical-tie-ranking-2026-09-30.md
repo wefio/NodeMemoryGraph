@@ -32,7 +32,7 @@ The earlier [calibration record](relevance-gate-calibration-2026-09-09.md) uses
 ## Current implementation boundary
 
 Read-only source review on 2026-10-17 found
-[`rankLexicalCandidates`](../../../src/core/store/retrieval.ts) conditional on
+[`rankLexicalCandidates`](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/src/core/store/retrieval.ts) conditional on
 `retrievalMode === "fts5"` and the internal `preserveOrder === false` argument. The pure
 [`rerankEqualScoresByQueryCoverage`](../../../src/core/store/search-ranking.ts)
 helper preserves its input candidate set, computes document frequency over that

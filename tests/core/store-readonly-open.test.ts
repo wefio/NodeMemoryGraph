@@ -8,10 +8,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { NmgStoreBase } from "../../src/core/store/base.ts";
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 
 const hash = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
-const noop = { chainId: "no-such-chain", memoryId: "no-such-memory" };
+const subscription = { sessionId: "read-only-test", taskId: "board" };
 
 test("a read-only open neither creates, migrates nor writes", () => {
   const dir = mkdtempSync(join(tmpdir(), "nmg-readonly-"));
@@ -20,7 +20,7 @@ test("a read-only open neither creates, migrates nor writes", () => {
   // A missing store is refused by name, and the refusal does not create it.
   const missing = join(dir, "missing.sqlite");
   assert.throws(
-    () => new NmgStoreBase(missing, undefined, { readOnly: true }),
+    () => new SqliteLocalDaemonState(missing, { readOnly: true }),
     /does not exist/u,
     "a read-only open of a missing store is refused, not created",
   );
@@ -28,16 +28,16 @@ test("a read-only open neither creates, migrates nor writes", () => {
 
   // A real store, written and closed by its owner.
   const database = join(dir, "store.sqlite");
-  const owner = new NmgStoreBase(database);
-  assert.equal(owner.removeMemoryFromChain(noop), false, "the owner can write");
+  const owner = new SqliteLocalDaemonState(database);
+  owner.subscribeTaskBoard(subscription);
   owner.close();
   const before = hash(database);
 
   // The view reads the same file and cannot write it: the refusal comes from the handle itself, so
   // setting query_only is not what makes this safe.
-  const view = new NmgStoreBase(database, undefined, { readOnly: true });
+  const view = new SqliteLocalDaemonState(database, { readOnly: true });
   assert.throws(
-    () => view.removeMemoryFromChain(noop),
+    () => view.subscribeTaskBoard(subscription),
     /readonly|read-only|attempt to write|not authorized/iu,
     "a write through the read-only handle is refused",
   );
@@ -49,8 +49,8 @@ test("a read-only open neither creates, migrates nor writes", () => {
   );
 
   // Releasing the view leaves the owner able to write: read-only is a capability of one connection.
-  const again = new NmgStoreBase(database);
-  assert.equal(again.removeMemoryFromChain(noop), false, "the owner can still write");
+  const again = new SqliteLocalDaemonState(database);
+  again.unsubscribeTaskBoard(subscription);
   again.close();
 
   // An existing file with no recognisable schema is not an empty store: it is refused, and migrating
@@ -58,7 +58,7 @@ test("a read-only open neither creates, migrates nor writes", () => {
   const empty = join(dir, "empty.sqlite");
   new DatabaseSync(empty).close();
   assert.throws(
-    () => new NmgStoreBase(empty, undefined, { readOnly: true }),
+    () => new SqliteLocalDaemonState(empty, { readOnly: true }),
     /no recognisable schema/u,
     "a schemaless file is refused rather than read as an empty run",
   );

@@ -9,7 +9,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { connectDaemon, invokeDaemon, shutdownOwnedDaemon } from "../../src/cli/daemon-client.ts";
 import type { NmgMethodResult } from "../../src/cli/protocol.ts";
-import { NmgStore } from "../../src/core/store.ts";
+import { LegacySqliteFixture } from "../helpers/legacy-sqlite-fixture.ts";
 import { SEARCH_TOOL_PARAMETERS } from "../../src/integration/tool-contract.ts";
 import {
   assertAgentActivityContract,
@@ -334,14 +334,14 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
 test("MCP adapter exposes shared logical-chain structure", async () => {
   const dataDir = mkdtempSync(resolve(tmpdir(), "nmg-claude-mcp-chains-"));
   const databasePath = resolve(dataDir, "nmg.sqlite");
-  const store = new NmgStore(databasePath);
+  const store = new LegacySqliteFixture(databasePath);
   const ids = [
     "Claude chain anchor input A.",
     "Claude chain combines both inputs.",
     "Claude chain input C is available.",
   ].map(
     (statement, index) =>
-      store.remember({
+      store.insertMemory({
         nodeName: `Claude chain ${index}`,
         nodeKind: "topic",
         nodeSummary: "Claude shared projection",
@@ -349,20 +349,9 @@ test("MCP adapter exposes shared logical-chain structure", async () => {
         sourceActor: "user",
       }).memory.id,
   );
-  const chain = store.createMemoryChain({
-    chainType: "logical",
-    topic: "Claude shared projection",
-  });
-  store.addMemoryChainEdge({
-    chainId: chain.id,
-    sourceMemoryId: ids[0]!,
-    targetMemoryId: ids[1]!,
-  });
-  store.addMemoryChainEdge({
-    chainId: chain.id,
-    sourceMemoryId: ids[2]!,
-    targetMemoryId: ids[1]!,
-  });
+  const chain = store.insertChain("logical", "Claude shared projection");
+  store.insertChainEdge(chain, ids[0]!, ids[1]!);
+  store.insertChainEdge(chain, ids[2]!, ids[1]!);
   store.close();
   const { backend } = await openLocalMemory(databasePath, "claude-chain-contract");
   await backend.close();

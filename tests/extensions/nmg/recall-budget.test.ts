@@ -1,3 +1,5 @@
+import { stripProviderEnv } from "../../helpers/test-env.ts";
+stripProviderEnv();
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,7 +11,7 @@ import { ControllerShadowBridge } from "../../../.pi/extensions/nmg/controller-s
 import { acquireServerLease } from "../../../src/cli/lifecycle.ts";
 import { NMG_PROTOCOL_VERSION } from "../../../src/cli/protocol.ts";
 import { SessionActiveGraphRuntime } from "../../../src/core/session-active-graph.ts";
-import { NmgStore } from "../../../src/core/store.ts";
+import { NmgService } from "../../../src/cli/service.ts";
 import { decideMemoryLoad } from "../../../src/core/gate.ts";
 
 type HookResult = {
@@ -59,16 +61,17 @@ for (const delayed of [
         port: 12345,
         token: "budget-test-not-a-secret",
       });
-      const store = new NmgStore(":memory:");
-      const memory = store.remember({
+      const store = new NmgService({ dataDirectory: directory, environment: {} });
+      const { memory } = await store.invoke("remember", {
         statement: "Atlas uses SQLite for offline storage",
         nodeName: "Atlas storage",
-      }).memory;
-      const context = store.searchContext("Atlas SQLite offline storage", {
+      });
+      const context = await store.invoke("search", {
+        query: "Atlas SQLite offline storage",
         maxTier: 1,
         limit: 1,
       });
-      store.close();
+      await store.close();
       const runtime = new SessionActiveGraphRuntime();
       runtime.replaceWorkingState(
         runtime.bindWorkingState("budget-session"),
@@ -163,8 +166,9 @@ for (const delayed of [
           assert.equal(content, "", "cancelled or foreign turns cannot carry even completed state");
           return;
         }
-        if (delayed === "telemetry") assert.match(content, new RegExp(memory.id));
-        else assert.doesNotMatch(content, new RegExp(memory.id));
+        const reference = context.memoryReferences?.[memory.id];
+        assert.ok(reference);
+        assert.equal(content.includes(reference), delayed === "telemetry");
         if (delayed === "search" || delayed === "telemetry") {
           assert.match(content, /<nmg_working_state>/u);
           assert.match(content, /Retain this state through optional recall work/u);

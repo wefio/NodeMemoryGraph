@@ -10,9 +10,8 @@ import test from "node:test";
 import { NMG_PROTOCOL_VERSION, type NmgMethodResult } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
 import { columnsForBlocks } from "../../src/core/relevance-features.ts";
-import { NmgStore } from "../../src/core/store.ts";
 import { RelevanceModel } from "../../src/lab/relevance-model.ts";
-import { stgStorePath } from "../../src/core/stg.ts";
+import { stgStorePath } from "../../src/core/stg-projection.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
@@ -130,12 +129,7 @@ test("rememberBatch rejects mixed LTG and STG targets before writing", async () 
       }),
       /one physical memory store/u,
     );
-    const store = new NmgStore(databasePath);
-    try {
-      assert.equal(store.exportMemories().items.length, 0);
-    } finally {
-      store.close();
-    }
+    assert.equal((await service.invoke("exportMemories", {})).items.length, 0);
   } finally {
     await service.close();
     removeTempDirectory(directory);
@@ -484,12 +478,7 @@ test("task board RPC shares temporary coordination without creating semantic mem
     if (resolved.action !== "resolve") throw new Error("expected task board resolve result");
     assert.equal(resolved.entry.resolvedBy, "agent-b");
 
-    const store = new NmgStore(databasePath);
-    try {
-      assert.deepEqual(store.search("parser"), []);
-    } finally {
-      store.close();
-    }
+    assert.deepEqual((await service.invoke("search", { query: "parser" })).results, []);
   } finally {
     await service.close();
     removeTempDirectory(directory);

@@ -35,7 +35,7 @@ The prior backlog tests used active indexed records and asserted that work progr
 
 ## Guardrails added
 
-- [Store maintenance regressions](../../tests/core/store/maintenance.test.ts) cover superseded/dormant pressure, a productive active control, a stopping check, reactivation and empty checks with retained performance aggregates.
+- [Store maintenance regressions](https://github.com/wefio/NodeMemoryGraph/blob/3cf3bec2147925f49545775f2ff8aa25e00404f0/tests/core/store/maintenance.test.ts) cover superseded/dormant pressure, a productive active control, a stopping check, reactivation and empty checks with retained performance aggregates.
 - [Service regression](../../tests/cli/service.test.ts) exercises a real file-backed backlog through RPC and event-loop slices without deleting historical memory.
 - [The maintenance contract](../design/design.md) owns eligibility and journal semantics. Semantic rows are not suppressed solely on `rowsTouched`: trace-signal drainage can change durable state independently.
 

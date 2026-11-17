@@ -58,13 +58,3 @@ test("Pi, MCP, DSH, and OpenCode register and call shared definitions", () => {
     assert.match(source, /tool\.execute/u);
   }
 });
-
-test("the benchmark bridge evaluates the shared exact-evidence surface", () => {
-  const source = readFileSync(
-    resolve(import.meta.dirname, "../../evals/omnimemeval/bridge.ts"),
-    "utf8",
-  );
-  assert.match(source, /const context = await searchMemoryContext\(/u);
-  assert.match(source, /renderEvidenceSurface/u);
-  assert.doesNotMatch(source, /projectMemoryContext/u);
-});
