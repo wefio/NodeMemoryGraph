@@ -1,3 +1,4 @@
+import { openLocalMemory } from "../../src/cli/local-memory-migration.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,7 +10,6 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { connectDaemon, invokeDaemon, shutdownOwnedDaemon } from "../../src/cli/daemon-client.ts";
 import type { NmgMethodResult } from "../../src/cli/protocol.ts";
 import { NmgStore } from "../../src/core/store.ts";
-import { SqliteMemoryBackend } from "../../src/core/memory/sqlite-backend.ts";
 import { SEARCH_TOOL_PARAMETERS } from "../../src/integration/tool-contract.ts";
 import {
   assertAgentActivityContract,
@@ -364,12 +364,8 @@ test("MCP adapter exposes shared logical-chain structure", async () => {
     targetMemoryId: ids[1]!,
   });
   store.close();
-  const backend = new SqliteMemoryBackend(databasePath, "claude-chain-contract");
-  try {
-    backend.activateLocal();
-  } finally {
-    await backend.close();
-  }
+  const { backend } = await openLocalMemory(databasePath, "claude-chain-contract");
+  await backend.close();
 
   const transport = new StdioClientTransport({
     command: process.execPath,

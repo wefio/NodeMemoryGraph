@@ -176,7 +176,10 @@ test("the store runs its transaction boundary in exactly one place", () => {
   // A mechanical check rather than a reminder: a hand-rolled BEGIN reappearing anywhere in the
   // store is what makes a second boundary possible, and no behavioural test notices a path that
   // still works by accident.
-  const source = readFileSync(new URL("../../src/core/store/base.ts", import.meta.url), "utf8");
+  const source = readFileSync(
+    new URL("../../src/core/store/local-sqlite-state-base.ts", import.meta.url),
+    "utf8",
+  );
   const count = (needle: string) => source.split(needle).length - 1;
   assert.equal(count("BEGIN IMMEDIATE"), 1, "one BEGIN, in writeTransaction");
   assert.equal(count('"COMMIT"'), 1, "one COMMIT, in writeTransaction");

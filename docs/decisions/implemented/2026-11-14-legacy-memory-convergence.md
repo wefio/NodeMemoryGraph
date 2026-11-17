@@ -24,13 +24,14 @@ SQLite code. Route local coordination through explicit board/run/activity ports
 while retaining the shared SQLite file for pure-local use.
 
 Select the local SQLite engine through an activation record published in the
-same transaction as graph import and the legacy write fence. The record belongs
+same transaction as graph import and removal of retired tables. Create a SQLite
+backup before that transaction for legacy files. The record belongs
 to the physical SQLite file. A project opened through a different daemon keeps
 its existing namespace and memory identities. Codex state and disclosure use the shared session
 runtime and project recall reads the unified backend.
 
 SQLite carries record vectors across activation with their model identifiers
-and references the retained node/leaf projections. The engine fuses results
+and imports the node and leaf projections into the unified backend. The engine fuses results
 through a vector-candidate port. The host owns provider calls and bounded
 indexing work, and SQLite writes vectors after that I/O returns.
 
@@ -45,4 +46,5 @@ The opt-in [rehearsal and comparison](../../design/unified-architecture/legacy-g
 cover the bounded cross-backend graph and the full local copy. All local memory
 entry points use MemoryEngine. First use backs up and migrates a legacy SQLite
 file. The migration command accepts the main file and selected projects together.
-Original tables support recovery, chain projection and vector hierarchy queries.
+The old schema is available in the backup. The runtime uses migrated chains and
+hierarchy signals, and the package excludes the old store implementation.

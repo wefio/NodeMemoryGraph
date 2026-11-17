@@ -1,6 +1,8 @@
-import { NmgStoreBase } from "./base.ts";
 import { withCoordination } from "./coordination.ts";
-import { withMaintenance } from "./maintenance.ts";
+import { LocalSqliteStateBase } from "./local-sqlite-state-base.ts";
+import { withRetrievalDiagnostics } from "./retrieval-diagnostics.ts";
 
 /** SQLite owner for local coordination and persisted retrieval diagnostics. */
-export class SqliteLocalDaemonState extends withCoordination(withMaintenance(NmgStoreBase)) {}
+export class SqliteLocalDaemonState extends withCoordination(
+  withRetrievalDiagnostics(LocalSqliteStateBase),
+) {}

@@ -23,24 +23,23 @@ import {
 import { graphImportRequest } from "./graph-import.ts";
 import { readLegacyClaimRows, readLegacyMemoryRows } from "../store/legacy-memory-snapshot.ts";
 import { requestHash } from "./model.ts";
-import { migrate } from "../store/schema.ts";
+import { ensureLocalDaemonSchema, migrate } from "../store/schema.ts";
 import { ftsExpression, ftsIndexedText } from "../store/search-ranking.ts";
 import { SqliteMemoryVectors } from "./sqlite-vectors.ts";
-import { readSqliteChainProjection } from "./sqlite-chains.ts";
+import {
+  ensureSqliteMemoryChains,
+  importLegacySqliteChains,
+  readSqliteChainProjection,
+} from "./sqlite-chains.ts";
+import {
+  ensureSqliteMemoryAssociations,
+  hasLegacyMemoryTables,
+  importLegacySqliteAssociations,
+  retireLegacyMemoryTables,
+} from "./sqlite-legacy-retirement.ts";
 
 const LOCAL_MEMORY_TABLE = "nmg_local_memory";
 export const LOCAL_MEMORY_NAMESPACE = "local-memory-v1";
-const LEGACY_GRAPH_TABLES = [
-  "history_records",
-  "memory_records",
-  "memory_nodes",
-  "node_relations",
-  "memory_evidence_links",
-  "state_key_aliases",
-  "memory_write_events",
-  "tesserae",
-] as const;
-
 function localNamespace(db: DatabaseSync): string | undefined {
   const exists = db
     .prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?")
@@ -58,21 +57,6 @@ export function activatedLocalMemory(path: string): string | undefined {
     return localNamespace(db);
   } finally {
     db.close();
-  }
-}
-
-function fenceLegacyTables(db: DatabaseSync, tables: readonly string[]): void {
-  for (const table of tables) {
-    for (const action of ["INSERT", "UPDATE", "DELETE"]) {
-      // Opening the existing coordination store still repeats this schema backfill.
-      const when =
-        table === "memory_evidence_links" && action === "INSERT"
-          ? "WHEN NOT EXISTS (SELECT 1 FROM memory_evidence_links WHERE memory_id=NEW.memory_id AND history_id=NEW.history_id)"
-          : "";
-      db.exec(`CREATE TRIGGER nmg_unified_${table}_${action} BEFORE ${action} ON ${table}
-        ${when}
-        BEGIN SELECT RAISE(ABORT, 'This database uses the unified memory engine'); END`);
-    }
   }
 }
 
@@ -105,6 +89,8 @@ export class SqliteMemoryBackend implements MemoryBackend {
       CREATE VIRTUAL TABLE IF NOT EXISTS nmg_memory_fts USING fts5(namespace UNINDEXED, key UNINDEXED, text);
       CREATE VIRTUAL TABLE IF NOT EXISTS nmg_memory_tessera_fts USING fts5(namespace UNINDEXED, key UNINDEXED, text);`);
     this.writer.prepare("INSERT OR IGNORE INTO nmg_memory_head VALUES (?, 0)").run(namespace);
+    ensureSqliteMemoryChains(this.writer);
+    ensureSqliteMemoryAssociations(this.writer);
     this.vectorIndex = new SqliteMemoryVectors(this.writer, namespace, (view) => this.reader(view));
   }
 
@@ -152,7 +138,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
   }
 
   chainProjection(view: MemoryReadView, ids: readonly string[], sessionId?: string) {
-    return readSqliteChainProjection(this.reader(view), ids, sessionId);
+    return readSqliteChainProjection(this.reader(view), this.namespace, ids, sessionId);
   }
 
   async closeRead(view: MemoryReadView): Promise<void> {
@@ -176,33 +162,44 @@ export class SqliteMemoryBackend implements MemoryBackend {
     return outcome.receipt;
   }
 
-  /** Atomically install the current local data and prevent publication through the old tables. */
-  activateLocal(): void {
+  /** Legacy schema can only be retired after a backup of the locked source has been verified. */
+  activateLocal(assertLegacyBackup?: () => void): void {
     this.transaction(() => {
       const current = localNamespace(this.writer);
-      if (current === this.namespace) {
-        this.vectorIndex.importLegacy();
-        this.importLegacyClaims();
-        this.reindexLegacyRows();
-        return;
-      }
-      if (current || this.revision(this.writer) !== 0)
+      if (current ? current !== this.namespace : this.revision(this.writer) !== 0)
         throw new Error("Local activation requires an unused namespace");
-      migrate(this.writer);
-      const entities = readLegacyMemoryRows(this.writer, true);
-      if (entities.length) {
-        const request = graphImportRequest(entities, true);
-        validateCommit(request, entities.length);
-        this.write(request);
+      if (hasLegacyMemoryTables(this.writer)) {
+        if (!assertLegacyBackup) throw new Error("Local memory migration requires a SQLite backup");
+        assertLegacyBackup();
+        if (!current) this.installLocalLegacyGraph();
+        this.vectorIndex.importLegacy();
+        this.vectorIndex.importLegacyHierarchy();
+        this.importLegacyClaims();
+        importLegacySqliteChains(this.writer, this.namespace);
+        importLegacySqliteAssociations(this.writer, this.namespace);
+        retireLegacyMemoryTables(this.writer);
+      } else if (!current) {
+        ensureLocalDaemonSchema(this.writer);
       }
-      this.vectorIndex.importLegacy();
-      this.importLegacyClaims();
       this.reindexLegacyRows();
-      fenceLegacyTables(this.writer, LEGACY_GRAPH_TABLES);
-      this.writer.exec(`CREATE TABLE ${LOCAL_MEMORY_TABLE} (
-        id INTEGER PRIMARY KEY CHECK(id=1), namespace TEXT NOT NULL)`);
-      this.writer.prepare(`INSERT INTO ${LOCAL_MEMORY_TABLE} VALUES (1, ?)`).run(this.namespace);
+      if (!current) this.markLocal();
     });
+  }
+
+  private installLocalLegacyGraph(): void {
+    migrate(this.writer);
+    const entities = readLegacyMemoryRows(this.writer, true);
+    if (entities.length) {
+      const request = graphImportRequest(entities, true);
+      validateCommit(request, entities.length);
+      this.write(request);
+    }
+  }
+
+  private markLocal(): void {
+    this.writer.exec(`CREATE TABLE ${LOCAL_MEMORY_TABLE} (
+        id INTEGER PRIMARY KEY CHECK(id=1), namespace TEXT NOT NULL)`);
+    this.writer.prepare(`INSERT INTO ${LOCAL_MEMORY_TABLE} VALUES (1, ?)`).run(this.namespace);
   }
 
   private importLegacyClaims(): void {
@@ -221,7 +218,6 @@ export class SqliteMemoryBackend implements MemoryBackend {
       changes: { upsert: entities },
       resultIds: [],
     });
-    fenceLegacyTables(this.writer, ["claim_posteriors", "claim_outcome_events"]);
   }
 
   private publish(request: MemoryCommitRequest): MemoryCommitOutcome {

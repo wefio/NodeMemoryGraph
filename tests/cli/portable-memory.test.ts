@@ -1,3 +1,5 @@
+import { openLocalMemory } from "../../src/cli/local-memory-migration.ts";
+import { hasLegacyMemoryTables } from "../../src/core/memory/sqlite-legacy-retirement.ts";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readdirSync, truncateSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -65,18 +67,49 @@ test("default service migrates an old SQLite file before serving memory", async 
     }
     const current = new DatabaseSync(databasePath);
     try {
-      assert.throws(
-        () =>
-          current
-            .prepare("UPDATE memory_records SET statement=? WHERE id=?")
-            .run("stale writer", memory.id),
-        /unified memory engine/,
-      );
+      assert.equal(hasLegacyMemoryTables(current), false);
+      assert.throws(() => new NmgStore(databasePath), /uses the unified memory engine/);
+      assert.equal(hasLegacyMemoryTables(current), false);
     } finally {
       current.close();
     }
   } finally {
     await service.close();
+    removeTempDirectory(directory);
+  }
+});
+
+test("legacy retirement rolls back if a retained table references a retired table", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-retire-reference-"));
+  const path = join(directory, "nmg.sqlite");
+  try {
+    const legacy = new NmgStore(path);
+    const { memory } = legacy.remember({
+      statement: "An archived record still supports the external report.",
+      nodeName: "Archived record",
+    });
+    legacy.close();
+    const db = new DatabaseSync(path);
+    try {
+      db.exec(
+        "CREATE TABLE report (memory_id TEXT REFERENCES memory_records(id) ON DELETE CASCADE)",
+      );
+      db.prepare("INSERT INTO report VALUES (?)").run(memory.id);
+    } finally {
+      db.close();
+    }
+
+    await assert.rejects(openLocalMemory(path, "rollback"), /memory_records: referenced by report/);
+    assert.equal(activatedLocalMemory(path), undefined);
+    const restored = new DatabaseSync(path, { readOnly: true });
+    try {
+      assert.ok(restored.prepare("SELECT 1 FROM memory_records WHERE id=?").get(memory.id));
+      assert.equal(restored.prepare("SELECT memory_id FROM report").get()?.memory_id, memory.id);
+      assert.equal(restored.prepare("SELECT count(*) AS n FROM nmg_memory_entities").get()?.n, 0);
+    } finally {
+      restored.close();
+    }
+  } finally {
     removeTempDirectory(directory);
   }
 });
@@ -570,6 +603,7 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
     nodeName: "Depot",
   });
   legacy.upsertExternalEmbeddings(indexId, [{ memoryId: original.memory.id, vector: [1, 0] }]);
+  legacy.upsertExternalNodeEmbeddings(indexId, [{ nodeId: original.node.id, vector: [1, 0] }]);
   legacy.close();
   let service = new NmgService({
     databasePath: path,
@@ -583,6 +617,18 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
     });
     assert.equal(pure.results[0]?.memory.id, original.memory.id);
     assert.equal(pure.results[0]?.vectorScore, 1);
+    const migrated = new DatabaseSync(path, { readOnly: true });
+    try {
+      assert.equal(hasLegacyMemoryTables(migrated), false);
+      assert.equal(
+        migrated
+          .prepare("SELECT id FROM nmg_memory_route_vectors WHERE model=? AND kind='node'")
+          .get(indexId)?.id,
+        original.node.id,
+      );
+    } finally {
+      migrated.close();
+    }
     assert.equal(documentCalls, 0);
     const hybrid = await service.invoke("search", {
       query: "logistics depot",

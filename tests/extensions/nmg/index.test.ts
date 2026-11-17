@@ -1,3 +1,5 @@
+import { SqliteLocalDaemonState } from "../../../src/core/store/local-daemon-state.ts";
+import { openLocalMemory } from "../../../src/cli/local-memory-migration.ts";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,7 +26,6 @@ import { loadPrompts } from "../../../src/prompts/load.ts";
 import { SEARCH_TOOL_PARAMETERS } from "../../../src/integration/tool-contract.ts";
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
 import { NmgStore } from "../../../src/core/store.ts";
-import { SqliteMemoryBackend } from "../../../src/core/memory/sqlite-backend.ts";
 import { connectDaemon, invokeDaemon } from "../../../src/cli/daemon-client.ts";
 import { renameAgentIdentity } from "../../../src/integration/agent-identity.ts";
 import type { MemoryContext } from "../../../src/core/types.ts";
@@ -1055,8 +1056,7 @@ test("Pi sends its live automatic recall and exact lookup to the unified SQLite 
     nodeName: "Atlas storage",
   });
   legacy.close();
-  const backend = new SqliteMemoryBackend(databasePath, "pi-contract");
-  backend.activateLocal();
+  const { backend } = await openLocalMemory(databasePath, "pi-contract");
   await backend.close();
   const { handlers, tools } = extensionHarness();
   const sessionManager = {
@@ -1514,7 +1514,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     assert.match(boardRead.content[0].text, /Agent B should verify the parser tests/u);
     {
       renameAgentIdentity({ anchor: "agent-b", id: "agent-b", agentName: "Inbox reviewer" });
-      const store = new NmgStore(join(directory, "nmg.sqlite"));
+      const store = new SqliteLocalDaemonState(join(directory, "nmg.sqlite"));
       const directed = {
         taskId: "atlas-inbox",
         agentId: "agent-a",
@@ -1552,7 +1552,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     // B has now 'read' the handoff, so the wake loop will not re-push it.
     // (Cross-agent feedback, world #9: already-read entries must not re-wake.)
     {
-      const store = new NmgStore(join(directory, "nmg.sqlite"));
+      const store = new SqliteLocalDaemonState(join(directory, "nmg.sqlite"));
       try {
         assert.equal(
           store.hasTaskBoardDelivery({
@@ -1923,7 +1923,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     assert.equal(isProcessAlive(started!.pid), false);
     const remaining = readServerState(serverStatePath(join(directory, "nmg.sqlite")));
     assert.equal(remaining ? isProcessAlive(remaining.pid) : false, false);
-    const store = new NmgStore(join(directory, "nmg.sqlite"));
+    const store = new SqliteLocalDaemonState(join(directory, "nmg.sqlite"));
     const { NmgService } = await import("../../../src/cli/service.ts");
     const unified = new NmgService({
       databasePath: join(directory, "nmg.sqlite"),
@@ -2081,7 +2081,7 @@ test("agent_end derives and persists answer-overlap attribution on the trace", a
       },
       { sessionManager },
     );
-    const store = new NmgStore(join(directory, "nmg.sqlite"));
+    const store = new SqliteLocalDaemonState(join(directory, "nmg.sqlite"));
     try {
       const trace = store.retrievalTrace(
         searched.details.activeGraph!.traceIds[0],

@@ -14,7 +14,7 @@
  * current state: this records the *transitions* the board's current state cannot keep.
  */
 import type { CoordinationPort } from "./coordination-port.ts";
-import type { TransactionPort } from "../core/store/base.ts";
+import type { TransactionPort } from "../core/store/store-ctor.ts";
 import type { TaskUnitDeclarationInput } from "./task-unit-declaration-store.ts";
 import type { TaskBoardEntry } from "../core/types.ts";
 

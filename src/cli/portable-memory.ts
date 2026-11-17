@@ -20,7 +20,11 @@ import type {
   NmgSetStorageStateParams,
 } from "./protocol.ts";
 import { NmgProtocolError } from "./protocol.ts";
-import { mergeStgLtgContexts, stgConsolidationInput, stgStorePath } from "../core/stg.ts";
+import {
+  mergeStgLtgContexts,
+  stgConsolidationInput,
+  stgStorePath,
+} from "../core/stg-projection.ts";
 import type { ClaimPosterior, MemoryContext } from "../core/types.ts";
 import type { StgConsolidationPolicyConfig } from "../integration/config.ts";
 import { LocalMemoryEmbeddings } from "./local-memory-embeddings.ts";
@@ -442,6 +446,14 @@ export class PortableMemoryService {
         return { action, newMemoryId, relatedMemoryId, proposal };
       }
     }
+  }
+
+  async backfillTesseraFingerprint(
+    input: { id: string; memoryId: string; path: string; fileSimhash: string },
+    scope: { projectDir?: string; sessionId?: string },
+  ): Promise<void> {
+    const engine = await this.storeForRecord(input.memoryId, scope);
+    await engine.backfillTesseraFingerprint({ ...input, sessionId: scope.sessionId });
   }
 
   private async storeForRecord(

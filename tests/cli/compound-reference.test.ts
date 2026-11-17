@@ -1,3 +1,4 @@
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { mkdtempSync } from "node:fs";
@@ -79,7 +80,7 @@ test("shared search displays a copied compound reference that exact get resolves
       canonical.results[0]!.memory.accessCount + 1,
     );
     assert.deepEqual(stable(copied), stable(canonical));
-    const store = new NmgStore(join(directory, "nmg.sqlite"));
+    const store = new SqliteLocalDaemonState(join(directory, "nmg.sqlite"));
     try {
       const trace = store.retrievalTrace(context.activeGraph!.traceIds![0]!, "reference-reader")!;
       assert.deepEqual(trace.disclosedMemoryIds, [saved.memory.id]);

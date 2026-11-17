@@ -509,7 +509,7 @@ export class NmgService {
     if (!memory.local) return context;
     const directMs = performance.now() - started;
     if (!params.autoRecall)
-      context.tesserae = this.#resolveTesseraLines(context.tesserae ?? [], params.projectDir);
+      context.tesserae = await this.#resolveTesseraLines(context.tesserae ?? [], params);
     if (params.sessionId) {
       context.results = this.#recallContext.rank(
         params.sessionId,
@@ -567,7 +567,7 @@ export class NmgService {
   ): Array<ActiveGraphProjectionPart<ActiveGraphStorePart>> {
     if (persistTrace === false) return [];
     const store = this.#getStore();
-    const traceId = store.recordRetrievalTrace(
+    const traceId = store.recordTrace(
       {
         sessionId: graph.sessionId ?? undefined,
         query: graph.query,
@@ -583,7 +583,6 @@ export class NmgService {
         qpp: graph.qpp,
         timings,
       },
-      false,
       graph.id,
     );
     store.recordPerfAggregates(timings);
@@ -600,7 +599,7 @@ export class NmgService {
     const context = await this.#portableMemory.get(params);
     const found = new Set(context.results.map((result) => result.memory.id));
     if (trace) {
-      trace.store.recordActiveGraphDisclosure(trace.id, [...found], params.sessionId, false);
+      trace.store.recordActiveGraphDisclosure(trace.id, [...found], params.sessionId);
       const graphIds = new Set(trace.memoryIds);
       await this.#portableMemory.recordUsage(
         [...found].filter((id) => graphIds.has(id)),
@@ -608,7 +607,7 @@ export class NmgService {
       );
     }
     if (this.#portableMemory.local)
-      context.tesserae = this.#resolveTesseraLines(context.tesserae ?? [], params.projectDir);
+      context.tesserae = await this.#resolveTesseraLines(context.tesserae ?? [], params);
     return { ...context, missingMemoryIds: params.memoryIds.filter((id) => !found.has(id)) };
   }
 
@@ -1460,7 +1459,11 @@ export class NmgService {
 
   /** Resolve tessera snippets to current line numbers against a project root.
    *  Best-effort: file missing/unreadable or snippet absent marks stale. */
-  #resolveTesseraLines(tesserae: TesseraHit[], projectRoot?: string): TesseraHit[] {
+  async #resolveTesseraLines(
+    tesserae: TesseraHit[],
+    scope: { projectDir?: string; sessionId?: string },
+  ): Promise<TesseraHit[]> {
+    const projectRoot = scope.projectDir;
     if (!projectRoot || tesserae.length === 0) return tesserae;
     const cache = new Map<string, string[] | null>(); // absPath -> lines | null
     const linesFor = (path: string): string[] | null => {
@@ -1470,28 +1473,45 @@ export class NmgService {
       cache.set(abs, lines);
       return lines;
     };
-    return tesserae.map((tessera) => {
-      if (!tessera.snippet) return { ...tessera, stale: true };
-      const target = tessera.snippet.trim();
-      const pathLines = linesFor(tessera.path);
-      if (pathLines) {
-        // Stage 1 — exact relocation against the stored path.
-        const found = pathLines.findIndex((line) => line.includes(target));
-        if (found !== -1)
-          return {
-            ...tessera,
-            line: found + 1,
-            fileSimhash: tessera.fileSimhash ?? simhashToHex(simhash64(pathLines.join("\n"))),
-          };
-      }
-      // Stage 2 — SimHash drift fallback. The stored path no longer relocates
-      // (edited or moved). Compare the stored file fingerprint against current
-      // files; a near-identical document (Hamming ≤ 6) elsewhere is the same
-      // file after a move — locate the snippet there. Never auto-rewrites the
-      // row; a stored file that still matches but lost the snippet is stale.
-      const relocated = this.#relocateTesseraViaSimhash(tessera, target, projectRoot);
-      return relocated ?? { ...tessera, stale: true };
-    });
+    return Promise.all(
+      tesserae.map((tessera) => {
+        if (!tessera.snippet) return { ...tessera, stale: true };
+        const target = tessera.snippet.trim();
+        const pathLines = linesFor(tessera.path);
+        if (pathLines) {
+          // Stage 1 — exact relocation against the stored path.
+          const found = pathLines.findIndex((line) => line.includes(target));
+          if (found !== -1) return this.#resolvedTessera(tessera, pathLines, found + 1, scope);
+        }
+        // Stage 2 — SimHash drift fallback. The stored path no longer relocates
+        // (edited or moved). Compare the stored file fingerprint against current
+        // files; a near-identical document (Hamming ≤ 6) elsewhere is the same
+        // file after a move — locate the snippet there. Never auto-rewrites the
+        // row; a stored file that still matches but lost the snippet is stale.
+        const relocated = this.#relocateTesseraViaSimhash(tessera, target, projectRoot);
+        return relocated ?? { ...tessera, stale: true };
+      }),
+    );
+  }
+
+  async #resolvedTessera(
+    tessera: TesseraHit,
+    lines: string[],
+    line: number,
+    scope: { projectDir?: string; sessionId?: string },
+  ): Promise<TesseraHit> {
+    if (tessera.fileSimhash) return { ...tessera, line };
+    const fileSimhash = simhashToHex(simhash64(lines.join("\n")));
+    try {
+      if (tessera.memoryId)
+        await this.#portableMemory.backfillTesseraFingerprint(
+          { id: tessera.id, memoryId: tessera.memoryId, path: tessera.path, fileSimhash },
+          scope,
+        );
+    } catch {
+      // A file lookup still returns its resolved line if fingerprint persistence fails.
+    }
+    return { ...tessera, line, fileSimhash };
   }
 
   /** SimHash drift relocation: find a current file whose fingerprint is within

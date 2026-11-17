@@ -178,6 +178,33 @@ export class MemoryEngine {
     }
   }
 
+  async backfillTesseraFingerprint(input: {
+    id: string;
+    memoryId: string;
+    path: string;
+    fileSimhash: string;
+    sessionId?: string;
+  }): Promise<void> {
+    await this.mutate(
+      memoryIdentity("tessera-fingerprint", JSON.stringify(input)),
+      input,
+      async (plan) => {
+        const [entity] = await plan.find({ kind: "tessera", ids: [input.id] });
+        const owner = await plan.record(input.memoryId, input.sessionId);
+        if (
+          entity?.kind === "tessera" &&
+          entity.value.memoryId === owner?.id &&
+          entity.value.path === input.path &&
+          !entity.value.fileSimhash
+        ) {
+          plan.put({ kind: "tessera", value: { ...entity.value, fileSimhash: input.fileSimhash } });
+        }
+        return { result: null, ids: [] };
+      },
+      async () => null,
+    );
+  }
+
   async exportMemories(
     options: { sourceActor?: MemoryActor; includeDeleted?: boolean } = {},
   ): Promise<MemoryExportBundle> {

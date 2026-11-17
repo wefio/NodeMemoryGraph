@@ -43,7 +43,7 @@ import { reloadDaemon } from "./daemon-reload.ts";
 import { NmgService } from "./service.ts";
 import { openLocalMemory } from "./local-memory-migration.ts";
 import { activatedLocalMemory, LOCAL_MEMORY_NAMESPACE } from "../core/memory/sqlite-backend.ts";
-import { stgStorePath } from "../core/stg.ts";
+import { stgStorePath } from "../core/stg-projection.ts";
 import { histogramQuantile } from "../core/perf.ts";
 import type { MemoryContext } from "../core/types.ts";
 import { compactSearchContext } from "../integration/search-projection.ts";

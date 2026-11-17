@@ -148,20 +148,13 @@ test("Codex automatically recalls unified SQLite memory from the owning project 
       (await service.invoke("get", { memoryIds: [mainWrite.memory.id] })).results.length,
       1,
     );
-    const oldWriter = new NmgStore(databasePath);
-    try {
-      assert.throws(
-        () =>
-          oldWriter.remember({
-            statement: "An obsolete writer attempted publication",
-            nodeName: "Obsolete",
-          }),
-        /unified memory engine/,
-      );
-      assert.equal(oldWriter.readTaskBoard({ taskId: "local-cutover" }).entries.length, 1);
-    } finally {
-      oldWriter.close();
-    }
+    assert.throws(() => new NmgStore(databasePath), /unified memory engine/);
+    const readBoard = await service.invoke("taskBoard", {
+      action: "read",
+      taskId: "local-cutover",
+      agentId: "test",
+    });
+    assert.ok(readBoard.action === "read" && readBoard.entries.length === 1);
   } finally {
     await service?.close();
     removeTempDirectory(directory);

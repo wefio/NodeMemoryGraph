@@ -11,7 +11,7 @@
  * Nothing here decides: the decision is `nextSessionMove`'s, a pure function of the plan and the
  * facts. This module only gives that decision a name and a home in the run's log.
  */
-import type { NmgStore } from "../core/store.ts";
+import type { SqliteLocalDaemonState } from "../core/store/local-daemon-state.ts";
 import { nextSessionMove, type SessionMove, type SessionMoveInput } from "./ooo-fusion-plan.ts";
 import { taskCancellation } from "./task-coordinator.ts";
 
@@ -76,7 +76,7 @@ export function parseSessionMove(payload: unknown): SessionMove | null {
  * the same move twice records it once - which is what makes a retry after a lost response safe.
  */
 export function recordSessionMove(
-  store: NmgStore,
+  store: SqliteLocalDaemonState,
   input: {
     runId: string;
     move: SessionMove;
@@ -96,7 +96,10 @@ export function recordSessionMove(
 }
 
 /** Every move this run recorded, oldest first, skipping facts this module does not recognise. */
-export function recordedSessionMoves(store: NmgStore, runId: string): RecordedSessionMove[] {
+export function recordedSessionMoves(
+  store: SqliteLocalDaemonState,
+  runId: string,
+): RecordedSessionMove[] {
   const moves: RecordedSessionMove[] = [];
   for (const fact of store.taskRunFacts(runId)) {
     if (fact.kind !== SESSION_MOVE_FACT) continue;
@@ -140,7 +143,10 @@ export interface SessionDecision {
  * the way the managed-write fence reads its two refusals, because a caller remembers what was true
  * when it decided to write.
  */
-export function decideSessionMove(store: NmgStore, boundary: SessionBoundary): SessionDecision {
+export function decideSessionMove(
+  store: SqliteLocalDaemonState,
+  boundary: SessionBoundary,
+): SessionDecision {
   // A cancelled run admits nothing further, whatever the plan says. The question is scoped to this
   // unit's task through the one reader the fence uses too: cancelling one task of a run must not end
   // the sessions of the others, which is what a bare kind lookup did.
@@ -186,7 +192,10 @@ export interface UnitSession extends SessionDecision {
 }
 
 /** Open the session this unit belongs to: one key, one recorded move. */
-export function openUnitSession(store: NmgStore, input: UnitSessionInput): UnitSession {
+export function openUnitSession(
+  store: SqliteLocalDaemonState,
+  input: UnitSessionInput,
+): UnitSession {
   const key = sessionKey(input.runId, input.sessionId);
   const decision = decideSessionMove(store, input);
   return { key, ...decision };

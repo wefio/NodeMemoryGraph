@@ -1,13 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
 import { backup, DatabaseSync } from "node:sqlite";
-import { activatedLocalMemory, SqliteMemoryBackend } from "../core/memory/sqlite-backend.ts";
+import { SqliteMemoryBackend } from "../core/memory/sqlite-backend.ts";
+import { hasLegacyMemoryTables } from "../core/memory/sqlite-legacy-retirement.ts";
 
 export async function openLocalMemory(path: string, namespace: string) {
-  const backupPath = activatedLocalMemory(path) ? undefined : await backupLegacyMemory(path);
   const backend = new SqliteMemoryBackend(path, namespace);
   try {
-    backend.activateLocal();
+    const backupPath = await activateWithBackup(path, backend);
     return { backend, backupPath };
   } catch (error) {
     await backend.close();
@@ -15,20 +14,28 @@ export async function openLocalMemory(path: string, namespace: string) {
   }
 }
 
-async function backupLegacyMemory(path: string): Promise<string | undefined> {
-  if (!existsSync(path)) return undefined;
+async function activateWithBackup(path: string, backend: SqliteMemoryBackend) {
   const source = new DatabaseSync(path, { readOnly: true });
   try {
-    if (
-      !source
-        .prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='memory_records'")
-        .get()
-    )
+    if (!hasLegacyMemoryTables(source)) {
+      backend.activateLocal();
       return undefined;
+    }
+    const version = sqliteDataVersion(source);
     const copy = `${path}.before-unified-${randomUUID()}.sqlite`;
     await backup(source, copy);
+    backend.activateLocal(() => {
+      if (sqliteDataVersion(source) !== version)
+        throw new Error(
+          "SQLite changed while the legacy memory backup was being made. Retry migration.",
+        );
+    });
     return copy;
   } finally {
     source.close();
   }
+}
+
+function sqliteDataVersion(db: DatabaseSync) {
+  return db.prepare("PRAGMA data_version").get()!.data_version;
 }

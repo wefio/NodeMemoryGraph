@@ -1,3 +1,4 @@
+import { SqliteLocalDaemonState } from "../../src/core/store/local-daemon-state.ts";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -981,7 +982,7 @@ test("resident service keeps mixed STG/LTG evidence in one AG and attributes bot
       sessionId: "session-alpha",
     });
 
-    const traceStore = new NmgStore(databasePath);
+    const traceStore = new SqliteLocalDaemonState(databasePath);
     try {
       const trace = traceStore.retrievalTrace(searched.activeGraph!.id, "session-alpha");
       assert.deepEqual(
@@ -1059,7 +1060,7 @@ test("resident service records nmg_get disclosure only for the owning session", 
       activeGraphId,
       sessionId: "session-alpha",
     });
-    const reader = new NmgStore(join(directory, "ltg.sqlite"));
+    const reader = new SqliteLocalDaemonState(join(directory, "ltg.sqlite"));
     try {
       const traceId = searched.activeGraph!.traceIds?.[0];
       assert.ok(traceId);
@@ -1780,7 +1781,7 @@ test("recordActiveGraphAttribution persists API answer overlap as diagnostic att
       sessionId: "session-a",
     });
     assert.equal(recorded.activeGraphId, searched.activeGraph.id);
-    const store = new NmgStore(join(directory, "nmg.sqlite"));
+    const store = new SqliteLocalDaemonState(join(directory, "nmg.sqlite"));
     try {
       const traceId = searched.activeGraph!.traceIds?.[0];
       assert.ok(traceId);

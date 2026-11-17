@@ -51,6 +51,14 @@ export function useUnifiedInspectViews(db: DatabaseSync): boolean {
     SELECT record.id AS memory_id, evidence.value AS history_id
     FROM nmg_memory_entities record JOIN json_each(record.payload, '$.evidenceIds') evidence
     WHERE record.kind='memory' AND record.namespace=(SELECT namespace FROM nmg_local_memory WHERE id=1)`);
+  if (
+    db
+      .prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='nmg_memory_associations'")
+      .get()
+  )
+    db.exec(`CREATE TEMP VIEW node_pair_signals AS
+      SELECT left_node_id, right_node_id, co_retrieval_count, useful_count FROM nmg_memory_associations
+      WHERE namespace=(SELECT namespace FROM nmg_local_memory WHERE id=1)`);
   return true;
 }
 
