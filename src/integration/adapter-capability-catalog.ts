@@ -15,14 +15,30 @@ export interface AdapterManifest {
   readonly capabilities: readonly AdapterCapability[];
 }
 
-const schema = Unsafe<AdapterManifest>(manifestSchema);
+/** JSON module imports are loader-dependent: native ESM hands back the parsed
+ * value, while transpiling loaders such as jiti (which the Pi harness uses to
+ * load extensions) also attach a non-enumerable self-referencing `default` to
+ * it. TypeBox clones and validates own properties, so that wrapper overflows the
+ * stack in Unsafe() and reads as an unknown property in Value.Check(). Copying
+ * the enumerable own properties keeps the catalog identical under every loader.
+ */
+function plainModuleValue<Value>(source: Value): Value {
+  return (
+    typeof source === "object" && source !== null && !Array.isArray(source)
+      ? { ...(source as Record<string, unknown>) }
+      : source
+  ) as Value;
+}
+
+const schema = Unsafe<AdapterManifest>(plainModuleValue(manifestSchema));
 export const ADAPTER_MANIFEST_SCHEMA = manifestSchema;
 
 export function readAdapterManifest(id: string, manifest: unknown): AdapterManifest {
-  if (!Value.Check(schema, manifest)) throw new Error(`Invalid NMG capability manifest: ${id}`);
+  const data = plainModuleValue(manifest);
+  if (!Value.Check(schema, data)) throw new Error(`Invalid NMG capability manifest: ${id}`);
   return Object.freeze({
-    entry: manifest.entry,
-    capabilities: Object.freeze([...manifest.capabilities]),
+    entry: data.entry,
+    capabilities: Object.freeze([...data.capabilities]),
   });
 }
 

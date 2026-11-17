@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   ADAPTER_CAPABILITY_IDS,
   assembleAdapterCapabilities,
@@ -173,6 +175,29 @@ test("the manifest schema validates real capability IDs and rejects duplicate or
   ]) {
     assert.throws(() => readAdapterManifest("fixture", input), /Invalid NMG capability manifest/u);
   }
+});
+
+test("the catalog loads through the Pi harness module loader", async () => {
+  // Pi loads extensions with jiti, which attaches a non-enumerable,
+  // self-referencing `default` to JSON module imports. TypeBox clones and
+  // validates own properties, so those wrappers make the catalog overflow the
+  // stack before any tool can register.
+  const harnessDir = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
+  const jitiEntry = createRequire(resolve(harnessDir, "index.js")).resolve("jiti");
+  const { createJiti } = (await import(pathToFileURL(jitiEntry).href)) as {
+    createJiti: (
+      url: string,
+      options: { moduleCache: boolean },
+    ) => {
+      import: (
+        path: string,
+      ) => Promise<typeof import("../../src/integration/adapter-capability-catalog.ts")>;
+    };
+  };
+  const loaded = await createJiti(import.meta.url, { moduleCache: false }).import(
+    fileURLToPath(new URL("../../src/integration/adapter-capability-catalog.ts", import.meta.url)),
+  );
+  assert.deepEqual(loaded.ADAPTER_CAPABILITY_CATALOG, ADAPTER_CAPABILITY_CATALOG);
 });
 
 test("state spaces assemble one shared tool and expose only declared operations", async () => {
