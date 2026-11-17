@@ -137,7 +137,7 @@ Answer/judge stages also require their own LLM budget:
 ## Reproduction
 
 The results above used the archived local harness. See the [archived report](https://github.com/wefio/NodeMemoryGraph/tree/codex/archive-legacy-memory-engine-3cf3bec2)
-for its run commands and [the AML HTTP guide](../../evals/omnimemeval/README.md)
+for its run commands and [the NMG HTTP guide](../../evals/omnimemeval/README.md)
 for new runs.
 
 ### Embedding availability contract

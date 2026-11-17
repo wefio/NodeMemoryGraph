@@ -8,11 +8,11 @@ terms:
     owner: evals/omnimemeval/README.md
     anchor: OmniMemEval integration
     status: canonical
-  - term: OmniMemEval AML adapter
+  - term: OmniMemEval HTTP adapter
     aliases: [NMG adapter, OmniMemEval HTTP client]
     definition: >-
-      The Python client registered in OmniMemEval to send synchronous Add and ranked Search requests to an AML endpoint using an explicit experiment namespace. Its HTTP contract covers Add and Search, with no deletion or operation-level materialized records.
-      在 OmniMemEval 注册的 Python 客户端，通过显式实验命名空间向 AML 端点发送同步 Add 和排序后的 Search 请求。HTTP 合同支持 Add 和 Search，删除及操作级物化记录不可用。
+      The Python client registered in OmniMemEval to send synchronous Add and ranked Search requests to the NMG HTTP endpoint using an explicit experiment namespace. Its HTTP contract covers Add and Search, with no deletion or operation-level materialized records.
+      在 OmniMemEval 注册的 Python 客户端，通过显式实验命名空间向 NMG HTTP 端点发送同步 Add 和排序后的 Search 请求。HTTP 合同支持 Add 和 Search，删除及操作级物化记录不可用。
     owner: evals/omnimemeval/README.md
     anchor: Integration boundary
     status: canonical

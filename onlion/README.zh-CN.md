@@ -1,13 +1,13 @@
-# onlion — AML 云端记忆服务
+# NMG HTTP 服务（onlion）
 
 [English](README.md)
 
-NMG AML Add/Search 边界背后云端记忆应用的 Git 管理源码。它导入规范根目录 `src/`——CLI/daemon 与本服务共用一份 NMG 实现，没有 vendored 第二棵树。设计依据与边界：[所属决策记录](../docs/decisions/implemented/2026-10-22-onlion-aml-cloud-service.zh-CN.md)。
+NMG HTTP 服务提供记忆写入（Add）和检索（Search）。服务与 CLI 共用 `src/` 下的记忆实现。[服务设计决策](../docs/decisions/implemented/2026-10-22-onlion-aml-cloud-service.zh-CN.md)
 
 ## 目录布局
 
 - `backend/worker.mjs` — HTTP 面、鉴权、R2 快照与回执事务接线。
-- `backend/memory-service.ts` — daemon 核心之上的薄 AML 适配层：消息映射、固定搜索档案、投影。
+- `backend/memory-service.ts` — 映射 HTTP 请求并整理检索结果。
 - `backend/extractive-summaries.mjs` — 确定性、无 LLM 的检索索引摘要，经 store 的 provider 机制写入。
 - `backend/storage.mjs`、`sqlite.mjs`、`page-delta.mjs` — R2 manifest 事务、SQLite WASM 请求上下文、快照页增量。
 - `vendor/` — 仅 SQLite WASM 运行时胶水（官方 3.53.4 构建加构建时由可读覆盖集清单 `callbacks.manifest.json` 生成的回调模块；生成的 wasm 不跟踪）。search-query-parser 是普通 npm 依赖。
@@ -69,4 +69,4 @@ Search 接受两种形状：旧形态的单 `query`（可带 `options`，每条�
 
 ## 非目标
 
-本包不宣称任何官方 AML 评测、生产部署或完整 benchmark 分数。远端删除、异步 Add、HaluMem 物化操作计分与流式生命周期不在范围内；面向本服务的评测适配器见[集成边界](../evals/omnimemeval/README.zh-CN.md#集成边界)。
+本包验证服务接口和打包。远端删除、异步 Add、HaluMem 操作级评分和流式运行暂未支持。面向本服务的评测适配器见[集成边界](../evals/omnimemeval/README.zh-CN.md#集成边界)。

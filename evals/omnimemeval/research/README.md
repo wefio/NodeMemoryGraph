@@ -4,7 +4,7 @@
 
 These files are diagnostic or hypothesis-testing utilities. They do not define
 the public benchmark execution path, official prompts, or NMG runtime defaults.
-For new benchmark runs, follow the [AML HTTP guide](../README.md).
+For new benchmark runs, follow the [NMG HTTP guide](../README.md).
 
 ## Layout
 

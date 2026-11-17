@@ -20,7 +20,7 @@ exceeding its retrieval budget, or rebuilding an index unnecessarily.
 
 ## Layout
 
-- `omnimemeval/` contains the maintained AML HTTP client and its upstream
+- `omnimemeval/` contains the maintained NMG HTTP client and its upstream
   evaluation guide. Its `research/` subtree contains probes, audits and ablations.
 - `official/` pins benchmark sources and supplies offline scoring utilities.
 - `controller*`, `topology/`, `retrieval/`, `consolidation/`, `disclosure/`,
@@ -115,11 +115,11 @@ logs under `docs/` (indexed here so new work can find prior evidence):
 - `docs/design/llm-sufficiency-recall-design.md` — LLM-sufficiency recall design.
 - `docs/experiments/lme-recall-headers-2026-08-04.md` — recall-header refinement verified as format-only (94.15/87.95/82.67 unchanged; answer acc 82.3%).
 
-## OmniMemEval over AML HTTP
+## OmniMemEval over NMG HTTP
 
 Run the pinned upstream suite with the NMG HTTP adapter. The
-[OmniMemEval guide](omnimemeval/README.md#run-longmemeval-over-aml-http) covers
-installation, the AML endpoint and namespace, and the LongMemEval command.
+[OmniMemEval guide](omnimemeval/README.md#run-longmemeval-over-nmg-http) covers
+installation, the NMG HTTP endpoint and namespace, and the LongMemEval command.
 The upstream runner owns checkpoints and the report. Repository-local scoring
 commands can still score artifacts from supported historical runs.
 
@@ -150,7 +150,7 @@ number because they measure different distributions and failure modes.
 
 ## Official-protocol benchmark commands
 
-Use the [AML HTTP workflow](omnimemeval/README.md#run-longmemeval-over-aml-http)
+Use the [NMG HTTP workflow](omnimemeval/README.md#run-longmemeval-over-nmg-http)
 to generate new OmniMemEval results. Use the existing offline scorers for their
 supported NMG prediction artifacts.
 
@@ -180,8 +180,8 @@ Use `--allow-insufficient` only for a file-layout/adapter smoke. See
 
 ## Reproducible official-protocol workflow
 
-OmniMemEval produces and scores AML runs through the
-[upstream workflow](omnimemeval/README.md#run-longmemeval-over-aml-http).
+OmniMemEval produces and scores HTTP runs through the
+[upstream workflow](omnimemeval/README.md#run-longmemeval-over-nmg-http).
 For an existing NMG-format `report.json` and `predictions.jsonl`, the offline
 score commands above produce `official-score.json`.
 
@@ -350,7 +350,7 @@ not considered better when the same result comes from a smaller retrieval arm.
 
 ## Adapter verification
 
-Run the installer and simulated AML HTTP contracts with:
+Run the installer and simulated NMG HTTP contracts with:
 
 ```bash
 node --experimental-strip-types --test tests/evals/omnimemeval-install.test.ts tests/evals/omnimemeval-http-client.test.ts

@@ -99,7 +99,7 @@ NMG 在 [OmniMemEval](https://github.com/MemTensor/OmniMemEval) 用户记忆 ben
 
 ## 复现
 
-以上结果使用归档版的本地评测。原始运行命令见[归档记录](https://github.com/wefio/NodeMemoryGraph/tree/codex/archive-legacy-memory-engine-3cf3bec2)，新的评测运行见 [AML HTTP 指南](../../evals/omnimemeval/README.zh-CN.md)。
+以上结果使用归档版的本地评测。原始运行命令见[归档记录](https://github.com/wefio/NodeMemoryGraph/tree/codex/archive-legacy-memory-engine-3cf3bec2)，新的评测运行见 [NMG HTTP 指南](../../evals/omnimemeval/README.zh-CN.md)。
 
 ### Embedding 可用性契约
 

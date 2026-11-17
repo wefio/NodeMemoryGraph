@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) · [术语](README.terms.yaml)
 
-本文记录历史本地 SQLite 检索协议和评测结果。新的评测见 [AML HTTP 指南](../omnimemeval/README.zh-CN.md)。
+本文记录历史本地 SQLite 检索协议和评测结果。新的评测见 [NMG HTTP 指南](../omnimemeval/README.zh-CN.md)。
 
 ## 协议（固定）
 
@@ -93,7 +93,7 @@ manifest 固定 dataset sha256、git commit（含 dirty 标记）、Node 与 NMG
 
 ## 环境
 
-这些结果的环境和服务设置属于归档版的本地 runner。AML HTTP 评测的向量和检索配置由选定的服务负责。
+这些结果的环境和服务设置属于归档版的本地 runner。NMG HTTP 评测的向量和检索配置由选定的服务负责。
 
 ## 结果
 

@@ -3,16 +3,16 @@ terms:
   - term: benchmark resume by result directory
     aliases: [按结果目录续跑]
     definition: >-
-      Continuing an interrupted AML HTTP run with the upstream runner's checkpoint options and the same endpoint, namespace, suite version, and dataset settings.
-      使用上游 runner 的检查点选项，沿用同一端点、命名空间、套件版本和数据集设置，继续中断的 AML HTTP 评测。
+      Continuing an interrupted NMG HTTP run with the upstream runner's checkpoint options and the same endpoint, namespace, suite version, and dataset settings.
+      使用上游 runner 的检查点选项，沿用同一端点、命名空间、套件版本和数据集设置，继续中断的 NMG HTTP 评测。
     owner: .pi/skills/omnimemeval-eval/SKILL.md
     anchor: Resume
     status: canonical
   - term: run-manual boundary
     aliases: [操作手册边界]
     definition: >-
-      OmniMemEval owns answers, judging, checkpoints, and reports. NMG supplies AML HTTP Add and Search and audits completed artifacts separately.
-      答案、评分、检查点与报告由 OmniMemEval 负责。NMG 提供 AML HTTP Add 和 Search，单独审计完成的产物。
+      OmniMemEval owns answers, judging, checkpoints, and reports. NMG supplies NMG HTTP Add and Search and audits completed artifacts separately.
+      答案、评分、检查点与报告由 OmniMemEval 负责。NMG 提供 NMG HTTP Add 和 Search，单独审计完成的产物。
     owner: .pi/skills/omnimemeval-eval/SKILL.md
     anchor: Boundaries
     status: canonical

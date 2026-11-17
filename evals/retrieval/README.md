@@ -3,7 +3,7 @@
 [English](README.md) | [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
 
 This document records the pinned local SQLite retrieval protocol and its results.
-For new evaluations, use the [AML HTTP guide](../omnimemeval/README.md).
+For new evaluations, use the [NMG HTTP guide](../omnimemeval/README.md).
 
 ## Protocol (pinned)
 
@@ -112,7 +112,7 @@ The historical setup and commands are in the
 ## Environment
 
 The environments and service settings for these results belong to the archived
-local runner. For an AML HTTP run, the selected service owns embedding and
+local runner. For a NMG HTTP run, the selected service owns embedding and
 retrieval configuration.
 
 ## Results

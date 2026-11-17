@@ -3,10 +3,10 @@
 [简体中文](README.zh-CN.md) · [Terms](README.terms.yaml)
 
 OmniMemEval's user-memory track uses the NMG adapter to send Add and Search
-requests to an AML HTTP service. OmniMemEval owns dataset parsing, answer
-generation, judging, checkpoints, and reports. [AML service setup](../../onlion/README.md)
+requests to the NMG HTTP service. OmniMemEval owns dataset parsing, answer
+generation, judging, checkpoints, and reports. [NMG HTTP service setup](../../onlion/README.md)
 
-## Run LongMemEval over AML HTTP
+## Run LongMemEval over NMG HTTP
 
 Use Bash with Node.js, Git, uv, and Python 3.12 available. For a fresh setup,
 start in the NMG repository. The bootstrap checks out the pinned upstream suite.
@@ -46,7 +46,7 @@ runner's documented checkpoint options.
 
 The adapter supports non-streaming Add and Search. Automatic deletion and
 HaluMem's operation-level scoring are unavailable, so leave `--clear 0` and
-`--streaming 0` in place. Test data stays on the selected AML service.
+`--streaming 0` in place. Test data stays on the selected NMG HTTP service.
 
 ## Integration boundary
 
@@ -57,7 +57,7 @@ The client requires an HTTPS endpoint except for loopback tests, rejects
 redirects, and prefixes benchmark user IDs with `NMG_OMNI_API_NAMESPACE`.
 Add sends a content-derived request ID and checks the synchronous receipt and
 identity echoes. Search preserves service ranking within `top_k` and renders
-text for the upstream reader. The AML service owns extraction, retrieval,
+text for the upstream reader. The NMG HTTP service owns extraction, retrieval,
 and embedding configuration. [HTTP client](nmg_client.py)
 
 Source and session time travel with Add messages. Search uses `event_time`
@@ -74,7 +74,7 @@ a bounded response body with the configured token redacted. [HTTP transport cont
 The local SQLite benchmark runs, including reverse-retrieval, BGE, PersonaMem
 v2, LoCoMo and BEAM measurements, used the archived implementation. Consult
 the saved run settings and evidence before comparing those measurements with
-an AML HTTP run. [Evaluation results](../../docs/experiments/benchmark-results.md) · [Archived benchmark guide](https://github.com/wefio/NodeMemoryGraph/blob/codex/archive-legacy-memory-engine-3cf3bec2/evals/omnimemeval/README.md)
+a NMG HTTP run. [Evaluation results](../../docs/experiments/benchmark-results.md) · [Archived benchmark guide](https://github.com/wefio/NodeMemoryGraph/blob/codex/archive-legacy-memory-engine-3cf3bec2/evals/omnimemeval/README.md)
 
 Use the [research utilities](research/README.md) for diagnostics on completed
 artifacts. The matched no-memory baseline is an internal comparison. The

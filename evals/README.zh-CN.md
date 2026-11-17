@@ -19,7 +19,7 @@ benchmark 问题，同时破坏来源、超出检索预算，或者不必要地�
 
 ## 布局
 
-- `omnimemeval/` 包含 AML HTTP 客户端和上游评测指南。`research/` 子树包含探针、审计与消融工具。
+- `omnimemeval/` 包含 NMG HTTP 客户端和上游评测指南。`research/` 子树包含探针、审计与消融工具。
 - `official/` 固定上游版本并提供离线评分工具。
 - `controller*`、`topology/`、`retrieval/`、`consolidation/`、`disclosure/`、
   `reasoning-workspace/` 以及规模/性能目录是聚焦的研究族。请使用它们各自的
@@ -100,9 +100,9 @@ blocker 与 `metrics: null`。
 - `docs/experiments/lme-recall-headers-2026-08-04.md` —— recall-header 细化经
   核实仅为格式变化（94.15/87.95/82.67 不变；answer acc 82.3%）。
 
-## 通过 AML HTTP 运行 OmniMemEval
+## 通过 NMG HTTP 运行 OmniMemEval
 
-使用固定版本的上游套件和 NMG HTTP 适配器。[OmniMemEval 指南](omnimemeval/README.zh-CN.md#通过-aml-http-运行-longmemeval)提供安装、AML 端点与命名空间配置，以及 LongMemEval 命令。上游 runner 负责检查点与报告。仓库的评分命令仍可用于支持的历史结果。
+使用固定版本的上游套件和 NMG HTTP 适配器。[OmniMemEval 指南](omnimemeval/README.zh-CN.md#通过-nmg-http-运行-longmemeval)提供安装、NMG HTTP 端点与命名空间配置，以及 LongMemEval 命令。上游 runner 负责检查点与报告。仓库的评分命令仍可用于支持的历史结果。
 
 ## 一次性测量脚本
 
@@ -131,7 +131,7 @@ blocker 与 `metrics: null`。
 
 ## 官方协议 benchmark 命令
 
-使用 [AML HTTP 流程](omnimemeval/README.zh-CN.md#通过-aml-http-运行-longmemeval)生成新的 OmniMemEval 结果。对评分器支持的 NMG 预测制品可以离线评分。
+使用 [NMG HTTP 流程](omnimemeval/README.zh-CN.md#通过-nmg-http-运行-longmemeval)生成新的 OmniMemEval 结果。对评分器支持的 NMG 预测制品可以离线评分。
 
 ```bash
 npm run benchmark:score:longmem -- <结果目录>
@@ -157,7 +157,7 @@ npm run eval:skillopt:export
 
 ## 可复现的官方协议工作流
 
-OmniMemEval 通过[上游流程](omnimemeval/README.zh-CN.md#通过-aml-http-运行-longmemeval)运行并评分。已有 NMG 格式的 `report.json` 与 `predictions.jsonl` 时，上面的离线评分命令可生成 `official-score.json`。
+OmniMemEval 通过[上游流程](omnimemeval/README.zh-CN.md#通过-nmg-http-运行-longmemeval)运行并评分。已有 NMG 格式的 `report.json` 与 `predictions.jsonl` 时，上面的离线评分命令可生成 `official-score.json`。
 
 ### 本地分数快照
 
@@ -301,7 +301,7 @@ AgentBench/OpenClaw 生命周期插件，而 NMG 的运行时集成目标是 Pi�
 
 ## 适配器校验
 
-下面的命令运行安装器测试与模拟 AML HTTP 合同测试。
+下面的命令运行安装器测试与模拟 NMG HTTP 合同测试。
 
 ```bash
 node --experimental-strip-types --test tests/evals/omnimemeval-install.test.ts tests/evals/omnimemeval-http-client.test.ts
