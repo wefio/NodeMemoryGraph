@@ -203,6 +203,7 @@ matched routes, deduplicates by first occurrence and runs all blocking commands.
 For `ci-and-tests`, `verify:static` expands into the same atomic checks as the CI
 contract. Cross-route shared checks run once, retaining individual status and
 route attribution; CI still invokes the named contract.
+The route also runs the same sealed unit layer as CI before the product suite.
 
 Non-RCP full plans run adjacent independent static checks with at most three
 workers, including test-source checking, anchor resolution and policy-word checks.

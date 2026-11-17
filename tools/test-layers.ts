@@ -48,12 +48,11 @@ const SPAWNS_PROCESS =
 const STARTS_PRODUCT = /daemon-client|dist\/cli\/main\.js|bin\/nmg\.mjs/;
 
 /**
- * A real dependency the test neither owns nor mocks: a database file, a temp directory, a
- * listening socket. The assertions are still in process, which keeps the failure readable,
- * but the setup can fail for reasons the code under test did not cause.
+ * A real dependency the test neither owns nor mocks: a SQLite connection (including
+ * in-memory local state), a temp directory, or a listening socket.
  */
 const REAL_DEPENDENCY =
-  /(?:DatabaseSync|node:sqlite|mkdtemp|tmpdir\(\)|createServer|\.listen\(|writeFileSync|mkdirSync|rmSync|NmgStore|\/store\.ts|\/store\/)/;
+  /(?:DatabaseSync|\bnew\s+SqliteLocalDaemonState\s*\(|mkdtemp|tmpdir\(\)|createServer|\.listen\(|writeFileSync|mkdirSync|rmSync)/;
 
 /**
  * Deliberate exceptions, keyed by repository-relative path. Each one must say why the marker

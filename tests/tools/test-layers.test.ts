@@ -48,6 +48,7 @@ test("the classifier reads the boundary the test crosses, not its folder", () =>
     ["const child = spawn(node, [script]);", "e2e"],
     [`import { start } from '${daemonClient}';`, "e2e"],
     ["const db = new DatabaseSync(join(dir, 'store.db'));", "integration"],
+    ["const state = new SqliteLocalDaemonState(':memory:');", "integration"],
     ["assert.equal(rank(a), 2);", "unit"],
   ];
   for (const [source, expected] of cases) {

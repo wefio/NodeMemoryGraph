@@ -21,8 +21,8 @@ function freshDir(): { directory: string; db: string } {
   return { directory, db: join(directory, "nmg.sqlite") };
 }
 
-function writeBoard(store: SqliteLocalDaemonState, content: string, taskId: string): void {
-  store.putTaskBoardEntry({
+function writeBoard(store: SqliteLocalDaemonState, content: string, taskId: string) {
+  return store.putTaskBoardEntry({
     content,
     taskId,
     agentId: "chaos",
@@ -99,27 +99,43 @@ test("chaos concurrent writers: busy_timeout keeps both alive", async () => {
   rmSync(directory, { recursive: true, force: true });
 });
 
-test("chaos truncated active WAL: new connection fails loudly, writer survives", async () => {
+test("chaos truncated active WAL: reading fails loudly and the writer persists new entries", (t) => {
   const { directory, db } = freshDir();
-  const s1 = new SqliteLocalDaemonState(db);
-  writeBoard(s1, "wal durable", "chaos4-wal");
-  const wal = `${db}-wal`;
-  const size = statSync(wal).size;
-  assert.ok(size > 100, `active WAL should exist, size=${size}`);
-  truncateSync(wal, 100);
-  await assert.rejects(
-    async () => {
-      new SqliteLocalDaemonState(db);
-    },
-    (e: Error) => {
-      assert.match(e.message, /disk I\/O error|malformed|not a database/i);
-      return true;
-    },
-  );
-  // The original connection keeps working (SQLite recovers the WAL).
-  writeBoard(s1, "writer survives", "chaos4-wal2");
-  s1.close();
-  rmSync(directory, { recursive: true, force: true });
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const taskId = "chaos4-wal";
+  const initial = new SqliteLocalDaemonState(db);
+  const baseline = writeBoard(initial, "checkpointed", taskId);
+  initial.close();
+
+  const writer = new SqliteLocalDaemonState(db);
+  let next;
+  try {
+    const damaged = writeBoard(writer, "in active WAL", taskId);
+    const wal = `${db}-wal`;
+    const size = statSync(wal).size;
+    assert.ok(size > 100, `active WAL should exist, size=${size}`);
+    truncateSync(wal, 100);
+    assert.throws(() => {
+      const reader = new SqliteLocalDaemonState(db);
+      try {
+        // Opening checks the schema; reading forces SQLite to touch the truncated WAL.
+        reader.getTaskBoardEntryById(taskId, damaged.id);
+      } finally {
+        reader.close();
+      }
+    }, /disk I\/O error|malformed|not a database/i);
+    next = writeBoard(writer, "writer survives", taskId);
+  } finally {
+    writer.close();
+  }
+
+  const reopened = new SqliteLocalDaemonState(db);
+  try {
+    assert.equal(reopened.getTaskBoardEntryById(taskId, baseline.id)?.content, baseline.content);
+    assert.equal(reopened.getTaskBoardEntryById(taskId, next.id)?.content, next.content);
+  } finally {
+    reopened.close();
+  }
 });
 
 test("chaos empty DB file: SQLite initializes it as a fresh store", () => {

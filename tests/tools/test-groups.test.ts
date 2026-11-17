@@ -154,7 +154,7 @@ test("the maintained policy-word check blocks the shared static contract exactly
   );
 });
 
-test("agent static checks match the CI contract without nested duplicate execution", () => {
+test("agent checks cover the CI static contract and sealed unit layer without duplicates", () => {
   const context = parseYaml(
     readFileSync(new URL("../../agent-context.yaml", import.meta.url), "utf8"),
   ) as { routes: { id: string; verify: { blocking: string[] } }[] };
@@ -163,6 +163,6 @@ test("agent static checks match the CI contract without nested duplicate executi
   const staticChecks = [
     ...packageJson.scripts["verify:static"]!.matchAll(/npm run ([\w:-]+)/gu),
   ].map((match) => match[1]!);
-  assert.deepEqual(route.verify.blocking, [...staticChecks, "test:product"]);
+  assert.deepEqual(route.verify.blocking, [...staticChecks, "test:unit", "test:product"]);
   assert.equal(new Set(route.verify.blocking).size, route.verify.blocking.length);
 });
