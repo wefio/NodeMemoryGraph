@@ -180,6 +180,7 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
 }
 
 const INDEXABLE_MEMORY = `json_extract(m.payload, '$.status') <> 'deleted'
+  AND json_extract(m.payload, '$.storageState') IS NULL
   AND NOT EXISTS (SELECT 1 FROM json_each(m.payload, '$.markers') marker
     WHERE json_extract(marker.value, '$.kind')='forget')`;
 const MISSING_VECTOR = `m.namespace=? AND m.kind='memory' AND ${INDEXABLE_MEMORY}

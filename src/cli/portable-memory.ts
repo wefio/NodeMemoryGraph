@@ -9,6 +9,7 @@ import type { MemoryBackendOptions } from "../core/memory/open.ts";
 import { activatedLocalMemory } from "../core/memory/sqlite-backend.ts";
 import type {
   NmgGetParams,
+  NmgExportMemoriesParams,
   NmgHelloResult,
   NmgMethod,
   NmgMethodResult,
@@ -16,12 +17,14 @@ import type {
   NmgResolveRememberParams,
   NmgRecordClaimOutcomesParams,
   NmgSearchParams,
+  NmgSetStorageStateParams,
 } from "./protocol.ts";
 import { NmgProtocolError } from "./protocol.ts";
 import { mergeStgLtgContexts, stgConsolidationInput, stgStorePath } from "../core/stg.ts";
 import type { ClaimPosterior, MemoryContext } from "../core/types.ts";
 import type { StgConsolidationPolicyConfig } from "../integration/config.ts";
 import { LocalMemoryEmbeddings } from "./local-memory-embeddings.ts";
+import { openLocalMemory } from "./local-memory-migration.ts";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
 
 const METHODS = new Set<NmgMethod>(["remember", "rememberBatch", "search", "get", "deleteMemory"]);
@@ -33,6 +36,10 @@ const SESSION_METHODS = new Set<NmgMethod>([
   "resolveRemember",
   "recordFeedback",
   "recordClaimOutcomes",
+  "exportMemories",
+  "setStorageState",
+  "perfAggregates",
+  "pruneRetrievalTraces",
   "lab",
 ]);
 const SEARCH_FIELDS = [
@@ -67,6 +74,7 @@ const LOCAL_SEARCH_FIELDS = [
   "recallCue",
   "recallRevision",
   "recallSource",
+  "perf",
 ];
 
 /** Application-level memory owner. Coordination continues through the local service. */
@@ -75,6 +83,7 @@ export class PortableMemoryService {
   private pending: Promise<MemoryEngine> | undefined;
   private backend: MemoryBackend | undefined;
   private readonly projects = new Map<string, Promise<MemoryEngine>>();
+  private readonly projectBackends = new Set<MemoryBackend>();
   private readonly embeddings: LocalMemoryEmbeddings;
   readonly local: boolean;
 
@@ -82,11 +91,12 @@ export class PortableMemoryService {
     options: MemoryBackendOptions,
     local = false,
     embedding: () => EmbeddingClient | undefined = () => undefined,
+    embeddingUnavailable: () => boolean = () => false,
   ) {
     // Do not retain a caller-mutable credentials/options object.
     this.options = structuredClone(options);
     this.local = local;
-    this.embeddings = new LocalMemoryEmbeddings(embedding);
+    this.embeddings = new LocalMemoryEmbeddings(embedding, embeddingUnavailable);
   }
 
   static handles(method: NmgMethod): boolean {
@@ -124,6 +134,12 @@ export class PortableMemoryService {
           ? ([
               "session-active-graph",
               "optional-embedding-retrieval",
+              "lab-capabilities",
+              "resolve-remember",
+              "claim-outcome-posterior",
+              "claim-outcome-origin-provenance",
+              "export-memories",
+              "set-storage-state",
               "state-spaces",
               "diagnostic-answer-attribution",
               "versioned-answer-attribution",
@@ -161,6 +177,32 @@ export class PortableMemoryService {
     return (await this.engine()).remember(input, operationId);
   }
 
+  async exportMemories(input: NmgExportMemoriesParams) {
+    return (await this.engine()).exportMemories(input);
+  }
+
+  async setStorageState(input: NmgSetStorageStateParams) {
+    const engine = await this.engine();
+    const storageState = await engine.setStorageState(
+      input.memoryId,
+      input.storageState,
+      input.recoveryDays,
+    );
+    return { memoryId: input.memoryId, storageState };
+  }
+
+  async recordUsage(ids: readonly string[], input: NmgGetParams): Promise<void> {
+    if (!ids.length) return;
+    const project = await this.project(input.projectDir);
+    const localIds = new Set<string>();
+    if (project) {
+      for (const id of ids) if (await project.record(id, input.sessionId)) localIds.add(id);
+      if (localIds.size) await project.recordUsage([...localIds], input.sessionId);
+    }
+    const sharedIds = ids.filter((id) => !localIds.has(id));
+    if (sharedIds.length) await (await this.engine()).recordUsage(sharedIds, input.sessionId);
+  }
+
   async rememberMany(inputs: readonly NmgRememberParams[], operationId?: string) {
     if (this.local) {
       const paths = new Set(inputs.map(projectForWrite));
@@ -187,7 +229,7 @@ export class PortableMemoryService {
     const shared = await this.engine();
     const project = await this.project(input.projectDir);
     const results = await Promise.all(
-      [input.query, ...(input.queries ?? [])].map(async (query) => {
+      [...new Set([input.query, ...(input.queries ?? [])])].map(async (query) => {
         const indexes = [shared.backend.vectorIndex, project?.backend.vectorIndex].flatMap(
           (index) => (index ? [index] : []),
         );
@@ -413,13 +455,27 @@ export class PortableMemoryService {
     throw new NmgProtocolError("INVALID_PARAMS", "Memory does not exist in this store and session");
   }
 
-  async close(): Promise<void> {
-    await this.embeddings.close();
-    const projects = await Promise.allSettled(this.projects.values());
-    for (const project of projects)
-      if (project.status === "fulfilled") await project.value.backend.close();
+  close(): Promise<void> {
+    const finalEmbeddings = this.embeddings.close();
+    const opening = Array.from(this.projects.values());
+    if (this.pending && !this.backend) opening.push(this.pending);
+    if (finalEmbeddings || opening.length !== this.projectBackends.size)
+      return Promise.allSettled([finalEmbeddings, ...opening]).then(() => this.closeBackends());
+    return this.closeBackends();
+  }
+
+  private closeBackends(): Promise<void> {
+    const backends = [...this.projectBackends];
+    if (this.backend) backends.push(this.backend);
+    this.backend = undefined;
+    this.pending = undefined;
     this.projects.clear();
-    await this.backend?.close();
+    this.projectBackends.clear();
+    return Promise.all(backends.map((backend) => backend.close())).then(() => undefined);
+  }
+
+  async prepare(): Promise<void> {
+    if (this.local) await this.engine();
   }
 
   embeddingHealth(indexId: string) {
@@ -449,15 +505,7 @@ export class PortableMemoryService {
 
   private async open(options: MemoryBackendOptions): Promise<MemoryBackend> {
     if (!this.local || options.kind !== "sqlite") return openMemoryBackend(options);
-    const { SqliteMemoryBackend } = await import("../core/memory/sqlite-backend.ts");
-    const backend = new SqliteMemoryBackend(options.path, options.namespace);
-    try {
-      backend.activateLocal();
-      return backend;
-    } catch (error) {
-      await backend.close();
-      throw error;
-    }
+    return (await openLocalMemory(options.path, options.namespace)).backend;
   }
 
   private async writer(input: NmgRememberParams): Promise<MemoryEngine> {
@@ -476,7 +524,10 @@ export class PortableMemoryService {
     if (!create && !existsSync(path)) return undefined;
     const namespace = activatedLocalMemory(path) ?? this.options.namespace;
     const opened = this.open({ ...this.options, path, namespace })
-      .then((backend) => new MemoryEngine(backend))
+      .then((backend) => {
+        this.projectBackends.add(backend);
+        return new MemoryEngine(backend);
+      })
       .catch((error: unknown) => {
         this.projects.delete(path);
         throw error;

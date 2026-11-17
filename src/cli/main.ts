@@ -1,8 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
-import { backup, DatabaseSync } from "node:sqlite";
-import { randomUUID } from "node:crypto";
 
 import {
   type NmgGetParams,
@@ -43,23 +41,27 @@ import {
 } from "./lifecycle.ts";
 import { reloadDaemon } from "./daemon-reload.ts";
 import { NmgService } from "./service.ts";
-import {
-  activatedLocalMemory,
-  LOCAL_MEMORY_NAMESPACE,
-  SqliteMemoryBackend,
-} from "../core/memory/sqlite-backend.ts";
+import { openLocalMemory } from "./local-memory-migration.ts";
+import { activatedLocalMemory, LOCAL_MEMORY_NAMESPACE } from "../core/memory/sqlite-backend.ts";
+import { stgStorePath } from "../core/stg.ts";
 import { histogramQuantile } from "../core/perf.ts";
 import type { MemoryContext } from "../core/types.ts";
 import { compactSearchContext } from "../integration/search-projection.ts";
 import { captureStateInvocation, renderStateOutput } from "../integration/state.ts";
 import { captureWorkingStateInvocation, renderLabOutput } from "../integration/lab-capabilities.ts";
-import { assertDaemonCapability, assertDaemonProtocol, parseDaemonHello } from "./daemon-client.ts";
+import {
+  assertDaemonCapability,
+  assertDaemonProtocol,
+  DAEMON_READY_TIMEOUT_MS,
+  parseDaemonHello,
+} from "./daemon-client.ts";
 
 // The CLI surface (synopsis, option details, known options/flags) is
 // assembled from the command registry in commands.ts; only the daemon
 // synopsis line is local because daemon commands are not RPC methods.
 const USAGE = cliUsage([
-  "nmg daemon start|restart|reload|status|stop|migrate [--data-dir DIR | --db FILE] [--json]",
+  "nmg daemon start|restart|reload|status|stop [--data-dir DIR | --db FILE] [--json]",
+  "nmg daemon migrate [--data-dir DIR | --db FILE] [--project-dir DIR]... [--json]",
 ]);
 
 export async function runCli(
@@ -91,7 +93,7 @@ export async function runCli(
   });
   if (isDaemonCommand(parsed.command)) {
     try {
-      const result = await runDaemonAction(parsed.command, service, parsed.reloadTicket);
+      const result = await runDaemonAction(parsed.command, service, parsed);
       io.stdout.write(
         parsed.json ? `${JSON.stringify(result, null, 2)}\n` : humanDaemonResult(result),
       );
@@ -188,46 +190,47 @@ async function invokeCliMethod(
   return service.invoke(method, parsed.params);
 }
 
-async function runDaemonAction(command: DaemonCommand, service: NmgService, ticket?: string) {
+async function runDaemonAction(
+  command: DaemonCommand,
+  service: NmgService,
+  parsed: ParsedArguments,
+) {
   if (command === "daemon-reload") {
     return reloadDaemon(service.databasePath, resolve(import.meta.dirname, "../../bin/nmg.mjs"));
   }
   if (command !== "daemon-run") await waitForReload(service.databasePath);
-  if (command === "daemon-migrate") return migrateDaemonMemory(service.databasePath);
-  return runDaemonCommand(command, service, ticket);
+  if (command === "daemon-migrate")
+    return migrateDaemonMemory(service.databasePath, undefined, parsed.migrationProjects);
+  return runDaemonCommand(command, service, parsed.reloadTicket);
 }
 
 export async function migrateDaemonMemory(
   path: string,
   reloadTicket?: string,
+  projectDirs: readonly string[] = [],
 ): Promise<Record<string, unknown>> {
-  const lease = acquireServerLease(path, reloadTicket);
+  const projects = [
+    ...new Set(projectDirs.map((directory) => stgStorePath(resolve(directory)))),
+  ].filter((database) => database !== path && existsSync(database));
+  const leases: ReturnType<typeof acquireServerLease>[] = [];
   try {
-    const existing = activatedLocalMemory(path);
-    if (existing) return { migrated: true, namespace: existing, databasePath: path };
-    const backupPath = await backupLegacyMemory(path);
-    const backend = new SqliteMemoryBackend(path, LOCAL_MEMORY_NAMESPACE);
-    try {
-      backend.activateLocal();
-    } finally {
-      await backend.close();
-    }
-    return { migrated: true, namespace: LOCAL_MEMORY_NAMESPACE, databasePath: path, backupPath };
+    leases.push(acquireServerLease(path, reloadTicket));
+    for (const database of projects) leases.push(acquireServerLease(database));
+    const main = await migrateMemoryFile(path, LOCAL_MEMORY_NAMESPACE);
+    const projectDatabases = [];
+    for (const database of projects)
+      projectDatabases.push(await migrateMemoryFile(database, main.namespace));
+    return { migrated: true, ...main, projectDatabases };
   } finally {
-    lease.release();
+    for (const lease of leases.reverse()) lease.release();
   }
 }
 
-async function backupLegacyMemory(path: string): Promise<string | undefined> {
-  if (!existsSync(path)) return undefined;
-  const copy = `${path}.before-unified-${randomUUID()}.sqlite`;
-  const source = new DatabaseSync(path, { readOnly: true });
-  try {
-    await backup(source, copy);
-    return copy;
-  } finally {
-    source.close();
-  }
+async function migrateMemoryFile(path: string, fallbackNamespace: string) {
+  const namespace = activatedLocalMemory(path) ?? fallbackNamespace;
+  const { backend, backupPath } = await openLocalMemory(path, namespace);
+  await backend.close();
+  return { namespace, databasePath: path, backupPath };
 }
 
 async function runDaemonCommand(
@@ -342,6 +345,7 @@ async function runDaemonCommand(
   process.once("SIGINT", stopOnSignal);
   process.once("SIGTERM", stopOnSignal);
   try {
+    await service.prepareMemory();
     await serveHttp(service, lease);
     return { stopped: true };
   } finally {
@@ -360,7 +364,8 @@ async function runDaemonCommand(
 }
 
 async function waitForState(statePath: string) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  const deadline = Date.now() + DAEMON_READY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
     const state = readServerState(statePath);
     // 必须同时探活：stale lease（强杀残留）里也带着 transport/port/token，
     // 仅校验字段会把死进程端点当成活 daemon 去连接。
@@ -369,7 +374,7 @@ async function waitForState(statePath: string) {
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 25));
   }
-  throw new Error("NMG daemon did not become ready");
+  throw new Error(`NMG daemon did not become ready within ${DAEMON_READY_TIMEOUT_MS}ms`);
 }
 
 async function waitForProcessExit(pid: number): Promise<void> {
@@ -411,6 +416,7 @@ interface ParsedArguments {
   compactJson?: boolean;
   requiresResident?: boolean;
   reloadTicket?: string;
+  migrationProjects?: string[];
   dataDirectory?: string;
   databasePath?: string;
   /** Local `graph` command: output HTML path. */
@@ -496,6 +502,7 @@ function daemonArguments(rest: readonly string[]): ParsedArguments {
   return {
     command: `daemon-${action}` as DaemonCommand,
     reloadTicket: firstOption(values, "reload-ticket"),
+    migrationProjects: values.options.get("project-dir"),
     json: values.flags.has("json"),
     dataDirectory: firstOption(values, "data-dir"),
     databasePath: optionalResolvedPath(firstOption(values, "db")),
@@ -503,7 +510,11 @@ function daemonArguments(rest: readonly string[]): ParsedArguments {
 }
 
 function daemonOptionAllowed(action: string | undefined, name: string): boolean {
-  return ["data-dir", "db"].includes(name) || (action === "run" && name === "reload-ticket");
+  return (
+    ["data-dir", "db"].includes(name) ||
+    (action === "run" && name === "reload-ticket") ||
+    (action === "migrate" && name === "project-dir")
+  );
 }
 
 /** "a" / "a or b" / "a, b, or c" — matches the historical error messages. */

@@ -172,7 +172,11 @@ test("Lab reasoning tool persists scratch state and injects it only after compac
     };
     assert.match(added.details.invoked.output.id, /^reason_/u);
     assert.match(added.content[0]!.text, /not verified fact/u);
-    assert.equal(existsSync(join(directory, "nmg.sqlite")), false);
+    const scratchOwner = await connectDaemon(join(directory, "nmg.sqlite"));
+    const { items } = (await invokeDaemon(scratchOwner, "exportMemories", {})) as {
+      items: unknown[];
+    };
+    assert.deepEqual(items, []);
 
     const ordinary = (await handlers.get("before_agent_start")!(
       { prompt: "continue", systemPrompt: "base" },
@@ -208,7 +212,7 @@ test("Lab reasoning tool persists scratch state and injects it only after compac
     else process.env.NMG_ENABLE_LAB_TOOLS = previousLab;
     if (previousCoordination === undefined) delete process.env.NMG_ENABLE_COORDINATION;
     else process.env.NMG_ENABLE_COORDINATION = previousCoordination;
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -1920,14 +1924,21 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     const remaining = readServerState(serverStatePath(join(directory, "nmg.sqlite")));
     assert.equal(remaining ? isProcessAlive(remaining.pid) : false, false);
     const store = new NmgStore(join(directory, "nmg.sqlite"));
-    assert.equal(store.getMemory(oldDatabase.details.memory.id)?.status, "superseded");
-    assert.equal(
-      store
-        .exportMemories({ sourceActor: "system" })
-        .items.some((item) => item.memory.statement.includes("Edited src/storage.ts")),
-      false,
-    );
+    const { NmgService } = await import("../../../src/cli/service.ts");
+    const unified = new NmgService({
+      databasePath: join(directory, "nmg.sqlite"),
+      environment: {},
+    });
     try {
+      const { items } = await unified.invoke("exportMemories");
+      const older = items.find(({ memory }) => memory.id === oldDatabase.details.memory.id);
+      assert.equal(older?.memory.status, "superseded");
+      assert.ok(
+        !items.some(
+          ({ memory }) =>
+            memory.sourceActor === "system" && memory.statement.includes("Edited src/storage.ts"),
+        ),
+      );
       const trace = store.retrievalTrace(
         searched.details.activeGraph.traceIds[0],
         "http-test-session",
@@ -1938,6 +1949,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       // Close the in-process store first so the daemon's SQLite close (WAL
       // checkpoint) is not blocked by our own connection; then shut the owned
       // daemon down before the temp dir is removed.
+      await unified.close();
       store.close();
       await handlers.get("session_shutdown")!({}, { sessionManager }).catch((error) =>
         console.error("session_shutdown error:", error),
@@ -1997,17 +2009,17 @@ test("remember from a board source attaches a board_origin marker", async () => 
       undefined,
       { sessionManager },
     )) as { details: { memory: { id: string } } };
-    const store = new NmgStore(join(directory, "nmg.sqlite"));
-    try {
-      const memory = store.getMemory(saved.details.memory.id);
-      assert.ok(memory, "board-sourced memory persisted");
-      const marker = memory.markers.find((candidate) => candidate.kind === "board_origin");
-      assert.ok(marker, "board_origin marker attached");
-      assert.equal(marker.attributes?.taskId, "board-origin-test-2026-08-12");
-      assert.equal(marker.attributes?.entryId, "entry-42");
-    } finally {
-      store.close();
-    }
+    const connection = await connectDaemon(join(directory, "nmg.sqlite"));
+    const evidence = (await invokeDaemon(connection, "get", {
+      memoryIds: [saved.details.memory.id],
+      sessionId: sessionManager.getSessionId(),
+    })) as MemoryContext;
+    const memory = evidence.results[0]?.memory;
+    assert.ok(memory, "board-sourced memory persisted");
+    const marker = memory.markers.find((candidate) => candidate.kind === "board_origin");
+    assert.ok(marker, "board_origin marker attached");
+    assert.equal(marker.attributes?.taskId, "board-origin-test-2026-08-12");
+    assert.equal(marker.attributes?.entryId, "entry-42");
     await handlers.get("session_shutdown")!({}, { sessionManager });
   } finally {
     process.env.NMG_DATA_DIR = previous;

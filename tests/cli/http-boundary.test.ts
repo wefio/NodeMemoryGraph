@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
 import { NMG_METHODS } from "../../src/cli/protocol.ts";
+import { NmgService } from "../../src/cli/service.ts";
+import { stripProviderEnv } from "../helpers/test-env.ts";
+import { removeTempDirectory } from "../helpers/temp-directory.ts";
+
+stripProviderEnv();
 
 /**
  * Module-boundary guard for the JSON-RPC-over-HTTP transport.
@@ -154,7 +160,7 @@ test("gRPC must not be reintroduced: no module imports it and no @grpc dependenc
   );
 });
 
-test("http server implements every method the service supports", () => {
+test("http server implements every method the service supports", async () => {
   // Methods served by NmgService.invoke's switch, e.g. `case "remember":`.
   const serviceText = fileText(SERVICE_FILE);
   const serviceMethods = new Set(
@@ -173,12 +179,21 @@ test("http server implements every method the service supports", () => {
     `${SERVER_FILE} must serve every service method; missing: ${missing.join(", ")}`,
   );
 
-  const unimplemented = (NMG_METHODS as readonly string[]).filter(
-    (method) => !serviceMethods.has(method),
-  );
-  assert.deepEqual(
-    unimplemented,
-    [],
-    `protocol registry must not advertise methods without service handlers: ${unimplemented.join(", ")}`,
-  );
+  const dataDirectory = mkdtempSync(join(tmpdir(), "nmg-service-method-contract-"));
+  const service = new NmgService({
+    dataDirectory,
+    environment: {},
+    memoryBackend: { kind: "sqlite", namespace: "contract", local: true },
+  });
+  try {
+    const { methods } = await service.invoke("hello");
+    assert.deepEqual(new Set(methods), serviceMethods);
+    for (const name of ["mergeNodes", "chainCreate", "syncStg", "retentionCandidates"] as const) {
+      assert.ok(!methods?.includes(name));
+      await assert.rejects(service.invoke(name), { code: "METHOD_NOT_FOUND" });
+    }
+  } finally {
+    await service.close();
+    removeTempDirectory(dataDirectory);
+  }
 });

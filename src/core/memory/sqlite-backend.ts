@@ -14,6 +14,7 @@ import type {
 import {
   ENTITY_COLUMNS,
   commitRows,
+  lexicalMemoryText,
   queryBounds,
   sqliteQueryWhere,
   sqlLiteral,
@@ -182,7 +183,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
       if (current === this.namespace) {
         this.vectorIndex.importLegacy();
         this.importLegacyClaims();
-        this.importLegacyTesseraIndex();
+        this.reindexLegacyRows();
         return;
       }
       if (current || this.revision(this.writer) !== 0)
@@ -196,7 +197,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
       }
       this.vectorIndex.importLegacy();
       this.importLegacyClaims();
-      this.importLegacyTesseraIndex();
+      this.reindexLegacyRows();
       fenceLegacyTables(this.writer, LEGACY_GRAPH_TABLES);
       this.writer.exec(`CREATE TABLE ${LOCAL_MEMORY_TABLE} (
         id INTEGER PRIMARY KEY CHECK(id=1), namespace TEXT NOT NULL)`);
@@ -227,8 +228,15 @@ export class SqliteMemoryBackend implements MemoryBackend {
     return this.transaction(() => this.write(request));
   }
 
-  private importLegacyTesseraIndex(): void {
-    const operationId = "migration:sqlite-tessera-index:v1";
+  private reindexLegacyRows(): void {
+    this.reindexRows("migration:sqlite-tessera-index:v1", "kind='tessera'");
+    this.reindexRows(
+      "migration:sqlite-recall-trigger-index:v1",
+      "kind='memory' AND EXISTS (SELECT 1 FROM json_each(payload, '$.markers') marker WHERE json_extract(marker.value, '$.kind')='recall_trigger')",
+    );
+  }
+
+  private reindexRows(operationId: string, condition: string): void {
     if (
       this.writer
         .prepare("SELECT 1 FROM nmg_memory_entities WHERE namespace=? AND key=?")
@@ -236,10 +244,10 @@ export class SqliteMemoryBackend implements MemoryBackend {
     )
       return;
     const rows = this.writer
-      .prepare("SELECT payload FROM nmg_memory_entities WHERE namespace=? AND kind='tessera'")
+      .prepare(`SELECT kind, payload FROM nmg_memory_entities WHERE namespace=? AND (${condition})`)
       .all(this.namespace);
     const entities = rows.map((row): MemoryEntity => ({
-      kind: "tessera",
+      kind: row.kind as "tessera" | "memory",
       value: JSON.parse(String(row.payload)),
     }));
     this.write({
@@ -297,7 +305,13 @@ export class SqliteMemoryBackend implements MemoryBackend {
           .run(this.namespace, row.key);
         this.writer
           .prepare(`INSERT INTO ${index} VALUES (?, ?, ?)`)
-          .run(this.namespace, row.key, ftsIndexedText(row.text));
+          .run(
+            this.namespace,
+            row.key,
+            ftsIndexedText(
+              row.kind === "memory" ? lexicalMemoryText(JSON.parse(row.payload)) : row.text,
+            ),
+          );
       }
     }
     this.writer

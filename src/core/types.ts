@@ -246,6 +246,10 @@ export interface MemoryRecord {
   validFrom: string | null;
   validUntil: string | null;
   status: MemoryStatus;
+  /** Retention state carried forward from local SQLite. Omitted for indexed records. */
+  storageState?: Exclude<MemoryStorageState, "indexed">;
+  retentionChangedAt?: string | null;
+  quarantineUntil?: string | null;
   /** Whether this memory represents an unresolved structure or a closed result. */
   resolution: MemoryResolution;
   /** First/most-recent time the structure entered an open or reopened state. */

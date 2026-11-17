@@ -1,5 +1,6 @@
 import { serializeScope } from "../scope.ts";
 import { normalizeStatement } from "../memory-normalization.ts";
+import { recallTriggersFromMarkers } from "../recall-triggers.ts";
 import { CANONICAL_EVENT_TIME_GLOB } from "../event-time.ts";
 import { MAX_MEMORY_COMMIT_ENTITIES, sessionScopedEntity } from "./backend.ts";
 import type {
@@ -76,6 +77,13 @@ export function entityRow(entity: MemoryEntity): EntityRow {
   }
   if (entity.kind === "claimPosterior") row.target = entity.value.posterior.memoryId;
   return row;
+}
+
+export function lexicalMemoryText(
+  memory: Extract<MemoryEntity, { kind: "memory" }>["value"],
+): string {
+  if (memory.storageState) return "";
+  return [memory.statement, ...recallTriggersFromMarkers(memory.markers)].join(" ");
 }
 
 export function receiptRow(receipt: MemoryCommitReceipt): EntityRow {

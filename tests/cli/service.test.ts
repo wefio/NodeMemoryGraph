@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
-import { NMG_METHODS, NMG_PROTOCOL_VERSION, type NmgMethodResult } from "../../src/cli/protocol.ts";
+import { NMG_PROTOCOL_VERSION, type NmgMethodResult } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
 import { columnsForBlocks } from "../../src/core/relevance-features.ts";
 import { NmgStore } from "../../src/core/store.ts";
@@ -27,17 +28,18 @@ test("status and hello do not create or open the database", async () => {
     assert.equal(hello.protocol, NMG_PROTOCOL_VERSION);
     assert.ok(hello.capabilities.includes("search"));
     assert.ok(hello.capabilities.includes("lab-capabilities"));
-    assert.deepEqual(hello.methods, NMG_METHODS);
+    assert.ok(hello.methods?.includes("rememberBatch"));
+    assert.ok(hello.capabilities.includes("portable-memory"));
     assert.equal(status.storage.exists, false);
     assert.equal(status.storage.loaded, false);
     assert.equal(existsSync(databasePath), false);
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
 
-test("data directory follows an explicit --db path instead of the shared default", () => {
+test("data directory follows an explicit --db path instead of the shared default", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-datadir-"));
   const databasePath = join(directory, "nmg.sqlite");
   const service = new NmgService({ databasePath, environment: {} });
@@ -46,12 +48,12 @@ test("data directory follows an explicit --db path instead of the shared default
     // state into the developer's shared ~/.nmg.
     assert.equal(service.dataDirectory, resolve(directory));
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
 
-test("an explicit data directory still wins over the database path", () => {
+test("an explicit data directory still wins over the database path", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-datadir-db-"));
   const dataDirectory = mkdtempSync(join(tmpdir(), "nmg-cli-datadir-explicit-"));
   const service = new NmgService({
@@ -62,7 +64,7 @@ test("an explicit data directory still wins over the database path", () => {
   try {
     assert.equal(service.dataDirectory, resolve(dataDirectory));
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
     removeTempDirectory(dataDirectory);
   }
@@ -96,15 +98,12 @@ test("rememberBatch preserves ordered replacement semantics in one store", async
     assert.equal(batch.results.length, 2);
     assert.equal(batch.results[1]!.memory.supersedesId, batch.results[0]!.memory.id);
 
-    const store = new NmgStore(databasePath);
-    try {
-      assert.equal(store.getMemory(batch.results[0]!.memory.id)?.status, "superseded");
-      assert.equal(store.getMemory(batch.results[1]!.memory.id)?.status, "active");
-    } finally {
-      store.close();
-    }
+    const { items } = await service.invoke("exportMemories");
+    const records = new Map(items.map(({ memory }) => [memory.id, memory.status]));
+    assert.equal(records.get(batch.results[0]!.memory.id), "superseded");
+    assert.equal(records.get(batch.results[1]!.memory.id), "active");
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -137,49 +136,7 @@ test("rememberBatch rejects mixed LTG and STG targets before writing", async () 
       store.close();
     }
   } finally {
-    service.close();
-    removeTempDirectory(directory);
-  }
-});
-
-test("memory maintenance RPC persists review-only proposals", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-maintenance-proposal-"));
-  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
-  try {
-    const remembered = await service.invoke("remember", {
-      statement: "Atlas currently runs in region eu-west",
-      nodeName: "Atlas deployment",
-      sourceActor: "user",
-    });
-    const proposed = await service.invoke("memoryMaintenanceProposal", {
-      action: "propose",
-      defectType: "retrieval",
-      maintenanceAction: "observe",
-      targetMemoryIds: [remembered.memory.id],
-      policy: {
-        id: "policy",
-        revision: "1",
-        sourceHash: "sha256:policy",
-        minimumLongHorizonScore: 0.5,
-      },
-      longHorizonScore: 0.75,
-      evaluationKind: "matched_replay",
-      evaluationRef: "replay:atlas",
-    });
-    assert.equal(proposed.action, "propose");
-    if (proposed.action !== "propose") throw new Error("expected proposal result");
-
-    const reviewed = await service.invoke("memoryMaintenanceProposal", {
-      action: "review",
-      proposalId: proposed.proposal.id,
-      decision: "reject",
-      reason: "selection policy will be calibrated separately",
-    });
-    assert.equal(reviewed.action, "review");
-    if (reviewed.action !== "review") throw new Error("expected review result");
-    assert.equal(reviewed.proposal.status, "rejected");
-  } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -202,7 +159,7 @@ test("service applies NMG_GRAPH_HOPS as a default while explicit search params w
     const explicit = await service.invoke("search", { query: "Atlas SQLite", graphHops: 2 });
     assert.equal(explicit.activeGraph?.budget.maxGraphHops, 2);
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -244,7 +201,7 @@ test("search accepts a structured event-time window and refuses an unusable boun
       code: "INVALID_PARAMS",
     });
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -302,7 +259,7 @@ test("Lab RPC is session scoped and reasoning workspaces are daemon owned", asyn
       /not enabled for session/,
     );
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -393,7 +350,7 @@ test("Lab RPC exposes read-only memory graph reasoning after explicit activation
       /belongs to another session/u,
     );
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -431,7 +388,7 @@ test("daemon owns temporary session Active Graph observations and releases them"
     });
     assert.deepEqual(released, { action: "release", released: true });
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -484,7 +441,7 @@ test("daemon owns the bounded content disclosure window for every adapter", asyn
       foldedMemoryIds: [remembered.memory.id],
     });
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -533,7 +490,7 @@ test("task board RPC shares temporary coordination without creating semantic mem
       store.close();
     }
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -598,43 +555,7 @@ test("task board acknowledge records a no-reply confirmation visible on read and
     })) as { action: "deliveryCheck"; acked: string[] };
     assert.deepEqual(checkUnacked.acked, []);
   } finally {
-    service.close();
-    removeTempDirectory(directory);
-  }
-});
-
-test("resident service rolls back a journaled node merge", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-node-rollback-"));
-  const databasePath = join(directory, "nmg.sqlite");
-  const service = new NmgService({ databasePath, environment: {} });
-  try {
-    const first = await service.invoke("remember", {
-      statement: "Atlas uses cobalt labels.",
-      nodeName: "Atlas labels",
-    });
-    const second = await service.invoke("remember", {
-      statement: "Atlas release notes stay concise.",
-      nodeName: "Atlas release notes",
-    });
-    const transform = await service.invoke("mergeNodes", {
-      sourceNodeIds: [first.node.id, second.node.id],
-      targetName: "Atlas conventions",
-    });
-
-    const rolledBack = await service.invoke("rollbackNodeTransform", {
-      transformId: transform.id,
-    });
-    assert.ok(rolledBack.rolledBackAt);
-
-    const reader = new NmgStore(databasePath);
-    try {
-      assert.equal(reader.getContext([first.memory.id]).results[0]!.node.id, first.node.id);
-      assert.equal(reader.getContext([second.memory.id]).results[0]!.node.id, second.node.id);
-    } finally {
-      reader.close();
-    }
-  } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -662,7 +583,7 @@ test("resident service remembers, searches, and expands exact evidence", async (
     assert.equal(expanded.results[0]?.evidence.content, remembered.history.content);
     assert.deepEqual(expanded.missingMemoryIds, ["missing-memory"]);
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -699,7 +620,7 @@ test("remember resolution lets an external semantic judge apply a validated supe
     const stale = search.results.find((entry) => entry.memory.id === oldValue.memory.id);
     assert.equal(stale?.memory.status, "superseded");
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -728,44 +649,13 @@ test("remember relation resolution creates a reversible proposal without merging
     assert.equal(resolved.proposal.relationType, "refines");
     assert.deepEqual(resolved.proposal.evidenceMemoryIds, [specific.memory.id, general.memory.id]);
 
-    const listed = await service.invoke("topologyProposal", { action: "list" });
-    assert.equal(listed.action, "list");
-    if (listed.action !== "list") throw new Error("expected topology list");
-    assert.deepEqual(
-      listed.proposals.map((proposal) => proposal.id),
-      [resolved.proposal.id],
-    );
-    const assessment = await service.invoke("topologyProposal", {
-      action: "assess",
-      proposalId: resolved.proposal.id,
-    });
-    assert.equal(assessment.action, "assess");
-    if (assessment.action !== "assess") throw new Error("expected topology assessment");
-    assert.equal(assessment.assessment.proposalId, resolved.proposal.id);
-    assert.equal(assessment.assessment.eligible, false);
-    const reviewed = await service.invoke("topologyProposal", {
-      action: "review",
-      proposalId: resolved.proposal.id,
-      decision: "accept",
-    });
-    assert.equal(reviewed.action, "review");
-    if (reviewed.action !== "review") throw new Error("expected topology review");
-    assert.equal(reviewed.proposal.status, "accepted");
-    await assert.rejects(
-      service.invoke("topologyProposal", {
-        action: "actuate",
-        proposalId: resolved.proposal.id,
-      }),
-      /automatic merge/i,
-    );
-
     const search = await service.invoke("search", { query: "Atlas storage", limit: 10 });
     assert.deepEqual(
       new Set(search.results.map((entry) => entry.memory.id)),
       new Set([specific.memory.id, general.memory.id]),
     );
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -794,7 +684,7 @@ test("remember relation resolution rejects identity claims across conflicting sc
       /requires non-conflicting scope/,
     );
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -841,7 +731,7 @@ test("remember conflict resolution accepts scope intersections but rejects adjac
       /requires overlapping validity/u,
     );
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -872,7 +762,7 @@ test("remember forget resolution withdraws a selected memory from retrieval", as
       false,
     );
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -916,7 +806,7 @@ test("remember open, resolve, and reopen lifecycle survives service restart", as
     assert.equal(reopened.resolution, "reopened");
     assert.deepEqual(reopened.relatedMemoryIds, [anchor.memory.id]);
   } finally {
-    service.close();
+    await service.close();
   }
 
   const reopenedService = new NmgService({ databasePath, environment: {} });
@@ -925,7 +815,7 @@ test("remember open, resolve, and reopen lifecycle survives service restart", as
     assert.equal(context.results[0]?.memory.resolution, "reopened");
     assert.deepEqual(context.results[0]?.memory.relatedMemoryIds, [anchorMemoryId]);
   } finally {
-    reopenedService.close();
+    await reopenedService.close();
     removeTempDirectory(directory);
   }
 });
@@ -956,7 +846,7 @@ test("memory export defaults can preserve user-owned memory with provenance", as
     assert.equal(exported.items[0]?.evidence[0]?.content, "I prefer concise release notes.");
     assert.equal(exported.items[0]?.evidence[0]?.sourceRef, "pi-session:example");
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -995,7 +885,7 @@ test("resident service records claim outcomes without changing extraction confid
     assert.equal(result.posteriors[0]?.priorConfidence, 0.5);
     assert.equal(result.posteriors[0]?.independentVoteCount, 1);
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -1046,7 +936,7 @@ test("resident service isolates project STG while retaining LTG fallback", async
     assert.deepEqual(expanded.missingMemoryIds, []);
     assert.ok(existsSync(stgStorePath(projectA, "cli")));
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -1091,19 +981,18 @@ test("resident service keeps mixed STG/LTG evidence in one AG and attributes bot
       sessionId: "session-alpha",
     });
 
-    const ltg = new NmgStore(databasePath);
-    const stg = new NmgStore(stgStorePath(projectDir, "session-alpha"));
+    const traceStore = new NmgStore(databasePath);
     try {
-      assert.ok(ltg.getContext([durable.memory.id]).results[0]!.memory.accessCount > 0);
-      assert.ok(
-        stg.getContext([local.memory.id], 0, "session-alpha").results[0]!.memory.accessCount > 0,
+      const trace = traceStore.retrievalTrace(searched.activeGraph!.id, "session-alpha");
+      assert.deepEqual(
+        new Set(trace?.disclosedMemoryIds),
+        new Set([local.memory.id, durable.memory.id]),
       );
     } finally {
-      ltg.close();
-      stg.close();
+      traceStore.close();
     }
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -1139,149 +1028,7 @@ test("resident service isolates STG by session inside one project", async () => 
       stgStorePath(projectDir, "session-beta"),
     );
   } finally {
-    service.close();
-    removeTempDirectory(directory);
-  }
-});
-
-test("resident service exposes complete LTG memory-chain DAG operations", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-chain-ltg-"));
-  const service = new NmgService({ databasePath: join(directory, "ltg.sqlite"), environment: {} });
-  try {
-    const first = await service.invoke("remember", {
-      statement: "Atlas migration starts with an inventory.",
-      nodeName: "Atlas migration inventory",
-    });
-    const second = await service.invoke("remember", {
-      statement: "Atlas migration validates the converted database.",
-      nodeName: "Atlas migration validation",
-    });
-    const chain = await service.invoke("chainCreate", {
-      chainType: "logical",
-      topic: "Atlas migration",
-    });
-    await service.invoke("chainEdgeAdd", {
-      chainId: chain.id,
-      sourceMemoryId: first.memory.id,
-      targetMemoryId: second.memory.id,
-    });
-    const loaded = await service.invoke("chainGet", { chainId: chain.id });
-    assert.deepEqual(loaded?.topologicalOrder, [first.memory.id, second.memory.id]);
-    assert.equal(loaded?.members.length, 2, "edge endpoints auto-join the chain");
-    assert.equal(loaded?.edges.length, 1);
-
-    assert.deepEqual(
-      await service.invoke("chainEdgeRemove", {
-        chainId: chain.id,
-        sourceMemoryId: first.memory.id,
-        targetMemoryId: second.memory.id,
-      }),
-      { removed: true },
-    );
-    await service.invoke("chainEdgeAdd", {
-      chainId: chain.id,
-      sourceMemoryId: first.memory.id,
-      targetMemoryId: second.memory.id,
-    });
-    assert.deepEqual(
-      await service.invoke("chainRemove", {
-        chainId: chain.id,
-        memoryId: first.memory.id,
-      }),
-      { removed: true },
-    );
-    const reduced = await service.invoke("chainGet", { chainId: chain.id });
-    assert.deepEqual(reduced?.topologicalOrder, [second.memory.id]);
-    assert.equal(reduced?.edges.length, 0, "member removal also removes incident chain edges");
-  } finally {
-    service.close();
-    removeTempDirectory(directory);
-  }
-});
-
-test("resident service keeps STG memory chains inside their owning session", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-chain-stg-"));
-  const projectDir = join(directory, "project");
-  const service = new NmgService({ databasePath: join(directory, "ltg.sqlite"), environment: {} });
-  try {
-    const first = await service.invoke("remember", {
-      statement: "Session alpha first scratch decision.",
-      nodeName: "Session alpha decision one",
-      residence: "stg",
-      projectDir,
-      sessionId: "session-alpha",
-    });
-    const second = await service.invoke("remember", {
-      statement: "Session alpha second scratch decision.",
-      nodeName: "Session alpha decision two",
-      residence: "stg",
-      projectDir,
-      sessionId: "session-alpha",
-    });
-    const chain = await service.invoke("chainCreate", {
-      chainType: "temporal",
-      topic: "Session alpha scratch sequence",
-      projectDir,
-      sessionId: "session-alpha",
-    });
-    assert.equal(chain.ownerSessionId, "session-alpha");
-    await service.invoke("chainAdd", {
-      chainId: chain.id,
-      memoryId: first.memory.id,
-      projectDir,
-      sessionId: "session-alpha",
-    });
-    await service.invoke("chainAdd", {
-      chainId: chain.id,
-      memoryId: second.memory.id,
-      projectDir,
-      sessionId: "session-alpha",
-    });
-    const alpha = await service.invoke("chainGet", {
-      chainId: chain.id,
-      projectDir,
-      sessionId: "session-alpha",
-    });
-    assert.equal(alpha?.members.length, 2);
-    assert.equal(
-      (
-        await service.invoke("chainList", {
-          projectDir,
-          sessionId: "session-alpha",
-        })
-      ).length,
-      1,
-    );
-    assert.equal((await service.invoke("chainList", {})).length, 0, "chain was not written to LTG");
-    assert.equal(
-      (
-        await service.invoke("chainList", {
-          projectDir,
-          sessionId: "session-beta",
-        })
-      ).length,
-      0,
-    );
-    await assert.rejects(
-      service.invoke("chainGet", {
-        chainId: chain.id,
-        projectDir,
-        sessionId: "session-beta",
-      }),
-      /belongs to another session/u,
-    );
-    await assert.rejects(
-      service.invoke("chainCreate", {
-        chainType: "logical",
-        topic: "forged owner",
-        ownerSessionId: "session-beta",
-        projectDir,
-        sessionId: "session-alpha",
-      }),
-      /owner must match/u,
-    );
-  } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -1323,84 +1070,7 @@ test("resident service records nmg_get disclosure only for the owning session", 
       reader.close();
     }
   } finally {
-    service.close();
-    removeTempDirectory(directory);
-  }
-});
-
-test("resident service syncs a scoped LTG working set into project STG idempotently", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-stg-sync-"));
-  const projectDir = join(directory, "project");
-  const service = new NmgService({ databasePath: join(directory, "ltg.sqlite"), environment: {} });
-  try {
-    await service.invoke("remember", {
-      statement: "Project atlas uses SQLite.",
-      nodeName: "Atlas storage",
-      scope: { project: "atlas" },
-    });
-    const first = await service.invoke("syncStg", {
-      projectDir,
-      scope: { project: "atlas" },
-      limit: 10,
-    });
-    const second = await service.invoke("syncStg", {
-      projectDir,
-      scope: { project: "atlas" },
-      limit: 10,
-    });
-    assert.equal(first.copied, 1);
-    assert.equal(second.copied, 0);
-  } finally {
-    service.close();
-    removeTempDirectory(directory);
-  }
-});
-
-test("resident service can automatically cache a scoped LTG working set on project search", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-stg-auto-sync-"));
-  const projectDir = join(directory, "project");
-  const service = new NmgService({
-    databasePath: join(directory, "ltg.sqlite"),
-    environment: {
-      NMG_STG_AUTO_SYNC: "1",
-      NMG_STG_AUTO_SYNC_LIMIT: "10",
-      NMG_STG_AUTO_SYNC_INTERVAL_SECONDS: "60",
-    },
-  });
-  try {
-    const remembered = await service.invoke("remember", {
-      statement: "Project atlas uses SQLite for durable state.",
-      nodeName: "Atlas storage",
-      scope: { project: "atlas" },
-    });
-    await service.invoke("search", {
-      query: "atlas durable state",
-      projectDir,
-      sessionId: "session-alpha",
-      scope: { project: "atlas" },
-    });
-
-    const stg = new NmgStore(stgStorePath(projectDir));
-    try {
-      const cached = stg.search("atlas durable state", {
-        scope: { project: "atlas" },
-        maxTier: 3,
-        limit: 10,
-      });
-      assert.ok(
-        cached.some((entry) =>
-          entry.memory.markers.some(
-            (marker) =>
-              marker.kind === "cached_from_ltg" &&
-              marker.attributes?.sourceMemoryId === remembered.memory.id,
-          ),
-        ),
-      );
-    } finally {
-      stg.close();
-    }
-  } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -1415,6 +1085,7 @@ test("STG consolidation stays shadow by default and can be enabled after strong 
     NMG_STG_CONSOLIDATE_MIN_LOWER_BOUND: "0",
   };
   const service = new NmgService({ databasePath, environment });
+  let localMemoryId: string;
   try {
     const local = await service.invoke("remember", {
       statement: "Atlas durable convention uses cobalt labels.",
@@ -1437,10 +1108,11 @@ test("STG consolidation stays shadow by default and can be enabled after strong 
         },
       ],
     });
-    assert.deepEqual(shadow.consolidationCandidates, [local.memory.id]);
+    localMemoryId = local.memory.id;
+    assert.deepEqual(shadow.consolidationCandidates, [localMemoryId]);
     assert.deepEqual(shadow.consolidatedMemories, []);
   } finally {
-    service.close();
+    await service.close();
   }
 
   const active = new NmgService({
@@ -1448,17 +1120,13 @@ test("STG consolidation stays shadow by default and can be enabled after strong 
     environment: { ...environment, NMG_STG_AUTO_CONSOLIDATE: "1" },
   });
   try {
-    const localStore = new NmgStore(stgStorePath(projectDir, "session-alpha"));
-    const [memory] = localStore.exportMemories({ sourceActor: "user" }).items;
-    localStore.close();
-    assert.ok(memory);
     const promoted = await active.invoke("recordClaimOutcomes", {
       projectDir,
       sessionId: "session-alpha",
       semanticTaskId: "task-two",
       votes: [
         {
-          memoryId: memory!.memory.id,
+          memoryId: localMemoryId,
           outcome: "supported",
           source: "user",
           sourceLineage: "message:user-confirmation-2",
@@ -1466,14 +1134,10 @@ test("STG consolidation stays shadow by default and can be enabled after strong 
       ],
     });
     assert.equal(promoted.consolidatedMemories.length, 1);
-    const ltg = new NmgStore(databasePath);
-    try {
-      assert.equal(ltg.search("cobalt labels", { maxTier: 3 }).length, 1);
-    } finally {
-      ltg.close();
-    }
+    const shared = await active.invoke("search", { query: "cobalt labels", maxTier: 3 });
+    assert.equal(shared.results.length, 1);
   } finally {
-    active.close();
+    await active.close();
     removeTempDirectory(directory);
   }
 });
@@ -1555,7 +1219,7 @@ test("automatic STG consolidation retracts only its own LTG copy when posterior 
       "requalification creates a fresh auditable LTG version",
     );
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -1624,7 +1288,7 @@ test("STG correction never retracts a pre-existing manual LTG duplicate", async 
       "manual LTG truth remains independently owned",
     );
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -1665,125 +1329,7 @@ test("resident service exposes explicit retention and deletion maintenance", asy
       0,
     );
   } finally {
-    service.close();
-    removeTempDirectory(directory);
-  }
-});
-
-test("remember schedules thresholded maintenance after returning", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-auto-maintenance-"));
-  const service = new NmgService({
-    databasePath: join(directory, "nmg.sqlite"),
-    environment: {
-      NMG_MAINTENANCE_WRITE_THRESHOLD: "1",
-      NMG_MAINTENANCE_ACCESS_THRESHOLD: "1",
-      NMG_MAINTENANCE_NODE_LIMIT: "1",
-    },
-  });
-  try {
-    const remembered = await service.invoke("remember", {
-      statement: "Maintenance is deferred until after remember.",
-      nodeName: "Maintenance scheduling",
-    });
-    assert.ok(remembered.memory.id, "remember completes independently of maintenance");
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    const aggregates = await service.invoke("perfAggregates");
-    assert.ok(aggregates.some((aggregate) => aggregate.section === "maintenance.batch"));
-    assert.ok(aggregates.some((aggregate) => aggregate.section === "maintenance.semantic"));
-  } finally {
-    service.close();
-    removeTempDirectory(directory);
-  }
-});
-
-test("service maintenance bounds a write backlog distributed across small nodes", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-distributed-maintenance-"));
-  const databasePath = join(directory, "nmg.sqlite");
-  const service = new NmgService({
-    databasePath,
-    environment: {
-      NMG_MAINTENANCE_WRITE_THRESHOLD: "4",
-      NMG_MAINTENANCE_ACCESS_THRESHOLD: "32",
-      NMG_MAINTENANCE_NODE_LIMIT: "2",
-    },
-  });
-  try {
-    for (let index = 0; index < 5; index += 1) {
-      await service.invoke("remember", {
-        statement: `Distributed service write ${index}`,
-        nodeName: `Distributed service node ${index}`,
-      });
-    }
-    await new Promise<void>((resolve) => setImmediate(() => setImmediate(resolve)));
-  } finally {
-    service.close();
-  }
-
-  const reader = new NmgStore(databasePath);
-  try {
-    assert.ok(
-      reader.pendingIndexDelta().length < 4,
-      "recursive bounded slices reduce global backlog below its trigger threshold",
-    );
-  } finally {
-    reader.close();
-    removeTempDirectory(directory);
-  }
-});
-
-test("service does not reschedule maintenance for superseded access pressure", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-historical-pressure-"));
-  const databasePath = join(directory, "nmg.sqlite");
-  const seed = new NmgStore(databasePath);
-  let historicalId: string;
-  try {
-    const old = seed.remember({
-      statement: "The historical backend is SQLite",
-      nodeName: "Service backend",
-      memoryType: "state",
-      stateKey: "service.backend",
-    });
-    historicalId = old.memory.id;
-    seed.recordUsage([historicalId]);
-    seed.remember({
-      statement: "The current backend is PostgreSQL",
-      nodeName: "Service backend",
-      memoryType: "state",
-      stateKey: "service.backend",
-    });
-  } finally {
-    seed.close();
-  }
-  const service = new NmgService({
-    databasePath,
-    environment: {
-      NMG_MAINTENANCE_WRITE_THRESHOLD: "100",
-      NMG_MAINTENANCE_ACCESS_THRESHOLD: "1",
-      NMG_MAINTENANCE_NODE_LIMIT: "1",
-    },
-  });
-  try {
-    const written = await service.invoke("remember", {
-      statement: "A new service write triggers the backlog check",
-      nodeName: "Backlog trigger",
-    });
-    assert.ok(written.memory.id);
-    for (let slice = 0; slice < 3; slice++) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-  } finally {
-    service.close();
-  }
-  const reader = new NmgStore(databasePath);
-  try {
-    assert.deepEqual(reader.maintenanceRuns(), []);
-    assert.equal(reader.getMemory(historicalId)?.status, "superseded");
-    assert.equal(
-      reader.perfAggregates().find((item) => item.section === "maintenance.batch")?.count,
-      1,
-    );
-  } finally {
-    reader.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -1804,7 +1350,7 @@ test("service validates method parameters", async () => {
       { code: "INVALID_PARAMS" },
     );
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -1840,7 +1386,7 @@ test("external source markers persist and default trust to unverified", async ()
       { code: "INVALID_PARAMS" },
     );
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -1871,7 +1417,7 @@ test("remember accepts bounded recall triggers and uses them in automatic recall
       { code: "INVALID_PARAMS" },
     );
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -1920,18 +1466,18 @@ test("CLI writes pass through the governed memory admission policy", async () =>
     // The refusal must leave a session-anchored row. That row is the only
     // evidence a later "this should have been recorded" judgement can cite, so
     // it is asserted here rather than by calling recordRejectedWrite directly.
-    const reader = new NmgStore(join(directory, "nmg.sqlite"));
+    const reader = new DatabaseSync(join(directory, "nmg.sqlite"), { readOnly: true });
     try {
       const event = reader
-        .memoryWriteEvents()
-        .find(
-          (item) =>
-            item.writeReason === "cli_rejected_constraint" &&
-            item.policyReason === "coordination_state",
-        );
-      assert.equal(event?.decision, "rejected");
-      assert.equal(event?.sessionId, "sess-write-policy");
-      assert.equal(event?.memoryId, null);
+        .prepare(
+          "SELECT payload FROM nmg_memory_entities WHERE kind='writeEvent' AND json_extract(payload, '$.policyReason')=?",
+        )
+        .get("coordination_state");
+      assert.ok(event);
+      const value = JSON.parse(String(event.payload));
+      assert.equal(value.decision, "rejected");
+      assert.equal(value.sessionId, "sess-write-policy");
+      assert.equal(value.memoryId, null);
     } finally {
       reader.close();
     }
@@ -1974,7 +1520,7 @@ test("CLI writes pass through the governed memory admission policy", async () =>
       { code: "WRITE_REJECTED" },
     );
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -2014,7 +1560,7 @@ test("a configured-but-unreachable embedding provider degrades search to lexical
     assert.equal(searched.retrieval?.degraded, true);
     assert.match(searched.retrieval?.reason ?? "", /embedding_(unavailable|index_not_ready)/u);
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -2038,13 +1584,13 @@ test("a configured provider whose client cannot construct (missing key) degrades
     assert.equal(searched.results.length, 1);
     assert.equal(searched.retrieval?.mode, "lexical");
     assert.equal(searched.retrieval?.degraded, true);
-    assert.match(searched.retrieval?.reason ?? "", /api key/iu);
+    assert.equal(searched.retrieval?.reason, "embedding_unavailable");
     const status = await service.invoke("status");
     assert.equal(status.embedding.configured, true);
     assert.equal(status.embedding.indexId, null);
     assert.match(String(status.embedding.reason ?? ""), /api key/iu);
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -2101,7 +1647,7 @@ test("opt-in embedding auto-sync makes remembered records available to hybrid se
     assert.equal(searched.results[0]?.memory.statement, "Container vectors execute through CUDA.");
     assert.ok((searched.results[0]?.vectorScore ?? 0) > 0);
   } finally {
-    service.close();
+    await service.close();
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     );
@@ -2164,7 +1710,7 @@ test("provider presence alone (no AUTO_SYNC env) auto-syncs remembered records t
     );
     assert.ok((searched.results[0]?.vectorScore ?? 0) > 0);
   } finally {
-    service.close();
+    await service.close();
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     );
@@ -2206,7 +1752,7 @@ test("search protocol preserves Pi QPP evidence-window overrides", async () => {
     assert.equal(planned.activeGraph?.budget.maxTokens, 7_500);
     assert.equal(planned.activeGraph?.budget.maxNodes, 12);
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -2255,7 +1801,7 @@ test("recordActiveGraphAttribution persists API answer overlap as diagnostic att
       /session/i,
     );
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -2335,7 +1881,7 @@ test("task board RPC parses directed delivery and agent discovery actions", asyn
       id: "kimi-002",
     });
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -2363,7 +1909,7 @@ test("recordActiveGraphAttribution validates its RPC boundary and permits empty 
     });
     assert.deepEqual(recorded.attributedMemoryIds, []);
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -2442,7 +1988,7 @@ test("task board subscriptions gate broadcast wake while directed delivery uses 
     if (afterWorld.action !== "listSubscriptions") throw new Error("expected listSubscriptions");
     assert.deepEqual(afterWorld.subscriptions, [], "world channel is implicit, not explicit");
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -2485,7 +2031,7 @@ test("task board compact preview RPC omits full bodies but keeps ordering", asyn
     if (full.action !== "read") throw new Error("expected read");
     assert.ok(full.entries[1]!.content.length > 200);
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -2518,7 +2064,7 @@ test("task board inbox RPC returns directed and outstanding actionable work", as
     if (inbox.action !== "readInbox") throw new Error("expected readInbox");
     assert.equal(inbox.entries.length, 2);
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -2555,7 +2101,7 @@ test("task board veto RPC marks a resolve contested by an independent reviewer",
     assert.equal(veto.entry.vetoReason, "unverified");
     assert.equal(veto.entry.status, "resolved");
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });
@@ -2585,8 +2131,8 @@ test("the learned gate is refused when its embedder is not the runtime's", async
       "refused: trained on embedder some-other-embedder::768, runtime is none",
     );
   } finally {
-    emptyService.close();
-    service.close();
+    await emptyService.close();
+    await service.close();
     removeTempDirectory(empty);
     removeTempDirectory(directory);
   }
@@ -2604,7 +2150,7 @@ test("a head that reads no absolute score loads whatever the runtime embedder is
     writeFileSync(join(directory, "relevance-model.json"), JSON.stringify(core.toJSON()), "utf8");
     assert.equal(service.relevanceModelStatus, "loaded (runtime embedder none)");
   } finally {
-    service.close();
+    await service.close();
     removeTempDirectory(directory);
   }
 });

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, truncateSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, truncateSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,14 +7,138 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { NmgService } from "../../src/cli/service.ts";
+import { runCli } from "../../src/cli/main.ts";
 import { httpHandler } from "../../src/cli/http-server.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { stgStorePath } from "../../src/core/stg.ts";
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
+import { activatedLocalMemory } from "../../src/core/memory/sqlite-backend.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
+
+test("default service migrates an old SQLite file before serving memory", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-default-migration-"));
+  const databasePath = join(directory, "nmg.sqlite");
+  const legacy = new NmgStore(databasePath);
+  const { memory } = legacy.remember({
+    statement: "The signed inventory is stored in the original warehouse",
+    nodeName: "Original warehouse",
+  });
+  const retained = legacy.remember({
+    statement: "The retained inventory references the retired warehouse",
+    nodeName: "Retired warehouse",
+  }).memory;
+  legacy.setMemoryStorageState(retained.id, "dormant");
+  legacy.close();
+  const service = new NmgService({ databasePath, environment: {} });
+  try {
+    assert.ok((await service.invoke("hello")).capabilities.includes("portable-memory"));
+    assert.equal(
+      (await service.invoke("get", { memoryIds: [memory.id] })).results[0]?.memory.id,
+      memory.id,
+    );
+    assert.equal(
+      (await service.invoke("get", { memoryIds: [retained.id] })).results[0]?.memory.storageState,
+      "dormant",
+    );
+    const matches = await service.invoke("search", {
+      query: "inventory warehouse",
+      includeHistorical: true,
+    });
+    assert.deepEqual(
+      matches.results.map(({ memory }) => memory.id),
+      [memory.id],
+    );
+    assert.ok(activatedLocalMemory(databasePath));
+    const backup = readdirSync(directory).find((name) =>
+      name.startsWith("nmg.sqlite.before-unified-"),
+    );
+    assert.ok(backup);
+    const source = new DatabaseSync(join(directory, backup), { readOnly: true });
+    try {
+      assert.ok(source.prepare("SELECT id FROM memory_records WHERE id=?").get(memory.id));
+      assert.equal(activatedLocalMemory(join(directory, backup)), undefined);
+    } finally {
+      source.close();
+    }
+    const current = new DatabaseSync(databasePath);
+    try {
+      assert.throws(
+        () =>
+          current
+            .prepare("UPDATE memory_records SET statement=? WHERE id=?")
+            .run("stale writer", memory.id),
+        /unified memory engine/,
+      );
+    } finally {
+      current.close();
+    }
+  } finally {
+    await service.close();
+    removeTempDirectory(directory);
+  }
+});
+
+test("one daemon migrate command backs up and activates the main and selected projects", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-migrate-projects-"));
+  const main = join(directory, "nmg.sqlite");
+  const project = join(directory, "project");
+  const stg = stgStorePath(project);
+  const missing = join(directory, "missing");
+  try {
+    for (const path of [main, stg]) {
+      const fixture = new NmgStore(path);
+      fixture.remember({
+        statement: "Archive checkpoint stored in SQLite",
+        nodeName: "Checkpoint",
+      });
+      fixture.close();
+    }
+    const argv = [
+      "daemon",
+      "migrate",
+      "--db",
+      main,
+      "--project-dir",
+      project,
+      "--project-dir",
+      missing,
+      "--project-dir",
+      project,
+      "--json",
+    ];
+    let output = "";
+    const io = {
+      stdout: {
+        write: (text: string) => {
+          output += text;
+          return true;
+        },
+      },
+      stderr: {
+        write: (text: string) => {
+          assert.fail(text);
+        },
+      },
+    };
+    assert.equal(await runCli(argv, io), 0);
+    const receipt = JSON.parse(output);
+    assert.ok(existsSync(receipt.backupPath));
+    assert.equal(receipt.projectDatabases.length, 1);
+    assert.equal(receipt.projectDatabases[0].databasePath, stg);
+    assert.ok(existsSync(receipt.projectDatabases[0].backupPath));
+    assert.equal(activatedLocalMemory(stg), receipt.namespace);
+    assert.equal(existsSync(stgStorePath(missing)), false);
+    output = "";
+    assert.equal(await runCli(argv, io), 0);
+    assert.equal(JSON.parse(output).backupPath, undefined);
+    assert.equal(JSON.parse(output).projectDatabases[0].backupPath, undefined);
+  } finally {
+    removeTempDirectory(directory);
+  }
+});
 
 test("activated daemon uses the project file's existing namespace for scoped memory", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-project-namespace-"));

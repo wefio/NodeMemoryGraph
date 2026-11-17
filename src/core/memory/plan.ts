@@ -2,6 +2,7 @@ import type { HistoryRecord, MemoryRecord, MemoryWriteEvent, RememberResult } fr
 import { TESSERA_REF_MARKER } from "../types.ts";
 import { serializeScope } from "../scope.ts";
 import { normalizeStatement } from "../memory-normalization.ts";
+import { statementSimilarity } from "../store/search-ranking.ts";
 import type { MemoryBackend, MemoryEntity, MemoryEntityQuery, MemoryReadView } from "./backend.ts";
 import { sessionScopedEntity } from "./backend.ts";
 import {
@@ -81,6 +82,7 @@ export class MemoryPlan {
     const history = await this.history(input, `${id}_evidence`, now);
     const memory = newMemory(input, id, node.id, history.id, now);
     await this.replacePrevious(input, memory, now);
+    const supersedeCandidates = await this.possiblePredecessors(memory, now);
     await this.requireRelated(memory, sessionId, now);
     this.attachTesserae(input, memory, now);
     this.put({ kind: "node", value: node });
@@ -99,7 +101,52 @@ export class MemoryPlan {
       requestedResidence: residence,
       createdAt: now,
     });
-    return { history, node, memory };
+    return {
+      history,
+      node,
+      memory,
+      ...(supersedeCandidates.length ? { supersedeCandidates } : {}),
+    };
+  }
+
+  private async possiblePredecessors(memory: MemoryRecord, now: string) {
+    if (memory.supersedesId || memory.stateKey) return [];
+    const sessionId = memory.sessionId ?? undefined;
+    const scope = serializeScope(memory.scope);
+    const rows = await this.backend.scan(this.view, {
+      kind: "memory",
+      nodeId: memory.nodeId,
+      scope: memory.scope,
+      sessionId,
+      limit: 80,
+    });
+    return rows
+      .flatMap((row) => {
+        if (row.kind !== "memory") return [];
+        const candidate = row.value;
+        if (
+          candidate.sessionId !== memory.sessionId ||
+          candidate.storageState ||
+          serializeScope(candidate.scope) !== scope ||
+          !visibleMemory(candidate, sessionId, now)
+        )
+          return [];
+        const similarity = statementSimilarity(memory.statement, candidate.statement);
+        return similarity >= 0.3
+          ? [
+              {
+                memoryId: candidate.id,
+                nodeId: candidate.nodeId,
+                statement: candidate.statement,
+                eventTime: candidate.eventTime,
+                similarity,
+                priority: "token" as const,
+              },
+            ]
+          : [];
+      })
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, 8);
   }
 
   private attachTesserae(input: MemoryInput, memory: MemoryRecord, now: string): void {

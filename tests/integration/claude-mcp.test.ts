@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { connectDaemon, invokeDaemon } from "../../src/cli/daemon-client.ts";
+import { connectDaemon, invokeDaemon, shutdownOwnedDaemon } from "../../src/cli/daemon-client.ts";
 import type { NmgMethodResult } from "../../src/cli/protocol.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { SqliteMemoryBackend } from "../../src/core/memory/sqlite-backend.ts";
@@ -19,6 +19,7 @@ import { assertGetToolContract } from "../helpers/get-tool-contract.ts";
 import { assertRememberToolContract } from "../helpers/remember-tool-contract.ts";
 import { assertSearchToolContract } from "../helpers/search-tool-contract.ts";
 import { assertLabToolContract } from "../helpers/lab-tool-contract.ts";
+import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 // The spawned MCP server inherits this process's environment; drop any ambient
@@ -40,6 +41,7 @@ function textOf(result: Awaited<ReturnType<Client["callTool"]>>): string {
 
 test("MCP adapter permits coordination to be explicitly disabled", async () => {
   const dataDir = mkdtempSync(resolve(tmpdir(), "nmg-claude-mcp-default-"));
+  const owner = await connectDaemon(resolve(dataDir, "nmg.sqlite"));
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: ["--experimental-strip-types", serverPath],
@@ -66,7 +68,8 @@ test("MCP adapter permits coordination to be explicitly disabled", async () => {
     );
   } finally {
     await client.close().catch(() => undefined);
-    rmSync(dataDir, { recursive: true, force: true });
+    await shutdownOwnedDaemon(owner);
+    removeTempDirectory(dataDir);
   }
 });
 
@@ -324,7 +327,7 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     const daemon = await connectDaemon(resolve(dataDir, "nmg.sqlite")).catch(() => null);
     if (daemon) await invokeDaemon(daemon, "shutdown", {}).catch(() => undefined);
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-    rmSync(dataDir, { recursive: true, force: true });
+    removeTempDirectory(dataDir);
   }
 });
 
@@ -419,6 +422,6 @@ test("MCP adapter exposes shared logical-chain structure", async () => {
     const daemon = await connectDaemon(databasePath).catch(() => null);
     if (daemon) await invokeDaemon(daemon, "shutdown", {}).catch(() => undefined);
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-    rmSync(dataDir, { recursive: true, force: true });
+    removeTempDirectory(dataDir);
   }
 });

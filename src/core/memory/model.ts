@@ -113,7 +113,9 @@ export function searchableMemory(
   memory: MemoryRecord,
   options: { sessionId?: string; includeHistorical?: boolean; sourceActor?: MemoryActor },
   now: string,
+  includeRetained = false,
 ): boolean {
+  if (memory.storageState && !includeRetained) return false;
   if (options.sourceActor && memory.sourceActor !== options.sourceActor) return false;
   if (!options.includeHistorical) return visibleMemory(memory, options.sessionId, now);
   return (

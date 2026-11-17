@@ -1,6 +1,7 @@
 import type { MemoryContext, MemorySearchResult } from "../core/types.ts";
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+const MEMORY_ID =
+  /^(?:[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/iu;
 const REFERENCE_PREFIX = "ref:";
 const QUOTE_CODE_POINTS = 6;
 
@@ -58,7 +59,7 @@ function matchingIds(
     targets
       .filter(
         ({ memory }) =>
-          UUID.test(memory.id) &&
+          MEMORY_ID.test(memory.id) &&
           memory.id.replaceAll("-", "").toLowerCase().startsWith(prefix) &&
           statementQuote(memory.statement) === quote,
       )
@@ -71,7 +72,7 @@ function referenceFor(
   targets: readonly MemoryReferenceTarget[],
 ): string | undefined {
   const { memory } = result;
-  if (!UUID.test(memory.id) || memory.markers.some((marker) => marker.kind === "forget"))
+  if (!MEMORY_ID.test(memory.id) || memory.markers.some((marker) => marker.kind === "forget"))
     return undefined;
   const quote = statementQuote(memory.statement);
   if (unsafeQuote(quote)) return undefined;
@@ -110,7 +111,7 @@ export function resolveMemoryReferences(
 ): string[] {
   return memoryIds.map((value) => {
     if (!isMemoryReference(value)) return value;
-    const match = /^ref:([0-9a-fA-F]{4,32})\|(.{1,6})$/u.exec(value);
+    const match = /^ref:([0-9a-fA-F]{4,64})\|(.{1,6})$/u.exec(value);
     if (
       !match ||
       match[1]!.length % 2 !== 0 ||

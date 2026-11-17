@@ -25,4 +25,4 @@ SQLite 启用时保留记录向量及模型标识，并读取既有节点和叶�
 
 ## 后果
 
-[演练和差异对照](../../design/unified-architecture/legacy-graph-migration.zh-CN.md)覆盖跨后端的有界图和本地完整副本。待迁移的数据库继续使用旧配置，启用后的 SQLite 保留旧表供恢复使用。
+[演练和差异对照](../../design/unified-architecture/legacy-graph-migration.zh-CN.md)覆盖跨后端的有界图和本地完整副本。本地入口统一使用 MemoryEngine，首次使用旧 SQLite 时备份并迁移。迁移命令也可以一次处理主库和已知项目。SQLite 保留旧表供恢复、既有链投影和向量层级查询使用。

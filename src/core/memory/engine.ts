@@ -34,8 +34,10 @@ import type {
   MemoryContext,
   EdgePathStep,
   MemoryActor,
+  MemoryExportBundle,
   MemoryRecord,
   MemoryScope,
+  MemoryStorageState,
   MemorySearchResult,
   MemoryWriteEvent,
   NodeRelation,
@@ -156,7 +158,7 @@ export class MemoryEngine {
         scope: options.scope,
         limit: 512,
       });
-      const results = await this.project(view, entities, options);
+      const results = await this.project(view, entities, options, true);
       const order = new Map(ids.map((id, index) => [id, index]));
       results.sort((left, right) => order.get(left.memory.id)! - order.get(right.memory.id)!);
       const relations = await this.expand(view, results, {
@@ -174,6 +176,54 @@ export class MemoryEngine {
     } finally {
       await this.backend.closeRead(view);
     }
+  }
+
+  async exportMemories(
+    options: { sourceActor?: MemoryActor; includeDeleted?: boolean } = {},
+  ): Promise<MemoryExportBundle> {
+    const view = await this.backend.openRead();
+    try {
+      const plan = new MemoryPlan(this.backend, view);
+      const rows = await plan.find({ kind: "memory" });
+      const memories = rows.flatMap((row) => (row.kind === "memory" ? [row.value] : []));
+      const items = await this.exportItems(view, plan, memories, options);
+      items.sort(
+        (a, b) =>
+          a.memory.createdAt.localeCompare(b.memory.createdAt) ||
+          a.memory.id.localeCompare(b.memory.id),
+      );
+      return { format: "nmg.memory-export.v1", exportedAt: this.now(), items };
+    } finally {
+      await this.backend.closeRead(view);
+    }
+  }
+
+  private async exportItems(
+    view: MemoryReadView,
+    plan: MemoryPlan,
+    memories: readonly MemoryRecord[],
+    options: { sourceActor?: MemoryActor; includeDeleted?: boolean },
+  ): Promise<MemoryExportBundle["items"]> {
+    const selected = memories.filter(
+      (memory) =>
+        (options.includeDeleted || memory.status !== "deleted") &&
+        (!options.sourceActor || memory.sourceActor === options.sourceActor),
+    );
+    const evidence = new Map(
+      (
+        await this.histories(view, [...new Set(selected.flatMap(({ evidenceIds }) => evidenceIds))])
+      ).map((record) => [record.id, record]),
+    );
+    const nodes = new Map(
+      (await plan.find({ kind: "node" })).flatMap((row) =>
+        row.kind === "node" ? [[row.value.id, row.value] as const] : [],
+      ),
+    );
+    return selected.map((memory) => ({
+      memory,
+      node: nodes.get(memory.nodeId)!,
+      evidence: memory.evidenceIds.map((id) => evidence.get(id)!),
+    }));
   }
 
   async search(
@@ -255,9 +305,7 @@ export class MemoryEngine {
     const now = this.now();
     const visible = new Set(
       owners.flatMap((row) =>
-        row.kind === "memory" && visibleMemory(row.value, options.sessionId, now)
-          ? [row.value.id]
-          : [],
+        row.kind === "memory" && searchableMemory(row.value, options, now) ? [row.value.id] : [],
       ),
     );
     const independent = matches
@@ -466,15 +514,62 @@ export class MemoryEngine {
     );
   }
 
+  setStorageState(memoryId: string, target: MemoryStorageState, recoveryDays = 30) {
+    return this.lifecycle("storageState", { memoryId, target, recoveryDays }, async (plan) => {
+      const memory = await plan.record(memoryId);
+      if (!memory) throw new Error(`memory ${memoryId} does not exist`);
+      if (memory.residence !== "ltg")
+        throw new Error("Retention applies only to shared LTG memories");
+      if ((memory.storageState ?? "indexed") === target) return target;
+      if (memory.resolution !== "resolved" && target !== "indexed")
+        throw new Error("open memories must be resolved before archival or quarantine");
+      const now = this.now();
+      const quarantineUntil =
+        target === "quarantine"
+          ? new Date(Date.parse(now) + recoveryDays * 86_400_000).toISOString()
+          : null;
+      plan.put({
+        kind: "memory",
+        value: {
+          ...memory,
+          storageState: target === "indexed" ? undefined : target,
+          retentionChangedAt: now,
+          quarantineUntil,
+        },
+      });
+      return target;
+    });
+  }
+
+  recordUsage(ids: readonly string[], sessionId?: string): Promise<void> {
+    return this.mutate(
+      randomUUID(),
+      { action: "usage", ids, sessionId },
+      async (plan) => {
+        const now = this.now();
+        const rows = await plan.find({ kind: "memory", ids, sessionId });
+        for (const row of rows) {
+          if (row.kind !== "memory" || !visibleMemory(row.value, sessionId, now)) continue;
+          plan.put({
+            kind: "memory",
+            value: { ...row.value, accessCount: row.value.accessCount + 1, lastAccessedAt: now },
+          });
+        }
+        return { result: null, ids: [] };
+      },
+      async () => null,
+    ).then(() => undefined);
+  }
+
   proposeRelation(input: MemoryRelationProposal) {
     return this.lifecycle("relationProposal", input, (plan) =>
       proposeMemoryRelation(plan, input, this.now()),
     );
   }
 
-  private lifecycle<T>(
+  private lifecycle<T, Input extends { memoryId: string }>(
     action: string,
-    input: { memoryId: string },
+    input: Input,
     apply: (plan: MemoryPlan) => Promise<T>,
   ): Promise<T> {
     return this.mutate(
@@ -531,11 +626,12 @@ export class MemoryEngine {
     view: MemoryReadView,
     entities: MemoryEntity[],
     options: MemoryQueryOptions,
+    includeRetained = false,
   ): Promise<MemorySearchResult[]> {
     const now = this.now();
     const memories = entities.flatMap((entity) =>
       entity.kind === "memory" &&
-      searchableMemory(entity.value, options, now) &&
+      searchableMemory(entity.value, options, now, includeRetained) &&
       inEventWindow(entity.value, options) &&
       entity.value.tier <= (options.maxTier ?? 3)
         ? [entity.value]

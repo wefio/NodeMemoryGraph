@@ -7,8 +7,8 @@
 
 ## Behavior and data comparison
 
-The legacy path is `NmgService` → `NmgStore` and its write, retrieval, graph,
-and maintenance mixins. The explicit profile routes memory through
+The legacy path used `NmgService` → `NmgStore` and its write, retrieval, graph,
+and maintenance mixins. The default routes local memory through
 `MemoryEngine` → `MemoryBackend` → SQLite or LanceDB.
 
 | Responsibility | Legacy path | Unified engine and remaining difference |
@@ -55,9 +55,10 @@ On a local copy, pass `{ fullSqlite: true }` to the snapshot reader and use
 alias, audit and file-reference rows in one transaction in a fresh namespace.
 Existing legacy evidence and predecessor links keep their original IDs and
 session provenance. Retrieval still checks the session of the memory returned,
-and new links use the engine's access checks. Dormant and quarantined rows, node
-redirects, and dangling graph references still fail installation. Original
-SQLite tables, including coordination and derived indexes, stay in the copy.
+and new links use the engine's access checks. Dormant and quarantined records
+are imported with their retention state and can be requested by ID. Search
+excludes them. Dangling graph references fail installation. Original SQLite
+tables retain node redirect history, coordination, and derived indexes.
 
 On 2026-11-15, rehearsal on online backups of the owner's main SQLite and project
 STG compared 1,249 and 3 memory IDs respectively. The paths agreed on all 982
@@ -72,14 +73,25 @@ before retrying.
 
 ## Local default after activation
 
-On a stopped local daemon, `nmg daemon migrate --db FILE --json` takes the
-daemon lease and makes an online SQLite backup beside the database. It imports
-the graph, fences legacy graph writes and publishes the local namespace marker
-in one SQLite transaction. Regular daemon starts and direct local CLI calls
-automatically use the marked namespace. The main file continues to hold Task
-Board and local run data. Existing project STG files are converted atomically on
-first use in this profile. A project-scoped read against an absent STG uses the
-shared database.
+The local daemon opens the unified engine before advertising its endpoint. A new
+SQLite database initializes directly. A legacy file receives a SQLite backup
+before the engine imports its memory, fences legacy writes, and publishes the
+namespace marker in one transaction. Direct CLI memory calls use the same
+activation. Task Board and local run data live in the main file.
+
+To migrate the main file and known projects together, stop the owner and run
+the following command.
+
+```sh
+nmg daemon migrate --db FILE --project-dir PROJECT_A --project-dir PROJECT_B --json
+```
+
+Each file commits independently and reports its backup. Retrying reuses an
+activated namespace. Other existing project files migrate on first access.
+A project-scoped read against an absent file uses the shared file.
+The unified owner supports export, archival and restoration by ID. It omits
+legacy chain editing, topology transforms, retention candidates and STG cache
+synchronization.
 
 An activated project SQLite file supplies its own namespace. First activation
 inherits the main daemon's namespace when the project file has no marker.

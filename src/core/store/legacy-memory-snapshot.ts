@@ -30,10 +30,12 @@ export function readLegacyMemorySnapshot(
 
 /** Read rows on the caller's pinned SQLite transaction. */
 export function readLegacyMemoryRows(db: DatabaseSync, fullSqlite: boolean): MemoryEntity[] {
-  if (db.prepare("SELECT 1 FROM memory_records WHERE storage_state <> 'indexed' LIMIT 1").get())
-    throw new Error("Legacy snapshot contains dormant or quarantined memories");
-  if (db.prepare("SELECT 1 FROM node_redirects LIMIT 1").get())
-    throw new Error("Legacy snapshot contains node redirects");
+  if (!fullSqlite) {
+    if (db.prepare("SELECT 1 FROM memory_records WHERE storage_state <> 'indexed' LIMIT 1").get())
+      throw new Error("Legacy snapshot contains dormant or quarantined memories");
+    if (db.prepare("SELECT 1 FROM node_redirects LIMIT 1").get())
+      throw new Error("Legacy snapshot contains node redirects");
+  }
   const limit = fullSqlite ? -1 : MAX_MEMORY_COMMIT_ENTITIES + 1;
   const histories = db.prepare("SELECT * FROM history_records ORDER BY id LIMIT ?").all(limit);
   const nodes = db.prepare("SELECT * FROM memory_nodes ORDER BY id LIMIT ?").all(limit);
@@ -61,6 +63,13 @@ export function readLegacyMemoryRows(db: DatabaseSync, fullSqlite: boolean): Mem
     ...nodes.map((row): MemoryEntity => ({ kind: "node", value: mapNode(row as StoreRow) })),
     ...memories.map((row): MemoryEntity => {
       const value = mapMemoryRow(row as StoreRow);
+      if (row.storage_state === "dormant" || row.storage_state === "quarantine") {
+        value.storageState = row.storage_state;
+        value.retentionChangedAt =
+          typeof row.retention_changed_at === "string" ? row.retention_changed_at : null;
+        value.quarantineUntil =
+          typeof row.quarantine_until === "string" ? row.quarantine_until : null;
+      }
       const linked = evidence.all(value.id).map((link) => String(link.history_id));
       value.evidenceIds = [...new Set([value.evidenceId, ...linked])];
       return { kind: "memory", value };

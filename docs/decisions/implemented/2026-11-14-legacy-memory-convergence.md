@@ -42,6 +42,7 @@ indexing work, and SQLite writes vectors after that I/O returns.
 ## Consequences
 
 The opt-in [rehearsal and comparison](../../design/unified-architecture/legacy-graph-migration.md)
-cover the bounded cross-backend graph and the full local copy. Local activation
-retains the legacy profile for databases awaiting migration and preserves the
-original tables for recovery.
+cover the bounded cross-backend graph and the full local copy. All local memory
+entry points use MemoryEngine. First use backs up and migrates a legacy SQLite
+file. The migration command accepts the main file and selected projects together.
+Original tables support recovery, chain projection and vector hierarchy queries.

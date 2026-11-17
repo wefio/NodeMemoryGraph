@@ -8,6 +8,7 @@ import test from "node:test";
 import { readGraphData } from "../../src/cli/graph-data.ts";
 import { openInspectDb } from "../../src/cli/inspect-data.ts";
 import { NmgService } from "../../src/cli/service.ts";
+import { NmgStore } from "../../src/core/store.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 // In-process NmgService inherits process.env; keep recall lexical (test-env.ts).
@@ -17,22 +18,23 @@ test("graph projection reads nodes, memories, and all three edge layers", async 
   const directory = mkdtempSync(join(tmpdir(), "nmg-graph-"));
   const databasePath = join(directory, "nmg.sqlite");
   const service = new NmgService({ databasePath, environment: {} });
+  const old = new NmgStore(databasePath);
   try {
-    await service.invoke("remember", {
+    old.remember({
       statement: "The Atlas project must remain offline-first.",
       nodeName: "Atlas architecture",
       memoryType: "constraint",
       evidence: "The Atlas project must remain offline-first.",
       scope: { project: "atlas" },
     });
-    const sync = await service.invoke("remember", {
+    const sync = old.remember({
       statement: "Atlas sync runs nightly.",
       nodeName: "Atlas sync",
       memoryType: "fact",
       evidence: "Atlas sync runs nightly.",
       scope: { project: "atlas" },
     });
-    await service.invoke("remember", {
+    old.remember({
       statement: "Atlas sync runs hourly.",
       nodeName: "Atlas deploy",
       memoryType: "fact",
@@ -90,6 +92,8 @@ test("graph projection reads nodes, memories, and all three edge layers", async 
     pairSignal.run(nodeId("Atlas deploy"), nodeId("Atlas sync"), 1, 0, new Date().toISOString());
     writable.close();
 
+    old.close();
+    await service.prepareMemory();
     // Read-only projection must be safe while the writer is still open (WAL).
     const db = openInspectDb(databasePath);
     try {
@@ -135,7 +139,7 @@ test("graph projection reads nodes, memories, and all three edge layers", async 
       db.close();
     }
   } finally {
-    service.close();
+    await service.close();
     rmSync(directory, { recursive: true, force: true });
   }
 });
@@ -157,7 +161,7 @@ test("graph projection on an empty database yields an empty graph", async () => 
       db.close();
     }
   } finally {
-    service.close();
+    await service.close();
     rmSync(directory, { recursive: true, force: true });
   }
 });

@@ -1,116 +1,79 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { deriveAnswerOverlapMemoryIds, statementFingerprint } from "../core/feedback.ts";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { deriveAnswerOverlapMemoryIds, statementFingerprint } from "../core/feedback.ts";
+import type { PerfSnapshot } from "../core/perf.ts";
 
+import { MAX_BOARD_DELIVERY_ENTRIES, parseBoardNotification } from "../core/board-notifications.ts";
 import {
   configuredProvider,
   createEmbeddingClientFromEnv,
   type EmbeddingClient,
 } from "../core/embedding-provider.ts";
-import {
-  syncLeafEmbeddings,
-  syncNodeEmbeddings,
-  syncRecordEmbeddings,
-} from "../core/embedding-sync.ts";
-import {
-  createLeafSummaryProviderFromEnv,
-  drainLeafSummaries,
-} from "../integration/leaf-summarizer.ts";
-import {
-  createNodeSummaryProviderFromEnv,
-  drainNodeSummaries,
-} from "../integration/node-summarizer.ts";
-import type {
-  TesseraInput,
-  TesseraHit,
-  LeafSummaryProvider,
-  NodeSummaryProvider,
-  RememberInput,
-  RelevanceModelLike,
-} from "../core/types.ts";
-import { NmgStore } from "../core/store.ts";
-import { PortableMemoryService } from "./portable-memory.ts";
-import { RpcRejections } from "./rpc-rejections.ts";
+import { eventWindowEnd, eventWindowStart, resolveWriteEventTime } from "../core/event-time.ts";
 import type { MemoryBackendOptions } from "../core/memory/open.ts";
-import { parseBoardNotification, MAX_BOARD_DELIVERY_ENTRIES } from "../core/board-notifications.ts";
-import {
-  COORDINATION_OPERATIONS,
-  executeCoordinationState,
-  prepareCoordinationSurface,
-  coordinationSummary,
-} from "../integration/coordination-state.ts";
-import {
-  prepareSessionActiveGraphSurface,
-  prepareTaskBoardSurface,
-} from "../integration/agent-surface.ts";
-import { STATE_AG_FIELDS, stateOperation } from "../integration/state.ts";
-import {
-  captureMemoryReferenceTargets,
-  createMemoryReferences,
-  isMemoryReference,
-  type MemoryReferenceTarget,
-  MemoryReferenceError,
-  resolveMemoryReferences,
-} from "../integration/memory-reference.ts";
+import { LOCAL_MEMORY_NAMESPACE, activatedLocalMemory } from "../core/memory/sqlite-backend.ts";
+import { normalizeRecallTriggers } from "../core/recall-triggers.ts";
 import {
   SessionActiveGraphRuntime,
   type ActiveGraphProjectionPart,
   type WorkingStateBinding,
 } from "../core/session-active-graph.ts";
-import {
-  consolidateStgMemoryToLtg,
-  copyLtgSubsetToStg,
-  createStgStore,
-  mergeStgLtgContexts,
-  purgeSessionFromStg,
-  retractStgConsolidation,
-} from "../core/stg.ts";
+import { SessionRecallTrial, type SessionRecallPreparation } from "../core/session-recall.ts";
+import { hammingDistance, simhash64, simhashFromHex, simhashToHex } from "../core/simhash.ts";
+import { SqliteLocalDaemonState } from "../core/store/local-daemon-state.ts";
+import type { RelevanceModelLike, TesseraHit, TesseraInput } from "../core/types.ts";
 import {
   CLAIM_OUTCOMES,
   CLAIM_OUTCOME_SOURCES,
   EVIDENCE_ROLES,
   MEMORY_ACTORS,
-  MEMORY_NODE_KINDS,
   MEMORY_RESIDENCES,
   MEMORY_RESOLUTIONS,
-  MEMORY_STORAGE_STATES,
   MEMORY_TYPES,
   MEMORY_WRITE_SOURCES,
-  TASK_BOARD_KINDS,
   RETRIEVAL_MODES,
+  TASK_BOARD_KINDS,
+  TASK_BOARD_VERDICTS,
   TRUTH_STATUSES,
   VECTOR_GRANULARITIES,
   type ActiveGraph,
   type ActiveGraphBudget,
-  type ClaimPosterior,
-  type MemoryChain,
-  type MemoryChainEdge,
-  type MemoryChainMember,
   type MemoryContext,
-  type MemoryScope,
   type MemoryMarker,
+  type MemoryScope,
   type MemoryTier,
-  type SearchOptions,
 } from "../core/types.ts";
-import { TASK_BOARD_VERDICTS } from "../core/types.ts";
-import { assessMemoryWrite, MemoryWriteRejected } from "../core/write-policy.ts";
+import { MemoryWriteRejected } from "../core/write-policy.ts";
 import {
-  MemoryGraphReasoner,
-  type LogicExpr,
-  type MemoryNode as ReasonerMemoryNode,
-} from "../lab/memory-graph-reasoner.ts";
-import { scopesOverlap, validityIntervalsOverlap } from "../core/semantic-domain.ts";
-import { sameScope } from "../core/scope.ts";
-import {
-  DEFAULT_MODEL_FLOOR,
-  DEFAULT_RELEVANCE_FLOOR,
-  DEFAULT_RELEVANCE_MAX_CV,
-} from "../core/relevance-gate.ts";
-import { readRelevanceModel } from "../lab/relevance-model.ts";
-import { normalizeRecallTriggers } from "../core/recall-triggers.ts";
-import { SessionRecallTrial, type SessionRecallPreparation } from "../core/session-recall.ts";
-import { RecallContextPolicy } from "../integration/recall-context-policy.ts";
+  prepareSessionActiveGraphSurface,
+  prepareTaskBoardSurface,
+} from "../integration/agent-surface.ts";
+import { configuredGraphHops, configuredStgConsolidationPolicy } from "../integration/config.ts";
+import { ControllerPolicyChannel } from "../integration/controller-channel.ts";
 import type { CoordinationPort, TaskBoardPort } from "../integration/coordination-port.ts";
+import {
+  COORDINATION_OPERATIONS,
+  coordinationSummary,
+  executeCoordinationState,
+  prepareCoordinationSurface,
+} from "../integration/coordination-state.ts";
+import {
+  LAB_CAPABILITIES,
+  LabActivationAuthority,
+  type LabCapability,
+} from "../integration/lab-capabilities.ts";
+import {
+  MemoryReferenceError,
+  captureMemoryReferenceTargets,
+  createMemoryReferences,
+  isMemoryReference,
+  resolveMemoryReferences,
+  type MemoryReferenceTarget,
+} from "../integration/memory-reference.ts";
+import { portableRecallGraph } from "../integration/portable-recall.ts";
+import { ReasoningWorkspaces } from "../integration/reasoning-workspaces.ts";
+import { RecallContextPolicy } from "../integration/recall-context-policy.ts";
+import { STATE_AG_FIELDS, stateOperation } from "../integration/state.ts";
 import {
   bindRunEntry,
   cancelRun,
@@ -121,10 +84,6 @@ import {
   taskRunStatus,
   type RunPlanTaskInput,
 } from "../integration/task-coordinator.ts";
-import { requestQueryEmbeddingClient, searchMemoryContext } from "../integration/search.ts";
-import { DAEMON_AUTOMATIC_RECALL_MAX_MS, RecallBudget } from "../integration/recall-budget.ts";
-import { simhash64, simhashToHex, simhashFromHex, hammingDistance } from "../core/simhash.ts";
-import { ControllerPolicyChannel } from "../integration/controller-channel.ts";
 import {
   ContextRouterOnlineLearner,
   contextFeaturesFromMemory,
@@ -132,9 +91,12 @@ import {
   onlineRouterStatePath,
 } from "../lab/context-router-online.ts";
 import {
-  appendRecallInstance,
+  MemoryGraphReasoner,
+  type LogicExpr,
+  type MemoryNode as ReasonerMemoryNode,
+} from "../lab/memory-graph-reasoner.ts";
+import {
   appendRecallLabel,
-  boundCandidates,
   instancesSurfacing,
   readRecallInstances,
   readRecallLabels,
@@ -142,69 +104,39 @@ import {
   recallInstancesPath,
   recallLabelsPath,
 } from "../lab/recall-instance.ts";
+import { readRelevanceModel } from "../lab/relevance-model.ts";
+import { resolveNmgDataDir } from "./data-path.ts";
+import { PortableMemoryService } from "./portable-memory.ts";
 import {
-  LAB_CAPABILITIES,
-  LabActivationAuthority,
-  type LabCapability,
-} from "../integration/lab-capabilities.ts";
-import { ReasoningWorkspaces } from "../integration/reasoning-workspaces.ts";
-import {
-  configuredGraphHops,
-  configuredMaintenancePolicy,
-  configuredStgConsolidationPolicy,
-  configuredStgSyncPolicy,
-} from "../integration/config.ts";
-import { applyAdvancedFilters, parseAdvancedQuery } from "../core/store/advanced-query.ts";
-import { eventWindowEnd, eventWindowStart, resolveWriteEventTime } from "../core/event-time.ts";
-import {
+  MEMORY_RELATION_JUDGEMENTS,
   NMG_CAPABILITIES,
   NMG_METHODS,
-  NMG_RPC_CATALOG_FINGERPRINT,
-  MEMORY_RELATION_JUDGEMENTS,
   NMG_PROTOCOL_VERSION,
+  NMG_RPC_CATALOG_FINGERPRINT,
   NmgProtocolError,
-  type NmgChainAddParams,
-  type NmgChainCreateParams,
-  type NmgChainEdgeAddParams,
-  type NmgChainEdgeRemoveParams,
-  type NmgChainGetParams,
-  type NmgChainListParams,
-  type NmgChainRemoveParams,
+  type NmgDeleteMemoryParams,
   type NmgGetParams,
-  type NmgRecordActiveGraphAttributionParams,
   type NmgHelloResult,
   type NmgLabParams,
-  type NmgDeleteMemoryParams,
-  type NmgExportMemoriesParams,
   type NmgMethod,
   type NmgMethodResult,
-  type NmgMergeNodesParams,
-  type NmgMemoryMaintenanceProposalParams,
-  type NmgRememberParams,
-  type NmgRememberBatchParams,
+  type NmgRecordActiveGraphAttributionParams,
   type NmgRecordClaimOutcomesParams,
   type NmgRecordFeedbackParams,
+  type NmgRememberBatchParams,
+  type NmgRememberParams,
   type NmgResolveRememberParams,
-  type NmgRollbackNodeTransformParams,
-  type NmgRetentionCandidatesParams,
   type NmgSearchParams,
   type NmgSessionActiveGraphParams,
-  type NmgSetStorageStateParams,
-  type NmgSplitNodeParams,
   type NmgStatusResult,
-  type NmgSyncStgParams,
-  type NmgStgPurgeSessionParams,
   type NmgTaskBoardParams,
   type NmgTaskRunParams,
-  type NmgTopologyProposalParams,
 } from "./protocol.ts";
-import { resolveNmgDataDir } from "./data-path.ts";
-import { portableRecallGraph } from "../integration/portable-recall.ts";
-import { activatedLocalMemory } from "../core/memory/sqlite-backend.ts";
+import { RpcRejections } from "./rpc-rejections.ts";
 
 const SERVICE_VERSION = "0.1.0";
 type ActiveGraphStorePart = {
-  store: NmgStore;
+  store: SqliteLocalDaemonState;
   traceId: string;
   memoryIds: Set<string>;
   referenceTargets?: readonly MemoryReferenceTarget[];
@@ -220,7 +152,7 @@ export interface NmgServiceOptions {
 }
 
 export class NmgService {
-  readonly #portableMemory: PortableMemoryService | undefined;
+  readonly #portableMemory: PortableMemoryService;
   readonly #rpcRejections: RpcRejections;
   /**
    * Concurrency contract:
@@ -246,26 +178,13 @@ export class NmgService {
    *  layer). Lazily constructed on first stage/feedback; null while the online
    *  learning gate is off. State persists at <dataDir>/context-router-online.json. */
   #onlineLearner: ContextRouterOnlineLearner | null | undefined;
-  #store: NmgStore | undefined;
-  readonly #stgStores = new Map<string, NmgStore>();
+  #store: SqliteLocalDaemonState | undefined;
+
   readonly #sessionActiveGraphs = new SessionActiveGraphRuntime<ActiveGraphStorePart>();
   readonly #getReferenceUsage = { fullIds: 0, compoundRefs: 0 };
   #embeddingClient: EmbeddingClient | undefined | null;
   #embeddingError: string | null = null;
-  /** When the embedding provider last failed; search skips provider calls
-   *  until this cooldown elapses so a down/rate-limited provider cannot hang
-   *  or fail every query. Mirrors degrade-on-persistent-failure practice. */
-  #embeddingCooldownUntil = 0;
-  readonly #embeddingCooldownMs = 30_000;
-  #summaryProvider: LeafSummaryProvider | undefined | null;
-  readonly #summaryDrains = new Set<NmgStore>();
-  #nodeSummaryProvider: NodeSummaryProvider | undefined | null;
-  readonly #nodeSummaryDrains = new Set<NmgStore>();
-  readonly #embeddingDrains = new Set<NmgStore>();
-  /** Project roots whose tessera SimHash backfill pass already ran. One batched
-   *  pass per root per process: rows are stamped once, then never revisited. */
-  readonly #tesseraBackfillRoots = new Set<string>();
-  readonly #stgSyncTimes = new WeakMap<NmgStore, Map<string, number>>();
+
   #shutdownRequested = false;
   /** Set by close(). New work is refused after this, so a shutdown cannot race a fresh request. */
   #closing = false;
@@ -276,16 +195,6 @@ export class NmgService {
   #relevanceModel: RelevanceModelLike | null | undefined;
   /** Human-readable reason the learned gate is or is not active. */
   #relevanceModelNote = "unread";
-  readonly #maintenanceJobs = new Map<NmgStore, NodeJS.Immediate>();
-  readonly #maintenanceSignals = new Map<
-    NmgStore,
-    {
-      writes: number;
-      accesses: number;
-      backlogChecked: boolean;
-      localBatches: number;
-    }
-  >();
 
   constructor(options: NmgServiceOptions = {}) {
     const environment = options.environment ?? process.env;
@@ -303,21 +212,24 @@ export class NmgService {
     this.databasePath = databasePath ?? join(dataDirectory, "nmg.sqlite");
     this.#rpcRejections = new RpcRejections(this.databasePath + ".rpc-rejections.sqlite");
     const memoryBackend = options.memoryBackend ?? localMemorySelection(this.databasePath);
-    this.#portableMemory = memoryBackend
-      ? new PortableMemoryService(
-          memoryBackend.kind === "sqlite"
-            ? {
-                ...memoryBackend,
-                path: memoryBackend.path ? resolve(memoryBackend.path) : this.databasePath,
-              }
-            : memoryBackend,
-          memoryBackend.kind === "sqlite" && memoryBackend.local === true,
-          () => this.#configuredEmbeddingClient(),
-        )
-      : undefined;
+    this.#portableMemory = new PortableMemoryService(
+      memoryBackend.kind === "sqlite"
+        ? {
+            ...memoryBackend,
+            path: memoryBackend.path ? resolve(memoryBackend.path) : this.databasePath,
+          }
+        : memoryBackend,
+      memoryBackend.kind === "sqlite" && memoryBackend.local === true,
+      () => this.#configuredEmbeddingClient(),
+      () => this.#embeddingError !== null,
+    );
     this.#dataDirectory = dataDirectory;
     this.#environment = environment;
     this.#reasoningWorkspaces = new ReasoningWorkspaces(join(dataDirectory, "lab", "reasoning"));
+  }
+
+  prepareMemory(): Promise<void> {
+    return this.#portableMemory.prepare();
   }
 
   get dataDirectory(): string {
@@ -422,38 +334,6 @@ export class NmgService {
     }
   }
 
-  /** The four topology actions share one parameter parse and three mutually exclusive branches;
-   *  keeping them in the dispatch switch made that switch the largest decision point in the file. */
-  #topologyProposal(params: unknown): unknown {
-    const parsed = parseTopologyProposalParams(params);
-    if (parsed.action === "list") {
-      return {
-        action: "list",
-        proposals: this.#getStore().topologyProposals(parsed.status),
-      };
-    }
-    if (parsed.action === "assess") {
-      return {
-        action: "assess",
-        assessment: this.#getStore().assessAutomaticMergeProposal(parsed.proposalId, {
-          minimumObservations: parsed.minimumObservations,
-          minimumEstimatedGain: parsed.minimumEstimatedGain,
-          minimumEvidenceMemories: parsed.minimumEvidenceMemories,
-        }),
-      };
-    }
-    if (parsed.action === "review") {
-      return {
-        action: "review",
-        proposal: this.#getStore().reviewTopologyProposal(parsed.proposalId, parsed.decision),
-      };
-    }
-    return {
-      action: "actuate",
-      transform: this.#getStore().actuateAutomaticMergeProposal(parsed.proposalId),
-    };
-  }
-
   async invoke<M extends NmgMethod>(method: M, params?: unknown): Promise<NmgMethodResult[M]> {
     if (this.#closing)
       throw new NmgProtocolError("SHUTTING_DOWN", "the service is closing and takes no new work");
@@ -462,7 +342,7 @@ export class NmgService {
     try {
       if (PortableMemoryService.handles(method))
         return (await this.#invokeMemory(method, params)) as NmgMethodResult[M];
-      this.#portableMemory?.requireLocalMethod(method);
+      this.#portableMemory.requireLocalMethod(method);
       switch (method) {
         case "hello":
           return this.#hello() as NmgMethodResult[M];
@@ -478,67 +358,40 @@ export class NmgService {
           )) as NmgMethodResult[M];
         case "recordFeedback":
           return this.#recordFeedback(parseRecordFeedbackParams(params)) as NmgMethodResult[M];
+        case "exportMemories": {
+          const input = objectParams(params);
+          return (await this.#portableMemory.exportMemories({
+            sourceActor: optionalEnum(input, "sourceActor", MEMORY_ACTORS),
+            includeDeleted: optionalBoolean(input, "includeDeleted"),
+          })) as NmgMethodResult[M];
+        }
+        case "setStorageState": {
+          const input = objectParams(params);
+          return (await this.#portableMemory.setStorageState({
+            memoryId: requiredString(input, "memoryId"),
+            storageState: requiredEnum(input, "storageState", [
+              "indexed",
+              "dormant",
+              "quarantine",
+            ] as const),
+            recoveryDays: optionalInteger(input, "recoveryDays", 0, 3650),
+          })) as NmgMethodResult[M];
+        }
+        case "perfAggregates":
+          return this.#getStore().perfAggregates() as NmgMethodResult[M];
+        case "pruneRetrievalTraces": {
+          const input = objectParams(params);
+          return {
+            pruned: this.#getStore().pruneRetrievalTraces({
+              maxDays: optionalInteger(input, "maxDays", 1, 3650),
+              maxRows: optionalInteger(input, "maxRows", 100, 1_000_000),
+            }),
+          } as NmgMethodResult[M];
+        }
         case "recordActiveGraphAttribution":
           return (await this.#attributeRecall(
             parseRecordActiveGraphAttributionParams(params),
           )) as NmgMethodResult[M];
-        case "retentionCandidates":
-          return {
-            candidates: this.#getStore().retentionCandidates(
-              parseRetentionCandidatesParams(params),
-            ),
-          } as NmgMethodResult[M];
-        case "setStorageState": {
-          const parsed = parseSetStorageStateParams(params);
-          return {
-            memoryId: parsed.memoryId,
-            storageState: this.#getStore().setMemoryStorageState(
-              parsed.memoryId,
-              parsed.storageState,
-              parsed.recoveryDays,
-            ),
-          } as NmgMethodResult[M];
-        }
-        case "exportMemories":
-          return this.#getStore().exportMemories(
-            parseExportMemoriesParams(params),
-          ) as NmgMethodResult[M];
-        case "mergeNodes":
-          return this.#getStore().mergeNodes(parseMergeNodesParams(params)) as NmgMethodResult[M];
-        case "rollbackNodeTransform":
-          return this.#getStore().rollbackNodeTransform(
-            parseRollbackNodeTransformParams(params).transformId,
-          ) as NmgMethodResult[M];
-        case "splitNode":
-          return this.#getStore().splitNode(parseSplitNodeParams(params)) as NmgMethodResult[M];
-        case "topologyProposal":
-          return this.#topologyProposal(params) as NmgMethodResult[M];
-        case "memoryMaintenanceProposal":
-          return this.#memoryMaintenanceProposal(
-            parseMemoryMaintenanceProposalParams(params),
-          ) as NmgMethodResult[M];
-        case "syncStg": {
-          const parsed = parseSyncStgParams(params);
-          return {
-            copied: copyLtgSubsetToStg(
-              this.#getStore(),
-              this.#getStgStore(parsed.projectDir, parsed.sessionId),
-              parsed,
-            ),
-            projectDir: parsed.projectDir,
-          } as NmgMethodResult[M];
-        }
-        case "stgPurgeSession": {
-          const parsed = parseStgPurgeSessionParams(params);
-          const purged = purgeSessionFromStg(
-            this.#getStgStore(parsed.projectDir, parsed.sessionId),
-            parsed.sessionId,
-          );
-          return {
-            purged,
-            projectDir: parsed.projectDir,
-          } as NmgMethodResult[M];
-        }
         case "taskBoard": {
           const parsed = parseTaskBoardParams(params);
           return taskBoardHandlers[parsed.action](this.#getStore(), parsed) as NmgMethodResult[M];
@@ -547,20 +400,6 @@ export class NmgService {
           const parsed = parseTaskRunParams(params);
           return taskRunHandlers[parsed.action](this.#getStore(), parsed) as NmgMethodResult[M];
         }
-        case "chainCreate":
-          return this.#chainCreate(parseChainCreateParams(params)) as NmgMethodResult[M];
-        case "chainAdd":
-          return this.#chainAdd(parseChainAddParams(params)) as NmgMethodResult[M];
-        case "chainRemove":
-          return this.#chainRemove(parseChainRemoveParams(params)) as NmgMethodResult[M];
-        case "chainEdgeAdd":
-          return this.#chainEdgeAdd(parseChainEdgeAddParams(params)) as NmgMethodResult[M];
-        case "chainEdgeRemove":
-          return this.#chainEdgeRemove(parseChainEdgeRemoveParams(params)) as NmgMethodResult[M];
-        case "chainGet":
-          return this.#chainGet(parseChainGetParams(params)) as NmgMethodResult[M];
-        case "chainList":
-          return this.#chainList(parseChainListParams(params)) as NmgMethodResult[M];
         case "state":
           return this.#state(params) as NmgMethodResult[M];
         case "lab":
@@ -573,7 +412,7 @@ export class NmgService {
           this.#shutdownRequested = true;
           return { shuttingDown: true } as NmgMethodResult[M];
         default:
-          return this.#invokeLegacyDiagnostics(method, params) as NmgMethodResult[M];
+          throw new NmgProtocolError("METHOD_NOT_FOUND", "Unknown NMG method " + method);
       }
     } catch (error) {
       this.#rpcRejections.record(method, error);
@@ -585,17 +424,6 @@ export class NmgService {
 
   recordUnknownRpcMethod(): void {
     this.#rpcRejections.record("(unknown)", new NmgProtocolError("METHOD_NOT_FOUND", ""));
-  }
-
-  #invokeLegacyDiagnostics(method: NmgMethod, params: unknown): unknown {
-    switch (method) {
-      case "perfAggregates":
-        return this.#getStore().perfAggregates();
-      case "pruneRetrievalTraces":
-        return { pruned: this.#getStore().pruneRetrievalTraces(parsePerfPruneParams(params)) };
-      default:
-        throw new NmgProtocolError("METHOD_NOT_FOUND", `unknown method: ${String(method)}`);
-    }
   }
 
   /** Closes in the order the design asks for: stop taking new work, revoke the timers and signals
@@ -611,48 +439,24 @@ export class NmgService {
       );
     }
     this.#closing = true;
-    for (const job of this.#maintenanceJobs.values()) clearImmediate(job);
-    this.#maintenanceJobs.clear();
-    this.#maintenanceSignals.clear();
-    const stores = [this.#store, ...this.#stgStores.values()];
+    this.#store?.close();
     this.#store = undefined;
-    this.#stgStores.clear();
     this.#sessionActiveGraphs.clear();
-    for (const store of stores) if (store) store.close();
-    return this.#portableMemory?.close();
+    return this.#portableMemory.close();
   }
 
   async #invokeMemory(method: NmgMethod, value: unknown): Promise<unknown> {
-    if (this.#portableMemory) {
-      try {
-        return await this.#invokePortable(method, value);
-      } catch (error) {
-        if (error instanceof MemoryWriteRejected)
-          throw new NmgProtocolError("WRITE_REJECTED", error.reason);
-        throw error;
-      }
-    }
-    switch (method) {
-      case "remember":
-        return this.#remember(parseRememberParams(value));
-      case "rememberBatch":
-        return this.#rememberBatch(parseRememberBatchParams(value));
-      case "search":
-        return this.#search(parseSearchParams(value));
-      case "get":
-        return this.#get(parseGetParams(value));
-      case "deleteMemory": {
-        const parsed = parseDeleteMemoryParams(value);
-        const memory = this.#getStore().deleteMemory(parsed.memoryId);
-        return { deleted: memory !== null, memory };
-      }
-      default:
-        throw new NmgProtocolError("METHOD_NOT_FOUND", `unknown memory method: ${method}`);
+    try {
+      return await this.#invokePortable(method, value);
+    } catch (error) {
+      if (error instanceof MemoryWriteRejected)
+        throw new NmgProtocolError("WRITE_REJECTED", error.reason);
+      throw error;
     }
   }
 
   async #invokePortable(method: NmgMethod, value: unknown): Promise<unknown> {
-    const memory = this.#portableMemory!;
+    const memory = this.#portableMemory;
     const params = objectParams(value);
     const operationId = optionalString(params, "operationId");
     switch (method) {
@@ -680,16 +484,17 @@ export class NmgService {
   }
 
   #portableWriteInput(params: NmgRememberParams): NmgRememberParams {
-    if (!this.#portableMemory?.local) return params;
+    if (!this.#portableMemory.local) return params;
     return { ...params, tesserae: this.#withTesseraSimhashes(params.tesserae, params.projectDir) };
   }
 
   async #searchPortable(params: NmgSearchParams): Promise<MemoryContext> {
-    const memory = this.#portableMemory!;
+    const memory = this.#portableMemory;
     const started = performance.now();
     if (memory.local) this.#offerSearchCue(params);
     const retrieval = { ...params };
     if (memory.local) {
+      retrieval.graphHops ??= configuredGraphHops(0, this.#environment);
       delete retrieval.recallCue;
       delete retrieval.recallRevision;
       delete retrieval.recallSource;
@@ -702,24 +507,52 @@ export class NmgService {
     }
     const context = await memory.search(retrieval);
     if (!memory.local) return context;
+    const directMs = performance.now() - started;
     if (!params.autoRecall)
       context.tesserae = this.#resolveTesseraLines(context.tesserae ?? [], params.projectDir);
-    if (!params.sessionId) return context;
-    context.results = this.#recallContext.rank(
-      params.sessionId,
-      resolve(params.projectDir ?? process.cwd()),
-      params.query,
-      context.results,
+    if (params.sessionId) {
+      context.results = this.#recallContext.rank(
+        params.sessionId,
+        resolve(params.projectDir ?? process.cwd()),
+        params.query,
+        context.results,
+      );
+      if (params.autoRecall) context.recallDisplayMode = this.#recallContext.mode(params.sessionId);
+    }
+    return this.#registerPortableSearch(
+      context,
+      { ...params, graphHops: retrieval.graphHops },
+      started,
+      directMs,
     );
-    if (params.autoRecall) context.recallDisplayMode = this.#recallContext.mode(params.sessionId);
+  }
+
+  #registerPortableSearch(
+    context: MemoryContext,
+    params: NmgSearchParams,
+    started: number,
+    directMs: number,
+  ): MemoryContext {
     const projected = portableRecallGraph(context, params, performance.now() - started);
+    const taskFrame = this.#labAuthority.status(
+      "working_state",
+      params.sessionId ?? "",
+    )?.workingStateBinding;
+    if (taskFrame) projected.activeGraph.taskId = taskFrame.taskFrameId;
+    const timings =
+      params.perf === false
+        ? undefined
+        : {
+            timings: { "search.direct": directMs },
+            totalMs: performance.now() - started,
+          };
     const targets = captureMemoryReferenceTargets(projected.results);
     const activeGraph = this.#sessionActiveGraphs.registerProjection(
       projected.activeGraph,
-      this.#portableTraceParts(projected.activeGraph, targets, params.persistTrace),
+      this.#portableTraceParts(projected.activeGraph, targets, params.persistTrace, timings),
       projected.activeGraph.id,
     );
-    const result = { ...projected, activeGraph: activeGraph.graph };
+    const result = { ...projected, activeGraph: activeGraph.graph, timings };
     if (params.persistTrace !== false) this.#stageOnlineDecision(params, result);
     return params.persistTrace === false
       ? result
@@ -730,6 +563,7 @@ export class NmgService {
     graph: ActiveGraph,
     referenceTargets: readonly MemoryReferenceTarget[],
     persistTrace?: boolean,
+    timings?: PerfSnapshot,
   ): Array<ActiveGraphProjectionPart<ActiveGraphStorePart>> {
     if (persistTrace === false) return [];
     const store = this.#getStore();
@@ -747,10 +581,12 @@ export class NmgService {
         expansions: graph.expansions,
         budgetLedger: graph.budgetLedger,
         qpp: graph.qpp,
+        timings,
       },
       false,
       graph.id,
     );
+    store.recordPerfAggregates(timings);
     const memoryIds = new Set(graph.memoryIds);
     return [{ traceId, memoryIds, value: { store, traceId, memoryIds, referenceTargets } }];
   }
@@ -761,24 +597,36 @@ export class NmgService {
       ? this.#portableDisclosureTrace(params.activeGraphId, params.sessionId)
       : undefined;
     params = await this.#resolvePortableGetReferences(params);
-    const context = await this.#portableMemory!.get(params);
+    const context = await this.#portableMemory.get(params);
     const found = new Set(context.results.map((result) => result.memory.id));
-    if (trace)
+    if (trace) {
       trace.store.recordActiveGraphDisclosure(trace.id, [...found], params.sessionId, false);
-    if (this.#portableMemory!.local)
+      const graphIds = new Set(trace.memoryIds);
+      await this.#portableMemory.recordUsage(
+        [...found].filter((id) => graphIds.has(id)),
+        params,
+      );
+    }
+    if (this.#portableMemory.local)
       context.tesserae = this.#resolveTesseraLines(context.tesserae ?? [], params.projectDir);
     return { ...context, missingMemoryIds: params.memoryIds.filter((id) => !found.has(id)) };
   }
 
   #portableDisclosureTrace(id: string, sessionId?: string) {
-    if (!this.#portableMemory?.local)
+    if (!this.#portableMemory.local)
       throw new NmgProtocolError(
         "INVALID_PARAMS",
         "Portable memory does not support activeGraphId",
         "activeGraphId",
       );
     const store = this.#getStore();
-    if (store.traceOwnership(id, sessionId) === "owned") {
+    const ownership = store.traceOwnership(id, sessionId);
+    if (ownership === "foreign")
+      throw new NmgProtocolError(
+        "NOT_FOUND",
+        "Active Graph projection belongs to another session.",
+      );
+    if (ownership === "owned") {
       const trace = store.retrievalTrace(id, sessionId)!;
       return { id, store, memoryIds: trace.resultMemoryIds };
     }
@@ -795,8 +643,10 @@ export class NmgService {
         "activeGraphId",
       );
     const parts = this.#projectionParts(params.activeGraphId, params.sessionId) ?? [];
+    if (parts.length === 0)
+      throw new NmgProtocolError("NOT_FOUND", "Active Graph projection is absent or not owned.");
     const targets = parts.flatMap((part) => part.referenceTargets ?? []);
-    const current = await this.#portableMemory!.get({
+    const current = await this.#portableMemory.get({
       ...params,
       memoryIds: targets.map(({ memory }) => memory.id),
       graphHops: 0,
@@ -818,7 +668,9 @@ export class NmgService {
     if (!projection || projection.sessionId !== (sessionId?.trim() || "__anonymous__"))
       throw new NmgProtocolError(
         "NOT_FOUND",
-        "Active Graph projection is absent or belongs to another session",
+        this.#sessionActiveGraphs.projectionOwner(id)
+          ? "Active Graph projection belongs to another session."
+          : "Active Graph projection is absent or not owned.",
       );
     return projection.graph;
   }
@@ -826,7 +678,6 @@ export class NmgService {
   async #attributeRecall(
     params: NmgRecordActiveGraphAttributionParams,
   ): Promise<NmgMethodResult["recordActiveGraphAttribution"]> {
-    if (!this.#portableMemory?.local) return this.#recordActiveGraphAttribution(params);
     const graph = this.#ownedPortableGraph(params.activeGraphId, params.sessionId);
     const visible = new Set(graph.memoryIds);
     const attributedMemoryIds =
@@ -850,7 +701,7 @@ export class NmgService {
       params.memoryVersions!.map((item) => [item.memoryId, item.statementHash]),
     );
     const ids = graph.memoryIds.filter((id) => versions.has(id));
-    const context = await this.#portableMemory!.get({
+    const context = await this.#portableMemory.get({
       memoryIds: ids,
       sessionId: params.sessionId,
       projectDir: params.projectDir,
@@ -870,49 +721,22 @@ export class NmgService {
       methods: NMG_METHODS,
       catalogFingerprint: NMG_RPC_CATALOG_FINGERPRINT,
     };
-    return this.#portableMemory ? this.#portableMemory.hello(result) : result;
+    return this.#portableMemory.hello(result);
   }
 
   #status(): NmgStatusResult {
-    const rpcRejections = this.#rpcRejections.report();
-    if (this.#portableMemory)
-      return {
-        ...this.#hello(),
-        process: { pid: process.pid, node: process.version },
-        storage: this.#portableMemory.storageStatus,
-        getReferenceUsage: { ...this.#getReferenceUsage },
-        rpcRejections,
-        embedding: this.#portableEmbeddingStatus(),
-      };
-    const exists = existsSync(this.databasePath);
-    const embeddingClient = this.#configuredEmbeddingClient();
-    const provider = this.#configuredProvider();
     return {
       ...this.#hello(),
       process: { pid: process.pid, node: process.version },
+      storage: this.#portableMemory.storageStatus,
       getReferenceUsage: { ...this.#getReferenceUsage },
-      rpcRejections,
-      storage: {
-        databasePath: this.databasePath,
-        exists,
-        bytes: exists ? statSync(this.databasePath).size : 0,
-        loaded: this.#store !== undefined,
-      },
-      embedding: {
-        configured: provider !== null,
-        provider,
-        indexId: embeddingClient?.indexId ?? null,
-        health:
-          embeddingClient && this.#store
-            ? this.#store.embeddingIndexHealth(embeddingClient.indexId)
-            : null,
-        reason: this.#embeddingError,
-      },
+      rpcRejections: this.#rpcRejections.report(),
+      embedding: this.#portableEmbeddingStatus(),
     };
   }
 
   #portableEmbeddingStatus(): NmgStatusResult["embedding"] {
-    const portable = this.#portableMemory!;
+    const portable = this.#portableMemory;
     const provider = portable.local ? this.#configuredProvider() : null;
     const client = provider ? this.#configuredEmbeddingClient() : undefined;
     return {
@@ -921,41 +745,6 @@ export class NmgService {
       indexId: client?.indexId ?? null,
       health: client ? portable.embeddingHealth(client.indexId) : null,
       reason: portable.local ? this.#embeddingError : "portable_memory_lexical",
-    };
-  }
-
-  #memoryMaintenanceProposal(
-    parsed: NmgMemoryMaintenanceProposalParams,
-  ): NmgMethodResult["memoryMaintenanceProposal"] {
-    if (parsed.action === "list")
-      return {
-        action: "list",
-        proposals: this.#getStore().memoryMaintenanceProposals(parsed.status),
-      };
-    if (parsed.action === "review")
-      return {
-        action: "review",
-        proposal: this.#getStore().reviewMemoryMaintenanceProposal(
-          parsed.proposalId,
-          parsed.decision,
-          parsed.reason,
-        ),
-      };
-    return {
-      action: "propose",
-      proposal: this.#getStore().createMemoryMaintenanceProposal({
-        defectType: parsed.defectType,
-        action: parsed.maintenanceAction,
-        targetMemoryIds: parsed.targetMemoryIds,
-        evidenceMemoryIds: parsed.evidenceMemoryIds,
-        evidenceTraceIds: parsed.evidenceTraceIds,
-        proposedStatement: parsed.proposedStatement,
-        proposedScope: parsed.proposedScope,
-        policy: parsed.policy,
-        longHorizonScore: parsed.longHorizonScore,
-        evaluationKind: parsed.evaluationKind,
-        evaluationRef: parsed.evaluationRef,
-      }),
     };
   }
 
@@ -1511,197 +1300,7 @@ export class NmgService {
     this.#labAuthority.disable("working_state", params.sessionId);
     this.#labAuthority.disable("recall_gate", params.sessionId);
     this.#sessionRecall.clear(params.sessionId);
-    this.#store?.clearSessionActivation(params.sessionId);
-    for (const store of this.#stgStores.values()) store.clearSessionActivation(params.sessionId);
     return { action: "release", released };
-  }
-
-  #chainCreate(params: NmgChainCreateParams): MemoryChain {
-    const { store, ownerSessionId } = this.#chainStore(params);
-    if (
-      ownerSessionId !== undefined &&
-      params.ownerSessionId !== undefined &&
-      params.ownerSessionId !== ownerSessionId
-    ) {
-      throw new NmgProtocolError(
-        "INVALID_PARAMS",
-        "an STG chain owner must match the requesting session",
-      );
-    }
-    return store.createMemoryChain({
-      chainType: params.chainType,
-      topic: params.topic,
-      ownerSessionId: ownerSessionId ?? params.ownerSessionId,
-    });
-  }
-
-  #chainAdd(params: NmgChainAddParams): MemoryChainMember {
-    const { store, ownerSessionId } = this.#chainStore(params);
-    this.#assertChainAccess(store, params.chainId, ownerSessionId);
-    this.#assertChainMemoryAccess(store, params.memoryId, ownerSessionId);
-    return store.addMemoryToChain({
-      chainId: params.chainId,
-      memoryId: params.memoryId,
-      position: params.position,
-      note: params.note,
-    });
-  }
-
-  #chainRemove(params: NmgChainRemoveParams): { removed: boolean } {
-    const { store, ownerSessionId } = this.#chainStore(params);
-    this.#assertChainAccess(store, params.chainId, ownerSessionId);
-    return { removed: store.removeMemoryFromChain(params) };
-  }
-
-  #chainEdgeAdd(params: NmgChainEdgeAddParams): MemoryChainEdge {
-    const { store, ownerSessionId } = this.#chainStore(params);
-    this.#assertChainAccess(store, params.chainId, ownerSessionId);
-    this.#assertChainMemoryAccess(store, params.sourceMemoryId, ownerSessionId);
-    this.#assertChainMemoryAccess(store, params.targetMemoryId, ownerSessionId);
-    return store.addMemoryChainEdge(params);
-  }
-
-  #chainEdgeRemove(params: NmgChainEdgeRemoveParams): { removed: boolean } {
-    const { store, ownerSessionId } = this.#chainStore(params);
-    this.#assertChainAccess(store, params.chainId, ownerSessionId);
-    return { removed: store.removeMemoryChainEdge(params) };
-  }
-
-  #chainGet(params: NmgChainGetParams): NmgMethodResult["chainGet"] {
-    const { store, ownerSessionId } = this.#chainStore(params);
-    const result = store.getMemoryChain(params.chainId);
-    if (!result) return null;
-    this.#assertChainAccess(store, params.chainId, ownerSessionId);
-    return {
-      ...result,
-      edges: store.getMemoryChainEdges(params.chainId),
-      topologicalOrder: store.topologicalChainOrder(params.chainId),
-    };
-  }
-
-  #chainList(params: NmgChainListParams): MemoryChain[] {
-    const { store, ownerSessionId } = this.#chainStore(params);
-    if (
-      ownerSessionId !== undefined &&
-      params.ownerSessionId !== undefined &&
-      params.ownerSessionId !== ownerSessionId
-    ) {
-      throw new NmgProtocolError(
-        "INVALID_PARAMS",
-        "an STG chain owner filter must match the requesting session",
-      );
-    }
-    return store.listMemoryChains({
-      chainType: params.chainType,
-      ownerSessionId: ownerSessionId ?? params.ownerSessionId,
-    });
-  }
-
-  #chainStore(params: { projectDir?: string; sessionId?: string }): {
-    store: NmgStore;
-    ownerSessionId?: string;
-  } {
-    if (!params.projectDir) return { store: this.#getStore() };
-    const ownerSessionId = params.sessionId?.trim() || "cli";
-    return {
-      store: this.#getStgStore(params.projectDir, ownerSessionId),
-      ownerSessionId,
-    };
-  }
-
-  #assertChainAccess(store: NmgStore, chainId: string, ownerSessionId?: string): void {
-    const result = store.getMemoryChain(chainId);
-    if (!result) {
-      throw new NmgProtocolError("NOT_FOUND", `memory chain ${chainId} does not exist`);
-    }
-    if (ownerSessionId !== undefined && result.chain.ownerSessionId !== ownerSessionId) {
-      throw new NmgProtocolError("NOT_FOUND", `memory chain ${chainId} belongs to another session`);
-    }
-  }
-
-  #assertChainMemoryAccess(store: NmgStore, memoryId: string, ownerSessionId?: string): void {
-    if (!store.getMemory(memoryId, ownerSessionId)) {
-      throw new NmgProtocolError(
-        "INVALID_PARAMS",
-        `memory ${memoryId} does not exist in the chain's storage and session scope`,
-      );
-    }
-  }
-
-  #remember(params: NmgRememberParams): NmgMethodResult["remember"] {
-    const prepared = this.#prepareRemember(params);
-    const result = prepared.store.remember(prepared.input);
-    this.#signalMaintenance(prepared.store, "write");
-    return result;
-  }
-
-  #rememberBatch(params: NmgRememberBatchParams): NmgMethodResult["rememberBatch"] {
-    const prepared = params.items.map((item) => this.#prepareRemember(item));
-    const store = prepared[0]!.store;
-    if (prepared.some((item) => item.store !== store)) {
-      throw new NmgProtocolError(
-        "INVALID_PARAMS",
-        "rememberBatch items must target one physical memory store",
-      );
-    }
-    const results = store.rememberMany(prepared.map((item) => item.input));
-    this.#signalMaintenance(store, "write", false, results.length);
-    return { results };
-  }
-
-  #prepareRemember(params: NmgRememberParams): {
-    store: NmgStore;
-    input: RememberInput;
-  } {
-    const external = params.markers?.some((marker) => marker.kind === "external_source") ?? false;
-    const assessment = assessMemoryWrite({
-      statement: params.statement,
-      evidence: params.evidence,
-      evidenceSource: params.evidenceSource,
-      memoryType: params.memoryType,
-      bypass: params.unsafe,
-      expiresAt: params.expiresAt,
-    });
-    if (!assessment.allowed) {
-      this.#getStore().recordRejectedWrite({
-        policyReason: assessment.reason,
-        writeReason: params.writeReason ?? `cli_rejected_${params.memoryType ?? "fact"}`,
-        writeSource: params.writeSource ?? "agent",
-        memoryType: params.memoryType,
-        requestedResidence: params.residence,
-        sessionId: params.sessionId,
-      });
-      throw new NmgProtocolError("WRITE_REJECTED", assessment.reason);
-    }
-    const { projectDir, ...memory } = params;
-    delete memory.unsafe;
-    const store =
-      memory.residence === "stg" && projectDir
-        ? this.#getStgStore(projectDir, memory.sessionId)
-        : this.#getStore();
-    // Escape hatch audit (docs §3.6): an explicit unsafe write leaves a
-    // marker so the bypass is traceable, not a silent hole. The unsafe flag
-    // itself never reaches the store layer (policy lives at the boundary).
-    const bypassMarkers: MemoryMarker[] = params.unsafe
-      ? [{ kind: "write_bypass", attributes: { policy: "unsafe" } }]
-      : [];
-    // Best-effort SimHash drift fingerprint: computed at write time from the
-    // project file when a project root is known, so a later snippet relocation
-    // can survive a small edit or file move. Absent for project-less writes —
-    // the tessera still writes, without drift tolerance.
-    const tesserae = this.#withTesseraSimhashes(memory.tesserae, projectDir);
-    const input: RememberInput = {
-      ...memory,
-      tesserae,
-      markers: [...(memory.markers ?? []), ...bypassMarkers],
-      // LTG rows are project/session-global: never attach a session_id. STG
-      // rows keep the caller's sessionId (escape-hatch validated in the store).
-      sessionId: store === this.#getStore() ? null : memory.sessionId,
-      truthStatus: memory.truthStatus ?? (external ? "unverified" : undefined),
-      writeReason: params.writeReason ?? `cli_confirmed_${params.memoryType ?? "fact"}`,
-      writeSource: params.writeSource ?? "agent",
-    };
-    return { store, input };
   }
 
   /** Stamp each tessera with a 64-bit SimHash of its target file (16-hex), or
@@ -1725,212 +1324,13 @@ export class NmgService {
     });
   }
 
-  #signalMaintenance(store: NmgStore, kind: "write" | "access", force = false, count = 1): void {
-    const state = this.#maintenanceSignals.get(store) ?? {
-      writes: 0,
-      accesses: 0,
-      backlogChecked: false,
-      localBatches: 0,
-    };
-    if (!force) {
-      if (kind === "write") state.writes += Math.max(1, count);
-      else state.accesses += Math.max(1, count);
-    }
-    this.#maintenanceSignals.set(store, state);
-    // Every write/access tops up a bounded embedding batch immediately,
-    // independent of the maintenance thresholds below — so a low-activity
-    // store still converges toward a complete index and a new memory becomes
-    // vector-searchable within one operation cycle.
-    this.#drainEmbeddings(store);
-    const policy = configuredMaintenancePolicy(this.#environment);
-    const { writeThreshold, accessThreshold } = policy;
-    if (
-      !force &&
-      state.backlogChecked &&
-      state.writes < writeThreshold &&
-      state.accesses < accessThreshold
-    ) {
-      return;
-    }
-    if (this.#maintenanceJobs.has(store)) return;
-    const job = setImmediate(() => {
-      this.#maintenanceJobs.delete(store);
-      try {
-        const firstCheck = !state.backlogChecked;
-        state.writes = 0;
-        state.accesses = 0;
-        state.backlogChecked = true;
-        const { nodeLimit } = policy;
-        const result = store.runDueMaintenance({
-          writeThreshold,
-          accessThreshold,
-          nodeLimit,
-        });
-        if (result.consideredNodes > 0) state.localBatches += 1;
-        if (
-          firstCheck ||
-          (result.consideredNodes > 0 && state.localBatches % policy.semanticEveryBatches === 0)
-        ) {
-          store.runSemanticMaintenance({
-            expiryLimit: policy.expiryLimit,
-            pairLimit: policy.pairLimit,
-            topologyNodeLimit: policy.topologyNodeLimit,
-            autoMerge: policy.autoMergeEnabled,
-            autoMergeLimit: policy.autoMergeLimit,
-          });
-        }
-        if (result.consideredNodes >= nodeLimit) this.#signalMaintenance(store, kind, true);
-        // Blocks rebuilt above may lack (or have stale) semantic summaries;
-        // drain a bounded slice. No-op unless NMG_SUMMARY_* / NMG_JUDGE_* is set.
-        this.#drainLeafSummaries(store);
-        // Node summaries consume the node's leaf-block summaries (coarser
-        // tier), so they drain after blocks get their summaries.
-        this.#drainNodeSummaries(store);
-        this.#drainEmbeddings(store);
-      } catch {
-        // Maintenance is opportunistic. Dirty/delta counters remain durable and
-        // the next write can retry; a failed batch must not fail remember.
-      }
-    });
-    this.#maintenanceJobs.set(store, job);
-  }
-
-  #resolveRemember(params: NmgResolveRememberParams): NmgMethodResult["resolveRemember"] {
-    const stores = params.projectDir
-      ? [this.#getStgStore(params.projectDir, params.sessionId), this.#getStore()]
-      : [this.#getStore()];
-    if (params.action === "forget") {
-      const store = stores.find(
-        (candidate) => candidate.getMemory(params.memoryId, params.sessionId) !== null,
-      );
-      if (!store) {
-        throw new NmgProtocolError("INVALID_PARAMS", `memory ${params.memoryId} does not exist`);
-      }
-      return {
-        action: "forget",
-        memoryId: params.memoryId,
-        deleted: store.deleteMemory(params.memoryId) !== null,
-      };
-    }
-    if (params.action === "resolve" || params.action === "reopen") {
-      const store = stores.find(
-        (candidate) => candidate.getMemory(params.memoryId, params.sessionId) !== null,
-      );
-      if (!store) {
-        throw new NmgProtocolError("INVALID_PARAMS", `memory ${params.memoryId} does not exist`);
-      }
-      const state = store.setMemoryResolution(
-        params.memoryId,
-        params.action === "resolve" ? "resolved" : "reopened",
-        {
-          relatedMemoryIds: params.relatedMemoryIds,
-          reason: params.reason,
-        },
-      );
-      return { action: params.action, ...state };
-    }
-    const store = stores.find(
-      (candidate) => candidate.getMemory(params.newMemoryId, params.sessionId) !== null,
-    );
-    if (!store) {
-      throw new NmgProtocolError(
-        "INVALID_PARAMS",
-        `new memory ${params.newMemoryId} does not exist`,
-      );
-    }
-    if (params.action === "relate") return this.#relateRemember(params, store);
-    const newer = store.getMemory(params.newMemoryId, params.sessionId);
-    const stale = store.getMemory(params.supersededMemoryId, params.sessionId);
-    if (!newer || !stale) {
-      throw new NmgProtocolError(
-        "INVALID_PARAMS",
-        "supersession targets must exist in the same LTG or session-owned STG store",
-      );
-    }
-    if (!sameScope(newer.scope, stale.scope)) {
-      throw new NmgProtocolError(
-        "INVALID_PARAMS",
-        "supersession requires identical scope; use distinct memories for different scopes",
-      );
-    }
-    store.recordFeedback({
-      sessionId: params.sessionId,
-      supersede: {
-        newMemoryId: params.newMemoryId,
-        supersededMemoryId: params.supersededMemoryId,
-        reason: params.reason,
-      },
-    });
-    // Write-path debt settlement: any outstanding recall instance that surfaced
-    // the now-superseded memory is settled on_target (store-verifiable — that
-    // memory was the current value the write just corrected).
-    this.#settleRecallDebtOnSupersede(params.supersededMemoryId);
-    return {
-      action: "supersede",
-      newMemoryId: params.newMemoryId,
-      supersededMemoryId: params.supersededMemoryId,
-      applied:
-        store.getMemory(params.supersededMemoryId, params.sessionId)?.status === "superseded",
-    };
-  }
-
   async #resolveMemory(
     params: NmgResolveRememberParams,
   ): Promise<NmgMethodResult["resolveRemember"]> {
-    if (!this.#portableMemory) return this.#resolveRemember(params);
     const result = await this.#portableMemory.resolveRemember(params);
     if (result.action === "supersede" && result.applied)
       this.#settleRecallDebtOnSupersede(result.supersededMemoryId);
     return result;
-  }
-
-  #relateRemember(
-    params: Extract<NmgResolveRememberParams, { action: "relate" }>,
-    store: NmgStore,
-  ): NmgMethodResult["resolveRemember"] {
-    const newer = store.getMemory(params.newMemoryId, params.sessionId);
-    const related = store.getMemory(params.relatedMemoryId, params.sessionId);
-    if (!newer || !related) {
-      throw new NmgProtocolError(
-        "INVALID_PARAMS",
-        "relation targets must exist in the same LTG or session-owned STG store",
-      );
-    }
-    if (
-      ["conflict", "refines", "same_entity"].includes(params.relationJudgement) &&
-      !scopesOverlap(newer.scope, related.scope)
-    ) {
-      throw new NmgProtocolError(
-        "INVALID_PARAMS",
-        `${params.relationJudgement} requires non-conflicting scope; use distinct for different entities or retain both memories`,
-      );
-    }
-    if (params.relationJudgement === "conflict" && !validityIntervalsOverlap(newer, related)) {
-      throw new NmgProtocolError(
-        "INVALID_PARAMS",
-        "conflict requires overlapping validity; sequential values should remain temporal states or use supersede",
-      );
-    }
-    const relationType = {
-      conflict: "contradicts",
-      distinct: "distinct_from",
-      refines: "refines",
-      related: "related_to",
-      same_entity: "same_as",
-    } as const;
-    const proposal = store.proposeSemanticRelation({
-      sourceNodeId: newer.nodeId,
-      targetNodeId: related.nodeId,
-      relationType: relationType[params.relationJudgement],
-      evidenceMemoryIds: [newer.id, related.id],
-      confidence: params.confidence,
-    });
-    return {
-      action: "relate",
-      newMemoryId: newer.id,
-      relatedMemoryId: related.id,
-      proposal,
-    };
   }
 
   /** Consume one labeled auto-recall graph (RSCB context-use feedback) into the
@@ -1969,7 +1369,6 @@ export class NmgService {
   }
 
   async #claimOutcomes(params: NmgRecordClaimOutcomesParams) {
-    if (!this.#portableMemory) return this.#recordClaimOutcomes(params);
     if (params.activeGraphId) {
       const projection = this.#sessionActiveGraphs.projection(
         params.activeGraphId,
@@ -1987,201 +1386,6 @@ export class NmgService {
       params,
       configuredStgConsolidationPolicy(this.#environment),
     );
-  }
-
-  #recordClaimOutcomes(
-    params: NmgRecordClaimOutcomesParams,
-  ): NmgMethodResult["recordClaimOutcomes"] {
-    const { projectDir, ...input } = params;
-    const parts = params.activeGraphId
-      ? this.#projectionParts(params.activeGraphId, params.sessionId)
-      : undefined;
-    if (parts?.length) {
-      const events: NmgMethodResult["recordClaimOutcomes"]["events"] = [];
-      const posteriors: NmgMethodResult["recordClaimOutcomes"]["posteriors"] = [];
-      const consolidationCandidates: string[] = [];
-      const consolidatedMemories: Array<{
-        sourceMemoryId: string;
-        memoryId: string;
-      }> = [];
-      const retractedMemories: Array<{
-        sourceMemoryId: string;
-        memoryId: string;
-      }> = [];
-      const assigned = new Set<string>();
-      for (const part of parts) {
-        const votes = input.votes.filter((vote) => part.memoryIds.has(vote.memoryId));
-        if (votes.length === 0) continue;
-        votes.forEach((vote) => assigned.add(vote.memoryId));
-        const result = part.store.recordClaimOutcomes({
-          ...input,
-          activeGraphId: part.traceId,
-          votes,
-        });
-        events.push(...result.events);
-        posteriors.push(...result.posteriors);
-        this.#collectStgConsolidation(
-          part.store,
-          result.posteriors,
-          consolidationCandidates,
-          consolidatedMemories,
-          retractedMemories,
-          input.sessionId,
-        );
-      }
-      const missing = input.votes.find((vote) => !assigned.has(vote.memoryId));
-      if (missing) {
-        throw new NmgProtocolError(
-          "INVALID_PARAMS",
-          `memory ${missing.memoryId} was not exposed by active graph ${params.activeGraphId}`,
-        );
-      }
-      return {
-        events,
-        posteriors,
-        consolidationCandidates,
-        consolidatedMemories,
-        retractedMemories,
-      };
-    }
-
-    const stores = projectDir
-      ? [this.#getStgStore(projectDir, params.sessionId), this.#getStore()]
-      : [this.#getStore()];
-    const grouped = new Map<NmgStore, typeof input.votes>();
-    for (const vote of input.votes) {
-      const store = stores.find(
-        (candidate) => candidate.getMemory(vote.memoryId, params.sessionId) !== null,
-      );
-      if (!store)
-        throw new NmgProtocolError("INVALID_PARAMS", `memory ${vote.memoryId} does not exist`);
-      const bucket = grouped.get(store) ?? [];
-      bucket.push(vote);
-      grouped.set(store, bucket);
-    }
-    const events: NmgMethodResult["recordClaimOutcomes"]["events"] = [];
-    const posteriors: NmgMethodResult["recordClaimOutcomes"]["posteriors"] = [];
-    const consolidationCandidates: string[] = [];
-    const consolidatedMemories: Array<{
-      sourceMemoryId: string;
-      memoryId: string;
-    }> = [];
-    const retractedMemories: Array<{
-      sourceMemoryId: string;
-      memoryId: string;
-    }> = [];
-    for (const [store, votes] of grouped) {
-      const result = store.recordClaimOutcomes({ ...input, votes });
-      events.push(...result.events);
-      posteriors.push(...result.posteriors);
-      this.#collectStgConsolidation(
-        store,
-        result.posteriors,
-        consolidationCandidates,
-        consolidatedMemories,
-        retractedMemories,
-        input.sessionId,
-      );
-    }
-    return {
-      events,
-      posteriors,
-      consolidationCandidates,
-      consolidatedMemories,
-      retractedMemories,
-    };
-  }
-
-  #collectStgConsolidation(
-    store: NmgStore,
-    posteriors: readonly ClaimPosterior[],
-    candidates: string[],
-    consolidated: Array<{ sourceMemoryId: string; memoryId: string }>,
-    retracted: Array<{ sourceMemoryId: string; memoryId: string }>,
-    sessionId?: string,
-  ): void {
-    if (store === this.#getStore()) return;
-    const policy = configuredStgConsolidationPolicy(this.#environment);
-    const grouped = new Map<string, ClaimPosterior[]>();
-    for (const posterior of posteriors) {
-      const bucket = grouped.get(posterior.memoryId) ?? [];
-      bucket.push(posterior);
-      grouped.set(posterior.memoryId, bucket);
-    }
-    for (const [memoryId, claims] of grouped) {
-      const eligible =
-        claims.length > 0 &&
-        claims.every(
-          (claim) =>
-            claim.independentVoteCount >= policy.minimumIndependentVotes &&
-            claim.mean >= policy.minimumPosteriorMean &&
-            claim.conservativeLowerBound >= policy.minimumConservativeLowerBound,
-        );
-      if (!eligible) {
-        const retained =
-          claims.length > 0 &&
-          claims.every(
-            (claim) =>
-              claim.mean >= policy.minimumRetainedPosteriorMean &&
-              claim.conservativeLowerBound >= policy.minimumRetainedConservativeLowerBound,
-          );
-        if (policy.enabled && !retained) {
-          retracted.push(
-            ...retractStgConsolidation(this.#getStore(), memoryId).map((retractedMemoryId) => ({
-              sourceMemoryId: memoryId,
-              memoryId: retractedMemoryId,
-            })),
-          );
-        }
-        continue;
-      }
-      candidates.push(memoryId);
-      if (!policy.enabled) continue;
-      const promoted = consolidateStgMemoryToLtg(store, this.#getStore(), memoryId, sessionId);
-      if (
-        promoted.memory.markers.some(
-          (marker) =>
-            marker.kind === "consolidated_from_stg" &&
-            marker.attributes?.sourceMemoryId === memoryId,
-        )
-      ) {
-        consolidated.push({
-          sourceMemoryId: memoryId,
-          memoryId: promoted.memory.id,
-        });
-      }
-    }
-  }
-
-  /** Daemon-owned stage + consume for online context-use learning. Every search
-   *  that surfaced a disclosure graph to a consumer is stageable — automatic
-   *  pre-turn recall and the model's own explicit search alike (any recall may
-   *  be rated). Internal probes opt out via persistTrace:false. recordFeedback
-   *  then applies the RSCB reward as one observed-action update against the
-   *  exact graph the feedback names. Both host adapters (pi, dsh) just forward
-   *  — no adapter holds learner logic. */
-  async #search(params: NmgSearchParams): Promise<NmgMethodResult["search"]> {
-    this.#offerSearchCue(params);
-    const retrieval = { ...params };
-    delete retrieval.recallCue;
-    delete retrieval.recallRevision;
-    delete retrieval.recallSource;
-    const context = await this.#searchImpl(retrieval);
-    if (params.sessionId) {
-      context.results = this.#recallContext.rank(
-        params.sessionId,
-        resolve(params.projectDir ?? process.cwd()),
-        params.query,
-        context.results,
-      );
-    }
-    if (params.autoRecall)
-      context.recallDisplayMode = this.#recallContext.mode(params.sessionId ?? "");
-    if (retrieval.persistTrace !== false) {
-      this.#stageOnlineDecision(retrieval, context);
-      this.#recordRecallInstance(retrieval, context);
-    }
-    return context;
   }
 
   #offerSearchCue(params: NmgSearchParams): void {
@@ -2209,40 +1413,6 @@ export class NmgService {
       if (params.projectDir) this.#sessionRecall.snapshot(sessionId, resolve(params.projectDir));
       this.#sessionRecall.offerPrepared(sessionId, recallRevision, recallCue);
     }
-  }
-
-  /** Append one self-contained recall instance to the benchmark corpus for any
-   *  disclosure recall (auto or explicit). Offline-only capture: writes an
-   *  unlabeled instance; relevance labelling happens later against the trigger,
-   *  independent of the downstream answer. persistTrace:false internal probes
-   *  never reach here. Never breaks a recall search. */
-  #recordRecallInstance(params: NmgSearchParams, context: MemoryContext): void {
-    if (!recallInstancesEnabled(this.#environment)) return;
-    const graphId = context.activeGraph?.id;
-    if (!graphId) return; // no disclosure graph: nothing to bind the instance to
-    const trigger = [params.query, ...(params.queries ?? [])]
-      .filter((part): part is string => typeof part === "string" && part.length > 0)
-      .join(" | ");
-    if (!trigger) return;
-    appendRecallInstance(this.#dataDirectory, {
-      at: new Date().toISOString(),
-      kind: params.autoRecall ? "auto" : "explicit",
-      trigger,
-      activeGraphId: graphId,
-      sessionId: params.sessionId,
-      candidates: boundCandidates(
-        (context.results ?? []).map((result) => ({
-          memoryId: result.memory.id,
-          statement: result.memory.statement,
-          combinedScore: result.combinedScore,
-          recallReason: result.recallReason,
-          lexicalScore: result.lexicalScore,
-          vectorScore: result.vectorScore,
-          routeScore: result.routeScore,
-          memoryType: result.memory.memoryType,
-        })),
-      ),
-    });
   }
 
   /** Remember-time debt settlement: when the write path supersedes a memory,
@@ -2288,259 +1458,6 @@ export class NmgService {
     }
   }
 
-  async #searchImpl(params: NmgSearchParams): Promise<NmgMethodResult["search"]> {
-    const budget = params.autoRecall
-      ? new RecallBudget(
-          Math.min(
-            DAEMON_AUTOMATIC_RECALL_MAX_MS,
-            params.autoRecallBudgetMs ?? DAEMON_AUTOMATIC_RECALL_MAX_MS,
-          ),
-        )
-      : undefined;
-    try {
-      return await this.#searchWithinBudget(params, budget);
-    } finally {
-      budget?.close();
-    }
-  }
-
-  async #searchWithinBudget(
-    params: NmgSearchParams,
-    budget?: RecallBudget,
-  ): Promise<NmgMethodResult["search"]> {
-    const { query, queries, projectDir, sessionId, ...options } = params;
-    // Transport deadlines are not core retrieval options.
-    delete options.autoRecall;
-    delete options.autoRecallBudgetMs;
-    const searchOptions: SearchOptions = {
-      ...options,
-      sessionId,
-      graphHops: options.graphHops ?? configuredGraphHops(1, this.#environment),
-      expandChains: options.expandChains ?? true,
-      progressiveWarmDisclosure: options.progressiveWarmDisclosure ?? true,
-      // Program-side relevance gate: ON by default (deterministic; only removes
-      // candidates). No env switch — see src/core/relevance-gate.ts.
-      relevanceFloor: DEFAULT_RELEVANCE_FLOOR,
-      relevanceMaxCv: DEFAULT_RELEVANCE_MAX_CV,
-      // Model gate: opt-in by placing a validated model at
-      // <dataDir>/relevance-model.json. Best-effort — a missing/malformed model
-      // leaves the path fully deterministic.
-      relevanceModel: this.#getRelevanceModel(),
-      relevanceModelFloor: DEFAULT_MODEL_FLOOR,
-    };
-    const raws = [query, ...(queries ?? [])];
-    const embedding = requestQueryEmbeddingClient(this.#configuredEmbeddingClient());
-    // Tessera (bookmark) source: independent of projectDir — tesserae live in the
-    // shared store and are searched alongside memory. Snippet relocation to a
-    // line needs the project root (to read the current file), so the resolver
-    // is applied here, not in the store. The root also unlocks the one-time
-    // legacy-fingerprint backfill.
-    this.#backfillTesseraSimhashes(projectDir);
-    const tesseraHits = this.#resolveTesseraLines(
-      this.#searchTesseraSource(query, options.limit ?? 8),
-      projectDir,
-    );
-    const withTesserae = <T extends MemoryContext>(context: T): T => {
-      if (tesseraHits.length > 0) context.tesserae = tesseraHits;
-      return context;
-    };
-    const runOne = async (store: NmgStore, raw: string): Promise<MemoryContext> => {
-      const { semantic, filters } = parseAdvancedQuery(raw);
-      // An event-time window belongs in candidate generation, not in a post-filter
-      // over the top-k: a selective window that only filtered afterwards let
-      // out-of-window memories occupy the slots and returned nothing.
-      const windowed: SearchOptions = {
-        ...searchOptions,
-        ...(filters.eventTimeFrom ? { eventTimeFrom: filters.eventTimeFrom } : {}),
-        ...(filters.eventTimeTo ? { eventTimeTo: filters.eventTimeTo } : {}),
-      };
-      const narrowed = (context: MemoryContext): MemoryContext => {
-        context.results = applyAdvancedFilters(context.results, filters);
-        return context;
-      };
-      const ctx = await searchMemoryContext(
-        store,
-        embedding,
-        semantic,
-        windowed,
-        this.#embeddingDegradedReason(),
-        budget,
-      );
-      // A window inferred from the query text is a hint, not a constraint: when
-      // it leaves nothing (most memories carry no event_time), retry unwindowed
-      // rather than answer "no memory" to a question that does have one.
-      if (ctx.results.length === 0 && filters.eventTimeSource === "natural") {
-        const unwindowed = { ...filters };
-        delete unwindowed.eventTimeFrom;
-        delete unwindowed.eventTimeTo;
-        delete unwindowed.eventTimeSource;
-        const widened = await searchMemoryContext(
-          store,
-          embedding,
-          semantic,
-          { ...searchOptions, interpretTemporalQuery: false },
-          this.#embeddingDegradedReason(),
-          budget,
-        );
-        if (widened.results.length > 0) {
-          widened.results = applyAdvancedFilters(widened.results, unwindowed);
-          return widened;
-        }
-      }
-      return narrowed(ctx);
-    };
-    const searchAcross = async (store: NmgStore, raw: string) => {
-      this.#syncStgWorkingSet(store, options.scope);
-      const local = await runOne(store, raw);
-      if (local.results.length > 0 && local.activeGraph?.qpp?.trigger === false) {
-        return withTesserae(
-          this.#registerSearchProjection(local, activeGraphPartsFor(store, local)),
-        );
-      }
-      const sharedStore = this.#getStore();
-      const shared = await runOne(sharedStore, raw);
-      if (local.results.length === 0) {
-        return withTesserae(
-          this.#registerSearchProjection(shared, activeGraphPartsFor(sharedStore, shared)),
-        );
-      }
-      const merged = mergeStgLtgContexts(local, shared);
-      return withTesserae(
-        this.#registerSearchProjection(
-          merged,
-          [
-            local.activeGraph
-              ? {
-                  store,
-                  traceId: local.activeGraph.id,
-                  memoryIds: new Set(local.activeGraph.memoryIds),
-                }
-              : undefined,
-            shared.activeGraph
-              ? {
-                  store: this.#getStore(),
-                  traceId: shared.activeGraph.id,
-                  memoryIds: new Set(shared.activeGraph.memoryIds),
-                }
-              : undefined,
-          ].filter(isActiveGraphStorePart),
-        ),
-      );
-    };
-
-    if (raws.length === 1) {
-      if (!projectDir) {
-        const store = this.#getStore();
-        const context = await runOne(store, raws[0]!);
-        return withTesserae(
-          this.#registerSearchProjection(context, activeGraphPartsFor(store, context)),
-        );
-      }
-      return searchAcross(this.#getStgStore(projectDir, sessionId), raws[0]!);
-    }
-
-    // Multi-query fusion: primary keeps rank, extra clauses append unique
-    // hits (their own order), then the hard limit is applied once.
-    const sharedStore = this.#getStore();
-    const primary = await runOne(sharedStore, raws[0]!);
-    const parts = activeGraphPartsFor(sharedStore, primary);
-    const seen = new Set(primary.results.map((result) => result.memory.id));
-    for (let i = 1; i < raws.length; i += 1) {
-      const extra = await runOne(this.#getStore(), raws[i]!);
-      parts.push(...activeGraphPartsFor(sharedStore, extra));
-      for (const result of extra.results) {
-        if (seen.has(result.memory.id)) continue;
-        seen.add(result.memory.id);
-        primary.results.push(result);
-      }
-    }
-    if (searchOptions.limit) primary.results = primary.results.slice(0, searchOptions.limit);
-    return withTesserae(this.#registerSearchProjection(primary, parts));
-  }
-
-  #syncStgWorkingSet(store: NmgStore, scope: MemoryScope | undefined): void {
-    const policy = configuredStgSyncPolicy(this.#environment);
-    if (!policy.enabled || !scope || Object.keys(scope).length === 0) return;
-    const scopeKey = JSON.stringify(
-      Object.entries(scope).sort(([left], [right]) => left.localeCompare(right)),
-    );
-    const syncTimes = this.#stgSyncTimes.get(store) ?? new Map<string, number>();
-    const now = Date.now();
-    if (now - (syncTimes.get(scopeKey) ?? 0) < policy.minimumIntervalMs) return;
-    // Mark the attempt before copying so repeated searches do not hot-loop on a
-    // malformed or empty scope. This cache is advisory and resets with daemon restart.
-    syncTimes.set(scopeKey, now);
-    this.#stgSyncTimes.set(store, syncTimes);
-    try {
-      copyLtgSubsetToStg(this.#getStore(), store, {
-        scope,
-        limit: policy.limit,
-      });
-    } catch {
-      // Read-through caching is optional. LTG fallback remains authoritative.
-    }
-  }
-
-  /** Search the tessera (bookmark) source across stores. Tessera rows are in the
-   *  store (independent of any project index), so this does not need a
-   *  projectDir; snippet relocation to a line is applied when a project root
-   *  is available at call time. */
-  #searchTesseraSource(query: string, limit: number): TesseraHit[] {
-    const tesseraLimit = Math.max(1, Math.min(limit, 10));
-    const rows = this.#getStore().searchTesserae(query, tesseraLimit);
-    return rows.map((row) => ({
-      id: row.id,
-      path: row.path,
-      label: row.label,
-      kind: row.kind,
-      memoryId: row.memoryId,
-      snippet: row.snippet,
-      fileSimhash: row.fileSimhash,
-    }));
-  }
-
-  /** One batched SimHash backfill pass per project root: stamp the drift
-   *  fingerprint onto tesserae written before it existed (or whose file was
-   *  unreadable at write time). Runs on searches that know the project root,
-   *  so legacy bookmarks converge to drift tolerance without a manual
-   *  migration; update-at-most-once in the store means a re-run can never
-   *  overwrite a stamped fingerprint. Per-row failures (file gone, transient
-   *  writer contention) skip that row only; the root is marked done once a
-   *  pass has nothing left to stamp, so an interrupted pass is retried by a
-   *  later search instead of being lost for the process lifetime. */
-  #backfillTesseraSimhashes(projectDir: string | undefined): void {
-    if (!projectDir) return;
-    const root = resolve(projectDir);
-    if (this.#tesseraBackfillRoots.has(root)) return;
-    try {
-      const store = this.#getStore();
-      const missing = store.tesseraeMissingSimhash();
-      let unstamped = 0;
-      for (const row of missing) {
-        try {
-          const content = readFileSafe(resolve(root, row.path));
-          if (content === null) {
-            unstamped += 1;
-            continue;
-          }
-          if (!store.updateTesseraSimhash(row.id, simhashToHex(simhash64(content)))) {
-            unstamped += 1;
-          }
-        } catch {
-          unstamped += 1; // file vanished mid-pass, or a transient writer conflict
-        }
-      }
-      // Done only when this pass had nothing stampable left (all rows already
-      // stamped, or every remaining row is unreadable). A pass cut short by
-      // contention stays pending and retries on the next search.
-      if (missing.length === 0 || missing.length === unstamped) {
-        this.#tesseraBackfillRoots.add(root);
-      }
-    } catch {
-      // backfill is pure drift-tolerance maintenance, never a search failure
-    }
-  }
-
   /** Resolve tessera snippets to current line numbers against a project root.
    *  Best-effort: file missing/unreadable or snippet absent marks stale. */
   #resolveTesseraLines(tesserae: TesseraHit[], projectRoot?: string): TesseraHit[] {
@@ -2560,7 +1477,12 @@ export class NmgService {
       if (pathLines) {
         // Stage 1 — exact relocation against the stored path.
         const found = pathLines.findIndex((line) => line.includes(target));
-        if (found !== -1) return { ...tessera, line: found + 1 };
+        if (found !== -1)
+          return {
+            ...tessera,
+            line: found + 1,
+            fileSimhash: tessera.fileSimhash ?? simhashToHex(simhash64(pathLines.join("\n"))),
+          };
       }
       // Stage 2 — SimHash drift fallback. The stored path no longer relocates
       // (edited or moved). Compare the stored file fingerprint against current
@@ -2628,141 +1550,6 @@ export class NmgService {
     }
   }
 
-  #get(params: NmgGetParams): NmgMethodResult["get"] {
-    this.#countGetReferences(params.memoryIds);
-    const sharedStore = this.#getStore();
-    const localStore = params.projectDir
-      ? this.#getStgStore(params.projectDir, params.sessionId)
-      : undefined;
-    params = this.#resolveGetReferences(
-      params,
-      [localStore, sharedStore].filter((store): store is NmgStore => store !== undefined),
-    );
-    const shared = sharedStore.getContext(params.memoryIds, params.graphHops ?? 0);
-    const local = localStore
-      ? localStore.getContext(params.memoryIds, params.graphHops ?? 0, params.sessionId)
-      : undefined;
-    const context = local ? mergeStgLtgContexts(local, shared) : shared;
-    const found = new Set(context.results.map((result) => result.memory.id));
-    if (params.activeGraphId) {
-      const activeGraphId = params.activeGraphId;
-      const parts = this.#projectionParts(activeGraphId, params.sessionId);
-      if (parts) {
-        for (const part of parts) {
-          const disclosedMemoryIds = [...found].filter((id) => part.memoryIds.has(id));
-          part.store.recordActiveGraphDisclosure(
-            part.traceId,
-            disclosedMemoryIds,
-            params.sessionId,
-          );
-          if (disclosedMemoryIds.length > 0) {
-            this.#signalMaintenance(part.store, "access", false, disclosedMemoryIds.length);
-          }
-        }
-        return {
-          ...context,
-          missingMemoryIds: params.memoryIds.filter((id) => !found.has(id)),
-        };
-      }
-      const projectionOwner = this.#sessionActiveGraphs.projectionOwner(activeGraphId);
-      if (projectionOwner && projectionOwner !== (params.sessionId?.trim() || "__anonymous__")) {
-        throw new NmgProtocolError(
-          "NOT_FOUND",
-          `active graph ${activeGraphId} belongs to another session`,
-        );
-      }
-      const stores = [localStore, sharedStore].filter(
-        (store): store is NmgStore => store !== undefined,
-      );
-      const traceStore = stores.find(
-        (store) => store.traceOwnership(activeGraphId, params.sessionId) === "owned",
-      );
-      if (!traceStore) {
-        const exists = stores.some(
-          (store) => store.traceOwnership(activeGraphId, params.sessionId) !== "absent",
-        );
-        throw new NmgProtocolError(
-          "NOT_FOUND",
-          exists
-            ? `active graph ${activeGraphId} belongs to another session`
-            : `active graph ${activeGraphId} does not exist`,
-        );
-      }
-      traceStore.recordActiveGraphDisclosure(activeGraphId, [...found], params.sessionId);
-      if (found.size > 0) this.#signalMaintenance(traceStore, "access", false, found.size);
-    }
-    return {
-      ...context,
-      missingMemoryIds: params.memoryIds.filter((id) => !found.has(id)),
-    };
-  }
-
-  #registerSearchProjection(context: MemoryContext, parts: ActiveGraphStorePart[]): MemoryContext {
-    if (!context.activeGraph) return context;
-    const binding = this.#labAuthority.status(
-      "working_state",
-      context.activeGraph.sessionId ?? "",
-    )?.workingStateBinding;
-    const graph = {
-      ...context.activeGraph,
-      taskId: binding?.taskFrameId ?? context.activeGraph.taskId,
-      memoryIds: context.results.map((result) => result.memory.id),
-      nodeIds: [...new Set(context.results.map((result) => result.node.id))],
-    };
-    const targets = captureMemoryReferenceTargets(
-      referenceTargets(parts, this.#getStore(), graph.sessionId ?? undefined),
-    );
-    const projection = this.#sessionActiveGraphs.registerProjection(
-      graph,
-      parts.map((part): ActiveGraphProjectionPart<ActiveGraphStorePart> => ({
-        traceId: part.traceId,
-        memoryIds: part.memoryIds,
-        value: Object.freeze({
-          ...part,
-          referenceTargets: Object.freeze(
-            targets.filter((target) => part.memoryIds.has(target.memory.id)),
-          ),
-        }),
-      })),
-    );
-    const projected = { ...context, activeGraph: projection.graph };
-    const memoryReferences = createMemoryReferences(projected, targets);
-    return Object.keys(memoryReferences).length > 0
-      ? { ...projected, memoryReferences }
-      : projected;
-  }
-
-  #resolveGetReferences(params: NmgGetParams, stores: NmgStore[]): NmgGetParams {
-    if (!params.memoryIds.some(isMemoryReference)) return params;
-    if (!params.activeGraphId)
-      throw new NmgProtocolError(
-        "INVALID_PARAMS",
-        "Memory references require their activeGraphId.",
-      );
-    const graphId = params.activeGraphId;
-    const owner = this.#sessionActiveGraphs.projectionOwner(graphId);
-    if (owner && owner !== (params.sessionId?.trim() || "__anonymous__"))
-      throw new NmgProtocolError("NOT_FOUND", "Memory reference graph is absent or not owned.");
-    const parts = this.#projectionParts(graphId, params.sessionId) ?? [];
-    const readableParts = parts.filter((part) => stores.includes(part.store));
-    if (readableParts.length === 0)
-      throw new NmgProtocolError("NOT_FOUND", "Memory reference graph is absent or not owned.");
-    try {
-      return {
-        ...params,
-        memoryIds: resolveMemoryReferences(
-          params.memoryIds,
-          readableParts.flatMap((part) => part.referenceTargets ?? []),
-          referenceTargets(readableParts, this.#getStore(), params.sessionId),
-        ),
-      };
-    } catch (error) {
-      if (error instanceof MemoryReferenceError)
-        throw new NmgProtocolError("INVALID_PARAMS", error.message);
-      throw error;
-    }
-  }
-
   #projectionParts(activeGraphId: string, sessionId?: string): ActiveGraphStorePart[] | undefined {
     const projection = this.#sessionActiveGraphs.projection(activeGraphId, sessionId);
     if (!projection) return undefined;
@@ -2774,129 +1561,8 @@ export class NmgService {
     }));
   }
 
-  #recordActiveGraphAttribution(
-    params: NmgRecordActiveGraphAttributionParams,
-  ): NmgMethodResult["recordActiveGraphAttribution"] {
-    if (params.answerText !== undefined) {
-      const attributedMemoryIds = this.#deriveVersionedAnswerAttribution(params);
-      return this.#recordActiveGraphAttribution({
-        activeGraphId: params.activeGraphId,
-        attributedMemoryIds,
-        sessionId: params.sessionId,
-        projectDir: params.projectDir,
-      });
-    }
-    // Agent-end answer-overlap attribution. This is diagnostic telemetry,
-    // not QPP supervision or proof of causal model reliance.
-    const sharedStore = this.#getStore();
-    const localStore = params.projectDir
-      ? this.#getStgStore(params.projectDir, params.sessionId)
-      : undefined;
-    // isTraceOwned never throws on a foreign trace (vs retrievalTrace which
-    // does), so a foreign-session trace in the STG cannot abort the search
-    // for the real owner in the LTG. Record on EVERY owning store, not just
-    // the first match: in a merged STG+LTG retrieval the same activeGraphId
-    // can carry a trace in both stores, and the LTG (authoritative) side must
-    // not lose its diagnostic trace.
-    const projectionParts = this.#projectionParts(params.activeGraphId, params.sessionId);
-    if (projectionParts?.length) {
-      const attributed = new Set(params.attributedMemoryIds);
-      for (const part of projectionParts) {
-        part.store.recordActiveGraphAttribution(
-          part.traceId,
-          {
-            method: "answer_overlap",
-            attributedMemoryIds: [...attributed].filter((id) => part.memoryIds.has(id)),
-          },
-          params.sessionId,
-        );
-      }
-      return {
-        activeGraphId: params.activeGraphId,
-        attributedMemoryIds: params.attributedMemoryIds,
-      };
-    }
-    const projectionOwner = this.#sessionActiveGraphs.projectionOwner(params.activeGraphId);
-    if (projectionOwner && projectionOwner !== (params.sessionId?.trim() || "__anonymous__")) {
-      throw new NmgProtocolError(
-        "NOT_FOUND",
-        `active graph ${params.activeGraphId} belongs to another session`,
-      );
-    }
-    const stores = localStore ? [localStore, sharedStore] : [sharedStore];
-    const owned = stores.filter(
-      (store) => store.traceOwnership(params.activeGraphId, params.sessionId) === "owned",
-    );
-    if (owned.length === 0) {
-      const exists = stores.some(
-        (store) => store.traceOwnership(params.activeGraphId, params.sessionId) !== "absent",
-      );
-      throw new NmgProtocolError(
-        "NOT_FOUND",
-        exists
-          ? `active graph ${params.activeGraphId} belongs to another session`
-          : `active graph ${params.activeGraphId} does not exist`,
-      );
-    }
-    for (const store of owned) {
-      store.recordActiveGraphAttribution(
-        params.activeGraphId,
-        {
-          method: "answer_overlap",
-          attributedMemoryIds: params.attributedMemoryIds,
-        },
-        params.sessionId,
-      );
-    }
-    return {
-      activeGraphId: params.activeGraphId,
-      attributedMemoryIds: params.attributedMemoryIds,
-    };
-  }
-
-  #deriveVersionedAnswerAttribution(params: NmgRecordActiveGraphAttributionParams): string[] {
-    const parts = this.#projectionParts(params.activeGraphId, params.sessionId);
-    if (!params.sessionId || !parts?.length)
-      throw new NmgProtocolError(
-        "NOT_FOUND",
-        "Owned live projection is required for answer attribution",
-      );
-    const versions = new Map(
-      params.memoryVersions!.map((item) => [item.memoryId, item.statementHash]),
-    );
-    const attributed = new Set<string>();
-    for (const part of parts) {
-      const query = part.store.retrievalTrace(part.traceId, params.sessionId)?.query;
-      const candidates = [...part.memoryIds].flatMap((id) => {
-        const memory = part.store.getMemory(id, params.sessionId);
-        return memory && versions.get(id) === statementFingerprint(memory.statement)
-          ? [{ memory }]
-          : [];
-      });
-      for (const id of deriveAnswerOverlapMemoryIds(params.answerText!, candidates, query))
-        attributed.add(id);
-    }
-    return [...attributed];
-  }
-
-  #getStore(): NmgStore {
-    return (this.#store ??= new NmgStore(this.databasePath));
-  }
-
-  #getStgStore(projectDir: string, _sessionId = "cli"): NmgStore {
-    // STG v2 shared store: one NmgStore instance per project file
-    // (<project>/.nmg/stg.sqlite). Session isolation is row-level via
-    // memory_records.session_id (docs/stg-shared-store-v2 §3), so the
-    // sessionId parameter no longer selects a store. Call sites keep passing
-    // it for remember/search filtering — it is consumed by the store methods,
-    // not the file path.
-    const resolved = resolve(projectDir);
-    let store = this.#stgStores.get(resolved);
-    if (!store) {
-      store = createStgStore(resolved, undefined, _sessionId);
-      this.#stgStores.set(resolved, store);
-    }
-    return store;
+  #getStore(): SqliteLocalDaemonState {
+    return (this.#store ??= new SqliteLocalDaemonState(this.databasePath));
   }
 
   #configuredEmbeddingClient(): EmbeddingClient | undefined {
@@ -2918,111 +1584,11 @@ export class NmgService {
       return this.#environment.NMG_EMBED_PROVIDER?.trim() || null;
     }
   }
-
-  /** Incrementally fills record, leaf-summary and node-summary indexes after
-   * writes. Disabled by default so embedding traffic remains an explicit
-   * deployment choice. Summary vectors may become pending after this pass;
-   * their timestamps make the next bounded pass refresh them safely. */
-  /** Bounded per-operation embedding drain: tops up at most one batch per
-   *  target (records → leaves → nodes) so a remember/search always converges
-   *  toward a complete external index without hammering a rate-limited
-   *  provider. Provider presence (+key) implies auto-sync; the old
-   *  NMG_EMBED_AUTO_SYNC env is no longer required to enable it. Concurrent
-   *  drains per store are serialized; a 429/transient failure lands on
-   *  #embeddingError and the SQLite missing-vector queue keeps the rest for
-   *  the next operation. */
-  #drainEmbeddings(store: NmgStore): void {
-    if (this.#embeddingDrains.has(store)) return;
-    const client = this.#configuredEmbeddingClient();
-    if (!client) return;
-    this.#embeddingDrains.add(store);
-    const bounded = { maxBatches: 1 };
-    void syncRecordEmbeddings(store, client, 64, bounded)
-      .then(() => syncLeafEmbeddings(store, client, 64, bounded))
-      .then(() => syncNodeEmbeddings(store, client, 64, bounded))
-      .then(() => {
-        // Full drain success clears any prior cooldown.
-        this.#embeddingCooldownUntil = 0;
-        this.#embeddingError = null;
-      })
-      .catch((error) => {
-        this.#embeddingError = error instanceof Error ? error.message : String(error);
-        // Provider failure starts a cooldown so search stops attempting
-        // provider calls until it elapses; the bounded drain keeps retrying
-        // on later operations and lifts the cooldown on success.
-        this.#embeddingCooldownUntil = Date.now() + this.#embeddingCooldownMs;
-      })
-      .finally(() => this.#embeddingDrains.delete(store));
-  }
-
-  /** Reason to report when the embedding provider is degraded, or undefined
-   *  when provider calls may proceed (or no provider was ever configured —
-   *  plain lexical is then the normal mode, not a degradation). Two failure
-   *  shapes are covered: a construction failure (provider configured but
-   *  unusable — e.g. a missing API key, no client object exists) is a
-   *  persistent state with no cooldown, so it must be reported directly or
-   *  every search would silently claim a healthy lexical mode; a runtime
-   *  provider failure (429, network) arms the cooldown and is reported until
-   *  it elapses. */
-  #embeddingDegradedReason(): string | undefined {
-    if (this.#embeddingClient === null && this.#configuredProvider() !== null) {
-      return this.#embeddingError ?? "embedding provider configured but unavailable (missing key?)";
-    }
-    if (this.#embeddingCooldownUntil <= Date.now()) return undefined;
-    return this.#embeddingError ?? "embedding provider unavailable (cooling down)";
-  }
-
-  #configuredSummaryProvider(): LeafSummaryProvider | undefined {
-    if (this.#summaryProvider !== undefined) return this.#summaryProvider ?? undefined;
-    try {
-      this.#summaryProvider = createLeafSummaryProviderFromEnv(this.#environment) ?? null;
-    } catch {
-      // Summaries are opportunistic: a misconfigured endpoint must not break
-      // the daemon; the store simply keeps the structural fallback text.
-      this.#summaryProvider = null;
-    }
-    return this.#summaryProvider ?? undefined;
-  }
-
-  /** Post-maintenance, remember-triggered leaf summary drain: bounded per
-   *  pass and serialized per store. The store side is sync and LLM-free; the
-   *  async LLM calls live here, outside the maintenance transaction. */
-  #drainLeafSummaries(store: NmgStore): void {
-    const provider = this.#configuredSummaryProvider();
-    if (!provider || this.#summaryDrains.has(store)) return;
-    this.#summaryDrains.add(store);
-    void drainLeafSummaries(store, provider, { batch: 16, maxCalls: 16 })
-      .catch(() => undefined)
-      .finally(() => this.#summaryDrains.delete(store));
-  }
-
-  #configuredNodeSummaryProvider(): NodeSummaryProvider | undefined {
-    if (this.#nodeSummaryProvider !== undefined) return this.#nodeSummaryProvider ?? undefined;
-    try {
-      this.#nodeSummaryProvider = createNodeSummaryProviderFromEnv(this.#environment) ?? null;
-    } catch {
-      // Summaries are opportunistic: a misconfigured endpoint must not break
-      // the daemon; the store simply keeps the structural fallback text.
-      this.#nodeSummaryProvider = null;
-    }
-    return this.#nodeSummaryProvider ?? undefined;
-  }
-
-  /** Post-maintenance node summary drain: coarser tier above leaf blocks, also
-   *  bounded per pass and serialized per store. Same env as leaf summaries. */
-  #drainNodeSummaries(store: NmgStore): void {
-    const provider = this.#configuredNodeSummaryProvider();
-    if (!provider || this.#nodeSummaryDrains.has(store)) return;
-    this.#nodeSummaryDrains.add(store);
-    void drainNodeSummaries(store, provider, { batch: 8, maxCalls: 8 })
-      .catch(() => undefined)
-      .finally(() => this.#nodeSummaryDrains.delete(store));
-  }
 }
 
-function localMemorySelection(path: string): NmgServiceOptions["memoryBackend"] {
-  const namespace = activatedLocalMemory(path);
-  return namespace ? { kind: "sqlite", namespace, local: true } : undefined;
+function localMemorySelection(path: string): NonNullable<NmgServiceOptions["memoryBackend"]> {
+  const namespace = activatedLocalMemory(path) ?? LOCAL_MEMORY_NAMESPACE;
+  return { kind: "sqlite", namespace, local: true };
 }
 
 function parseRememberParams(value: unknown): NmgRememberParams {
@@ -3203,14 +1769,6 @@ function readFileSafe(absPath: string): string | null {
  *  snippet relocation. */
 function readLinesSafe(absPath: string): string[] | null {
   return readFileSafe(absPath)?.split(/\r?\n/) ?? null;
-}
-
-function parseExportMemoriesParams(value: unknown): NmgExportMemoriesParams {
-  const params = objectParams(value);
-  return {
-    sourceActor: optionalEnum(params, "sourceActor", MEMORY_ACTORS),
-    includeDeleted: optionalBoolean(params, "includeDeleted"),
-  };
 }
 
 function parseResolveRememberParams(value: unknown): NmgResolveRememberParams {
@@ -3395,17 +1953,6 @@ function parseSearchParams(value: unknown): NmgSearchParams {
   };
 }
 
-function parsePerfPruneParams(value: unknown): {
-  maxDays?: number;
-  maxRows?: number;
-} {
-  const params = objectParams(value);
-  return {
-    maxDays: optionalInteger(params, "maxDays", 1, 3650),
-    maxRows: optionalInteger(params, "maxRows", 100, 1_000_000),
-  };
-}
-
 function parseGetParams(value: unknown): NmgGetParams {
   const params = objectParams(value);
   const ids = params.memoryIds;
@@ -3557,93 +2104,6 @@ function parseSessionActiveGraphParams(value: unknown): NmgSessionActiveGraphPar
   };
 }
 
-function parseChainCreateParams(value: unknown): NmgChainCreateParams {
-  const params = objectParams(value);
-  const chainType = params.chainType;
-  if (chainType !== "temporal" && chainType !== "logical") {
-    throw new NmgProtocolError("INVALID_PARAMS", "chainType must be 'temporal' or 'logical'");
-  }
-  return {
-    chainType,
-    topic: requiredString(params, "topic"),
-    ownerSessionId: optionalString(params, "ownerSessionId"),
-    projectDir: optionalString(params, "projectDir"),
-    sessionId: optionalString(params, "sessionId"),
-  };
-}
-
-function parseChainAddParams(value: unknown): NmgChainAddParams {
-  const params = objectParams(value);
-  return {
-    chainId: requiredString(params, "chainId"),
-    memoryId: requiredString(params, "memoryId"),
-    position: optionalInteger(params, "position", 0, 100_000),
-    note: optionalString(params, "note"),
-    projectDir: optionalString(params, "projectDir"),
-    sessionId: optionalString(params, "sessionId"),
-  };
-}
-
-function parseChainRemoveParams(value: unknown): NmgChainRemoveParams {
-  const params = objectParams(value);
-  return {
-    chainId: requiredString(params, "chainId"),
-    memoryId: requiredString(params, "memoryId"),
-    projectDir: optionalString(params, "projectDir"),
-    sessionId: optionalString(params, "sessionId"),
-  };
-}
-
-function parseChainEdgeAddParams(value: unknown): NmgChainEdgeAddParams {
-  const params = objectParams(value);
-  const edgeType = params.edgeType;
-  if (edgeType !== undefined && edgeType !== "order") {
-    throw new NmgProtocolError("INVALID_PARAMS", "edgeType must be 'order'");
-  }
-  return {
-    chainId: requiredString(params, "chainId"),
-    sourceMemoryId: requiredString(params, "sourceMemoryId"),
-    targetMemoryId: requiredString(params, "targetMemoryId"),
-    edgeType: edgeType as "order" | undefined,
-    projectDir: optionalString(params, "projectDir"),
-    sessionId: optionalString(params, "sessionId"),
-  };
-}
-
-function parseChainEdgeRemoveParams(value: unknown): NmgChainEdgeRemoveParams {
-  const params = objectParams(value);
-  return {
-    chainId: requiredString(params, "chainId"),
-    sourceMemoryId: requiredString(params, "sourceMemoryId"),
-    targetMemoryId: requiredString(params, "targetMemoryId"),
-    projectDir: optionalString(params, "projectDir"),
-    sessionId: optionalString(params, "sessionId"),
-  };
-}
-
-function parseChainGetParams(value: unknown): NmgChainGetParams {
-  const params = objectParams(value);
-  return {
-    chainId: requiredString(params, "chainId"),
-    projectDir: optionalString(params, "projectDir"),
-    sessionId: optionalString(params, "sessionId"),
-  };
-}
-
-function parseChainListParams(value: unknown): NmgChainListParams {
-  const params = objectParams(value);
-  const chainType = params.chainType;
-  if (chainType !== undefined && chainType !== "temporal" && chainType !== "logical") {
-    throw new NmgProtocolError("INVALID_PARAMS", "chainType must be 'temporal' or 'logical'");
-  }
-  return {
-    chainType: chainType as "temporal" | "logical" | undefined,
-    ownerSessionId: optionalString(params, "ownerSessionId"),
-    projectDir: optionalString(params, "projectDir"),
-    sessionId: optionalString(params, "sessionId"),
-  };
-}
-
 function parseRecordActiveGraphAttributionParams(
   value: unknown,
 ): NmgRecordActiveGraphAttributionParams {
@@ -3686,28 +2146,6 @@ function parseAttributionVersions(value: unknown, answer: string | undefined) {
       throw new NmgProtocolError("INVALID_PARAMS", "Invalid attribution statementHash");
     return { memoryId: requiredString(record, "memoryId"), statementHash };
   });
-}
-
-function parseSyncStgParams(value: unknown): NmgSyncStgParams {
-  const params = objectParams(value);
-  const scope = optionalScope(params, "scope");
-  if (!scope || Object.keys(scope).length === 0) {
-    throw new NmgProtocolError("INVALID_PARAMS", "scope is required");
-  }
-  return {
-    projectDir: requiredString(params, "projectDir"),
-    sessionId: optionalString(params, "sessionId"),
-    scope,
-    limit: optionalInteger(params, "limit", 1, 200),
-  };
-}
-
-function parseStgPurgeSessionParams(value: unknown): NmgStgPurgeSessionParams {
-  const params = objectParams(value);
-  return {
-    projectDir: requiredString(params, "projectDir"),
-    sessionId: requiredString(params, "sessionId"),
-  };
 }
 
 /** Read-style actions share one parse shape (taskId/agentId + paging). A Set
@@ -4349,135 +2787,8 @@ const taskRunHandlers: Record<NmgTaskRunParams["action"], TaskRunHandler> = {
   },
 };
 
-function parseRetentionCandidatesParams(value: unknown): NmgRetentionCandidatesParams {
-  const params = objectParams(value);
-  return {
-    dormantAfterDays: optionalInteger(params, "dormantAfterDays", 1, 36500),
-    quarantineAfterDays: optionalInteger(params, "quarantineAfterDays", 1, 36500),
-    maximumImportance: optionalNumber(params, "maximumImportance", 0, 1),
-    maximumAccessCount: optionalInteger(params, "maximumAccessCount", 0, 1_000_000_000),
-  };
-}
-
-function parseSetStorageStateParams(value: unknown): NmgSetStorageStateParams {
-  const params = objectParams(value);
-  return {
-    memoryId: requiredString(params, "memoryId"),
-    storageState: optionalEnum(params, "storageState", MEMORY_STORAGE_STATES) ?? "indexed",
-    recoveryDays: optionalInteger(params, "recoveryDays", 0, 36500),
-  };
-}
-
 function parseDeleteMemoryParams(value: unknown): NmgDeleteMemoryParams {
   return { memoryId: requiredString(objectParams(value), "memoryId") };
-}
-
-function parseMergeNodesParams(value: unknown): NmgMergeNodesParams {
-  const params = objectParams(value);
-  return {
-    sourceNodeIds: requiredStringArray(params, "sourceNodeIds", 2, 100),
-    targetName: requiredString(params, "targetName"),
-    targetKind: optionalEnum(params, "targetKind", MEMORY_NODE_KINDS),
-    summary: optionalString(params, "summary"),
-  };
-}
-
-function parseRollbackNodeTransformParams(value: unknown): NmgRollbackNodeTransformParams {
-  return { transformId: requiredString(objectParams(value), "transformId") };
-}
-
-function parseSplitNodeParams(value: unknown): NmgSplitNodeParams {
-  const params = objectParams(value);
-  if (!Array.isArray(params.partitions) || params.partitions.length < 2) {
-    throw new NmgProtocolError("INVALID_PARAMS", "partitions must contain at least two entries");
-  }
-  return {
-    sourceNodeId: requiredString(params, "sourceNodeId"),
-    partitions: params.partitions.map((value) => {
-      const partition = objectParams(value);
-      return {
-        nodeName: requiredString(partition, "nodeName"),
-        memoryIds: requiredStringArray(partition, "memoryIds", 1, 10_000),
-        nodeKind: optionalEnum(partition, "nodeKind", MEMORY_NODE_KINDS),
-        summary: optionalString(partition, "summary"),
-      };
-    }),
-  };
-}
-
-function parseTopologyProposalParams(value: unknown): NmgTopologyProposalParams {
-  const params = objectParams(value);
-  const action = requiredEnum(params, "action", ["list", "assess", "review", "actuate"] as const);
-  if (action === "list") {
-    return {
-      action,
-      status: optionalEnum(params, "status", ["accepted", "pending", "rejected"] as const),
-    };
-  }
-  const proposalId = requiredString(params, "proposalId");
-  if (action === "assess") {
-    return {
-      action,
-      proposalId,
-      minimumObservations: optionalInteger(params, "minimumObservations", 1, 1_000_000),
-      minimumEstimatedGain: optionalNumber(params, "minimumEstimatedGain", 0, 1),
-      minimumEvidenceMemories: optionalInteger(params, "minimumEvidenceMemories", 1, 1_000_000),
-    };
-  }
-  if (action === "review") {
-    return {
-      action,
-      proposalId,
-      decision: requiredEnum(params, "decision", ["accept", "reject"] as const),
-    };
-  }
-  return { action, proposalId };
-}
-
-function parseMemoryMaintenanceProposalParams(value: unknown): NmgMemoryMaintenanceProposalParams {
-  const params = objectParams(value);
-  const action = requiredEnum(params, "action", ["list", "propose", "review"] as const);
-  if (action === "list") {
-    return {
-      action,
-      status: optionalEnum(params, "status", ["accepted", "pending", "rejected"] as const),
-    };
-  }
-  if (action === "review") {
-    return {
-      action,
-      proposalId: requiredString(params, "proposalId"),
-      decision: requiredEnum(params, "decision", ["accept", "reject"] as const),
-      reason: requiredString(params, "reason"),
-    };
-  }
-  const policy = objectParams(params.policy);
-  return {
-    action,
-    defectType: requiredEnum(params, "defectType", ["content", "retrieval", "scope"] as const),
-    maintenanceAction: requiredEnum(params, "maintenanceAction", [
-      "merge",
-      "observe",
-      "rescope",
-      "rewrite",
-      "split",
-      "supersede",
-    ] as const),
-    targetMemoryIds: requiredStringArray(params, "targetMemoryIds", 1, 10_000),
-    evidenceMemoryIds: optionalStringArray(params, "evidenceMemoryIds"),
-    evidenceTraceIds: optionalStringArray(params, "evidenceTraceIds"),
-    proposedStatement: optionalString(params, "proposedStatement"),
-    proposedScope: optionalScope(params, "proposedScope"),
-    policy: {
-      id: requiredString(policy, "id"),
-      revision: requiredString(policy, "revision"),
-      sourceHash: requiredString(policy, "sourceHash"),
-      minimumLongHorizonScore: requiredNumber(policy, "minimumLongHorizonScore", 0, 1),
-    },
-    longHorizonScore: requiredNumber(params, "longHorizonScore", 0, 1),
-    evaluationKind: requiredEnum(params, "evaluationKind", ["held_out", "matched_replay"] as const),
-    evaluationRef: requiredString(params, "evaluationRef"),
-  };
 }
 
 function objectParams(value: unknown): Record<string, unknown> {
@@ -4577,36 +2888,6 @@ function boundedReasonerSteps(values: Record<string, unknown>, graphHopBudget: n
     optionalInteger(values, "maxSteps", 1, 100) ?? 8,
     Math.max(1, graphHopBudget + 1),
   );
-}
-
-function referenceTargets(
-  parts: ActiveGraphStorePart[],
-  sharedStore: NmgStore,
-  sessionId?: string,
-): MemoryContext["results"] {
-  return parts.flatMap((part) =>
-    part.store
-      .getContext([...part.memoryIds], 0, part.store === sharedStore ? undefined : sessionId)
-      .results.filter((result) => part.memoryIds.has(result.memory.id)),
-  );
-}
-
-function activeGraphPartsFor(store: NmgStore, context: MemoryContext): ActiveGraphStorePart[] {
-  return context.activeGraph
-    ? [
-        {
-          store,
-          traceId: context.activeGraph.id,
-          memoryIds: new Set(context.activeGraph.memoryIds),
-        },
-      ]
-    : [];
-}
-
-function isActiveGraphStorePart(
-  value: ActiveGraphStorePart | undefined,
-): value is ActiveGraphStorePart {
-  return value !== undefined;
 }
 
 function requiredString(params: Record<string, unknown>, key: string): string {
