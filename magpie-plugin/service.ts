@@ -131,7 +131,7 @@ export class MagpiePageService {
     response.setHeader("content-type", "text/html; charset=utf-8");
     response.setHeader(
       "content-security-policy",
-      `default-src 'none'; script-src 'self' http://127.0.0.1:${this.port} 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self' http://127.0.0.1:${this.port}; frame-ancestors 'self' http://127.0.0.1:* https://magpie.localhost`,
+      `default-src 'none'; script-src 'self' http://127.0.0.1:${this.port} 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self' http://127.0.0.1:${this.port}; frame-ancestors 'self' http://127.0.0.1:* https://magpie.localhost http://wails.localhost`,
     );
     const html = await readFile(join(this.uiDirectory, "operator.html"), "utf8");
     response.end(

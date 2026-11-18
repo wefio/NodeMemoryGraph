@@ -24,4 +24,6 @@
 
 插件可以独立运行，也可以和原生适配器同时使用。独立的原生会话和 Magpie 会话各自持有状态。请求 hook 在模型请求时投递黑板通知，回复归因用于诊断。检索计数覆盖服务端尝试，进程突然退出可能丢失尚未落盘的一批数据。网关 token 来自 Magpie 聚合用量账本。
 
+管理页监听回环地址，并允许 Windows 桌面 WebView 的指定来源 `http://wails.localhost` 嵌入。浏览器版 Magpie 使用自身的服务代理。管理 API 仍要求进程令牌。
+
 [安装指南](../../../magpie-plugin/README.zh-CN.md)提供打包和使用步骤。[私有宿主复现脚本](../../experiments/runtime/magpie-plugin-probe.mjs)在 Magpie 0.1.4338 下验证已安装包、八项 MCP 工具声明、两次 Chat Completions 请求、会话隔离、所有者状态承载和受保护的管理快照。模型使用本地模拟服务，付费调用为零。[管理接口测试](../../../tests/cli/operator.test.ts)使用本地模拟向量服务验证候选配置激活。

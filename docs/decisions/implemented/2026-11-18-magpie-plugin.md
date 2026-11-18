@@ -24,4 +24,6 @@ Use the shared InformationView budget for state, evidence and board notices. Con
 
 The plugin can run on its own or alongside a native adapter. Independent native and Magpie sessions keep separate state. Request hooks provide prompt-time board delivery, and response-based attribution remains diagnostic. Search counters cover service attempts, with the current batch vulnerable to abrupt process exit. Gateway tokens come from the Magpie aggregate usage ledger.
 
+The loopback management page allows the specific Windows desktop WebView origin `http://wails.localhost` as a frame ancestor. Browser-hosted Magpie uses its own service proxy. The operator API continues to require its process token.
+
 The [install guide](../../../magpie-plugin/README.md) owns the package and operating steps. The private-host [reproduction script](../../experiments/runtime/magpie-plugin-probe.mjs) exercises an installed bundle, eight MCP tool declarations, two Chat Completions requests, session isolation, owner-state carriage and the protected management snapshot on Magpie 0.1.4338. It uses a loopback model fixture and makes zero paid calls. The [operator test](../../../tests/cli/operator.test.ts) exercises candidate activation using a loopback embedding fixture.

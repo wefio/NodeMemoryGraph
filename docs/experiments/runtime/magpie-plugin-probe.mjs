@@ -284,6 +284,11 @@ try {
   await resumed.json();
   assert.ok(JSON.stringify(requests.at(-1).messages).includes("MagpiePrivateOwnerInvariant"));
   const page = await waitFor(`http://127.0.0.1:${pagePort}/`);
+  const frameAncestors = page.headers.get("content-security-policy")
+    ?.split(";").map((directive) => directive.trim())
+    .find((directive) => directive.startsWith("frame-ancestors "))?.split(/\s+/);
+  assert.ok(frameAncestors?.includes("http://wails.localhost"), "Windows Magpie must be able to frame the page");
+  assert.ok(!frameAncestors.includes("*"), "Operator page framing must remain restricted");
   const html = await page.text();
   const token = html.match(/NMG_OPERATOR_TOKEN\s*=\s*("[A-Za-z0-9_-]+")/)?.[1];
   assert.ok(token, html.slice(0, 300));
