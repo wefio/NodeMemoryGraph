@@ -29,7 +29,7 @@
 | Controller (DC) runtime rerank | `NMG_CONTROLLER_RUNTIME_MODE` | off | `off` / `shadow` / `controlled` / `active` | `src/integration/config.ts` + pi ext | earlier feature | opt-in / dormant |
 | Search-recommendation nudge | `NMG_SEARCH_RECOMMENDATION` | off | `off` / `advisory` / `guardrail` | `src/integration/config.ts` + pi ext | earlier feature | opt-in |
 | Lab tools (reasoning workspace, memory-graph reasoner, controller shadow; also dsh `dsh-nmg`) | `NMG_ENABLE_LAB_TOOLS` | off | `"1"` = on | pi ext / dsh plugin / daemon `lab` RPC | earlier feature | opt-in |
-| Autodiff graph compile | `NMG_AUTODIFF_COMPILE` | off | compile autodiff graphs to JS for speed | `src/lab/autodiff.ts` | core | opt-in / perf knob |
+| Autodiff graph compile | `NMG_AUTODIFF_COMPILE` | off | compile autodiff graphs to JS for speed | `src/core/autodiff.ts` | core | opt-in / perf knob |
 | Auto-recall tuning knobs | `NMG_AUTO_RECALL_TIER` (1), `NMG_AUTO_RECALL_LIMIT` (13), `NMG_AUTO_RECALL_INITIAL_TARGET` (13), `NMG_AUTO_RECALL_STRONG_HIT_TOP_GAP` (0.05), `NMG_AUTO_RECALL_STRONG_HIT_INITIAL_TARGET` (3) | as listed | tune the default-on auto-recall | pi ext + dsh plugin | core | knobs of a default-on feature |
 | Board wake cadence | `NMG_BOARD_WAKE_INTERVAL_SEC` | — | wake interval for board coordination loop | dsh plugin | earlier feature | knob |
 | Daemon idle timeout | `NMG_DAEMON_IDLE_TIMEOUT_MS` | — | daemon idle shutdown | `src/cli/http-server.ts` | core | knob |

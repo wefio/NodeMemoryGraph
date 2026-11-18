@@ -7,7 +7,7 @@
 ## Source and scope
 
 This reference describes the internal `Op` keys and evaluator in
-[`src/lab/autodiff.ts`](../../../../src/lab/autodiff.ts). A `UOp` node carries an
+[`src/core/autodiff.ts`](../../../../src/core/autodiff.ts). A `UOp` node carries an
 operation, a two-dimensional `Shape`, source nodes and an optional array or
 numeric argument. Scalars use `[1,1]`; buffers are `Float32Array` values.
 

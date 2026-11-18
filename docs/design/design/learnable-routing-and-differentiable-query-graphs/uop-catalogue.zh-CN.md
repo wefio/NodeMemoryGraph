@@ -6,7 +6,7 @@
 
 ## 来源与范围
 
-本参考描述 [`src/lab/autodiff.ts`](../../../../src/lab/autodiff.ts) 中内部 `Op` key 与 evaluator。
+本参考描述 [`src/core/autodiff.ts`](../../../../src/core/autodiff.ts) 中内部 `Op` key 与 evaluator。
 `UOp` 节点携带 operation、二维 `Shape`、来源节点，以及可选的数组或数值参数。
 标量使用 `[1,1]`；缓冲区值为 `Float32Array`。
 

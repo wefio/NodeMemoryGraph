@@ -124,6 +124,11 @@ spot is also the one that showed the cost.
   the probe name read as an implementation detail. The new test asserts the
   extension, which is what the fallback got wrong.
 
+For Git-detected renames, the gate reads the source at its original path in the
+baseline and compares findings at the destination. This keeps complexity
+increases visible after a move and classifies existing methods against the
+correct baseline.
+
 ## Deferred
 
 Read the baseline with one `git cat-file --batch` instead of one `git show` per

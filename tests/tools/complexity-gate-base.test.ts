@@ -18,6 +18,7 @@ import { basename, join, relative, resolve } from "node:path";
 import {
   LINTABLE,
   changedFiles,
+  changedPaths,
   complexitiesFor,
   complexitiesForMany,
   describeBasis,
@@ -93,6 +94,20 @@ test("the default baseline is the merge base, so committed branch work is judged
   });
   git(["update-ref", "-d", "refs/remotes/origin/main"], path);
   assert.deepEqual(resolveBaseRef([], path), { ref: "HEAD", source: "head" });
+});
+
+test("staged and committed renames use the original path at the baseline", (t) => {
+  const { path } = probeRepository();
+  t.after(() => rmSync(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const baseline = git(["rev-parse", "HEAD"], path);
+  const renamed = "moved probe.ts";
+  git(["mv", "probe-tangled.ts", renamed], path);
+  assert.equal(changedPaths("HEAD", path).get(join(path, renamed)), "probe-tangled.ts");
+  git(["commit", "-qm", "move probe"], path);
+  assert.equal(changedPaths(baseline, path).get(join(path, renamed)), "probe-tangled.ts");
+  assert.deepEqual(changedFiles(baseline, path), [join(path, renamed)]);
+  writeFileSync(join(path, renamed), complexSource(21), "utf8");
+  assert.equal(changedPaths(baseline, path).get(join(path, renamed)), "probe-tangled.ts");
 });
 
 test("a measured file above the limit fails the gate; an unmeasured one is named", () => {

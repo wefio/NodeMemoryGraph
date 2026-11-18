@@ -11,7 +11,7 @@
 
 | 能力与 owner | 在任务协作中的复用方向 | 保留的边界 |
 | --- | --- | --- |
-| [autodiff](../../../src/lab/autodiff.ts) 的 Tensor/UOp 与梯度计算 | 为明确构造的成本、收益或动作评分模型提供数值底座 | Agent 调用、离散调度和工具副作用不因表示成图就可微；不声称梯度穿过整个 Agent 任务 |
+| [autodiff](../../../src/core/autodiff.ts) 的 Tensor/UOp 与梯度计算 | 为明确构造的成本、收益或动作评分模型提供数值底座 | Agent 调用、离散调度和工具副作用不因表示成图就可微；不声称梯度穿过整个 Agent 任务 |
 | [HA：Hierarchical Activation](../hierarchical-activation.md) | 对任务所需上下文做激活与保留评分，研究上下文复用的价值信号 | 激活分数不改变语义置信度、访问权限、硬预算或任务依赖；时间状态仍归 session/branch 所有 |
 | [MGR：MemoryGraphReasoner](../../../src/lab/memory-graph-reasoner.ts) | 利用已有遍历与 what-if 推演提出有来源的上下文、路径或有限假设候选 | `MemoryNode.requires` 的软门控不等于任务依赖成立；what-if 结果不等于真实检查结果，也不能自行开启推测执行 |
 | 共享任务语义与协调器 | 生成合法动作集合，校验建议并执行原子认领与提交 | 合法性和接受权不交给评分模型；建议失效、不可用或关闭时仍能确定性执行 |

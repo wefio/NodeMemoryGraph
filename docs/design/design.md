@@ -98,12 +98,11 @@ small always-available discovery/control entry, while the capability-specific
 schemas and state stay unloaded until enabled. Pi's optional `nmg_reason` remains
 only a typed convenience wrapper over this shared boundary.
 
-The autodiff substrate belongs to Lite because product features may depend on
-its numerical graph and it adds no Python, PyTorch, GPU, or model-service
-dependency. This does **not** promote every consumer of that substrate:
-learned routing, hierarchical activation, fork/merge experiments, and the
-Memory-Graph Reasoner each retain an independent feature gate and evidence
-requirement.
+[The autodiff substrate](../../src/core/autodiff.ts) belongs to Lite. Core
+hierarchical activation and Lab features can call this numerical graph, which
+runs on the existing TypeScript runtime. Learned routing, hierarchical
+activation, fork/merge experiments, and the Memory-Graph Reasoner each have an
+independent feature gate and evidence requirement.
 
 ## First principles
 

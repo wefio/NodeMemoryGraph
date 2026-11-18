@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
 
-import { Tensor, gradientStep } from "../src/lab/autodiff.ts";
+import { Tensor, gradientStep } from "../src/core/autodiff.ts";
 
 // ── Batch training backend sweep ─────────────────────────────────────────────
 // Measures one training step (forward + backward + gradientStep) for two batch

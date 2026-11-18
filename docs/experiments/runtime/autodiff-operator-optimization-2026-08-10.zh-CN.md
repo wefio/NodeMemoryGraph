@@ -23,6 +23,6 @@
 
 这些有日期的测量是本地微基准，绑定其图形状、环境与 opt-in mode。它们不能证明其他 workload 的性能、默认启用，或 GPU crossover。原文文献综述与详细接口提案未纳入本精简记录，也没有独立复核。
 
-- Autodiff engine：[`src/lab/autodiff.ts`](../../../src/lab/autodiff.ts)
+- Autodiff engine：[`src/core/autodiff.ts`](../../../src/core/autodiff.ts)
 - Backend 选择探索：[批量 backend 成本模型](backend-selection-cost-model-2026-08-10.zh-CN.md)
-- 当前行为与测试：依赖历史结论前，应检查现行 `src/lab/` owner 与目标测试。
+- 当前行为与测试：依赖历史结论前，应检查现行 实现位置 与目标测试。

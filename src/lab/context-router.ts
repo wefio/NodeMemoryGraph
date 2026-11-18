@@ -1,4 +1,4 @@
-import { Tensor, gradientStep } from "./autodiff.ts";
+import { Tensor, gradientStep } from "../core/autodiff.ts";
 
 export const CONTEXT_ACTIONS = ["none", "cue", "resurface", "retrieve"] as const;
 export type ContextAction = (typeof CONTEXT_ACTIONS)[number];

@@ -78,32 +78,32 @@ export function evaluateComplexityDiff(
   return { violations };
 }
 
-/** Parse `git status --porcelain` into changed-file paths (tracked modified,
- * staged, and untracked — i.e. every working-tree change). When `ref` is not
- * HEAD, committed differences vs the ref are added too (PR review mode). */
-export function changedFiles(ref: string, cwd: string = root): string[] {
-  const files: string[] = [];
-  if (ref !== "HEAD") {
-    const committed = execFileSync("git", ["diff", "--name-only", "--diff-filter=AM", ref], {
-      cwd,
-      encoding: "utf8",
-    })
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    files.push(...committed);
+/** Current absolute paths and their corresponding paths in the baseline tree. */
+export function changedPaths(ref: string, cwd: string = root): Map<string, string> {
+  const fields = execFileSync(
+    "git",
+    ["diff", "--name-status", "-z", "--find-renames", "--diff-filter=AMRT", ref, "--"],
+    { cwd, encoding: "utf8" },
+  ).split("\0");
+  const paths = new Map<string, string>();
+  for (let index = 0; fields[index];) {
+    const status = fields[index++]!;
+    const previous = fields[index++]!;
+    const current = status.startsWith("R") ? fields[index++]! : previous;
+    paths.set(resolve(cwd, current), previous);
   }
-  // Uncommitted working-tree changes (staged + unstaged + untracked).
-  const working = execFileSync("git", ["status", "--porcelain"], {
+  const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
     cwd,
     encoding: "utf8",
-  })
-    .split(/\r?\n/)
-    .map((line) => line.slice(3).trim())
-    .filter((line) => line && !line.startsWith('"'))
-    .map((line) => line.split(" -> ").pop() ?? line);
-  files.push(...working);
-  return [...new Set(files)].filter(Boolean).map((line) => resolve(cwd, line));
+  }).split("\0");
+  for (const file of untracked) {
+    if (file) paths.set(resolve(cwd, file), file);
+  }
+  return paths;
+}
+
+export function changedFiles(ref: string, cwd: string = root): string[] {
+  return [...changedPaths(ref, cwd).keys()];
 }
 
 /** A file's source to measure, with the path its findings are keyed to. */
@@ -456,7 +456,8 @@ export function describeUnmeasured(
 async function main(): Promise<void> {
   installInterruptCleanup();
   const basis = resolveBaseRef(process.argv.slice(2), root);
-  const files = changedFiles(basis.ref, root).filter((file) => LINTABLE.test(file));
+  const paths = changedPaths(basis.ref, root);
+  const files = [...paths.keys()].filter((file) => LINTABLE.test(file));
   if (files.length === 0) {
     process.stdout.write(`complexity gate: no changed files (${describeBasis(basis)})\n`);
     return;
@@ -464,9 +465,9 @@ async function main(): Promise<void> {
 
   // Baseline complexities: read each changed file at the base ref. A file that is absent
   // there is new, which is not the same as a file that could not be read.
-  const baselineSources: ComplexityProbe[] = [];
+  const baselineSources: (ComplexityProbe & { currentFile: string })[] = [];
   for (const file of files) {
-    const relative = file.slice(root.length + 1).replaceAll("\\", "/");
+    const previous = paths.get(file)!;
     try {
       // A file that is absent at the base ref is the ordinary case for new work, so
       // git's "exists on disk, but not in <ref>" is expected here and not this gate's
@@ -474,8 +475,9 @@ async function main(): Promise<void> {
       // child's stderr to ours, and a passing run then floods stderr with one `fatal:`
       // per new file — which is what makes a real failure in that stream unreadable.
       baselineSources.push({
-        file,
-        source: execFileSync("git", ["show", `${basis.ref}:${relative}`], {
+        file: resolve(root, previous),
+        currentFile: file,
+        source: execFileSync("git", ["show", `${basis.ref}:${previous}`], {
           cwd: root,
           encoding: "utf8",
           stdio: ["ignore", "pipe", "ignore"],
@@ -492,7 +494,7 @@ async function main(): Promise<void> {
     const measure = baselineMeasures[index]!;
     if (!measure.measured) unmeasuredBaseline.push(entry.file);
     for (const finding of measure.findings) {
-      baseline.set(`${entry.file}::${finding.name}`, finding);
+      baseline.set(`${entry.currentFile}::${finding.name}`, finding);
     }
   });
 
