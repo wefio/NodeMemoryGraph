@@ -10,6 +10,7 @@ import type {
   MemoryEntityQuery,
   MemoryReadView,
   MemoryVectorCandidate,
+  MemoryVectorCursor,
   MemoryVectorDocument,
   MemoryVectorIndex,
   MemoryVectorQuery,
@@ -38,7 +39,12 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
         PRIMARY KEY(namespace, model, kind, id));
       CREATE TABLE IF NOT EXISTS nmg_memory_route_members (
         namespace TEXT NOT NULL, memory_id TEXT NOT NULL, leaf_id TEXT NOT NULL,
-        PRIMARY KEY(namespace, memory_id, leaf_id));`);
+        PRIMARY KEY(namespace, memory_id, leaf_id));
+      CREATE INDEX IF NOT EXISTS nmg_memory_embedding_order ON nmg_memory_entities
+        (namespace, json_extract(payload, '$.createdAt') DESC, id) WHERE kind='memory';
+      CREATE INDEX IF NOT EXISTS nmg_memory_history_sequence ON nmg_memory_entities
+        (namespace, json_extract(payload, '$.sessionId'), CAST(name AS INTEGER) DESC, id)
+        WHERE kind='history';`);
   }
 
   importLegacyHierarchy(): void {
@@ -105,23 +111,36 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
     return { indexed: Number(indexed?.n), pending: Number(pending?.n) };
   }
 
-  pending(indexId: string, limit: number): MemoryVectorDocument[] {
+  pending(
+    indexId: string,
+    limit: number,
+    after?: MemoryVectorCursor,
+  ): (MemoryVectorDocument & MemoryVectorCursor)[] {
+    const start = [this.namespace, indexId] as const;
+    // Split the cursor at its timestamp so both parts can use ordered index ranges.
+    const selection = after
+      ? `same_time AS MATERIALIZED (
+          ${pendingSelection(`AND ${CREATED_AT}=? AND m.id>?`, "?", "m.id")}
+        ), pending AS MATERIALIZED (
+          SELECT * FROM same_time
+          UNION ALL
+          SELECT * FROM (${pendingSelection(`AND ${CREATED_AT}<?`, "(SELECT ? - count(*) FROM same_time)")})
+        )`
+      : `pending AS MATERIALIZED (${pendingSelection()})`;
+    const bind = after
+      ? [...start, after.createdAt, after.id, limit, ...start, after.createdAt, limit]
+      : [...start, limit];
     const rows = this.db
       .prepare(
-        `SELECT m.id, m.text, json_extract(m.payload, '$.eventTime') eventTime,
-      (SELECT json_extract(prev.payload, '$.content')
-       FROM json_each(m.payload, '$.evidenceIds') link
-       JOIN nmg_memory_entities h ON h.namespace=m.namespace AND h.key='history:' || link.value
-       JOIN nmg_memory_entities prev ON prev.namespace=m.namespace AND prev.kind='history'
-        AND json_extract(prev.payload, '$.sessionId')=json_extract(h.payload, '$.sessionId')
-        AND CAST(prev.name AS INTEGER)<CAST(h.name AS INTEGER)
-       ORDER BY CAST(prev.name AS INTEGER) DESC LIMIT 1) previousTurn
-      FROM nmg_memory_entities m WHERE ${MISSING_VECTOR}
-      ORDER BY json_extract(m.payload, '$.createdAt') DESC, m.id LIMIT ?`,
+        `WITH ${selection}
+      SELECT m.id, m.text, m.createdAt, json_extract(m.payload, '$.eventTime') eventTime,
+        ${PREVIOUS_TURN} previousTurn
+      FROM pending m ORDER BY m.createdAt DESC, m.id`,
       )
-      .all(this.namespace, indexId, limit);
+      .all(...bind);
     return rows.map((row) => ({
       id: String(row.id),
+      createdAt: String(row.createdAt),
       statement: String(row.text),
       text: memoryEmbeddingText(row.text, {
         eventTime: row.eventTime,
@@ -136,27 +155,32 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
     vectors: readonly number[][],
   ): void {
     validateVectors(vectors, documents.length);
-    const insert = this.db.prepare(`INSERT OR IGNORE INTO nmg_memory_vectors
-      SELECT m.namespace, ?, m.id, ?, ? FROM nmg_memory_entities m
-      WHERE m.namespace=? AND m.key=? AND m.text=? AND ${INDEXABLE_MEMORY}`);
+    const dimensions = vectors[0]!.length;
+    const encoded = vectors.map(encodeVector);
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const existing = this.db
         .prepare("SELECT dimensions FROM nmg_memory_vectors WHERE namespace=? AND model=? LIMIT 1")
         .get(this.namespace, indexId);
-      if (existing && Number(existing.dimensions) !== vectors[0]!.length)
+      if (existing && Number(existing.dimensions) !== dimensions)
         throw new Error("Embedding vector dimensions differ from the configured index");
-      documents.forEach((doc, i) => {
-        const vector = vectors[i]!;
-        insert.run(
-          indexId,
-          vector.length,
-          encodeVector(vector),
-          this.namespace,
+      for (let offset = 0; offset < documents.length; offset += 64) {
+        const batch = documents.slice(offset, offset + 64);
+        const bind = batch.flatMap((doc, i) => [
           `memory:${doc.id}`,
           doc.statement,
-        );
-      });
+          encoded[offset + i]!,
+        ]);
+        this.db
+          .prepare(
+            `WITH incoming(key, text, vector) AS (VALUES ${batch.map(() => "(?, ?, ?)").join(",")})
+          INSERT OR IGNORE INTO nmg_memory_vectors
+          SELECT m.namespace, ?, m.id, ?, incoming.vector FROM incoming
+          JOIN nmg_memory_entities m ON m.namespace=? AND m.key=incoming.key AND m.text=incoming.text
+          WHERE ${INDEXABLE_MEMORY}`,
+          )
+          .run(...bind, indexId, dimensions, this.namespace);
+      }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -214,6 +238,27 @@ const INDEXABLE_MEMORY = `json_extract(m.payload, '$.status') <> 'deleted'
 const MISSING_VECTOR = `m.namespace=? AND m.kind='memory' AND ${INDEXABLE_MEMORY}
   AND NOT EXISTS (SELECT 1 FROM nmg_memory_vectors v
     WHERE v.namespace=m.namespace AND v.model=? AND v.id=m.id)`;
+
+const CREATED_AT = "json_extract(m.payload, '$.createdAt')";
+
+function pendingSelection(boundary = "", limit = "?", order = `${CREATED_AT} DESC, m.id`): string {
+  return `SELECT m.namespace, m.id, m.text, m.payload, ${CREATED_AT} createdAt
+    FROM nmg_memory_entities m WHERE ${MISSING_VECTOR} ${boundary}
+    ORDER BY ${order} LIMIT ${limit}`;
+}
+
+// Visit the few evidence IDs first, then seek directly to their history rows.
+const PREVIOUS_TURN = `(SELECT json_extract(prev.payload, '$.content')
+  FROM json_each(m.payload, '$.evidenceIds') link
+  CROSS JOIN nmg_memory_entities h ON h.namespace=m.namespace AND h.key='history:' || link.value
+  CROSS JOIN nmg_memory_entities prev ON prev.rowid=(
+    SELECT candidate.rowid FROM nmg_memory_entities candidate
+    WHERE candidate.namespace=m.namespace AND candidate.kind='history'
+      AND json_extract(candidate.payload, '$.sessionId')=json_extract(h.payload, '$.sessionId')
+      AND CAST(candidate.name AS INTEGER)<CAST(h.name AS INTEGER)
+    ORDER BY CAST(candidate.name AS INTEGER) DESC, candidate.id LIMIT 1
+  )
+  ORDER BY CAST(prev.name AS INTEGER) DESC, CAST(link.key AS INTEGER) LIMIT 1)`;
 
 const HIERARCHY_SCORE = `max(coalesce((
   SELECT nmg_memory_cosine(n.vector)

@@ -60,3 +60,7 @@ As an imported scope grew, SQLite scanned existing rows for each new record's
 duplicate lookup, predecessor lookup, and FTS cleanup. The
 [backend contract](../../design/unified-architecture/native-backends.md#publication-and-retry)
 uses indexed lookups so the cost of a fixed write batch depends on the rows it touches.
+Batching only the RPC and transaction still repeated planning reads for each
+item. The backend groups bounded lookups and mutations while the engine applies
+batch inputs in order. For embedding backfill, advancing through ordered pages
+lets one local sweep visit an already-indexed prefix at most once.

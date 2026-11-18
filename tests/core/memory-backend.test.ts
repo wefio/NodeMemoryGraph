@@ -192,3 +192,134 @@ test("SQLite upgrades existing text indexes and replaces both projections at the
     raw.close();
   }
 });
+
+test("SQLite batches write lookups and keeps earlier items visible inside the batch", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-batched-writes-"));
+  const path = join(directory, "memory.sqlite");
+  const backend = await openMemoryBackend({
+    kind: "sqlite",
+    path,
+    namespace: "tenant",
+  });
+  t.after(async () => {
+    await backend.close();
+    removeTempDirectory(directory);
+  });
+  const engine = new MemoryEngine(backend);
+  const prepare = DatabaseSync.prototype.prepare;
+  let selects = 0;
+  t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+    if (sql.includes("SELECT kind, payload FROM nmg_memory_entities")) selects++;
+    return prepare.call(this, sql);
+  });
+  const inputs = Array.from({ length: 32 }, (_, i) => ({
+    statement: `Independent Atlas update ${i}`,
+    nodeName: "Atlas",
+    scope: { project: "atlas" },
+  }));
+  const results = await engine.rememberMany([...inputs, inputs[0]!], "import");
+  assert.equal(new Set(results.map(({ node }) => node.id)).size, 1);
+  assert.equal(new Set(results.map(({ memory }) => memory.id)).size, 32);
+  assert.equal(results.at(-1)?.history.id, results[0]?.history.id);
+  assert.ok(selects <= 4, `executed ${selects} planning queries`);
+
+  const evidenceSource = {
+    actor: "user",
+    sourceMessageId: "legacy-source",
+    content: "Old transcript",
+  } as const;
+  const original = await engine.remember({
+    ...inputs[0]!,
+    statement: "Use the original evidence",
+    evidenceSource,
+  });
+  const raw = new DatabaseSync(path);
+  try {
+    raw
+      .prepare("UPDATE nmg_memory_entities SET name='' WHERE key=?")
+      .run(`history:${original.history.id}`);
+  } finally {
+    raw.close();
+  }
+  const reused = await engine.remember({
+    ...inputs[0]!,
+    statement: "Reuse the original evidence",
+    evidenceSource,
+  });
+  assert.equal(reused.history.id, original.history.id);
+});
+
+test("SQLite pages missing vectors in order, scopes previous turns, and saves only current rows", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-vector-page-"));
+  const path = join(directory, "memory.sqlite");
+  const backend = await openMemoryBackend({ kind: "sqlite", path, namespace: "tenant" });
+  t.after(async () => {
+    await backend.close();
+    removeTempDirectory(directory);
+  });
+  const engine = new MemoryEngine(backend, () => "2026-11-17T00:00:00.000Z");
+  const inputs = [
+    ["session-one", "1", "same-session previous turn"],
+    ["session-other", "2", "unrelated turn"],
+    ["session-one", "3", "the current turn"],
+    ["session-one", "4", "the subsequent turn"],
+  ] as const;
+  const records = await engine.rememberMany(
+    inputs.map(([sessionId, sourceMessageId, statement]) => ({
+      nodeName: "Example",
+      statement,
+      sessionId,
+      residence: "stg",
+      evidenceSource: { actor: "user", sourceMessageId, content: statement },
+    })),
+    "source",
+  );
+
+  const index = backend.vectorIndex!;
+  const prepare = DatabaseSync.prototype.prepare;
+  let pendingSql = "";
+  t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+    if (sql.startsWith("WITH") && sql.includes("previousTurn")) pendingSql = sql;
+    return prepare.call(this, sql);
+  });
+  const first = index.pending("test", 2);
+  const second = index.pending("test", 2, first.at(-1));
+  const cursor = first.at(-1)!;
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    const details = db
+      .prepare(`EXPLAIN QUERY PLAN ${pendingSql}`)
+      .all("tenant", "test", cursor.createdAt, cursor.id, 2, "tenant", "test", cursor.createdAt, 2)
+      .map(({ detail }) => detail)
+      .join("\n");
+    assert.match(details, /nmg_memory_embedding_order \(namespace=\? AND <expr>=\? AND id>\?\)/);
+    assert.match(details, /SEARCH h .* \(namespace=\? AND key=\?\)/);
+    assert.match(details, /nmg_memory_history_sequence/);
+  } finally {
+    db.close();
+  }
+  assert.deepEqual(
+    [...first, ...second].map(({ id }) => id),
+    records.map(({ memory }) => memory.id).sort(),
+  );
+  assert.deepEqual(index.pending("test", 2, second.at(-1)), []);
+  const current = [...first, ...second].find(({ id }) => id === records[2]!.memory.id)!;
+  assert.match(current.text, /same-session previous turn/);
+  const subsequent = [...first, ...second].find(({ id }) => id === records[3]!.memory.id)!;
+  assert.match(subsequent.text, /the current turn/);
+
+  const [withdrawn] = first;
+  const sessionId = records.find(({ memory }) => memory.id === withdrawn!.id)!.memory.sessionId!;
+  await engine.withdraw(withdrawn!.id, "withdraw", sessionId);
+  index.save("test", first, [
+    [1, 0],
+    [1, 1],
+  ]);
+  assert.deepEqual(index.stats("test"), { indexed: 1, pending: 2 });
+  assert.throws(() => index.save("test", second, [[1], [1]]), /dimensions differ/);
+  index.save("test", second, [
+    [0, 1],
+    [1, 0],
+  ]);
+  assert.deepEqual(index.stats("test"), { indexed: 3, pending: 0 });
+});

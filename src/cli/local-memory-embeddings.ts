@@ -1,5 +1,10 @@
+import { setImmediate } from "node:timers/promises";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
-import type { MemoryVectorIndex, MemoryVectorQuery } from "../core/memory/backend.ts";
+import type {
+  MemoryVectorCursor,
+  MemoryVectorIndex,
+  MemoryVectorQuery,
+} from "../core/memory/backend.ts";
 import { HashingVectorEmbedder } from "../core/vector.ts";
 import { memoryEmbeddingModelId } from "../core/store/search-ranking.ts";
 import { DAEMON_AUTOMATIC_RECALL_MAX_MS, RecallBudget } from "../integration/recall-budget.ts";
@@ -12,7 +17,10 @@ const hashingClient = {
   embedQueries: async (texts: string[]) => texts.map((text) => [...hashing.embed(text)]),
 };
 
-type IndexClient = Pick<EmbeddingClient, "indexId" | "embedDocuments" | "embedQueries">;
+type IndexClient = Pick<
+  EmbeddingClient,
+  "indexId" | "batchSize" | "embedDocuments" | "embedQueries"
+>;
 type IndexUpdate = { pending: boolean; task: Promise<void> };
 
 /** Provider I/O stays outside SQLite transactions. Missing vectors remain durable work. */
@@ -91,7 +99,7 @@ export class LocalMemoryEmbeddings {
 
   afterWrite(index?: MemoryVectorIndex): void {
     const client = this.configured();
-    if (index && client) this.schedule(index, client);
+    if (index && client) this.schedule(index, client, true);
   }
 
   close(): Promise<void> | undefined {
@@ -102,13 +110,13 @@ export class LocalMemoryEmbeddings {
     if (tasks.length) return Promise.all(tasks).then(() => undefined);
   }
 
-  private schedule(index: MemoryVectorIndex, client: IndexClient): void {
+  private schedule(index: MemoryVectorIndex, client: IndexClient, changed = false): void {
     if (this.closing || this.coolingDown(client)) return;
     const jobs = this.jobs.get(index) ?? new Map<string, IndexUpdate>();
     this.jobs.set(index, jobs);
     const existing = jobs.get(client.indexId);
     if (existing) {
-      existing.pending = true;
+      if (changed) existing.pending = true;
       return;
     }
     const job: IndexUpdate = { pending: false, task: Promise.resolve() };
@@ -126,18 +134,38 @@ export class LocalMemoryEmbeddings {
     client: IndexClient,
     job: IndexUpdate,
   ): Promise<void> {
+    const limit = backfillPageSize(client);
     do {
       job.pending = false;
-      const documents = index.pending(client.indexId, 32);
-      if (documents.length === 0) return;
+      await this.sweep(index, client, limit);
+    } while (job.pending && !this.closing);
+  }
+
+  private async sweep(index: MemoryVectorIndex, client: IndexClient, limit: number): Promise<void> {
+    let after: MemoryVectorCursor | undefined;
+    do {
+      const documents = index.pending(client.indexId, limit, after);
+      if (!documents.length) return;
       const vectors = await client.embedDocuments(documents.map((document) => document.text));
       index.save(client.indexId, documents, vectors);
-    } while (job.pending && !this.closing);
+      if (documents.length < limit) return;
+      after = documents.at(-1);
+      // Give the daemon a chance to process interactive work between full pages.
+      await setImmediate();
+    } while (!this.closing);
   }
 
   private coolingDown(client: IndexClient): boolean {
     return Date.now() < (this.failures.get(client.indexId) ?? 0);
   }
+}
+
+function backfillPageSize(client: IndexClient): number {
+  const target = 32;
+  const size = client.batchSize;
+  return size && Number.isSafeInteger(size) && size > 0 && size <= target
+    ? target - (target % size)
+    : target;
 }
 
 function vectorMode(mode: NmgSearchParams["retrievalMode"]): MemoryVectorQuery["mode"] {

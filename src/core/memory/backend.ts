@@ -129,6 +129,11 @@ export interface MemoryBackend {
   ): MemoryChainProjection;
   openRead(): Promise<MemoryReadView>;
   scan(view: MemoryReadView, query: MemoryEntityQuery): Promise<MemoryEntity[]>;
+  /** Read the requested pages in order from the same snapshot. */
+  scanBatch?(
+    view: MemoryReadView,
+    queries: readonly MemoryEntityQuery[],
+  ): Promise<MemoryEntity[][]>;
   receipt(view: MemoryReadView, operationId: string): Promise<MemoryCommitReceipt | null>;
   closeRead(view: MemoryReadView): Promise<void>;
   commit(request: MemoryCommitRequest): Promise<MemoryCommitOutcome>;
@@ -153,6 +158,11 @@ export interface MemoryVectorDocument {
   text: string;
 }
 
+export interface MemoryVectorCursor {
+  createdAt: string;
+  id: string;
+}
+
 export interface MemoryVectorCandidate {
   entity: Extract<MemoryEntity, { kind: "memory" }>;
   recordScore: number;
@@ -162,7 +172,11 @@ export interface MemoryVectorCandidate {
 export interface MemoryVectorIndex {
   has(indexId: string, dimensions?: number): boolean;
   stats(indexId: string): { indexed: number; pending: number };
-  pending(indexId: string, limit: number): MemoryVectorDocument[];
+  pending(
+    indexId: string,
+    limit: number,
+    after?: MemoryVectorCursor,
+  ): (MemoryVectorDocument & MemoryVectorCursor)[];
   save(
     indexId: string,
     documents: readonly MemoryVectorDocument[],

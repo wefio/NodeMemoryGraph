@@ -20,6 +20,57 @@ import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
 
+test(
+  "one local write drains a vector backlog using whole provider batches",
+  { timeout: 5000 },
+  async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), "nmg-vector-backlog-"));
+    const path = join(directory, "memory.sqlite");
+    const requests: number[] = [];
+    let complete: (() => void) | undefined;
+    const received = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    t.mock.method(globalThis, "fetch", async (_url: unknown, init?: RequestInit) => {
+      const { input } = JSON.parse(String(init?.body)) as { input: string[] };
+      requests.push(input.length);
+      if (requests.reduce((total, size) => total + size, 0) === 67) complete!();
+      return Response.json({
+        data: input.map((_, index) => ({ index, embedding: [1, 1] })),
+      });
+    });
+    const service = new NmgService({
+      databasePath: path,
+      environment: {
+        NMG_EMBED_PROVIDER: "openai",
+        NMG_EMBED_API_KEY: "fixture-only",
+        NMG_EMBED_BASE_URL: "https://embedding.test/v1",
+        NMG_EMBED_BATCH_SIZE: "10",
+      },
+    });
+    t.after(async () => {
+      await service.close();
+      removeTempDirectory(directory);
+    });
+    await service.invoke("rememberBatch", {
+      operationId: "one-backlog",
+      items: Array.from({ length: 67 }, (_, i) => ({
+        statement: `The verification archive includes entry ${i}`,
+        nodeName: "Archive",
+      })),
+    });
+    await received;
+    await service.close();
+    assert.deepEqual(requests, [10, 10, 10, 10, 10, 10, 7]);
+    const db = new DatabaseSync(path, { readOnly: true });
+    try {
+      assert.equal(db.prepare("SELECT count(*) AS n FROM nmg_memory_vectors").get()?.n, 67);
+    } finally {
+      db.close();
+    }
+  },
+);
+
 test("default service migrates an old SQLite file before serving memory", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-default-migration-"));
   const databasePath = join(directory, "nmg.sqlite");

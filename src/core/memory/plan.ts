@@ -16,12 +16,18 @@ import {
 } from "./model.ts";
 import type { MemoryInput } from "./model.ts";
 
+const PLAN_PAGE_SIZE = 512;
+const PREFETCH_LIMIT = 8;
+
 /** One planning view plus uncommitted entities; ordered batch inputs observe prior inputs. */
 export class MemoryPlan {
   readonly changes = new Map<string, MemoryEntity>();
   readonly audit: MemoryWriteEvent[] = [];
   readonly backend: MemoryBackend;
   readonly view: MemoryReadView;
+  private readonly snapshotPages = new Map<string, MemoryEntity[]>();
+  private readonly changedKeys = new Map<string, Set<string>>();
+  private readonly changeOrder = new Map<string, number>();
 
   constructor(backend: MemoryBackend, view: MemoryReadView) {
     this.backend = backend;
@@ -29,7 +35,33 @@ export class MemoryPlan {
   }
 
   put(entity: MemoryEntity): void {
-    this.changes.set(`${entity.kind}:${entity.value.id}`, entity);
+    const id = entityKey(entity);
+    if (!this.changes.has(id)) this.changeOrder.set(id, this.changes.size);
+    this.changes.set(id, entity);
+    for (const query of entityLookups(entity)) {
+      const key = lookupKey(query)!;
+      const entries = this.changedKeys.get(key) ?? new Set<string>();
+      entries.add(id);
+      this.changedKeys.set(key, entries);
+    }
+  }
+
+  async prefetchRemember(inputs: readonly MemoryInput[]): Promise<void> {
+    if (inputs.length < 2 || !this.backend.scanBatch) return;
+    const queries = new Map<string, MemoryEntityQuery>();
+    for (const input of inputs) {
+      const { query: node } = this.nodeLookup(input);
+      const duplicate = duplicateLookup(input);
+      for (const query of [node, duplicate]) {
+        const key = JSON.stringify({ ...query, limit: PLAN_PAGE_SIZE, offset: 0 });
+        queries.set(key, { ...query, limit: PREFETCH_LIMIT });
+      }
+    }
+    const pages = await this.backend.scanBatch(this.view, [...queries.values()]);
+    [...queries.keys()].forEach((key, i) => {
+      const rows = pages[i]!;
+      if (rows.length < PREFETCH_LIMIT) this.snapshotPages.set(key, rows);
+    });
   }
 
   async record(id: string, sessionId?: string): Promise<MemoryRecord | null> {
@@ -38,18 +70,44 @@ export class MemoryPlan {
   }
 
   async find(query: MemoryEntityQuery): Promise<MemoryEntity[]> {
-    const base: MemoryEntity[] = [];
-    for (let offset = 0; ; offset += 512) {
-      const page = await this.backend.scan(this.view, { ...query, limit: 512, offset });
-      base.push(...page);
-      if (page.length < 512) break;
+    const base = new Map<string, MemoryEntity>();
+    for (let offset = 0; ; offset += PLAN_PAGE_SIZE) {
+      const page = await this.readPage({ ...query, limit: PLAN_PAGE_SIZE, offset });
+      for (const entity of page) {
+        const id = entityKey(entity);
+        if (!this.changes.has(id)) base.set(id, entity);
+      }
+      if (page.length < PLAN_PAGE_SIZE) break;
     }
-    const merged = new Map(base.map((entity) => [`${entity.kind}:${entity.value.id}`, entity]));
-    for (const [key, entity] of this.changes) {
-      merged.delete(key);
-      if (matches(entity, query)) merged.set(key, entity);
+    for (const entity of this.changedCandidates(query)) {
+      if (matches(entity, query)) base.set(entityKey(entity), entity);
     }
-    return [...merged.values()];
+    return [...base.values()];
+  }
+
+  private changedCandidates(query: MemoryEntityQuery): Iterable<MemoryEntity> {
+    const key = lookupKey(query);
+    const ids = query.ids
+      ? [...new Set(query.ids)].map((id) => `${query.kind}:${id}`)
+      : key === undefined
+        ? undefined
+        : [...(this.changedKeys.get(key) ?? [])];
+    if (!ids) return this.changes.values();
+    return ids
+      .filter((id) => this.changes.has(id))
+      .sort((a, b) => this.changeOrder.get(a)! - this.changeOrder.get(b)!)
+      .map((id) => this.changes.get(id)!);
+  }
+
+  private async readPage(query: MemoryEntityQuery): Promise<MemoryEntity[]> {
+    const key = JSON.stringify(query);
+    const cached = this.snapshotPages.get(key);
+    if (cached) return cached;
+    const rows = await this.backend.scan(this.view, query);
+    // Repeated empty and bounded reads are common within one write batch.
+    if (query.limit !== PLAN_PAGE_SIZE || (query.offset === 0 && rows.length < PLAN_PAGE_SIZE))
+      this.snapshotPages.set(key, rows);
+    return rows;
   }
 
   async remember(
@@ -61,12 +119,7 @@ export class MemoryPlan {
     input = await this.resolveStateAlias(input);
     const residence = memoryResidence(input);
     const sessionId = residence === "stg" ? (input.sessionId ?? undefined) : undefined;
-    const duplicates = await this.find({
-      kind: "memory",
-      exactText: input.statement,
-      scope: input.scope ?? {},
-      sessionId,
-    });
+    const duplicates = await this.find(duplicateLookup(input));
     const duplicate = duplicates.find(
       (entity) =>
         entity.kind === "memory" &&
@@ -77,7 +130,7 @@ export class MemoryPlan {
         entity.value.sessionId === (sessionId ?? null),
     );
     if (duplicate?.kind === "memory") return this.result(duplicate.value);
-    const node = await this.node(input, sessionId, now);
+    const node = await this.node(input, now);
     const id = memoryIdentity(this.backend.namespace, operationId, String(slot));
     const history = await this.history(input, `${id}_evidence`, now);
     const memory = newMemory(input, id, node.id, history.id, now);
@@ -113,7 +166,7 @@ export class MemoryPlan {
     if (memory.supersedesId || memory.stateKey) return [];
     const sessionId = memory.sessionId ?? undefined;
     const scope = serializeScope(memory.scope);
-    const rows = await this.backend.scan(this.view, {
+    const rows = await this.readPage({
       kind: "memory",
       nodeId: memory.nodeId,
       scope: memory.scope,
@@ -181,20 +234,25 @@ export class MemoryPlan {
     return alias?.kind === "stateAlias" ? { ...input, stateKey: alias.value.canonicalKey } : input;
   }
 
-  private async node(input: MemoryInput, sessionId: string | undefined, now: string) {
+  private nodeLookup(input: MemoryInput) {
     const residence = memoryResidence(input);
+    const name = input.nodeName.trim().toLocaleLowerCase("en-US");
     const nodeId = memoryIdentity(
       this.backend.namespace,
       "node",
-      input.nodeName.trim().toLocaleLowerCase("en-US"),
+      name,
       residence,
-      sessionId ?? "",
+      residence === "stg" ? (input.sessionId ?? "") : "",
     );
-    const nodes = await this.find(
-      residence === "ltg"
-        ? { kind: "node", nodeName: input.nodeName }
-        : { kind: "node", ids: [nodeId] },
-    );
+    const query: MemoryEntityQuery =
+      residence === "ltg" ? { kind: "node", nodeName: name } : { kind: "node", ids: [nodeId] };
+    return { nodeId, query };
+  }
+
+  private async node(input: MemoryInput, now: string) {
+    const residence = memoryResidence(input);
+    const { nodeId, query } = this.nodeLookup(input);
+    const nodes = await this.find(query);
     const active = nodes.flatMap((entity) =>
       entity.kind === "node" &&
       entity.value.status === "active" &&
@@ -316,6 +374,45 @@ export class MemoryPlan {
   }
 }
 
+function entityKey(entity: MemoryEntity): string {
+  return `${entity.kind}:${entity.value.id}`;
+}
+
+function duplicateLookup(input: MemoryInput): MemoryEntityQuery {
+  return {
+    kind: "memory",
+    exactText: normalizeStatement(input.statement),
+    scope: input.scope ?? {},
+    sessionId: memoryResidence(input) === "stg" ? (input.sessionId ?? undefined) : undefined,
+  };
+}
+
+function lookupKey(query: MemoryEntityQuery): string | undefined {
+  if (query.kind === "node" && query.nodeName)
+    return JSON.stringify(["node", query.nodeName.trim().toLocaleLowerCase("en-US")]);
+  if (query.kind === "history" && query.sourceMessageId)
+    return JSON.stringify(["history", query.sourceMessageId]);
+  if (query.kind === "memory" && query.scope) {
+    const scope = serializeScope(query.scope);
+    if (query.exactText !== undefined)
+      return JSON.stringify(["text", scope, normalizeStatement(query.exactText)]);
+    if (query.stateKey !== undefined) return JSON.stringify(["state", scope, query.stateKey]);
+  }
+  return undefined;
+}
+
+function entityLookups(entity: MemoryEntity): MemoryEntityQuery[] {
+  if (entity.kind === "node") return [{ kind: "node", nodeName: entity.value.canonicalName }];
+  if (entity.kind === "history" && entity.value.sourceMessageId)
+    return [{ kind: "history", sourceMessageId: entity.value.sourceMessageId }];
+  if (entity.kind !== "memory") return [];
+  const { statement, scope, stateKey } = entity.value;
+  return [
+    { kind: "memory", exactText: statement, scope },
+    ...(stateKey === null ? [] : [{ kind: "memory" as const, stateKey, scope }]),
+  ];
+}
+
 function matches(entity: MemoryEntity, query: MemoryEntityQuery): boolean {
   if (entity.kind !== query.kind || (query.ids && !query.ids.includes(entity.value.id)))
     return false;
@@ -323,6 +420,8 @@ function matches(entity: MemoryEntity, query: MemoryEntityQuery): boolean {
     return matchesMemory(entity.value, query);
   }
   if (!matchesMetadata(entity, query)) return false;
+  if (entity.kind === "history" && query.sourceMessageId)
+    return entity.value.sourceMessageId === query.sourceMessageId;
   if (
     entity.kind === "node" &&
     query.nodeName &&
@@ -354,6 +453,7 @@ function matchesMemory(memory: MemoryRecord, query: MemoryEntityQuery): boolean 
   if (query.stateKey !== undefined && memory.stateKey !== query.stateKey) return false;
   if (query.supersedesId && memory.supersedesId !== query.supersedesId) return false;
   return (
-    !query.exactText || normalizeStatement(memory.statement) === normalizeStatement(query.exactText)
+    query.exactText === undefined ||
+    normalizeStatement(memory.statement) === normalizeStatement(query.exactText)
   );
 }
