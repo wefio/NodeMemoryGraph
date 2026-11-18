@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { optionalNumber, requiredValue } from "./environment.ts";
+import { embeddingFormats, type EmbeddingFormats, type EmbeddingFormatStore } from "./formats.ts";
 import { embeddingHttpTransport } from "./http.ts";
 import type { EmbeddingProviderFactory, EmbeddingRequestOptions } from "./types.ts";
 
@@ -13,6 +14,7 @@ export interface GeminiEmbeddingClientOptions {
   dimensions?: number;
   timeoutMs?: number;
   chunkConcurrency?: number;
+  formatStore?: EmbeddingFormatStore;
 }
 
 /** Gemini batchEmbedContents adapter with retrieval-specific task types. */
@@ -25,6 +27,8 @@ export class GeminiEmbeddingClient {
   readonly profile = "gemini-retrieval";
   readonly timeoutMs: number;
   private readonly chunkConcurrency: number;
+  private readonly modelPath: string;
+  private readonly formats?: EmbeddingFormats;
 
   constructor(options: GeminiEmbeddingClientOptions) {
     this.apiKey = requiredValue(options.apiKey, "Gemini embedding API key");
@@ -33,6 +37,7 @@ export class GeminiEmbeddingClient {
       "",
     );
     this.model = options.model ?? "gemini-embedding-001";
+    this.modelPath = this.model.startsWith("models/") ? this.model : `models/${this.model}`;
     this.dimensions = options.dimensions;
     this.timeoutMs = Math.max(1, Math.floor(options.timeoutMs ?? 10_000));
     this.chunkConcurrency = Math.max(1, Math.floor(options.chunkConcurrency ?? 4));
@@ -40,6 +45,12 @@ export class GeminiEmbeddingClient {
       .update(JSON.stringify({ dimensions: this.dimensions ?? null, task: "retrieval" }))
       .digest("hex")
       .slice(0, 12)}`;
+    this.formats = embeddingFormats(options.formatStore, {
+      endpoint: `${this.baseUrl}/${this.modelPath}:batchEmbedContents`,
+      model: this.model,
+      indexId: this.indexId,
+      credential: this.apiKey,
+    });
   }
 
   embedQueries(inputs: string[], options?: EmbeddingRequestOptions): Promise<number[][]> {
@@ -60,8 +71,7 @@ export class GeminiEmbeddingClient {
     options?: EmbeddingRequestOptions,
   ): Promise<number[][]> {
     if (inputs.length === 0) return [];
-    const modelPath = this.model.startsWith("models/") ? this.model : `models/${this.model}`;
-    const url = `${this.baseUrl}/${modelPath}:batchEmbedContents`;
+    const url = `${this.baseUrl}/${this.modelPath}:batchEmbedContents`;
     const payload = await embeddingHttpTransport(url, this.apiKey, this.chunkConcurrency).json<{
       embeddings?: Array<{ values?: number[] }>;
     }>(
@@ -74,7 +84,7 @@ export class GeminiEmbeddingClient {
         },
         body: JSON.stringify({
           requests: inputs.map((text) => ({
-            model: modelPath,
+            model: this.modelPath,
             content: { parts: [{ text }] },
             taskType,
             ...(this.dimensions ? { outputDimensionality: this.dimensions } : {}),
@@ -94,13 +104,14 @@ export class GeminiEmbeddingClient {
         `embedding server returned ${vectors.length} vectors for ${inputs.length} inputs`,
       );
     }
+    this.formats?.noteNativeJson(taskType === "RETRIEVAL_DOCUMENT" ? "document" : "query");
     return vectors;
   }
 }
 
 export const geminiEmbeddingProvider: EmbeddingProviderFactory = {
   name: "gemini",
-  create(environment) {
+  create(environment, formatStore) {
     return new GeminiEmbeddingClient({
       apiKey: requiredValue(
         environment.NMG_EMBED_API_KEY ?? environment.GEMINI_API_KEY,
@@ -111,6 +122,7 @@ export const geminiEmbeddingProvider: EmbeddingProviderFactory = {
       dimensions: optionalNumber(environment.NMG_EMBED_DIMENSIONS),
       timeoutMs: optionalNumber(environment.NMG_EMBED_TIMEOUT_MS),
       chunkConcurrency: optionalNumber(environment.NMG_EMBED_CHUNK_CONCURRENCY),
+      formatStore,
     });
   },
 };

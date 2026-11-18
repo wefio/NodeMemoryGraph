@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { deriveAnswerOverlapMemoryIds, statementFingerprint } from "../core/feedback.ts";
 import type { PerfSnapshot } from "../core/perf.ts";
+import { localEmbeddingFormatStore } from "./embedding-format-store.ts";
 
 import { MAX_BOARD_DELIVERY_ENTRIES, parseBoardNotification } from "../core/board-notifications.ts";
 import {
@@ -1598,7 +1599,10 @@ export class NmgService {
   #configuredEmbeddingClient(): EmbeddingClient | undefined {
     if (this.#embeddingClient !== undefined) return this.#embeddingClient ?? undefined;
     try {
-      this.#embeddingClient = createEmbeddingClientFromEnv(this.#environment) ?? null;
+      this.#embeddingClient =
+        createEmbeddingClientFromEnv(this.#environment, {
+          formatStore: localEmbeddingFormatStore(this.#dataDirectory),
+        }) ?? null;
     } catch (error) {
       this.#embeddingClient = null;
       this.#embeddingError = error instanceof Error ? error.message : String(error);

@@ -1,4 +1,12 @@
 import { createHash } from "node:crypto";
+import {
+  embeddingFormats,
+  numericVectors,
+  type EmbeddingFormats,
+  type EmbeddingFormatStore,
+  type EmbeddingStorageVector,
+  type OpenAIEmbeddingRow,
+} from "./embedding-providers/formats.ts";
 import { embeddingHttpTransport } from "./embedding-providers/http.ts";
 import type { EmbeddingRequestOptions } from "./embedding-providers/types.ts";
 
@@ -21,6 +29,7 @@ export interface OpenAIEmbeddingClientOptions {
   chunkConcurrency?: number;
   documentBody?: Record<string, unknown>;
   timeoutMs?: number;
+  formatStore?: EmbeddingFormatStore;
 }
 
 const EMBEDDING_PROFILES: Record<
@@ -63,6 +72,7 @@ export class OpenAIEmbeddingClient {
   readonly queryBody: Record<string, unknown>;
   readonly documentBody: Record<string, unknown>;
   readonly timeoutMs: number;
+  readonly #formats?: EmbeddingFormats;
 
   constructor(options: OpenAIEmbeddingClientOptions = {}) {
     this.baseUrl = (options.baseUrl ?? "http://127.0.0.1:8000/v1").replace(/\/$/u, "");
@@ -97,15 +107,23 @@ export class OpenAIEmbeddingClient {
       queryBody: this.queryBody,
     });
     this.timeoutMs = Math.max(1, Math.floor(options.timeoutMs ?? 10_000));
+    this.#formats = embeddingFormats(options.formatStore, {
+      endpoint: `${this.baseUrl}/embeddings`,
+      model: this.#apiModel,
+      indexId: this.indexId,
+      credential: this.apiKey,
+      dimensions: this.dimensions,
+    });
   }
 
-  embedQueries(inputs: string[], options?: EmbeddingRequestOptions): Promise<number[][]> {
-    return this.request(
+  async embedQueries(inputs: string[], options?: EmbeddingRequestOptions): Promise<number[][]> {
+    const vectors = await this.request(
       inputs.map((input) => this.render(this.queryTemplate, input)),
       this.queryBody,
       false,
       options,
     );
+    return vectors.map(toNumberArray);
   }
 
   embedDocuments(inputs: string[], options?: EmbeddingRequestOptions): Promise<number[][]> {
@@ -116,7 +134,14 @@ export class OpenAIEmbeddingClient {
     return template.replaceAll("{instruction}", this.queryInstruction).replaceAll("{text}", text);
   }
 
-  embed(inputs: string[], options?: EmbeddingRequestOptions): Promise<number[][]> {
+  async embed(inputs: string[], options?: EmbeddingRequestOptions): Promise<number[][]> {
+    return (await this.embedDocumentsForStorage(inputs, options)).map(toNumberArray);
+  }
+
+  embedDocumentsForStorage(
+    inputs: string[],
+    options?: EmbeddingRequestOptions,
+  ): Promise<EmbeddingStorageVector[]> {
     return this.request(
       inputs.map((input) => this.render(this.documentTemplate, input)),
       this.documentBody,
@@ -135,10 +160,10 @@ export class OpenAIEmbeddingClient {
     extraBody: Record<string, unknown>,
     background: boolean,
     options: EmbeddingRequestOptions = {},
-  ): Promise<number[][]> {
+  ): Promise<EmbeddingStorageVector[]> {
     if (inputs.length === 0) return [];
     if (inputs.length <= this.batchSize)
-      return this.requestBatch(inputs, extraBody, background, options.signal);
+      return this.requestBatch(inputs, extraBody, background, options);
     return this.requestChunked(inputs, extraBody, background, options);
   }
 
@@ -153,12 +178,12 @@ export class OpenAIEmbeddingClient {
     extraBody: Record<string, unknown>,
     background: boolean,
     options: EmbeddingRequestOptions,
-  ): Promise<number[][]> {
+  ): Promise<EmbeddingStorageVector[]> {
     const chunks: string[][] = [];
     for (let offset = 0; offset < inputs.length; offset += this.batchSize) {
       chunks.push(inputs.slice(offset, offset + this.batchSize));
     }
-    const results: number[][][] = new Array(chunks.length);
+    const results: EmbeddingStorageVector[][] = new Array(chunks.length);
     const controller = new AbortController();
     const signal = options.signal
       ? AbortSignal.any([options.signal, controller.signal])
@@ -171,7 +196,10 @@ export class OpenAIEmbeddingClient {
     const worker = async () => {
       while (next < chunks.length) {
         const index = next++;
-        results[index] = await this.requestBatch(chunks[index], extraBody, background, signal);
+        results[index] = await this.requestBatch(chunks[index], extraBody, background, {
+          ...options,
+          signal,
+        });
       }
     };
     try {
@@ -187,17 +215,37 @@ export class OpenAIEmbeddingClient {
     inputs: string[],
     extraBody: Record<string, unknown>,
     background: boolean,
+    options: EmbeddingRequestOptions,
+  ): Promise<EmbeddingStorageVector[]> {
+    const load = (base64: boolean) =>
+      this.requestRows(inputs, extraBody, background, base64, options.signal);
+    if (!this.#formats || Object.hasOwn(extraBody, "encoding_format"))
+      return numericVectors(await load(false));
+    return this.#formats.load(
+      background ? "document" : "query",
+      load,
+      options.probeEncoding !== false,
+      options.signal,
+    );
+  }
+
+  private async requestRows(
+    inputs: string[],
+    extraBody: Record<string, unknown>,
+    background: boolean,
+    base64: boolean,
     signal?: AbortSignal,
-  ): Promise<number[][]> {
+  ): Promise<OpenAIEmbeddingRow[]> {
     const body = JSON.stringify({
       model: this.#apiModel,
       input: inputs,
       ...(this.dimensions ? { dimensions: this.dimensions } : {}),
       ...extraBody,
+      ...(base64 ? { encoding_format: "base64" } : {}),
     });
     const url = `${this.baseUrl}/embeddings`;
     const payload = await embeddingHttpTransport(url, this.apiKey, this.chunkConcurrency).json<{
-      data?: Array<{ index: number; embedding: number[] }>;
+      data?: OpenAIEmbeddingRow[];
     }>(
       url,
       {
@@ -216,8 +264,12 @@ export class OpenAIEmbeddingClient {
         `embedding server returned ${rows.length} vectors for ${inputs.length} inputs`,
       );
     }
-    return rows.sort((left, right) => left.index - right.index).map((row) => row.embedding);
+    return rows.sort((left, right) => left.index - right.index);
   }
+}
+
+function toNumberArray(vector: EmbeddingStorageVector): number[] {
+  return vector instanceof Float32Array ? Array.from(vector) : vector;
 }
 
 /**

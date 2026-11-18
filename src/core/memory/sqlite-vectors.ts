@@ -152,7 +152,7 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
   save(
     indexId: string,
     documents: readonly MemoryVectorDocument[],
-    vectors: readonly number[][],
+    vectors: readonly (number[] | Float32Array)[],
   ): void {
     validateVectors(vectors, documents.length);
     const dimensions = vectors[0]!.length;
@@ -272,7 +272,7 @@ const HIERARCHY_SCORE = `max(coalesce((
   WHERE member.namespace=m.namespace AND member.memory_id=m.id AND l.model=?
 ), 0))`;
 
-function validateVectors(vectors: readonly number[][], expected: number): void {
+function validateVectors(vectors: readonly (number[] | Float32Array)[], expected: number): void {
   const dimensions = vectors[0]?.length;
   if (
     vectors.length !== expected ||

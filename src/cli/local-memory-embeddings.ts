@@ -19,7 +19,7 @@ const hashingClient = {
 
 type IndexClient = Pick<
   EmbeddingClient,
-  "indexId" | "batchSize" | "embedDocuments" | "embedQueries"
+  "indexId" | "batchSize" | "embedDocuments" | "embedDocumentsForStorage" | "embedQueries"
 >;
 type IndexUpdate = { pending: boolean; task: Promise<void> };
 type QueryEmbedding = { semantic?: MemoryVectorQuery; reason?: string };
@@ -88,7 +88,7 @@ export class LocalMemoryEmbeddings {
   ): Promise<QueryEmbedding[]> {
     try {
       const load = (requestSignal?: AbortSignal) =>
-        client.embedQueries(texts, { signal: requestSignal });
+        client.embedQueries(texts, { signal: requestSignal, probeEncoding: !params.autoRecall });
       const vectors = budget ? await budget.run("embedding", load) : await load(signal);
       if (vectors.length !== texts.length) throw new Error("Invalid query vector batch");
       return vectors.map((vector) => {
@@ -171,7 +171,8 @@ export class LocalMemoryEmbeddings {
       const documents = index.pending(client.indexId, limit, after);
       if (!documents.length) return;
       const texts = [...new Set(documents.map((document) => document.text))];
-      const vectors = await client.embedDocuments(texts);
+      const vectors = await (client.embedDocumentsForStorage?.(texts) ??
+        client.embedDocuments(texts));
       if (vectors.length !== texts.length) throw new Error("Invalid document vector batch");
       const byText = new Map(texts.map((text, i) => [text, vectors[i]!]));
       index.save(

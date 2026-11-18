@@ -12,8 +12,11 @@ type Row = Record<string, string | number | Uint8Array | null>;
 
 const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
 
-export function encodeVector(vector: readonly number[]): Buffer {
-  if (LITTLE_ENDIAN) return Buffer.from(Float32Array.from(vector).buffer);
+export function encodeVector(vector: readonly number[] | Float32Array): Buffer {
+  if (LITTLE_ENDIAN) {
+    const packed = vector instanceof Float32Array ? vector : Float32Array.from(vector);
+    return Buffer.from(packed.buffer, packed.byteOffset, packed.byteLength);
+  }
   const buffer = Buffer.allocUnsafe(vector.length * Float32Array.BYTES_PER_ELEMENT);
   vector.forEach((value, index) => buffer.writeFloatLE(value, index * 4));
   return buffer;

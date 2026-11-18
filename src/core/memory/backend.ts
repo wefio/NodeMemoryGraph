@@ -180,7 +180,7 @@ export interface MemoryVectorIndex {
   save(
     indexId: string,
     documents: readonly MemoryVectorDocument[],
-    vectors: readonly number[][],
+    vectors: readonly (number[] | Float32Array)[],
   ): void;
   candidates(
     view: MemoryReadView,

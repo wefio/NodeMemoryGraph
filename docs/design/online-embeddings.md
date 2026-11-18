@@ -100,8 +100,35 @@ Local search embeds distinct query texts in provider-sized batches. Query and
 document traffic share the concurrency limit. A provider that allows concurrent
 requests has one slot reserved for queries. HTTP 429 applies the provider's
 `Retry-After` to both kinds of work in the same process. A recall deadline or a
-disconnected search cancels queued work, HTTP reads and retries. Providers
-return vectors as JSON arrays.
+disconnected search cancels queued work, HTTP reads and retries.
+
+## Local response format negotiation
+
+The local daemon keeps separate format records for each endpoint, API model,
+and query or document purpose. The record key also covers the embedding
+configuration and credential identity. Find the records in
+`<data-dir>/embedding-formats/`. Each JSON record shows the endpoint origin,
+model, purpose, format, reason and check time. Credentials, inputs and vectors
+stay out of the records.
+
+For an OpenAI-compatible endpoint, the first eligible request can ask for
+`encoding_format: "base64"`. The daemon checks the response order, dimensions
+and finite Float32 values before comparing it with a numeric response to the
+same request. Document vectors must match the Float32 values SQLite would
+store from JSON. Query vectors must match the numeric values used for scoring.
+Automatic recall can use an existing record and skips new probes.
+
+An explicit format rejection triggers one numeric fallback. The daemon records
+JSON after a successful fallback, a numeric response, or a verified difference
+in the vector values. Timeouts, HTTP 429, cancellations and other transport
+failures leave the decision alone. Records expire after seven days so that an
+endpoint can be checked again on later use.
+
+The native Gemini adapter keeps using `batchEmbedContents` with separate query
+and document tasks and records native JSON when a request succeeds. Format
+decisions do not affect the index identity or require re-embedding. For a
+confirmed Base64 document response the SQLite writer can store the decoded
+Float32 bytes directly.
 
 ## Core embedding interface
 

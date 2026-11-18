@@ -5,13 +5,14 @@ import type { EmbeddingProviderFactory } from "./types.ts";
 
 export const cloudflareEmbeddingProvider: EmbeddingProviderFactory = {
   name: "cloudflare",
-  create(environment) {
+  create(environment, formatStore) {
     const accountId = requiredValue(
       environment.NMG_CLOUDFLARE_ACCOUNT_ID ?? environment.CLOUDFLARE_ACCOUNT_ID,
       "Cloudflare account ID",
     );
     return new OpenAIEmbeddingClient({
       ...commonOpenAiOptions(environment),
+      formatStore,
       baseUrl:
         environment.NMG_EMBED_BASE_URL ??
         `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1`,
