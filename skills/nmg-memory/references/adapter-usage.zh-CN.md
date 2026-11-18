@@ -247,7 +247,7 @@ CLI 加 Skill 不会安装自动召回、状态承载或后台唤醒 hook，不�
 
 ## 与 Magpie 组合
 
-Magpie 在[集成设计](../../../docs/design/unified-architecture/magpie-integration.zh-CN.md)中保持完整独立 NMG 插件目标。
+Magpie 通过[独立插件](../../../magpie-plugin/README.zh-CN.md)提供网关召回、工具与管理页。调用工具使用当前对话的 `NMG_BINDING`。独立工具连接先通过 `nmg_session action=open` 创建自己的会话。
 本文不为尚未交付的绑定编造安装命令。经过验证的组合按操作选择一个效果所有者，接续获准会话／披露上下文，
 保留各插件完整能力，同时避免重复效果。名称相同不表示会话已关联；GUI、用量与追踪属于独立增强。
 拟议的 pi durable 云端绑定同样是设计目标，不是已安装的本地适配器。

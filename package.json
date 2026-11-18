@@ -57,10 +57,10 @@
     "cli": "node --experimental-strip-types src/cli/main.ts",
     "rcp": "node --experimental-strip-types src/rcp/cli/main.ts",
     "tutorial:first-recall": "node --experimental-strip-types scripts/tutorial-first-recall.ts",
-    "lint": "eslint src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ opencode-plugin/ codex-plugin/ tests/ evals/ scripts/ tools/",
-    "lint:fix": "eslint --fix src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ opencode-plugin/ codex-plugin/ tests/ evals/ scripts/ tools/",
-    "format": "prettier --write \"src/**/*.ts\" \".pi/**/*.ts\" \"workbuddy-plugin/**/*.ts\" \"opencode-plugin/**/*.ts\" \"codex-plugin/**/*.ts\" \"tests/**/*.ts\" \"evals/**/*.ts\" \"scripts/**/*.ts\" \"tools/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \".pi/**/*.ts\" \"workbuddy-plugin/**/*.ts\" \"opencode-plugin/**/*.ts\" \"codex-plugin/**/*.ts\" \"tests/**/*.ts\" \"evals/**/*.ts\" \"scripts/**/*.ts\" \"tools/**/*.ts\"",
+    "lint": "eslint src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ opencode-plugin/ codex-plugin/ magpie-plugin/ tests/ evals/ scripts/ tools/",
+    "lint:fix": "eslint --fix src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ opencode-plugin/ codex-plugin/ magpie-plugin/ tests/ evals/ scripts/ tools/",
+    "format": "prettier --write \"src/**/*.ts\" \".pi/**/*.ts\" \"workbuddy-plugin/**/*.ts\" \"opencode-plugin/**/*.ts\" \"codex-plugin/**/*.ts\" \"magpie-plugin/**/*.ts\" \"tests/**/*.ts\" \"evals/**/*.ts\" \"scripts/**/*.ts\" \"tools/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \".pi/**/*.ts\" \"workbuddy-plugin/**/*.ts\" \"opencode-plugin/**/*.ts\" \"codex-plugin/**/*.ts\" \"magpie-plugin/**/*.ts\" \"tests/**/*.ts\" \"evals/**/*.ts\" \"scripts/**/*.ts\" \"tools/**/*.ts\"",
     "test:coverage": "c8 --check-coverage --lines 0.01 node --experimental-strip-types --test --test-concurrency=2 \"tests/cli/**/*.test.ts\" \"tests/core/**/*.test.ts\" \"tests/docker/**/*.test.ts\" \"tests/docs/**/*.test.ts\" \"tests/extensions/**/*.test.ts\" \"tests/guardrails/**/*.test.ts\" \"tests/integration/**/*.test.ts\" \"tests/lab/**/*.test.ts\" \"tests/prompts/**/*.test.ts\" \"tests/rcp/**/*.test.ts\" \"tests/scripts/**/*.test.ts\" \"tests/skills/**/*.test.ts\" \"tests/support/**/*.test.ts\" \"tests/tools/**/*.test.ts\"",
     "perf:hotspots": "node --experimental-strip-types scripts/perf-hotspots.ts",
     "eval:controller-shadow": "node --experimental-strip-types evals/controller-shadow/report.ts",
@@ -130,7 +130,9 @@
     "rtm:check": "node --experimental-strip-types tools/rtm-check.ts",
     "verify:onlion": "cd onlion && npm run verify",
     "codex:build": "npm run prompts:generate && node --experimental-strip-types scripts/build-codex-plugin.ts",
-    "codex:package": "npm run prompts:generate && node --experimental-strip-types scripts/build-codex-plugin.ts --pack"
+    "codex:package": "npm run prompts:generate && node --experimental-strip-types scripts/build-codex-plugin.ts --pack",
+    "magpie:build": "npm run prompts:generate && node --experimental-strip-types scripts/build-magpie-plugin.ts",
+    "magpie:package": "npm run prompts:generate && node --experimental-strip-types scripts/build-magpie-plugin.ts --pack"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",

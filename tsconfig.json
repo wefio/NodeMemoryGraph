@@ -21,6 +21,7 @@
     "tools/repo-context.ts",
     "tools/agent-verify.ts",
     "codex-plugin/**/*.ts",
+    "magpie-plugin/**/*.ts",
     "scripts/build-codex-plugin.ts"
   ]
 }

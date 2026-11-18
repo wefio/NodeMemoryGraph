@@ -72,6 +72,15 @@ export class LanceMemoryBackend implements MemoryBackend {
     }
   }
 
+  async counts(view: MemoryReadView): Promise<{ memories: number; nodes: number }> {
+    const table = this.reader(view);
+    const [memories, nodes] = await Promise.all([
+      table.countRows("kind = 'memory'"),
+      table.countRows("kind = 'node'"),
+    ]);
+    return { memories, nodes };
+  }
+
   async openRead(): Promise<MemoryReadView> {
     this.assertOpen();
     const head = await this.published();

@@ -44,6 +44,8 @@ The [Codex package](../../codex-plugin/README.md) combines native hooks and MCP
 in one adapter. Its [native exercise](../experiments/runtime/codex-plugin-capabilities-2026-11-13.md)
 records artifact installation and multi-session evidence.
 
+[Magpie](../../magpie-plugin/README.md) supplies budgeted recall, state and notices through gateway hooks and shared tools through MCP. Its lifecycle evidence covers gateway requests. Idle wake needs another host, and per-agent options select native lifecycle owners.
+
 ## Matrix
 
 | Capability | Pi | OpenCode | WorkBuddy | MCP | DSH | Kimi | Codex |

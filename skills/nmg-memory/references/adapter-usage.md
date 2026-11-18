@@ -307,8 +307,9 @@ wake, fork/reset/reconnect and desktop loading need host-specific evidence.
 
 ## Combine with Magpie
 
-Magpie remains a complete independent NMG plugin target in the
-[integration design](../../../docs/design/unified-architecture/magpie-integration.md).
+The [Magpie plugin](../../../magpie-plugin/README.md) supplies gateway recall,
+shared tools and management. Use the current conversation’s `NMG_BINDING` for
+tools, or open a separate session through `nmg_session action=open`.
 This guide does not invent an installation command for that undelivered binding.
 For validated combinations, select one effect owner per operation and share
 an authorized session/disclosure context. Preserve each plugin's full capability

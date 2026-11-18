@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
+import type { EmbeddingAttempt, EmbeddingAttemptObserver } from "./types.ts";
 
 const RETRY_DELAYS_MS = [150, 500];
 const transports = new Map<string, EmbeddingHttpTransport>();
@@ -18,6 +19,7 @@ type RequestOptions = {
   signal?: AbortSignal;
   background: boolean;
   retry?: boolean;
+  observation?: { model: string; observe: EmbeddingAttemptObserver };
 };
 
 type Waiter = {
@@ -82,8 +84,12 @@ class EmbeddingHttpTransport {
       try {
         signal.throwIfAborted();
         backoff = this.throttleUntil - Date.now();
-        if (backoff <= 0)
-          return await abortable(this.fetchJson<T>(url, init, signal, retryDelay), signal);
+        if (backoff <= 0) {
+          const run = () => abortable(this.fetchJson<T>(url, init, signal, retryDelay), signal);
+          return await (options.observation
+            ? observeAttempt(run, options.observation, options.signal)
+            : run());
+        }
         if (backoff >= options.timeoutMs)
           throw new EmbeddingHttpError(
             429,
@@ -154,6 +160,31 @@ class EmbeddingHttpTransport {
     queue.delete(next);
     next.start();
     return true;
+  }
+}
+
+async function observeAttempt<T>(
+  run: () => Promise<T>,
+  { model, observe }: NonNullable<RequestOptions["observation"]>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const started = performance.now();
+  let outcome: EmbeddingAttempt["outcome"] = "success";
+  try {
+    return await run();
+  } catch (error) {
+    outcome = signal?.aborted ? "cancelled" : "failure";
+    throw error;
+  } finally {
+    try {
+      observe({
+        model,
+        durationMs: performance.now() - started,
+        outcome,
+      });
+    } catch {
+      // Reporting cannot delay retries or change the provider result.
+    }
   }
 }
 

@@ -3,7 +3,11 @@ import { createHash } from "node:crypto";
 import { optionalNumber, requiredValue } from "./environment.ts";
 import { embeddingFormats, type EmbeddingFormats, type EmbeddingFormatStore } from "./formats.ts";
 import { embeddingHttpTransport } from "./http.ts";
-import type { EmbeddingProviderFactory, EmbeddingRequestOptions } from "./types.ts";
+import type {
+  EmbeddingAttemptObserver,
+  EmbeddingProviderFactory,
+  EmbeddingRequestOptions,
+} from "./types.ts";
 
 type GeminiTaskType = "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY";
 
@@ -15,6 +19,7 @@ export interface GeminiEmbeddingClientOptions {
   timeoutMs?: number;
   chunkConcurrency?: number;
   formatStore?: EmbeddingFormatStore;
+  observeAttempt?: EmbeddingAttemptObserver;
 }
 
 /** Gemini batchEmbedContents adapter with retrieval-specific task types. */
@@ -29,6 +34,7 @@ export class GeminiEmbeddingClient {
   private readonly chunkConcurrency: number;
   private readonly modelPath: string;
   private readonly formats?: EmbeddingFormats;
+  private readonly observeAttempt?: EmbeddingAttemptObserver;
 
   constructor(options: GeminiEmbeddingClientOptions) {
     this.apiKey = requiredValue(options.apiKey, "Gemini embedding API key");
@@ -41,6 +47,7 @@ export class GeminiEmbeddingClient {
     this.dimensions = options.dimensions;
     this.timeoutMs = Math.max(1, Math.floor(options.timeoutMs ?? 10_000));
     this.chunkConcurrency = Math.max(1, Math.floor(options.chunkConcurrency ?? 4));
+    this.observeAttempt = options.observeAttempt;
     this.indexId = `gemini:${this.model}@${createHash("sha256")
       .update(JSON.stringify({ dimensions: this.dimensions ?? null, task: "retrieval" }))
       .digest("hex")
@@ -96,6 +103,7 @@ export class GeminiEmbeddingClient {
         timeoutMs: this.timeoutMs,
         signal: options?.signal,
         retry: false,
+        observation: this.observeAttempt && { model: this.model, observe: this.observeAttempt },
       },
     );
     const vectors = (payload.embeddings ?? []).map((embedding) => embedding.values ?? []);
@@ -111,7 +119,7 @@ export class GeminiEmbeddingClient {
 
 export const geminiEmbeddingProvider: EmbeddingProviderFactory = {
   name: "gemini",
-  create(environment, formatStore) {
+  create(environment, options) {
     return new GeminiEmbeddingClient({
       apiKey: requiredValue(
         environment.NMG_EMBED_API_KEY ?? environment.GEMINI_API_KEY,
@@ -122,7 +130,7 @@ export const geminiEmbeddingProvider: EmbeddingProviderFactory = {
       dimensions: optionalNumber(environment.NMG_EMBED_DIMENSIONS),
       timeoutMs: optionalNumber(environment.NMG_EMBED_TIMEOUT_MS),
       chunkConcurrency: optionalNumber(environment.NMG_EMBED_CHUNK_CONCURRENCY),
-      formatStore,
+      ...options,
     });
   },
 };

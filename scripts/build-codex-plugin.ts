@@ -1,40 +1,13 @@
 import { build } from "esbuild";
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { parseArgs, promisify } from "node:util";
+import { parseArgs } from "node:util";
+
+import { packPlugin, preparePluginOutput } from "../tools/parts/plugin-output.ts";
 
 const root = resolve(import.meta.dirname, "..");
-
-async function prepareOutput(output: string): Promise<string> {
-  const directory = resolve(output, "plugin");
-  if (relative(resolve(output), directory) !== "plugin")
-    throw new Error("Invalid plugin output path");
-  try {
-    if ((await lstat(directory)).isSymbolicLink())
-      throw new Error("Refusing to replace a linked plugin directory");
-    const marker = JSON.parse(await readFile(join(directory, ".nmg-build.json"), "utf8"));
-    if (marker.owner !== "nmg-codex-plugin")
-      throw new Error("Refusing to replace an unmanaged plugin directory");
-    await rm(directory, { recursive: true });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    try {
-      await readdir(directory);
-      throw new Error("Refusing to replace an unmanaged plugin directory", { cause: error });
-    } catch (missing) {
-      if ((missing as NodeJS.ErrnoException).code !== "ENOENT") throw missing;
-    }
-  }
-  await mkdir(directory, { recursive: true });
-  await writeFile(
-    join(directory, ".nmg-build.json"),
-    JSON.stringify({ owner: "nmg-codex-plugin" }),
-  );
-  return directory;
-}
 
 async function linkSkillOwners(
   source: string,
@@ -70,7 +43,7 @@ export async function buildCodexPlugin(options: {
   revision?: string;
 }) {
   const output = resolve(options.output);
-  const directory = await prepareOutput(output);
+  const directory = await preparePluginOutput(output, "nmg-codex-plugin");
   const source = join(root, "codex-plugin");
   for (const name of [
     ".codex-plugin",
@@ -111,27 +84,9 @@ export async function buildCodexPlugin(options: {
   const sha256 = createHash("sha256")
     .update(await readFile(join(directory, "scripts", "nmg.mjs")))
     .digest("hex");
-  let archive: string | undefined;
-  if (options.pack) {
-    const npm = process.env.npm_execpath;
-    if (!npm) throw new Error("Run packaging through npm run codex:package");
-    const { stdout } = await promisify(execFile)(
-      process.execPath,
-      [npm, "pack", "--ignore-scripts", "--pack-destination", output, "--json"],
-      { cwd: directory, windowsHide: true },
-    );
-    const packed = JSON.parse(stdout) as Array<{
-      filename: string;
-      files: Array<{ path: string }>;
-    }>;
-    if (
-      packed.length !== 1 ||
-      !packed[0]?.files.some((file) => file.path === ".codex-plugin/plugin.json")
-    ) {
-      throw new Error("Plugin archive is missing its Codex manifest");
-    }
-    archive = join(output, packed[0].filename);
-  }
+  const archive = options.pack
+    ? await packPlugin(directory, output, ".codex-plugin/plugin.json")
+    : undefined;
   const receipt = { directory, archive, sha256, bundledInputs: inputs.length };
   await writeFile(join(output, "build-receipt.json"), JSON.stringify(receipt, null, 2) + "\n");
   return receipt;

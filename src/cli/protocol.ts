@@ -189,6 +189,7 @@ const RPC_DESCRIPTOR_SOURCE = {
   sessionActiveGraph: { optionalCapability: "session-active-graph" },
   shutdown: {},
   status: {},
+  operator: {},
 } as const satisfies Record<string, NmgRpcDescriptor>;
 
 for (const descriptor of Object.values(RPC_DESCRIPTOR_SOURCE)) Object.freeze(descriptor);
@@ -1012,6 +1013,7 @@ export interface NmgStateResult {
 export type NmgMethodResult = {
   hello: NmgHelloResult;
   status: NmgStatusResult;
+  operator: Record<string, unknown>;
   remember: RememberResult;
   rememberBatch: { results: RememberResult[] };
   resolveRemember:

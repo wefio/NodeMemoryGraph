@@ -32,6 +32,7 @@ test("every RPC method is exposed via the CLI or is intentionally RPC-only", () 
   // host/import boundary. None is an ordinary interactive CLI command.
   const rpcOnly: readonly NmgMethod[] = [
     "hello",
+    "operator",
     "recordActiveGraphAttribution",
     "recordFeedback",
     "rememberBatch",

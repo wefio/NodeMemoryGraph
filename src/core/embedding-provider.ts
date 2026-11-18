@@ -3,7 +3,11 @@ import { geminiEmbeddingProvider } from "./embedding-providers/gemini.ts";
 import { jinaEmbeddingProvider } from "./embedding-providers/jina.ts";
 import { openAiEmbeddingProvider } from "./embedding-providers/openai.ts";
 import type { EmbeddingFormatStore } from "./embedding-providers/formats.ts";
-import type { EmbeddingClient, EmbeddingProviderFactory } from "./embedding-providers/types.ts";
+import type {
+  EmbeddingAttempt,
+  EmbeddingClient,
+  EmbeddingProviderFactory,
+} from "./embedding-providers/types.ts";
 
 const PROVIDERS = {
   cloudflare: cloudflareEmbeddingProvider,
@@ -18,15 +22,19 @@ export type { EmbeddingClient } from "./embedding-providers/types.ts";
 /** Builds the configured local or hosted embedding client without exposing keys. */
 export function createEmbeddingClientFromEnv(
   environment: NodeJS.ProcessEnv = process.env,
-  options: { required?: boolean; formatStore?: EmbeddingFormatStore } = {},
+  options: {
+    required?: boolean;
+    formatStore?: EmbeddingFormatStore;
+    observeAttempt?: (provider: EmbeddingProvider, attempt: EmbeddingAttempt) => void;
+  } = {},
 ): EmbeddingClient | undefined {
-  const name = configuredProvider(environment);
-  if (!name) {
-    if (!options.required) return undefined;
-    return openAiEmbeddingProvider.create(environment, options.formatStore);
-  }
-  const provider: EmbeddingProviderFactory = PROVIDERS[name];
-  return provider.create(environment, options.formatStore);
+  const name = configuredProvider(environment) ?? (options.required ? "openai" : undefined);
+  if (!name) return undefined;
+  const observe = options.observeAttempt;
+  return PROVIDERS[name].create(environment, {
+    formatStore: options.formatStore,
+    observeAttempt: observe && ((attempt) => observe(name, attempt)),
+  });
 }
 
 export function configuredProvider(

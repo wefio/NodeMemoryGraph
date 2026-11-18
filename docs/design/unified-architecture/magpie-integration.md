@@ -5,13 +5,23 @@
 **Status:** draft
 **Authority:** [Harness integration](harness-integration.md#magpie-gateway-binding)
 
+
+## First implementation
+
+The package uses Magpie 0.1.4338 community declarations and NMG's schema-validated
+capability catalog. The gateway hook, standalone tools and operator page run in
+an isolated host. A sealed, expiring handle connects the gateway and tools.
+Per-agent options suppress native-owned lifecycle effects. Cross-entry state
+sharing remains unverified.
+[Installation](../../../magpie-plugin/README.md)
+
 ## Boundary and upstream interfaces
 
 Magpie is an additional integration candidate at the model gateway boundary. It is not the Agent executor: a client Harness still owns tool declarations, tool execution and inference rounds. This binding can extend recall to clients behind Magpie without requiring a native NMG plugin in each client. It does not replace the pi durable cloud host.
 
-The [community plugin repository](https://github.com/magpie-community/plugins#gateway-hooks) documents asynchronous Bun gateway hooks. The [target host contract](https://github.com/yetone/magpie/blob/v0.1.3545/docs/subsystems/gateway-request-hooks.md) defines `onRequest(body, ctx)` for context changes and bounded best-effort `onResponse(reply, ctx)` completion observation. `ctx.state` lasts for one request, not a durable conversation. The gateway rejects hook changes to tools, tool choice, model or stream settings. The [interface and adapter map](magpie-capabilities.md) pins the source review to Magpie `0.1.3545`, separates public interfaces from platform internals and identifies concrete complementary paths. Example memory plugins do not establish NMG compatibility.
+The [community plugin repository](https://github.com/magpie-community/plugins#gateway-hooks) documents asynchronous Bun gateway hooks. The [target host contract](https://github.com/yetone/magpie/blob/v0.1.4338/docs/subsystems/gateway-request-hooks.md) defines `onRequest(body, ctx)` for context changes and bounded best-effort `onResponse(reply, ctx)` completion observation. `ctx.state` lasts for one request, not a durable conversation. The gateway rejects hook changes to tools, tool choice, model or stream settings. The [interface and adapter map](magpie-capabilities.md) pins the source review to Magpie `0.1.4338`, separates public interfaces from platform internals and identifies concrete complementary paths. Example memory plugins do not establish NMG compatibility.
 
-Use a `magpie.hooks` package for asynchronous NMG service calls. The synchronous gateway middleware has a different runtime and must not be treated as that service client. A [tools plugin](https://github.com/magpie-community/plugins#tools-for-every-agent) exposes tools through Magpie's MCP server; alternatively the client can use NMG's MCP endpoint directly. Neither approach transfers execution ownership to the gateway hook. Installation and publication are separate work, not delivered by this design.
+Use a `magpie.hooks` package for asynchronous NMG service calls. The synchronous gateway middleware has a different runtime. A [tools plugin](https://github.com/magpie-community/plugins#tools-for-every-agent) exposes tools through Magpie's MCP server. Clients may also connect directly to NMG MCP. Tool execution remains with the client and its MCP server. The [installation guide](../../../magpie-plugin/README.md) owns distribution steps.
 
 ## Complete plugin and per-session activation
 

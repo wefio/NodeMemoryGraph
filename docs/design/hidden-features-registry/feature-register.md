@@ -9,6 +9,7 @@
 | Feature | Gate(s) | Default | Values / meaning | Location | Owner | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | Versioned answer attribution | hello `versioned-answer-attribution` | opt-in | Owner/version-checked answer overlap | service, Codex Stop | [Contract](../../../codex-plugin/README.md) | native fixture verified |
+| Magpie | Install; `nativeCapabilities`, `coordination` | opt-in; board delivery on | Gateway context, tools, managed embeddings | Magpie plugin | [Guide](../../../magpie-plugin/README.md) | private host verified |
 | Unified memory backend | `nmg daemon migrate` or `NmgServiceOptions.memoryBackend` | SQLite follows activation marker | activated SQLite shares coordination file; LanceDB uses URI | `src/core/memory`, `src/cli/portable-memory.ts` | [Backend](../unified-architecture/native-backends.md), [activation](../unified-architecture/legacy-graph-migration.md) | local copy and S3 fixture verified |
 | Omni HTTP | `NMG_OMNI_API_URL`, `NMG_OMNI_API_TOKEN`, `NMG_OMNI_API_NAMESPACE` | required | Namespaced HTTP Add/Search | `evals/omnimemeval/nmg_client.py` | [Integration guide](../../../evals/omnimemeval/README.md) | HTTP-only |
 | Board presence, events and status | `board-events`, `board-agent-activity`, `board-agent-presence`, `board-wake-batches` | Board gate | History, notices, tasks, session presence and processing | Store, CLI/hosts | [Contract](../board-event-records.md) | source verification ≠ deployment |

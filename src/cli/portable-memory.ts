@@ -32,7 +32,14 @@ import { openLocalMemory } from "./local-memory-migration.ts";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
 
 const METHODS = new Set<NmgMethod>(["remember", "rememberBatch", "search", "get", "deleteMemory"]);
-const LOCAL_METHODS = new Set<NmgMethod>(["hello", "status", "taskBoard", "taskRun", "shutdown"]);
+const LOCAL_METHODS = new Set<NmgMethod>([
+  "hello",
+  "status",
+  "operator",
+  "taskBoard",
+  "taskRun",
+  "shutdown",
+]);
 const SESSION_METHODS = new Set<NmgMethod>([
   "state",
   "sessionActiveGraph",
@@ -497,6 +504,23 @@ export class PortableMemoryService {
     if (this.local) await this.engine();
   }
 
+  async counts() {
+    await this.engine();
+    const backend = this.backend!;
+    if (!backend.counts) return null;
+    const view = await backend.openRead();
+    try {
+      return {
+        ...(await backend.counts(view)),
+        revision: view.revision,
+        namespace: backend.namespace,
+        backend: backend.kind,
+      };
+    } finally {
+      await backend.closeRead(view);
+    }
+  }
+
   embeddingHealth(indexId: string) {
     const stats = this.backend?.vectorIndex?.stats(indexId);
     return stats
@@ -508,6 +532,13 @@ export class PortableMemoryService {
           status: stats.pending ? "running" : "ready",
         }
       : null;
+  }
+
+  async prepareEmbeddingIndex(client: EmbeddingClient, signal: AbortSignal): Promise<void> {
+    const engine = await this.engine();
+    const index = engine.backend.vectorIndex;
+    if (!index) throw new Error("This backend does not support managed embedding indexes");
+    await this.embeddings.prepareIndex(index, client, signal);
   }
 
   private engine(): Promise<MemoryEngine> {
