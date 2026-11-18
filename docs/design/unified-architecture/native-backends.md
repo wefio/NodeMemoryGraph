@@ -113,10 +113,14 @@ both table groups share one file; with object memory, only coordination uses it.
 
 This API supports remember/batch, search, exact get and withdrawal. `MemoryEngine`
 also supports explicit node links and bounded graph expansion. The capability
-handshake advertises the supported subset. Search supports explicit history,
-source actor and node filters. Attached file references from a full SQLite
-snapshot are returned with visible memories. The activated local SQLite profile
-also supports session AG, project recall, versioned answer attribution, and
+handshake advertises the supported subset. SQLite stores one row per edge and
+indexes its source and target separately. Neighbor reads merge the two
+endpoint ranges by edge ID before applying the page limit.
+
+Search supports explicit history, source actor and node filters. Attached file
+references from a full SQLite snapshot are returned with visible memories. The
+activated local SQLite profile also supports session AG, project recall,
+versioned answer attribution, and
 vector and hybrid retrieval. Its SQLite backend owns the model-keyed record
 index plus candidate queries. The engine combines those candidates with full
 text and applies visibility and graph rules. The host supplies embeddings.

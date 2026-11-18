@@ -64,3 +64,7 @@ Batching only the RPC and transaction still repeated planning reads for each
 item. The backend groups bounded lookups and mutations while the engine applies
 batch inputs in order. For embedding backfill, advancing through ordered pages
 lets one local sweep visit an already-indexed prefix at most once.
+
+SQLite's ordered query for either edge endpoint could still scan the namespace's
+edges. Separate endpoint ranges let it keep the same edge order and page limit.
+Both partial indexes contain only edge entries and share the same stored edge.

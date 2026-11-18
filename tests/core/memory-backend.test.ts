@@ -136,6 +136,108 @@ test("SQLite write lookups constrain the indexed name or node and exact scope be
   }
 });
 
+test("SQLite reads existing graph edges from both indexed endpoints in ID order", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-edge-indexes-"));
+  const path = join(directory, "memory.sqlite");
+  const options = { kind: "sqlite", path, namespace: "tenant" } as const;
+  const original = await openMemoryBackend(options);
+  const engine = new MemoryEngine(original);
+  const [hub, incoming, outgoing] = await engine.rememberMany([
+    { statement: "Coriander identifies the hub", nodeName: "Hub" },
+    { statement: "Velvet identifies the incoming node", nodeName: "Incoming" },
+    { statement: "Turquoise identifies the outgoing node", nodeName: "Outgoing" },
+  ]);
+  const inbound = await engine.linkNodes({
+    sourceNodeId: incoming!.node.id,
+    targetNodeId: hub!.node.id,
+    type: "related_to",
+  });
+  const outbound = await engine.linkNodes({
+    sourceNodeId: hub!.node.id,
+    targetNodeId: outgoing!.node.id,
+    type: "related_to",
+  });
+  const view = await original.openRead();
+  const revision = view.revision;
+  await original.closeRead(view);
+  const loop = { ...inbound, id: "imported-loop", sourceNodeId: hub!.node.id };
+  assert.equal(
+    (
+      await original.commit({
+        expectedRevision: revision,
+        operationId: "import-directed-edges",
+        requestHash: "test-edges",
+        resultIds: [],
+        changes: {
+          upsert: [
+            { kind: "edge", value: { ...inbound, direction: "source->target" } },
+            { kind: "edge", value: loop },
+          ],
+        },
+      })
+    ).status,
+    "committed",
+  );
+  await original.close();
+
+  const raw = new DatabaseSync(path);
+  try {
+    raw.exec(
+      "DROP INDEX IF EXISTS nmg_memory_edge_source; DROP INDEX IF EXISTS nmg_memory_edge_target",
+    );
+  } finally {
+    raw.close();
+  }
+  const backend = await openMemoryBackend(options);
+  t.after(async () => {
+    await backend.close();
+    removeTempDirectory(directory);
+  });
+  const prepare = DatabaseSync.prototype.prepare;
+  let neighborSql = "";
+  t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+    if (sql.startsWith("SELECT") && sql.includes("kind = 'edge'")) neighborSql = sql;
+    return prepare.call(this, sql);
+  });
+  const query = { kind: "edge", connectedTo: hub!.node.id } as const;
+  const snapshot = await backend.openRead();
+  try {
+    const ids = [inbound.id, outbound.id, loop.id].sort();
+    assert.deepEqual(
+      (await backend.scan(snapshot, query)).map(({ value }) => value.id),
+      ids,
+    );
+    const db = new DatabaseSync(path, { readOnly: true });
+    try {
+      const plan = db
+        .prepare(`EXPLAIN QUERY PLAN ${neighborSql}`)
+        .all(128, 0)
+        .map(({ detail }) => detail)
+        .join("\n");
+      assert.match(plan, /nmg_memory_edge_source \(namespace=\? AND source=\?\)/);
+      assert.match(plan, /nmg_memory_edge_target \(namespace=\? AND target=\?\)/);
+    } finally {
+      db.close();
+    }
+    const [edges, nodes] = await backend.scanBatch!(snapshot, [
+      { ...query, limit: 1, offset: 1 },
+      { kind: "node", ids: [hub!.node.id] },
+    ]);
+    assert.deepEqual(
+      edges?.map(({ value }) => value.id),
+      ids.slice(1, 2),
+    );
+    assert.equal(nodes?.[0]?.value.id, hub!.node.id);
+  } finally {
+    await backend.closeRead(snapshot);
+  }
+  const found = await new MemoryEngine(backend).search("coriander", { graphHops: 1, limit: 3 });
+  assert.deepEqual(
+    found.results.map(({ node }) => node.id),
+    [hub!.node.id, outgoing!.node.id],
+  );
+});
+
 test("SQLite upgrades existing text indexes and replaces both projections at their original rowids", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-fts-keys-"));
   t.after(() => removeTempDirectory(directory));

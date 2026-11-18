@@ -113,6 +113,10 @@ export class SqliteMemoryBackend implements MemoryBackend {
         ON nmg_memory_entities(namespace, kind, name, scope, id);
       CREATE INDEX IF NOT EXISTS nmg_memory_state
         ON nmg_memory_entities(namespace, statekey, scope, id) WHERE kind='memory';
+      CREATE INDEX IF NOT EXISTS nmg_memory_edge_source
+        ON nmg_memory_entities(namespace, source, id) WHERE kind='edge';
+      CREATE INDEX IF NOT EXISTS nmg_memory_edge_target
+        ON nmg_memory_entities(namespace, target, id) WHERE kind='edge';
       CREATE VIRTUAL TABLE IF NOT EXISTS nmg_memory_fts USING fts5(namespace UNINDEXED, key UNINDEXED, text);
       CREATE VIRTUAL TABLE IF NOT EXISTS nmg_memory_tessera_fts USING fts5(namespace UNINDEXED, key UNINDEXED, text);`);
     this.initializeTextIndexRows();
@@ -433,6 +437,8 @@ function textIndex(kind: string): string {
 
 function entityPage(namespace: string, query: MemoryEntityQuery) {
   const { limit, offset } = queryBounds(query);
+  if (query.kind === "edge" && query.connectedTo !== undefined && !query.text)
+    return { sql: adjacentEdgePage(namespace, query, query.connectedTo), bind: [limit, offset] };
   const where = `namespace = ${sqlLiteral(namespace)} AND ${sqliteQueryWhere(query)}`;
   const fts = query.text ? ftsExpression(query.text) : undefined;
   const matches = fts
@@ -446,6 +452,22 @@ function entityPage(namespace: string, query: MemoryEntityQuery) {
       WHERE ${fts === "" ? "1 = 0" : where} ORDER BY ${order} LIMIT ? OFFSET ?`,
     bind: [limit, offset],
   };
+}
+
+function adjacentEdgePage(namespace: string, query: MemoryEntityQuery, nodeId: string): string {
+  const where = `namespace = ${sqlLiteral(namespace)} AND ${sqliteQueryWhere({
+    ...query,
+    connectedTo: undefined,
+  })}`;
+  const node = sqlLiteral(nodeId);
+  const edges = `SELECT kind, payload, id FROM nmg_memory_entities WHERE ${where}`;
+  // Merge the two index ranges before paging. The source branch already includes any self-loop.
+  return `SELECT kind, payload FROM (
+    ${edges} AND source = ${node}
+    UNION ALL
+    ${edges} AND target = ${node} AND source <> ${node}
+    ORDER BY id LIMIT ? OFFSET ?
+  )`;
 }
 
 function decodeEntity(row: { kind?: unknown; payload?: unknown }): MemoryEntity {
