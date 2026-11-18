@@ -7,7 +7,7 @@
 ## Source and scope
 
 This reference describes the internal `Op` keys and evaluator in
-[`src/lab/autodiff.ts`](../../../../src/lab/autodiff.ts). A `UOp` node carries an
+[`src/core/autodiff.ts`](../../../../src/core/autodiff.ts). A `UOp` node carries an
 operation, a two-dimensional `Shape`, source nodes and an optional array or
 numeric argument. Scalars use `[1,1]`; buffers are `Float32Array` values.
 
@@ -22,6 +22,14 @@ The names below are the source keys, including `SoftmaxGradient`,
 `L2NormalizeGradient` and `Sqrt`; abbreviated gradient labels are not API names.
 The kernels assume a valid constructed graph. This table does not add a general
 shape or index validation guarantee.
+
+For a single-column right operand, both evaluators can use the shared
+[Core SIMD kernel](../../../../src/core/matvec-simd.ts). It tries Wasm SIMD
+at two or more rows, at least 128 elements per row and at least 131,072
+multiply-adds. It copies inputs in blocks into a reusable workspace of at most
+4 MiB. The lanes compute separate rows and round to Float32 after each
+addition. Set `NMG_AUTODIFF_SIMD=0` to select the JavaScript path. The
+JavaScript path also handles other shapes and runtimes without SIMD.
 
 | Op key | Kernel meaning | Shape |
 | --- | --- | --- |

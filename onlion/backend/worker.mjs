@@ -442,6 +442,11 @@ function embeddingClient(env, seed) {
       ? Number(env.NMG_EMBED_QUERY_BUDGET_MS)
       : EMBED_QUERY_BUDGET_MS;
   const deadline = Date.now() + budgetMs;
+  const queryDeadline = AbortSignal.timeout(Math.max(1, Math.floor(budgetMs)));
+  const requestSignal = currentContext()?.requestSignal;
+  const querySignal = requestSignal
+    ? AbortSignal.any([queryDeadline, requestSignal])
+    : queryDeadline;
   const writeBudgetMs =
     Number(env.NMG_EMBED_WRITE_BUDGET_MS) > 0
       ? Number(env.NMG_EMBED_WRITE_BUDGET_MS)
@@ -450,15 +455,13 @@ function embeddingClient(env, seed) {
   // A second client, not a second knob on the first: the provider client keeps one timeout,
   // and documents need a longer one than queries.
   let documentClient;
-  // Document chunks are the load a burst sends to one provider account; each concurrent
-  // chunk is a queue position the provider may not have. One at a time unless configured:
-  // the fold's batch of 32 becomes three sequential 10-row calls instead of three racing
-  // 25 s stalls (the 2026-10-30 incident's `dependency_timeout` ×9 at 25 s).
+  // Keep document chunks serial within this call by default. Both clients share the
+  // same account-wide concurrency cap and cooldown in the HTTP transport.
+  const documentChunks = Number(env.NMG_EMBED_CHUNK_CONCURRENCY) || 1;
   const documents = () =>
     (documentClient ??= createEmbeddingClientFromEnv({
       ...env,
       NMG_EMBED_TIMEOUT_MS: env.NMG_EMBED_TIMEOUT_MS ?? String(EMBED_DOCUMENT_TIMEOUT_MS),
-      NMG_EMBED_CHUNK_CONCURRENCY: env.NMG_EMBED_CHUNK_CONCURRENCY ?? "1",
     }));
   // Thrown from inside `measure`'s async callback this becomes a rejection, which is what
   // every call site is written against (`catch(() => [])`). A synchronous throw would
@@ -480,8 +483,12 @@ function embeddingClient(env, seed) {
   // deadline (search-time-budget invariant 8). The bug that produced it: a patch added the deadline
   // to three of four call sites, and the one it missed was the query embedding - the exact path that
   // hung for 60 s in production while the other three were covered.
-  const throughProvider = (operation, target) =>
-    embeddingOperation(operation, env, perCallMs(target) + graceMs);
+  const throughProvider = (operation, target, parent) => {
+    const limit = Math.max(1, Math.floor(perCallMs(target) + graceMs));
+    const deadline = AbortSignal.timeout(limit);
+    const signal = parent ? AbortSignal.any([parent, deadline]) : deadline;
+    return embeddingOperation(() => operation(signal), env, limit, parent);
+  };
   return {
     indexId: client.indexId,
     model: client.model,
@@ -489,16 +496,11 @@ function embeddingClient(env, seed) {
     embed: (inputs) =>
       Promise.resolve().then(() => {
         spend();
-        return throughProvider(() => client.embed(inputs), client);
+        return throughProvider((signal) => client.embed(inputs, { signal }), client, querySignal);
       }),
     embedDocuments: deferredDocuments((inputs) => {
-      // A fold that already holds these vectors must not call the provider: this is what keeps the
-      // fold a storage-only operation. A partial match falls through to the provider for all of
-      // them, which is correct and only costs the call this avoids in the common case.
-      if (seed) {
-        const seeded = inputs.map((text) => seed.get(text) ?? null);
-        if (seeded.every(Boolean)) return Promise.resolve(seeded);
-      }
+      const missing = seed ? inputs.filter((text) => !seed.get(text)) : inputs;
+      if (missing.length === 0) return Promise.resolve(inputs.map((text) => seed.get(text)));
       // Bounded by a total, not by an attempt: without it one slow provider turned a single
       // Add into a 55-120 s request that the platform killed with no answer.
       if (Date.now() >= writeDeadline)
@@ -506,13 +508,25 @@ function embeddingClient(env, seed) {
           code: "embedding_budget_exhausted",
         });
       const documentClient = documents();
-      return throughProvider(() => documentClient.embedDocuments(inputs), documentClient);
+      return throughProvider(
+        (signal) => documentClient.embedDocuments(missing, { signal, chunkConcurrency: documentChunks }),
+        documentClient,
+      ).then((vectors) => {
+        if (vectors.length !== missing.length)
+          throw new Error("embedding provider returned an invalid document batch");
+        const fresh = new Map(missing.map((text, index) => [text, vectors[index]]));
+        return inputs.map((text) => seed?.get(text) ?? fresh.get(text));
+      });
     }),
     // The raw provider call, for a caller outside any SQLite session - the accept path. The
     // deferred form above is for the fold, where it signals a preparation and throws by design.
-    embedDocumentsDirect: (inputs) => {
+    embedDocumentsDirect: (inputs, parent) => {
       const documentClient = documents();
-      return throughProvider(() => documentClient.embedDocuments(inputs), documentClient);
+      return throughProvider(
+        (signal) => documentClient.embedDocuments(inputs, { signal, chunkConcurrency: documentChunks }),
+        documentClient,
+        parent,
+      );
     },
     // Cached per TEXT, not per input array. The retrieval engine embeds one feature at a
     // time (`embedQueries([text])`), so a cache keyed by the array only ever hits when the
@@ -531,7 +545,11 @@ function embeddingClient(env, seed) {
             // separate features: pooling them here would average the query's
             // aspects into one compromise vector, which measured worse than either
             // the whole text or the per-feature maximum.
-            const vectors = await throughProvider(() => client.embedQueries(missing), client);
+            const vectors = await throughProvider(
+              (signal) => client.embedQueries(missing, { signal }),
+              client,
+              querySignal,
+            );
             if (vectors.length !== missing.length)
               throw new Error("embedding provider returned an invalid query batch");
             return vectors;
@@ -782,7 +800,7 @@ async function acceptAdd(env, input) {
 /** Embeds this entry's messages inside `ACCEPT_EMBED_MS`, or reports that it did not finish.
  *
  *  Losing the race is not an error: the entry is still written, the fold embeds instead, and the
- *  abandoned call is harmless. What it buys is that in the common case the fold never contacts the
+ *  client cancels the HTTP request. In the common case the fold never contacts the
  *  provider - and the fold is the only per-user serialisation point left. */
 async function inlineEntryVectors(env, messages) {
   const client = embeddingClient(env);
@@ -791,13 +809,18 @@ async function inlineEntryVectors(env, messages) {
     Number(env.NMG_ACCEPT_EMBED_MS) >= 0 ? Number(env.NMG_ACCEPT_EMBED_MS) : ACCEPT_EMBED_MS;
   if (budget === 0) return null;
   const texts = messages.map((message) => embeddingTextOf(message));
-  const embedded = client.embedDocumentsDirect(texts).catch(() => null);
-  const raced = await Promise.race([
-    embedded,
-    new Promise((resolve) => setTimeout(() => resolve(null), budget)),
-  ]);
-  if (!raced || raced.length !== texts.length) return null;
-  return { vectors: raced, model: client.indexId };
+  const unique = [...new Set(texts)];
+  const deadline = AbortSignal.timeout(Math.max(1, Math.floor(budget)));
+  const requestSignal = currentContext()?.requestSignal;
+  const signal = requestSignal ? AbortSignal.any([deadline, requestSignal]) : deadline;
+  const vectors = await hardDeadline(
+    () => client.embedDocumentsDirect(unique, signal),
+    budget,
+    "accept embedding",
+  ).catch(() => null);
+  if (!vectors || vectors.length !== unique.length) return null;
+  const byText = new Map(unique.map((text, index) => [text, vectors[index]]));
+  return { vectors: texts.map((text) => byText.get(text)), model: client.indexId };
 }
 /** Folds waiting entries into the partition, one partition write for the batch.
  *
@@ -2466,7 +2489,7 @@ export default {
           ) || normalized === "/"
         ? normalized
         : "/unknown";
-    const context = { trace_id: traceId, route, env, execution };
+    const context = { trace_id: traceId, route, env, execution, requestSignal: request.signal };
     return withRequest(context, () => {
       const track = statisticsEnabled();
       const startedAt = Date.now();

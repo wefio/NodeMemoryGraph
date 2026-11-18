@@ -20,6 +20,57 @@ import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
 
+test(
+  "one local write drains a vector backlog using whole provider batches",
+  { timeout: 5000 },
+  async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), "nmg-vector-backlog-"));
+    const path = join(directory, "memory.sqlite");
+    const requests: number[] = [];
+    let complete: (() => void) | undefined;
+    const received = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    t.mock.method(globalThis, "fetch", async (_url: unknown, init?: RequestInit) => {
+      const { input } = JSON.parse(String(init?.body)) as { input: string[] };
+      requests.push(input.length);
+      if (requests.reduce((total, size) => total + size, 0) === 67) complete!();
+      return Response.json({
+        data: input.map((_, index) => ({ index, embedding: [1, 1] })),
+      });
+    });
+    const service = new NmgService({
+      databasePath: path,
+      environment: {
+        NMG_EMBED_PROVIDER: "openai",
+        NMG_EMBED_API_KEY: "fixture-only",
+        NMG_EMBED_BASE_URL: "https://embedding.test/v1",
+        NMG_EMBED_BATCH_SIZE: "10",
+      },
+    });
+    t.after(async () => {
+      await service.close();
+      removeTempDirectory(directory);
+    });
+    await service.invoke("rememberBatch", {
+      operationId: "one-backlog",
+      items: Array.from({ length: 67 }, (_, i) => ({
+        statement: `The verification archive includes entry ${i}`,
+        nodeName: "Archive",
+      })),
+    });
+    await received;
+    await service.close();
+    assert.deepEqual(requests, [10, 10, 10, 10, 10, 10, 7]);
+    const db = new DatabaseSync(path, { readOnly: true });
+    try {
+      assert.equal(db.prepare("SELECT count(*) AS n FROM nmg_memory_vectors").get()?.n, 67);
+    } finally {
+      db.close();
+    }
+  },
+);
+
 test("default service migrates an old SQLite file before serving memory", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-default-migration-"));
   const databasePath = join(directory, "nmg.sqlite");
@@ -596,6 +647,8 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
   const path = join(directory, "memory.sqlite");
   let documentCalls = 0;
   let slowQueries = false;
+  const queryBatches: number[] = [];
+  let watchQuery: ((response: import("node:http").ServerResponse) => void) | undefined;
   const server = createServer(async (request, response) => {
     const parts = [];
     for await (const chunk of request) parts.push(chunk);
@@ -603,8 +656,12 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
       requests: Array<{ taskType: string }>;
     };
     documentCalls += requests.filter((item) => item.taskType === "RETRIEVAL_DOCUMENT").length;
-    if (slowQueries && requests.some((item) => item.taskType === "RETRIEVAL_QUERY"))
+    if (requests.some((item) => item.taskType === "RETRIEVAL_QUERY"))
+      queryBatches.push(requests.length);
+    if (slowQueries && requests.some((item) => item.taskType === "RETRIEVAL_QUERY")) {
+      watchQuery?.(response);
       await delay(120);
+    }
     response.end(JSON.stringify({ embeddings: requests.map(() => ({ values: [1, 0] })) }));
   });
   await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
@@ -655,6 +712,13 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
     });
     assert.equal(hybrid.retrieval?.mode, "hybrid");
     assert.ok(hybrid.results[0]!.lexicalScore > 0);
+    const multi = await service.invoke("search", {
+      query: "logistics depot",
+      queries: ["logistics depot", "warehouse location", "shipping address"],
+      retrievalMode: "hybrid",
+    });
+    assert.equal(multi.retrieval?.mode, "hybrid");
+    assert.equal(queryBatches.at(-1), 3);
     slowQueries = true;
     const fallback = await service.invoke("search", {
       query: "logistics depot",
@@ -674,6 +738,44 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
     });
     assert.equal(explicit.retrieval?.mode, "hybrid");
     assert.equal(explicit.results[0]?.vectorScore, 1);
+    let queryStarted!: () => void;
+    let queryClosed!: (aborted: boolean) => void;
+    const started = new Promise<void>((resolve) => {
+      queryStarted = resolve;
+    });
+    const closed = new Promise<boolean>((resolve) => {
+      queryClosed = resolve;
+    });
+    watchQuery = (response) => {
+      response.once("close", () => queryClosed(!response.writableFinished));
+      queryStarted();
+    };
+    const rpc = createServer(httpHandler(service, "fixture-token"));
+    await new Promise<void>((ready) => rpc.listen(0, "127.0.0.1", ready));
+    try {
+      const endpoint = rpc.address();
+      assert.ok(endpoint && typeof endpoint === "object");
+      const controller = new AbortController();
+      const response = fetch(`http://127.0.0.1:${endpoint.port}/`, {
+        method: "POST",
+        headers: { authorization: "Bearer fixture-token" },
+        body: JSON.stringify({
+          method: "search",
+          params: { query: "explicit cancellation", retrievalMode: "hybrid" },
+        }),
+        signal: controller.signal,
+      });
+      const rejected = assert.rejects(response, { name: "AbortError" });
+      await started;
+      controller.abort();
+      await rejected;
+      assert.equal(await closed, true);
+    } finally {
+      await new Promise<void>((ready) => {
+        rpc.close(() => ready());
+        rpc.closeAllConnections();
+      });
+    }
     slowQueries = false;
     const next = await service.invoke("remember", {
       statement: "The freight terminal is in Bergen",

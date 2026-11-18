@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Tensor } from "../../src/lab/autodiff.ts";
+import { Tensor } from "../../src/core/autodiff.ts";
+import { tryMatvecSimd } from "../../src/core/matvec-simd.ts";
 
 function approximately(actual: number, expected: number, tolerance = 1e-5): void {
   assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} differs from ${expected}`);
@@ -27,6 +28,55 @@ test("matrix multiplication preserves rectangular tails and gradients", () => {
   product.sum().backward();
   assert.deepEqual([...left.grad], [15, 40, 65, 15, 40, 65]);
   assert.deepEqual([...right.grad], [5, 5, 5, 5, 5, 7, 7, 7, 7, 7, 9, 9, 9, 9, 9]);
+});
+
+test("SIMD matvec preserves Float32 accumulation across blocks and odd dimensions", () => {
+  const rows = 1025;
+  const columns = 1025;
+  const matrix = Float32Array.from({ length: rows * columns }, (_, i) => Math.sin(i) / 3);
+  const vector = Float32Array.from({ length: columns }, (_, i) => Math.cos(i) / 5);
+  matrix[columns] = Number.NaN;
+  matrix[columns * 2] = Number.POSITIVE_INFINITY;
+  matrix[columns * 3] = -0;
+  const result = new Float32Array(rows);
+  assert.equal(tryMatvecSimd(matrix, vector, result), true);
+  for (let row = 0; row < rows; row += 1) {
+    let sum = 0;
+    for (let column = 0; column < columns; column += 1) {
+      sum = Math.fround(sum + matrix[row * columns + column]! * vector[column]!);
+    }
+    assert.ok(Object.is(result[row], sum), `row ${row} differs from scalar Float32 accumulation`);
+  }
+  assert.equal(tryMatvecSimd(matrix, vector, result.subarray(0, 2)), false);
+  assert.equal(
+    tryMatvecSimd(matrix.subarray(0, 2 * columns), vector, result.subarray(0, 2)),
+    false,
+  );
+});
+
+test("large autodiff matvec gives the same analytic gradients on repeated backward passes", () => {
+  const rows = 129;
+  const columns = 1025;
+  const values = Float32Array.from({ length: rows * columns }, (_, i) => (i % 23) - 11);
+  const weights = Tensor.matrix(values, rows, columns, true);
+  const input = Tensor.vector(new Float32Array(columns).fill(2), true);
+  const loss = weights.matmul(input).sum();
+  const expectedInputGradient = Float32Array.from({ length: columns }, (_, column) => {
+    let sum = 0;
+    for (let row = 0; row < rows; row += 1) sum += values[row * columns + column]!;
+    return sum;
+  });
+  assert.equal(
+    loss.scalarValue,
+    values.reduce((sum, value) => sum + value * 2, 0),
+  );
+  for (let turn = 0; turn < 2; turn += 1) {
+    weights.zeroGrad();
+    input.zeroGrad();
+    loss.backward();
+    assert.ok(weights.grad.every((value) => value === 2));
+    assert.deepEqual(input.grad, expectedInputGradient);
+  }
 });
 
 test("softmax cross entropy produces the expected graph gradient", () => {

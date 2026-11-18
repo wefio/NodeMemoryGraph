@@ -13,6 +13,7 @@ import type {
 } from "./backend.ts";
 import {
   ENTITY_COLUMNS,
+  SQLITE_HISTORY_SOURCE,
   commitRows,
   lexicalMemoryText,
   queryBounds,
@@ -20,6 +21,7 @@ import {
   sqlLiteral,
   validateCommit,
 } from "./entity-rows.ts";
+import type { EntityRow } from "./entity-rows.ts";
 import { graphImportRequest } from "./graph-import.ts";
 import { readLegacyClaimRows, readLegacyMemoryRows } from "../store/legacy-memory-snapshot.ts";
 import { requestHash } from "./model.ts";
@@ -39,6 +41,7 @@ import {
 } from "./sqlite-legacy-retirement.ts";
 
 const LOCAL_MEMORY_TABLE = "nmg_local_memory";
+const SQL_BATCH_SIZE = 64;
 export const LOCAL_MEMORY_NAMESPACE = "local-memory-v1";
 function localNamespace(db: DatabaseSync): string | undefined {
   const exists = db
@@ -80,6 +83,18 @@ export class SqliteMemoryBackend implements MemoryBackend {
       throw new Error("Snapshot reads require a file-backed memory database");
     mkdirSync(dirname(path), { recursive: true });
     this.writer = new DatabaseSync(path);
+    try {
+      this.initializeSchema();
+      this.vectorIndex = new SqliteMemoryVectors(this.writer, namespace, (view) =>
+        this.reader(view),
+      );
+    } catch (error) {
+      this.writer.close();
+      throw error;
+    }
+  }
+
+  private initializeSchema(): void {
     this.writer.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS nmg_memory_head (namespace TEXT PRIMARY KEY, revision INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS nmg_memory_entities (namespace TEXT NOT NULL,
@@ -87,13 +102,27 @@ export class SqliteMemoryBackend implements MemoryBackend {
         PRIMARY KEY(namespace, key));
       CREATE INDEX IF NOT EXISTS nmg_memory_kind ON nmg_memory_entities(namespace, kind, id);
       CREATE INDEX IF NOT EXISTS nmg_memory_node ON nmg_memory_entities(namespace, kind, node);
-      CREATE INDEX IF NOT EXISTS nmg_memory_name ON nmg_memory_entities(namespace, kind, name);
+      CREATE INDEX IF NOT EXISTS nmg_memory_node_name
+        ON nmg_memory_entities(namespace, name, id) WHERE kind='node';
+      CREATE INDEX IF NOT EXISTS nmg_memory_history_source
+        ON nmg_memory_entities(namespace, ${SQLITE_HISTORY_SOURCE}, id) WHERE kind='history';
+      DROP INDEX IF EXISTS nmg_memory_name;
+      CREATE INDEX IF NOT EXISTS nmg_memory_scope_node
+        ON nmg_memory_entities(namespace, kind, node, scope, id);
+      CREATE INDEX IF NOT EXISTS nmg_memory_scope_name
+        ON nmg_memory_entities(namespace, kind, name, scope, id);
+      CREATE INDEX IF NOT EXISTS nmg_memory_state
+        ON nmg_memory_entities(namespace, statekey, scope, id) WHERE kind='memory';
+      CREATE INDEX IF NOT EXISTS nmg_memory_edge_source
+        ON nmg_memory_entities(namespace, source, id) WHERE kind='edge';
+      CREATE INDEX IF NOT EXISTS nmg_memory_edge_target
+        ON nmg_memory_entities(namespace, target, id) WHERE kind='edge';
       CREATE VIRTUAL TABLE IF NOT EXISTS nmg_memory_fts USING fts5(namespace UNINDEXED, key UNINDEXED, text);
       CREATE VIRTUAL TABLE IF NOT EXISTS nmg_memory_tessera_fts USING fts5(namespace UNINDEXED, key UNINDEXED, text);`);
-    this.writer.prepare("INSERT OR IGNORE INTO nmg_memory_head VALUES (?, 0)").run(namespace);
+    this.initializeTextIndexRows();
+    this.writer.prepare("INSERT OR IGNORE INTO nmg_memory_head VALUES (?, 0)").run(this.namespace);
     ensureSqliteMemoryChains(this.writer);
     ensureSqliteMemoryAssociations(this.writer);
-    this.vectorIndex = new SqliteMemoryVectors(this.writer, namespace, (view) => this.reader(view));
   }
 
   async openRead(): Promise<MemoryReadView> {
@@ -112,24 +141,31 @@ export class SqliteMemoryBackend implements MemoryBackend {
   }
 
   async scan(view: MemoryReadView, query: MemoryEntityQuery): Promise<MemoryEntity[]> {
+    const page = entityPage(this.namespace, query);
+    return this.reader(view)
+      .prepare(page.sql)
+      .all(...page.bind)
+      .map(decodeEntity);
+  }
+
+  async scanBatch(
+    view: MemoryReadView,
+    queries: readonly MemoryEntityQuery[],
+  ): Promise<MemoryEntity[][]> {
     const db = this.reader(view);
-    const { limit, offset } = queryBounds(query);
-    const where = `namespace = ${sqlLiteral(this.namespace)} AND ${sqliteQueryWhere(query)}`;
-    const fts = query.text ? ftsExpression(query.text) : undefined;
-    if (fts === "") return [];
-    const ftsTable = textIndex(query.kind);
-    const matches = fts
-      ? `JOIN (SELECT key AS fts_key, rank AS fts_rank FROM ${ftsTable}
-      WHERE namespace = ${sqlLiteral(this.namespace)} AND text MATCH ${sqlLiteral(fts)})
-      ON key = fts_key`
-      : "";
-    const order = fts ? "fts_rank, id" : "id";
-    return db
-      .prepare(
-        `SELECT kind, payload FROM nmg_memory_entities ${matches} WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`,
-      )
-      .all(limit, offset)
-      .map((row) => ({ kind: row.kind, value: JSON.parse(String(row.payload)) }) as MemoryEntity);
+    const results: MemoryEntity[][] = queries.map(() => []);
+    for (let offset = 0; offset < queries.length; offset += SQL_BATCH_SIZE) {
+      const pages = queries
+        .slice(offset, offset + SQL_BATCH_SIZE)
+        .map((query) => entityPage(this.namespace, query));
+      const sql = pages
+        .map((page, i) => `SELECT ${offset + i} AS slot, * FROM (${page.sql})`)
+        .join(" UNION ALL ");
+      for (const row of db.prepare(sql).all(...pages.flatMap((page) => page.bind))) {
+        results[Number(row.slot)]!.push(decodeEntity(row));
+      }
+    }
+    return results;
   }
 
   async receipt(view: MemoryReadView, operationId: string): Promise<MemoryCommitReceipt | null> {
@@ -280,6 +316,46 @@ export class SqliteMemoryBackend implements MemoryBackend {
     }
   }
 
+  private initializeTextIndexRows(): void {
+    const initialized = this.writer.prepare(
+      "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='nmg_memory_fts_rows'",
+    );
+    if (initialized.get()) return;
+    this.transaction(() => {
+      if (initialized.get()) return;
+      this.writer.exec(`CREATE TABLE nmg_memory_fts_rows (
+        namespace TEXT NOT NULL, key TEXT NOT NULL, fts_rowid INTEGER NOT NULL,
+        PRIMARY KEY(namespace, key)) WITHOUT ROWID;
+        INSERT INTO nmg_memory_fts_rows
+        SELECT namespace, key, rowid FROM nmg_memory_fts
+        UNION ALL
+        SELECT namespace, key, rowid FROM nmg_memory_tessera_fts;`);
+    });
+  }
+
+  private writeTextIndex(row: EntityRow): void {
+    const table = textIndex(row.kind);
+    const text = ftsIndexedText(
+      row.kind === "memory" ? lexicalMemoryText(JSON.parse(row.payload)) : row.text,
+    );
+    const previous = this.writer
+      .prepare("SELECT fts_rowid FROM nmg_memory_fts_rows WHERE namespace=? AND key=?")
+      .get(this.namespace, row.key);
+    if (previous) {
+      const updated = this.writer
+        .prepare(`UPDATE ${table} SET text=? WHERE rowid=? AND namespace=? AND key=?`)
+        .run(text, previous.fts_rowid, this.namespace, row.key);
+      if (updated.changes !== 1) throw new Error("Memory text index row is missing");
+      return;
+    }
+    const { lastInsertRowid } = this.writer
+      .prepare(`INSERT INTO ${table} VALUES (?, ?, ?)`)
+      .run(this.namespace, row.key, text);
+    this.writer
+      .prepare("INSERT INTO nmg_memory_fts_rows VALUES (?, ?, ?)")
+      .run(this.namespace, row.key, lastInsertRowid);
+  }
+
   private write(request: MemoryCommitRequest): MemoryCommitOutcome {
     const previous = this.writer
       .prepare("SELECT payload FROM nmg_memory_entities WHERE namespace=? AND key=?")
@@ -299,33 +375,34 @@ export class SqliteMemoryBackend implements MemoryBackend {
       resultIds: [...request.resultIds],
       ...(request.result === undefined ? {} : { result: request.result }),
     };
-    const statement = this.writer.prepare(
-      `INSERT OR REPLACE INTO nmg_memory_entities VALUES (${Array(ENTITY_COLUMNS.length + 1)
-        .fill("?")
-        .join(",")})`,
-    );
-    for (const row of commitRows(request, receipt)) {
-      statement.run(this.namespace, ...ENTITY_COLUMNS.map((column) => row[column]));
-      if (row.kind === "memory" || row.kind === "tessera") {
-        const index = textIndex(row.kind);
-        this.writer
-          .prepare(`DELETE FROM ${index} WHERE namespace=? AND key=?`)
-          .run(this.namespace, row.key);
-        this.writer
-          .prepare(`INSERT INTO ${index} VALUES (?, ?, ?)`)
-          .run(
-            this.namespace,
-            row.key,
-            ftsIndexedText(
-              row.kind === "memory" ? lexicalMemoryText(JSON.parse(row.payload)) : row.text,
-            ),
-          );
-      }
+    const rows = commitRows(request, receipt);
+    this.writeEntities(rows);
+    for (const row of rows) {
+      if (row.kind === "memory" || row.kind === "tessera") this.writeTextIndex(row);
     }
     this.writer
       .prepare("UPDATE nmg_memory_head SET revision=? WHERE namespace=?")
       .run(receipt.revision, this.namespace);
     return { status: "committed", receipt };
+  }
+
+  private writeEntities(rows: readonly EntityRow[]): void {
+    const tuple = `(${Array(ENTITY_COLUMNS.length + 1)
+      .fill("?")
+      .join(",")})`;
+    for (let offset = 0; offset < rows.length; offset += SQL_BATCH_SIZE) {
+      const batch = rows.slice(offset, offset + SQL_BATCH_SIZE);
+      this.writer
+        .prepare(
+          `INSERT OR REPLACE INTO nmg_memory_entities VALUES ${batch.map(() => tuple).join(",")}`,
+        )
+        .run(
+          ...batch.flatMap((row) => [
+            this.namespace,
+            ...ENTITY_COLUMNS.map((column) => row[column]),
+          ]),
+        );
+    }
   }
 
   async close(): Promise<void> {
@@ -356,4 +433,43 @@ export class SqliteMemoryBackend implements MemoryBackend {
 
 function textIndex(kind: string): string {
   return kind === "tessera" ? "nmg_memory_tessera_fts" : "nmg_memory_fts";
+}
+
+function entityPage(namespace: string, query: MemoryEntityQuery) {
+  const { limit, offset } = queryBounds(query);
+  if (query.kind === "edge" && query.connectedTo !== undefined && !query.text)
+    return { sql: adjacentEdgePage(namespace, query, query.connectedTo), bind: [limit, offset] };
+  const where = `namespace = ${sqlLiteral(namespace)} AND ${sqliteQueryWhere(query)}`;
+  const fts = query.text ? ftsExpression(query.text) : undefined;
+  const matches = fts
+    ? `JOIN (SELECT key AS fts_key, rank AS fts_rank FROM ${textIndex(query.kind)}
+      WHERE namespace = ${sqlLiteral(namespace)} AND text MATCH ${sqlLiteral(fts)})
+      ON key = fts_key`
+    : "";
+  const order = fts ? "fts_rank, id" : "id";
+  return {
+    sql: `SELECT kind, payload FROM nmg_memory_entities ${matches}
+      WHERE ${fts === "" ? "1 = 0" : where} ORDER BY ${order} LIMIT ? OFFSET ?`,
+    bind: [limit, offset],
+  };
+}
+
+function adjacentEdgePage(namespace: string, query: MemoryEntityQuery, nodeId: string): string {
+  const where = `namespace = ${sqlLiteral(namespace)} AND ${sqliteQueryWhere({
+    ...query,
+    connectedTo: undefined,
+  })}`;
+  const node = sqlLiteral(nodeId);
+  const edges = `SELECT kind, payload, id FROM nmg_memory_entities WHERE ${where}`;
+  // Merge the two index ranges before paging. The source branch already includes any self-loop.
+  return `SELECT kind, payload FROM (
+    ${edges} AND source = ${node}
+    UNION ALL
+    ${edges} AND target = ${node} AND source <> ${node}
+    ORDER BY id LIMIT ? OFFSET ?
+  )`;
+}
+
+function decodeEntity(row: { kind?: unknown; payload?: unknown }): MemoryEntity {
+  return { kind: row.kind, value: JSON.parse(String(row.payload)) } as MemoryEntity;
 }

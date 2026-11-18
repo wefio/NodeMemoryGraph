@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
 
-import { Tensor } from "../src/lab/autodiff.ts";
+import { Tensor } from "../src/core/autodiff.ts";
 import { DifferentiableController } from "../src/lab/differentiable-controller.ts";
 import { percentileNearestRank } from "./parts/stats.ts";
 import { requirePositiveInteger } from "./parts/numbers.ts";

@@ -249,6 +249,64 @@ test("a timeout is not retried, because the caller runs inside an invocation cei
   }
 });
 
+test("embedding respects Retry-After across calls to the same provider", async (t) => {
+  let attempts = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    attempts += 1;
+    return new Response("throttled", { status: 429, headers: { "Retry-After": "60" } });
+  });
+  const client = new OpenAIEmbeddingClient({
+    baseUrl: "https://rate-limit.test/v1",
+    timeoutMs: 20,
+  });
+  await assert.rejects(client.embedQueries(["query"]), /returned 429/);
+  await assert.rejects(client.embedDocuments(["document"]), /returned 429/);
+  assert.equal(attempts, 1);
+});
+
+test("queries share the provider limit with documents and queued cancellation skips HTTP", async (t) => {
+  const calls: string[] = [];
+  let releaseDocument!: () => void;
+  let startDocument!: () => void;
+  const documentReleased = new Promise<void>((resolve) => {
+    releaseDocument = resolve;
+  });
+  const documentStarted = new Promise<void>((resolve) => {
+    startDocument = resolve;
+  });
+  t.mock.method(globalThis, "fetch", async (_url: unknown, init?: RequestInit) => {
+    const { input } = JSON.parse(String(init?.body)) as { input: string[] };
+    const text = input[0]!;
+    calls.push(text);
+    if (text === "first document") {
+      startDocument();
+      await documentReleased;
+    }
+    return Response.json({ data: [{ index: 0, embedding: [1] }] });
+  });
+  const config = {
+    baseUrl: "https://shared-limit.test/v1",
+    profile: "plain",
+    chunkConcurrency: 2,
+  } as const;
+  const documents = new OpenAIEmbeddingClient(config);
+  const queries = new OpenAIEmbeddingClient(config);
+  const first = documents.embedDocuments(["first document"]);
+  await documentStarted;
+  try {
+    const controller = new AbortController();
+    const queued = documents.embedDocuments(["queued document"], { signal: controller.signal });
+    const rejected = assert.rejects(queued, { name: "AbortError" });
+    await queries.embedQueries(["query"]);
+    controller.abort();
+    await rejected;
+    assert.deepEqual(calls, ["first document", "query"]);
+  } finally {
+    releaseDocument();
+    await first;
+  }
+});
+
 test("a dropped connection is still retried", async () => {
   let attempts = 0;
   const server = createServer((request, response) => {

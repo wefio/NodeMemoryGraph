@@ -118,23 +118,8 @@ async function handle(
     return;
   }
 
-  let raw = "";
-  let bytes = 0;
-  try {
-    for await (const chunk of req) {
-      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      bytes += Buffer.byteLength(text);
-      if (bytes > MAX_REQUEST_BYTES) {
-        req.resume();
-        send(413, jsonRpcError(undefined, -32600, "request too large"));
-        return;
-      }
-      raw += text;
-    }
-  } catch {
-    send(400, jsonRpcError(undefined, -32700, "parse error"));
-    return;
-  }
+  const raw = await readBody(req, send);
+  if (raw === undefined) return;
 
   let request: { method?: unknown; params?: unknown; id?: unknown };
   try {
@@ -152,7 +137,8 @@ async function handle(
 
   try {
     validateReloadShutdown(service.databasePath, method, request.params);
-    const result = await service.invoke(method as NmgMethod, request.params);
+    const signal = method === "search" ? clientSignal(res) : undefined;
+    const result = await service.invoke(method as NmgMethod, request.params, signal);
     if (method === "shutdown") {
       await prepareReloadIfRequested(service, request.params);
       send(200, { jsonrpc: "2.0", result, id: request.id ?? null });
@@ -161,12 +147,47 @@ async function handle(
     }
     send(200, { jsonrpc: "2.0", result, id: request.id ?? null });
   } catch (error) {
+    if (res.destroyed) return;
     const protocol = error instanceof NmgProtocolError;
     send(
       protocol ? 400 : 500,
       jsonRpcError(request.id, protocol ? -32602 : -32603, errorMessage(error)),
     );
   }
+}
+
+async function readBody(
+  req: import("node:http").IncomingMessage,
+  send: (status: number, payload: unknown) => void,
+): Promise<string | undefined> {
+  let raw = "";
+  let bytes = 0;
+  try {
+    for await (const chunk of req) {
+      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      bytes += Buffer.byteLength(text);
+      if (bytes > MAX_REQUEST_BYTES) {
+        req.resume();
+        send(413, jsonRpcError(undefined, -32600, "request too large"));
+        return undefined;
+      }
+      raw += text;
+    }
+    return raw;
+  } catch {
+    send(400, jsonRpcError(undefined, -32700, "parse error"));
+    return undefined;
+  }
+}
+
+function clientSignal(response: import("node:http").ServerResponse): AbortSignal {
+  const controller = new AbortController();
+  if (response.destroyed) controller.abort();
+  else
+    response.once("close", () => {
+      if (!response.writableFinished) controller.abort();
+    });
+  return controller.signal;
 }
 
 function parseRequest(raw: string): { method?: unknown; params?: unknown; id?: unknown } {

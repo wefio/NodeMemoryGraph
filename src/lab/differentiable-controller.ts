@@ -1,4 +1,4 @@
-import { gradientStep, Tensor } from "./autodiff.ts";
+import { gradientStep, Tensor } from "../core/autodiff.ts";
 
 export const CONTROLLER_BUDGET_DIMENSIONS = [
   "nodes",

@@ -91,6 +91,7 @@ export class MemoryEngine {
       operationId,
       { action: "remember", inputs: inputs.map(rememberRequest) },
       async (plan) => {
+        await plan.prefetchRemember(inputs);
         const result: RememberResult[] = [];
         for (const [slot, input] of inputs.entries())
           result.push(await plan.remember(input, operationId, slot, timestamp));

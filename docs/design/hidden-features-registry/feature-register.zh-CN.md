@@ -30,6 +30,7 @@
 | Search-recommendation nudge | `NMG_SEARCH_RECOMMENDATION` | `off` | `off`／`advisory`／`guardrail` | opt-in |
 | Lab tools | `NMG_ENABLE_LAB_TOOLS` | `off` | `"1"` 开启 reasoning workspace、memory-graph reasoner、controller shadow；也影响 dsh `dsh-nmg` | opt-in |
 | Autodiff graph compile | `NMG_AUTODIFF_COMPILE` | `off` | 将 autodiff graphs 编译为 JS 以提高速度 | opt-in／性能 knob |
+| Autodiff 矩阵向量乘 SIMD | `NMG_AUTODIFF_SIMD` | 自动 | `0` 指定矩阵向量乘使用 JavaScript | 性能开关 |
 | Auto-recall tuning knobs | `NMG_AUTO_RECALL_TIER` (1)、`NMG_AUTO_RECALL_LIMIT` (13)、`NMG_AUTO_RECALL_INITIAL_TARGET` (13)、`NMG_AUTO_RECALL_STRONG_HIT_TOP_GAP` (0.05)、`NMG_AUTO_RECALL_STRONG_HIT_INITIAL_TARGET` (3) | 如列值 | 调节默认开启的 auto-recall | 默认开启功能的 knobs |
 | Board wake cadence | `NMG_BOARD_WAKE_INTERVAL_SEC` | 未设置 | board coordination loop 的唤醒间隔 | knob |
 | Daemon idle timeout | `NMG_DAEMON_IDLE_TIMEOUT_MS` | 未设置 | daemon 空闲关闭时间 | knob |

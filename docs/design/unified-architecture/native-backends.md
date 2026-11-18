@@ -73,6 +73,14 @@ nodes and edges. The receipt and all changed entities become visible together.
 Readers pin one published revision and must close their read view.
 
 SQLite uses a native write transaction and independent WAL snapshot readers.
+Batch planning prefetches bounded duplicate and node lookups from one revision.
+It indexes the batch's changes in memory so later items see earlier changes in
+input order. Predecessor lookups reuse the snapshot candidates for their scope,
+node and session. SQLite groups entity upserts in the same commit. Full-text
+updates address existing FTS rows by rowid. On first open, SQLite transactionally
+records rowids for existing full-text rows. Subsequent commits maintain that
+mapping with the projections.
+
 Lance stores all domain entity kinds and receipts in one data table per namespace.
 A write creates a shallow branch from the pinned version, applies one merge and
 prepares native full-text indexes. A separate head table publishes the branch
@@ -105,13 +113,23 @@ both table groups share one file; with object memory, only coordination uses it.
 
 This API supports remember/batch, search, exact get and withdrawal. `MemoryEngine`
 also supports explicit node links and bounded graph expansion. The capability
-handshake advertises the supported subset. Search supports explicit history,
-source actor and node filters. Attached file references from a full SQLite
-snapshot are returned with visible memories. The activated local SQLite profile
-also supports session AG, project recall, versioned answer attribution, and
+handshake advertises the supported subset. SQLite stores one row per edge and
+indexes its source and target separately. Neighbor reads merge the two
+endpoint ranges by edge ID before applying the page limit.
+
+Search supports explicit history, source actor and node filters. Attached file
+references from a full SQLite snapshot are returned with visible memories. The
+activated local SQLite profile also supports session AG, project recall,
+versioned answer attribution, and
 vector and hybrid retrieval. Its SQLite backend owns the model-keyed record
 index plus candidate queries. The engine combines those candidates with full
 text and applies visibility and graph rules. The host supplies embeddings.
+For hierarchy scoring, SQLite finds a memory's associated leaf IDs before
+looking up those leaf vectors for the selected model.
+SQLite selects one ordered page of missing vectors before fetching previous turns
+by session and source sequence. A local backfill sweep advances by creation time
+and ID and saves each page after the provider call. Vector saves still check that
+the record is indexable and its statement matches the submitted text.
 The [local compatibility profile](legacy-graph-migration.md#local-default-after-activation)
 also owns event-time windows, lifecycle writes, feedback, bookmark lookup and
 existing chain projection. Chain editing and node transforms retain separate

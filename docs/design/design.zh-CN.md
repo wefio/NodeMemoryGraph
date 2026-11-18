@@ -41,7 +41,7 @@ Lab 能力生命周期有两个彼此独立的迁移：
 
 第一次迁移是有界显式租约，不证明能力有用。第二次迁移是产品默认项决策，而且必须可逆。Daemon 能力目录说明哪些功能允许 Agent 为当前 session 租用。低风险 scratch、只读推理和 shadow 观察可自助启用；会产生成本或修改状态的控制器模式仍要求 Harness/operator 授权，不能由模型请求自行解锁。因此，`nmg_lab` 是始终可用的小型发现／控制入口；能力专属 schema 和状态只有启用后才加载。Pi 的可选 `nmg_reason` 只是对这一共享边界的类型化便捷包装。
 
-autodiff 底座属于 Lite，因为产品功能可能依赖其数值图，而且它不增加 Python、PyTorch、GPU 或模型服务依赖。**这不表示底座的每个使用方都晋升**：学习型路由、层级激活、fork/merge 实验和 Memory-Graph Reasoner 各自保留独立 feature gate 和证据要求。
+[autodiff 底座](../../src/core/autodiff.ts)属于 Lite。核心的层级激活和 Lab 功能都可以调用这套数值计算图，计算图运行在现有的 TypeScript 运行时中。学习型路由、层级激活、fork/merge 实验和 Memory-Graph Reasoner 各自有独立的功能开关和证据要求。
 
 ## 基本原则
 

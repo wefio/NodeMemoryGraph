@@ -3,8 +3,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { openMemoryBackend } from "../../src/core/memory/open.ts";
 import type { MemoryCommitRequest, MemoryEntity } from "../../src/core/memory/backend.ts";
+import { MemoryEngine } from "../../src/core/memory/engine.ts";
+import { sqliteQueryWhere } from "../../src/core/memory/entity-rows.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
 const node = (id: string, name: string): MemoryEntity => ({
@@ -100,3 +103,325 @@ for (const kind of ["sqlite", "lancedb"] as const) {
     }
   });
 }
+
+test("SQLite write lookups constrain the indexed name or node and exact scope before sorting", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-write-lookups-"));
+  t.after(() => removeTempDirectory(directory));
+  const path = join(directory, "memory.sqlite");
+  const backend = await openMemoryBackend({ kind: "sqlite", path, namespace: "tenant" });
+  await backend.close();
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    const scope = { project: "atlas" };
+    for (const [filter, constrained] of [
+      [{ exactText: "a new statement" }, "name"],
+      [{ nodeId: "node-1" }, "node"],
+    ] as const) {
+      const where = sqliteQueryWhere({ kind: "memory", scope, ...filter });
+      const details = db
+        .prepare(
+          `EXPLAIN QUERY PLAN SELECT kind, payload FROM nmg_memory_entities
+          WHERE namespace='tenant' AND ${where} ORDER BY id LIMIT ? OFFSET ?`,
+        )
+        .all(80, 0)
+        .map(({ detail }) => detail)
+        .join("\n");
+      assert.match(
+        details,
+        new RegExp(`namespace=\\? AND kind=\\? AND ${constrained}=\\? AND scope=\\?`),
+      );
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test("SQLite reads existing graph edges from both indexed endpoints in ID order", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-edge-indexes-"));
+  const path = join(directory, "memory.sqlite");
+  const options = { kind: "sqlite", path, namespace: "tenant" } as const;
+  const original = await openMemoryBackend(options);
+  const engine = new MemoryEngine(original);
+  const [hub, incoming, outgoing] = await engine.rememberMany([
+    { statement: "Coriander identifies the hub", nodeName: "Hub" },
+    { statement: "Velvet identifies the incoming node", nodeName: "Incoming" },
+    { statement: "Turquoise identifies the outgoing node", nodeName: "Outgoing" },
+  ]);
+  const inbound = await engine.linkNodes({
+    sourceNodeId: incoming!.node.id,
+    targetNodeId: hub!.node.id,
+    type: "related_to",
+  });
+  const outbound = await engine.linkNodes({
+    sourceNodeId: hub!.node.id,
+    targetNodeId: outgoing!.node.id,
+    type: "related_to",
+  });
+  const view = await original.openRead();
+  const revision = view.revision;
+  await original.closeRead(view);
+  const loop = { ...inbound, id: "imported-loop", sourceNodeId: hub!.node.id };
+  assert.equal(
+    (
+      await original.commit({
+        expectedRevision: revision,
+        operationId: "import-directed-edges",
+        requestHash: "test-edges",
+        resultIds: [],
+        changes: {
+          upsert: [
+            { kind: "edge", value: { ...inbound, direction: "source->target" } },
+            { kind: "edge", value: loop },
+          ],
+        },
+      })
+    ).status,
+    "committed",
+  );
+  await original.close();
+
+  const raw = new DatabaseSync(path);
+  try {
+    raw.exec(
+      "DROP INDEX IF EXISTS nmg_memory_edge_source; DROP INDEX IF EXISTS nmg_memory_edge_target",
+    );
+  } finally {
+    raw.close();
+  }
+  const backend = await openMemoryBackend(options);
+  t.after(async () => {
+    await backend.close();
+    removeTempDirectory(directory);
+  });
+  const prepare = DatabaseSync.prototype.prepare;
+  let neighborSql = "";
+  t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+    if (sql.startsWith("SELECT") && sql.includes("kind = 'edge'")) neighborSql = sql;
+    return prepare.call(this, sql);
+  });
+  const query = { kind: "edge", connectedTo: hub!.node.id } as const;
+  const snapshot = await backend.openRead();
+  try {
+    const ids = [inbound.id, outbound.id, loop.id].sort();
+    assert.deepEqual(
+      (await backend.scan(snapshot, query)).map(({ value }) => value.id),
+      ids,
+    );
+    const db = new DatabaseSync(path, { readOnly: true });
+    try {
+      const plan = db
+        .prepare(`EXPLAIN QUERY PLAN ${neighborSql}`)
+        .all(128, 0)
+        .map(({ detail }) => detail)
+        .join("\n");
+      assert.match(plan, /nmg_memory_edge_source \(namespace=\? AND source=\?\)/);
+      assert.match(plan, /nmg_memory_edge_target \(namespace=\? AND target=\?\)/);
+    } finally {
+      db.close();
+    }
+    const [edges, nodes] = await backend.scanBatch!(snapshot, [
+      { ...query, limit: 1, offset: 1 },
+      { kind: "node", ids: [hub!.node.id] },
+    ]);
+    assert.deepEqual(
+      edges?.map(({ value }) => value.id),
+      ids.slice(1, 2),
+    );
+    assert.equal(nodes?.[0]?.value.id, hub!.node.id);
+  } finally {
+    await backend.closeRead(snapshot);
+  }
+  const found = await new MemoryEngine(backend).search("coriander", { graphHops: 1, limit: 3 });
+  assert.deepEqual(
+    found.results.map(({ node }) => node.id),
+    [hub!.node.id, outgoing!.node.id],
+  );
+});
+
+test("SQLite upgrades existing text indexes and replaces both projections at their original rowids", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-fts-keys-"));
+  t.after(() => removeTempDirectory(directory));
+  const path = join(directory, "memory.sqlite");
+  const options = { kind: "sqlite", path, namespace: "tenant" } as const;
+  const first = await openMemoryBackend(options);
+  const { memory } = await new MemoryEngine(first).remember({
+    statement: "obsolete statement",
+    nodeName: "Atlas",
+    tesserae: [{ path: "atlas.md", snippet: "obsolete citation" }],
+  });
+  await first.close();
+
+  const raw = new DatabaseSync(path);
+  raw.exec("DROP TABLE IF EXISTS nmg_memory_fts_rows");
+  const projections = ["nmg_memory_fts", "nmg_memory_tessera_fts"];
+  const before = projections.map((table) => raw.prepare(`SELECT rowid, key FROM ${table}`).get());
+  const reopened = await openMemoryBackend(options);
+  try {
+    assert.equal(raw.prepare("SELECT count(*) AS count FROM nmg_memory_fts_rows").get()?.count, 2);
+    const view = await reopened.openRead();
+    const [tessera] = await reopened.scan(view, { kind: "tessera" });
+    await reopened.closeRead(view);
+    assert.equal(tessera?.kind, "tessera");
+    if (tessera?.kind !== "tessera") throw Error("Tessera missing");
+    const committed = await reopened.commit({
+      expectedRevision: view.revision,
+      operationId: "update",
+      requestHash: "update",
+      resultIds: [],
+      changes: {
+        upsert: [
+          { kind: "memory", value: { ...memory, statement: "replacement statement" } },
+          { kind: "tessera", value: { ...tessera.value, snippet: "replacement citation" } },
+        ],
+      },
+    });
+    assert.equal(committed.status, "committed");
+    for (const [index, table] of projections.entries()) {
+      assert.deepEqual(raw.prepare(`SELECT rowid, key FROM ${table}`).all(), [before[index]]);
+      assert.equal(
+        raw.prepare(`SELECT count(*) AS count FROM ${table} WHERE text MATCH 'obsolete'`).get()
+          ?.count,
+        0,
+      );
+      assert.equal(
+        raw.prepare(`SELECT count(*) AS count FROM ${table} WHERE text MATCH 'replacement'`).get()
+          ?.count,
+        1,
+      );
+    }
+  } finally {
+    await reopened.close();
+    raw.close();
+  }
+});
+
+test("SQLite batches write lookups and keeps earlier items visible inside the batch", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-batched-writes-"));
+  const path = join(directory, "memory.sqlite");
+  const backend = await openMemoryBackend({
+    kind: "sqlite",
+    path,
+    namespace: "tenant",
+  });
+  t.after(async () => {
+    await backend.close();
+    removeTempDirectory(directory);
+  });
+  const engine = new MemoryEngine(backend);
+  const prepare = DatabaseSync.prototype.prepare;
+  let selects = 0;
+  t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+    if (sql.includes("SELECT kind, payload FROM nmg_memory_entities")) selects++;
+    return prepare.call(this, sql);
+  });
+  const inputs = Array.from({ length: 32 }, (_, i) => ({
+    statement: `Independent Atlas update ${i}`,
+    nodeName: "Atlas",
+    scope: { project: "atlas" },
+  }));
+  const results = await engine.rememberMany([...inputs, inputs[0]!], "import");
+  assert.equal(new Set(results.map(({ node }) => node.id)).size, 1);
+  assert.equal(new Set(results.map(({ memory }) => memory.id)).size, 32);
+  assert.equal(results.at(-1)?.history.id, results[0]?.history.id);
+  assert.ok(selects <= 4, `executed ${selects} planning queries`);
+
+  const evidenceSource = {
+    actor: "user",
+    sourceMessageId: "legacy-source",
+    content: "Old transcript",
+  } as const;
+  const original = await engine.remember({
+    ...inputs[0]!,
+    statement: "Use the original evidence",
+    evidenceSource,
+  });
+  const raw = new DatabaseSync(path);
+  try {
+    raw
+      .prepare("UPDATE nmg_memory_entities SET name='' WHERE key=?")
+      .run(`history:${original.history.id}`);
+  } finally {
+    raw.close();
+  }
+  const reused = await engine.remember({
+    ...inputs[0]!,
+    statement: "Reuse the original evidence",
+    evidenceSource,
+  });
+  assert.equal(reused.history.id, original.history.id);
+});
+
+test("SQLite pages missing vectors in order, scopes previous turns, and saves only current rows", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-vector-page-"));
+  const path = join(directory, "memory.sqlite");
+  const backend = await openMemoryBackend({ kind: "sqlite", path, namespace: "tenant" });
+  t.after(async () => {
+    await backend.close();
+    removeTempDirectory(directory);
+  });
+  const engine = new MemoryEngine(backend, () => "2026-11-17T00:00:00.000Z");
+  const inputs = [
+    ["session-one", "1", "same-session previous turn"],
+    ["session-other", "2", "unrelated turn"],
+    ["session-one", "3", "the current turn"],
+    ["session-one", "4", "the subsequent turn"],
+  ] as const;
+  const records = await engine.rememberMany(
+    inputs.map(([sessionId, sourceMessageId, statement]) => ({
+      nodeName: "Example",
+      statement,
+      sessionId,
+      residence: "stg",
+      evidenceSource: { actor: "user", sourceMessageId, content: statement },
+    })),
+    "source",
+  );
+
+  const index = backend.vectorIndex!;
+  const prepare = DatabaseSync.prototype.prepare;
+  let pendingSql = "";
+  t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+    if (sql.startsWith("WITH") && sql.includes("previousTurn")) pendingSql = sql;
+    return prepare.call(this, sql);
+  });
+  const first = index.pending("test", 2);
+  const second = index.pending("test", 2, first.at(-1));
+  const cursor = first.at(-1)!;
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    const details = db
+      .prepare(`EXPLAIN QUERY PLAN ${pendingSql}`)
+      .all("tenant", "test", cursor.createdAt, cursor.id, 2, "tenant", "test", cursor.createdAt, 2)
+      .map(({ detail }) => detail)
+      .join("\n");
+    assert.match(details, /nmg_memory_embedding_order \(namespace=\? AND <expr>=\? AND id>\?\)/);
+    assert.match(details, /SEARCH h .* \(namespace=\? AND key=\?\)/);
+    assert.match(details, /nmg_memory_history_sequence/);
+  } finally {
+    db.close();
+  }
+  assert.deepEqual(
+    [...first, ...second].map(({ id }) => id),
+    records.map(({ memory }) => memory.id).sort(),
+  );
+  assert.deepEqual(index.pending("test", 2, second.at(-1)), []);
+  const current = [...first, ...second].find(({ id }) => id === records[2]!.memory.id)!;
+  assert.match(current.text, /same-session previous turn/);
+  const subsequent = [...first, ...second].find(({ id }) => id === records[3]!.memory.id)!;
+  assert.match(subsequent.text, /the current turn/);
+
+  const [withdrawn] = first;
+  const sessionId = records.find(({ memory }) => memory.id === withdrawn!.id)!.memory.sessionId!;
+  await engine.withdraw(withdrawn!.id, "withdraw", sessionId);
+  index.save("test", first, [
+    [1, 0],
+    [1, 1],
+  ]);
+  assert.deepEqual(index.stats("test"), { indexed: 1, pending: 2 });
+  assert.throws(() => index.save("test", second, [[1], [1]]), /dimensions differ/);
+  index.save("test", second, [
+    [0, 1],
+    [1, 0],
+  ]);
+  assert.deepEqual(index.stats("test"), { indexed: 3, pending: 0 });
+});

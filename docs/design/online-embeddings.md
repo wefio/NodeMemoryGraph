@@ -87,13 +87,21 @@ For backward compatibility, setting `NMG_EMBED_BASE_URL` without
 | `NMG_EMBED_API_KEY`    | Provider-neutral credential override                                        |
 | `NMG_EMBED_MODEL`      | Provider model override                                                     |
 | `NMG_EMBED_DIMENSIONS` | Requested output dimensions when supported                                  |
-| `NMG_EMBED_BATCH_SIZE` | Incremental indexing batch size                                             |
-| `NMG_EMBED_TIMEOUT_MS` | Per-request timeout                                                         |
+| `NMG_EMBED_BATCH_SIZE` | Maximum inputs per OpenAI-compatible HTTP request                             |
+| `NMG_EMBED_CHUNK_CONCURRENCY` | Concurrent requests per configured provider connection in one process (default 4) |
+| `NMG_EMBED_TIMEOUT_MS` | Per-attempt timeout, including the transport queue                            |
 | `NMG_EMBED_PROFILE`    | `plain`, `bge-en`, or `qwen3` preprocessing for OpenAI-compatible providers |
 | `NMG_EMBED_TARGETS`    | `records` by default; optional `nodes,leaves,records`                       |
 
 API keys are read from the environment, never stored in benchmark parameter
 snapshots, index IDs, or the memory database.
+
+Local search embeds distinct query texts in provider-sized batches. Query and
+document traffic share the concurrency limit. A provider that allows concurrent
+requests has one slot reserved for queries. HTTP 429 applies the provider's
+`Retry-After` to both kinds of work in the same process. A recall deadline or a
+disconnected search cancels queued work, HTTP reads and retries. Providers
+return vectors as JSON arrays.
 
 ## Core embedding interface
 

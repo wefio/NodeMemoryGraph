@@ -9,7 +9,7 @@
  * simultaneously.
  */
 
-import { Tensor, gradientStep } from "./autodiff.ts";
+import { Tensor, gradientStep } from "../core/autodiff.ts";
 import type { HierarchicalActivation } from "../core/hierarchical-activation.ts";
 import type { NodeActivationInput, GraphStateSnapshot } from "../core/hierarchical-activation.ts";
 

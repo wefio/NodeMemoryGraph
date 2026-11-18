@@ -32,7 +32,6 @@
     "src/cli/",
     "src/core/",
     "src/integration/",
-    "src/lab/autodiff.ts",
     "src/lab/context-features.ts",
     "src/lab/context-reward.ts",
     "src/lab/context-router-online.ts",

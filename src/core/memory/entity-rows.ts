@@ -152,9 +152,20 @@ export function queryBounds(query: MemoryEntityQuery): { limit: number; offset: 
   return { limit, offset };
 }
 
+/** Older portable history rows projected the source message ID only in the payload. */
+export const SQLITE_HISTORY_SOURCE =
+  "coalesce(nullif(name, ''), json_extract(payload, '$.sourceMessageId'))";
+
 /** Filter the SQLite candidate pool before FTS or vector ranking applies its limit. */
 export function sqliteQueryWhere(query: MemoryEntityQuery): string {
-  const clauses = [queryWhere(query)];
+  const source = query.kind === "history" ? query.sourceMessageId : undefined;
+  const clauses =
+    source === undefined
+      ? [queryWhere(query)]
+      : [
+          queryWhere({ ...query, sourceMessageId: undefined }),
+          `${SQLITE_HISTORY_SOURCE} = ${sqlLiteral(source)}`,
+        ];
   if (query.supersedesId)
     clauses.push(`json_extract(payload, '$.supersedesId') = ${sqlLiteral(query.supersedesId)}`);
   if (query.consolidatedFrom)

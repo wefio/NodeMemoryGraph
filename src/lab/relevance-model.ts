@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { BLOCK_COLUMNS, RELEVANCE_FEATURE_COUNT } from "../core/relevance-features.ts";
-import { gradientStep, Tensor } from "./autodiff.ts";
+import { gradientStep, Tensor } from "../core/autodiff.ts";
 
 /**
  * Learned relevance model — the strict half of the two-gate design

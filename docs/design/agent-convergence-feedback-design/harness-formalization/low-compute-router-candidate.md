@@ -73,7 +73,7 @@ Future changes to feature meanings require a new version before collecting data.
 Normalize numeric inputs and encode missing values explicitly. Do not acquire
 new LLM-generated features merely to run the small router.
 
-`src/lab/autodiff.ts` is the substrate used by the current 132-parameter
+`src/core/autodiff.ts` is the substrate used by the current 132-parameter
 `ContextRouter` prototype; that primitive does not show that this candidate
 policy is fully integrated, fast, or effective. The component test
 `tests/core/context-router.test.ts` checks observed-action updates and finite-

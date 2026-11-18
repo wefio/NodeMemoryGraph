@@ -1,4 +1,4 @@
-import { Tensor, gradientStep } from "./autodiff.ts";
+import { Tensor, gradientStep } from "../core/autodiff.ts";
 
 /**
  * Memory-Graph Reasoner — each memory node is a micro-operator that

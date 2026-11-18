@@ -1,12 +1,8 @@
 import { createHash } from "node:crypto";
+import { embeddingHttpTransport } from "./embedding-providers/http.ts";
+import type { EmbeddingRequestOptions } from "./embedding-providers/types.ts";
 
 export type EmbeddingProfileName = "bge-en" | "plain" | "qwen3";
-
-/** Transient failures worth retrying: connection resets, 429 and 5xx. */
-const RETRYABLE_STATUS = (status: number) => status === 429 || status >= 500;
-const RETRY_DELAYS_MS = [150, 500];
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface OpenAIEmbeddingClientOptions {
   baseUrl?: string;
@@ -75,8 +71,8 @@ export class OpenAIEmbeddingClient {
     this.#apiModel = rawModel;
     this.model = rawModel.replace(/^BAAI\//i, "");
     this.dimensions = options.dimensions;
-    this.batchSize = Math.max(1, options.batchSize ?? 10);
-    this.chunkConcurrency = Math.max(1, options.chunkConcurrency ?? 4);
+    this.batchSize = Math.max(1, Math.floor(options.batchSize ?? 10));
+    this.chunkConcurrency = Math.max(1, Math.floor(options.chunkConcurrency ?? 4));
     this.profile = options.profile ?? "qwen3";
     this.queryInstruction =
       options.queryInstruction ??
@@ -100,28 +96,32 @@ export class OpenAIEmbeddingClient {
       queryInstruction: this.queryInstruction,
       queryBody: this.queryBody,
     });
-    this.timeoutMs = Math.max(1, options.timeoutMs ?? 10_000);
+    this.timeoutMs = Math.max(1, Math.floor(options.timeoutMs ?? 10_000));
   }
 
-  embedQueries(inputs: string[]): Promise<number[][]> {
+  embedQueries(inputs: string[], options?: EmbeddingRequestOptions): Promise<number[][]> {
     return this.request(
       inputs.map((input) => this.render(this.queryTemplate, input)),
       this.queryBody,
+      false,
+      options,
     );
   }
 
-  embedDocuments(inputs: string[]): Promise<number[][]> {
-    return this.embed(inputs);
+  embedDocuments(inputs: string[], options?: EmbeddingRequestOptions): Promise<number[][]> {
+    return this.embed(inputs, options);
   }
 
   private render(template: string, text: string): string {
     return template.replaceAll("{instruction}", this.queryInstruction).replaceAll("{text}", text);
   }
 
-  embed(inputs: string[]): Promise<number[][]> {
+  embed(inputs: string[], options?: EmbeddingRequestOptions): Promise<number[][]> {
     return this.request(
       inputs.map((input) => this.render(this.documentTemplate, input)),
       this.documentBody,
+      true,
+      options,
     );
   }
 
@@ -130,10 +130,16 @@ export class OpenAIEmbeddingClient {
    * text-embedding-v4: "batch size is invalid, it should not be larger than 10"),
    * so inputs are chunked here instead of relying on the server.
    */
-  private async request(inputs: string[], extraBody: Record<string, unknown>): Promise<number[][]> {
+  private async request(
+    inputs: string[],
+    extraBody: Record<string, unknown>,
+    background: boolean,
+    options: EmbeddingRequestOptions = {},
+  ): Promise<number[][]> {
     if (inputs.length === 0) return [];
-    if (inputs.length <= this.batchSize) return this.requestBatch(inputs, extraBody);
-    return this.requestChunked(inputs, extraBody);
+    if (inputs.length <= this.batchSize)
+      return this.requestBatch(inputs, extraBody, background, options.signal);
+    return this.requestChunked(inputs, extraBody, background, options);
   }
 
   /**
@@ -145,28 +151,43 @@ export class OpenAIEmbeddingClient {
   private async requestChunked(
     inputs: string[],
     extraBody: Record<string, unknown>,
+    background: boolean,
+    options: EmbeddingRequestOptions,
   ): Promise<number[][]> {
     const chunks: string[][] = [];
     for (let offset = 0; offset < inputs.length; offset += this.batchSize) {
       chunks.push(inputs.slice(offset, offset + this.batchSize));
     }
     const results: number[][][] = new Array(chunks.length);
+    const controller = new AbortController();
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
+    const concurrency = Math.max(
+      1,
+      Math.min(this.chunkConcurrency, options.chunkConcurrency ?? this.chunkConcurrency),
+    );
     let next = 0;
     const worker = async () => {
       while (next < chunks.length) {
         const index = next++;
-        results[index] = await this.requestBatch(chunks[index], extraBody);
+        results[index] = await this.requestBatch(chunks[index], extraBody, background, signal);
       }
     };
-    await Promise.all(
-      Array.from({ length: Math.min(this.chunkConcurrency, chunks.length) }, worker),
-    );
-    return results.flat();
+    try {
+      await Promise.all(Array.from({ length: Math.min(concurrency, chunks.length) }, worker));
+      return results.flat();
+    } catch (error) {
+      controller.abort(error);
+      throw error;
+    }
   }
 
   private async requestBatch(
     inputs: string[],
     extraBody: Record<string, unknown>,
+    background: boolean,
+    signal?: AbortSignal,
   ): Promise<number[][]> {
     const body = JSON.stringify({
       model: this.#apiModel,
@@ -174,13 +195,21 @@ export class OpenAIEmbeddingClient {
       ...(this.dimensions ? { dimensions: this.dimensions } : {}),
       ...extraBody,
     });
-    const response = await this.send(body);
-    if (!response.ok) {
-      throw new Error(`embedding server returned ${response.status}: ${await response.text()}`);
-    }
-    const payload = (await response.json()) as {
+    const url = `${this.baseUrl}/embeddings`;
+    const payload = await embeddingHttpTransport(url, this.apiKey, this.chunkConcurrency).json<{
       data?: Array<{ index: number; embedding: number[] }>;
-    };
+    }>(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
+        },
+        body,
+      },
+      { background, timeoutMs: this.timeoutMs, signal },
+    );
     const rows = payload.data ?? [];
     if (rows.length !== inputs.length) {
       throw new Error(
@@ -188,42 +217,6 @@ export class OpenAIEmbeddingClient {
       );
     }
     return rows.sort((left, right) => left.index - right.index).map((row) => row.embedding);
-  }
-  /**
-   * Transient upstream failures (connection resets between a compute region and
-   * the model endpoint, 429, 5xx) are retried here. Without this, one dropped
-   * socket surfaces as a failed Add; with it, the caller sees a slow-but-correct
-   * write. Non-retryable answers (400 invalid key/model/batch) surface at once,
-   * and so does a timeout - see the catch below.
-   */
-  private async send(body: string): Promise<Response> {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        const response = await fetch(`${this.baseUrl}/embeddings`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
-          },
-          body,
-          signal: AbortSignal.timeout(this.timeoutMs),
-        });
-        if (!RETRYABLE_STATUS(response.status) || attempt >= RETRY_DELAYS_MS.length)
-          return response;
-      } catch (error) {
-        // A timeout is not retried. The caller is an HTTP request with an invocation
-        // ceiling, so retrying a slow dependency multiplies the time it takes to fail
-        // rather than the chance of success: at a 90 s per-attempt budget one retried
-        // timeout is already longer than the 120 s the invocation is killed at, which
-        // turns "the provider was slow" into "the request died with no answer".
-        // A connection reset says nothing about the endpoint being slow, so those are
-        // still retried.
-        const name = (error as { name?: string } | undefined)?.name;
-        if (name === "TimeoutError" || name === "AbortError") throw error;
-        if (attempt >= RETRY_DELAYS_MS.length) throw error;
-      }
-      await sleep(RETRY_DELAYS_MS[attempt]);
-    }
   }
 }
 

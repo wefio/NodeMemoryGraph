@@ -73,12 +73,15 @@ npm run index:embeddings
 | `NMG_EMBED_API_KEY` | provider-neutral credential override |
 | `NMG_EMBED_MODEL` | provider model override |
 | `NMG_EMBED_DIMENSIONS` | provider 支持时请求的输出维度 |
-| `NMG_EMBED_BATCH_SIZE` | 增量索引批次大小 |
-| `NMG_EMBED_TIMEOUT_MS` | 每次请求的超时 |
+| `NMG_EMBED_BATCH_SIZE` | OpenAI 兼容接口每个 HTTP 请求最多接收的文本数 |
+| `NMG_EMBED_CHUNK_CONCURRENCY` | 单个进程对同一服务商连接配置的请求并发上限，默认 4 |
+| `NMG_EMBED_TIMEOUT_MS` | 每次尝试的超时，包含等候 HTTP 请求名额的时间 |
 | `NMG_EMBED_PROFILE` | OpenAI-compatible provider 的 `plain`、`bge-en` 或 `qwen3` preprocessing |
 | `NMG_EMBED_TARGETS` | 默认 `records`；可选 `nodes,leaves,records` |
 
 API key 只从环境变量读取，不写入 benchmark 参数快照、index ID 或 memory database。
+
+本地检索对查询文本去重，按服务商允许的大小合批。查询和文档共用并发上限，上限大于 1 时给查询预留一个名额。收到 HTTP 429 后，同一进程的两类请求都遵守服务商的 `Retry-After`。自动召回超时或搜索连接断开时会取消排队、HTTP 读取和重试。服务商以 JSON 数组返回向量。
 
 ## Core 嵌入接口
 

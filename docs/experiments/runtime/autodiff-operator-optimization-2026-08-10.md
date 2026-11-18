@@ -23,6 +23,6 @@ The reported compiled mode used a forward/backward tape, data rebinding, and a s
 
 The dated measurements are local microbenchmarks tied to their graph shapes, environment, and opt-in mode. They do not establish performance for other workloads, a default-enabled mode, or a GPU crossover. The original literature survey and detailed proposed APIs are omitted from this compact record and were not independently revalidated.
 
-- Autodiff engine: [`src/lab/autodiff.ts`](../../../src/lab/autodiff.ts)
+- Autodiff engine: [`src/core/autodiff.ts`](../../../src/core/autodiff.ts)
 - Backend selection exploration: [Batch backend cost model](backend-selection-cost-model-2026-08-10.md)
-- Current behavior and tests: inspect the present `src/lab/` owners and targeted tests before relying on a historical claim.
+- Current behavior and tests: inspect the present owners and targeted tests before relying on a historical claim.

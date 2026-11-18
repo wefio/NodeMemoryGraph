@@ -224,7 +224,7 @@ export class PortableMemoryService {
     return { results: await (await this.engine()).rememberMany(inputs, operationId) };
   }
 
-  async search(input: NmgSearchParams) {
+  async search(input: NmgSearchParams, signal?: AbortSignal) {
     if (!this.local) {
       allowOptions(input, SEARCH_FIELDS);
       return (await this.engine()).search(input.query, input);
@@ -232,12 +232,15 @@ export class PortableMemoryService {
     allowOptions(input, LOCAL_SEARCH_FIELDS);
     const shared = await this.engine();
     const project = await this.project(input.projectDir);
+    const queries = [...new Set([input.query, ...(input.queries ?? [])])];
+    const indexes = [shared.backend.vectorIndex, project?.backend.vectorIndex].flatMap((index) =>
+      index ? [index] : [],
+    );
+    const embeddings = await this.embeddings.queries(queries, input, indexes, signal);
+    signal?.throwIfAborted();
     const results = await Promise.all(
-      [...new Set([input.query, ...(input.queries ?? [])])].map(async (query) => {
-        const indexes = [shared.backend.vectorIndex, project?.backend.vectorIndex].flatMap(
-          (index) => (index ? [index] : []),
-        );
-        const { semantic, reason } = await this.embeddings.query(query, input, indexes);
+      queries.map(async (query, i) => {
+        const { semantic, reason } = embeddings[i]!;
         const search = async (engine: MemoryEngine) => {
           const useVector =
             semantic && engine.backend.vectorIndex?.has(semantic.indexId, semantic.vector.length);
