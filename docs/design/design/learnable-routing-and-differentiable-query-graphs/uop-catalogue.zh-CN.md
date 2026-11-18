@@ -20,6 +20,8 @@
 缩写的 gradient 标签不是 API 名。内核假设图已被有效构造，本表不新增一般性的 shape
 或索引校验保证。
 
+右操作数只有一列时，解释和编译执行都可调用共用的 [Core SIMD 内核](../../../../src/core/matvec-simd.ts)。矩阵至少有两行，每行至少 128 个元素，并且总乘加次数达到 131,072 时，会尝试 Wasm SIMD。输入分块复制到可复用的工作区，最多占用 4 MiB。各 lane 分别算一行，每次累加后按 Float32 舍入。其他形状和缺少 SIMD 的运行时使用 JavaScript。设置 `NMG_AUTODIFF_SIMD=0` 可指定 JavaScript 路径。
+
 | Op key | 内核含义 | Shape |
 | --- | --- | --- |
 | `Add` | `a[i] + b[i]` | 相同 shape |

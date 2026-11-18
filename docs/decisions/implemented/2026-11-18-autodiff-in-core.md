@@ -24,3 +24,8 @@ package would add a release boundary for the same callers.
 
 The Core source inclusion rule packages autodiff. Feature admission belongs to
 each consumer under the [Lite and Lab design](../../design/design.md).
+
+Core owns the shared matrix-vector kernel. Autodiff uses two Wasm SIMD lanes
+to compute independent rows and preserve the scalar accumulation order.
+The [operator catalogue](../../design/design/learnable-routing-and-differentiable-query-graphs/uop-catalogue.md)
+owns its dispatch conditions and workspace limit.

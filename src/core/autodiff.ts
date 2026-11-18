@@ -1,3 +1,5 @@
+import { tryMatvecSimd } from "./matvec-simd.ts";
+
 type Shape = readonly [rows: number, columns: number];
 
 const Op = {
@@ -318,6 +320,7 @@ function evaluateMatmul(
   const [leftRows, shared] = leftShape;
   const [, rightColumns] = rightShape;
   const result = new Float32Array(leftRows * rightColumns);
+  if (SIMD_ENABLED && rightColumns === 1 && tryMatvecSimd(left, right, result)) return result;
   for (let row = 0; row < leftRows; row += 1) {
     const leftOffset = row * shared;
     const resultOffset = row * rightColumns;
@@ -399,6 +402,7 @@ interface CompiledSession {
 }
 
 const COMPILE_ENABLED = /^(1|on|true)$/i.test(process.env.NMG_AUTODIFF_COMPILE ?? "");
+const SIMD_ENABLED = process.env.NMG_AUTODIFF_SIMD !== "0";
 let lastSession: CompiledSession | null = null;
 
 const COMPILED_OPS = new Set<Op>([
