@@ -1,0 +1,20 @@
+{
+  "$schema": "./adapter-manifest.schema.json",
+  "entry": "magpie-plugin/index.ts",
+  "capabilities": [
+    "search",
+    "get",
+    "remember",
+    "state.ag",
+    "state.board",
+    "lab",
+    "daemon-health",
+    "reasoning-workspace",
+    "automatic-recall",
+    "state-context",
+    "answer-attribution",
+    "tool-observation",
+    "board-delivery",
+    "completion-nudge"
+  ]
+}

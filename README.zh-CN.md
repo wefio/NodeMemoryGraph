@@ -83,6 +83,7 @@ skills/nmg-memory/SKILL.md，再选择当前环境支持的最佳接入方式。
 | [Claude Code / MCP](#claude-code-插件) | 记忆工具、工作状态、任务板和可选 Lab | 通过 MCP 显式调用；没有自动逐轮召回或推送唤醒 |
 | [DeepSeek Harness](dsh/dsh-nmg/README.md) | 记忆工具、自动召回、工作状态承载和任务板 | 使用当前宿主包；生命周期与真实唤醒验证范围有限 |
 | [Codex](codex-plugin/README.zh-CN.md) | 独立插件包，原生多会话映射、五类工具与共享 hook | 构建并安装生成包，然后启用、信任 hook |
+| [Magpie](magpie-plugin/README.zh-CN.md) | 网关召回、共享工具、记忆统计和向量索引管理 | 构建后通过 Magpie 安装，连接现有 daemon |
 | [WorkBuddy](workbuddy-plugin/README.zh-CN.md) | Hook 自动召回；可组合 MCP 工具与 Skill | Hook 自身不提供记忆工具；Hook 与 MCP 的会话状态不同 |
 | [Kimi Code CLI](kimi-plugin/README.zh-CN.md) | MCP 工具加可选提醒、在场登记和 prompt 时黑板轮询 | 只装 hook 没有记忆工具、自动召回或状态承载 |
 | 其他可调用工具的 Agent | [CLI + Skill](#agent-无关-cli) 保存、搜索并展开记忆 | 需要 Agent 能执行 CLI 并读取 Skill；自动召回取决于宿主 |

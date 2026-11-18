@@ -42,6 +42,8 @@ Stop 报告处理状态未知，提出续接后报告 busy。工具观察接收�
 后台空闲唤醒、交互控制台及 CLI 兜底尚未接入。
 
 
+[Magpie 插件](../../magpie-plugin/README.zh-CN.md)通过网关 hook 提供预算内召回、状态和通知，通过 MCP 提供共享工具。它的生命周期证据来自网关请求，空闲唤醒需要其他宿主。组合时可按 agent 选定原生能力所有者。
+
 ## 矩阵
 
 | 能力 | Pi | OpenCode | WorkBuddy | MCP | DSH | Kimi | Codex |

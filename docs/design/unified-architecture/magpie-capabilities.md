@@ -15,23 +15,22 @@ adapters: memory operations, automatic recall, working state, disclosure,
 attribution/feedback and coordination. Usage, tracing and GUI are additional
 Magpie features; they do not close an NMG capability gap by themselves.
 
-Target: Magpie `0.1.3545`, observed locally on 2026-11-12. Versioned sources
-establish interfaces, not integration. Plugin loading, collector export, model
-requests and combined sessions were not tested. NMG links describe wiring,
-not deployment. The [operations plan](magpie-operations.md) owns delivery slices.
+Magpie `0.1.4338` is the source and private-host target. The package exercises
+standalone tools, context and the page. Cross-entry ownership and trace joins
+remain design work.
 
 ## Choose the interface by observation
 
 | Need | Versioned upstream source and surface | Integration consequence |
 | --- | --- | --- |
-| Read/modify the model context | [Gateway hooks](https://github.com/yetone/magpie/blob/v0.1.3545/docs/subsystems/gateway-request-hooks.md), [context definition](https://github.com/yetone/magpie/blob/v0.1.3545/internal/plugin/gateway.go) | Async Bun `onRequest` can await bounded NMG reads. It receives origin, protocol, requested model, stream, path, agent, session, cwd and query. It runs before routing, so requested model is not the final provider/model. Tools and tool choice remain client-owned. |
+| Read/modify the model context | [Gateway hooks](https://github.com/yetone/magpie/blob/v0.1.4338/docs/subsystems/gateway-request-hooks.md), [context definition](https://github.com/yetone/magpie/blob/v0.1.4338/internal/plugin/gateway.go) | Async Bun `onRequest` can await bounded NMG reads. It receives origin, protocol, requested model, stream, path, agent, session, cwd and query. It runs before routing, so requested model is not the final provider/model. Tools and tool choice remain client-owned. |
 | Observe completed replies | The same request-hook contract | `onResponse` receives the reconstructed client-facing reply and completion status. It cannot rewrite the delivered reply and can be lost. It supplies neither native tool execution nor Agent idle state. |
-| Show aggregate usage | [Page bridge](https://github.com/yetone/magpie/blob/v0.1.3545/internal/gui/pluginpage.go) | Declared `usage:summary` reads provide today/7d/30d aggregates, not session attribution. `usage:day` has a separate day view. |
-| Observe usage rows | [Middleware extension](https://github.com/yetone/magpie/blob/v0.1.3545/internal/middleware/points.go) | `onUsage` runs synchronously in moejs, separately from Bun. Rows include provider/account, caller/provider key IDs and names, requested/served model, token categories, timing, attempts, status and cost. They omit session, request ID, prompt and raw credentials. |
-| Join a model request | [OTLP spans](https://github.com/yetone/magpie/blob/v0.1.3545/internal/otlp/request.go) | W3C version-00 `traceparent` joins the caller trace. Routing-attempt children carry failures, fallback and usage. Native tools need caller spans. |
-| Place NMG UI | [Page/panel declarations](https://github.com/yetone/magpie/blob/v0.1.3545/internal/plugin/page.go) | Independent pages can have services. Panels have agents/usage/settings/provider slots. Menu actions open pages with ID/name. Validate panel transport separately. |
-| Use embedding and rerank providers | [Retrieval API reference](https://github.com/yetone/magpie/blob/v0.1.3545/docs/reference.md) | `/v1/embeddings` accepts OpenAI-shaped inputs, `/v1/rerank` accepts supported retrieval-vendor shapes. Both use a gateway key and provider/model or bare model ID. Provider compatibility and NMG index identity need tests. |
-| Distribute explicit tools | [Plugin tools](https://github.com/yetone/magpie/blob/v0.1.3545/docs/subsystems/plugin-tools.md) | Streamable HTTP `/mcp/magpie/tools` exposes plugin-prefixed tools. Execution context exposes gateway-known agent, abort and host directory. That does not establish a native Harness session binding. |
+| Show aggregate usage | [Page bridge](https://github.com/yetone/magpie/blob/v0.1.4338/internal/gui/pluginpage.go) | Declared `usage:summary` reads provide today/7d/30d aggregates, not session attribution. `usage:day` has a separate day view. |
+| Observe usage rows | [Middleware extension](https://github.com/yetone/magpie/blob/v0.1.4338/internal/middleware/points.go) | `onUsage` runs synchronously in moejs, separately from Bun. Rows include provider/account, caller/provider key IDs and names, requested/served model, token categories, timing, attempts, status and cost. They omit session, request ID, prompt and raw credentials. |
+| Join a model request | [OTLP spans](https://github.com/yetone/magpie/blob/v0.1.4338/internal/otlp/request.go) | W3C version-00 `traceparent` joins the caller trace. Routing-attempt children carry failures, fallback and usage. Native tools need caller spans. |
+| Place NMG UI | [Page/panel declarations](https://github.com/yetone/magpie/blob/v0.1.4338/internal/plugin/page.go) | Independent pages can have services. Panels have agents/usage/settings/provider slots. Menu actions open pages with ID/name. Validate panel transport separately. |
+| Use embedding and rerank providers | [Retrieval API reference](https://github.com/yetone/magpie/blob/v0.1.4338/docs/reference.md) | `/v1/embeddings` accepts OpenAI-shaped inputs, `/v1/rerank` accepts supported retrieval-vendor shapes. Both use a gateway key and provider/model or bare model ID. Provider compatibility and NMG index identity need tests. |
+| Distribute explicit tools | [Plugin tools](https://github.com/yetone/magpie/blob/v0.1.4338/docs/subsystems/plugin-tools.md) | Streamable HTTP `/mcp/magpie/tools` exposes plugin-prefixed tools. Execution context exposes gateway-known agent, abort and host directory. That does not establish a native Harness session binding. |
 
 `onUsage` is an optional bounded observer. Its queue holds 1,024 rows and a
 callback has a 250 ms limit, with drops possible. It is unsuitable as the sole

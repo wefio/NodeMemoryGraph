@@ -165,14 +165,26 @@ export class LocalMemoryEmbeddings {
     } while (job.pending && !this.closing);
   }
 
-  private async sweep(index: MemoryVectorIndex, client: IndexClient, limit: number): Promise<void> {
+  prepareIndex(index: MemoryVectorIndex, client: IndexClient, signal: AbortSignal): Promise<void> {
+    return this.sweep(index, client, backfillPageSize(client), signal);
+  }
+
+  private async sweep(
+    index: MemoryVectorIndex,
+    client: IndexClient,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
     let after: MemoryVectorCursor | undefined;
     do {
+      signal?.throwIfAborted();
       const documents = index.pending(client.indexId, limit, after);
       if (!documents.length) return;
       const texts = [...new Set(documents.map((document) => document.text))];
-      const vectors = await (client.embedDocumentsForStorage?.(texts) ??
-        client.embedDocuments(texts));
+      const options = signal ? { signal } : undefined;
+      const vectors = await (client.embedDocumentsForStorage?.(texts, options) ??
+        client.embedDocuments(texts, options));
+      signal?.throwIfAborted();
       if (vectors.length !== texts.length) throw new Error("Invalid document vector batch");
       const byText = new Map(texts.map((text, i) => [text, vectors[i]!]));
       index.save(

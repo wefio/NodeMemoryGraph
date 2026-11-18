@@ -9,20 +9,20 @@
 
 将 Magpie 与客户端完整的已连接能力集合组合，包括原生适配器、MCP、hook 和 CLI／Skill 访问。共享[组合模型](harness-integration.zh-CN.md#组合各接入点的能力)按操作选择提供方。目标是让各适配器正常使用 NMG 的记忆操作、自动召回、工作状态、披露、归因／反馈与协作。用量、追踪和 GUI 是 Magpie 的附加特性，本身不补齐 NMG 能力缺口。
 
-目标是 2026-11-12 本机观察到的 Magpie `0.1.3545`。固定版本源码证明接口，不证明集成；插件加载、collector 导出、模型请求和组合会话均未测试。NMG 链接表示接线，不表示部署。[管理计划](magpie-operations.zh-CN.md)拥有交付切片。
+接口核对与首版运行验证固定到 Magpie `0.1.4338`。独立工具、召回和页面已在隔离宿主验证。跨入口联动和追踪仍属设计范围。
 
 ## 按观测目标选择接口
 
 | 需求 | 固定版本上游来源与接口 | 接入含义 |
 | --- | --- | --- |
-| 读取／修改模型上下文 | [网关 hook](https://github.com/yetone/magpie/blob/v0.1.3545/docs/subsystems/gateway-request-hooks.md)、[上下文定义](https://github.com/yetone/magpie/blob/v0.1.3545/internal/plugin/gateway.go) | 异步 Bun `onRequest` 可以等待有界 NMG 读取，接收 origin、protocol、请求模型、stream、path、agent、session、cwd、query。它在路由前运行，请求模型不等于最终供应商／模型。工具与工具选择仍归客户端。 |
+| 读取／修改模型上下文 | [网关 hook](https://github.com/yetone/magpie/blob/v0.1.4338/docs/subsystems/gateway-request-hooks.md)、[上下文定义](https://github.com/yetone/magpie/blob/v0.1.4338/internal/plugin/gateway.go) | 异步 Bun `onRequest` 可以等待有界 NMG 读取，接收 origin、protocol、请求模型、stream、path、agent、session、cwd、query。它在路由前运行，请求模型不等于最终供应商／模型。工具与工具选择仍归客户端。 |
 | 观察已完成回复 | 同一请求 hook 合同 | `onResponse` 接收重建的客户端回复和完成状态，不能改写已交付回复，通知可能丢失，不提供原生工具执行或 Agent 空闲状态。 |
-| 展示聚合用量 | [页面 bridge](https://github.com/yetone/magpie/blob/v0.1.3545/internal/gui/pluginpage.go) | 声明过的 `usage:summary` 读取提供 today／7d／30d 聚合，不提供会话归因，`usage:day` 有独立按日视图。 |
-| 观察用量行 | [Middleware 扩展](https://github.com/yetone/magpie/blob/v0.1.3545/internal/middleware/points.go) | `onUsage` 在 moejs 中同步运行，与 Bun 不同。行包含供应商／账号、调用方／供应商 key 的 ID 和名称、请求／实际模型、token 分类、耗时、尝试、状态和成本，不含 session、请求 ID、prompt 或原始凭据。 |
-| 关联模型请求 | [OTLP span](https://github.com/yetone/magpie/blob/v0.1.3545/internal/otlp/request.go) | W3C version-00 `traceparent` 接入调用方 trace，路由尝试子 span 包含失败、fallback 与用量，原生工具需要调用方 span。 |
-| 放置 NMG GUI | [页面／面板声明](https://github.com/yetone/magpie/blob/v0.1.3545/internal/plugin/page.go) | 独立页面可以带 service，面板可放入 agents／usage／settings／provider，菜单动作带 ID／名称打开页面，面板传输独立验证。 |
-| 复用向量和重排供应商 | [检索 API 参考](https://github.com/yetone/magpie/blob/v0.1.3545/docs/reference.md) | `/v1/embeddings` 接收 OpenAI 形状输入，`/v1/rerank` 接收支持的检索供应商格式。两者使用网关 key，模型可为 provider/model 或裸 ID，供应商兼容性与 NMG 索引身份需要测试。 |
-| 分发显式工具 | [插件工具](https://github.com/yetone/magpie/blob/v0.1.3545/docs/subsystems/plugin-tools.md) | Streamable HTTP `/mcp/magpie/tools` 提供带插件前缀的工具。执行上下文提供网关识别的 agent、abort 和宿主目录，不建立原生 Harness 会话绑定。 |
+| 展示聚合用量 | [页面 bridge](https://github.com/yetone/magpie/blob/v0.1.4338/internal/gui/pluginpage.go) | 声明过的 `usage:summary` 读取提供 today／7d／30d 聚合，不提供会话归因，`usage:day` 有独立按日视图。 |
+| 观察用量行 | [Middleware 扩展](https://github.com/yetone/magpie/blob/v0.1.4338/internal/middleware/points.go) | `onUsage` 在 moejs 中同步运行，与 Bun 不同。行包含供应商／账号、调用方／供应商 key 的 ID 和名称、请求／实际模型、token 分类、耗时、尝试、状态和成本，不含 session、请求 ID、prompt 或原始凭据。 |
+| 关联模型请求 | [OTLP span](https://github.com/yetone/magpie/blob/v0.1.4338/internal/otlp/request.go) | W3C version-00 `traceparent` 接入调用方 trace，路由尝试子 span 包含失败、fallback 与用量，原生工具需要调用方 span。 |
+| 放置 NMG GUI | [页面／面板声明](https://github.com/yetone/magpie/blob/v0.1.4338/internal/plugin/page.go) | 独立页面可以带 service，面板可放入 agents／usage／settings／provider，菜单动作带 ID／名称打开页面，面板传输独立验证。 |
+| 复用向量和重排供应商 | [检索 API 参考](https://github.com/yetone/magpie/blob/v0.1.4338/docs/reference.md) | `/v1/embeddings` 接收 OpenAI 形状输入，`/v1/rerank` 接收支持的检索供应商格式。两者使用网关 key，模型可为 provider/model 或裸 ID，供应商兼容性与 NMG 索引身份需要测试。 |
+| 分发显式工具 | [插件工具](https://github.com/yetone/magpie/blob/v0.1.4338/docs/subsystems/plugin-tools.md) | Streamable HTTP `/mcp/magpie/tools` 提供带插件前缀的工具。执行上下文提供网关识别的 agent、abort 和宿主目录，不建立原生 Harness 会话绑定。 |
 
 `onUsage` 是可选的有界观察器。队列容纳 1,024 行，单次回调限时 250 ms，可能丢弃。它不适合作为唯一持久用量账本，也不能关联某次召回。不能假设这个运行环境支持任意 Node 导入或异步 NMG RPC，持久传输需要受支持的导出或 bridge。
 

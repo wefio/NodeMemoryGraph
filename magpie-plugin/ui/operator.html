@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>NMG</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: var(--magpie-font, "Geist", system-ui, sans-serif);
+        color: var(--magpie-fg, CanvasText);
+        background: var(--magpie-bg, Canvas);
+        font-size: 14px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 24px;
+        max-width: 1100px;
+      }
+      button,
+      input,
+      select {
+        font: inherit;
+        color: inherit;
+      }
+      button {
+        cursor: pointer;
+        padding: 7px 12px;
+        border: 1px solid var(--magpie-line, ButtonBorder);
+        border-radius: 6px;
+        background: var(--magpie-card, ButtonFace);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      input,
+      select {
+        padding: 8px;
+        border: 1px solid var(--magpie-line, ButtonBorder);
+        border-radius: 5px;
+        background: var(--magpie-card, Field);
+        width: 100%;
+      }
+      h2 {
+        font-size: 16px;
+        margin: 0 0 16px;
+      }
+      p {
+        line-height: 1.6;
+        margin: 8px 0;
+      }
+      .muted,
+      dt,
+      th {
+        color: var(--magpie-muted, GrayText);
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      section {
+        padding: 24px 0;
+        border-bottom: 1px solid var(--magpie-line, ButtonBorder);
+      }
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 20px;
+        margin: 24px 0;
+      }
+      dl {
+        margin: 0;
+      }
+      dt {
+        font-size: 12px;
+      }
+      dd {
+        font-size: 26px;
+        margin: 8px 0 0;
+        font-variant-numeric: tabular-nums;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 18px;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 13px;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 10px 6px;
+        border-bottom: 1px solid var(--magpie-line, ButtonBorder);
+      }
+      th {
+        font-weight: 500;
+      }
+      code {
+        font-size: 12px;
+        overflow-wrap: anywhere;
+      }
+      #message {
+        min-height: 24px;
+      }
+      #message[data-error="true"] {
+        color: var(--magpie-danger, #b34838);
+      }
+      #model-form {
+        margin-top: 20px;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (max-width: 650px) {
+        body {
+          padding: 16px;
+        }
+        .metrics {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        .toolbar {
+          align-items: flex-start;
+        }
+        .metrics dd {
+          font-size: 22px;
+        }
+      }
+    </style>
+    <script nonce="__NMG_NONCE__">
+      globalThis.NMG_OPERATOR_TOKEN = __NMG_OPERATOR_TOKEN__;
+    </script>
+    <script src="operator.js" defer></script>
+  </head>
+  <body>
+    <div class="toolbar">
+      <div>
+        <strong id="health">连接中</strong>
+        <p class="muted" id="store"></p>
+      </div>
+      <button id="refresh">刷新</button>
+    </div>
+    <p id="message" role="status" aria-live="polite"></p>
+    <div class="metrics" aria-label="存储统计">
+      <dl>
+        <dt>记忆记录</dt>
+        <dd id="memories">—</dd>
+      </dl>
+      <dl>
+        <dt>节点</dt>
+        <dd id="nodes">—</dd>
+      </dl>
+      <dl>
+        <dt>当前索引向量</dt>
+        <dd id="vectors">—</dd>
+      </dl>
+      <dl>
+        <dt>SQLite 主文件</dt>
+        <dd id="bytes">—</dd>
+      </dl>
+    </div>
+    <p class="muted" id="scope">记录数包含历史及归档记录，以服务公布的命名空间为范围。</p>
+    <section>
+      <h2>检索活动</h2>
+      <p class="muted">
+        服务端保留最近 30 天的搜索尝试，按 UTC 日期统计。自动召回与主动搜索分别计数。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>来源</th>
+            <th>有结果</th>
+            <th>空结果</th>
+            <th>失败</th>
+          </tr>
+        </thead>
+        <tbody id="activity"></tbody>
+      </table>
+    </section>
+    <section>
+      <h2>Magpie 网关用量</h2>
+      <p class="muted">当前网关全部请求的报告值，覆盖经过 Magpie 的流量。</p>
+      <div class="actions">
+        <button class="period" data-period="today" aria-pressed="true">今天</button
+        ><button class="period" data-period="7d">7 天</button
+        ><button class="period" data-period="30d">30 天</button>
+      </div>
+      <p id="gateway-usage">等待 Magpie 用量接口</p>
+      <p class="muted" id="nmg-usage">NMG 专属模型用量尚无完整报告。</p>
+    </section>
+    <section>
+      <h2>向量模型</h2>
+      <p id="current-model"></p>
+      <p class="muted" id="config-source"></p>
+      <p id="job" role="status"></p>
+      <button id="edit-model">设置候选模型</button>
+      <form id="model-form" hidden>
+        <div class="grid">
+          <label class="field"
+            >服务商<select name="provider">
+              <option value="openai">OpenAI 兼容／Magpie 网关</option>
+              <option value="gemini">Gemini</option>
+              <option value="jina">Jina</option>
+              <option value="cloudflare">Cloudflare</option>
+            </select></label
+          >
+          <label class="field">模型 ID<input name="model" required autocomplete="off" /></label>
+          <label class="field"
+            >API 地址<input
+              name="baseUrl"
+              type="url"
+              autocomplete="off"
+              placeholder="使用服务商默认地址，或填写 Magpie 的 /v1 地址"
+          /></label>
+          <label class="field"
+            >API key<input
+              name="apiKey"
+              type="password"
+              autocomplete="new-password"
+              placeholder="留空仅保留相同服务商及地址的已存凭据"
+          /></label>
+          <label class="field"
+            >向量维度<input
+              name="dimensions"
+              type="number"
+              min="1"
+              max="65536"
+              placeholder="采用模型默认值"
+          /></label>
+          <label class="field"
+            >检索 profile<select name="profile">
+              <option value="">自动选择</option>
+              <option value="qwen3">qwen3</option>
+              <option value="bge-en">bge-en</option>
+            </select></label
+          >
+        </div>
+        <div class="actions"><button type="button" id="save-model">保存候选配置</button></div>
+      </form>
+      <div class="actions" id="candidate-actions" hidden>
+        <button data-action="testCandidate">测试连接</button
+        ><button data-action="buildCandidate">构建候选索引</button
+        ><button data-action="activateCandidate">激活候选配置</button
+        ><button data-action="cancelCandidate">取消候选</button>
+      </div>
+      <p class="muted">
+        连接测试和索引构建会调用所选向量服务。激活后使用托管配置，当前索引在候选就绪前持续提供检索。
+      </p>
+    </section>
+    <p class="muted" id="updated"></p>
+  </body>
+</html>

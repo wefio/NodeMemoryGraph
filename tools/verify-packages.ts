@@ -148,11 +148,23 @@ if (!codex.ok) {
   process.stdout.write("  ok\n");
 }
 
+process.stdout.write("\nverify:packages — Magpie self-contained distribution\n");
+const magpie = capture(
+  "npm",
+  ["run", "magpie:package", "--", "--output", ".nmg/verification/magpie-package"],
+  root,
+);
+if (magpie.ok) process.stdout.write("  ok\n");
+else {
+  failures += 1;
+  process.stderr.write(magpie.output);
+}
+
 if (failures > 0) {
   process.stderr.write(`\nverify:packages — ${failures} subpackage(s) failed\n`);
   process.exitCode = 1;
 } else {
   process.stdout.write(
-    `\nverify:packages ok: ${SUBPACKAGES.length} subpackage(s) build from clean install; Codex distribution packs\n`,
+    `\nverify:packages ok: ${SUBPACKAGES.length} subpackage(s) build from clean install; Codex and Magpie distributions pack\n`,
   );
 }

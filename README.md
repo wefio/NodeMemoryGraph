@@ -98,6 +98,7 @@ you choose an integration.
 | [Claude Code / MCP](#claude-code-plugin) | Memory tools, working state, Task Board and optional Lab | Explicit MCP calls; no automatic per-turn recall or push wake |
 | [DeepSeek Harness](dsh/dsh-nmg/README.md) | Memory tools, automatic recall, working-state carriage and Task Board | Use the current host package; lifecycle and live-wake verification remain scoped |
 | [Codex](codex-plugin/README.md) | Self-contained plugin with native multi-session mapping, five tools and shared hooks | Build and install the generated package, then enable and trust hooks |
+| [Magpie](magpie-plugin/README.md) | Gateway recall, shared tools, memory statistics and embedding index management | Build and install in Magpie, then connect an existing daemon |
 | [WorkBuddy](workbuddy-plugin/README.md) | Hook-based automatic recall; can combine MCP tools and Skill | The hook itself has no memory tools; hook and MCP session state differ |
 | [Kimi Code CLI](kimi-plugin/README.md) | MCP tools plus optional reminders, presence and prompt-time board polling | Hook alone has no memory tools, automatic recall or state carriage |
 | Other tool-capable agents | [CLI + Skill](#agent-independent-cli) to save, search and open memory | The agent must run the CLI and read the Skill; automatic recall depends on the host |

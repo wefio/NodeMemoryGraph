@@ -134,6 +134,7 @@ import {
   type NmgTaskRunParams,
 } from "./protocol.ts";
 import { RpcRejections } from "./rpc-rejections.ts";
+import { NmgOperator } from "./operator.ts";
 
 const SERVICE_VERSION = "0.1.0";
 type ActiveGraphStorePart = {
@@ -185,6 +186,19 @@ export class NmgService {
   readonly #getReferenceUsage = { fullIds: 0, compoundRefs: 0 };
   #embeddingClient: EmbeddingClient | undefined | null;
   #embeddingError: string | null = null;
+  #operator: NmgOperator | undefined;
+
+  #getOperator(): NmgOperator {
+    return (this.#operator ??= new NmgOperator(
+      this.databasePath + ".operator.sqlite",
+      this.#portableMemory,
+      this.#environment,
+      () => {
+        this.#embeddingClient = undefined;
+        this.#embeddingError = null;
+      },
+    ));
+  }
 
   #shutdownRequested = false;
   /** Set by close(). New work is refused after this, so a shutdown cannot race a fresh request. */
@@ -357,77 +371,89 @@ export class NmgService {
           return this.#hello() as NmgMethodResult[M];
         case "status":
           return this.#status() as NmgMethodResult[M];
-        case "resolveRemember":
-          return (await this.#resolveMemory(
-            parseResolveRememberParams(params),
-          )) as NmgMethodResult[M];
-        case "recordClaimOutcomes":
-          return (await this.#claimOutcomes(
-            parseRecordClaimOutcomesParams(params),
-          )) as NmgMethodResult[M];
-        case "recordFeedback":
-          return this.#recordFeedback(parseRecordFeedbackParams(params)) as NmgMethodResult[M];
-        case "exportMemories": {
-          const input = objectParams(params);
-          return (await this.#portableMemory.exportMemories({
-            sourceActor: optionalEnum(input, "sourceActor", MEMORY_ACTORS),
-            includeDeleted: optionalBoolean(input, "includeDeleted"),
-          })) as NmgMethodResult[M];
-        }
-        case "setStorageState": {
-          const input = objectParams(params);
-          return (await this.#portableMemory.setStorageState({
-            memoryId: requiredString(input, "memoryId"),
-            storageState: requiredEnum(input, "storageState", [
-              "indexed",
-              "dormant",
-              "quarantine",
-            ] as const),
-            recoveryDays: optionalInteger(input, "recoveryDays", 0, 3650),
-          })) as NmgMethodResult[M];
-        }
-        case "perfAggregates":
-          return this.#getStore().perfAggregates() as NmgMethodResult[M];
-        case "pruneRetrievalTraces": {
-          const input = objectParams(params);
-          return {
-            pruned: this.#getStore().pruneRetrievalTraces({
-              maxDays: optionalInteger(input, "maxDays", 1, 3650),
-              maxRows: optionalInteger(input, "maxRows", 100, 1_000_000),
-            }),
-          } as NmgMethodResult[M];
-        }
-        case "recordActiveGraphAttribution":
-          return (await this.#attributeRecall(
-            parseRecordActiveGraphAttributionParams(params),
-          )) as NmgMethodResult[M];
-        case "taskBoard": {
-          const parsed = parseTaskBoardParams(params);
-          return taskBoardHandlers[parsed.action](this.#getStore(), parsed) as NmgMethodResult[M];
-        }
-        case "taskRun": {
-          const parsed = parseTaskRunParams(params);
-          return taskRunHandlers[parsed.action](this.#getStore(), parsed) as NmgMethodResult[M];
-        }
-        case "state":
-          return this.#state(params) as NmgMethodResult[M];
-        case "lab":
-          return this.#lab(parseLabParams(params)) as NmgMethodResult[M];
-        case "sessionActiveGraph":
-          return this.#sessionActiveGraph(
-            parseSessionActiveGraphParams(params),
-          ) as NmgMethodResult[M];
+        case "operator":
+          return (await this.#getOperator().invoke(params)) as NmgMethodResult[M];
         case "shutdown":
           this.#shutdownRequested = true;
           return { shuttingDown: true } as NmgMethodResult[M];
         default:
-          throw new NmgProtocolError("METHOD_NOT_FOUND", "Unknown NMG method " + method);
+          return await this.#invokeLocalOperation(method, params);
       }
     } catch (error) {
       this.#rpcRejections.record(method, error);
       throw error;
     } finally {
       this.#inFlight -= 1;
+    }
+  }
+
+  async #invokeLocalOperation<M extends NmgMethod>(
+    method: M,
+    params: unknown,
+  ): Promise<NmgMethodResult[M]> {
+    switch (method) {
+      case "resolveRemember":
+        return (await this.#resolveMemory(
+          parseResolveRememberParams(params),
+        )) as NmgMethodResult[M];
+      case "recordClaimOutcomes":
+        return (await this.#claimOutcomes(
+          parseRecordClaimOutcomesParams(params),
+        )) as NmgMethodResult[M];
+      case "recordFeedback":
+        return this.#recordFeedback(parseRecordFeedbackParams(params)) as NmgMethodResult[M];
+      case "exportMemories": {
+        const input = objectParams(params);
+        return (await this.#portableMemory.exportMemories({
+          sourceActor: optionalEnum(input, "sourceActor", MEMORY_ACTORS),
+          includeDeleted: optionalBoolean(input, "includeDeleted"),
+        })) as NmgMethodResult[M];
+      }
+      case "setStorageState": {
+        const input = objectParams(params);
+        return (await this.#portableMemory.setStorageState({
+          memoryId: requiredString(input, "memoryId"),
+          storageState: requiredEnum(input, "storageState", [
+            "indexed",
+            "dormant",
+            "quarantine",
+          ] as const),
+          recoveryDays: optionalInteger(input, "recoveryDays", 0, 3650),
+        })) as NmgMethodResult[M];
+      }
+      case "perfAggregates":
+        return this.#getStore().perfAggregates() as NmgMethodResult[M];
+      case "pruneRetrievalTraces": {
+        const input = objectParams(params);
+        return {
+          pruned: this.#getStore().pruneRetrievalTraces({
+            maxDays: optionalInteger(input, "maxDays", 1, 3650),
+            maxRows: optionalInteger(input, "maxRows", 100, 1_000_000),
+          }),
+        } as NmgMethodResult[M];
+      }
+      case "recordActiveGraphAttribution":
+        return (await this.#attributeRecall(
+          parseRecordActiveGraphAttributionParams(params),
+        )) as NmgMethodResult[M];
+      case "taskBoard": {
+        const parsed = parseTaskBoardParams(params);
+        return taskBoardHandlers[parsed.action](this.#getStore(), parsed) as NmgMethodResult[M];
+      }
+      case "taskRun": {
+        const parsed = parseTaskRunParams(params);
+        return taskRunHandlers[parsed.action](this.#getStore(), parsed) as NmgMethodResult[M];
+      }
+      case "state":
+        return this.#state(params) as NmgMethodResult[M];
+      case "lab":
+        return this.#lab(parseLabParams(params)) as NmgMethodResult[M];
+      case "sessionActiveGraph":
+        return this.#sessionActiveGraph(
+          parseSessionActiveGraphParams(params),
+        ) as NmgMethodResult[M];
+      default:
+        throw new NmgProtocolError("METHOD_NOT_FOUND", "Unknown NMG method " + method);
     }
   }
 
@@ -451,16 +477,30 @@ export class NmgService {
     this.#store?.close();
     this.#store = undefined;
     this.#sessionActiveGraphs.clear();
-    return this.#portableMemory.close();
+    const pendingOperator = this.#operator?.close();
+    return pendingOperator
+      ? pendingOperator.then(() => this.#portableMemory.close())
+      : this.#portableMemory.close();
   }
 
   async #invokeMemory(method: NmgMethod, value: unknown, signal?: AbortSignal): Promise<unknown> {
     try {
-      return await this.#invokePortable(method, value, signal);
+      const result = await this.#invokePortable(method, value, signal);
+      if (method === "search") this.#recordSearchActivity(value, result);
+      return result;
     } catch (error) {
+      if (method === "search") this.#recordSearchActivity(value, undefined, true);
       if (error instanceof MemoryWriteRejected)
         throw new NmgProtocolError("WRITE_REJECTED", error.reason);
       throw error;
+    }
+  }
+
+  #recordSearchActivity(value: unknown, result?: unknown, failed = false): void {
+    try {
+      this.#getOperator().record(value, result, failed);
+    } catch {
+      /* Optional diagnostics preserve the memory operation's result. */
     }
   }
 
@@ -1600,7 +1640,8 @@ export class NmgService {
     if (this.#embeddingClient !== undefined) return this.#embeddingClient ?? undefined;
     try {
       this.#embeddingClient =
-        createEmbeddingClientFromEnv(this.#environment, {
+        this.#getOperator().client() ??
+        createEmbeddingClientFromEnv(this.#getOperator().effectiveEnvironment(), {
           formatStore: localEmbeddingFormatStore(this.#dataDirectory),
         }) ?? null;
     } catch (error) {
@@ -1612,7 +1653,7 @@ export class NmgService {
 
   #configuredProvider(): string | null {
     try {
-      return configuredProvider(this.#environment) ?? null;
+      return configuredProvider(this.#getOperator().effectiveEnvironment()) ?? null;
     } catch (error) {
       this.#embeddingError ??= error instanceof Error ? error.message : String(error);
       return this.#environment.NMG_EMBED_PROVIDER?.trim() || null;

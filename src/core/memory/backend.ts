@@ -128,6 +128,7 @@ export interface MemoryBackend {
     sessionId?: string,
   ): MemoryChainProjection;
   openRead(): Promise<MemoryReadView>;
+  counts?(view: MemoryReadView): Promise<{ memories: number; nodes: number }>;
   scan(view: MemoryReadView, query: MemoryEntityQuery): Promise<MemoryEntity[]>;
   /** Read the requested pages in order from the same snapshot. */
   scanBatch?(

@@ -1,4 +1,4 @@
-import { prepareAutomaticRecallSurface } from "./agent-surface.ts";
+import { prepareAutomaticRecallSurface, prepareEvidenceSurface } from "./agent-surface.ts";
 import type { NmgHelloResult, NmgMethod } from "../cli/protocol.ts";
 import { contextStateViews } from "./context-information.ts";
 import { promptCompletionNudge } from "./completion-nudge.ts";
@@ -64,7 +64,10 @@ export async function observeAdapterToolResult(input: ToolObservationInput): Pro
 }
 
 export interface CapabilityServices {
-  "automatic-recall": { prepare: typeof prepareAutomaticRecallSurface };
+  "automatic-recall": {
+    prepare: typeof prepareAutomaticRecallSurface;
+    evidence: typeof prepareEvidenceSurface;
+  };
   "state-context": { views: typeof contextStateViews };
   "tool-observation": { observe: typeof observeAdapterToolResult };
   "completion-nudge": { prepare: typeof promptCompletionNudge };
@@ -83,7 +86,7 @@ export interface CapabilityServices {
 }
 
 const SERVICES: CapabilityServices = {
-  "automatic-recall": { prepare: prepareAutomaticRecallSurface },
+  "automatic-recall": { prepare: prepareAutomaticRecallSurface, evidence: prepareEvidenceSurface },
   "state-context": { views: contextStateViews },
   "tool-observation": { observe: observeAdapterToolResult },
   "completion-nudge": { prepare: promptCompletionNudge },

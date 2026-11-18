@@ -5,6 +5,11 @@
 **Status:** draft；接口命名与交付切片可随实现调整。
 **Authority:** [Magpie 集成](magpie-integration.zh-CN.md)。
 
+## 当前实现
+
+首版页面通过已认证的 NMG daemon `operator` 方法读取库快照、UTC 日搜索尝试和托管向量配置。Magpie 的用量 bridge 单独提供网关 token。页面显示 SQLite 主文件占用及当前索引向量，保留未知指标。候选索引支持连接测试、构建、取消和显式激活。完整的 NMG 专属用量账本、操作去重、交付确认统计和跨适配器关联属于下文设计。
+[安装和操作](../../../magpie-plugin/README.zh-CN.md)
+
 ## 首版目标
 
 借用 Magpie 窗口提供 NMG 页面，包含库统计、召回活动、token 账本和向量设置。记忆服务保留供其他客户端复用的接口。建议先交付页面，再接网关自动召回；已有原生 NMG 插件的用户可以直接使用页面，无需更换召回所有者。
@@ -17,18 +22,6 @@
 | 活动 | 自动召回与主动搜索分别展示；尝试、注入、空结果／跳过／失败；按时间与来源筛选 |
 | 用量 | 网关报告的模型用量、估算注入量、NMG 后台模型用量；覆盖范围与未知值 |
 | 向量设置 | provider、向量模型、配置实际来源、脱敏凭据状态、候选索引与构建进度 |
-
-界面草图，不使用生产数据：
-
-```text
-NMG    服务 / 储存库 / 作用域         今天 | 7天 | 30天
-记忆 —    节点 —    当前索引向量 —    物理占用 —
-自动召回：尝试 — | 已注入 — | 跳过 — | 失败 —
-主动搜索：操作 — | 请求尝试 — | 空结果 — | 失败 —
-模型 token：报告值 —   记忆上下文：估算值 —
-向量：当前模型 —   待切换模型 —   索引状态 —
-[连接设置] [模型设置] [刷新]
-```
 
 ## 归属与宿主接口
 
@@ -46,9 +39,9 @@ flowchart LR
 
 Host 服务负责页面传输和端点认证，不另开记忆数据库、不复制供应商配置文件，也不作为 Agent 登记到黑板。库指标、配置和索引由 NMG 负责，网关用量由 Magpie 负责。组合展示保留两边的来源标签。
 
-2026-11-12 在本机观察到 Magpie `0.1.3545`。[对应版本的请求 hook 合同](https://github.com/yetone/magpie/blob/v0.1.3545/docs/subsystems/gateway-request-hooks.md)作为首个实现目标，不表示 NMG 绑定已经可用。请求 hook 在路由前执行，只保留单次请求状态，接收部分元数据，不接收客户端凭据。完成回调是尽力观察。
+Magpie `0.1.4338` 的[请求 hook 合同](https://github.com/yetone/magpie/blob/v0.1.4338/docs/subsystems/gateway-request-hooks.md)提供路由前元数据、单次请求状态及尽力而为的回复观察。
 
-[固定版本页面合同](https://github.com/yetone/magpie/blob/v0.1.3545/internal/plugin/page.go)提供声明过的 bridge 读取和独立页面的可选 host 服务，也支持在已有 Usage、Agents、Settings 和供应商页面嵌入面板，以及从供应商／Agent 菜单打开插件页。面板传输需要独立验证。静态插件页不能直接联网；自定义 NMG 读取和设置，需要受支持的 host 服务，或另行验证的上游 bridge 扩展，不能假设存在任意页面 RPC。[Nowledge Mem 清单](https://github.com/magpie-community/plugins/blob/main/packages/nowledge-mem/package.json)提供 hooks／page／service 同包的布局示例，不成为 NMG 实现依赖。拟议的 `magpie-plugin/` 可以将页面、host 传输与 hook 放在一起，打包方式仍需验证。
+[固定版本页面合同](https://github.com/yetone/magpie/blob/v0.1.4338/internal/plugin/page.go)提供声明过的 bridge 读取和独立页面的可选 host 服务，也支持在已有 Usage、Agents、Settings 和供应商页面嵌入面板，以及从供应商／Agent 菜单打开插件页。面板传输需要独立验证。静态插件页不能直接联网；自定义 NMG 读取和设置，需要受支持的 host 服务，或另行验证的上游 bridge 扩展，不能假设存在任意页面 RPC。[Nowledge Mem 清单](https://github.com/magpie-community/plugins/blob/main/packages/nowledge-mem/package.json)提供 hooks／page／service 同包的布局示例，不成为 NMG 实现依赖。拟议的 `magpie-plugin/` 可以将页面、host 传输与 hook 放在一起，打包方式仍需验证。
 
 按[接口与适配器映射](magpie-capabilities.zh-CN.md)选择数据路径：聚合用量来自声明过的页面 bridge，单次请求关联使用调用方追踪和已验证的 OTLP 导出。独立的同步 `onUsage` 观察器没有 session／请求 ID，不能替代该关联，也不能单独承担持久账本。
 
@@ -79,7 +72,7 @@ NMG 当前 `status` 已提供服务／embedding 健康及主 SQLite 文件大小
 
 ## 向量模型和 key 设置
 
-页面提供直连 NMG embedding provider 和 Magpie 网关路由，填写模型 ID 及可选端点／profile。Magpie `0.1.3545` 已暴露 `/v1/embeddings` 和 `/v1/rerank`，现有 NMG OpenAI embedding client 是具体复用候选。启用前验证协议兼容性和向量／索引身份，固定兼容的 provider/model 路由，防止 fallback 混入不同向量空间。聊天模型列表和公开 `providers:list` bridge 都不提供向量模型目录。
+页面提供直连 NMG embedding provider 和 Magpie 网关路由，填写模型 ID 及可选端点／profile。Magpie `0.1.4338` 已暴露 `/v1/embeddings` 和 `/v1/rerank`，现有 NMG OpenAI embedding client 是具体复用候选。启用前验证协议兼容性和向量／索引身份，固定兼容的 provider/model 路由，防止 fallback 混入不同向量空间。聊天模型列表和公开 `providers:list` bridge 都不提供向量模型目录。
 
 NMG 拥有自身有效配置和凭据存储。网关路由保存受限网关凭据，上游供应商凭据继续归 Magpie；直连 provider 的凭据归 NMG。表单通过认证的管理写入提交新 key 后清空，后续读取只返回已配置／脱敏状态。插件 options 保存非敏感端点和展示选项，不多存一份明文 key；不从 Magpie 私有文件导入 key。具体安全存储方式留待实现选定，管理设置不暴露为模型工具。
 

@@ -47,6 +47,7 @@ test("format and format:check cover the same declared developer TypeScript surfa
     "workbuddy-plugin",
     "opencode-plugin",
     "codex-plugin",
+    "magpie-plugin",
     "tests",
     "evals",
     "scripts",

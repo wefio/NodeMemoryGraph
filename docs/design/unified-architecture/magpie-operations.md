@@ -5,6 +5,16 @@
 **Status:** draft; implementation names and delivery slices can change.
 **Authority:** [Magpie integration](magpie-integration.md).
 
+## Current implementation
+
+The page reads a store snapshot, UTC daily search attempts and managed embedding
+settings through the authenticated NMG daemon `operator` method. The Magpie usage
+bridge reports gateway tokens. The page shows main SQLite file size and active
+index vectors. It supports candidate testing, build, cancellation and activation.
+The design below covers a complete NMG usage ledger, operation deduplication,
+delivery metrics and cross-adapter correlation.
+[Installation and operation](../../../magpie-plugin/README.md)
+
 ## Intended first version
 
 Use Magpie's window for an NMG page with store statistics, recall activity,
@@ -20,18 +30,6 @@ The proposed page has four areas:
 | Activity | Automatic recall and explicit search separately; attempts, injections, empty/skipped/failed outcomes; period and source filters |
 | Usage | Gateway-reported model usage, estimated injected context, NMG background model usage; coverage and unknown values |
 | Embedding | Provider, embedding model, effective configuration source, masked credential status, candidate index and rebuild progress |
-
-An indicative layout, without production values:
-
-```text
-NMG    Service / store / scope      Today | 7d | 30d
-Memories —    Nodes —    Active-index vectors —    Storage —
-Automatic recall: attempts — | injected — | skipped — | failed —
-Explicit search: operations — | attempts — | empty — | failed —
-Model tokens: reported —   Memory context: estimated —
-Embedding: active model —  candidate —  index state —
-[Connection] [Model settings] [Refresh]
-```
 
 ## Ownership and supported host surface
 
@@ -52,14 +50,10 @@ not open another memory database, copy provider configuration files, or become
 an Agent in the board roster. NMG owns store metrics, settings and indexing;
 Magpie owns its gateway usage. A combined view retains both source labels.
 
-Magpie `0.1.3545` was observed locally on 2026-11-12. Its
-[versioned request-hook contract](https://github.com/yetone/magpie/blob/v0.1.3545/docs/subsystems/gateway-request-hooks.md)
-is the initial implementation target, not proof of a working NMG binding.
-Request hooks run before routing, retain state for one request and receive
-selected metadata rather than client credentials. Completion callbacks are
-best-effort observations.
+The [Magpie 0.1.4338 hook contract](https://github.com/yetone/magpie/blob/v0.1.4338/docs/subsystems/gateway-request-hooks.md) supplies
+pre-routing metadata, request-local state and best-effort reply observation.
 
-The [versioned page contract](https://github.com/yetone/magpie/blob/v0.1.3545/internal/plugin/page.go) offers
+The [versioned page contract](https://github.com/yetone/magpie/blob/v0.1.4338/internal/plugin/page.go) offers
 declared bridge reads and an optional host service for an independent page.
 It also supports panels in existing Usage, Agents, Settings and provider pages,
 and provider/agent menu entries that open the plugin page. Panel transport needs
@@ -129,7 +123,7 @@ for every UI poll. Portable backends report supported metrics explicitly.
 ## Embedding model and key settings
 
 The page offers direct NMG embedding providers and a Magpie gateway route, with
-a model ID and optional endpoint/profile. Magpie `0.1.3545` exposes
+a model ID and optional endpoint/profile. Magpie `0.1.4338` exposes
 `/v1/embeddings` and `/v1/rerank`; the existing NMG OpenAI embedding client is
 a concrete reuse candidate. Validate protocol compatibility and vector/index
 identity before enabling it. Pin compatible provider/model routing so fallback

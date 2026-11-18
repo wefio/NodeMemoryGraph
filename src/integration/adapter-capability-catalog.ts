@@ -6,6 +6,7 @@ import codex from "./adapter-manifests/codex.json" with { type: "json" };
 import dsh from "./adapter-manifests/dsh.json" with { type: "json" };
 import kimi from "./adapter-manifests/kimi.json" with { type: "json" };
 import mcp from "./adapter-manifests/mcp.json" with { type: "json" };
+import magpie from "./adapter-manifests/magpie.json" with { type: "json" };
 import opencode from "./adapter-manifests/opencode.json" with { type: "json" };
 import pi from "./adapter-manifests/pi.json" with { type: "json" };
 import workbuddy from "./adapter-manifests/workbuddy.json" with { type: "json" };
@@ -47,6 +48,7 @@ export const ADAPTER_CAPABILITY_CATALOG = {
   dsh: readAdapterManifest("dsh", dsh),
   kimi: readAdapterManifest("kimi", kimi),
   mcp: readAdapterManifest("mcp", mcp),
+  magpie: readAdapterManifest("magpie", magpie),
   opencode: readAdapterManifest("opencode", opencode),
   pi: readAdapterManifest("pi", pi),
   workbuddy: readAdapterManifest("workbuddy", workbuddy),

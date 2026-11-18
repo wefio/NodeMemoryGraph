@@ -125,6 +125,16 @@ export class SqliteMemoryBackend implements MemoryBackend {
     ensureSqliteMemoryAssociations(this.writer);
   }
 
+  async counts(view: MemoryReadView): Promise<{ memories: number; nodes: number }> {
+    const rows = this.reader(view)
+      .prepare(
+        "SELECT kind, count(*) AS n FROM nmg_memory_entities WHERE namespace=? AND kind IN ('memory','node') GROUP BY kind",
+      )
+      .all(this.namespace);
+    const counts = new Map(rows.map((row) => [String(row.kind), Number(row.n)]));
+    return { memories: counts.get("memory") ?? 0, nodes: counts.get("node") ?? 0 };
+  }
+
   async openRead(): Promise<MemoryReadView> {
     this.assertOpen();
     const db = this.requestScoped ? this.writer : new DatabaseSync(this.path, { readOnly: true });

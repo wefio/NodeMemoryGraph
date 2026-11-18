@@ -123,6 +123,16 @@ routes:
       blocking: [check, check:tests, test:product, build]
       advisory: []
 
+  - id: magpie-adapter
+    paths: [magpie-plugin/**, scripts/build-magpie-plugin.ts]
+    owners:
+      - magpie-plugin/README.md
+      - docs/design/unified-architecture/magpie-integration.md
+    tests: [tests/integration/magpie-*.test.ts, tests/cli/operator.test.ts]
+    verify:
+      blocking: [check, check:tests, test:product, verify:packages]
+      advisory: []
+
   - id: claude-adapter
     paths: [claude-plugins/**]
     owners:

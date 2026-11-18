@@ -1,0 +1,38 @@
+{
+  "name": "@nmg/magpie-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.mjs",
+  "files": [
+    "index.mjs",
+    "ui",
+    "options.schema.json",
+    "adapter-manifest.json",
+    "adapter-manifest.schema.json",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "nmg": {
+    "adapterManifest": "./adapter-manifest.json",
+    "optionsSchema": "./options.schema.json"
+  },
+  "magpie": {
+    "hooks": "./index.mjs",
+    "page": {
+      "title": "NMG",
+      "titles": {
+        "zh": "NMG 记忆"
+      },
+      "file": "ui/page.html",
+      "service": {
+        "port": 3487,
+        "option": "port"
+      }
+    },
+    "permissions": [
+      "usage:summary"
+    ]
+  }
+}

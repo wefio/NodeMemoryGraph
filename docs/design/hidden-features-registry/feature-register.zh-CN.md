@@ -10,6 +10,7 @@
 |---|---|---|---|---|
 | 原生答案版本归因 | hello capability `versioned-answer-attribution` | 能力可用，由调用方选择 | 自有投影、已完成回复及匹配的陈述指纹产生诊断重合 | [Codex 契约](../../../codex-plugin/README.zh-CN.md)，确定性原生 fixture 已验证 |
 | 统一记忆后端 | `nmg daemon migrate` 或 `NmgServiceOptions.memoryBackend` | SQLite 遵循启用标记 | SQLite 与协作共用文件；LanceDB 使用 URI | 本地副本和 S3 协议夹具已验证。[后端契约](../unified-architecture/native-backends.zh-CN.md) · [启用流程](../unified-architecture/legacy-graph-migration.zh-CN.md) |
+| NMG Magpie 集成 | 安装插件；`nativeCapabilities` 选择交给原生适配器的操作；`coordination` 选择请求时黑板投递 | 按需安装插件；默认启用黑板投递 | 密封会话句柄、共享工具和请求上下文；候选向量配置需显式选择托管后才能激活 | 已通过隔离宿主联调。[安装与操作](../../../magpie-plugin/README.zh-CN.md) · `magpie-plugin/options.schema.json` · daemon `operator` |
 | OmniMemEval NMG HTTP | `NMG_OMNI_API_URL`、`NMG_OMNI_API_TOKEN`、`NMG_OMNI_API_NAMESPACE` | 必填 | 带显式命名空间的同步 HTTP Add/Search | [集成指南](../../../evals/omnimemeval/README.zh-CN.md) |
 | Board presence, events and Agent status | `board-events`、`board-agent-activity`、`board-agent-presence`、`board-wake-batches`；`nmg_state space=board` | 跟随共享黑板 gate，记录创建为显式动作 | 版本历史、范围通知、邀请订阅与退出、任务状态，以及[会话在线状态与处理报告](../board-event-records/agent-activity-and-batches.zh-CN.md) | 源码验证与部署分开 |
 | Automatic recall deadline and timing | 无 env gate；Pi `/nmg recall timing` 查看诊断 | ON | [五秒绝对等待预算](../session-memory-lifecycle-hooks-2026-08-10/automatic-recall-budget.zh-CN.md)；显式搜索不受自动期限约束；实现位于 `src/integration/recall-budget.ts` 与 Pi／WorkBuddy adapters | 默认开启；共享 integration owner |
