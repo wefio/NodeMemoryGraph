@@ -3,7 +3,7 @@ import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { access, cp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { parseArgs, promisify } from "node:util";
 import { privateNmg } from "./native-nmg-fixture.mjs";
 
@@ -358,7 +358,10 @@ try {
   await nmg.close();
   const parent = await realpath(output);
   const target = await realpath(fixture);
-  if (relative(parent, target) !== "fixture")
-    throw new Error("Unexpected private fixture cleanup target");
-  await rm(target, { recursive: true, force: true, maxRetries: 6, retryDelay: 200 });
+  if (relative(parent, target) === "fixture") {
+    await rm(target, { recursive: true, force: true, maxRetries: 6, retryDelay: 200 });
+  } else {
+    process.stderr.write("Unexpected private fixture cleanup target\n");
+    process.exitCode = 1;
+  }
 }
