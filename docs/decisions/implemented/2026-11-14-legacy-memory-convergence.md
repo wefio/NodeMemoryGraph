@@ -68,3 +68,8 @@ lets one local sweep visit an already-indexed prefix at most once.
 SQLite's ordered query for either edge endpoint could still scan the namespace's
 edges. Separate endpoint ranges let it keep the same edge order and page limit.
 Both partial indexes contain only edge entries and share the same stored edge.
+
+An unrestricted join let SQLite scan a model's leaf vector index for each
+eligible memory. Keeping memberships on the outer side of that join limits
+leaf vector lookups to the memory's own memberships. Both lookups use the
+existing primary keys.

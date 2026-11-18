@@ -260,13 +260,14 @@ const PREVIOUS_TURN = `(SELECT json_extract(prev.payload, '$.content')
   )
   ORDER BY CAST(prev.name AS INTEGER) DESC, CAST(link.key AS INTEGER) LIMIT 1)`;
 
+// Keep the current memory's memberships on the outer side of the leaf lookup.
 const HIERARCHY_SCORE = `max(coalesce((
   SELECT nmg_memory_cosine(n.vector)
   FROM nmg_memory_route_vectors n
   WHERE n.namespace=m.namespace AND n.kind='node' AND n.id=m.node AND n.model=?
 ), 0), coalesce((
   SELECT max(nmg_memory_cosine(l.vector))
-  FROM nmg_memory_route_members member JOIN nmg_memory_route_vectors l
+  FROM nmg_memory_route_members member CROSS JOIN nmg_memory_route_vectors l
     ON l.namespace=member.namespace AND l.kind='leaf' AND l.id=member.leaf_id
   WHERE member.namespace=m.namespace AND member.memory_id=m.id AND l.model=?
 ), 0))`;

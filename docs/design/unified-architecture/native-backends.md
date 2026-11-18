@@ -124,6 +124,8 @@ versioned answer attribution, and
 vector and hybrid retrieval. Its SQLite backend owns the model-keyed record
 index plus candidate queries. The engine combines those candidates with full
 text and applies visibility and graph rules. The host supplies embeddings.
+For hierarchy scoring, SQLite finds a memory's associated leaf IDs before
+looking up those leaf vectors for the selected model.
 SQLite selects one ordered page of missing vectors before fetching previous turns
 by session and source sequence. A local backfill sweep advances by creation time
 and ID and saves each page after the provider call. Vector saves still check that
