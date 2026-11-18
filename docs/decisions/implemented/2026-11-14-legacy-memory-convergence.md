@@ -74,9 +74,9 @@ eligible memory. Keeping memberships on the outer side of that join limits
 leaf vector lookups to the memory's own memberships. Both lookups use the
 existing primary keys.
 
-A full local embedding sweep on one search or write can keep the daemon busy
-after the caller leaves. Automatic indexing processes one page per activity
-per index and model, and spaces pages on a process-wide queue. This bounds
-unattended work at the cost of slower catch-up when a backlog is large.
-The [daemon idle boundary](../../design/daemon-lifecycle-design.md#r1-daemon-idle-timeout)
-stops background work once foreground requests finish and the idle interval expires.
+Fixed pauses and per-request page limits prolong a bulk indexing job. The
+daemon processes a full sweep in batches and uses the
+[idle boundary](../../design/daemon-lifecycle-design.md#r1-daemon-idle-timeout)
+after that work settles. Bounded pages give incoming requests time to run
+between writes. On little-endian hosts the Float32 buffer supplies the BLOB
+bytes directly.

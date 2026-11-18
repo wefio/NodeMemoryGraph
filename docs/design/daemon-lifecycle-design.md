@@ -31,7 +31,7 @@ During `run.ts locomo matched 99999`, Node exhausted memory: 98.2% of 63.7 GB ph
 
 | Requirement | Design | Setting | Default |
 | --- | --- | --- | --- |
-| R1 | Idle timer runs while no HTTP request is active | `NMG_DAEMON_IDLE_TIMEOUT_MS` | `300000` (5 minutes; `<=0` disables) |
+| R1 | Idle timer runs once requests and vector backfill have settled | `NMG_DAEMON_IDLE_TIMEOUT_MS` | `300000` (5 minutes; `<=0` disables) |
 | R2 | Reuse `readyState()` and stale-lease cleanup; add one connection-level reconnect | None; fixed behavior | — |
 | R3 | Before spawn, scan the resolved NMG data root and warn above the limit; do not block spawn | `NMG_DAEMON_LIMIT` | `32` (`<=0` disables) |
 
@@ -40,8 +40,8 @@ During `run.ts locomo matched 99999`, Node exhausted memory: 98.2% of 63.7 GB ph
 ### Behavior
 
 - Start the timer at daemon startup, even before the first request, so a client that dies immediately after spawn does not leave an immortal daemon.
-- Suspend the timer when an HTTP request arrives and start a fresh interval after the last request handler completes.
-- On timeout, close the listener, cancel queued and in-flight vector backfill, and close the service. Release the lease after closing the stores. The next connection can then start a daemon on the same database.
+- Suspend the timer when an HTTP request arrives. Start a fresh interval once the last handler and any vector backfill already scheduled by a request have settled.
+- On timeout, close the listener and the service, then release the lease. The next connection can start a daemon on the same database.
 
 ### Implementation location
 

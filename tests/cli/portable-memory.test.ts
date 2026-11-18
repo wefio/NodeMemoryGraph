@@ -10,7 +10,9 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { NmgService } from "../../src/cli/service.ts";
 import { runCli } from "../../src/cli/main.ts";
-import { httpHandler } from "../../src/cli/http-server.ts";
+import { httpHandler, serveHttp } from "../../src/cli/http-server.ts";
+import { httpCall } from "../../src/cli/http-client.ts";
+import type { ServerState } from "../../src/cli/lifecycle.ts";
 import { LegacySqliteFixture } from "../helpers/legacy-sqlite-fixture.ts";
 import { stgStorePath } from "../../src/core/stg-projection.ts";
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
@@ -21,20 +23,18 @@ import { stripProviderEnv } from "../helpers/test-env.ts";
 stripProviderEnv();
 
 test(
-  "local activity uses one page of whole provider batches and resumes the backlog after reopening",
+  "the daemon drains whole provider batches before starting its idle countdown",
   { timeout: 5000 },
   async (t) => {
     const directory = mkdtempSync(join(tmpdir(), "nmg-vector-backlog-"));
     const path = join(directory, "memory.sqlite");
     const requests: number[] = [];
-    let complete: (() => void) | undefined;
-    const received = new Promise<void>((resolve) => {
-      complete = resolve;
-    });
-    t.mock.method(globalThis, "fetch", async (_url: unknown, init?: RequestInit) => {
+    const fetch = globalThis.fetch;
+    t.mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+      if (!url.startsWith("https://embedding.test/")) return fetch(url, init);
       const { input } = JSON.parse(String(init?.body)) as { input: string[] };
-      if (!input[0]?.includes("find the archive")) requests.push(input.length);
-      if (requests.length === 3) complete!();
+      requests.push(input.length);
+      await delay(450);
       return Response.json({
         data: input.map((_, index) => ({ index, embedding: [1, 1] })),
       });
@@ -48,27 +48,29 @@ test(
         NMG_EMBED_BATCH_SIZE: "10",
       },
     };
-    let service = new NmgService(options);
+    const service = new NmgService(options);
     t.after(async () => {
       await service.close();
       removeTempDirectory(directory);
     });
-    await service.invoke("rememberBatch", {
+    let publishState!: (state: Partial<ServerState>) => void;
+    const ready = new Promise<Partial<ServerState>>((resolve) => {
+      publishState = resolve;
+    });
+    const stopped = serveHttp(
+      service,
+      { statePath: "unused", update: publishState, release() {} },
+      { idleTimeoutMs: 300 },
+    );
+    const state = (await ready) as ServerState;
+    await httpCall(state, "rememberBatch", {
       operationId: "one-backlog",
       items: Array.from({ length: 67 }, (_, i) => ({
         statement: `The verification archive includes entry ${i}`,
         nodeName: "Archive",
       })),
     });
-    await received;
-    await delay(350);
-    assert.deepEqual(requests, [10, 10, 10]);
-    await service.close();
-    for (let page = 0; page < 2; page += 1) {
-      service = new NmgService(options);
-      await service.invoke("search", { query: "find the archive", retrievalMode: "hybrid" });
-      await service.close();
-    }
+    await stopped;
     assert.deepEqual(requests, [10, 10, 10, 10, 10, 10, 7]);
     const db = new DatabaseSync(path, { readOnly: true });
     try {

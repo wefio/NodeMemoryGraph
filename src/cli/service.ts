@@ -304,6 +304,10 @@ export class NmgService {
     return this.#inFlight;
   }
 
+  pendingBackfill(): Promise<void> | undefined {
+    return this.#portableMemory.pendingBackfill();
+  }
+
   /** Let the calls already accepted finish. Shutdown is a sequence - stop new work, then let the
    *  work in flight finish, then close once - and the middle step needs an await, which a
    *  synchronous close() does not have. So close() requires that this has happened, instead of
@@ -433,7 +437,7 @@ export class NmgService {
   /** Closes in the order the design asks for: stop taking new work, revoke the timers and signals
    *  that could start more of it, then close each store exactly once. A second call is a no-op, so
    *  a shutdown path that runs twice cannot close a store out from under a live reader. */
-  close(options: { cancelBackfill?: boolean } = {}): void | Promise<void> {
+  close(): void | Promise<void> {
     // A close that silently drops calls already accepted would lose writes that were answered as
     // accepted; the sequence is drain() first, and this refuses rather than pretending.
     if (this.#inFlight > 0) {
@@ -446,7 +450,7 @@ export class NmgService {
     this.#store?.close();
     this.#store = undefined;
     this.#sessionActiveGraphs.clear();
-    return this.#portableMemory.close(options.cancelBackfill);
+    return this.#portableMemory.close();
   }
 
   async #invokeMemory(method: NmgMethod, value: unknown, signal?: AbortSignal): Promise<unknown> {

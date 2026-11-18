@@ -35,6 +35,7 @@ export async function serveHttp(
   let idleTimer: NodeJS.Timeout | undefined;
   let closing = false;
   let activeRequests = 0;
+  let waitingForBackfill = false;
   const close = (reason: "idle" | "shutdown") => {
     if (closing) return;
     closing = true;
@@ -43,7 +44,16 @@ export async function serveHttp(
     if (reason === "shutdown") server.closeAllConnections();
   };
   const armIdleTimer = () => {
-    if (closing || activeRequests || idleTimeoutMs <= 0) return;
+    if (closing || activeRequests || waitingForBackfill || idleTimeoutMs <= 0) return;
+    const backfill = service.pendingBackfill();
+    if (backfill) {
+      waitingForBackfill = true;
+      void backfill.then(() => {
+        waitingForBackfill = false;
+        armIdleTimer();
+      });
+      return;
+    }
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => close("idle"), idleTimeoutMs);
   };
@@ -74,7 +84,7 @@ export async function serveHttp(
   armIdleTimer();
   const reason = await closed;
   try {
-    if (reason === "idle") await service.close({ cancelBackfill: true });
+    if (reason === "idle") await service.close();
   } finally {
     lease.release();
   }

@@ -1,4 +1,4 @@
-import { setTimeout as delay } from "node:timers/promises";
+import { setImmediate } from "node:timers/promises";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
 import type {
   MemoryVectorCursor,
@@ -21,20 +21,15 @@ type IndexClient = Pick<
   EmbeddingClient,
   "indexId" | "batchSize" | "embedDocuments" | "embedQueries"
 >;
-const BACKFILL_PAUSE_MS = 250;
-
-type IndexUpdate = { cursor?: MemoryVectorCursor; queued: boolean; dirty: boolean };
+type IndexUpdate = { pending: boolean; task: Promise<void> };
 type QueryEmbedding = { semantic?: MemoryVectorQuery; reason?: string };
 
 /** Provider I/O stays outside SQLite transactions. Missing vectors remain durable work. */
 export class LocalMemoryEmbeddings {
   private readonly configured: () => EmbeddingClient | undefined;
   private readonly unavailable: () => boolean;
-  private readonly updates = new WeakMap<MemoryVectorIndex, Map<string, IndexUpdate>>();
+  private readonly jobs = new Map<MemoryVectorIndex, Map<string, IndexUpdate>>();
   private readonly failures = new Map<string, number>();
-  private readonly backfillAbort = new AbortController();
-  private backfillTail?: Promise<void>;
-  private backfillReadyAt = 0;
   private closing = false;
 
   constructor(
@@ -125,57 +120,58 @@ export class LocalMemoryEmbeddings {
     if (index && client) this.schedule(index, client, true);
   }
 
-  close(cancelBackfill = false): Promise<void> | undefined {
+  close(): Promise<void> | undefined {
     this.closing = true;
-    if (cancelBackfill) this.backfillAbort.abort();
-    return this.backfillTail;
+    return this.pendingBackfill();
+  }
+
+  pendingBackfill(): Promise<void> | undefined {
+    const tasks = [...this.jobs.values()].flatMap((jobs) =>
+      [...jobs.values()].map(({ task }) => task),
+    );
+    if (tasks.length) return Promise.all(tasks).then(() => undefined);
   }
 
   private schedule(index: MemoryVectorIndex, client: IndexClient, changed = false): void {
     if (this.closing || this.coolingDown(client)) return;
-    const updates = this.updates.get(index) ?? new Map<string, IndexUpdate>();
-    this.updates.set(index, updates);
-    const update = updates.get(client.indexId) ?? { queued: false, dirty: false };
-    updates.set(client.indexId, update);
-    if (changed) {
-      update.cursor = undefined;
-      update.dirty = true;
+    const jobs = this.jobs.get(index) ?? new Map<string, IndexUpdate>();
+    this.jobs.set(index, jobs);
+    const existing = jobs.get(client.indexId);
+    if (existing) {
+      if (changed) existing.pending = true;
+      return;
     }
-    if (update.queued) return;
-    update.queued = true;
-    this.backfillTail = (this.backfillTail ?? Promise.resolve())
-      .then(() => this.indexPage(index, client, update))
-      .catch(() => {
-        if (!this.backfillAbort.signal.aborted)
-          this.failures.set(client.indexId, Date.now() + 30_000);
-      })
-      .finally(() => {
-        update.queued = false;
-        if (update.dirty) this.schedule(index, client, true);
+    const job: IndexUpdate = { pending: false, task: Promise.resolve() };
+    job.task = Promise.resolve()
+      .then(() => this.indexBatch(index, client, job))
+      .catch(() => this.failures.set(client.indexId, Date.now() + 30_000))
+      .then(() => {
+        jobs.delete(client.indexId);
+        if (!jobs.size) this.jobs.delete(index);
+        if (job.pending) this.schedule(index, client, true);
       });
+    jobs.set(client.indexId, job);
   }
 
-  private async indexPage(
+  private async indexBatch(
     index: MemoryVectorIndex,
     client: IndexClient,
-    update: IndexUpdate,
+    job: IndexUpdate,
   ): Promise<void> {
-    const signal = this.backfillAbort.signal;
-    if (signal.aborted || this.coolingDown(client)) return;
-    const wait = this.backfillReadyAt - performance.now();
-    if (wait > 0) await delay(wait, undefined, { signal });
-    signal.throwIfAborted();
-    update.dirty = false;
     const limit = backfillPageSize(client);
-    try {
-      const documents = index.pending(client.indexId, limit, update.cursor);
-      if (!documents.length) {
-        update.cursor = undefined;
-        return;
-      }
+    do {
+      job.pending = false;
+      await this.sweep(index, client, limit);
+    } while (job.pending && !this.closing);
+  }
+
+  private async sweep(index: MemoryVectorIndex, client: IndexClient, limit: number): Promise<void> {
+    let after: MemoryVectorCursor | undefined;
+    do {
+      const documents = index.pending(client.indexId, limit, after);
+      if (!documents.length) return;
       const texts = [...new Set(documents.map((document) => document.text))];
-      const vectors = await client.embedDocuments(texts, { signal, chunkConcurrency: 1 });
-      signal.throwIfAborted();
+      const vectors = await client.embedDocuments(texts);
       if (vectors.length !== texts.length) throw new Error("Invalid document vector batch");
       const byText = new Map(texts.map((text, i) => [text, vectors[i]!]));
       index.save(
@@ -183,10 +179,11 @@ export class LocalMemoryEmbeddings {
         documents,
         documents.map(({ text }) => byText.get(text)!),
       );
-      if (!update.dirty) update.cursor = documents.length === limit ? documents.at(-1) : undefined;
-    } finally {
-      this.backfillReadyAt = performance.now() + BACKFILL_PAUSE_MS;
-    }
+      if (documents.length < limit) return;
+      after = documents.at(-1);
+      // Give the daemon a chance to process interactive work between full pages.
+      await setImmediate();
+    } while (!this.closing);
   }
 
   private coolingDown(client: IndexClient): boolean {
