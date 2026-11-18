@@ -24,7 +24,7 @@ type Waiter = {
   start: () => void;
 };
 
-class EmbeddingHttpError extends Error {
+export class EmbeddingHttpError extends Error {
   readonly status: number;
   readonly retryable: boolean;
 

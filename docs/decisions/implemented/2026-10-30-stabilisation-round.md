@@ -69,3 +69,9 @@ document calls share an account-level transport within a process, so client
 instances cannot independently consume the full concurrency allowance.
 Cancellation reaches the HTTP attempt and its retry wait. The cloud write log
 reuses available document vectors when only part of a batch is missing.
+
+An endpoint that accepts a format option can still change embedding values
+or task behavior. [Local format negotiation](../../design/online-embeddings.md#local-response-format-negotiation)
+checks vectors against the numeric response for the same request and keeps
+the evidence outside the index. This allows an encoding optimization without
+switching endpoints or rebuilding the index.

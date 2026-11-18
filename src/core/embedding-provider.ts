@@ -2,6 +2,7 @@ import { cloudflareEmbeddingProvider } from "./embedding-providers/cloudflare.ts
 import { geminiEmbeddingProvider } from "./embedding-providers/gemini.ts";
 import { jinaEmbeddingProvider } from "./embedding-providers/jina.ts";
 import { openAiEmbeddingProvider } from "./embedding-providers/openai.ts";
+import type { EmbeddingFormatStore } from "./embedding-providers/formats.ts";
 import type { EmbeddingClient, EmbeddingProviderFactory } from "./embedding-providers/types.ts";
 
 const PROVIDERS = {
@@ -17,14 +18,15 @@ export type { EmbeddingClient } from "./embedding-providers/types.ts";
 /** Builds the configured local or hosted embedding client without exposing keys. */
 export function createEmbeddingClientFromEnv(
   environment: NodeJS.ProcessEnv = process.env,
-  options: { required?: boolean } = {},
+  options: { required?: boolean; formatStore?: EmbeddingFormatStore } = {},
 ): EmbeddingClient | undefined {
   const name = configuredProvider(environment);
   if (!name) {
     if (!options.required) return undefined;
-    return openAiEmbeddingProvider.create(environment);
+    return openAiEmbeddingProvider.create(environment, options.formatStore);
   }
-  return PROVIDERS[name].create(environment);
+  const provider: EmbeddingProviderFactory = PROVIDERS[name];
+  return provider.create(environment, options.formatStore);
 }
 
 export function configuredProvider(

@@ -73,3 +73,10 @@ An unrestricted join let SQLite scan a model's leaf vector index for each
 eligible memory. Keeping memberships on the outer side of that join limits
 leaf vector lookups to the memory's own memberships. Both lookups use the
 existing primary keys.
+
+Fixed pauses and per-request page limits prolong a bulk indexing job. The
+daemon processes a full sweep in batches and uses the
+[idle boundary](../../design/daemon-lifecycle-design.md#r1-daemon-idle-timeout)
+after that work settles. Bounded pages give incoming requests time to run
+between writes. On little-endian hosts the Float32 buffer supplies the BLOB
+bytes directly.

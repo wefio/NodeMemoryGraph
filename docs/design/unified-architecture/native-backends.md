@@ -127,9 +127,13 @@ text and applies visibility and graph rules. The host supplies embeddings.
 For hierarchy scoring, SQLite finds a memory's associated leaf IDs before
 looking up those leaf vectors for the selected model.
 SQLite selects one ordered page of missing vectors before fetching previous turns
-by session and source sequence. A local backfill sweep advances by creation time
-and ID and saves each page after the provider call. Vector saves still check that
-the record is indexable and its statement matches the submitted text.
+by session and source sequence. A memory write or semantic search can schedule
+a sweep per local index and model. The daemon advances by creation time and
+ID and yields between batches so it can serve incoming requests. Provider
+concurrency stays bounded by the shared embedding transport. Vector saves check
+that the record is indexable and its statement matches the submitted text.
+If the provider fails or the service is explicitly stopped, unfinished rows
+remain eligible on reopening.
 The [local compatibility profile](legacy-graph-migration.md#local-default-after-activation)
 also owns event-time windows, lifecycle writes, feedback, bookmark lookup and
 existing chain projection. Chain editing and node transforms retain separate

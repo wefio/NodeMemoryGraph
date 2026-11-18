@@ -27,37 +27,46 @@ export async function serveHttp(
 ): Promise<void> {
   const idleTimeoutMs = options.idleTimeoutMs ?? daemonIdleTimeoutMs();
   const token = randomBytes(32).toString("base64url");
-  let resolveClosed!: () => void;
-  const closed = new Promise<void>((resolve) => {
+  let resolveClosed!: (reason: "idle" | "shutdown") => void;
+  const closed = new Promise<"idle" | "shutdown">((resolve) => {
     resolveClosed = resolve;
   });
 
   let idleTimer: NodeJS.Timeout | undefined;
   let closing = false;
-  const close = () => {
+  let activeRequests = 0;
+  let waitingForBackfill = false;
+  const close = (reason: "idle" | "shutdown") => {
     if (closing) return;
     closing = true;
     if (idleTimer) clearTimeout(idleTimer);
-    // closeAllConnections is required on the shutdown path: the RPC client's
-    // keep-alive fetch holds an open socket, closeIdleConnections does not
-    // drop it, and server.close() would wait forever -> daemon never exits.
-    server.close(resolveClosed);
-    server.closeAllConnections?.();
+    server.close(() => resolveClosed(reason));
+    if (reason === "shutdown") server.closeAllConnections();
   };
-  // 每次请求刷新 idle 计时器；超时后走与 shutdown 相同的关闭路径。
-  // 启动即计时：即使从未收到请求（spawn 后客户端先死）也会超时退出。
-  const touch = () => {
-    if (closing) return;
+  const armIdleTimer = () => {
+    if (closing || activeRequests || waitingForBackfill || idleTimeoutMs <= 0) return;
+    const backfill = service.pendingBackfill();
+    if (backfill) {
+      waitingForBackfill = true;
+      void backfill.then(() => {
+        waitingForBackfill = false;
+        armIdleTimer();
+      });
+      return;
+    }
     if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = idleTimeoutMs > 0 ? setTimeout(close, idleTimeoutMs) : undefined;
+    idleTimer = setTimeout(() => close("idle"), idleTimeoutMs);
   };
 
-  const handler = httpHandler(service, token, close);
+  const shutdown = () => close("shutdown");
   const server = createServer((req, res) => {
-    touch();
-    handler(req, res);
+    if (idleTimer) clearTimeout(idleTimer);
+    activeRequests += 1;
+    void handle(service, token, req, res, shutdown).finally(() => {
+      activeRequests -= 1;
+      armIdleTimer();
+    });
   });
-  touch();
 
   await listen(server);
   const address = server.address();
@@ -72,8 +81,13 @@ export async function serveHttp(
     endpoint: { methods, searchParameters },
   });
 
-  await closed;
-  lease.release();
+  armIdleTimer();
+  const reason = await closed;
+  try {
+    if (reason === "idle") await service.close();
+  } finally {
+    lease.release();
+  }
 }
 
 /**

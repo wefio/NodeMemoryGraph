@@ -4,12 +4,10 @@ import test from "node:test";
 import { encodeVector, parseVector, storedVector } from "../../../src/core/store/vector-codec.ts";
 
 test("encodeVector and parseVector round-trip through float32", () => {
-  const original = [0.5, -0.25, 1, 0];
-  const decoded = parseVector(encodeVector(original));
-  assert.equal(decoded.length, original.length);
-  decoded.forEach((value, index) => {
-    assert.ok(Math.abs(value - original[index]!) < 1e-6);
-  });
+  const original = [0.5, -0.25, 1, 0, -0];
+  const encoded = encodeVector(original);
+  assert.equal(encoded.toString("hex"), "0000003f000080be0000803f0000000000000080");
+  assert.deepEqual(parseVector(encoded), original);
 });
 
 test("parseVector reads the legacy JSON form", () => {
