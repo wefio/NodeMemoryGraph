@@ -63,3 +63,9 @@ distinct faults, all visible with the new always-on lines:
 - Restated as before: the provider's 25 s cap is the throughput ceiling for backfill; the code
   parts can no longer wait on it while holding a manifest — the worker's 25 s budget is now
   effectively the ceiling, and 120 s kills no longer fits the model.
+
+Local multi-query search groups the texts before provider dispatch. Query and
+document calls share an account-level transport within a process, so client
+instances cannot independently consume the full concurrency allowance.
+Cancellation reaches the HTTP attempt and its retry wait. The cloud write log
+reuses available document vectors when only part of a batch is missing.

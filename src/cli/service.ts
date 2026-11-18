@@ -334,14 +334,18 @@ export class NmgService {
     }
   }
 
-  async invoke<M extends NmgMethod>(method: M, params?: unknown): Promise<NmgMethodResult[M]> {
+  async invoke<M extends NmgMethod>(
+    method: M,
+    params?: unknown,
+    signal?: AbortSignal,
+  ): Promise<NmgMethodResult[M]> {
     if (this.#closing)
       throw new NmgProtocolError("SHUTTING_DOWN", "the service is closing and takes no new work");
     // Count the awaited application operation, including asynchronous backend publication.
     this.#inFlight += 1;
     try {
       if (PortableMemoryService.handles(method))
-        return (await this.#invokeMemory(method, params)) as NmgMethodResult[M];
+        return (await this.#invokeMemory(method, params, signal)) as NmgMethodResult[M];
       this.#portableMemory.requireLocalMethod(method);
       switch (method) {
         case "hello":
@@ -445,9 +449,9 @@ export class NmgService {
     return this.#portableMemory.close();
   }
 
-  async #invokeMemory(method: NmgMethod, value: unknown): Promise<unknown> {
+  async #invokeMemory(method: NmgMethod, value: unknown, signal?: AbortSignal): Promise<unknown> {
     try {
-      return await this.#invokePortable(method, value);
+      return await this.#invokePortable(method, value, signal);
     } catch (error) {
       if (error instanceof MemoryWriteRejected)
         throw new NmgProtocolError("WRITE_REJECTED", error.reason);
@@ -455,7 +459,7 @@ export class NmgService {
     }
   }
 
-  async #invokePortable(method: NmgMethod, value: unknown): Promise<unknown> {
+  async #invokePortable(method: NmgMethod, value: unknown, signal?: AbortSignal): Promise<unknown> {
     const memory = this.#portableMemory;
     const params = objectParams(value);
     const operationId = optionalString(params, "operationId");
@@ -468,7 +472,7 @@ export class NmgService {
           operationId,
         );
       case "search":
-        return this.#searchPortable(parseSearchParams(params));
+        return this.#searchPortable(parseSearchParams(params), signal);
       case "get":
         return this.#getPortable(parseGetParams(params));
       case "deleteMemory": {
@@ -488,7 +492,8 @@ export class NmgService {
     return { ...params, tesserae: this.#withTesseraSimhashes(params.tesserae, params.projectDir) };
   }
 
-  async #searchPortable(params: NmgSearchParams): Promise<MemoryContext> {
+  async #searchPortable(params: NmgSearchParams, signal?: AbortSignal): Promise<MemoryContext> {
+    signal?.throwIfAborted();
     const memory = this.#portableMemory;
     const started = performance.now();
     if (memory.local) this.#offerSearchCue(params);
@@ -505,7 +510,8 @@ export class NmgService {
           params.query,
         );
     }
-    const context = await memory.search(retrieval);
+    const context = await memory.search(retrieval, signal);
+    signal?.throwIfAborted();
     if (!memory.local) return context;
     const directMs = performance.now() - started;
     if (!params.autoRecall)

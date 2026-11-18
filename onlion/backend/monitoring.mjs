@@ -291,7 +291,8 @@ export function hardDeadline(operation, ms, label = "operation") {
       );
   });
 }
-export async function embeddingOperation(operation, env, deadlineMs) {
+export async function embeddingOperation(operation, env, deadlineMs, callerSignal) {
+  callerSignal?.throwIfAborted();
   // Per invocation first: this is the one that bounds a single request, and on a fresh isolate
   // per request it is the only one that can.
   if (invokeFailures >= failFastAfter(env)) {
@@ -322,6 +323,7 @@ export async function embeddingOperation(operation, env, deadlineMs) {
     };
     return value;
   } catch (caught) {
+    if (callerSignal?.aborted) throw callerSignal.reason;
     const error = caught && typeof caught === "object" ? caught : new Error("Embedding failed");
     if (!error.code) {
       error.code = /embedding server returned/.test(String(error.message))

@@ -22,6 +22,7 @@ type IndexClient = Pick<
   "indexId" | "batchSize" | "embedDocuments" | "embedQueries"
 >;
 type IndexUpdate = { pending: boolean; task: Promise<void> };
+type QueryEmbedding = { semantic?: MemoryVectorQuery; reason?: string };
 
 /** Provider I/O stays outside SQLite transactions. Missing vectors remain durable work. */
 export class LocalMemoryEmbeddings {
@@ -39,61 +40,78 @@ export class LocalMemoryEmbeddings {
     this.unavailable = unavailable;
   }
 
-  async query(
-    text: string,
+  async queries(
+    texts: string[],
     params: NmgSearchParams,
     indexes: MemoryVectorIndex[],
-  ): Promise<{
-    semantic?: MemoryVectorQuery;
-    reason?: string;
-  }> {
-    if (params.retrievalMode === "fts5") return {};
-    const client = params.retrievalMode === "hashing" ? hashingClient : this.configured();
+    signal?: AbortSignal,
+  ): Promise<QueryEmbedding[]> {
+    if (params.retrievalMode === "fts5") return emptyQueries(texts);
+    const client: IndexClient | undefined =
+      params.retrievalMode === "hashing" ? hashingClient : this.configured();
     if (!client)
       return this.unavailable() ||
         params.retrievalMode === "hybrid" ||
         params.retrievalMode === "qwen3"
-        ? { reason: "embedding_unavailable" }
-        : {};
-    if (this.coolingDown(client)) return { reason: "embedding_unavailable" };
+        ? emptyQueries(texts, "embedding_unavailable")
+        : emptyQueries(texts);
+    if (this.coolingDown(client)) return emptyQueries(texts, "embedding_unavailable");
     for (const index of indexes) this.schedule(index, client);
     if (!indexes.some((index) => index.has(client.indexId)))
-      return { reason: "embedding_index_not_ready" };
-    return this.requestVector(text, params, client, indexes, vectorMode(params.retrievalMode));
+      return emptyQueries(texts, "embedding_index_not_ready");
+    const budget = params.autoRecall
+      ? new RecallBudget(
+          Math.min(DAEMON_AUTOMATIC_RECALL_MAX_MS, params.autoRecallBudgetMs ?? 850),
+          signal,
+        )
+      : undefined;
+    try {
+      const size = client.batchSize ?? 32;
+      const batches: Promise<QueryEmbedding[]>[] = [];
+      for (let offset = 0; offset < texts.length; offset += size) {
+        const batch = texts.slice(offset, offset + size);
+        batches.push(this.requestVectors(batch, params, client, indexes, signal, budget));
+      }
+      return (await Promise.all(batches)).flat();
+    } finally {
+      budget?.close();
+    }
   }
 
-  private async requestVector(
-    text: string,
+  private async requestVectors(
+    texts: string[],
     params: NmgSearchParams,
     client: IndexClient,
     indexes: MemoryVectorIndex[],
-    mode: MemoryVectorQuery["mode"],
-  ): Promise<{ semantic?: MemoryVectorQuery; reason?: string }> {
-    const budget = params.autoRecall
-      ? new RecallBudget(Math.min(DAEMON_AUTOMATIC_RECALL_MAX_MS, params.autoRecallBudgetMs ?? 850))
-      : undefined;
+    signal?: AbortSignal,
+    budget?: RecallBudget,
+  ): Promise<QueryEmbedding[]> {
     try {
-      const load = () => client.embedQueries([text]);
-      const [vector] = budget ? await budget.run("embedding", load) : await load();
-      if (!vector?.length || !vector.every(Number.isFinite))
-        throw new Error("Invalid query vector");
-      if (!indexes.some((index) => index.has(client.indexId, vector.length)))
-        return { reason: "embedding_index_not_ready" };
-      return {
-        semantic: {
-          indexId: client.indexId,
-          vector,
-          granularity: params.vectorGranularity ?? "records",
-          mode,
-        },
-      };
+      const load = (requestSignal?: AbortSignal) =>
+        client.embedQueries(texts, { signal: requestSignal });
+      const vectors = budget ? await budget.run("embedding", load) : await load(signal);
+      if (vectors.length !== texts.length) throw new Error("Invalid query vector batch");
+      return vectors.map((vector) => {
+        if (!vector?.length || !vector.every(Number.isFinite))
+          return { reason: "embedding_unavailable" };
+        if (!indexes.some((index) => index.has(client.indexId, vector.length)))
+          return { reason: "embedding_index_not_ready" };
+        return {
+          semantic: {
+            indexId: client.indexId,
+            vector,
+            granularity: params.vectorGranularity ?? "records",
+            mode: vectorMode(params.retrievalMode),
+          },
+        };
+      });
     } catch {
+      signal?.throwIfAborted();
       if (!budget?.expired) this.failures.set(client.indexId, Date.now() + 30_000);
-      return {
-        reason: budget?.expired ? "automatic_recall_embedding_deadline" : "embedding_unavailable",
-      };
-    } finally {
-      budget?.close();
+      return emptyQueries(
+        texts,
+        budget?.expired ? "automatic_recall_embedding_deadline" : "embedding_unavailable",
+      );
     }
   }
 
@@ -146,8 +164,15 @@ export class LocalMemoryEmbeddings {
     do {
       const documents = index.pending(client.indexId, limit, after);
       if (!documents.length) return;
-      const vectors = await client.embedDocuments(documents.map((document) => document.text));
-      index.save(client.indexId, documents, vectors);
+      const texts = [...new Set(documents.map((document) => document.text))];
+      const vectors = await client.embedDocuments(texts);
+      if (vectors.length !== texts.length) throw new Error("Invalid document vector batch");
+      const byText = new Map(texts.map((text, i) => [text, vectors[i]!]));
+      index.save(
+        client.indexId,
+        documents,
+        documents.map(({ text }) => byText.get(text)!),
+      );
       if (documents.length < limit) return;
       after = documents.at(-1);
       // Give the daemon a chance to process interactive work between full pages.
@@ -158,6 +183,10 @@ export class LocalMemoryEmbeddings {
   private coolingDown(client: IndexClient): boolean {
     return Date.now() < (this.failures.get(client.indexId) ?? 0);
   }
+}
+
+function emptyQueries(texts: string[], reason?: string): QueryEmbedding[] {
+  return texts.map(() => (reason ? { reason } : {}));
 }
 
 function backfillPageSize(client: IndexClient): number {

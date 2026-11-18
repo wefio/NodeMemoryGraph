@@ -647,6 +647,8 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
   const path = join(directory, "memory.sqlite");
   let documentCalls = 0;
   let slowQueries = false;
+  const queryBatches: number[] = [];
+  let watchQuery: ((response: import("node:http").ServerResponse) => void) | undefined;
   const server = createServer(async (request, response) => {
     const parts = [];
     for await (const chunk of request) parts.push(chunk);
@@ -654,8 +656,12 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
       requests: Array<{ taskType: string }>;
     };
     documentCalls += requests.filter((item) => item.taskType === "RETRIEVAL_DOCUMENT").length;
-    if (slowQueries && requests.some((item) => item.taskType === "RETRIEVAL_QUERY"))
+    if (requests.some((item) => item.taskType === "RETRIEVAL_QUERY"))
+      queryBatches.push(requests.length);
+    if (slowQueries && requests.some((item) => item.taskType === "RETRIEVAL_QUERY")) {
+      watchQuery?.(response);
       await delay(120);
+    }
     response.end(JSON.stringify({ embeddings: requests.map(() => ({ values: [1, 0] })) }));
   });
   await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
@@ -706,6 +712,13 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
     });
     assert.equal(hybrid.retrieval?.mode, "hybrid");
     assert.ok(hybrid.results[0]!.lexicalScore > 0);
+    const multi = await service.invoke("search", {
+      query: "logistics depot",
+      queries: ["logistics depot", "warehouse location", "shipping address"],
+      retrievalMode: "hybrid",
+    });
+    assert.equal(multi.retrieval?.mode, "hybrid");
+    assert.equal(queryBatches.at(-1), 3);
     slowQueries = true;
     const fallback = await service.invoke("search", {
       query: "logistics depot",
@@ -725,6 +738,44 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
     });
     assert.equal(explicit.retrieval?.mode, "hybrid");
     assert.equal(explicit.results[0]?.vectorScore, 1);
+    let queryStarted!: () => void;
+    let queryClosed!: (aborted: boolean) => void;
+    const started = new Promise<void>((resolve) => {
+      queryStarted = resolve;
+    });
+    const closed = new Promise<boolean>((resolve) => {
+      queryClosed = resolve;
+    });
+    watchQuery = (response) => {
+      response.once("close", () => queryClosed(!response.writableFinished));
+      queryStarted();
+    };
+    const rpc = createServer(httpHandler(service, "fixture-token"));
+    await new Promise<void>((ready) => rpc.listen(0, "127.0.0.1", ready));
+    try {
+      const endpoint = rpc.address();
+      assert.ok(endpoint && typeof endpoint === "object");
+      const controller = new AbortController();
+      const response = fetch(`http://127.0.0.1:${endpoint.port}/`, {
+        method: "POST",
+        headers: { authorization: "Bearer fixture-token" },
+        body: JSON.stringify({
+          method: "search",
+          params: { query: "explicit cancellation", retrievalMode: "hybrid" },
+        }),
+        signal: controller.signal,
+      });
+      const rejected = assert.rejects(response, { name: "AbortError" });
+      await started;
+      controller.abort();
+      await rejected;
+      assert.equal(await closed, true);
+    } finally {
+      await new Promise<void>((ready) => {
+        rpc.close(() => ready());
+        rpc.closeAllConnections();
+      });
+    }
     slowQueries = false;
     const next = await service.invoke("remember", {
       statement: "The freight terminal is in Bergen",
