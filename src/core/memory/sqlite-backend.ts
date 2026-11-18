@@ -20,6 +20,7 @@ import {
   sqlLiteral,
   validateCommit,
 } from "./entity-rows.ts";
+import type { EntityRow } from "./entity-rows.ts";
 import { graphImportRequest } from "./graph-import.ts";
 import { readLegacyClaimRows, readLegacyMemoryRows } from "../store/legacy-memory-snapshot.ts";
 import { requestHash } from "./model.ts";
@@ -80,6 +81,18 @@ export class SqliteMemoryBackend implements MemoryBackend {
       throw new Error("Snapshot reads require a file-backed memory database");
     mkdirSync(dirname(path), { recursive: true });
     this.writer = new DatabaseSync(path);
+    try {
+      this.initializeSchema();
+      this.vectorIndex = new SqliteMemoryVectors(this.writer, namespace, (view) =>
+        this.reader(view),
+      );
+    } catch (error) {
+      this.writer.close();
+      throw error;
+    }
+  }
+
+  private initializeSchema(): void {
     this.writer.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS nmg_memory_head (namespace TEXT PRIMARY KEY, revision INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS nmg_memory_entities (namespace TEXT NOT NULL,
@@ -88,12 +101,16 @@ export class SqliteMemoryBackend implements MemoryBackend {
       CREATE INDEX IF NOT EXISTS nmg_memory_kind ON nmg_memory_entities(namespace, kind, id);
       CREATE INDEX IF NOT EXISTS nmg_memory_node ON nmg_memory_entities(namespace, kind, node);
       CREATE INDEX IF NOT EXISTS nmg_memory_name ON nmg_memory_entities(namespace, kind, name);
+      CREATE INDEX IF NOT EXISTS nmg_memory_scope_node
+        ON nmg_memory_entities(namespace, kind, node, scope, id);
+      CREATE INDEX IF NOT EXISTS nmg_memory_scope_name
+        ON nmg_memory_entities(namespace, kind, name, scope, id);
       CREATE VIRTUAL TABLE IF NOT EXISTS nmg_memory_fts USING fts5(namespace UNINDEXED, key UNINDEXED, text);
       CREATE VIRTUAL TABLE IF NOT EXISTS nmg_memory_tessera_fts USING fts5(namespace UNINDEXED, key UNINDEXED, text);`);
-    this.writer.prepare("INSERT OR IGNORE INTO nmg_memory_head VALUES (?, 0)").run(namespace);
+    this.initializeTextIndexRows();
+    this.writer.prepare("INSERT OR IGNORE INTO nmg_memory_head VALUES (?, 0)").run(this.namespace);
     ensureSqliteMemoryChains(this.writer);
     ensureSqliteMemoryAssociations(this.writer);
-    this.vectorIndex = new SqliteMemoryVectors(this.writer, namespace, (view) => this.reader(view));
   }
 
   async openRead(): Promise<MemoryReadView> {
@@ -280,6 +297,46 @@ export class SqliteMemoryBackend implements MemoryBackend {
     }
   }
 
+  private initializeTextIndexRows(): void {
+    const initialized = this.writer.prepare(
+      "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='nmg_memory_fts_rows'",
+    );
+    if (initialized.get()) return;
+    this.transaction(() => {
+      if (initialized.get()) return;
+      this.writer.exec(`CREATE TABLE nmg_memory_fts_rows (
+        namespace TEXT NOT NULL, key TEXT NOT NULL, fts_rowid INTEGER NOT NULL,
+        PRIMARY KEY(namespace, key)) WITHOUT ROWID;
+        INSERT INTO nmg_memory_fts_rows
+        SELECT namespace, key, rowid FROM nmg_memory_fts
+        UNION ALL
+        SELECT namespace, key, rowid FROM nmg_memory_tessera_fts;`);
+    });
+  }
+
+  private writeTextIndex(row: EntityRow): void {
+    const table = textIndex(row.kind);
+    const text = ftsIndexedText(
+      row.kind === "memory" ? lexicalMemoryText(JSON.parse(row.payload)) : row.text,
+    );
+    const previous = this.writer
+      .prepare("SELECT fts_rowid FROM nmg_memory_fts_rows WHERE namespace=? AND key=?")
+      .get(this.namespace, row.key);
+    if (previous) {
+      const updated = this.writer
+        .prepare(`UPDATE ${table} SET text=? WHERE rowid=? AND namespace=? AND key=?`)
+        .run(text, previous.fts_rowid, this.namespace, row.key);
+      if (updated.changes !== 1) throw new Error("Memory text index row is missing");
+      return;
+    }
+    const { lastInsertRowid } = this.writer
+      .prepare(`INSERT INTO ${table} VALUES (?, ?, ?)`)
+      .run(this.namespace, row.key, text);
+    this.writer
+      .prepare("INSERT INTO nmg_memory_fts_rows VALUES (?, ?, ?)")
+      .run(this.namespace, row.key, lastInsertRowid);
+  }
+
   private write(request: MemoryCommitRequest): MemoryCommitOutcome {
     const previous = this.writer
       .prepare("SELECT payload FROM nmg_memory_entities WHERE namespace=? AND key=?")
@@ -306,21 +363,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
     );
     for (const row of commitRows(request, receipt)) {
       statement.run(this.namespace, ...ENTITY_COLUMNS.map((column) => row[column]));
-      if (row.kind === "memory" || row.kind === "tessera") {
-        const index = textIndex(row.kind);
-        this.writer
-          .prepare(`DELETE FROM ${index} WHERE namespace=? AND key=?`)
-          .run(this.namespace, row.key);
-        this.writer
-          .prepare(`INSERT INTO ${index} VALUES (?, ?, ?)`)
-          .run(
-            this.namespace,
-            row.key,
-            ftsIndexedText(
-              row.kind === "memory" ? lexicalMemoryText(JSON.parse(row.payload)) : row.text,
-            ),
-          );
-      }
+      if (row.kind === "memory" || row.kind === "tessera") this.writeTextIndex(row);
     }
     this.writer
       .prepare("UPDATE nmg_memory_head SET revision=? WHERE namespace=?")

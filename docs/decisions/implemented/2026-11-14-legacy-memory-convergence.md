@@ -55,3 +55,8 @@ Tests that open local SQLite coordination state run in the integration layer,
 including those using an in-memory database. The Windows truncated-WAL test
 checks the board read through a second connection and verifies the checkpointed
 entry and a subsequent write after reopening.
+
+As an imported scope grew, SQLite scanned existing rows for each new record's
+duplicate lookup, predecessor lookup, and FTS cleanup. The
+[backend contract](../../design/unified-architecture/native-backends.md#publication-and-retry)
+uses indexed lookups so the cost of a fixed write batch depends on the rows it touches.

@@ -73,6 +73,11 @@ nodes and edges. The receipt and all changed entities become visible together.
 Readers pin one published revision and must close their read view.
 
 SQLite uses a native write transaction and independent WAL snapshot readers.
+Write planning looks up duplicates and predecessor candidates through indexes
+that include the exact scope. Full-text updates address the existing FTS row by
+rowid. On first open, SQLite transactionally records rowids for existing full-text
+rows, and subsequent commits maintain that mapping with the projections.
+
 Lance stores all domain entity kinds and receipts in one data table per namespace.
 A write creates a shallow branch from the pinned version, applies one merge and
 prepares native full-text indexes. A separate head table publishes the branch

@@ -3,8 +3,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { openMemoryBackend } from "../../src/core/memory/open.ts";
 import type { MemoryCommitRequest, MemoryEntity } from "../../src/core/memory/backend.ts";
+import { MemoryEngine } from "../../src/core/memory/engine.ts";
+import { sqliteQueryWhere } from "../../src/core/memory/entity-rows.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
 const node = (id: string, name: string): MemoryEntity => ({
@@ -100,3 +103,92 @@ for (const kind of ["sqlite", "lancedb"] as const) {
     }
   });
 }
+
+test("SQLite write lookups constrain the indexed name or node and exact scope before sorting", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-write-lookups-"));
+  t.after(() => removeTempDirectory(directory));
+  const path = join(directory, "memory.sqlite");
+  const backend = await openMemoryBackend({ kind: "sqlite", path, namespace: "tenant" });
+  await backend.close();
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    const scope = { project: "atlas" };
+    for (const [filter, constrained] of [
+      [{ exactText: "a new statement" }, "name"],
+      [{ nodeId: "node-1" }, "node"],
+    ] as const) {
+      const where = sqliteQueryWhere({ kind: "memory", scope, ...filter });
+      const details = db
+        .prepare(
+          `EXPLAIN QUERY PLAN SELECT kind, payload FROM nmg_memory_entities
+          WHERE namespace='tenant' AND ${where} ORDER BY id LIMIT ? OFFSET ?`,
+        )
+        .all(80, 0)
+        .map(({ detail }) => detail)
+        .join("\n");
+      assert.match(
+        details,
+        new RegExp(`namespace=\\? AND kind=\\? AND ${constrained}=\\? AND scope=\\?`),
+      );
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test("SQLite upgrades existing text indexes and replaces both projections at their original rowids", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-fts-keys-"));
+  t.after(() => removeTempDirectory(directory));
+  const path = join(directory, "memory.sqlite");
+  const options = { kind: "sqlite", path, namespace: "tenant" } as const;
+  const first = await openMemoryBackend(options);
+  const { memory } = await new MemoryEngine(first).remember({
+    statement: "obsolete statement",
+    nodeName: "Atlas",
+    tesserae: [{ path: "atlas.md", snippet: "obsolete citation" }],
+  });
+  await first.close();
+
+  const raw = new DatabaseSync(path);
+  raw.exec("DROP TABLE IF EXISTS nmg_memory_fts_rows");
+  const projections = ["nmg_memory_fts", "nmg_memory_tessera_fts"];
+  const before = projections.map((table) => raw.prepare(`SELECT rowid, key FROM ${table}`).get());
+  const reopened = await openMemoryBackend(options);
+  try {
+    assert.equal(raw.prepare("SELECT count(*) AS count FROM nmg_memory_fts_rows").get()?.count, 2);
+    const view = await reopened.openRead();
+    const [tessera] = await reopened.scan(view, { kind: "tessera" });
+    await reopened.closeRead(view);
+    assert.equal(tessera?.kind, "tessera");
+    if (tessera?.kind !== "tessera") throw Error("Tessera missing");
+    const committed = await reopened.commit({
+      expectedRevision: view.revision,
+      operationId: "update",
+      requestHash: "update",
+      resultIds: [],
+      changes: {
+        upsert: [
+          { kind: "memory", value: { ...memory, statement: "replacement statement" } },
+          { kind: "tessera", value: { ...tessera.value, snippet: "replacement citation" } },
+        ],
+      },
+    });
+    assert.equal(committed.status, "committed");
+    for (const [index, table] of projections.entries()) {
+      assert.deepEqual(raw.prepare(`SELECT rowid, key FROM ${table}`).all(), [before[index]]);
+      assert.equal(
+        raw.prepare(`SELECT count(*) AS count FROM ${table} WHERE text MATCH 'obsolete'`).get()
+          ?.count,
+        0,
+      );
+      assert.equal(
+        raw.prepare(`SELECT count(*) AS count FROM ${table} WHERE text MATCH 'replacement'`).get()
+          ?.count,
+        1,
+      );
+    }
+  } finally {
+    await reopened.close();
+    raw.close();
+  }
+});
