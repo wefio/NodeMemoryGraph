@@ -1,6 +1,8 @@
 import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { EmbeddingAttempt } from "../core/embedding-providers/types.ts";
+import type { EmbeddingProvider } from "../core/embedding-provider.ts";
 
 export interface ManagedEmbedding {
   provider: string;
@@ -25,6 +27,16 @@ type Activity = {
   count: number;
 };
 
+type EmbeddingActivity = {
+  day: string;
+  provider: EmbeddingProvider;
+  model: string;
+  outcome: EmbeddingAttempt["outcome"];
+  count: number;
+  totalMs: number;
+  maxMs: number;
+};
+
 /** Service-owned configuration and bounded metadata. No memory bodies enter this database. */
 export class OperatorStore {
   constructor(privatePath: string) {
@@ -33,6 +45,7 @@ export class OperatorStore {
   private readonly path: string;
   private initialized = false;
   private readonly pending = new Map<string, Activity>();
+  private readonly pendingEmbeddings = new Map<string, EmbeddingActivity>();
   private timer?: ReturnType<typeof setTimeout>;
 
   private open(): DatabaseSync {
@@ -50,7 +63,12 @@ export class OperatorStore {
       db.exec(`
       CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, payload TEXT NOT NULL);
       INSERT OR IGNORE INTO settings VALUES (1,0,'{"useManaged":false}');
-      CREATE TABLE IF NOT EXISTS activity (day TEXT NOT NULL, kind TEXT NOT NULL, outcome TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(day,kind,outcome));`);
+      CREATE TABLE IF NOT EXISTS activity (day TEXT NOT NULL, kind TEXT NOT NULL, outcome TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(day,kind,outcome));
+      CREATE TABLE IF NOT EXISTS embedding_activity (
+        day TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, outcome TEXT NOT NULL,
+        count INTEGER NOT NULL, total_ms REAL NOT NULL, max_ms REAL NOT NULL,
+        PRIMARY KEY(day,provider,model,outcome)
+      );`);
       this.initialized = true;
     }
     return db;
@@ -89,6 +107,33 @@ export class OperatorStore {
     const existing = this.pending.get(key);
     if (existing) existing.count++;
     else this.pending.set(key, { day, kind, outcome, count: 1 });
+    this.scheduleFlush();
+  }
+
+  recordEmbedding(provider: EmbeddingProvider, attempt: EmbeddingAttempt): void {
+    const { model, outcome, durationMs } = attempt;
+    const day = new Date().toISOString().slice(0, 10);
+    const key = JSON.stringify([day, provider, model, outcome]);
+    const entry = this.pendingEmbeddings.get(key);
+    if (entry) {
+      entry.count++;
+      entry.totalMs += durationMs;
+      entry.maxMs = Math.max(entry.maxMs, durationMs);
+    } else {
+      this.pendingEmbeddings.set(key, {
+        day,
+        provider,
+        model,
+        outcome,
+        count: 1,
+        totalMs: durationMs,
+        maxMs: durationMs,
+      });
+    }
+    this.scheduleFlush();
+  }
+
+  private scheduleFlush(): void {
     if (this.timer) return;
     this.timer = setTimeout(() => {
       this.timer = undefined;
@@ -98,15 +143,16 @@ export class OperatorStore {
   }
 
   private flush(): void {
-    if (!this.pending.size) return;
+    if (!this.pending.size && !this.pendingEmbeddings.size) return;
     try {
       this.persistActivity();
       this.pending.clear();
+      this.pendingEmbeddings.clear();
     } catch {
       // Retry on the next batch or snapshot without interrupting retrieval.
       const oldest = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
-      for (const [key, row] of this.pending) {
-        if (row.day < oldest) this.pending.delete(key);
+      for (const rows of [this.pending, this.pendingEmbeddings]) {
+        for (const [key, row] of rows) if (row.day < oldest) rows.delete(key);
       }
     }
   }
@@ -120,7 +166,25 @@ export class OperatorStore {
       );
       for (const { day, kind, outcome, count } of this.pending.values())
         increment.run(day, kind, outcome, count);
+      const embeddings = db.prepare(
+        `INSERT INTO embedding_activity VALUES (?,?,?,?,?,?,?)
+         ON CONFLICT(day,provider,model,outcome) DO UPDATE SET
+           count=count+excluded.count,
+           total_ms=total_ms+excluded.total_ms,
+           max_ms=MAX(max_ms,excluded.max_ms)`,
+      );
+      for (const {
+        day,
+        provider,
+        model,
+        outcome,
+        count,
+        totalMs,
+        maxMs,
+      } of this.pendingEmbeddings.values())
+        embeddings.run(day, provider, model, outcome, count, totalMs, maxMs);
       db.prepare("DELETE FROM activity WHERE day < date('now','-30 days')").run();
+      db.prepare("DELETE FROM embedding_activity WHERE day < date('now','-29 days')").run();
       db.exec("COMMIT");
     } finally {
       db.close();
@@ -130,6 +194,28 @@ export class OperatorStore {
   close(): void {
     clearTimeout(this.timer);
     this.flush();
+  }
+
+  embeddingUsage() {
+    this.flush();
+    const db = this.open();
+    try {
+      return db
+        .prepare(
+          `SELECT provider, model, SUM(count) AS requests,
+                SUM(CASE WHEN outcome='success' THEN count ELSE 0 END) AS succeeded,
+                SUM(CASE WHEN outcome='failure' THEN count ELSE 0 END) AS failed,
+                SUM(CASE WHEN outcome='cancelled' THEN count ELSE 0 END) AS cancelled,
+                SUM(CASE WHEN outcome='success' THEN total_ms END)
+                  / SUM(CASE WHEN outcome='success' THEN count END) AS averageMs,
+                MAX(CASE WHEN outcome='success' THEN max_ms END) AS maxMs
+         FROM embedding_activity WHERE day >= date('now','-29 days')
+         GROUP BY provider,model ORDER BY requests DESC,provider,model`,
+        )
+        .all();
+    } finally {
+      db.close();
+    }
   }
 
   activity(): Array<{ day: string; kind: string; outcome: string; count: number }> {

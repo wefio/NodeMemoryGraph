@@ -208,7 +208,26 @@
         ><button class="period" data-period="30d">30 天</button>
       </div>
       <p id="gateway-usage">等待 Magpie 用量接口</p>
-      <p class="muted" id="nmg-usage">NMG 专属模型用量尚无完整报告。</p>
+    </section>
+    <section>
+      <h2>向量模型用量</h2>
+      <p class="muted">
+        最近 30 个 UTC 日期。每次向量服务请求计一次，批次和重试分别计数。
+        耗时统计成功响应，包含读取响应，排除排队和重试等待。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">服务商／模型</th>
+            <th scope="col">请求</th>
+            <th scope="col">失败</th>
+            <th scope="col">取消</th>
+            <th scope="col">平均耗时</th>
+            <th scope="col">最长耗时</th>
+          </tr>
+        </thead>
+        <tbody id="embedding-usage"></tbody>
+      </table>
     </section>
     <section>
       <h2>向量模型</h2>

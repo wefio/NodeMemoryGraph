@@ -99,6 +99,30 @@
     }
   }
 
+  function embeddingUsage(rows) {
+    const body = byId("embedding-usage");
+    body.replaceChildren();
+    if (!rows?.length) {
+      const cell = body.insertRow().insertCell();
+      cell.colSpan = 6;
+      cell.textContent = rows ? "当前统计期尚无向量请求" : "当前 daemon 尚未提供向量用量";
+      return;
+    }
+    const latency = (ms) => (Number.isFinite(ms) ? `${number(Math.round(ms))} ms` : "—");
+    for (const row of rows) {
+      const line = body.insertRow();
+      for (const value of [
+        `${row.provider} / ${row.model}`,
+        number(row.requests),
+        number(row.failed),
+        number(row.cancelled),
+        latency(row.averageMs),
+        latency(row.maxMs),
+      ])
+        line.insertCell().textContent = value;
+    }
+  }
+
   async function usage() {
     try {
       const value = await bridge("read", { name: "usage:summary", params: { period } });
@@ -149,6 +173,7 @@
         : "—";
       renderConfiguration(config, status.embedding);
       activity(metrics.activity);
+      embeddingUsage(metrics.embeddingUsage);
       byId("updated").textContent = `快照时间 ${new Date(metrics.measuredAt).toLocaleString()}`;
       message("");
     } catch (error) {

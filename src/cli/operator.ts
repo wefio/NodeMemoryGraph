@@ -1,5 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createEmbeddingClientFromEnv, type EmbeddingClient } from "../core/embedding-provider.ts";
+import {
+  createEmbeddingClientFromEnv,
+  type EmbeddingClient,
+  type EmbeddingProvider,
+} from "../core/embedding-provider.ts";
+import type { EmbeddingFormatStore } from "../core/embedding-providers/formats.ts";
+import type { EmbeddingAttempt } from "../core/embedding-providers/types.ts";
 import {
   OperatorStore,
   managedEmbeddingEnvironment,
@@ -60,13 +66,17 @@ function embeddingEndpoint(input: string): string {
   return url.href.replace(/\/$/, "");
 }
 
-function configuredClient(config: ManagedEmbedding, base: NodeJS.ProcessEnv): EmbeddingClient {
+function configuredClient(
+  config: ManagedEmbedding,
+  base: NodeJS.ProcessEnv,
+  options?: Parameters<typeof createEmbeddingClientFromEnv>[1],
+): EmbeddingClient {
   const environment = managedEmbeddingEnvironment(base, {
     revision: 0,
     active: config,
     useManaged: true,
   });
-  const client = createEmbeddingClientFromEnv(environment, { required: true })!;
+  const client = createEmbeddingClientFromEnv(environment, { ...options, required: true })!;
   const endpoint = createHash("sha256")
     .update(JSON.stringify([config.provider, config.baseUrl ?? "default"]))
     .digest("hex")
@@ -79,6 +89,7 @@ function configuredClient(config: ManagedEmbedding, base: NodeJS.ProcessEnv): Em
     embed: client.embed.bind(client),
     embedQueries: client.embedQueries.bind(client),
     embedDocuments: client.embedDocuments.bind(client),
+    embedDocumentsForStorage: client.embedDocumentsForStorage?.bind(client),
   };
 }
 
@@ -95,6 +106,7 @@ export class NmgOperator {
   private readonly store: OperatorStore;
   private readonly memory: PortableMemoryService;
   private readonly environment: NodeJS.ProcessEnv;
+  private readonly formatStore: EmbeddingFormatStore;
   private readonly activated: () => void;
   private settings: OperatorSettings;
   private job?: CandidateJob;
@@ -106,12 +118,14 @@ export class NmgOperator {
     path: string,
     memory: PortableMemoryService,
     environment: NodeJS.ProcessEnv,
+    formatStore: EmbeddingFormatStore,
     activated: () => void,
   ) {
     this.store = new OperatorStore(path);
     this.settings = this.store.read();
     this.memory = memory;
     this.environment = environment;
+    this.formatStore = formatStore;
     this.activated = activated;
   }
 
@@ -120,10 +134,18 @@ export class NmgOperator {
   }
 
   client(): EmbeddingClient | undefined {
+    const options = this.clientOptions();
     return this.settings.useManaged && this.settings.active
-      ? configuredClient(this.settings.active, this.environment)
-      : undefined;
+      ? configuredClient(this.settings.active, this.environment, options)
+      : createEmbeddingClientFromEnv(this.environment, options);
   }
+
+  private clientOptions() {
+    return { formatStore: this.formatStore, observeAttempt: this.observeEmbedding };
+  }
+
+  private readonly observeEmbedding = (provider: EmbeddingProvider, attempt: EmbeddingAttempt) =>
+    this.store.recordEmbedding(provider, attempt);
 
   record(params: unknown, result?: unknown, failed = false): void {
     const input = object(params);
@@ -184,6 +206,7 @@ export class NmgOperator {
       counts: this.snapshotCache.result,
       configuration: this.configuration(),
       activity: this.store.activity(),
+      embeddingUsage: this.store.embeddingUsage(),
       activityScope: "service search attempts; UTC days; 30-day retention",
       tokenUsage: null,
       injectionCount: null,
@@ -209,7 +232,7 @@ export class NmgOperator {
 
   private candidate(): EmbeddingClient {
     if (!this.settings.candidate) throw new Error("Save a candidate embedding configuration first");
-    return configuredClient(this.settings.candidate, this.environment);
+    return configuredClient(this.settings.candidate, this.environment, this.clientOptions());
   }
 
   private async testCandidate(): Promise<Record<string, unknown>> {
@@ -268,10 +291,17 @@ export class NmgOperator {
     return this.configuration();
   }
 
-  close(): Promise<void> | undefined {
-    this.store.close();
+  pendingBuild(): Promise<void> | undefined {
+    return this.job?.state === "running" ? this.pending : undefined;
+  }
+
+  cancelBuild(): Promise<void> | undefined {
     this.cancel?.abort();
-    return this.pending;
+    return this.pendingBuild();
+  }
+
+  close(): void {
+    this.store.close();
   }
 }
 

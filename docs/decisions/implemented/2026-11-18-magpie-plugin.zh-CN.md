@@ -26,4 +26,11 @@
 
 管理页监听回环地址，并允许 Windows 桌面 WebView 的指定来源 `http://wails.localhost` 嵌入。浏览器版 Magpie 使用自身的服务代理。管理 API 仍要求进程令牌。
 
+Daemon 在共享 HTTP 传输层按配置的服务商和请求的模型统计向量请求。每个实际发出的
+批次和重试分别计一次。管理接口返回成功、失败和取消次数，以及成功 HTTP JSON 响应
+的平均与最长耗时。耗时从发出请求到读取完响应，排除共享队列和重试等待。
+统计覆盖检索、索引和候选连接测试，跳过本地哈希及发出前取消的请求。
+Daemon 批量写入最近 30 个 UTC 日期的聚合数据，聚合表不保存输入正文或凭据。
+计数从 daemon 加载统计代码时开始。
+
 [安装指南](../../../magpie-plugin/README.zh-CN.md)提供打包和使用步骤。[私有宿主复现脚本](../../experiments/runtime/magpie-plugin-probe.mjs)在 Magpie 0.1.4338 下验证已安装包、八项 MCP 工具声明、两次 Chat Completions 请求、会话隔离、所有者状态承载和受保护的管理快照。模型使用本地模拟服务，付费调用为零。[管理接口测试](../../../tests/cli/operator.test.ts)使用本地模拟向量服务验证候选配置激活。

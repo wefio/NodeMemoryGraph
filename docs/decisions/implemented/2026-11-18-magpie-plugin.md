@@ -26,4 +26,14 @@ The plugin can run on its own or alongside a native adapter. Independent native 
 
 The loopback management page allows the specific Windows desktop WebView origin `http://wails.localhost` as a frame ancestor. Browser-hosted Magpie uses its own service proxy. The operator API continues to require its process token.
 
+The daemon counts outbound embedding attempts by configured provider and requested
+model at the shared HTTP transport. A dispatched batch or retry is one attempt.
+The operator read includes success, failure and cancellation counts and the mean
+and maximum time of successful HTTP JSON responses. Time starts at dispatch and
+ends after reading the response, excluding shared queue and retry waits. This
+includes retrieval, indexing and candidate checks. It excludes local hashing
+and requests cancelled before dispatch. The daemon batches daily aggregates for
+the most recent 30 UTC dates and stores no input text or credentials in them.
+Counts start when the daemon runs the instrumentation.
+
 The [install guide](../../../magpie-plugin/README.md) owns the package and operating steps. The private-host [reproduction script](../../experiments/runtime/magpie-plugin-probe.mjs) exercises an installed bundle, eight MCP tool declarations, two Chat Completions requests, session isolation, owner-state carriage and the protected management snapshot on Magpie 0.1.4338. It uses a loopback model fixture and makes zero paid calls. The [operator test](../../../tests/cli/operator.test.ts) exercises candidate activation using a loopback embedding fixture.

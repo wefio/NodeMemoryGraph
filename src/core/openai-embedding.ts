@@ -8,7 +8,10 @@ import {
   type OpenAIEmbeddingRow,
 } from "./embedding-providers/formats.ts";
 import { embeddingHttpTransport } from "./embedding-providers/http.ts";
-import type { EmbeddingRequestOptions } from "./embedding-providers/types.ts";
+import type {
+  EmbeddingAttemptObserver,
+  EmbeddingRequestOptions,
+} from "./embedding-providers/types.ts";
 
 export type EmbeddingProfileName = "bge-en" | "plain" | "qwen3";
 
@@ -30,6 +33,7 @@ export interface OpenAIEmbeddingClientOptions {
   documentBody?: Record<string, unknown>;
   timeoutMs?: number;
   formatStore?: EmbeddingFormatStore;
+  observeAttempt?: EmbeddingAttemptObserver;
 }
 
 const EMBEDDING_PROFILES: Record<
@@ -73,6 +77,7 @@ export class OpenAIEmbeddingClient {
   readonly documentBody: Record<string, unknown>;
   readonly timeoutMs: number;
   readonly #formats?: EmbeddingFormats;
+  private readonly observeAttempt?: EmbeddingAttemptObserver;
 
   constructor(options: OpenAIEmbeddingClientOptions = {}) {
     this.baseUrl = (options.baseUrl ?? "http://127.0.0.1:8000/v1").replace(/\/$/u, "");
@@ -114,6 +119,7 @@ export class OpenAIEmbeddingClient {
       credential: this.apiKey,
       dimensions: this.dimensions,
     });
+    this.observeAttempt = options.observeAttempt;
   }
 
   async embedQueries(inputs: string[], options?: EmbeddingRequestOptions): Promise<number[][]> {
@@ -256,7 +262,15 @@ export class OpenAIEmbeddingClient {
         },
         body,
       },
-      { background, timeoutMs: this.timeoutMs, signal },
+      {
+        background,
+        timeoutMs: this.timeoutMs,
+        signal,
+        observation: this.observeAttempt && {
+          model: typeof extraBody.model === "string" ? extraBody.model : this.#apiModel,
+          observe: this.observeAttempt,
+        },
+      },
     );
     const rows = payload.data ?? [];
     if (rows.length !== inputs.length) {

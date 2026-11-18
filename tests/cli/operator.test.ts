@@ -11,11 +11,19 @@ stripProviderEnv();
 
 test("operator metrics survive reopen and managed embedding activation fences revisions and redacts keys", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "nmg-operator-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const modelRequests: string[] = [];
+  const requestFormats: Array<string | undefined> = [];
   const server = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    modelRequests.push(body.model);
+    requestFormats.push(body.encoding_format);
+    if (modelRequests.length === 1) {
+      response.writeHead(503).end("Retry fixture");
+      return;
+    }
+    await new Promise((done) => setTimeout(done, 15));
     response.setHeader("content-type", "application/json");
     response.end(
       JSON.stringify({
@@ -24,7 +32,10 @@ test("operator metrics survive reopen and managed embedding activation fences re
     );
   });
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
-  t.after(() => new Promise<void>((done) => server.close(() => done())));
+  t.after(async () => {
+    await new Promise<void>((done) => server.close(() => done()));
+    await rm(directory, { recursive: true, force: true, maxRetries: 3 });
+  });
   const port = (server.address() as { port: number }).port;
   let service = new NmgService({ dataDirectory: directory, environment: {} });
   try {
@@ -35,6 +46,7 @@ test("operator metrics survive reopen and managed embedding activation fences re
     await service.invoke("search", { query: "Atlas", sessionId: "owner", autoRecall: true });
     await service.invoke("search", { query: "Atlas", sessionId: "owner" });
     const initial = await service.invoke("operator", { action: "snapshot" });
+    assert.deepEqual(initial.embeddingUsage, []);
     assert.equal((initial.counts as { memories: number }).memories, 1);
     assert.ok(JSON.stringify(initial.activity).includes("automaticRecall"));
     const saved = await service.invoke("operator", {
@@ -60,6 +72,7 @@ test("operator metrics survive reopen and managed embedding activation fences re
       /ready/,
     );
     await service.invoke("operator", { action: "buildCandidate", revision: 1 });
+    assert.ok(service.pendingBackfill());
     let snapshot: Record<string, unknown> = {};
     for (let attempt = 0; attempt < 100; attempt++) {
       snapshot = await service.invoke("operator", { action: "snapshot" });
@@ -67,6 +80,19 @@ test("operator metrics survive reopen and managed embedding activation fences re
       await new Promise((done) => setTimeout(done, 10));
     }
     assert.equal((snapshot.configuration as { job: { state: string } }).job.state, "ready");
+    assert.equal(service.pendingBackfill(), undefined);
+    const [usage] = snapshot.embeddingUsage as Array<Record<string, unknown>>;
+    assert.ok(usage);
+    assert.deepEqual(modelRequests, ["fixture", "fixture", "fixture", "fixture"]);
+    assert.deepEqual(requestFormats, ["base64", "base64", undefined, "base64"]);
+    assert.equal(usage.provider, "openai");
+    assert.equal(usage.model, "fixture");
+    assert.equal(usage.requests, 4);
+    assert.equal(usage.succeeded, 3);
+    assert.equal(usage.failed, 1);
+    assert.equal(usage.cancelled, 0);
+    assert.ok(Number(usage.averageMs) >= 10);
+    assert.ok(Number(usage.maxMs) >= Number(usage.averageMs));
     await assert.rejects(
       service.invoke("operator", { action: "activateCandidate", revision: 1 }),
       /useManaged/,
@@ -85,6 +111,31 @@ test("operator metrics survive reopen and managed embedding activation fences re
     assert.doesNotMatch(JSON.stringify(recovered), /PrivateKeyMustStayHidden/);
     assert.equal((recovered.configuration as { source: string }).source, "managed");
     assert.deepEqual(recovered.activity, initial.activity);
+    assert.deepEqual(recovered.embeddingUsage, snapshot.embeddingUsage);
+    await service.invoke("operator", {
+      action: "saveCandidate",
+      revision: 2,
+      config: { provider: "openai", baseUrl: `http://127.0.0.1:${port}/v1`, model: "other" },
+    });
+    await service.invoke("operator", { action: "testCandidate", revision: 3 });
+    const twoModels = await service.invoke("operator", { action: "snapshot" });
+    assert.deepEqual(
+      (twoModels.embeddingUsage as Array<{ model: string; requests: number }>).map(
+        ({ model, requests }) => [model, requests],
+      ),
+      [
+        ["fixture", 4],
+        ["other", 1],
+      ],
+    );
+    await service.invoke("operator", { action: "buildCandidate", revision: 3 });
+    const pendingBuild = service.pendingBackfill();
+    assert.ok(pendingBuild);
+    await service.invoke("operator", { action: "cancelCandidate", revision: 3 });
+    await pendingBuild;
+    const cancelled = await service.invoke("operator", { action: "snapshot" });
+    assert.equal((cancelled.configuration as { job: { state: string } }).job.state, "cancelled");
+    assert.equal(service.pendingBackfill(), undefined);
   } finally {
     await service.close();
   }

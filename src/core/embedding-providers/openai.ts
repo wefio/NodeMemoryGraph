@@ -28,7 +28,7 @@ export function commonOpenAiOptions(environment: NodeJS.ProcessEnv): OpenAIEmbed
 
 export const openAiEmbeddingProvider: EmbeddingProviderFactory = {
   name: "openai",
-  create(environment, formatStore) {
-    return new OpenAIEmbeddingClient({ ...commonOpenAiOptions(environment), formatStore });
+  create(environment, options) {
+    return new OpenAIEmbeddingClient({ ...commonOpenAiOptions(environment), ...options });
   },
 };

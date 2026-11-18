@@ -5,6 +5,7 @@ import {
   configuredProvider,
   createEmbeddingClientFromEnv,
 } from "../../src/core/embedding-provider.ts";
+import type { EmbeddingAttempt } from "../../src/core/embedding-providers/types.ts";
 
 test("provider registry preserves legacy OpenAI-compatible configuration", () => {
   const environment = {
@@ -115,6 +116,7 @@ const requestContracts = {
 for (const [provider, contract] of Object.entries(requestContracts)) {
   test(`${provider} embedding request contract runs without external fetch`, async (t) => {
     const bodies: unknown[] = [];
+    const observations: Array<{ provider: string; attempt: EmbeddingAttempt }> = [];
     const gemini = provider === "gemini";
     const captureRequest: typeof globalThis.fetch = async (input, init) => {
       const request = new Request(input, init);
@@ -138,13 +140,19 @@ for (const [provider, contract] of Object.entries(requestContracts)) {
       );
     };
     const fetch = t.mock.method(globalThis, "fetch", captureRequest);
-    const client = createEmbeddingClientFromEnv({
-      ...contract.environment,
-      NMG_EMBED_PROVIDER: provider,
-      NMG_EMBED_API_KEY: key,
-      NMG_EMBED_DIMENSIONS: String(dimensions),
-    })!;
+    const client = createEmbeddingClientFromEnv(
+      {
+        ...contract.environment,
+        NMG_EMBED_PROVIDER: provider,
+        NMG_EMBED_API_KEY: key,
+        NMG_EMBED_DIMENSIONS: String(dimensions),
+      },
+      { observeAttempt: (provider, attempt) => observations.push({ provider, attempt }) },
+    )!;
     assert.deepEqual(await client.embedQueries([]), []);
+    await assert.rejects(client.embedQueries([query], { signal: AbortSignal.abort() }), {
+      name: "AbortError",
+    });
     assert.equal(fetch.mock.callCount(), 0);
     assert.deepEqual(await client.embedQueries([query]), [[0, 1]]);
     assert.deepEqual(await client.embedDocuments(documents), [
@@ -152,6 +160,14 @@ for (const [provider, contract] of Object.entries(requestContracts)) {
       [1, 1],
     ]);
     assert.deepEqual(bodies, [contract.queryBody, contract.documentBody]);
+    const model = "model" in contract.queryBody ? contract.queryBody.model : geminiModel;
+    assert.equal(observations.length, 2);
+    for (const { provider: actual, attempt } of observations) {
+      assert.equal(actual, provider);
+      assert.equal(attempt.model, model);
+      assert.equal(attempt.outcome, "success");
+      assert.ok(Number.isFinite(attempt.durationMs) && attempt.durationMs >= 0);
+    }
   });
 }
 

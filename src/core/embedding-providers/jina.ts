@@ -5,10 +5,10 @@ import type { EmbeddingProviderFactory } from "./types.ts";
 
 export const jinaEmbeddingProvider: EmbeddingProviderFactory = {
   name: "jina",
-  create(environment, formatStore) {
+  create(environment, options) {
     return new OpenAIEmbeddingClient({
       ...commonOpenAiOptions(environment),
-      formatStore,
+      ...options,
       baseUrl: environment.NMG_EMBED_BASE_URL ?? "https://api.jina.ai/v1",
       apiKey: requiredValue(
         environment.NMG_EMBED_API_KEY ?? environment.JINA_API_KEY,

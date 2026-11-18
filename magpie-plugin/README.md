@@ -52,6 +52,9 @@ outputs retain unknown execution outcome.
 
 The page reports service-scoped counts, persistent automatic/explicit search
 attempts and separately labelled gateway usage. Unknown measurements stay unknown.
+The embedding usage table groups daemon HTTP attempts by provider and requested
+model, with successful response latency and failure and cancellation counts
+over the latest 30 UTC dates.
 Embedding settings create a candidate configuration. Connection testing and
 index building are explicit actions that can call the selected provider.
 Activation requires a ready candidate and explicit selection of managed settings.

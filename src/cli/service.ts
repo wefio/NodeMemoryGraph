@@ -5,11 +5,7 @@ import type { PerfSnapshot } from "../core/perf.ts";
 import { localEmbeddingFormatStore } from "./embedding-format-store.ts";
 
 import { MAX_BOARD_DELIVERY_ENTRIES, parseBoardNotification } from "../core/board-notifications.ts";
-import {
-  configuredProvider,
-  createEmbeddingClientFromEnv,
-  type EmbeddingClient,
-} from "../core/embedding-provider.ts";
+import { configuredProvider, type EmbeddingClient } from "../core/embedding-provider.ts";
 import { eventWindowEnd, eventWindowStart, resolveWriteEventTime } from "../core/event-time.ts";
 import type { MemoryBackendOptions } from "../core/memory/open.ts";
 import { LOCAL_MEMORY_NAMESPACE, activatedLocalMemory } from "../core/memory/sqlite-backend.ts";
@@ -193,6 +189,7 @@ export class NmgService {
       this.databasePath + ".operator.sqlite",
       this.#portableMemory,
       this.#environment,
+      localEmbeddingFormatStore(this.#dataDirectory),
       () => {
         this.#embeddingClient = undefined;
         this.#embeddingError = null;
@@ -320,7 +317,7 @@ export class NmgService {
   }
 
   pendingBackfill(): Promise<void> | undefined {
-    return this.#portableMemory.pendingBackfill();
+    return this.#operator?.pendingBuild() ?? this.#portableMemory.pendingBackfill();
   }
 
   /** Let the calls already accepted finish. Shutdown is a sequence - stop new work, then let the
@@ -477,10 +474,13 @@ export class NmgService {
     this.#store?.close();
     this.#store = undefined;
     this.#sessionActiveGraphs.clear();
-    const pendingOperator = this.#operator?.close();
-    return pendingOperator
-      ? pendingOperator.then(() => this.#portableMemory.close())
+    const operator = this.#operator;
+    const pendingBuild = operator?.cancelBuild();
+    operator?.close();
+    const closingMemory = pendingBuild
+      ? pendingBuild.then(() => this.#portableMemory.close())
       : this.#portableMemory.close();
+    return closingMemory.finally(() => operator?.close());
   }
 
   async #invokeMemory(method: NmgMethod, value: unknown, signal?: AbortSignal): Promise<unknown> {
@@ -1639,11 +1639,7 @@ export class NmgService {
   #configuredEmbeddingClient(): EmbeddingClient | undefined {
     if (this.#embeddingClient !== undefined) return this.#embeddingClient ?? undefined;
     try {
-      this.#embeddingClient =
-        this.#getOperator().client() ??
-        createEmbeddingClientFromEnv(this.#getOperator().effectiveEnvironment(), {
-          formatStore: localEmbeddingFormatStore(this.#dataDirectory),
-        }) ?? null;
+      this.#embeddingClient = this.#getOperator().client() ?? null;
     } catch (error) {
       this.#embeddingClient = null;
       this.#embeddingError = error instanceof Error ? error.message : String(error);

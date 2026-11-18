@@ -25,5 +25,15 @@ export interface EmbeddingClient {
 
 export interface EmbeddingProviderFactory {
   readonly name: string;
-  create(environment: NodeJS.ProcessEnv, formatStore?: EmbeddingFormatStore): EmbeddingClient;
+  create(
+    environment: NodeJS.ProcessEnv,
+    options?: { formatStore?: EmbeddingFormatStore; observeAttempt?: EmbeddingAttemptObserver },
+  ): EmbeddingClient;
 }
+export interface EmbeddingAttempt {
+  model: string;
+  durationMs: number;
+  outcome: "success" | "failure" | "cancelled";
+}
+
+export type EmbeddingAttemptObserver = (attempt: EmbeddingAttempt) => void;
