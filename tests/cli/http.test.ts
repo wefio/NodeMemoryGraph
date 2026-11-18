@@ -4,11 +4,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { httpCall } from "../../src/cli/http-client.ts";
 import { invokeDaemon } from "../../src/cli/daemon-client.ts";
 import type { NmgHelloResult, NmgLabResult } from "../../src/cli/protocol.ts";
-import { httpHandler } from "../../src/cli/http-server.ts";
+import { httpHandler, serveHttp } from "../../src/cli/http-server.ts";
 import type { ServerState } from "../../src/cli/lifecycle.ts";
 import { NMG_PROTOCOL_VERSION, NMG_RPC_CATALOG_FINGERPRINT } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
@@ -16,6 +17,49 @@ import { stripProviderEnv } from "../helpers/test-env.ts";
 
 // In-process NmgService inherits process.env; keep recall lexical (test-env.ts).
 stripProviderEnv();
+
+test("idle timeout starts after the last request finishes", async (t) => {
+  const service = new NmgService({ databasePath: ":memory:" });
+  let enterRequest!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enterRequest = resolve;
+  });
+  let finishRequest!: () => void;
+  const finish = new Promise<void>((resolve) => {
+    finishRequest = resolve;
+  });
+  let publishState!: (state: Partial<ServerState>) => void;
+  const ready = new Promise<Partial<ServerState>>((resolve) => {
+    publishState = resolve;
+  });
+  const invoke = service.invoke.bind(service);
+  t.mock.method(service, "invoke", async (...args: Parameters<typeof invoke>) => {
+    if (args[0] === "status") {
+      enterRequest();
+      await finish;
+      return { running: true };
+    }
+    return invoke(...args);
+  });
+  const stopped = serveHttp(
+    service,
+    { statePath: "unused", update: publishState, release() {} },
+    { idleTimeoutMs: 200 },
+  );
+  try {
+    const state = await ready;
+    const call = httpCall(state as ServerState, "status");
+    const response = Promise.allSettled([call]);
+    await Promise.race([entered, call]);
+    await delay(350);
+    finishRequest();
+    assert.deepEqual(await response, [{ status: "fulfilled", value: { running: true } }]);
+  } finally {
+    finishRequest();
+    await stopped;
+    await service.close();
+  }
+});
 
 type EphemeralServer = { state: ServerState };
 

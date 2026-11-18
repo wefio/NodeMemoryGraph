@@ -470,8 +470,8 @@ export class PortableMemoryService {
     throw new NmgProtocolError("INVALID_PARAMS", "Memory does not exist in this store and session");
   }
 
-  close(): Promise<void> {
-    const finalEmbeddings = this.embeddings.close();
+  close(cancelBackfill = false): Promise<void> {
+    const finalEmbeddings = this.embeddings.close(cancelBackfill);
     const opening = Array.from(this.projects.values());
     if (this.pending && !this.backend) opening.push(this.pending);
     if (finalEmbeddings || opening.length !== this.projectBackends.size)

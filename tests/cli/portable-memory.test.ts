@@ -21,7 +21,7 @@ import { stripProviderEnv } from "../helpers/test-env.ts";
 stripProviderEnv();
 
 test(
-  "one local write drains a vector backlog using whole provider batches",
+  "local activity uses one page of whole provider batches and resumes the backlog after reopening",
   { timeout: 5000 },
   async (t) => {
     const directory = mkdtempSync(join(tmpdir(), "nmg-vector-backlog-"));
@@ -33,13 +33,13 @@ test(
     });
     t.mock.method(globalThis, "fetch", async (_url: unknown, init?: RequestInit) => {
       const { input } = JSON.parse(String(init?.body)) as { input: string[] };
-      requests.push(input.length);
-      if (requests.reduce((total, size) => total + size, 0) === 67) complete!();
+      if (!input[0]?.includes("find the archive")) requests.push(input.length);
+      if (requests.length === 3) complete!();
       return Response.json({
         data: input.map((_, index) => ({ index, embedding: [1, 1] })),
       });
     });
-    const service = new NmgService({
+    const options = {
       databasePath: path,
       environment: {
         NMG_EMBED_PROVIDER: "openai",
@@ -47,7 +47,8 @@ test(
         NMG_EMBED_BASE_URL: "https://embedding.test/v1",
         NMG_EMBED_BATCH_SIZE: "10",
       },
-    });
+    };
+    let service = new NmgService(options);
     t.after(async () => {
       await service.close();
       removeTempDirectory(directory);
@@ -60,7 +61,14 @@ test(
       })),
     });
     await received;
+    await delay(350);
+    assert.deepEqual(requests, [10, 10, 10]);
     await service.close();
+    for (let page = 0; page < 2; page += 1) {
+      service = new NmgService(options);
+      await service.invoke("search", { query: "find the archive", retrievalMode: "hybrid" });
+      await service.close();
+    }
     assert.deepEqual(requests, [10, 10, 10, 10, 10, 10, 7]);
     const db = new DatabaseSync(path, { readOnly: true });
     try {

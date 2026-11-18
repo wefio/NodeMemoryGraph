@@ -30,7 +30,7 @@
 
 | 需求 | 方案 | 配置项 | 默认值 |
 | --- | --- | --- | --- |
-| R1 | daemon 内建 idle 计时器，每次请求刷新；超时走与 `shutdown` 相同的关闭路径 | `NMG_DAEMON_IDLE_TIMEOUT_MS` | `300000`（5 分钟；`<=0` 禁用） |
+| R1 | 无在途 HTTP 请求时启动空闲计时 | `NMG_DAEMON_IDLE_TIMEOUT_MS` | `300000`（5 分钟；`<=0` 禁用） |
 | R2 | 复用现有 `readyState` 探活 + `acquireServerLease` 残留清理；新增客户端**连接失败自动重连一次** | 无（固定行为） | — |
 | R3 | spawn 前扫描 `*.server.json` 统计存活 pid，超限警告 | `NMG_DAEMON_LIMIT` | `32`（`<=0` 禁用） |
 
@@ -39,33 +39,12 @@
 ### 行为定义
 
 - daemon 启动时即启动计时器（**即使一个请求都没收到**也会退出，覆盖"spawn 后客户端先死"的孤儿场景）；
-- **请求到达并交给 handler 前**（含 `hello`）重置计时器；响应完成不会再次刷新；
-- 超时后调用与 `shutdown` 共用的关闭 helper：`server.close()` 停止接受新连接，随后 `closeAllConnections()` 关闭 HTTP 连接；`closed` promise 决议后调用 `lease.release()`（删除 `*.server.json`），`serveHttp` 返回，`daemon run` 以 0 退出；
-- `shutdown` 与 idle 超时互斥：`closing` 标志防止重复关闭；
-- **在途请求边界：**设计意图是不打断已接受请求，但当前 helper 调用 `closeAllConnections()`；超时前仍在处理的长请求可能被中断。现有 idle 测试只覆盖退出和刷新，不覆盖长请求。
+- HTTP 请求到达时暂停计时，最后一个请求处理结束后开始新的空闲计时。
+- 空闲超时后关闭监听，取消排队中和在途的补向量工作。关闭存储后释放 lease，下次连接可用同一个数据库启动 daemon。
 
 ### 实现位置
 
 `src/cli/http-server.ts` 的 `serveHttp`：
-
-```ts
-export async function serveHttp(
-  service: NmgService,
-  lease: ServerLease,
-  options: { idleTimeoutMs?: number } = {},
-): Promise<void> {
-  const idleTimeoutMs = options.idleTimeoutMs ?? daemonIdleTimeoutMs(); // env
-  let idleTimer: NodeJS.Timeout | undefined;
-  let closing = false;
-  const close = () => { /* server.close + closeAllConnections + 清计时器 */ };
-  const touch = () => {
-    if (closing) return;
-    clearTimeout(idleTimer);
-    idleTimer = idleTimeoutMs > 0 ? setTimeout(close, idleTimeoutMs) : undefined;
-  };
-  // 启动即 touch()；每个请求 handler 先 touch()
-}
-```
 
 `daemonIdleTimeoutMs()` 读取 `NMG_DAEMON_IDLE_TIMEOUT_MS`，非法值回退默认。`options.idleTimeoutMs` 仅测试注入。
 
@@ -150,7 +129,7 @@ stderr 会被 `RpcClient` 子进程捕获并透传到评测主进程，可观测
 
 | 文件 | 改动 |
 | --- | --- |
-| `src/cli/http-server.ts` | `serveHttp` 增加 idle 计时器（touch/close/closing 标志）；`daemonIdleTimeoutMs()` 读 env；`httpHandler` 保持签名不变（onShutdown 改为内部 close） |
+| `src/cli/http-server.ts` | 在途 HTTP 请求计数、空闲计时和关闭监听。 |
 | `src/cli/daemon-client.ts` | `DaemonConnection.databasePath`；`connectDaemon` spawn 前调 `countRunningDaemons` + 越限警告（每进程一次）；`invokeDaemon` 连接级失败重连一次；新增 `countRunningDaemons`、memo、环境变量解析 |
 | `tests/cli/process.test.ts` | 新增 idle 超时退出、超时后重拉、数量检测/警告的进程级测试 |
 | `tests/cli/http-boundary.test.ts` | 不破坏：`daemon-client.ts` 仍只 import `./http-client.ts`、`./lifecycle.ts`（新增 import 需复核不引入 `../core/*`） |
@@ -164,6 +143,7 @@ stderr 会被 `RpcClient` 子进程捕获并透传到评测主进程，可观测
 | --- | --- | --- |
 | idle 超时退出 | `NMG_DAEMON_IDLE_TIMEOUT_MS=1000` 起 daemon，等 ~1.5s | `daemon status --json` → `running:false`；`*.server.json` 已删除 |
 | 请求刷新计时器 | idle=2s，第 1s 发 `hello`/`status`，第 3s 再发一次 | 第 3s 调用仍成功（计时器被刷新） |
+| 请求耗时超过空闲超时 | 保持请求超过空闲超时，再结束请求 | 请求成功返回，新的空闲计时结束后关闭监听。 |
 | 超时后原样重拉 | 上例后再次 `connectDaemon`（或 `daemon start`） | 新 daemon 可用、pid 变化、`remember`/`search` 数据完整 |
 | stale lease 重拉 | 手动写 `*.server.json`（pid=已死进程）后 `daemon start` | 自动清理残留并拉起成功 |
 | 数量检测 | 在临时 `NMG_DATA_DIR` 根下启动真实测试 daemon，再用另一个连接触发 spawn；覆盖 authenticated `hello` 计数 | 超限时 stderr 含 warning；高上限或 `NMG_DAEMON_LIMIT=0` 时无警告。当前测试不把“pid 存活”单独当作 daemon 计数证据 |

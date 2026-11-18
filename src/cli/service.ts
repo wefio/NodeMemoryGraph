@@ -433,7 +433,7 @@ export class NmgService {
   /** Closes in the order the design asks for: stop taking new work, revoke the timers and signals
    *  that could start more of it, then close each store exactly once. A second call is a no-op, so
    *  a shutdown path that runs twice cannot close a store out from under a live reader. */
-  close(): void | Promise<void> {
+  close(options: { cancelBackfill?: boolean } = {}): void | Promise<void> {
     // A close that silently drops calls already accepted would lose writes that were answered as
     // accepted; the sequence is drain() first, and this refuses rather than pretending.
     if (this.#inFlight > 0) {
@@ -446,7 +446,7 @@ export class NmgService {
     this.#store?.close();
     this.#store = undefined;
     this.#sessionActiveGraphs.clear();
-    return this.#portableMemory.close();
+    return this.#portableMemory.close(options.cancelBackfill);
   }
 
   async #invokeMemory(method: NmgMethod, value: unknown, signal?: AbortSignal): Promise<unknown> {

@@ -31,7 +31,7 @@ During `run.ts locomo matched 99999`, Node exhausted memory: 98.2% of 63.7 GB ph
 
 | Requirement | Design | Setting | Default |
 | --- | --- | --- | --- |
-| R1 | In-daemon idle timer, refreshed on each request; timeout uses the server close path | `NMG_DAEMON_IDLE_TIMEOUT_MS` | `300000` (5 minutes; `<=0` disables) |
+| R1 | Idle timer runs while no HTTP request is active | `NMG_DAEMON_IDLE_TIMEOUT_MS` | `300000` (5 minutes; `<=0` disables) |
 | R2 | Reuse `readyState()` and stale-lease cleanup; add one connection-level reconnect | None; fixed behavior | — |
 | R3 | Before spawn, scan the resolved NMG data root and warn above the limit; do not block spawn | `NMG_DAEMON_LIMIT` | `32` (`<=0` disables) |
 
@@ -40,33 +40,12 @@ During `run.ts locomo matched 99999`, Node exhausted memory: 98.2% of 63.7 GB ph
 ### Behavior
 
 - Start the timer at daemon startup, even before the first request, so a client that dies immediately after spawn does not leave an immortal daemon.
-- Refresh the timer before handling each arriving HTTP request, including `hello`; response completion does not refresh it.
-- Timeout uses the shutdown close helper: `server.close()` stops new connections, then `closeAllConnections()` closes HTTP connections. After `closed` resolves, `lease.release()` removes `*.server.json`; `serveHttp` returns and `daemon run` exits 0.
-- A `closing` flag prevents duplicate close paths from racing.
-- **In-flight request boundary:** the design intends not to interrupt accepted work, but the current helper calls `closeAllConnections()`. A long request may be interrupted; current idle tests do not cover this case.
+- Suspend the timer when an HTTP request arrives and start a fresh interval after the last request handler completes.
+- On timeout, close the listener, cancel queued and in-flight vector backfill, and close the service. Release the lease after closing the stores. The next connection can then start a daemon on the same database.
 
 ### Implementation location
 
 `src/cli/http-server.ts`, `serveHttp`:
-
-```ts
-const idleTimeoutMs = options.idleTimeoutMs ?? daemonIdleTimeoutMs();
-let idleTimer: NodeJS.Timeout | undefined;
-let closing = false;
-const close = () => {
-  if (closing) return;
-  closing = true;
-  clearTimeout(idleTimer);
-  server.close(resolveClosed);
-  server.closeAllConnections?.();
-};
-const touch = () => {
-  if (closing) return;
-  clearTimeout(idleTimer);
-  idleTimer = idleTimeoutMs > 0 ? setTimeout(close, idleTimeoutMs) : undefined;
-};
-// touch at startup and before handling each request
-```
 
 `daemonIdleTimeoutMs()` reads `NMG_DAEMON_IDLE_TIMEOUT_MS`; invalid input falls back to the default. `options.idleTimeoutMs` is a test-only injection point.
 
@@ -140,7 +119,7 @@ The recorded rationale was 16-way evaluation concurrency × two NMG arms = 32 da
 
 | File | Change |
 | --- | --- |
-| `src/cli/http-server.ts` | Idle timer, `touch`/`close`/`closing`, environment parsing; `httpHandler` keeps its signature. |
+| `src/cli/http-server.ts` | Active HTTP request counting, idle timer, and listener shutdown. |
 | `src/cli/daemon-client.ts` | `DaemonConnection.databasePath`; pre-spawn count/warning; connection-level reconnect; `countRunningDaemons`, memo and environment parsing. |
 | `tests/cli/process.test.ts` | Process tests for idle exit, relaunch, count warning and reconnect. |
 | `tests/cli/http-boundary.test.ts` | Preserve the daemon-client boundary: imports remain limited to `./http-client.ts` and `./lifecycle.ts` rather than `../core/*`. |
@@ -153,6 +132,7 @@ The recorded rationale was 16-way evaluation concurrency × two NMG arms = 32 da
 | --- | --- | --- |
 | Idle exit | Start with `NMG_DAEMON_IDLE_TIMEOUT_MS=1000`; wait about 1.5 seconds. | `daemon status --json` reports `running:false`; `*.server.json` is removed. |
 | Request refreshes timer | With idle timeout 2 seconds, send `hello`/`status` at 1 second and another request at 3 seconds. | The later call succeeds because the timer was refreshed. |
+| Request outlasts timeout | Hold a request open beyond the idle timeout, then finish it. | The response succeeds and the listener exits after the new idle interval. |
 | Relaunch after idle exit | After the preceding daemon exits, reconnect or run `daemon start`. | New PID; `remember`/`search` still return the stored data. |
 | Stale lease | Write a `*.server.json` descriptor for a dead PID, then run `daemon start`. | The stale file is removed and the daemon starts. |
 | Count warning | Start real daemons under a temporary `NMG_DATA_DIR`, then trigger a new spawn with `NMG_DAEMON_LIMIT=1`; also use a high limit and `0`. | Authenticated daemons above the threshold warn; a high limit or `0` is quiet. A live PID alone is not enough to count. |

@@ -127,9 +127,12 @@ text and applies visibility and graph rules. The host supplies embeddings.
 For hierarchy scoring, SQLite finds a memory's associated leaf IDs before
 looking up those leaf vectors for the selected model.
 SQLite selects one ordered page of missing vectors before fetching previous turns
-by session and source sequence. A local backfill sweep advances by creation time
-and ID and saves each page after the provider call. Vector saves still check that
-the record is indexable and its statement matches the submitted text.
+by session and source sequence. A memory write or semantic search can schedule
+one page per local index and model. The daemon processes pages serially with a
+pause between them and keeps the creation-time and ID cursor between requests.
+It resets that cursor on writes to pick up new records. Unfinished rows remain
+eligible on reopening. Vector saves check that the record is indexable and its
+statement matches the submitted text.
 The [local compatibility profile](legacy-graph-migration.md#local-default-after-activation)
 also owns event-time windows, lifecycle writes, feedback, bookmark lookup and
 existing chain projection. Chain editing and node transforms retain separate

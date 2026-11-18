@@ -73,3 +73,10 @@ An unrestricted join let SQLite scan a model's leaf vector index for each
 eligible memory. Keeping memberships on the outer side of that join limits
 leaf vector lookups to the memory's own memberships. Both lookups use the
 existing primary keys.
+
+A full local embedding sweep on one search or write can keep the daemon busy
+after the caller leaves. Automatic indexing processes one page per activity
+per index and model, and spaces pages on a process-wide queue. This bounds
+unattended work at the cost of slower catch-up when a backlog is large.
+The [daemon idle boundary](../../design/daemon-lifecycle-design.md#r1-daemon-idle-timeout)
+stops background work once foreground requests finish and the idle interval expires.
