@@ -76,10 +76,13 @@ SQLite uses a native write transaction and independent WAL snapshot readers.
 Batch planning prefetches bounded duplicate and node lookups from one revision.
 It indexes the batch's changes in memory so later items see earlier changes in
 input order. Predecessor lookups reuse the snapshot candidates for their scope,
-node and session. SQLite groups entity upserts in the same commit. Full-text
-updates address existing FTS rows by rowid. On first open, SQLite transactionally
-records rowids for existing full-text rows. Subsequent commits maintain that
-mapping with the projections.
+node and session. SQLite groups entity upserts in the same commit. The
+contentless FTS5 projections for memories and file references store search
+terms, positions and document lengths for BM25. Text lives in the owning
+entities. A namespace/key registry maps entities to FTS rowids and is updated
+with the entities and projections. On first writable open, older full-content
+indexes are replaced in one transaction using the exact indexed text and
+existing rowids. Released SQLite pages are available for reuse.
 
 Lance stores all domain entity kinds and receipts in one data table per namespace.
 A write creates a shallow branch from the pinned version, applies one merge and

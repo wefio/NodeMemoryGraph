@@ -9,6 +9,7 @@
  * single consumer.
  */
 import { DatabaseSync } from "node:sqlite";
+import { hasContentlessMemoryTextIndex } from "../core/memory/sqlite-text-index.ts";
 import { memoryFtsLink } from "../core/store/fts-index.ts";
 import { useUnifiedInspectViews } from "./inspect-memory-views.ts";
 
@@ -122,23 +123,33 @@ export function searchMemories(db: DatabaseSync, query: string, limit = 200): In
 function inspectFts(db: DatabaseSync, query: string, limit: number): InspectMemoryRow[] {
   const unified = unifiedReaders.has(db);
   const table = unified ? "nmg_memory_fts" : "memory_fts";
-  const link = unified ? { join: "", id: "substr(f.key, 8)" } : memoryFtsLink(db);
-  const boundary = unified
-    ? "AND f.namespace=(SELECT namespace FROM nmg_local_memory WHERE id=1)"
-    : "";
+  const { join, id, boundary } = unified
+    ? inspectUnifiedFtsLink(db)
+    : { ...memoryFtsLink(db), boundary: "" };
   return mapMemoryRows(
     db
       .prepare(
         `SELECT m.id, m.statement, m.memory_type, m.tier, m.importance, m.status,
             m.created_at, n.canonical_name AS node_name
-     FROM ${table} f ${link.join}
-     JOIN memory_records m ON m.id=${link.id}
+     FROM ${table} f ${join}
+     JOIN memory_records m ON m.id=${id}
      JOIN memory_nodes n ON n.id=m.node_id
      WHERE ${table} MATCH ? AND m.status IN ('active', 'disputed') ${boundary}
      ORDER BY bm25(${table}), f.rowid LIMIT ?`,
       )
       .all(query, clampLimit(limit, 5_000)) as Row[],
   );
+}
+
+function inspectUnifiedFtsLink(db: DatabaseSync): { join: string; id: string; boundary: string } {
+  const namespace = "(SELECT namespace FROM nmg_local_memory WHERE id=1)";
+  if (!hasContentlessMemoryTextIndex(db))
+    return { join: "", id: "substr(f.key, 8)", boundary: `AND f.namespace=${namespace}` };
+  return {
+    join: "CROSS JOIN nmg_memory_fts_rows r ON r.fts_rowid=f.rowid",
+    id: "substr(r.key, 8)",
+    boundary: `AND r.namespace=${namespace} AND r.key GLOB 'memory:*'`,
+  };
 }
 
 export function getMemoryDetail(db: DatabaseSync, memoryId: string): InspectMemoryDetail | null {

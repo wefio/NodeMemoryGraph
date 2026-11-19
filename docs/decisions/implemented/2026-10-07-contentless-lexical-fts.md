@@ -39,6 +39,15 @@ change retrieval or provenance rather than eliminate a redundant payload.
 - Do not change page size, vector representations, source fields, durability or
   run automatic `VACUUM`.
 
+### Unified SQLite indexes
+
+Apply this decision to both unified SQLite FTS5 projections, for memories and
+file references. The migration copies the exact indexed text and existing
+rowids from the older projections, preserving BM25 and recall-trigger terms.
+It reuses the unified rowid registry with a reverse index for matching results.
+SQLite starts the join from MATCH results to avoid running MATCH for each
+entity. The inspector supports either layout by checking the schema.
+
 ## Alternatives considered
 
 - **External-content FTS:** transformed Han bigrams and evidence-plus-trigger

@@ -238,9 +238,8 @@ test("SQLite reads existing graph edges from both indexed endpoints in ID order"
   );
 });
 
-test("SQLite upgrades existing text indexes and replaces both projections at their original rowids", async (t) => {
+test("SQLite makes both text indexes contentless and updates them at their original rowids", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-fts-keys-"));
-  t.after(() => removeTempDirectory(directory));
   const path = join(directory, "memory.sqlite");
   const options = { kind: "sqlite", path, namespace: "tenant" } as const;
   const first = await openMemoryBackend(options);
@@ -252,17 +251,87 @@ test("SQLite upgrades existing text indexes and replaces both projections at the
   await first.close();
 
   const raw = new DatabaseSync(path);
-  raw.exec("DROP TABLE IF EXISTS nmg_memory_fts_rows");
+  t.after(() => {
+    raw.close();
+    removeTempDirectory(directory);
+  });
   const projections = ["nmg_memory_fts", "nmg_memory_tessera_fts"];
-  const before = projections.map((table) => raw.prepare(`SELECT rowid, key FROM ${table}`).get());
+  for (const [index, table] of projections.entries()) {
+    const kind = index === 0 ? "memory" : "tessera";
+    raw.exec(`DROP TABLE ${table};
+      CREATE VIRTUAL TABLE ${table} USING fts5(namespace UNINDEXED, key UNINDEXED, text);
+      INSERT INTO ${table}(rowid, namespace, key, text)
+        SELECT 91, namespace, key, 'obsolete test projection'
+        FROM nmg_memory_entities WHERE kind='${kind}';`);
+  }
+  const before = raw
+    .prepare("SELECT namespace, key, fts_rowid FROM nmg_memory_fts_rows ORDER BY key")
+    .all()
+    .map((row) => ({ ...row, fts_rowid: 91 }));
+  raw.exec("DROP TABLE nmg_memory_fts_rows");
+
+  // A duplicate legacy key fails partway through the second projection.
+  raw.exec(`INSERT INTO nmg_memory_tessera_fts(rowid, namespace, key, text)
+    SELECT 92, namespace, key, text FROM nmg_memory_tessera_fts WHERE rowid=91`);
+  await assert.rejects(openMemoryBackend(options), /UNIQUE constraint failed/);
+  for (const table of projections) {
+    assert.equal(
+      raw.prepare(`SELECT text FROM ${table} WHERE rowid=91`).get()?.text,
+      "obsolete test projection",
+    );
+  }
+  assert.equal(
+    raw.prepare("SELECT 1 FROM sqlite_schema WHERE name='nmg_memory_fts_rows'").get(),
+    undefined,
+  );
+  raw.exec("DELETE FROM nmg_memory_tessera_fts WHERE rowid=92");
+
   const reopened = await openMemoryBackend(options);
   try {
-    assert.equal(raw.prepare("SELECT count(*) AS count FROM nmg_memory_fts_rows").get()?.count, 2);
+    const mapping = raw.prepare(
+      "SELECT namespace, key, fts_rowid FROM nmg_memory_fts_rows ORDER BY key",
+    );
+    assert.deepEqual(
+      mapping.all().map((row) => ({ ...row })),
+      before,
+    );
+    for (const table of projections) {
+      assert.deepEqual(
+        raw
+          .prepare(`SELECT rowid, text FROM ${table} WHERE text MATCH 'obsolete'`)
+          .all()
+          .map((row) => ({ ...row })),
+        [{ rowid: 91, text: null }],
+      );
+      assert.equal(
+        raw.prepare("SELECT 1 FROM sqlite_schema WHERE name=?").get(`${table}_content`),
+        undefined,
+      );
+    }
+    const prepare = DatabaseSync.prototype.prepare;
+    let searchPlan: unknown;
+    t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+      if (
+        searchPlan === undefined &&
+        sql.startsWith("SELECT kind, payload") &&
+        sql.includes("MATCH")
+      )
+        searchPlan = prepare.call(this, `EXPLAIN QUERY PLAN ${sql}`).get(128, 0)?.detail;
+      return prepare.call(this, sql);
+    });
     const view = await reopened.openRead();
-    const [tessera] = await reopened.scan(view, { kind: "tessera" });
+    assert.equal(
+      (await reopened.scan(view, { kind: "memory", text: "obsolete" }))[0]?.value.id,
+      memory.id,
+    );
+    assert.match(String(searchPlan), /^SCAN f VIRTUAL TABLE INDEX/);
+    const [[matched], [tessera]] = await reopened.scanBatch!(view, [
+      { kind: "memory", text: "obsolete" },
+      { kind: "tessera", text: "obsolete" },
+    ]);
     await reopened.closeRead(view);
-    assert.equal(tessera?.kind, "tessera");
-    if (tessera?.kind !== "tessera") throw Error("Tessera missing");
+    assert.equal(matched?.value.id, memory.id);
+    assert.ok(tessera?.kind === "tessera");
     const committed = await reopened.commit({
       expectedRevision: view.revision,
       operationId: "update",
@@ -276,8 +345,18 @@ test("SQLite upgrades existing text indexes and replaces both projections at the
       },
     });
     assert.equal(committed.status, "committed");
-    for (const [index, table] of projections.entries()) {
-      assert.deepEqual(raw.prepare(`SELECT rowid, key FROM ${table}`).all(), [before[index]]);
+    assert.deepEqual(
+      mapping.all().map((row) => ({ ...row })),
+      before,
+    );
+    for (const table of projections) {
+      assert.deepEqual(
+        raw
+          .prepare(`SELECT rowid FROM ${table}`)
+          .all()
+          .map((row) => row.rowid),
+        [91],
+      );
       assert.equal(
         raw.prepare(`SELECT count(*) AS count FROM ${table} WHERE text MATCH 'obsolete'`).get()
           ?.count,
@@ -291,7 +370,6 @@ test("SQLite upgrades existing text indexes and replaces both projections at the
     }
   } finally {
     await reopened.close();
-    raw.close();
   }
 });
 
