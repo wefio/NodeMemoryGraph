@@ -832,7 +832,7 @@ export interface MemorySearchResult {
   /** Why this record surfaced: lexical/vector/graph route, populated by
    *  searchContext before the context is returned. Header formatters use it
    *  to tell the model why a candidate was recalled. */
-  recallReason?: "hybrid_match" | "learned_route" | "lexical_match" | "vector_match";
+  recallReason?: RecallCue["reason"];
   /** Multi-hop path traceability: when this result reached via graph
    *  activation propagation, the edge chain from a seed node to this record's
    *  node (best-activation path). Lets the presentation layer explain "why
@@ -1283,7 +1283,7 @@ export interface RecallCue {
   hasConflicts: boolean;
   hasDeepMemory: boolean;
   score: number;
-  reason: "hybrid_match" | "learned_route" | "lexical_match" | "vector_match";
+  reason: "hybrid_match" | "learned_route" | "lexical_match" | "vector_match" | "leaf_context";
 }
 
 export interface RecallIndex {

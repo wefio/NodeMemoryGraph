@@ -27,6 +27,11 @@ import { requestHash } from "./model.ts";
 import { ensureLocalDaemonSchema, migrate } from "../store/schema.ts";
 import { ftsExpression } from "../store/search-ranking.ts";
 import { ensureSqliteTextIndexes, textIndex, writeSqliteTextIndex } from "./sqlite-text-index.ts";
+import {
+  ensureSqliteLeafGroups,
+  importLegacySqliteLeaves,
+  readSqliteLeafPeers,
+} from "./sqlite-leaves.ts";
 import { SqliteMemoryVectors } from "./sqlite-vectors.ts";
 import {
   ensureSqliteMemoryChains,
@@ -118,6 +123,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
       CREATE INDEX IF NOT EXISTS nmg_memory_edge_target
         ON nmg_memory_entities(namespace, target, id) WHERE kind='edge';`);
     ensureSqliteTextIndexes(this.writer);
+    ensureSqliteLeafGroups(this.writer);
     this.writer.prepare("INSERT OR IGNORE INTO nmg_memory_head VALUES (?, 0)").run(this.namespace);
     ensureSqliteMemoryChains(this.writer);
     ensureSqliteMemoryAssociations(this.writer);
@@ -187,6 +193,15 @@ export class SqliteMemoryBackend implements MemoryBackend {
     return readSqliteChainProjection(this.reader(view), this.namespace, ids, sessionId);
   }
 
+  async leafPeers(
+    view: MemoryReadView,
+    seedIds: readonly string[],
+    excluded: readonly string[],
+    query: MemoryEntityQuery,
+  ): Promise<MemoryEntity[]> {
+    return readSqliteLeafPeers(this.reader(view), this.namespace, seedIds, excluded, query);
+  }
+
   async closeRead(view: MemoryReadView): Promise<void> {
     const db = this.readers.get(view);
     if (!db) return;
@@ -229,7 +244,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
         assertLegacyBackup();
         if (!current) this.installLocalLegacyGraph();
         this.vectorIndex.importLegacy();
-        this.vectorIndex.importLegacyHierarchy();
+        importLegacySqliteLeaves(this.writer, this.namespace);
         this.importLegacyClaims();
         importLegacySqliteChains(this.writer, this.namespace);
         importLegacySqliteAssociations(this.writer, this.namespace);

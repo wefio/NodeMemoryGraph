@@ -21,8 +21,9 @@ and alternate queries retain their normal behavior.
 
 Finish candidate selection before loading evidence. The engine keeps the existing
 candidate order for ties and preserves evidence order within the pinned read
-revision. SQLite reuses the query norm and materializes only scores for the
-reachable hierarchy vectors of the selected model.
+revision. SQLite reuses the query norm. The
+[structural leaf decision](2026-11-19-structural-leaves-record-vectors.md)
+defines the scope of vector scoring.
 
 ## Alternatives considered
 

@@ -118,13 +118,19 @@ export function sqlLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
+function idFilter(column: "id" | "node", ids: readonly string[]): string {
+  if (ids.length > 512)
+    throw new Error(
+      column === "id" ? "At most 512 entity IDs per read" : "At most 512 node IDs per read",
+    );
+  return ids.length ? `${column} IN (${ids.map(sqlLiteral).join(",")})` : "1 = 0";
+}
+
 export function queryWhere(query: MemoryEntityQuery): string {
   const clauses = [`kind = ${sqlLiteral(query.kind)}`];
-  if (query.ids) {
-    if (query.ids.length > 512) throw new Error("At most 512 entity IDs per read");
-    clauses.push(query.ids.length ? `id IN (${query.ids.map(sqlLiteral).join(",")})` : "1 = 0");
-  }
+  if (query.ids) clauses.push(idFilter("id", query.ids));
   if (query.nodeId !== undefined) clauses.push(`node = ${sqlLiteral(query.nodeId)}`);
+  if (query.nodeIds) clauses.push(idFilter("node", query.nodeIds));
   if (query.exactText !== undefined)
     clauses.push(`name = ${sqlLiteral(normalizeStatement(query.exactText))}`);
   if (query.stateKey !== undefined) clauses.push(`statekey = ${sqlLiteral(query.stateKey)}`);

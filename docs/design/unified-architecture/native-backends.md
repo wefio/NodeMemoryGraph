@@ -127,10 +127,18 @@ versioned answer attribution, and
 vector and hybrid retrieval. Its SQLite backend owns the model-keyed record
 index plus candidate queries. The engine combines those candidates with full
 text and applies visibility and graph rules. The host supplies embeddings.
-For hierarchy scoring, SQLite follows eligible memories to their nodes and
-leaves and scores each reachable route vector once per query. The engine ranks
-visible candidates using their memory and node fields, then loads the selected
-records' evidence from the same snapshot.
+Search resolves an explicit node name to IDs before selecting lexical and
+vector candidates. SQLite stores vectors only for memory records. The engine
+ranks visible candidates and loads the selected records' evidence from the
+same snapshot.
+
+Leaf context follows imported leaf memberships and records sharing the same
+primary evidence. Peers stay in the seed's scope and obey the request's
+visibility rules. Graph expansion can use leaf context to fill spare slots.
+The compatibility values `hierarchy` and `union` under `vectorGranularity`
+request bounded leaf context and can fill up to four spare result slots. Both
+also work with lexical search. A database upgrade preserves existing
+memberships and releases the obsolete node and leaf vector pages for reuse.
 
 An explicit local search in the default mode can end at lexical retrieval when
 its only query is a standalone identifier or quoted phrase and a visible

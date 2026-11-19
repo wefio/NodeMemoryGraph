@@ -100,7 +100,6 @@ export class LocalMemoryEmbeddings {
           semantic: {
             indexId: client.indexId,
             vector,
-            granularity: params.vectorGranularity ?? "records",
             mode: vectorMode(params.retrievalMode),
           },
         };

@@ -9,7 +9,6 @@ import { openMemoryBackend } from "../../src/core/memory/open.ts";
 import type { MemoryCommitRequest, MemoryEntity } from "../../src/core/memory/backend.ts";
 import { MemoryEngine } from "../../src/core/memory/engine.ts";
 import { sqliteQueryWhere } from "../../src/core/memory/entity-rows.ts";
-import { encodeVector } from "../../src/core/store/vector-codec.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
 const node = (id: string, name: string): MemoryEntity => ({
@@ -431,7 +430,7 @@ test("SQLite batches write lookups and keeps earlier items visible inside the ba
   assert.equal(reused.history.id, original.history.id);
 });
 
-test("SQLite hybrid search scores shared routes once and reads evidence after selecting results", async (t) => {
+test("SQLite hybrid search restricts vector scoring to the named node and reads selected evidence", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-rank-before-evidence-"));
   const path = join(directory, "memory.sqlite");
   const backend = await openMemoryBackend({ kind: "sqlite", path, namespace: "tenant" });
@@ -443,6 +442,7 @@ test("SQLite hybrid search scores shared routes once and reads evidence after se
   const records = await engine.rememberMany([
     { statement: "Atlas search first decision", nodeName: "Atlas" },
     { statement: "Atlas search second decision", nodeName: "Atlas" },
+    { statement: "Atlas search unrelated node", nodeName: "Other" },
   ]);
   const [first, second] = records;
   assert.ok(first && second);
@@ -457,20 +457,9 @@ test("SQLite hybrid search scores shared routes once and reads evidence after se
     [
       [1, 0],
       [0, 1],
+      [1, 0],
     ],
   );
-  const raw = new DatabaseSync(path);
-  try {
-    const route = raw.prepare(
-      "INSERT INTO nmg_memory_route_vectors VALUES ('tenant','model',?,?,?)",
-    );
-    route.run("node", first.node.id, encodeVector([0, 1]));
-    route.run("leaf", "shared", encodeVector([1, 0]));
-    const member = raw.prepare("INSERT INTO nmg_memory_route_members VALUES ('tenant',?,'shared')");
-    for (const { memory } of records) member.run(memory.id);
-  } finally {
-    raw.close();
-  }
   const load = backend.scan.bind(backend);
   const loaded: string[] = [];
   t.mock.method(backend, "scan", async (...args: Parameters<typeof load>) => {
@@ -501,11 +490,10 @@ test("SQLite hybrid search scores shared routes once and reads evidence after se
   );
   const result = await engine.search(
     "Atlas search",
-    { limit: 1 },
+    { limit: 1, nodeName: "Atlas" },
     {
       indexId: "model",
       vector: [1, 0],
-      granularity: "hierarchy",
       mode: "hybrid",
     },
   );
@@ -514,9 +502,85 @@ test("SQLite hybrid search scores shared routes once and reads evidence after se
     [first.memory.id],
   );
   assert.equal(result.results[0]?.vectorScore, 1);
-  assert.equal(result.results[0]?.routeScore, 1);
+  assert.equal(result.results[0]?.routeScore, 0);
   assert.deepEqual(loaded, [first.history.id]);
-  assert.equal(evaluations, 4);
+  assert.equal(evaluations, 2);
+});
+
+test("SQLite retains leaf memberships and expands same-source evidence without route vectors", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-structural-leaves-"));
+  const path = join(directory, "memory.sqlite");
+  const options = { kind: "sqlite", path, namespace: "tenant" } as const;
+  const backend = await openMemoryBackend(options);
+  const source = {
+    actor: "user",
+    sourceMessageId: "turn-42",
+    content: "Original context",
+  } as const;
+  const scope = { project: "atlas" };
+  const [seed, related, imported, outside] = await new MemoryEngine(backend).rememberMany([
+    { statement: "Coriander decision", nodeName: "Atlas", scope, evidenceSource: source },
+    { statement: "Serving temperatures", nodeName: "Atlas", scope, evidenceSource: source },
+    { statement: "Storage instructions", nodeName: "Atlas", scope },
+    { statement: "Other project details", nodeName: "Boreal", scope: { project: "boreal" } },
+    { statement: "Coriander packaging", nodeName: "Atlas", scope },
+  ]);
+  assert.ok(seed && related && imported && outside);
+  assert.equal(seed.history.id, related.history.id);
+  await backend.close();
+
+  const raw = new DatabaseSync(path);
+  try {
+    raw.exec(`CREATE TABLE nmg_memory_route_vectors (vector BLOB);
+      INSERT INTO nmg_memory_route_vectors VALUES (zeroblob(12288));
+      CREATE TABLE nmg_memory_route_members (namespace TEXT, memory_id TEXT, leaf_id TEXT);`);
+    const insert = raw.prepare(
+      "INSERT INTO nmg_memory_route_members VALUES ('tenant',?,'old-leaf')",
+    );
+    for (const row of [seed, imported, outside]) insert.run(row.memory.id);
+  } finally {
+    raw.close();
+  }
+
+  const reopened = await openMemoryBackend(options);
+  t.after(async () => {
+    await reopened.close();
+    removeTempDirectory(directory);
+  });
+  const inspector = new DatabaseSync(path, { readOnly: true });
+  try {
+    assert.equal(
+      inspector.prepare("SELECT count(*) AS n FROM nmg_memory_leaf_members").get()?.n,
+      3,
+    );
+    assert.deepEqual(
+      inspector
+        .prepare("SELECT name FROM sqlite_schema WHERE name LIKE 'nmg_memory_route_%'")
+        .all(),
+      [],
+    );
+  } finally {
+    inspector.close();
+  }
+  const engine = new MemoryEngine(reopened);
+  const plain = await engine.search("coriander decision", { limit: 2 });
+  assert.equal(plain.results.length, 2);
+  assert.equal(plain.results[0]?.memory.id, seed.memory.id);
+  assert.deepEqual(
+    await engine.search("coriander decision", { expandLeafContext: true, limit: 2 }),
+    plain,
+  );
+  const enriched = await engine.search("coriander decision", { expandLeafContext: true, limit: 8 });
+  assert.deepEqual(enriched.results.slice(0, 2), plain.results);
+  assert.deepEqual(
+    new Set(enriched.results.slice(2).map(({ memory }) => memory.id)),
+    new Set([related.memory.id, imported.memory.id]),
+  );
+  assert.ok(
+    enriched.results
+      .slice(2)
+      .every((hit) => hit.recallReason === "leaf_context" && hit.vectorScore === 0),
+  );
 });
 
 test("SQLite pages missing vectors in order, scopes previous turns, and saves only current rows", async (t) => {

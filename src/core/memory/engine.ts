@@ -59,6 +59,7 @@ export interface MemoryQueryOptions {
   eventTimeFrom?: string;
   eventTimeTo?: string;
   findTesserae?: boolean;
+  expandLeafContext?: boolean;
 }
 
 interface PlannedResult<T> {
@@ -68,6 +69,7 @@ interface PlannedResult<T> {
 
 type SearchCandidate = Omit<MemorySearchResult, "evidence" | "evidenceRecords">;
 type SelectCandidates = (candidates: SearchCandidate[]) => SearchCandidate[];
+export const MAX_LEAF_CONTEXT_RESULTS = 4;
 
 /** Memory semantics and graph organization depend only on the asynchronous domain port. */
 export class MemoryEngine {
@@ -291,6 +293,7 @@ export class MemoryEngine {
     try {
       const query: MemoryEntityQuery = {
         kind: "memory",
+        nodeIds: await this.searchNodeIds(view, options.nodeName),
         scope: options.scope,
         sessionId: options.sessionId,
         eventTimeFrom,
@@ -302,7 +305,10 @@ export class MemoryEngine {
         : await this.lexicalResults(view, text, query, options, limit, exact);
       if (exact && !results.length)
         return { results, relations: [], retrieval: { mode: "lexical", degraded: false } };
-      const relations = await this.expand(view, results, { ...options, limit });
+      const relations = await this.expandSearchStructure(view, results, query, {
+        ...options,
+        limit,
+      });
       const tesserae = await this.searchTesserae(view, text, options, results);
       return {
         results,
@@ -314,6 +320,62 @@ export class MemoryEngine {
     } finally {
       await this.backend.closeRead(view);
     }
+  }
+
+  private async searchNodeIds(
+    view: MemoryReadView,
+    nodeName: string | undefined,
+  ): Promise<string[] | undefined> {
+    if (!nodeName) return;
+    const nodes = await this.backend.scan(view, { kind: "node", nodeName, limit: 512 });
+    return nodes.flatMap((node) =>
+      node.kind === "node" && node.value.canonicalName === nodeName ? [node.value.id] : [],
+    );
+  }
+
+  private async expandSearchStructure(
+    view: MemoryReadView,
+    results: MemorySearchResult[],
+    query: MemoryEntityQuery,
+    options: MemoryQueryOptions & { limit: number },
+  ): Promise<NodeRelation[]> {
+    // Take seeds only from direct search results. Peers never seed another leaf expansion.
+    const includeLeaves = options.expandLeafContext || options.graphHops;
+    const seeds = includeLeaves
+      ? results.slice(0, MAX_LEAF_CONTEXT_RESULTS).map(({ memory }) => memory.id)
+      : [];
+    const relations = await this.expand(view, results, options);
+    const budget = Math.min(MAX_LEAF_CONTEXT_RESULTS, options.limit - results.length);
+    if (includeLeaves) await this.appendLeafContext(view, results, seeds, query, options, budget);
+    return relations;
+  }
+
+  private async appendLeafContext(
+    view: MemoryReadView,
+    results: MemorySearchResult[],
+    seeds: string[],
+    query: MemoryEntityQuery,
+    options: MemoryQueryOptions,
+    budget: number,
+  ): Promise<void> {
+    if (budget <= 0 || !seeds.length || !this.backend.leafPeers) return;
+    const peers = await this.backend.leafPeers(
+      view,
+      seeds,
+      results.map(({ memory }) => memory.id),
+      { ...query, limit: 64 },
+    );
+    const context = await this.project(view, peers, options, false, (rows) =>
+      rows.slice(0, budget),
+    );
+    results.push(
+      ...context.map((item): MemorySearchResult => ({
+        ...item,
+        lexicalScore: 0,
+        combinedScore: 0,
+        recallReason: "leaf_context",
+      })),
+    );
   }
 
   private async lexicalResults(
@@ -414,7 +476,6 @@ export class MemoryEngine {
         .map((result): SearchCandidate => {
           const score = scores.get(result.memory.id);
           const vectorScore = score?.recordScore ?? 0;
-          const routeScore = score?.routeScore ?? 0;
           const triggers = recallTriggersFromStoredMarkers(result.memory.markers).join(" ");
           const lexicalScore = lexicalTextScore(
             queryText,
@@ -422,9 +483,7 @@ export class MemoryEngine {
             terms,
           );
           const combinedScore =
-            semantic.mode === "vector"
-              ? Math.max(vectorScore, routeScore)
-              : hybridScore(lexicalScore, vectorScore, routeScore);
+            semantic.mode === "vector" ? vectorScore : hybridScore(lexicalScore, vectorScore, 0);
           const recallReason = score
             ? lexicalScore
               ? "hybrid_match"
@@ -434,7 +493,6 @@ export class MemoryEngine {
             ...result,
             lexicalScore,
             vectorScore,
-            routeScore,
             combinedScore,
             recallReason,
           };
