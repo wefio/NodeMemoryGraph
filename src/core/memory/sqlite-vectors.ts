@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { cosineSimilarity } from "../vector.ts";
+import { cosineScorer } from "../vector.ts";
 import {
   memoryEmbeddingModelId,
   memoryEmbeddingText,
@@ -33,41 +33,11 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
       PRIMARY KEY(namespace, model, id));
       CREATE TABLE IF NOT EXISTS nmg_memory_vector_import (
         namespace TEXT PRIMARY KEY);
-      CREATE TABLE IF NOT EXISTS nmg_memory_route_vectors (
-        namespace TEXT NOT NULL, model TEXT NOT NULL, kind TEXT NOT NULL,
-        id TEXT NOT NULL, vector BLOB NOT NULL,
-        PRIMARY KEY(namespace, model, kind, id));
-      CREATE TABLE IF NOT EXISTS nmg_memory_route_members (
-        namespace TEXT NOT NULL, memory_id TEXT NOT NULL, leaf_id TEXT NOT NULL,
-        PRIMARY KEY(namespace, memory_id, leaf_id));
       CREATE INDEX IF NOT EXISTS nmg_memory_embedding_order ON nmg_memory_entities
         (namespace, json_extract(payload, '$.createdAt') DESC, id) WHERE kind='memory';
       CREATE INDEX IF NOT EXISTS nmg_memory_history_sequence ON nmg_memory_entities
         (namespace, json_extract(payload, '$.sessionId'), CAST(name AS INTEGER) DESC, id)
         WHERE kind='history';`);
-  }
-
-  importLegacyHierarchy(): void {
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO nmg_memory_route_vectors
-      SELECT ?, model, 'node', node_id, COALESCE(vector_blob, vector_json) FROM node_embeddings
-      WHERE COALESCE(vector_blob, vector_json) IS NOT NULL`,
-      )
-      .run(this.namespace);
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO nmg_memory_route_vectors
-      SELECT ?, model, 'leaf', block_id, COALESCE(vector_blob, vector_json) FROM leaf_embeddings
-      WHERE COALESCE(vector_blob, vector_json) IS NOT NULL`,
-      )
-      .run(this.namespace);
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO nmg_memory_route_members
-      SELECT ?, memory_id, block_id FROM memory_leaf_members`,
-      )
-      .run(this.namespace);
   }
 
   importLegacy(): void {
@@ -195,38 +165,34 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
   ): MemoryVectorCandidate[] {
     const db = this.reader(view);
     const { limit } = queryBounds(query);
+    const cosine = cosineScorer(semantic.vector);
     db.function("nmg_memory_cosine", { deterministic: true }, (value) => {
       if (typeof value === "bigint") return 0;
-      const score = cosineSimilarity(semantic.vector, scoringVector({ vector: value }));
+      const score = cosine(scoringVector({ vector: value }));
       return Number.isFinite(score) ? score : 0;
     });
-    const hierarchy = semantic.granularity !== "records";
     const rows = db
       .prepare(
         `WITH eligible AS (
-      SELECT namespace, id, node, payload FROM nmg_memory_entities m
+      SELECT namespace, id, rowid AS entity_rowid FROM nmg_memory_entities m
       WHERE namespace=? AND ${sqliteQueryWhere(query)} AND ${INDEXABLE_MEMORY}
     ), scores AS MATERIALIZED (
-      SELECT m.id, m.payload,
-        COALESCE(nmg_memory_cosine(v.vector), 0) AS recordScore,
-        ${hierarchy ? HIERARCHY_SCORE : "0"} AS routeScore
-      FROM eligible m LEFT JOIN nmg_memory_vectors v
+      SELECT m.id, m.entity_rowid,
+        nmg_memory_cosine(v.vector) AS recordScore
+      FROM eligible m JOIN nmg_memory_vectors v
         ON v.namespace=m.namespace AND v.model=? AND v.id=m.id AND v.dimensions=?
+    ), selected AS (
+      SELECT * FROM scores
+      WHERE recordScore>0 ORDER BY recordScore DESC, id LIMIT ?
     )
-    SELECT payload, recordScore, routeScore FROM scores
-    WHERE max(recordScore, routeScore)>0 ORDER BY max(recordScore, routeScore) DESC, id LIMIT ?`,
+    SELECT m.payload, selected.recordScore FROM selected
+    CROSS JOIN nmg_memory_entities m ON m.rowid=selected.entity_rowid
+    ORDER BY selected.recordScore DESC, selected.id`,
       )
-      .all(
-        this.namespace,
-        ...(hierarchy ? [semantic.indexId, semantic.indexId] : []),
-        semantic.indexId,
-        semantic.vector.length,
-        limit,
-      ) as StoreRow[];
+      .all(this.namespace, semantic.indexId, semantic.vector.length, limit) as StoreRow[];
     return rows.map((row) => ({
       entity: { kind: "memory", value: JSON.parse(String(row.payload)) },
       recordScore: Number(row.recordScore),
-      routeScore: Number(row.routeScore),
     }));
   }
 }
@@ -259,18 +225,6 @@ const PREVIOUS_TURN = `(SELECT json_extract(prev.payload, '$.content')
     ORDER BY CAST(candidate.name AS INTEGER) DESC, candidate.id LIMIT 1
   )
   ORDER BY CAST(prev.name AS INTEGER) DESC, CAST(link.key AS INTEGER) LIMIT 1)`;
-
-// Keep the current memory's memberships on the outer side of the leaf lookup.
-const HIERARCHY_SCORE = `max(coalesce((
-  SELECT nmg_memory_cosine(n.vector)
-  FROM nmg_memory_route_vectors n
-  WHERE n.namespace=m.namespace AND n.kind='node' AND n.id=m.node AND n.model=?
-), 0), coalesce((
-  SELECT max(nmg_memory_cosine(l.vector))
-  FROM nmg_memory_route_members member CROSS JOIN nmg_memory_route_vectors l
-    ON l.namespace=member.namespace AND l.kind='leaf' AND l.id=member.leaf_id
-  WHERE member.namespace=m.namespace AND member.memory_id=m.id AND l.model=?
-), 0))`;
 
 function validateVectors(vectors: readonly (number[] | Float32Array)[], expected: number): void {
   const dimensions = vectors[0]?.length;

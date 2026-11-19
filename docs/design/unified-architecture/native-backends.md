@@ -76,10 +76,13 @@ SQLite uses a native write transaction and independent WAL snapshot readers.
 Batch planning prefetches bounded duplicate and node lookups from one revision.
 It indexes the batch's changes in memory so later items see earlier changes in
 input order. Predecessor lookups reuse the snapshot candidates for their scope,
-node and session. SQLite groups entity upserts in the same commit. Full-text
-updates address existing FTS rows by rowid. On first open, SQLite transactionally
-records rowids for existing full-text rows. Subsequent commits maintain that
-mapping with the projections.
+node and session. SQLite groups entity upserts in the same commit. The
+contentless FTS5 projections for memories and file references store search
+terms, positions and document lengths for BM25. Text lives in the owning
+entities. A namespace/key registry maps entities to FTS rowids and is updated
+with the entities and projections. On first writable open, older full-content
+indexes are replaced in one transaction using the exact indexed text and
+existing rowids. Released SQLite pages are available for reuse.
 
 Lance stores all domain entity kinds and receipts in one data table per namespace.
 A write creates a shallow branch from the pinned version, applies one merge and
@@ -124,8 +127,25 @@ versioned answer attribution, and
 vector and hybrid retrieval. Its SQLite backend owns the model-keyed record
 index plus candidate queries. The engine combines those candidates with full
 text and applies visibility and graph rules. The host supplies embeddings.
-For hierarchy scoring, SQLite finds a memory's associated leaf IDs before
-looking up those leaf vectors for the selected model.
+Search resolves an explicit node name to IDs before selecting lexical and
+vector candidates. SQLite stores vectors only for memory records. The engine
+ranks visible candidates and loads the selected records' evidence from the
+same snapshot.
+
+Leaf context follows imported leaf memberships and records sharing the same
+primary evidence. Peers stay in the seed's scope and obey the request's
+visibility rules. Graph expansion can use leaf context to fill spare slots.
+The compatibility values `hierarchy` and `union` under `vectorGranularity`
+request bounded leaf context and can fill up to four spare result slots. Both
+also work with lexical search. A database upgrade preserves existing
+memberships and releases the obsolete node and leaf vector pages for reuse.
+
+An explicit local search in the default mode can end at lexical retrieval when
+its only query is a standalone identifier or quoted phrase and a visible
+statement contains the complete anchor. The normal scope and visibility rules
+apply. An anchor miss follows the usual retrieval path. Requests with a
+selected retrieval mode, alternate queries, or automatic recall use their
+existing retrieval path.
 SQLite selects one ordered page of missing vectors before fetching previous turns
 by session and source sequence. A memory write or semantic search can schedule
 a sweep per local index and model. The daemon advances by creation time and

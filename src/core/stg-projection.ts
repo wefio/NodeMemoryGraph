@@ -62,12 +62,19 @@ function assertConsolidatable(memory: MemoryContext["results"][number]["memory"]
 export function mergeStgLtgContexts(local: MemoryContext, shared: MemoryContext): MemoryContext {
   // Merge: dedupe by cached sourceMemoryId; keep LTG rows (authoritative).
   const seenLtg = new Set(shared.results.map((result) => result.memory.id));
+  const rankedLtg = new Set(
+    shared.results
+      .filter((result) => result.recallReason !== "leaf_context")
+      .map((result) => result.memory.id),
+  );
   const dedupedLocal = local.results.filter(
     (result) =>
       !result.memory.markers.some(
         (marker) =>
           marker.kind === "cached_from_ltg" &&
-          seenLtg.has(String(marker.attributes?.sourceMemoryId ?? "")),
+          (result.recallReason === "leaf_context" ? seenLtg : rankedLtg).has(
+            String(marker.attributes?.sourceMemoryId ?? ""),
+          ),
       ),
   );
   const results = reconcileStateVersions([...dedupedLocal, ...shared.results]);
@@ -134,6 +141,9 @@ function compareStateRecency(
   left: MemoryContext["results"][number],
   right: MemoryContext["results"][number],
 ): number {
+  const priority =
+    Number(right.recallReason === "leaf_context") - Number(left.recallReason === "leaf_context");
+  if (priority !== 0) return priority;
   const timestamp = (result: MemoryContext["results"][number]) =>
     Date.parse(result.memory.validFrom ?? result.memory.eventTime ?? result.memory.createdAt);
   const timeDifference = timestamp(left) - timestamp(right);

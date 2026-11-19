@@ -258,7 +258,6 @@ export class AmlMemoryService {
           indexId: client.indexId,
           vector,
           mode: "hybrid",
-          granularity: "records",
         });
     } catch (error) {
       if (error instanceof EmbeddingPreparation) throw error;

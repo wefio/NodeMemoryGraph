@@ -72,6 +72,7 @@ export interface MemoryEntityQuery {
   kind: MemoryEntity["kind"];
   ids?: readonly string[];
   nodeId?: string;
+  nodeIds?: readonly string[];
   nodeName?: string;
   scope?: MemoryScope;
   /** Shared rows plus this session's provisional rows. Omit for shared rows only. */
@@ -122,6 +123,12 @@ export interface MemoryBackend {
   readonly namespace: string;
   readonly kind: "sqlite" | "lancedb";
   readonly vectorIndex?: MemoryVectorIndex;
+  leafPeers?(
+    view: MemoryReadView,
+    seedIds: readonly string[],
+    excluded: readonly string[],
+    query: MemoryEntityQuery,
+  ): Promise<MemoryEntity[]>;
   chainProjection?(
     view: MemoryReadView,
     ids: readonly string[],
@@ -149,7 +156,6 @@ export interface MemoryChainProjection {
 export interface MemoryVectorQuery {
   indexId: string;
   vector: readonly number[];
-  granularity: "records" | "hierarchy" | "union";
   mode: "vector" | "hybrid";
 }
 
@@ -167,7 +173,6 @@ export interface MemoryVectorCursor {
 export interface MemoryVectorCandidate {
   entity: Extract<MemoryEntity, { kind: "memory" }>;
   recordScore: number;
-  routeScore: number;
 }
 
 export interface MemoryVectorIndex {

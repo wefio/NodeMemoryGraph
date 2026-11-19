@@ -16,6 +16,9 @@ import type { ServerState } from "../../src/cli/lifecycle.ts";
 import { LegacySqliteFixture } from "../helpers/legacy-sqlite-fixture.ts";
 import { stgStorePath } from "../../src/core/stg-projection.ts";
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
+import { PortableMemoryService } from "../../src/cli/portable-memory.ts";
+import { MemoryEngine } from "../../src/core/memory/engine.ts";
+import { SqliteMemoryBackend } from "../../src/core/memory/sqlite-backend.ts";
 import { activatedLocalMemory } from "../../src/core/memory/sqlite-backend.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
@@ -652,6 +655,140 @@ test("unified lifecycle and claim receipts preserve legacy vote counters through
   }
 });
 
+test("default local search can finish exact anchor lookups without calling embeddings", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-exact-lookup-"));
+  const options = {
+    kind: "sqlite",
+    path: join(directory, "memory.sqlite"),
+    namespace: "lookup",
+  } as const;
+  const backend = new SqliteMemoryBackend(options.path, options.namespace);
+  backend.activateLocal();
+  const source = {
+    actor: "user",
+    sourceMessageId: "test-turn",
+    content: "Original context",
+  } as const;
+  const [direct, prefix, context] = await new MemoryEngine(backend).rememberMany([
+    {
+      statement: "Investigated ERR_SQL_BUSY due to write contention.",
+      nodeName: "SQLite",
+      scope: { project: "atlas" },
+      evidenceSource: source,
+    },
+    {
+      statement: "Investigated ERR_SQL_BUSY_RETRY and v1.2.3 due to lock contention.",
+      nodeName: "SQLite",
+      scope: { project: "boreal" },
+    },
+    {
+      statement: "Writer retry intervals apply in the queue.",
+      nodeName: "SQLite",
+      scope: { project: "atlas" },
+      evidenceSource: source,
+    },
+  ]);
+  const records = [direct!, prefix!, context!].map(({ memory }) => ({
+    id: memory.id,
+    statement: memory.statement,
+    text: memory.statement,
+  }));
+  backend.vectorIndex.save("fixture", records, [
+    [1, 0],
+    [1, 0],
+    [1, 0],
+  ]);
+  await backend.close();
+  const embedded: string[] = [];
+  const embed = async (queries: string[]) => queries.map(() => [1, 0]);
+  const service = new PortableMemoryService(options, true, () => ({
+    indexId: "fixture",
+    model: "fixture",
+    profile: "fixture",
+    embed,
+    embedDocuments: embed,
+    async embedQueries(queries) {
+      embedded.push(...queries);
+      return embed(queries);
+    },
+  }));
+  t.after(async () => {
+    await service.close();
+    removeTempDirectory(directory);
+  });
+  for (const query of ["ERR_SQL_BUSY", '"write contention"']) {
+    const exact = await service.search({ query });
+    assert.deepEqual(exact.retrieval, { mode: "lexical", degraded: false });
+    assert.deepEqual(
+      exact.results.map(({ memory }) => memory.id),
+      [direct!.memory.id],
+    );
+  }
+  const expanded = await service.search({
+    query: "ERR_SQL_BUSY",
+    retrievalMode: "fts5",
+    vectorGranularity: "hierarchy",
+    scope: { project: "atlas" },
+  });
+  assert.deepEqual(
+    expanded.results.map(({ memory }) => memory.id),
+    [direct!.memory.id, context!.memory.id],
+  );
+  assert.equal(expanded.results[1]?.recallReason, "leaf_context");
+  assert.deepEqual(embedded, []);
+  const cases = [
+    { query: "ERR_SQL_BUSY", scope: { project: "boreal" } },
+    { query: '"v1.2"' },
+    { query: "why ERR_SQL_BUSY" },
+    { query: "ERR_SQL_BUSY", retrievalMode: "hybrid" as const },
+    { query: "ERR_SQL_BUSY", autoRecall: true },
+    { query: "ERR_SQL_BUSY", queries: ["write contention"] },
+  ];
+  for (const params of cases) {
+    const fallback = await service.search(params);
+    assert.equal(fallback.retrieval?.mode, "hybrid");
+  }
+  assert.deepEqual(embedded, [...cases.map(({ query }) => query), "write contention"]);
+});
+
+test("project leaf context cannot displace ranked shared results", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-project-leaf-"));
+  const service = new PortableMemoryService(
+    { kind: "sqlite", path: join(directory, "memory.sqlite"), namespace: "lookup" },
+    true,
+  );
+  t.after(async () => {
+    await service.close();
+    removeTempDirectory(directory);
+  });
+  const nodeName = "Atlas";
+  const shared = await service.remember({ nodeName, statement: "Coriander supplies for the team" });
+  const project = {
+    nodeName,
+    residence: "stg",
+    sessionId: "test-session",
+    projectDir: directory,
+    evidenceSource: { actor: "user", sourceMessageId: "turn-1", content: "Original note" },
+  } as const;
+  const direct = await service.remember({
+    ...project,
+    statement: "Coriander supplies for local work",
+  });
+  await service.remember({ ...project, statement: "Storage instructions for local work" });
+  const found = await service.search({
+    query: "coriander",
+    limit: 2,
+    retrievalMode: "fts5",
+    vectorGranularity: "union",
+    projectDir: directory,
+    sessionId: project.sessionId,
+  });
+  assert.deepEqual(
+    found.results.map(({ memory }) => memory.id),
+    [direct.memory.id, shared.memory.id],
+  );
+});
+
 test("activated SQLite uses legacy vectors and indexes new writes across restart", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-portable-vector-"));
   const path = join(directory, "memory.sqlite");
@@ -690,6 +827,15 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
   });
   legacy.insertVector("record", indexId, original.memory.id, [1, 0]);
   legacy.insertVector("node", indexId, original.node.id, [1, 0]);
+  legacy.db
+    .prepare(
+      `INSERT INTO memory_leaf_blocks(id,node_id,tier,summary,memory_count,created_at,updated_at)
+    SELECT 'legacy-leaf',node_id,0,'fixture',1,created_at,created_at FROM memory_records WHERE id=?`,
+    )
+    .run(original.memory.id);
+  legacy.db
+    .prepare("INSERT INTO memory_leaf_members VALUES ('legacy-leaf', ?, 2)")
+    .run(original.memory.id);
   legacy.close();
   let service = new NmgService({
     databasePath: path,
@@ -707,10 +853,18 @@ test("activated SQLite uses legacy vectors and indexes new writes across restart
     try {
       assert.equal(hasLegacyMemoryTables(migrated), false);
       assert.equal(
+        migrated.prepare("SELECT 1 FROM sqlite_schema WHERE name='nmg_memory_route_vectors'").get(),
+        undefined,
+      );
+      assert.equal(
+        migrated.prepare("SELECT id FROM nmg_memory_vectors WHERE model=?").get(indexId)?.id,
+        original.memory.id,
+      );
+      assert.equal(
         migrated
-          .prepare("SELECT id FROM nmg_memory_route_vectors WHERE model=? AND kind='node'")
-          .get(indexId)?.id,
-        original.node.id,
+          .prepare("SELECT ordinal FROM nmg_memory_leaf_members WHERE leaf_id='legacy-leaf'")
+          .get()?.ordinal,
+        2,
       );
     } finally {
       migrated.close();

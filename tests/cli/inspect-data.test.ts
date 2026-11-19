@@ -66,8 +66,12 @@ test("inspect queries read memories, evidence, and traces from a live database",
         ftsHits.map((row) => row.id),
         [remembered.memory.id],
       );
-      // …node names are indexed too…
       assert.equal(searchMemories(db, "Atlas")[0]?.id, remembered.memory.id);
+      // Both terms are in the statement. They are separated, so LIKE cannot match the query.
+      assert.deepEqual(
+        searchMemories(db, "Atlas offlin").map((row) => row.id),
+        [remembered.memory.id],
+      );
       // …misses stay empty, malformed syntax falls back to LIKE without throwing,
       // and CJK takes the substring path.
       assert.equal(searchMemories(db, "nonexistent-token").length, 0);

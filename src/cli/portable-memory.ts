@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
-import { MemoryEngine } from "../core/memory/engine.ts";
+import {
+  MAX_LEAF_CONTEXT_RESULTS,
+  MemoryEngine,
+  type MemoryQueryOptions,
+} from "../core/memory/engine.ts";
+import { exactLookupAnchor } from "../core/store/search-ranking.ts";
 import { MemoryLifecycleError } from "../core/memory/lifecycle.ts";
 import type { MemoryBackend } from "../core/memory/backend.ts";
 import { openMemoryBackend } from "../core/memory/open.ts";
@@ -25,7 +30,7 @@ import {
   stgConsolidationInput,
   stgStorePath,
 } from "../core/stg-projection.ts";
-import type { ClaimPosterior, MemoryContext } from "../core/types.ts";
+import type { ClaimPosterior, MemoryContext, MemorySearchResult } from "../core/types.ts";
 import type { StgConsolidationPolicyConfig } from "../integration/config.ts";
 import { LocalMemoryEmbeddings } from "./local-memory-embeddings.ts";
 import { openLocalMemory } from "./local-memory-migration.ts";
@@ -240,6 +245,18 @@ export class PortableMemoryService {
     const shared = await this.engine();
     const project = await this.project(input.projectDir);
     const queries = [...new Set([input.query, ...(input.queries ?? [])])];
+    const options = {
+      ...input,
+      limit: candidateLimit(input),
+      findTesserae: !input.autoRecall,
+      expandLeafContext:
+        input.vectorGranularity === "hierarchy" || input.vectorGranularity === "union",
+    };
+    if (queries.length === 1 && input.retrievalMode === undefined && !input.autoRecall) {
+      const exact = await exactLocalLookup(shared, project, input.query, options);
+      signal?.throwIfAborted();
+      if (exact) return exact;
+    }
     const indexes = [shared.backend.vectorIndex, project?.backend.vectorIndex].flatMap((index) =>
       index ? [index] : [],
     );
@@ -251,15 +268,7 @@ export class PortableMemoryService {
         const search = async (engine: MemoryEngine) => {
           const useVector =
             semantic && engine.backend.vectorIndex?.has(semantic.indexId, semantic.vector.length);
-          const context = await engine.search(
-            query,
-            {
-              ...input,
-              limit: candidateLimit(input),
-              findTesserae: !input.autoRecall,
-            },
-            useVector ? semantic : undefined,
-          );
+          const context = await engine.search(query, options, useVector ? semantic : undefined);
           if (reason) context.retrieval = { mode: "lexical", degraded: true, reason };
           return context;
         };
@@ -270,13 +279,10 @@ export class PortableMemoryService {
     const primary = results[0]!;
     return {
       ...primary,
-      results: [
-        ...new Map(
-          results.flatMap((context) =>
-            context.results.map((item) => [item.memory.id, item] as const),
-          ),
-        ).values(),
-      ].slice(0, candidateLimit(input)),
+      results: limitSearchResults(
+        results.flatMap((context) => context.results),
+        options.limit,
+      ),
     };
   }
 
@@ -595,6 +601,39 @@ function candidateLimit(input: NmgSearchParams): number {
   return input.sessionId && (input.secondPass || input.progressiveWarmDisclosure)
     ? 50
     : (input.limit ?? 20);
+}
+
+async function exactLocalLookup(
+  shared: MemoryEngine,
+  project: MemoryEngine | undefined,
+  query: string,
+  options: MemoryQueryOptions & { limit: number },
+): Promise<MemoryContext | undefined> {
+  const anchor = exactLookupAnchor(query);
+  if (!anchor) return;
+  const main = await shared.searchExactAnchor(anchor, options);
+  const result = project
+    ? mergeLocalContexts(await project.searchExactAnchor(anchor, options), main)
+    : main;
+  if (!result.results.length) return;
+  result.results = limitSearchResults(result.results, options.limit);
+  return result;
+}
+
+function limitSearchResults(results: MemorySearchResult[], limit: number): MemorySearchResult[] {
+  const ranked = new Map<string, MemorySearchResult>();
+  const leaves = new Map<string, MemorySearchResult>();
+  for (const item of results) {
+    const group = item.recallReason === "leaf_context" ? leaves : ranked;
+    group.set(item.memory.id, item);
+  }
+  const hits = [...ranked.values()].slice(0, limit);
+  const room = Math.min(MAX_LEAF_CONTEXT_RESULTS, limit - hits.length);
+  if (room === 0) return hits;
+  return [
+    ...hits,
+    ...[...leaves.values()].filter(({ memory }) => !ranked.has(memory.id)).slice(0, room),
+  ];
 }
 
 function mergeLocalContexts(project: MemoryContext, main: MemoryContext): MemoryContext {

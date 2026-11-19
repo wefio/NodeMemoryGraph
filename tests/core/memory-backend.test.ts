@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
+import type { FunctionOptions, SQLInputValue, SQLOutputValue } from "node:sqlite";
 import { openMemoryBackend } from "../../src/core/memory/open.ts";
 import type { MemoryCommitRequest, MemoryEntity } from "../../src/core/memory/backend.ts";
 import { MemoryEngine } from "../../src/core/memory/engine.ts";
@@ -238,9 +239,8 @@ test("SQLite reads existing graph edges from both indexed endpoints in ID order"
   );
 });
 
-test("SQLite upgrades existing text indexes and replaces both projections at their original rowids", async (t) => {
+test("SQLite makes both text indexes contentless and updates them at their original rowids", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-fts-keys-"));
-  t.after(() => removeTempDirectory(directory));
   const path = join(directory, "memory.sqlite");
   const options = { kind: "sqlite", path, namespace: "tenant" } as const;
   const first = await openMemoryBackend(options);
@@ -252,17 +252,87 @@ test("SQLite upgrades existing text indexes and replaces both projections at the
   await first.close();
 
   const raw = new DatabaseSync(path);
-  raw.exec("DROP TABLE IF EXISTS nmg_memory_fts_rows");
+  t.after(() => {
+    raw.close();
+    removeTempDirectory(directory);
+  });
   const projections = ["nmg_memory_fts", "nmg_memory_tessera_fts"];
-  const before = projections.map((table) => raw.prepare(`SELECT rowid, key FROM ${table}`).get());
+  for (const [index, table] of projections.entries()) {
+    const kind = index === 0 ? "memory" : "tessera";
+    raw.exec(`DROP TABLE ${table};
+      CREATE VIRTUAL TABLE ${table} USING fts5(namespace UNINDEXED, key UNINDEXED, text);
+      INSERT INTO ${table}(rowid, namespace, key, text)
+        SELECT 91, namespace, key, 'obsolete test projection'
+        FROM nmg_memory_entities WHERE kind='${kind}';`);
+  }
+  const before = raw
+    .prepare("SELECT namespace, key, fts_rowid FROM nmg_memory_fts_rows ORDER BY key")
+    .all()
+    .map((row) => ({ ...row, fts_rowid: 91 }));
+  raw.exec("DROP TABLE nmg_memory_fts_rows");
+
+  // A duplicate legacy key fails partway through the second projection.
+  raw.exec(`INSERT INTO nmg_memory_tessera_fts(rowid, namespace, key, text)
+    SELECT 92, namespace, key, text FROM nmg_memory_tessera_fts WHERE rowid=91`);
+  await assert.rejects(openMemoryBackend(options), /UNIQUE constraint failed/);
+  for (const table of projections) {
+    assert.equal(
+      raw.prepare(`SELECT text FROM ${table} WHERE rowid=91`).get()?.text,
+      "obsolete test projection",
+    );
+  }
+  assert.equal(
+    raw.prepare("SELECT 1 FROM sqlite_schema WHERE name='nmg_memory_fts_rows'").get(),
+    undefined,
+  );
+  raw.exec("DELETE FROM nmg_memory_tessera_fts WHERE rowid=92");
+
   const reopened = await openMemoryBackend(options);
   try {
-    assert.equal(raw.prepare("SELECT count(*) AS count FROM nmg_memory_fts_rows").get()?.count, 2);
+    const mapping = raw.prepare(
+      "SELECT namespace, key, fts_rowid FROM nmg_memory_fts_rows ORDER BY key",
+    );
+    assert.deepEqual(
+      mapping.all().map((row) => ({ ...row })),
+      before,
+    );
+    for (const table of projections) {
+      assert.deepEqual(
+        raw
+          .prepare(`SELECT rowid, text FROM ${table} WHERE text MATCH 'obsolete'`)
+          .all()
+          .map((row) => ({ ...row })),
+        [{ rowid: 91, text: null }],
+      );
+      assert.equal(
+        raw.prepare("SELECT 1 FROM sqlite_schema WHERE name=?").get(`${table}_content`),
+        undefined,
+      );
+    }
+    const prepare = DatabaseSync.prototype.prepare;
+    let searchPlan: unknown;
+    t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+      if (
+        searchPlan === undefined &&
+        sql.startsWith("SELECT kind, payload") &&
+        sql.includes("MATCH")
+      )
+        searchPlan = prepare.call(this, `EXPLAIN QUERY PLAN ${sql}`).get(128, 0)?.detail;
+      return prepare.call(this, sql);
+    });
     const view = await reopened.openRead();
-    const [tessera] = await reopened.scan(view, { kind: "tessera" });
+    assert.equal(
+      (await reopened.scan(view, { kind: "memory", text: "obsolete" }))[0]?.value.id,
+      memory.id,
+    );
+    assert.match(String(searchPlan), /^SCAN f VIRTUAL TABLE INDEX/);
+    const [[matched], [tessera]] = await reopened.scanBatch!(view, [
+      { kind: "memory", text: "obsolete" },
+      { kind: "tessera", text: "obsolete" },
+    ]);
     await reopened.closeRead(view);
-    assert.equal(tessera?.kind, "tessera");
-    if (tessera?.kind !== "tessera") throw Error("Tessera missing");
+    assert.equal(matched?.value.id, memory.id);
+    assert.ok(tessera?.kind === "tessera");
     const committed = await reopened.commit({
       expectedRevision: view.revision,
       operationId: "update",
@@ -276,8 +346,18 @@ test("SQLite upgrades existing text indexes and replaces both projections at the
       },
     });
     assert.equal(committed.status, "committed");
-    for (const [index, table] of projections.entries()) {
-      assert.deepEqual(raw.prepare(`SELECT rowid, key FROM ${table}`).all(), [before[index]]);
+    assert.deepEqual(
+      mapping.all().map((row) => ({ ...row })),
+      before,
+    );
+    for (const table of projections) {
+      assert.deepEqual(
+        raw
+          .prepare(`SELECT rowid FROM ${table}`)
+          .all()
+          .map((row) => row.rowid),
+        [91],
+      );
       assert.equal(
         raw.prepare(`SELECT count(*) AS count FROM ${table} WHERE text MATCH 'obsolete'`).get()
           ?.count,
@@ -291,7 +371,6 @@ test("SQLite upgrades existing text indexes and replaces both projections at the
     }
   } finally {
     await reopened.close();
-    raw.close();
   }
 });
 
@@ -349,6 +428,159 @@ test("SQLite batches write lookups and keeps earlier items visible inside the ba
     evidenceSource,
   });
   assert.equal(reused.history.id, original.history.id);
+});
+
+test("SQLite hybrid search restricts vector scoring to the named node and reads selected evidence", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-rank-before-evidence-"));
+  const path = join(directory, "memory.sqlite");
+  const backend = await openMemoryBackend({ kind: "sqlite", path, namespace: "tenant" });
+  t.after(async () => {
+    await backend.close();
+    removeTempDirectory(directory);
+  });
+  const engine = new MemoryEngine(backend);
+  const records = await engine.rememberMany([
+    { statement: "Atlas search first decision", nodeName: "Atlas" },
+    { statement: "Atlas search second decision", nodeName: "Atlas" },
+    { statement: "Atlas search unrelated node", nodeName: "Other" },
+  ]);
+  const [first, second] = records;
+  assert.ok(first && second);
+  assert.equal(first.node.id, second.node.id);
+  backend.vectorIndex!.save(
+    "model",
+    records.map(({ memory }) => ({
+      id: memory.id,
+      statement: memory.statement,
+      text: memory.statement,
+    })),
+    [
+      [1, 0],
+      [0, 1],
+      [1, 0],
+    ],
+  );
+  const load = backend.scan.bind(backend);
+  const loaded: string[] = [];
+  t.mock.method(backend, "scan", async (...args: Parameters<typeof load>) => {
+    if (args[1].kind === "history") loaded.push(...(args[1].ids ?? []));
+    return load(...args);
+  });
+  let evaluations = 0;
+  const register: (
+    this: DatabaseSync,
+    name: string,
+    options: FunctionOptions,
+    callback: (value: SQLOutputValue) => SQLInputValue,
+  ) => void = DatabaseSync.prototype.function;
+  t.mock.method(
+    DatabaseSync.prototype,
+    "function",
+    function (
+      this: DatabaseSync,
+      name: string,
+      options: Parameters<typeof register>[1],
+      callback: Parameters<typeof register>[2],
+    ) {
+      return register.call(this, name, options, (value) => {
+        evaluations++;
+        return callback(value);
+      });
+    },
+  );
+  const result = await engine.search(
+    "Atlas search",
+    { limit: 1, nodeName: "Atlas" },
+    {
+      indexId: "model",
+      vector: [1, 0],
+      mode: "hybrid",
+    },
+  );
+  assert.deepEqual(
+    result.results.map(({ memory }) => memory.id),
+    [first.memory.id],
+  );
+  assert.equal(result.results[0]?.vectorScore, 1);
+  assert.equal(result.results[0]?.routeScore, 0);
+  assert.deepEqual(loaded, [first.history.id]);
+  assert.equal(evaluations, 2);
+});
+
+test("SQLite retains leaf memberships and expands same-source evidence without route vectors", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-structural-leaves-"));
+  const path = join(directory, "memory.sqlite");
+  const options = { kind: "sqlite", path, namespace: "tenant" } as const;
+  const backend = await openMemoryBackend(options);
+  const source = {
+    actor: "user",
+    sourceMessageId: "turn-42",
+    content: "Original context",
+  } as const;
+  const scope = { project: "atlas" };
+  const [seed, related, imported, outside] = await new MemoryEngine(backend).rememberMany([
+    { statement: "Coriander decision", nodeName: "Atlas", scope, evidenceSource: source },
+    { statement: "Serving temperatures", nodeName: "Atlas", scope, evidenceSource: source },
+    { statement: "Storage instructions", nodeName: "Atlas", scope },
+    { statement: "Other project details", nodeName: "Boreal", scope: { project: "boreal" } },
+    { statement: "Coriander packaging", nodeName: "Atlas", scope },
+  ]);
+  assert.ok(seed && related && imported && outside);
+  assert.equal(seed.history.id, related.history.id);
+  await backend.close();
+
+  const raw = new DatabaseSync(path);
+  try {
+    raw.exec(`CREATE TABLE nmg_memory_route_vectors (vector BLOB);
+      INSERT INTO nmg_memory_route_vectors VALUES (zeroblob(12288));
+      CREATE TABLE nmg_memory_route_members (namespace TEXT, memory_id TEXT, leaf_id TEXT);`);
+    const insert = raw.prepare(
+      "INSERT INTO nmg_memory_route_members VALUES ('tenant',?,'old-leaf')",
+    );
+    for (const row of [seed, imported, outside]) insert.run(row.memory.id);
+  } finally {
+    raw.close();
+  }
+
+  const reopened = await openMemoryBackend(options);
+  t.after(async () => {
+    await reopened.close();
+    removeTempDirectory(directory);
+  });
+  const inspector = new DatabaseSync(path, { readOnly: true });
+  try {
+    assert.equal(
+      inspector.prepare("SELECT count(*) AS n FROM nmg_memory_leaf_members").get()?.n,
+      3,
+    );
+    assert.deepEqual(
+      inspector
+        .prepare("SELECT name FROM sqlite_schema WHERE name LIKE 'nmg_memory_route_%'")
+        .all(),
+      [],
+    );
+  } finally {
+    inspector.close();
+  }
+  const engine = new MemoryEngine(reopened);
+  const plain = await engine.search("coriander decision", { limit: 2 });
+  assert.equal(plain.results.length, 2);
+  assert.equal(plain.results[0]?.memory.id, seed.memory.id);
+  assert.deepEqual(
+    await engine.search("coriander decision", { expandLeafContext: true, limit: 2 }),
+    plain,
+  );
+  const enriched = await engine.search("coriander decision", { expandLeafContext: true, limit: 8 });
+  assert.deepEqual(enriched.results.slice(0, 2), plain.results);
+  assert.deepEqual(
+    new Set(enriched.results.slice(2).map(({ memory }) => memory.id)),
+    new Set([related.memory.id, imported.memory.id]),
+  );
+  assert.ok(
+    enriched.results
+      .slice(2)
+      .every((hit) => hit.recallReason === "leaf_context" && hit.vectorScore === 0),
+  );
 });
 
 test("SQLite pages missing vectors in order, scopes previous turns, and saves only current rows", async (t) => {

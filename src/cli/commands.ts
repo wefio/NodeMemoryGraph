@@ -462,7 +462,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   --source-actor ACTOR       Restrict evidence actor
   --include-historical       Include inactive/superseded memories
   --retrieval-mode MODE      fts5, hybrid, qwen3, hashing, or legacy
-  --vector-granularity MODE  hierarchy, records, or union
+  --vector-granularity MODE  records (default), hierarchy or union (+ leaf context)
   --second-pass              Enable progressive QPP recall
   --full-warm                Expose all ranked L1 records in the first response
   --tiered-disclosure        Open tiers sequentially until QPP is sufficient
