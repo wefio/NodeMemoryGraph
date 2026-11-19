@@ -312,6 +312,28 @@ export function surfaceAnchorExpression(query: string): string {
     .join(" OR ");
 }
 
+export interface ExactLookupAnchor {
+  text: string;
+  pattern: RegExp;
+}
+
+/** A whole quoted phrase or identifier expresses a literal lookup. */
+export function exactLookupAnchor(query: string): ExactLookupAnchor | undefined {
+  const normalized = normalize(query);
+  const quoted = /^(?:`[^`\r\n]+`|"[^"\r\n]+"|“[^”\r\n]+”|'[^'\r\n]+'|‘[^’\r\n]+’)$/u.test(
+    normalized,
+  );
+  const [anchor] = surfaceAnchors(query);
+  const literal = quoted ? normalize(normalized.slice(1, -1)) : normalized;
+  if (!anchor || literal !== anchor || !/\p{L}/u.test(anchor)) return;
+  const identifier = /^[\p{L}\p{M}\p{N}_./\\:@+#-]+$/u.test(anchor);
+  if (!quoted && !identifier) return;
+  const escaped = anchor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Identifier punctuation remains part of a token, so v1.2 won't match v1.2.3.
+  const boundary = identifier ? "[\\p{L}\\p{M}\\p{N}_./\\\\:@+#-]" : "[\\p{L}\\p{M}\\p{N}_]";
+  return { text: anchor, pattern: new RegExp(`(?<!${boundary})${escaped}(?!${boundary})`, "u") };
+}
+
 export function lexicalNodeScore(query: string, node: MemoryNode): number {
   if (!query) return 0;
   const haystack = normalize(`${node.canonicalName} ${node.summary}`);

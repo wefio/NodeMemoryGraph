@@ -4,10 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
+import type { FunctionOptions, SQLInputValue, SQLOutputValue } from "node:sqlite";
 import { openMemoryBackend } from "../../src/core/memory/open.ts";
 import type { MemoryCommitRequest, MemoryEntity } from "../../src/core/memory/backend.ts";
 import { MemoryEngine } from "../../src/core/memory/engine.ts";
 import { sqliteQueryWhere } from "../../src/core/memory/entity-rows.ts";
+import { encodeVector } from "../../src/core/store/vector-codec.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
 const node = (id: string, name: string): MemoryEntity => ({
@@ -427,6 +429,94 @@ test("SQLite batches write lookups and keeps earlier items visible inside the ba
     evidenceSource,
   });
   assert.equal(reused.history.id, original.history.id);
+});
+
+test("SQLite hybrid search scores shared routes once and reads evidence after selecting results", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-rank-before-evidence-"));
+  const path = join(directory, "memory.sqlite");
+  const backend = await openMemoryBackend({ kind: "sqlite", path, namespace: "tenant" });
+  t.after(async () => {
+    await backend.close();
+    removeTempDirectory(directory);
+  });
+  const engine = new MemoryEngine(backend);
+  const records = await engine.rememberMany([
+    { statement: "Atlas search first decision", nodeName: "Atlas" },
+    { statement: "Atlas search second decision", nodeName: "Atlas" },
+  ]);
+  const [first, second] = records;
+  assert.ok(first && second);
+  assert.equal(first.node.id, second.node.id);
+  backend.vectorIndex!.save(
+    "model",
+    records.map(({ memory }) => ({
+      id: memory.id,
+      statement: memory.statement,
+      text: memory.statement,
+    })),
+    [
+      [1, 0],
+      [0, 1],
+    ],
+  );
+  const raw = new DatabaseSync(path);
+  try {
+    const route = raw.prepare(
+      "INSERT INTO nmg_memory_route_vectors VALUES ('tenant','model',?,?,?)",
+    );
+    route.run("node", first.node.id, encodeVector([0, 1]));
+    route.run("leaf", "shared", encodeVector([1, 0]));
+    const member = raw.prepare("INSERT INTO nmg_memory_route_members VALUES ('tenant',?,'shared')");
+    for (const { memory } of records) member.run(memory.id);
+  } finally {
+    raw.close();
+  }
+  const load = backend.scan.bind(backend);
+  const loaded: string[] = [];
+  t.mock.method(backend, "scan", async (...args: Parameters<typeof load>) => {
+    if (args[1].kind === "history") loaded.push(...(args[1].ids ?? []));
+    return load(...args);
+  });
+  let evaluations = 0;
+  const register: (
+    this: DatabaseSync,
+    name: string,
+    options: FunctionOptions,
+    callback: (value: SQLOutputValue) => SQLInputValue,
+  ) => void = DatabaseSync.prototype.function;
+  t.mock.method(
+    DatabaseSync.prototype,
+    "function",
+    function (
+      this: DatabaseSync,
+      name: string,
+      options: Parameters<typeof register>[1],
+      callback: Parameters<typeof register>[2],
+    ) {
+      return register.call(this, name, options, (value) => {
+        evaluations++;
+        return callback(value);
+      });
+    },
+  );
+  const result = await engine.search(
+    "Atlas search",
+    { limit: 1 },
+    {
+      indexId: "model",
+      vector: [1, 0],
+      granularity: "hierarchy",
+      mode: "hybrid",
+    },
+  );
+  assert.deepEqual(
+    result.results.map(({ memory }) => memory.id),
+    [first.memory.id],
+  );
+  assert.equal(result.results[0]?.vectorScore, 1);
+  assert.equal(result.results[0]?.routeScore, 1);
+  assert.deepEqual(loaded, [first.history.id]);
+  assert.equal(evaluations, 4);
 });
 
 test("SQLite pages missing vectors in order, scopes previous turns, and saves only current rows", async (t) => {

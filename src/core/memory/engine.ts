@@ -26,6 +26,7 @@ import type {
 } from "./lifecycle.ts";
 import { MemoryWriteRejected } from "../write-policy.ts";
 import { hybridScore, lexicalTextScore, searchTerms } from "../store/search-ranking.ts";
+import type { ExactLookupAnchor } from "../store/search-ranking.ts";
 import { normalize } from "../memory-normalization.ts";
 import { eventWindowEnd, eventWindowStart } from "../event-time.ts";
 import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
@@ -64,6 +65,9 @@ interface PlannedResult<T> {
   result: T;
   ids: string[];
 }
+
+type SearchCandidate = Omit<MemorySearchResult, "evidence" | "evidenceRecords">;
+type SelectCandidates = (candidates: SearchCandidate[]) => SearchCandidate[];
 
 /** Memory semantics and graph organization depend only on the asynchronous domain port. */
 export class MemoryEngine {
@@ -254,10 +258,26 @@ export class MemoryEngine {
     }));
   }
 
-  async search(
+  search(
     text: string,
     options: MemoryQueryOptions = {},
     semantic?: MemoryVectorQuery,
+  ): Promise<MemoryContext> {
+    return this.searchContext(text, options, semantic);
+  }
+
+  searchExactAnchor(
+    anchor: ExactLookupAnchor,
+    options: MemoryQueryOptions,
+  ): Promise<MemoryContext> {
+    return this.searchContext(anchor.text, options, undefined, anchor.pattern);
+  }
+
+  private async searchContext(
+    text: string,
+    options: MemoryQueryOptions,
+    semantic?: MemoryVectorQuery,
+    exact?: RegExp,
   ): Promise<MemoryContext> {
     if (!text.trim()) throw new Error("Search query is required");
     const limit = options.limit ?? 20;
@@ -278,9 +298,10 @@ export class MemoryEngine {
         limit: 512,
       };
       const results = semantic
-        ? await this.semanticResults(view, text, query, options, semantic)
-        : await this.project(view, await this.backend.scan(view, { ...query, text }), options);
-      results.splice(limit);
+        ? await this.semanticResults(view, text, query, options, semantic, limit)
+        : await this.lexicalResults(view, text, query, options, limit, exact);
+      if (exact && !results.length)
+        return { results, relations: [], retrieval: { mode: "lexical", degraded: false } };
       const relations = await this.expand(view, results, { ...options, limit });
       const tesserae = await this.searchTesserae(view, text, options, results);
       return {
@@ -293,6 +314,23 @@ export class MemoryEngine {
     } finally {
       await this.backend.closeRead(view);
     }
+  }
+
+  private async lexicalResults(
+    view: MemoryReadView,
+    text: string,
+    query: MemoryEntityQuery,
+    options: MemoryQueryOptions,
+    limit: number,
+    exact?: RegExp,
+  ): Promise<MemorySearchResult[]> {
+    const entities = await this.backend.scan(view, { ...query, text });
+    const matches = exact
+      ? entities.filter(
+          (entity) => entity.kind === "memory" && exact.test(normalize(entity.value.statement)),
+        )
+      : entities;
+    return this.project(view, matches, options, false, (candidates) => candidates.slice(0, limit));
   }
 
   private projectChains(view: MemoryReadView, results: MemorySearchResult[], sessionId?: string) {
@@ -349,6 +387,7 @@ export class MemoryEngine {
     query: MemoryEntityQuery,
     options: MemoryQueryOptions,
     semantic: MemoryVectorQuery,
+    limit: number,
   ): Promise<MemorySearchResult[]> {
     if (!this.backend.vectorIndex) throw new Error("This memory backend has no vector index");
     const semanticLimit = semantic.mode === "vector" ? 512 : 256;
@@ -370,36 +409,39 @@ export class MemoryEngine {
     const scores = new Map(vectors.map((item) => [item.entity.value.id, item]));
     const queryText = normalize(text);
     const terms = searchTerms(queryText);
-    return (await this.project(view, [...candidates.values()], options))
-      .map((result) => {
-        const score = scores.get(result.memory.id);
-        const vectorScore = score?.recordScore ?? 0;
-        const routeScore = score?.routeScore ?? 0;
-        const triggers = recallTriggersFromStoredMarkers(result.memory.markers).join(" ");
-        const lexicalScore = lexicalTextScore(
-          queryText,
-          `${result.memory.statement} ${result.node.canonicalName} ${result.node.summary} ${triggers}`,
-          terms,
-        );
-        const combinedScore =
-          semantic.mode === "vector"
-            ? Math.max(vectorScore, routeScore)
-            : hybridScore(lexicalScore, vectorScore, routeScore);
-        const recallReason = score
-          ? lexicalScore
-            ? "hybrid_match"
-            : "vector_match"
-          : "lexical_match";
-        return {
-          ...result,
-          lexicalScore,
-          vectorScore,
-          routeScore,
-          combinedScore,
-          recallReason,
-        } as MemorySearchResult;
-      })
-      .sort((left, right) => right.combinedScore - left.combinedScore);
+    return this.project(view, [...candidates.values()], options, false, (projected) =>
+      projected
+        .map((result): SearchCandidate => {
+          const score = scores.get(result.memory.id);
+          const vectorScore = score?.recordScore ?? 0;
+          const routeScore = score?.routeScore ?? 0;
+          const triggers = recallTriggersFromStoredMarkers(result.memory.markers).join(" ");
+          const lexicalScore = lexicalTextScore(
+            queryText,
+            `${result.memory.statement} ${result.node.canonicalName} ${result.node.summary} ${triggers}`,
+            terms,
+          );
+          const combinedScore =
+            semantic.mode === "vector"
+              ? Math.max(vectorScore, routeScore)
+              : hybridScore(lexicalScore, vectorScore, routeScore);
+          const recallReason = score
+            ? lexicalScore
+              ? "hybrid_match"
+              : "vector_match"
+            : "lexical_match";
+          return {
+            ...result,
+            lexicalScore,
+            vectorScore,
+            routeScore,
+            combinedScore,
+            recallReason,
+          };
+        })
+        .sort((left, right) => right.combinedScore - left.combinedScore)
+        .slice(0, limit),
+    );
   }
 
   async linkNodes(
@@ -655,6 +697,7 @@ export class MemoryEngine {
     entities: MemoryEntity[],
     options: MemoryQueryOptions,
     includeRetained = false,
+    select?: SelectCandidates,
   ): Promise<MemorySearchResult[]> {
     const now = this.now();
     const memories = entities.flatMap((entity) =>
@@ -671,22 +714,17 @@ export class MemoryEngine {
       ids: [...new Set(memories.map((memory) => memory.nodeId))],
       limit: 512,
     });
-    const evidenceIds = [...new Set(memories.flatMap((memory) => memory.evidenceIds))];
-    const histories = await this.histories(view, evidenceIds);
-    return memories.flatMap((memory, index) => {
-      const node = nodes.find(
-        (entity) => entity.kind === "node" && entity.value.id === memory.nodeId,
-      );
-      const evidenceRecords = histories.filter((entity) => memory.evidenceIds.includes(entity.id));
-      const evidence = evidenceRecords.find((item) => item.id === memory.evidenceId);
-      if (node?.kind !== "node" || !evidence) throw new Error("Broken memory references");
-      if (options.nodeName && node.value.canonicalName !== options.nodeName) return [];
+    const nodesById = new Map(
+      nodes.flatMap((node) => (node.kind === "node" ? [[node.value.id, node.value] as const] : [])),
+    );
+    const candidates = memories.flatMap((memory, index): SearchCandidate[] => {
+      const node = nodesById.get(memory.nodeId);
+      if (!node) throw new Error("Broken memory references");
+      if (options.nodeName && node.canonicalName !== options.nodeName) return [];
       return [
         {
           memory,
-          node: node.value,
-          evidence,
-          evidenceRecords,
+          node,
           lexicalScore: 1 / (index + 1),
           vectorScore: 0,
           routeScore: 0,
@@ -695,14 +733,42 @@ export class MemoryEngine {
         },
       ];
     });
+    return this.attachEvidence(view, select ? select(candidates) : candidates, memories);
   }
 
-  private async histories(view: MemoryReadView, ids: string[]) {
+  private async attachEvidence(
+    view: MemoryReadView,
+    selected: SearchCandidate[],
+    candidates: MemoryRecord[],
+  ): Promise<MemorySearchResult[]> {
+    if (!selected.length) return [];
+    const wanted = new Set(selected.flatMap(({ memory }) => memory.evidenceIds));
+    // Keep the original read batches so the evidence order stays stable even across batch boundaries.
+    const ordered = [...new Set(candidates.flatMap(({ evidenceIds }) => evidenceIds))];
+    const histories = await this.histories(view, ordered, wanted);
+    const byId = new Map(histories.map((history, index) => [history.id, { history, index }]));
+    return selected.map((item) => {
+      const { memory } = item;
+      const evidenceRecords = [...new Set(memory.evidenceIds)]
+        .flatMap((id) => byId.get(id) ?? [])
+        .sort((left, right) => left.index - right.index)
+        .map(({ history }) => history);
+      const evidence = byId.get(memory.evidenceId)?.history;
+      if (!evidence || !memory.evidenceIds.includes(evidence.id))
+        throw new Error("Broken memory references");
+      return { ...item, evidence, evidenceRecords };
+    });
+  }
+
+  private async histories(view: MemoryReadView, ids: string[], wanted?: ReadonlySet<string>) {
     const result = [];
     for (let offset = 0; offset < ids.length; offset += 512) {
+      const batch = ids.slice(offset, offset + 512);
+      const selected = wanted ? batch.filter((id) => wanted.has(id)) : batch;
+      if (!selected.length) continue;
       const entities = await this.backend.scan(view, {
         kind: "history",
-        ids: ids.slice(offset, offset + 512),
+        ids: selected,
         limit: 512,
       });
       for (const entity of entities) if (entity.kind === "history") result.push(entity.value);

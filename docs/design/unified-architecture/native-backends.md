@@ -127,8 +127,17 @@ versioned answer attribution, and
 vector and hybrid retrieval. Its SQLite backend owns the model-keyed record
 index plus candidate queries. The engine combines those candidates with full
 text and applies visibility and graph rules. The host supplies embeddings.
-For hierarchy scoring, SQLite finds a memory's associated leaf IDs before
-looking up those leaf vectors for the selected model.
+For hierarchy scoring, SQLite follows eligible memories to their nodes and
+leaves and scores each reachable route vector once per query. The engine ranks
+visible candidates using their memory and node fields, then loads the selected
+records' evidence from the same snapshot.
+
+An explicit local search in the default mode can end at lexical retrieval when
+its only query is a standalone identifier or quoted phrase and a visible
+statement contains the complete anchor. The normal scope and visibility rules
+apply. An anchor miss follows the usual retrieval path. Requests with a
+selected retrieval mode, alternate queries, or automatic recall use their
+existing retrieval path.
 SQLite selects one ordered page of missing vectors before fetching previous turns
 by session and source sequence. A memory write or semantic search can schedule
 a sweep per local index and model. The daemon advances by creation time and

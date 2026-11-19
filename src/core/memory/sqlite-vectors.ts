@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { cosineSimilarity } from "../vector.ts";
+import { cosineScorer } from "../vector.ts";
 import {
   memoryEmbeddingModelId,
   memoryEmbeddingText,
@@ -195,30 +195,35 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
   ): MemoryVectorCandidate[] {
     const db = this.reader(view);
     const { limit } = queryBounds(query);
+    const cosine = cosineScorer(semantic.vector);
     db.function("nmg_memory_cosine", { deterministic: true }, (value) => {
       if (typeof value === "bigint") return 0;
-      const score = cosineSimilarity(semantic.vector, scoringVector({ vector: value }));
+      const score = cosine(scoringVector({ vector: value }));
       return Number.isFinite(score) ? score : 0;
     });
     const hierarchy = semantic.granularity !== "records";
     const rows = db
       .prepare(
-        `WITH eligible AS (
-      SELECT namespace, id, node, payload FROM nmg_memory_entities m
+        `WITH eligible AS ${hierarchy ? "MATERIALIZED " : ""}(
+      SELECT namespace, id, node, rowid AS entity_rowid FROM nmg_memory_entities m
       WHERE namespace=? AND ${sqliteQueryWhere(query)} AND ${INDEXABLE_MEMORY}
-    ), scores AS MATERIALIZED (
-      SELECT m.id, m.payload,
+    )${hierarchy ? ROUTE_SCORES : ""}, scores AS MATERIALIZED (
+      SELECT m.id, m.entity_rowid,
         COALESCE(nmg_memory_cosine(v.vector), 0) AS recordScore,
         ${hierarchy ? HIERARCHY_SCORE : "0"} AS routeScore
       FROM eligible m LEFT JOIN nmg_memory_vectors v
         ON v.namespace=m.namespace AND v.model=? AND v.id=m.id AND v.dimensions=?
+    ), selected AS (
+      SELECT * FROM scores
+      WHERE max(recordScore, routeScore)>0 ORDER BY max(recordScore, routeScore) DESC, id LIMIT ?
     )
-    SELECT payload, recordScore, routeScore FROM scores
-    WHERE max(recordScore, routeScore)>0 ORDER BY max(recordScore, routeScore) DESC, id LIMIT ?`,
+    SELECT m.payload, selected.recordScore, selected.routeScore FROM selected
+    CROSS JOIN nmg_memory_entities m ON m.rowid=selected.entity_rowid
+    ORDER BY max(selected.recordScore, selected.routeScore) DESC, selected.id`,
       )
       .all(
         this.namespace,
-        ...(hierarchy ? [semantic.indexId, semantic.indexId] : []),
+        ...(hierarchy ? [this.namespace, semantic.indexId] : []),
         semantic.indexId,
         semantic.vector.length,
         limit,
@@ -260,16 +265,26 @@ const PREVIOUS_TURN = `(SELECT json_extract(prev.payload, '$.content')
   )
   ORDER BY CAST(prev.name AS INTEGER) DESC, CAST(link.key AS INTEGER) LIMIT 1)`;
 
-// Keep the current memory's memberships on the outer side of the leaf lookup.
+// Resolve reachable IDs before fetching any route vector, then score each vector once.
+const ROUTE_SCORES = `, route_ids AS (
+  SELECT 'node' AS kind, node AS id FROM eligible GROUP BY node
+  UNION ALL
+  SELECT 'leaf', member.leaf_id FROM eligible m
+  CROSS JOIN nmg_memory_route_members member ON member.namespace=m.namespace AND member.memory_id=m.id
+  GROUP BY member.leaf_id
+), route_scores AS MATERIALIZED (
+  SELECT route.kind, route.id, nmg_memory_cosine(v.vector) AS score FROM route_ids route
+  CROSS JOIN nmg_memory_route_vectors v
+    ON v.namespace=? AND v.model=? AND v.kind=route.kind AND v.id=route.id
+)`;
+
 const HIERARCHY_SCORE = `max(coalesce((
-  SELECT nmg_memory_cosine(n.vector)
-  FROM nmg_memory_route_vectors n
-  WHERE n.namespace=m.namespace AND n.kind='node' AND n.id=m.node AND n.model=?
+  SELECT n.score FROM route_scores n WHERE n.kind='node' AND n.id=m.node
 ), 0), coalesce((
-  SELECT max(nmg_memory_cosine(l.vector))
-  FROM nmg_memory_route_members member CROSS JOIN nmg_memory_route_vectors l
-    ON l.namespace=member.namespace AND l.kind='leaf' AND l.id=member.leaf_id
-  WHERE member.namespace=m.namespace AND member.memory_id=m.id AND l.model=?
+  SELECT max(l.score)
+  FROM nmg_memory_route_members member CROSS JOIN route_scores l
+    ON l.kind='leaf' AND l.id=member.leaf_id
+  WHERE member.namespace=m.namespace AND member.memory_id=m.id
 ), 0))`;
 
 function validateVectors(vectors: readonly (number[] | Float32Array)[], expected: number): void {

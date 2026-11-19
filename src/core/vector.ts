@@ -51,8 +51,33 @@ export function cosineSimilarity(left: ArrayLike<number>, right: ArrayLike<numbe
     leftNorm += leftValue * leftValue;
     rightNorm += rightValue * rightValue;
   }
+  return normalizedDot(score, leftNorm, rightNorm);
+}
+
+/** Reuse the query's squared norm when scoring many candidates. */
+export function cosineScorer(query: ArrayLike<number>): (candidate: ArrayLike<number>) => number {
+  const dimensions = query.length;
+  let queryNorm = 0;
+  for (let index = 0; index < dimensions; index += 1) {
+    const value = query[index] ?? 0;
+    queryNorm += value * value;
+  }
+  return (candidate) => {
+    if (candidate.length !== dimensions) return 0;
+    let dot = 0;
+    let norm = 0;
+    for (let index = 0; index < dimensions; index += 1) {
+      const value = candidate[index] ?? 0;
+      dot += (query[index] ?? 0) * value;
+      norm += value * value;
+    }
+    return normalizedDot(dot, queryNorm, norm);
+  };
+}
+
+function normalizedDot(dot: number, leftNorm: number, rightNorm: number): number {
   const denominator = Math.sqrt(leftNorm * rightNorm);
-  return denominator === 0 ? 0 : Math.max(-1, Math.min(1, score / denominator));
+  return denominator === 0 ? 0 : Math.max(-1, Math.min(1, dot / denominator));
 }
 
 function features(value: string): string[] {

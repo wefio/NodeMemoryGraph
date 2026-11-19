@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
-import { MemoryEngine } from "../core/memory/engine.ts";
+import { MemoryEngine, type MemoryQueryOptions } from "../core/memory/engine.ts";
+import { exactLookupAnchor } from "../core/store/search-ranking.ts";
 import { MemoryLifecycleError } from "../core/memory/lifecycle.ts";
 import type { MemoryBackend } from "../core/memory/backend.ts";
 import { openMemoryBackend } from "../core/memory/open.ts";
@@ -240,6 +241,12 @@ export class PortableMemoryService {
     const shared = await this.engine();
     const project = await this.project(input.projectDir);
     const queries = [...new Set([input.query, ...(input.queries ?? [])])];
+    const options = { ...input, limit: candidateLimit(input), findTesserae: !input.autoRecall };
+    if (queries.length === 1 && input.retrievalMode === undefined && !input.autoRecall) {
+      const exact = await exactLocalLookup(shared, project, input.query, options);
+      signal?.throwIfAborted();
+      if (exact) return exact;
+    }
     const indexes = [shared.backend.vectorIndex, project?.backend.vectorIndex].flatMap((index) =>
       index ? [index] : [],
     );
@@ -251,15 +258,7 @@ export class PortableMemoryService {
         const search = async (engine: MemoryEngine) => {
           const useVector =
             semantic && engine.backend.vectorIndex?.has(semantic.indexId, semantic.vector.length);
-          const context = await engine.search(
-            query,
-            {
-              ...input,
-              limit: candidateLimit(input),
-              findTesserae: !input.autoRecall,
-            },
-            useVector ? semantic : undefined,
-          );
+          const context = await engine.search(query, options, useVector ? semantic : undefined);
           if (reason) context.retrieval = { mode: "lexical", degraded: true, reason };
           return context;
         };
@@ -595,6 +594,23 @@ function candidateLimit(input: NmgSearchParams): number {
   return input.sessionId && (input.secondPass || input.progressiveWarmDisclosure)
     ? 50
     : (input.limit ?? 20);
+}
+
+async function exactLocalLookup(
+  shared: MemoryEngine,
+  project: MemoryEngine | undefined,
+  query: string,
+  options: MemoryQueryOptions & { limit: number },
+): Promise<MemoryContext | undefined> {
+  const anchor = exactLookupAnchor(query);
+  if (!anchor) return;
+  const main = await shared.searchExactAnchor(anchor, options);
+  const result = project
+    ? mergeLocalContexts(await project.searchExactAnchor(anchor, options), main)
+    : main;
+  if (!result.results.length) return;
+  result.results.splice(options.limit);
+  return result;
 }
 
 function mergeLocalContexts(project: MemoryContext, main: MemoryContext): MemoryContext {

@@ -16,6 +16,9 @@ import type { ServerState } from "../../src/cli/lifecycle.ts";
 import { LegacySqliteFixture } from "../helpers/legacy-sqlite-fixture.ts";
 import { stgStorePath } from "../../src/core/stg-projection.ts";
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
+import { PortableMemoryService } from "../../src/cli/portable-memory.ts";
+import { MemoryEngine } from "../../src/core/memory/engine.ts";
+import { SqliteMemoryBackend } from "../../src/core/memory/sqlite-backend.ts";
 import { activatedLocalMemory } from "../../src/core/memory/sqlite-backend.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
@@ -650,6 +653,78 @@ test("unified lifecycle and claim receipts preserve legacy vote counters through
     await service.close();
     removeTempDirectory(directory);
   }
+});
+
+test("default local search can finish exact anchor lookups without calling embeddings", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-exact-lookup-"));
+  const options = {
+    kind: "sqlite",
+    path: join(directory, "memory.sqlite"),
+    namespace: "lookup",
+  } as const;
+  const backend = new SqliteMemoryBackend(options.path, options.namespace);
+  backend.activateLocal();
+  const [direct, prefix] = await new MemoryEngine(backend).rememberMany([
+    {
+      statement: "Investigated ERR_SQL_BUSY due to write contention.",
+      nodeName: "SQLite",
+      scope: { project: "atlas" },
+    },
+    {
+      statement: "Investigated ERR_SQL_BUSY_RETRY and v1.2.3 due to lock contention.",
+      nodeName: "SQLite",
+      scope: { project: "boreal" },
+    },
+  ]);
+  const records = [direct!, prefix!].map(({ memory }) => ({
+    id: memory.id,
+    statement: memory.statement,
+    text: memory.statement,
+  }));
+  backend.vectorIndex.save("fixture", records, [
+    [1, 0],
+    [1, 0],
+  ]);
+  await backend.close();
+  const embedded: string[] = [];
+  const embed = async (queries: string[]) => queries.map(() => [1, 0]);
+  const service = new PortableMemoryService(options, true, () => ({
+    indexId: "fixture",
+    model: "fixture",
+    profile: "fixture",
+    embed,
+    embedDocuments: embed,
+    async embedQueries(queries) {
+      embedded.push(...queries);
+      return embed(queries);
+    },
+  }));
+  t.after(async () => {
+    await service.close();
+    removeTempDirectory(directory);
+  });
+  for (const query of ["ERR_SQL_BUSY", '"write contention"']) {
+    const exact = await service.search({ query });
+    assert.deepEqual(exact.retrieval, { mode: "lexical", degraded: false });
+    assert.deepEqual(
+      exact.results.map(({ memory }) => memory.id),
+      [direct!.memory.id],
+    );
+  }
+  assert.deepEqual(embedded, []);
+  const cases = [
+    { query: "ERR_SQL_BUSY", scope: { project: "boreal" } },
+    { query: '"v1.2"' },
+    { query: "why ERR_SQL_BUSY" },
+    { query: "ERR_SQL_BUSY", retrievalMode: "hybrid" as const },
+    { query: "ERR_SQL_BUSY", autoRecall: true },
+    { query: "ERR_SQL_BUSY", queries: ["write contention"] },
+  ];
+  for (const params of cases) {
+    const fallback = await service.search(params);
+    assert.equal(fallback.retrieval?.mode, "hybrid");
+  }
+  assert.deepEqual(embedded, [...cases.map(({ query }) => query), "write contention"]);
 });
 
 test("activated SQLite uses legacy vectors and indexes new writes across restart", async () => {
