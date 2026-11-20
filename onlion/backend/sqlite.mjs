@@ -105,10 +105,13 @@ export class DatabaseSync {
   }
   prepare(sql) {
     const db = this.db;
+    function bind(st, args) {
+      if (args.length) st.bind(args.map((x) => (Buffer.isBuffer(x) ? new Uint8Array(x) : x)));
+    }
     function statement(args, operation) {
       const st = db.prepare(sql);
       try {
-        if (args.length) st.bind(args.map((x) => (Buffer.isBuffer(x) ? new Uint8Array(x) : x)));
+        bind(st, args);
         return operation(st);
       } finally {
         st.finalize();
@@ -121,6 +124,15 @@ export class DatabaseSync {
           while (st.step()) rows.push(st.get({}));
           return rows;
         });
+      },
+      *iterate(...args) {
+        const st = db.prepare(sql);
+        try {
+          bind(st, args);
+          while (st.step()) yield st.get({});
+        } finally {
+          st.finalize();
+        }
       },
       get(...args) {
         return statement(args, (st) => (st.step() ? st.get({}) : undefined));
