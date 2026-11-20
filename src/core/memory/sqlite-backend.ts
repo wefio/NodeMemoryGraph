@@ -9,7 +9,9 @@ import type {
   MemoryCommitRequest,
   MemoryEntity,
   MemoryEntityQuery,
+  MemoryHybridPage,
   MemoryReadView,
+  MemoryVectorQuery,
 } from "./backend.ts";
 import {
   ENTITY_COLUMNS,
@@ -160,6 +162,52 @@ export class SqliteMemoryBackend implements MemoryBackend {
       .prepare(page.sql)
       .all(...page.bind)
       .map(decodeEntity);
+  }
+
+  hybridCandidates(
+    view: MemoryReadView,
+    query: MemoryEntityQuery & { text: string },
+    semantic: MemoryVectorQuery,
+  ): MemoryHybridPage {
+    const vector = this.vectorIndex.candidates(view, query, semantic);
+    const vectorScores = new Map(
+      vector.map(({ entity, recordScore }) => [entity.value.id, recordScore]),
+    );
+    const expression = ftsExpression(query.text);
+    const db = this.reader(view);
+    const lexical = expression ? readLexicalMemoryPage(db, this.namespace, query, expression) : [];
+    const lexicalIds = lexical.map(({ entity }) => entity.value.id);
+    const lexicalSet = new Set(lexicalIds);
+    const extraVector = this.vectorIndex.scoresFor(
+      view,
+      lexicalIds.filter((id) => !vectorScores.has(id)),
+      semantic,
+    );
+    const extraLexical = expression
+      ? readCrossBm25(
+          db,
+          this.namespace,
+          expression,
+          [...vectorScores.keys()].filter((id) => !lexicalSet.has(id)),
+        )
+      : new Map<string, number>();
+    return {
+      vectorIds: [...vectorScores.keys()],
+      lexicalIds,
+      candidates: [
+        ...lexical.map(({ entity, bm25 }) => ({
+          entity,
+          bm25,
+          recordScore: vectorScores.get(entity.value.id) ?? extraVector.get(entity.value.id) ?? 0,
+        })),
+        ...vector
+          .filter(({ entity }) => !lexicalSet.has(entity.value.id))
+          .map((candidate) => ({
+            ...candidate,
+            bm25: extraLexical.get(candidate.entity.value.id) ?? 0,
+          })),
+      ],
+    };
   }
 
   async scanBatch(
@@ -415,12 +463,12 @@ export class SqliteMemoryBackend implements MemoryBackend {
   }
 }
 
-function entityPage(namespace: string, query: MemoryEntityQuery) {
+function entityPage(namespace: string, query: MemoryEntityQuery, scoredExpression?: string) {
   const { limit, offset } = queryBounds(query);
   if (query.kind === "edge" && query.connectedTo !== undefined && !query.text)
     return { sql: adjacentEdgePage(namespace, query, query.connectedTo), bind: [limit, offset] };
   const where = `namespace = ${sqlLiteral(namespace)} AND ${sqliteQueryWhere(query)}`;
-  const fts = query.text ? ftsExpression(query.text) : undefined;
+  const fts = scoredExpression ?? (query.text ? ftsExpression(query.text) : undefined);
   const [kind, table] = textIndex(query.kind);
   // Start from MATCH results so SQLite only looks up entities that matched.
   const from = fts
@@ -432,10 +480,50 @@ function entityPage(namespace: string, query: MemoryEntityQuery) {
     : "nmg_memory_entities";
   const order = fts ? "fts_rank, id" : "id";
   return {
-    sql: `SELECT kind, payload FROM ${from}
+    sql: `SELECT kind, payload${scoredExpression ? ", -fts_rank AS bm25" : ""} FROM ${from}
       WHERE ${fts === "" ? "1 = 0" : where} ORDER BY ${order} LIMIT ? OFFSET ?`,
     bind: [limit, offset],
   };
+}
+
+function readLexicalMemoryPage(
+  db: DatabaseSync,
+  namespace: string,
+  query: MemoryEntityQuery,
+  expression: string,
+) {
+  const page = entityPage(namespace, query, expression);
+  return db
+    .prepare(page.sql)
+    .all(...page.bind)
+    .map((row) => ({
+      entity: decodeEntity(row) as Extract<MemoryEntity, { kind: "memory" }>,
+      bm25: Number(row.bm25),
+    }));
+}
+
+function readCrossBm25(db: DatabaseSync, namespace: string, expression: string, ids: string[]) {
+  const scores = new Map<string, number>();
+  if (!ids.length) return scores;
+  const wanted = new Map(
+    db
+      .prepare(
+        `SELECT r.fts_rowid, wanted.value AS id
+      FROM json_each(?) wanted CROSS JOIN nmg_memory_fts_rows r
+        ON r.namespace=? AND r.key='memory:' || wanted.value`,
+      )
+      .all(JSON.stringify(ids), namespace)
+      .map((row) => [row.fts_rowid, String(row.id)]),
+  );
+  if (!wanted.size) return scores;
+  // One MATCH scan shares the query's BM25 statistics. Probing each rowid repeats that work.
+  for (const row of db
+    .prepare(`SELECT rowid, -rank AS score FROM nmg_memory_fts WHERE text MATCH ?`)
+    .iterate(expression)) {
+    const id = wanted.get(row.rowid);
+    if (id !== undefined) scores.set(id, Number(row.score));
+  }
+  return scores;
 }
 
 function adjacentEdgePage(namespace: string, query: MemoryEntityQuery, nodeId: string): string {

@@ -137,6 +137,12 @@ export interface MemoryBackend {
   openRead(): Promise<MemoryReadView>;
   counts?(view: MemoryReadView): Promise<{ memories: number; nodes: number }>;
   scan(view: MemoryReadView, query: MemoryEntityQuery): Promise<MemoryEntity[]>;
+  /** Ranked lexical and vector admissions plus their available cross-scores from the same snapshot. */
+  hybridCandidates?(
+    view: MemoryReadView,
+    query: MemoryEntityQuery & { text: string },
+    semantic: MemoryVectorQuery,
+  ): MemoryHybridPage;
   /** Read the requested pages in order from the same snapshot. */
   scanBatch?(
     view: MemoryReadView,
@@ -173,6 +179,12 @@ export interface MemoryVectorCursor {
 export interface MemoryVectorCandidate {
   entity: Extract<MemoryEntity, { kind: "memory" }>;
   recordScore: number;
+}
+
+export interface MemoryHybridPage {
+  candidates: Array<MemoryVectorCandidate & { bm25: number }>;
+  vectorIds: string[];
+  lexicalIds: string[];
 }
 
 export interface MemoryVectorIndex {
