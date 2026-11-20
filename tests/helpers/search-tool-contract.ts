@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 
+export function searchCandidateKeys(text: string): string[] {
+  return [...text.matchAll(/^- (?:\[[^\r\n\]]+\] )*`([^`\r\n]+)`/gmu)].map((match) => match[1]!);
+}
+
 export async function assertSearchToolContract(
   call: (args: Record<string, unknown>) => Promise<string>,
   query: string,
@@ -7,8 +11,9 @@ export async function assertSearchToolContract(
 ): Promise<string> {
   const text = await call({ query, limit: 4 });
   assert.match(text, expectedPreview);
-  assert.match(text, /count=[1-4]\b/u);
-  assert.match(text, /Use nmg_get with selected IDs and activeGraphId/u);
-  assert.match(text, /activeGraphId=[^\s]+/u);
+  const keys = searchCandidateKeys(text);
+  assert.ok(keys.length >= 1 && keys.length <= 4);
+  assert.match(text, /nmg_get with key \+ activeGraphId/u);
+  assert.match(text, /^activeGraphId=[0-9a-f]{8}$/mu);
   return text;
 }

@@ -1,3 +1,4 @@
+import type { EvidenceRanker } from "../core/memory/evidence-ranking.ts";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { deriveAnswerOverlapMemoryIds, statementFingerprint } from "../core/feedback.ts";
@@ -147,6 +148,7 @@ export interface NmgServiceOptions {
   dataDirectory?: string;
   databasePath?: string;
   environment?: NodeJS.ProcessEnv;
+  evidenceRanker?: EvidenceRanker;
 }
 
 export class NmgService {
@@ -234,6 +236,7 @@ export class NmgService {
       memoryBackend.kind === "sqlite" && memoryBackend.local === true,
       () => this.#configuredEmbeddingClient(),
       () => this.#embeddingError !== null,
+      options.evidenceRanker,
     );
     this.#dataDirectory = dataDirectory;
     this.#environment = environment;
@@ -541,40 +544,51 @@ export class NmgService {
     signal?.throwIfAborted();
     const memory = this.#portableMemory;
     const started = performance.now();
-    if (memory.local) this.#offerSearchCue(params);
-    const retrieval = { ...params };
-    if (memory.local) {
-      retrieval.graphHops ??= configuredGraphHops(0, this.#environment);
-      delete retrieval.recallCue;
-      delete retrieval.recallRevision;
-      delete retrieval.recallSource;
-      if (params.autoRecall && params.sessionId)
-        retrieval.query = this.#recallContext.automaticQuery(
-          params.sessionId,
-          resolve(params.projectDir ?? process.cwd()),
-          params.query,
-        );
-    }
-    const context = await memory.search(retrieval, signal);
+    const retrieval = memory.local ? this.#prepareLocalSearch(params) : params;
+    const recallDisplayMode =
+      params.autoRecall && params.sessionId
+        ? this.#recallContext.mode(params.sessionId)
+        : undefined;
+    const economy = params.autoRecall === true && recallDisplayMode !== "full";
+    const { economyRanked, ...context } = await memory.search(retrieval, signal, economy);
     signal?.throwIfAborted();
     if (!memory.local) return context;
     const directMs = performance.now() - started;
     if (!params.autoRecall)
       context.tesserae = await this.#resolveTesseraLines(context.tesserae ?? [], params);
-    if (params.sessionId) {
-      context.results = this.#recallContext.rank(
-        params.sessionId,
-        resolve(params.projectDir ?? process.cwd()),
-        params.query,
-        context.results,
-      );
-      if (params.autoRecall) context.recallDisplayMode = this.#recallContext.mode(params.sessionId);
-    }
+    if (!economyRanked) this.#rankPortableSessionResults(context, params);
+    if (recallDisplayMode) context.recallDisplayMode = recallDisplayMode;
     return this.#registerPortableSearch(
       context,
       { ...params, graphHops: retrieval.graphHops },
       started,
       directMs,
+    );
+  }
+
+  #prepareLocalSearch(params: NmgSearchParams): NmgSearchParams {
+    this.#offerSearchCue(params);
+    const retrieval = { ...params };
+    delete retrieval.recallCue;
+    delete retrieval.recallRevision;
+    delete retrieval.recallSource;
+    retrieval.graphHops ??= configuredGraphHops(0, this.#environment);
+    if (params.autoRecall && params.sessionId)
+      retrieval.query = this.#recallContext.automaticQuery(
+        params.sessionId,
+        resolve(params.projectDir ?? process.cwd()),
+        params.query,
+      );
+    return retrieval;
+  }
+
+  #rankPortableSessionResults(context: MemoryContext, params: NmgSearchParams): void {
+    if (!params.sessionId || context.evidencePage?.ranked) return;
+    context.results = this.#recallContext.rank(
+      params.sessionId,
+      resolve(params.projectDir ?? process.cwd()),
+      params.query,
+      context.results,
     );
   }
 
@@ -641,8 +655,17 @@ export class NmgService {
     return [{ traceId, memoryIds, value: { store, traceId, memoryIds, referenceTargets } }];
   }
 
+  #resolveActiveGraphId(id: string, sessionId?: string): string {
+    return this.#sessionActiveGraphs.resolveProjectionId(id, sessionId) ?? id;
+  }
+
   async #getPortable(params: NmgGetParams): Promise<NmgMethodResult["get"]> {
     this.#countGetReferences(params.memoryIds);
+    if (params.activeGraphId)
+      params = {
+        ...params,
+        activeGraphId: this.#resolveActiveGraphId(params.activeGraphId, params.sessionId),
+      };
     const trace = params.activeGraphId
       ? this.#portableDisclosureTrace(params.activeGraphId, params.sessionId)
       : undefined;
@@ -1391,8 +1414,10 @@ export class NmgService {
       trained: false,
       activeGraphId: null,
     };
-    const owner =
-      params.activeGraphId && this.#sessionActiveGraphs.projectionOwner(params.activeGraphId);
+    const resolvedGraphId = params.activeGraphId
+      ? this.#resolveActiveGraphId(params.activeGraphId, params.sessionId)
+      : undefined;
+    const owner = resolvedGraphId && this.#sessionActiveGraphs.projectionOwner(resolvedGraphId);
     if (owner && owner !== (params.sessionId?.trim() || "__anonymous__")) return result;
     try {
       const learner = this.#getOnlineLearner();
@@ -1402,7 +1427,7 @@ export class NmgService {
       // fallback bound feedback to an unrelated staged decision whenever the
       // rated recall was not itself staged (e.g. an explicit search), silently
       // training on the wrong context. Skip rather than mis-bind.
-      const graphId = params.activeGraphId;
+      const graphId = resolvedGraphId;
       if (!graphId) return result; // no explicit graph: nothing safe to train on
       const trained = learner.consumeFeedback(graphId, params);
       learner.persistIfDirty();
@@ -1420,11 +1445,15 @@ export class NmgService {
 
   async #claimOutcomes(params: NmgRecordClaimOutcomesParams) {
     if (params.activeGraphId) {
+      params = {
+        ...params,
+        activeGraphId: this.#resolveActiveGraphId(params.activeGraphId, params.sessionId),
+      };
       const projection = this.#sessionActiveGraphs.projection(
-        params.activeGraphId,
+        params.activeGraphId!,
         params.sessionId,
       );
-      const trace = this.#portableDisclosureTrace(params.activeGraphId, params.sessionId);
+      const trace = this.#portableDisclosureTrace(params.activeGraphId!, params.sessionId);
       const exposed = new Set(projection?.graph.memoryIds ?? trace?.memoryIds);
       if (params.votes.some((vote) => !exposed.has(vote.memoryId)))
         throw new NmgProtocolError(

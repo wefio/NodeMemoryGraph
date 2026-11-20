@@ -55,7 +55,9 @@
   source: https://example.com/page (retrieved 2026-07-31)
 ```
 
-Pi surface 当前会在 compact search header 与 exact memory expansion 中呈现外部来源标记。若调用方未提供 `truthStatus`，CLI 写入路径会将带外部 marker 的记忆默认为 `unverified`；后续明确确认可以提升 trust，但不会移除 provenance。
+自动召回预览可以显示外部标记。显式搜索展示候选预览，外部出处在选中记录的精确读取中展示。
+调用方未提供 `truthStatus` 时，带外部标记的记忆默认是 `unverified`。
+后续明确确认可以提升可信度，来源仍随记录保留。
 
 ## 5. 外部内容入口
 

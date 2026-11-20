@@ -17,7 +17,7 @@ import {
 } from "../helpers/agent-activity-contract.ts";
 import { assertGetToolContract } from "../helpers/get-tool-contract.ts";
 import { assertRememberToolContract } from "../helpers/remember-tool-contract.ts";
-import { assertSearchToolContract } from "../helpers/search-tool-contract.ts";
+import { assertSearchToolContract, searchCandidateKeys } from "../helpers/search-tool-contract.ts";
 import { assertLabToolContract } from "../helpers/lab-tool-contract.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
@@ -179,7 +179,7 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     );
     const activeGraphId = /activeGraphId=([^\s]+)/u.exec(recalled)?.[1];
     assert.ok(activeGraphId);
-    const memoryReference = /memory=([^;]+);/u.exec(recalled)?.[1];
+    const [memoryReference] = searchCandidateKeys(recalled);
     assert.ok(memoryReference);
     assert.match(memoryReference, /^ref:/u);
     const repeated = await client.callTool({

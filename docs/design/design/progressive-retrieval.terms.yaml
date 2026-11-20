@@ -51,8 +51,8 @@ terms:
   - term: query formation boundary
     aliases: [caller-generated queries, HyDE, 查询形成边界]
     definition: >-
-      NMG accepts a primary query plus optional caller-generated `queries[]` produced by query decomposition, alternate wording, domain knowledge or a hypothetical answer (HyDE); HyDE is therefore not an NMG subsystem, and the retrieval boundary owns stable-ID deduplication, primary-query priority and the shared record/token budget, appending unique secondary-query results after the primary ranking, while weighted reciprocal rank fusion is a deterministic Lab primitive and reverse retrieval remains an offline probe.
-      NMG 接受一个主查询加可选的调用方生成 `queries[]`，后者可由查询分解、改写、领域知识或假设答案（HyDE）产生；因此 HyDE 不是 NMG 子系统，而检索边界拥有稳定 ID 去重、主查询优先与共享记录／token 预算，把唯一的次要查询结果追加在主排序之后，同时加权倒数排名融合是确定性的 Lab 原语，逆向检索仍是离线探针。
+      NMG accepts a primary query and optional caller-generated `queries[]`, including reformulations or queries derived from a hypothetical answer. The retrieval boundary appends unique secondary-query results after the primary ranking under a shared record and token budget. Compact automatic recall fuses the existing hybrid retrieval routes within each query.
+      NMG 接受一个主查询和可选的调用方生成 `queries[]`，包括改写或根据假设答案生成的查询。检索边界在共享记录和 token 预算内，将去重后的次查询结果追加到主排序之后。经济档自动召回在单个查询内融合已有的 hybrid 检索路线。
     owner: docs/design/design/progressive-retrieval.md
     anchor: Query formation and route fusion boundary
     status: canonical

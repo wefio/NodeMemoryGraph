@@ -8,6 +8,7 @@ import {
   type AdapterToolSession,
 } from "./adapter-tool-session.ts";
 import { renderSearchSurface } from "./agent-surface.ts";
+import { shortActiveGraphId } from "./memory-reference.ts";
 import { SEARCH_REQUIRED_PARAMETERS, searchParameterProperties } from "./tool-contract.ts";
 
 const prompts = loadPrompts();
@@ -186,7 +187,7 @@ export function renderSearchHeaders(context: MemoryContext, folded: string[] = [
   );
   const nextStep = deferred?.length
     ? `${prompts.deferred_hint} Memory IDs: ${deferred.join(",")}`
-    : prompts.get_hint;
+    : "";
   const text = renderSearchSurface(context, {
     emptyText: folded.length ? "" : "No NMG match.",
     preamble: renderDisclosure(prompts.search_disclosure, {}),
@@ -198,6 +199,8 @@ export function renderSearchHeaders(context: MemoryContext, folded: string[] = [
   });
   const graph = context.activeGraph?.id;
   const foldedOnlyGraph =
-    folded.length && !context.results.length && graph ? `activeGraphId=${graph}` : "";
+    folded.length && !context.results.length && graph
+      ? `activeGraphId=${shortActiveGraphId(graph)}`
+      : "";
   return [text, renderFoldedDisclosure(folded), foldedOnlyGraph].filter(Boolean).join("\n");
 }

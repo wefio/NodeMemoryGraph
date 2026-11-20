@@ -435,12 +435,9 @@ shadow_claim_outcome_nudge: >-
 # ---- 渐进披露（检索结果返回时附带） ---------------------------------------
 
 search_disclosure: |
-  NMG MEMORY CANDIDATES — previews, not evidence; order is not a guarantee of relevance.
-  node=semantic cluster; time=event date; expires=expiry date; chains=logical names.
-  [external]=external source; [open]=unresolved.
+  NMG candidates (previews only, not evidence; order != relevance; use nmg_get with key + activeGraphId):
 
 search_disclosure_metadata: |
-  count={count}
   {next_step}
   {forget_hint}
 

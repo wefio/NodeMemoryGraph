@@ -1,0 +1,3889 @@
+{
+  "schemaVersion": 1,
+  "recordedOn": "2026-11-20",
+  "baseRevision": "bcae8b481a8b566d7e76cb255b85284a420ee35a",
+  "runtime": {
+    "platform": "Windows",
+    "node": "24.19.0"
+  },
+  "embedder": {
+    "model": "BAAI/bge-small-en-v1.5",
+    "dimensions": 384,
+    "vectorIndex": "bge-small-en-v1.5@1e9807091681",
+    "newRequests": 0
+  },
+  "retrieval": {
+    "weights": {
+      "hybrid": 0.5,
+      "dense": 0.4,
+      "lexical": 0.1
+    },
+    "rankConstant": 60,
+    "candidateLimit": 100,
+    "pinnedHybridRecords": 0
+  },
+  "coverage": {
+    "fixtureSha256": "45df94d94a7712624f1e2a4388e978b9aea21793cc64ff6594e8aaffd488b00c",
+    "reportSha256": "cfd1601558e43c897ba8415419fff46f28361bd2c66809f185f11226d568d723",
+    "completedAt": "2026-11-20T04:21:42.788Z",
+    "configs": [
+      {
+        "cap": 2500,
+        "top": 20,
+        "pool": "records",
+        "key": "records_2500_20"
+      },
+      {
+        "cap": 2500,
+        "top": 20,
+        "pool": "withNeighbors",
+        "key": "withNeighbors_2500_20"
+      },
+      {
+        "cap": 4000,
+        "top": 32,
+        "pool": "records",
+        "key": "records_4000_32"
+      },
+      {
+        "cap": 4000,
+        "top": 32,
+        "pool": "withNeighbors",
+        "key": "withNeighbors_4000_32"
+      },
+      {
+        "cap": 6000,
+        "top": 50,
+        "pool": "records",
+        "key": "records_6000_50"
+      },
+      {
+        "cap": 6000,
+        "top": 50,
+        "pool": "withNeighbors",
+        "key": "withNeighbors_6000_50"
+      }
+    ],
+    "firstStageCharacters": 1500,
+    "rankPrior": "40/(40+zeroBasedRank)",
+    "lengthPenalty": "sqrt(max(characters,100)/100)",
+    "noveltyWeights": {
+      "terms": {
+        "uncoveredIdfTerms": 0.85
+      },
+      "facets": {
+        "uncoveredIdfTerms": 0.45,
+        "uncoveredQueryParts": 1.2
+      }
+    },
+    "timing": "Warm pack-only P95. Feature extraction, retrieval, and source reads are outside the timer."
+  },
+  "pinAblation": {
+    "fixtureSha256": "2dbd5191b28f0492d46e3800eba7aa9c84408c5051c0b52dd7d1635731a9243d",
+    "reportSha256": "56b43fc57fae44b98aa46dc03786bf7622ee2267930bfe1e7bccc55088fc9ec1"
+  },
+  "datasets": {
+    "locomo": {
+      "questions": 1532,
+      "datasetSha256": "553cd5a15e25f2ceccc6ed185221eba645080c93e5b91087560a91aa5961f365",
+      "goldUnits": "source-message",
+      "queriesWithFacets": 602,
+      "coverage": {
+        "records_2500_20": {
+          "greedy": {
+            "hits": 1424,
+            "total": 2348,
+            "recall": 0.606473594548552,
+            "full": 98,
+            "avgChars": 2443.07637075718,
+            "avgItems": 16.199738903394255,
+            "better": 7,
+            "worse": 3,
+            "gained": 8,
+            "lost": 4,
+            "contributing": 1423,
+            "packP95Ms": 0.0052999999998064595,
+            "ciVsStaged": [
+              -0.08237232289950576,
+              0.39331366764995085
+            ],
+            "ciVsDensity": [
+              4.603580562659847,
+              7.928730512249444
+            ]
+          },
+          "staged": {
+            "hits": 1420,
+            "total": 2348,
+            "recall": 0.6047700170357752,
+            "full": 97,
+            "avgChars": 2436.266318537859,
+            "avgItems": 16.452349869451698,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 1419,
+            "packP95Ms": 0.008100000000013097,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              4.42282176028306,
+              7.716049382716049
+            ]
+          },
+          "density": {
+            "hits": 1280,
+            "total": 2348,
+            "recall": 0.545144804088586,
+            "full": 75,
+            "avgChars": 2284.6821148825065,
+            "avgItems": 19.24934725848564,
+            "better": 62,
+            "worse": 195,
+            "gained": 73,
+            "lost": 213,
+            "contributing": 1280,
+            "packP95Ms": 0.09709999999995489,
+            "ciVsStaged": [
+              -7.71780303030303,
+              -4.424778761061947
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 1313,
+            "total": 2348,
+            "recall": 0.5591993185689949,
+            "full": 75,
+            "avgChars": 2288.7056135770235,
+            "avgItems": 19.211488250652742,
+            "better": 66,
+            "worse": 165,
+            "gained": 75,
+            "lost": 182,
+            "contributing": 1313,
+            "packP95Ms": 0.10789999999997235,
+            "ciVsStaged": [
+              -6.557377049180328,
+              -2.8240405503258508
+            ],
+            "ciVsDensity": [
+              0.9503695881731784,
+              1.880192391779624
+            ]
+          },
+          "facets": {
+            "hits": 1319,
+            "total": 2348,
+            "recall": 0.5617546848381602,
+            "full": 76,
+            "avgChars": 2290.121409921671,
+            "avgItems": 19.199738903394255,
+            "better": 63,
+            "worse": 157,
+            "gained": 72,
+            "lost": 173,
+            "contributing": 1319,
+            "packP95Ms": 0.1362000000003718,
+            "ciVsStaged": [
+              -6.209453197405004,
+              -2.619233776387803
+            ],
+            "ciVsDensity": [
+              1.2445095168374818,
+              2.1023403411344703
+            ]
+          }
+        },
+        "withNeighbors_2500_20": {
+          "greedy": {
+            "hits": 1419,
+            "total": 2348,
+            "recall": 0.604344122657581,
+            "full": 99,
+            "avgChars": 2444.5868146214098,
+            "avgItems": 16.75065274151436,
+            "better": 13,
+            "worse": 6,
+            "gained": 13,
+            "lost": 6,
+            "contributing": 1419,
+            "packP95Ms": 0.005599999999958527,
+            "ciVsStaged": [
+              -0.07763975155279502,
+              0.67598017124831
+            ],
+            "ciVsDensity": [
+              4.1356492969396195,
+              6.143520908621579
+            ]
+          },
+          "staged": {
+            "hits": 1412,
+            "total": 2348,
+            "recall": 0.6013628620102215,
+            "full": 96,
+            "avgChars": 2437.0992167101826,
+            "avgItems": 17.01697127937337,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 1412,
+            "packP95Ms": 0.008199999999760621,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              3.7383177570093458,
+              5.87074494326591
+            ]
+          },
+          "density": {
+            "hits": 1300,
+            "total": 2348,
+            "recall": 0.5536626916524702,
+            "full": 70,
+            "avgChars": 2271.6116187989555,
+            "avgItems": 19.37467362924282,
+            "better": 55,
+            "worse": 168,
+            "gained": 70,
+            "lost": 182,
+            "contributing": 1300,
+            "packP95Ms": 0.09789999999975407,
+            "ciVsStaged": [
+              -5.874439461883408,
+              -3.742283950617284
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 1324,
+            "total": 2348,
+            "recall": 0.5638841567291312,
+            "full": 72,
+            "avgChars": 2276.253263707572,
+            "avgItems": 19.349216710182766,
+            "better": 61,
+            "worse": 148,
+            "gained": 74,
+            "lost": 162,
+            "contributing": 1324,
+            "packP95Ms": 0.11529999999993379,
+            "ciVsStaged": [
+              -5.016883743367101,
+              -2.6293103448275863
+            ],
+            "ciVsDensity": [
+              0.5764966740576497,
+              1.385148133897653
+            ]
+          },
+          "facets": {
+            "hits": 1329,
+            "total": 2348,
+            "recall": 0.5660136286201022,
+            "full": 71,
+            "avgChars": 2277.2774151436033,
+            "avgItems": 19.339425587467364,
+            "better": 63,
+            "worse": 145,
+            "gained": 74,
+            "lost": 157,
+            "contributing": 1329,
+            "packP95Ms": 0.1450999999999567,
+            "ciVsStaged": [
+              -4.937076476282672,
+              -2.3128185025480206
+            ],
+            "ciVsDensity": [
+              0.726895119418484,
+              1.6772269847185985
+            ]
+          }
+        },
+        "records_4000_32": {
+          "greedy": {
+            "hits": 1579,
+            "total": 2348,
+            "recall": 0.6724872231686542,
+            "full": 133,
+            "avgChars": 3913.6168407310706,
+            "avgItems": 26.035248041775457,
+            "better": 3,
+            "worse": 1,
+            "gained": 3,
+            "lost": 1,
+            "contributing": 1578,
+            "packP95Ms": 0.0059000000001105946,
+            "ciVsStaged": [
+              -0.0772499034376207,
+              0.24896265560165975
+            ],
+            "ciVsDensity": [
+              0.9174311926605505,
+              3.5454545454545454
+            ]
+          },
+          "staged": {
+            "hits": 1577,
+            "total": 2348,
+            "recall": 0.6716354344122658,
+            "full": 132,
+            "avgChars": 3905.4366840731072,
+            "avgItems": 26.362924281984334,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 1576,
+            "packP95Ms": 0.010900000000219734,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              0.8003369839932604,
+              3.4737299174989142
+            ]
+          },
+          "density": {
+            "hits": 1529,
+            "total": 2348,
+            "recall": 0.6511925042589438,
+            "full": 114,
+            "avgChars": 3747.6044386422977,
+            "avgItems": 29.949086161879894,
+            "better": 48,
+            "worse": 92,
+            "gained": 54,
+            "lost": 102,
+            "contributing": 1528,
+            "packP95Ms": 0.134900000000016,
+            "ciVsStaged": [
+              -3.4799420009666506,
+              -0.8027522935779816
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 1537,
+            "total": 2348,
+            "recall": 0.6545996592844975,
+            "full": 117,
+            "avgChars": 3748.7003916449084,
+            "avgItems": 29.934725848563968,
+            "better": 53,
+            "worse": 89,
+            "gained": 58,
+            "lost": 98,
+            "contributing": 1536,
+            "packP95Ms": 0.15009999999983847,
+            "ciVsStaged": [
+              -2.881584871679424,
+              -0.7744874715261959
+            ],
+            "ciVsDensity": [
+              -0.09013068949977468,
+              0.7620660457239627
+            ]
+          },
+          "facets": {
+            "hits": 1539,
+            "total": 2348,
+            "recall": 0.6554514480408858,
+            "full": 115,
+            "avgChars": 3749.509138381201,
+            "avgItems": 29.91318537859008,
+            "better": 52,
+            "worse": 87,
+            "gained": 58,
+            "lost": 96,
+            "contributing": 1538,
+            "packP95Ms": 0.19489999999996144,
+            "ciVsStaged": [
+              -2.8080469404861694,
+              -0.6602641056422569
+            ],
+            "ciVsDensity": [
+              0.0449034575662326,
+              0.7637017070979335
+            ]
+          }
+        },
+        "withNeighbors_4000_32": {
+          "greedy": {
+            "hits": 1591,
+            "total": 2348,
+            "recall": 0.6775979557069847,
+            "full": 134,
+            "avgChars": 3915.7545691906007,
+            "avgItems": 26.492167101827675,
+            "better": 2,
+            "worse": 1,
+            "gained": 2,
+            "lost": 1,
+            "contributing": 1590,
+            "packP95Ms": 0.006699999999909778,
+            "ciVsStaged": [
+              -0.0898069151324652,
+              0.18409425625920472
+            ],
+            "ciVsDensity": [
+              1.756007393715342,
+              3.663003663003663
+            ]
+          },
+          "staged": {
+            "hits": 1590,
+            "total": 2348,
+            "recall": 0.6771720613287905,
+            "full": 134,
+            "avgChars": 3907.3805483028723,
+            "avgItems": 26.85509138381201,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 1589,
+            "packP95Ms": 0.011999999999943611,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              1.6200891049007695,
+              3.697334479793637
+            ]
+          },
+          "density": {
+            "hits": 1526,
+            "total": 2348,
+            "recall": 0.6499148211243612,
+            "full": 115,
+            "avgChars": 3735.2056135770235,
+            "avgItems": 30.232375979112273,
+            "better": 50,
+            "worse": 107,
+            "gained": 56,
+            "lost": 120,
+            "contributing": 1525,
+            "packP95Ms": 0.14249999999992724,
+            "ciVsStaged": [
+              -3.697813121272366,
+              -1.620253164556962
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 1534,
+            "total": 2348,
+            "recall": 0.6533219761499148,
+            "full": 115,
+            "avgChars": 3736.8492167101826,
+            "avgItems": 30.22650130548303,
+            "better": 53,
+            "worse": 103,
+            "gained": 59,
+            "lost": 115,
+            "contributing": 1533,
+            "packP95Ms": 0.16300000000001091,
+            "ciVsStaged": [
+              -3.442188879082083,
+              -1.1633109619686801
+            ],
+            "ciVsDensity": [
+              0,
+              0.7115749525616698
+            ]
+          },
+          "facets": {
+            "hits": 1540,
+            "total": 2348,
+            "recall": 0.65587734241908,
+            "full": 115,
+            "avgChars": 3736.9197127937337,
+            "avgItems": 30.2088772845953,
+            "better": 55,
+            "worse": 100,
+            "gained": 61,
+            "lost": 111,
+            "contributing": 1539,
+            "packP95Ms": 0.20610000000010587,
+            "ciVsStaged": [
+              -3.160919540229885,
+              -0.9219088937093276
+            ],
+            "ciVsDensity": [
+              0.1865671641791045,
+              1.0638297872340425
+            ]
+          }
+        },
+        "records_6000_50": {
+          "greedy": {
+            "hits": 1697,
+            "total": 2348,
+            "recall": 0.7227427597955707,
+            "full": 153,
+            "avgChars": 5875.086161879895,
+            "avgItems": 39.380548302872064,
+            "better": 4,
+            "worse": 3,
+            "gained": 4,
+            "lost": 3,
+            "contributing": 1696,
+            "packP95Ms": 0.007600000000365981,
+            "ciVsStaged": [
+              -0.17699115044247787,
+              0.2494802494802495
+            ],
+            "ciVsDensity": [
+              -0.9222133119486768,
+              1.0217113665389528
+            ]
+          },
+          "staged": {
+            "hits": 1696,
+            "total": 2348,
+            "recall": 0.7223168654173765,
+            "full": 154,
+            "avgChars": 5870.118798955614,
+            "avgItems": 39.69190600522193,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 1695,
+            "packP95Ms": 0.015300000000024738,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              -0.9246417013407304,
+              0.8943781942078365
+            ]
+          },
+          "density": {
+            "hits": 1695,
+            "total": 2348,
+            "recall": 0.7218909710391823,
+            "full": 160,
+            "avgChars": 5728.753916449086,
+            "avgItems": 44.82180156657964,
+            "better": 48,
+            "worse": 47,
+            "gained": 50,
+            "lost": 51,
+            "contributing": 1694,
+            "packP95Ms": 0.17419999999992797,
+            "ciVsStaged": [
+              -0.8946726311508744,
+              0.9205020920502092
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 1697,
+            "total": 2348,
+            "recall": 0.7227427597955707,
+            "full": 161,
+            "avgChars": 5730.824412532637,
+            "avgItems": 44.81070496083551,
+            "better": 48,
+            "worse": 45,
+            "gained": 50,
+            "lost": 49,
+            "contributing": 1696,
+            "packP95Ms": 0.20139999999992142,
+            "ciVsStaged": [
+              -0.8435259384226065,
+              0.989345509893455
+            ],
+            "ciVsDensity": [
+              -0.13351134846461948,
+              0.311804008908686
+            ]
+          },
+          "facets": {
+            "hits": 1699,
+            "total": 2348,
+            "recall": 0.7235945485519591,
+            "full": 161,
+            "avgChars": 5730.552219321149,
+            "avgItems": 44.81005221932115,
+            "better": 49,
+            "worse": 44,
+            "gained": 51,
+            "lost": 48,
+            "contributing": 1698,
+            "packP95Ms": 0.259900000000016,
+            "ciVsStaged": [
+              -0.6928406466512702,
+              1.0695187165775402
+            ],
+            "ciVsDensity": [
+              -0.03998400639744103,
+              0.3734827264239029
+            ]
+          }
+        },
+        "withNeighbors_6000_50": {
+          "greedy": {
+            "hits": 1720,
+            "total": 2348,
+            "recall": 0.7325383304940375,
+            "full": 159,
+            "avgChars": 5878.782637075718,
+            "avgItems": 39.825065274151434,
+            "better": 6,
+            "worse": 2,
+            "gained": 6,
+            "lost": 2,
+            "contributing": 1719,
+            "packP95Ms": 0.008199999999760621,
+            "ciVsStaged": [
+              -0.05,
+              0.40160642570281124
+            ],
+            "ciVsDensity": [
+              -0.09722897423432182,
+              1.1904761904761905
+            ]
+          },
+          "staged": {
+            "hits": 1716,
+            "total": 2348,
+            "recall": 0.7308347529812607,
+            "full": 156,
+            "avgChars": 5873.491514360313,
+            "avgItems": 40.18798955613577,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 1715,
+            "packP95Ms": 0.016299999999773718,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              -0.28155795401220085,
+              1.0399334442595674
+            ]
+          },
+          "density": {
+            "hits": 1706,
+            "total": 2348,
+            "recall": 0.7265758091993185,
+            "full": 157,
+            "avgChars": 5724.162532637076,
+            "avgItems": 45.242167101827675,
+            "better": 36,
+            "worse": 45,
+            "gained": 43,
+            "lost": 53,
+            "contributing": 1705,
+            "packP95Ms": 0.18960000000015498,
+            "ciVsStaged": [
+              -1.04,
+              0.2810116419108792
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 1711,
+            "total": 2348,
+            "recall": 0.7287052810902896,
+            "full": 158,
+            "avgChars": 5725.659921671018,
+            "avgItems": 45.22845953002611,
+            "better": 39,
+            "worse": 43,
+            "gained": 46,
+            "lost": 51,
+            "contributing": 1710,
+            "packP95Ms": 0.21149999999988722,
+            "ciVsStaged": [
+              -0.7926574885273259,
+              0.46160302140159465
+            ],
+            "ciVsDensity": [
+              0.08587376556462001,
+              0.34873583260680036
+            ]
+          },
+          "facets": {
+            "hits": 1711,
+            "total": 2348,
+            "recall": 0.7287052810902896,
+            "full": 158,
+            "avgChars": 5725.382506527415,
+            "avgItems": 45.23629242819843,
+            "better": 39,
+            "worse": 43,
+            "gained": 46,
+            "lost": 51,
+            "contributing": 1710,
+            "packP95Ms": 0.27700000000004366,
+            "ciVsStaged": [
+              -0.7642799678197908,
+              0.44031311154598823
+            ],
+            "ciVsDensity": [
+              0.04737091425864519,
+              0.3949447077409163
+            ]
+          }
+        }
+      },
+      "pinAblation": {
+        "2500_20": {
+          "greedy3": {
+            "hits": 1428,
+            "golds": 2348,
+            "recall": 0.6081771720613288,
+            "avgChars": 2443.8022193211486,
+            "full": 98,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 1427,
+            "golds": 2348,
+            "recall": 0.6077512776831345,
+            "avgChars": 2443.298955613577,
+            "full": 98,
+            "improved": 2,
+            "regressed": 3,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.28735632183908044,
+              0.15420200462606015
+            ]
+          },
+          "greedy0": {
+            "hits": 1424,
+            "golds": 2348,
+            "recall": 0.606473594548552,
+            "avgChars": 2443.07637075718,
+            "full": 98,
+            "improved": 3,
+            "regressed": 7,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.4826254826254826,
+              0.04849660523763336
+            ]
+          },
+          "staged3": {
+            "hits": 1423,
+            "golds": 2348,
+            "recall": 0.6060477001703578,
+            "avgChars": 2436.976501305483,
+            "full": 98,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 1423,
+            "golds": 2348,
+            "recall": 0.6060477001703578,
+            "avgChars": 2436.255221932115,
+            "full": 97,
+            "improved": 4,
+            "regressed": 4,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              -0.17482517482517482,
+              0.1569242840329541
+            ]
+          },
+          "staged0": {
+            "hits": 1420,
+            "golds": 2348,
+            "recall": 0.6047700170357752,
+            "avgChars": 2436.266318537859,
+            "full": 97,
+            "improved": 5,
+            "regressed": 8,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              -0.3598740440845704,
+              0.07202016564638099
+            ]
+          }
+        },
+        "4000_20": {
+          "greedy3": {
+            "hits": 1516,
+            "golds": 2348,
+            "recall": 0.645655877342419,
+            "avgChars": 3156.541775456919,
+            "full": 120,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 1516,
+            "golds": 2348,
+            "recall": 0.645655877342419,
+            "avgChars": 3155.9477806788514,
+            "full": 120,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy0": {
+            "hits": 1513,
+            "golds": 2348,
+            "recall": 0.6443781942078365,
+            "avgChars": 3155.648825065274,
+            "full": 120,
+            "improved": 0,
+            "regressed": 3,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.25305778152678193,
+              0
+            ]
+          },
+          "staged3": {
+            "hits": 1502,
+            "golds": 2348,
+            "recall": 0.6396933560477002,
+            "avgChars": 3065.691906005222,
+            "full": 115,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 1504,
+            "golds": 2348,
+            "recall": 0.6405451448040886,
+            "avgChars": 3065.8537859007834,
+            "full": 115,
+            "improved": 2,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0.24752475247524752
+            ]
+          },
+          "staged0": {
+            "hits": 1501,
+            "golds": 2348,
+            "recall": 0.639267461669506,
+            "avgChars": 3065.478459530026,
+            "full": 115,
+            "improved": 2,
+            "regressed": 3,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              -0.1937046004842615,
+              0.08572653236176597
+            ]
+          }
+        },
+        "4000_32": {
+          "greedy3": {
+            "hits": 1583,
+            "golds": 2348,
+            "recall": 0.674190800681431,
+            "avgChars": 3913.6338120104438,
+            "full": 133,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 1582,
+            "golds": 2348,
+            "recall": 0.6737649063032368,
+            "avgChars": 3913.6586161879895,
+            "full": 133,
+            "improved": 0,
+            "regressed": 1,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.12386457473162675,
+              0
+            ]
+          },
+          "greedy0": {
+            "hits": 1579,
+            "golds": 2348,
+            "recall": 0.6724872231686542,
+            "avgChars": 3913.6168407310706,
+            "full": 133,
+            "improved": 0,
+            "regressed": 4,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.3436426116838488,
+              0
+            ]
+          },
+          "staged3": {
+            "hits": 1580,
+            "golds": 2348,
+            "recall": 0.6729131175468483,
+            "avgChars": 3905.7545691906007,
+            "full": 132,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 1580,
+            "golds": 2348,
+            "recall": 0.6729131175468483,
+            "avgChars": 3905.4321148825065,
+            "full": 132,
+            "improved": 1,
+            "regressed": 1,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged0": {
+            "hits": 1577,
+            "golds": 2348,
+            "recall": 0.6716354344122658,
+            "avgChars": 3905.4366840731072,
+            "full": 132,
+            "improved": 1,
+            "regressed": 4,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              -0.25305778152678193,
+              0
+            ]
+          }
+        },
+        "6000_20": {
+          "greedy3": {
+            "hits": 1519,
+            "golds": 2348,
+            "recall": 0.6469335604770017,
+            "avgChars": 3188.0443864229765,
+            "full": 121,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 1519,
+            "golds": 2348,
+            "recall": 0.6469335604770017,
+            "avgChars": 3187.2708877284595,
+            "full": 121,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy0": {
+            "hits": 1516,
+            "golds": 2348,
+            "recall": 0.645655877342419,
+            "avgChars": 3186.9719321148823,
+            "full": 121,
+            "improved": 0,
+            "regressed": 3,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.25305778152678193,
+              0
+            ]
+          },
+          "staged3": {
+            "hits": 1503,
+            "golds": 2348,
+            "recall": 0.6401192504258943,
+            "avgChars": 3078.9157963446473,
+            "full": 116,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 1505,
+            "golds": 2348,
+            "recall": 0.6409710391822828,
+            "avgChars": 3079.4379895561356,
+            "full": 116,
+            "improved": 2,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0.24752475247524752
+            ]
+          },
+          "staged0": {
+            "hits": 1502,
+            "golds": 2348,
+            "recall": 0.6396933560477002,
+            "avgChars": 3079.0626631853784,
+            "full": 116,
+            "improved": 2,
+            "regressed": 3,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              -0.1937046004842615,
+              0.08572653236176597
+            ]
+          }
+        },
+        "6000_32": {
+          "greedy3": {
+            "hits": 1650,
+            "golds": 2348,
+            "recall": 0.702725724020443,
+            "avgChars": 4917.430809399478,
+            "full": 145,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 1650,
+            "golds": 2348,
+            "recall": 0.702725724020443,
+            "avgChars": 4917.249347258486,
+            "full": 145,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy0": {
+            "hits": 1648,
+            "golds": 2348,
+            "recall": 0.7018739352640545,
+            "avgChars": 4917.043080939948,
+            "full": 145,
+            "improved": 0,
+            "regressed": 2,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.19615535504119264,
+              0
+            ]
+          },
+          "staged3": {
+            "hits": 1645,
+            "golds": 2348,
+            "recall": 0.7005962521294719,
+            "avgChars": 4830.890992167102,
+            "full": 144,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 1645,
+            "golds": 2348,
+            "recall": 0.7005962521294719,
+            "avgChars": 4831.058093994778,
+            "full": 144,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged0": {
+            "hits": 1643,
+            "golds": 2348,
+            "recall": 0.6997444633730835,
+            "avgChars": 4830.714751958225,
+            "full": 144,
+            "improved": 0,
+            "regressed": 2,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              -0.19615535504119264,
+              0
+            ]
+          }
+        },
+        "6000_50": {
+          "greedy3": {
+            "hits": 1697,
+            "golds": 2348,
+            "recall": 0.7227427597955707,
+            "avgChars": 5875.300261096606,
+            "full": 153,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 1697,
+            "golds": 2348,
+            "recall": 0.7227427597955707,
+            "avgChars": 5875.150783289817,
+            "full": 153,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy0": {
+            "hits": 1697,
+            "golds": 2348,
+            "recall": 0.7227427597955707,
+            "avgChars": 5875.086161879895,
+            "full": 153,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged3": {
+            "hits": 1696,
+            "golds": 2348,
+            "recall": 0.7223168654173765,
+            "avgChars": 5870.198433420365,
+            "full": 154,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 1696,
+            "golds": 2348,
+            "recall": 0.7223168654173765,
+            "avgChars": 5870.189947780679,
+            "full": 154,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged0": {
+            "hits": 1696,
+            "golds": 2348,
+            "recall": 0.7223168654173765,
+            "avgChars": 5870.118798955614,
+            "full": 154,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    "beam": {
+      "questions": 235,
+      "datasetSha256": "9b01435a8a931acd960082ad08414252ece6759cb69f9c9e47c7552c377b56a1",
+      "goldUnits": "source-message",
+      "queriesWithFacets": 176,
+      "coverage": {
+        "records_2500_20": {
+          "greedy": {
+            "hits": 145,
+            "total": 833,
+            "recall": 0.17406962785114047,
+            "full": 10,
+            "avgChars": 2434.8553191489364,
+            "avgItems": 6.3319148936170215,
+            "better": 9,
+            "worse": 30,
+            "gained": 18,
+            "lost": 46,
+            "contributing": 145,
+            "packP95Ms": 0.004799999999704596,
+            "ciVsStaged": [
+              -5.287896592244419,
+              -1.4874141876430207
+            ],
+            "ciVsDensity": [
+              -7.894736842105263,
+              -3.4602076124567476
+            ]
+          },
+          "staged": {
+            "hits": 173,
+            "total": 833,
+            "recall": 0.20768307322929172,
+            "full": 11,
+            "avgChars": 2380.255319148936,
+            "avgItems": 8.702127659574469,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 173,
+            "packP95Ms": 0.008799999999610009,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              -3.4946236559139785,
+              -1.2790697674418605
+            ]
+          },
+          "density": {
+            "hits": 192,
+            "total": 833,
+            "recall": 0.2304921968787515,
+            "full": 13,
+            "avgChars": 2355.5021276595744,
+            "avgItems": 10.25531914893617,
+            "better": 23,
+            "worse": 7,
+            "gained": 26,
+            "lost": 7,
+            "contributing": 192,
+            "packP95Ms": 0.05549999999948341,
+            "ciVsStaged": [
+              1.2761020881670533,
+              3.4939759036144578
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 192,
+            "total": 833,
+            "recall": 0.2304921968787515,
+            "full": 13,
+            "avgChars": 2356.6,
+            "avgItems": 10.2,
+            "better": 22,
+            "worse": 5,
+            "gained": 24,
+            "lost": 5,
+            "contributing": 192,
+            "packP95Ms": 0.058299999999690044,
+            "ciVsStaged": [
+              1.4545454545454546,
+              3.214695752009185
+            ],
+            "ciVsDensity": [
+              -0.7317073170731707,
+              0.6038647342995169
+            ]
+          },
+          "facets": {
+            "hits": 187,
+            "total": 833,
+            "recall": 0.22448979591836735,
+            "full": 12,
+            "avgChars": 2361.425531914894,
+            "avgItems": 10.106382978723405,
+            "better": 21,
+            "worse": 9,
+            "gained": 24,
+            "lost": 10,
+            "contributing": 187,
+            "packP95Ms": 0.07289999999920838,
+            "ciVsStaged": [
+              0.778642936596218,
+              2.6744186046511627
+            ],
+            "ciVsDensity": [
+              -1.6645326504481435,
+              0.24600246002460024
+            ]
+          }
+        },
+        "withNeighbors_2500_20": {
+          "greedy": {
+            "hits": 164,
+            "total": 833,
+            "recall": 0.19687875150060025,
+            "full": 12,
+            "avgChars": 2425.795744680851,
+            "avgItems": 8.097872340425532,
+            "better": 8,
+            "worse": 23,
+            "gained": 13,
+            "lost": 34,
+            "contributing": 164,
+            "packP95Ms": 0.004899999999906868,
+            "ciVsStaged": [
+              -4.488778054862843,
+              -0.8383233532934131
+            ],
+            "ciVsDensity": [
+              -5.961070559610706,
+              -2.0238095238095237
+            ]
+          },
+          "staged": {
+            "hits": 185,
+            "total": 833,
+            "recall": 0.22208883553421369,
+            "full": 14,
+            "avgChars": 2416.140425531915,
+            "avgItems": 9.463829787234042,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 185,
+            "packP95Ms": 0.008799999999610009,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              -2.5316455696202533,
+              -0.24539877300613497
+            ]
+          },
+          "density": {
+            "hits": 196,
+            "total": 833,
+            "recall": 0.23529411764705882,
+            "full": 13,
+            "avgChars": 2399.2893617021277,
+            "avgItems": 10.659574468085106,
+            "better": 15,
+            "worse": 5,
+            "gained": 17,
+            "lost": 6,
+            "contributing": 196,
+            "packP95Ms": 0.057500000000800355,
+            "ciVsStaged": [
+              0.24479804161566707,
+              2.525252525252525
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 198,
+            "total": 833,
+            "recall": 0.23769507803121248,
+            "full": 15,
+            "avgChars": 2402.046808510638,
+            "avgItems": 10.625531914893617,
+            "better": 17,
+            "worse": 5,
+            "gained": 19,
+            "lost": 6,
+            "contributing": 198,
+            "packP95Ms": 0.06240000000070722,
+            "ciVsStaged": [
+              0.580046403712297,
+              2.7058823529411766
+            ],
+            "ciVsDensity": [
+              -0.46565774155995343,
+              0.9987515605493134
+            ]
+          },
+          "facets": {
+            "hits": 193,
+            "total": 833,
+            "recall": 0.23169267707082833,
+            "full": 14,
+            "avgChars": 2402.689361702128,
+            "avgItems": 10.62127659574468,
+            "better": 14,
+            "worse": 7,
+            "gained": 16,
+            "lost": 8,
+            "contributing": 193,
+            "packP95Ms": 0.07420000000001892,
+            "ciVsStaged": [
+              -0.35799522673031026,
+              2.466091245376079
+            ],
+            "ciVsDensity": [
+              -0.954653937947494,
+              0.2466091245376079
+            ]
+          }
+        },
+        "records_4000_32": {
+          "greedy": {
+            "hits": 124,
+            "total": 833,
+            "recall": 0.148859543817527,
+            "full": 4,
+            "avgChars": 3945.676595744681,
+            "avgItems": 4.736170212765957,
+            "better": 10,
+            "worse": 72,
+            "gained": 18,
+            "lost": 98,
+            "contributing": 124,
+            "packP95Ms": 0.004100000000107684,
+            "ciVsStaged": [
+              -12.452350698856417,
+              -6.982248520710059
+            ],
+            "ciVsDensity": [
+              -14.77124183006536,
+              -8.958837772397095
+            ]
+          },
+          "staged": {
+            "hits": 204,
+            "total": 833,
+            "recall": 0.24489795918367346,
+            "full": 14,
+            "avgChars": 3871.4170212765957,
+            "avgItems": 12.8,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 204,
+            "packP95Ms": 0.011199999999917054,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              -3.088803088803089,
+              -1.2121212121212122
+            ]
+          },
+          "density": {
+            "hits": 222,
+            "total": 833,
+            "recall": 0.2665066026410564,
+            "full": 15,
+            "avgChars": 3817.6978723404254,
+            "avgItems": 14.940425531914894,
+            "better": 19,
+            "worse": 3,
+            "gained": 21,
+            "lost": 3,
+            "contributing": 222,
+            "packP95Ms": 0.07740000000012515,
+            "ciVsStaged": [
+              1.2121212121212122,
+              3.088803088803089
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 222,
+            "total": 833,
+            "recall": 0.2665066026410564,
+            "full": 15,
+            "avgChars": 3833.8978723404257,
+            "avgItems": 14.85531914893617,
+            "better": 22,
+            "worse": 6,
+            "gained": 25,
+            "lost": 7,
+            "contributing": 222,
+            "packP95Ms": 0.09329999999954453,
+            "ciVsStaged": [
+              0.9302325581395349,
+              3.4216335540838854
+            ],
+            "ciVsDensity": [
+              -0.7109004739336493,
+              0.648508430609598
+            ]
+          },
+          "facets": {
+            "hits": 221,
+            "total": 833,
+            "recall": 0.2653061224489796,
+            "full": 15,
+            "avgChars": 3838.9574468085107,
+            "avgItems": 14.812765957446809,
+            "better": 22,
+            "worse": 7,
+            "gained": 26,
+            "lost": 9,
+            "contributing": 221,
+            "packP95Ms": 0.11950000000069849,
+            "ciVsStaged": [
+              0.865265760197775,
+              3.2175032175032174
+            ],
+            "ciVsDensity": [
+              -0.9433962264150944,
+              0.6157635467980296
+            ]
+          }
+        },
+        "withNeighbors_4000_32": {
+          "greedy": {
+            "hits": 117,
+            "total": 833,
+            "recall": 0.1404561824729892,
+            "full": 5,
+            "avgChars": 3938.4978723404256,
+            "avgItems": 5.45531914893617,
+            "better": 11,
+            "worse": 80,
+            "gained": 17,
+            "lost": 116,
+            "contributing": 117,
+            "packP95Ms": 0.0046999999995023245,
+            "ciVsStaged": [
+              -14.866581956797967,
+              -9.070548712206048
+            ],
+            "ciVsDensity": [
+              -16.68856767411301,
+              -10.614525139664805
+            ]
+          },
+          "staged": {
+            "hits": 216,
+            "total": 833,
+            "recall": 0.25930372148859543,
+            "full": 14,
+            "avgChars": 3860.5617021276594,
+            "avgItems": 13.582978723404254,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 216,
+            "packP95Ms": 0.01209999999991851,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              -3.0150753768844223,
+              -0.45454545454545453
+            ]
+          },
+          "density": {
+            "hits": 230,
+            "total": 833,
+            "recall": 0.27611044417767105,
+            "full": 17,
+            "avgChars": 3838.817021276596,
+            "avgItems": 15.646808510638298,
+            "better": 19,
+            "worse": 7,
+            "gained": 22,
+            "lost": 8,
+            "contributing": 230,
+            "packP95Ms": 0.0874999999996362,
+            "ciVsStaged": [
+              0.4540295119182747,
+              3.009259259259259
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 230,
+            "total": 833,
+            "recall": 0.27611044417767105,
+            "full": 17,
+            "avgChars": 3838.995744680851,
+            "avgItems": 15.617021276595745,
+            "better": 20,
+            "worse": 8,
+            "gained": 23,
+            "lost": 9,
+            "contributing": 230,
+            "packP95Ms": 0.09679999999934807,
+            "ciVsStaged": [
+              0.2503128911138924,
+              3.1286210892236386
+            ],
+            "ciVsDensity": [
+              -0.36319612590799033,
+              0.32967032967032966
+            ]
+          },
+          "facets": {
+            "hits": 227,
+            "total": 833,
+            "recall": 0.2725090036014406,
+            "full": 17,
+            "avgChars": 3847.0978723404255,
+            "avgItems": 15.587234042553192,
+            "better": 20,
+            "worse": 10,
+            "gained": 23,
+            "lost": 12,
+            "contributing": 227,
+            "packP95Ms": 0.13220000000001164,
+            "ciVsStaged": [
+              -0.6749156355455568,
+              3.135135135135135
+            ],
+            "ciVsDensity": [
+              -1.465201465201465,
+              0.3468208092485549
+            ]
+          }
+        },
+        "records_6000_50": {
+          "greedy": {
+            "hits": 159,
+            "total": 833,
+            "recall": 0.1908763505402161,
+            "full": 13,
+            "avgChars": 5934.055319148936,
+            "avgItems": 6.685106382978724,
+            "better": 13,
+            "worse": 69,
+            "gained": 23,
+            "lost": 101,
+            "contributing": 159,
+            "packP95Ms": 0.004800000000614091,
+            "ciVsStaged": [
+              -12.377450980392156,
+              -6.6516347237880495
+            ],
+            "ciVsDensity": [
+              -14.814814814814815,
+              -8.919597989949748
+            ]
+          },
+          "staged": {
+            "hits": 237,
+            "total": 833,
+            "recall": 0.2845138055222089,
+            "full": 18,
+            "avgChars": 5826.6765957446805,
+            "avgItems": 15.87659574468085,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 237,
+            "packP95Ms": 0.014699999999720603,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              -4.122497055359246,
+              -0.4581901489117984
+            ]
+          },
+          "density": {
+            "hits": 257,
+            "total": 833,
+            "recall": 0.3085234093637455,
+            "full": 18,
+            "avgChars": 5707.331914893617,
+            "avgItems": 19.906382978723403,
+            "better": 27,
+            "worse": 12,
+            "gained": 36,
+            "lost": 16,
+            "contributing": 257,
+            "packP95Ms": 0.11339999999927386,
+            "ciVsStaged": [
+              0.44642857142857145,
+              4.1214750542299345
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 261,
+            "total": 833,
+            "recall": 0.3133253301320528,
+            "full": 19,
+            "avgChars": 5731.906382978724,
+            "avgItems": 19.838297872340426,
+            "better": 29,
+            "worse": 10,
+            "gained": 38,
+            "lost": 14,
+            "contributing": 261,
+            "packP95Ms": 0.13909999999941647,
+            "ciVsStaged": [
+              1.1363636363636365,
+              4.405286343612334
+            ],
+            "ciVsDensity": [
+              -0.11990407673860912,
+              1.1235955056179776
+            ]
+          },
+          "facets": {
+            "hits": 261,
+            "total": 833,
+            "recall": 0.3133253301320528,
+            "full": 19,
+            "avgChars": 5734.587234042553,
+            "avgItems": 19.73191489361702,
+            "better": 30,
+            "worse": 11,
+            "gained": 41,
+            "lost": 17,
+            "contributing": 261,
+            "packP95Ms": 0.1890000000003056,
+            "ciVsStaged": [
+              0.9032258064516129,
+              4.534313725490196
+            ],
+            "ciVsDensity": [
+              0,
+              1.0604453870625663
+            ]
+          }
+        },
+        "withNeighbors_6000_50": {
+          "greedy": {
+            "hits": 169,
+            "total": 833,
+            "recall": 0.2028811524609844,
+            "full": 14,
+            "avgChars": 5944.71914893617,
+            "avgItems": 7.731914893617021,
+            "better": 13,
+            "worse": 69,
+            "gained": 22,
+            "lost": 97,
+            "contributing": 169,
+            "packP95Ms": 0.005600000000413274,
+            "ciVsStaged": [
+              -12.646675358539765,
+              -5.961070559610706
+            ],
+            "ciVsDensity": [
+              -15.24390243902439,
+              -8.20021299254526
+            ]
+          },
+          "staged": {
+            "hits": 244,
+            "total": 833,
+            "recall": 0.2929171668667467,
+            "full": 15,
+            "avgChars": 5846.795744680851,
+            "avgItems": 16.982978723404255,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 244,
+            "packP95Ms": 0.01599999999962165,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              -4.207920792079208,
+              -1.1737089201877935
+            ]
+          },
+          "density": {
+            "hits": 266,
+            "total": 833,
+            "recall": 0.31932773109243695,
+            "full": 18,
+            "avgChars": 5737.893617021276,
+            "avgItems": 21.072340425531916,
+            "better": 26,
+            "worse": 9,
+            "gained": 34,
+            "lost": 12,
+            "contributing": 266,
+            "packP95Ms": 0.12690000000020518,
+            "ciVsStaged": [
+              1.1668611435239207,
+              4.199772985244041
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 268,
+            "total": 833,
+            "recall": 0.3217286914765906,
+            "full": 19,
+            "avgChars": 5738.04255319149,
+            "avgItems": 21.025531914893616,
+            "better": 28,
+            "worse": 9,
+            "gained": 37,
+            "lost": 13,
+            "contributing": 268,
+            "packP95Ms": 0.15049999999973807,
+            "ciVsStaged": [
+              1.3871374527112232,
+              4.410011918951132
+            ],
+            "ciVsDensity": [
+              0,
+              0.5945303210463734
+            ]
+          },
+          "facets": {
+            "hits": 267,
+            "total": 833,
+            "recall": 0.3205282112845138,
+            "full": 19,
+            "avgChars": 5752.927659574468,
+            "avgItems": 20.85531914893617,
+            "better": 27,
+            "worse": 9,
+            "gained": 35,
+            "lost": 12,
+            "contributing": 267,
+            "packP95Ms": 0.21169999999983702,
+            "ciVsStaged": [
+              1.3605442176870748,
+              4.225352112676056
+            ],
+            "ciVsDensity": [
+              -0.23501762632197415,
+              0.5369127516778524
+            ]
+          }
+        }
+      },
+      "pinAblation": {
+        "2500_20": {
+          "greedy3": {
+            "hits": 141,
+            "golds": 833,
+            "recall": 0.16926770708283315,
+            "avgChars": 2434.91914893617,
+            "full": 10,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 145,
+            "golds": 833,
+            "recall": 0.17406962785114047,
+            "avgChars": 2434.8893617021276,
+            "full": 10,
+            "improved": 3,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              1.3447432762836187
+            ]
+          },
+          "greedy0": {
+            "hits": 145,
+            "golds": 833,
+            "recall": 0.17406962785114047,
+            "avgChars": 2434.8553191489364,
+            "full": 10,
+            "improved": 3,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              1.3447432762836187
+            ]
+          },
+          "staged3": {
+            "hits": 165,
+            "golds": 833,
+            "recall": 0.19807923169267708,
+            "avgChars": 2390.285106382979,
+            "full": 10,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 167,
+            "golds": 833,
+            "recall": 0.20048019207683074,
+            "avgChars": 2380.255319148936,
+            "full": 9,
+            "improved": 4,
+            "regressed": 3,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              -0.6009615384615384,
+              1.4687882496940023
+            ]
+          },
+          "staged0": {
+            "hits": 173,
+            "golds": 833,
+            "recall": 0.20768307322929172,
+            "avgChars": 2380.255319148936,
+            "full": 11,
+            "improved": 10,
+            "regressed": 6,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              -0.37174721189591076,
+              2.5345622119815667
+            ]
+          }
+        },
+        "4000_20": {
+          "greedy3": {
+            "hits": 118,
+            "golds": 833,
+            "recall": 0.14165666266506602,
+            "avgChars": 3945.3702127659576,
+            "full": 3,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 120,
+            "golds": 833,
+            "recall": 0.14405762304921968,
+            "avgChars": 3944.8212765957446,
+            "full": 3,
+            "improved": 3,
+            "regressed": 1,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.2306805074971165,
+              0.746268656716418
+            ]
+          },
+          "greedy0": {
+            "hits": 124,
+            "golds": 833,
+            "recall": 0.148859543817527,
+            "avgChars": 3943.506382978723,
+            "full": 4,
+            "improved": 7,
+            "regressed": 3,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.1091703056768559,
+              1.7321016166281755
+            ]
+          },
+          "staged3": {
+            "hits": 130,
+            "golds": 833,
+            "recall": 0.15606242496998798,
+            "avgChars": 3932.5234042553193,
+            "full": 5,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 156,
+            "golds": 833,
+            "recall": 0.1872749099639856,
+            "avgChars": 3902.323404255319,
+            "full": 9,
+            "improved": 25,
+            "regressed": 3,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              1.7721518987341771,
+              4.519119351100811
+            ]
+          },
+          "staged0": {
+            "hits": 204,
+            "golds": 833,
+            "recall": 0.24489795918367346,
+            "avgChars": 3863.008510638298,
+            "full": 14,
+            "improved": 65,
+            "regressed": 10,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              6.506024096385542,
+              11.34020618556701
+            ]
+          }
+        },
+        "4000_32": {
+          "greedy3": {
+            "hits": 118,
+            "golds": 833,
+            "recall": 0.14165666266506602,
+            "avgChars": 3947.540425531915,
+            "full": 3,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 120,
+            "golds": 833,
+            "recall": 0.14405762304921968,
+            "avgChars": 3946.991489361702,
+            "full": 3,
+            "improved": 3,
+            "regressed": 1,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.2306805074971165,
+              0.746268656716418
+            ]
+          },
+          "greedy0": {
+            "hits": 124,
+            "golds": 833,
+            "recall": 0.148859543817527,
+            "avgChars": 3945.676595744681,
+            "full": 4,
+            "improved": 7,
+            "regressed": 3,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.1091703056768559,
+              1.7321016166281755
+            ]
+          },
+          "staged3": {
+            "hits": 130,
+            "golds": 833,
+            "recall": 0.15606242496998798,
+            "avgChars": 3935.1063829787236,
+            "full": 5,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 156,
+            "golds": 833,
+            "recall": 0.1872749099639856,
+            "avgChars": 3906.4297872340426,
+            "full": 9,
+            "improved": 25,
+            "regressed": 3,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              1.7721518987341771,
+              4.519119351100811
+            ]
+          },
+          "staged0": {
+            "hits": 204,
+            "golds": 833,
+            "recall": 0.24489795918367346,
+            "avgChars": 3871.4170212765957,
+            "full": 14,
+            "improved": 65,
+            "regressed": 10,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              6.506024096385542,
+              11.34020618556701
+            ]
+          }
+        },
+        "6000_20": {
+          "greedy3": {
+            "hits": 157,
+            "golds": 833,
+            "recall": 0.18847539015606243,
+            "avgChars": 5929.234042553191,
+            "full": 12,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 159,
+            "golds": 833,
+            "recall": 0.1908763505402161,
+            "avgChars": 5931.434042553192,
+            "full": 13,
+            "improved": 3,
+            "regressed": 1,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.4884004884004884,
+              0.975609756097561
+            ]
+          },
+          "greedy0": {
+            "hits": 159,
+            "golds": 833,
+            "recall": 0.1908763505402161,
+            "avgChars": 5931.723404255319,
+            "full": 13,
+            "improved": 10,
+            "regressed": 7,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.8274231678486997,
+              1.3280212483399734
+            ]
+          },
+          "staged3": {
+            "hits": 166,
+            "golds": 833,
+            "recall": 0.1992797118847539,
+            "avgChars": 5916.28085106383,
+            "full": 14,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 183,
+            "golds": 833,
+            "recall": 0.21968787515006002,
+            "avgChars": 5839.829787234043,
+            "full": 15,
+            "improved": 13,
+            "regressed": 2,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0.9422850412249706,
+              3.2637075718015667
+            ]
+          },
+          "staged0": {
+            "hits": 232,
+            "golds": 833,
+            "recall": 0.2785114045618247,
+            "avgChars": 5584.221276595745,
+            "full": 18,
+            "improved": 61,
+            "regressed": 14,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              5.567928730512249,
+              10.546378653113088
+            ]
+          }
+        },
+        "6000_32": {
+          "greedy3": {
+            "hits": 157,
+            "golds": 833,
+            "recall": 0.18847539015606243,
+            "avgChars": 5929.234042553191,
+            "full": 12,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 159,
+            "golds": 833,
+            "recall": 0.1908763505402161,
+            "avgChars": 5931.434042553192,
+            "full": 13,
+            "improved": 3,
+            "regressed": 1,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.4884004884004884,
+              0.975609756097561
+            ]
+          },
+          "greedy0": {
+            "hits": 159,
+            "golds": 833,
+            "recall": 0.1908763505402161,
+            "avgChars": 5934.055319148936,
+            "full": 13,
+            "improved": 10,
+            "regressed": 7,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.8274231678486997,
+              1.3280212483399734
+            ]
+          },
+          "staged3": {
+            "hits": 166,
+            "golds": 833,
+            "recall": 0.1992797118847539,
+            "avgChars": 5926.88085106383,
+            "full": 14,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 183,
+            "golds": 833,
+            "recall": 0.21968787515006002,
+            "avgChars": 5911.327659574468,
+            "full": 15,
+            "improved": 13,
+            "regressed": 2,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0.9422850412249706,
+              3.2637075718015667
+            ]
+          },
+          "staged0": {
+            "hits": 237,
+            "golds": 833,
+            "recall": 0.2845138055222089,
+            "avgChars": 5824.442553191489,
+            "full": 18,
+            "improved": 64,
+            "regressed": 14,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              5.8690744920993225,
+              11.573472041612483
+            ]
+          }
+        },
+        "6000_50": {
+          "greedy3": {
+            "hits": 157,
+            "golds": 833,
+            "recall": 0.18847539015606243,
+            "avgChars": 5929.234042553191,
+            "full": 12,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 159,
+            "golds": 833,
+            "recall": 0.1908763505402161,
+            "avgChars": 5931.434042553192,
+            "full": 13,
+            "improved": 3,
+            "regressed": 1,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.4884004884004884,
+              0.975609756097561
+            ]
+          },
+          "greedy0": {
+            "hits": 159,
+            "golds": 833,
+            "recall": 0.1908763505402161,
+            "avgChars": 5934.055319148936,
+            "full": 13,
+            "improved": 10,
+            "regressed": 7,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.8274231678486997,
+              1.3280212483399734
+            ]
+          },
+          "staged3": {
+            "hits": 166,
+            "golds": 833,
+            "recall": 0.1992797118847539,
+            "avgChars": 5929.114893617021,
+            "full": 14,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 183,
+            "golds": 833,
+            "recall": 0.21968787515006002,
+            "avgChars": 5913.561702127659,
+            "full": 15,
+            "improved": 13,
+            "regressed": 2,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0.9422850412249706,
+              3.2637075718015667
+            ]
+          },
+          "staged0": {
+            "hits": 237,
+            "golds": 833,
+            "recall": 0.2845138055222089,
+            "avgChars": 5826.6765957446805,
+            "full": 18,
+            "improved": 64,
+            "regressed": 14,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              5.8690744920993225,
+              11.573472041612483
+            ]
+          }
+        }
+      }
+    },
+    "longmemeval": {
+      "questions": 100,
+      "datasetSha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+      "goldUnits": "answer-session",
+      "queriesWithFacets": 56,
+      "coverage": {
+        "records_2500_20": {
+          "greedy": {
+            "hits": 133,
+            "total": 170,
+            "recall": 0.7823529411764706,
+            "full": 8,
+            "avgChars": 2469.94,
+            "avgItems": 6.22,
+            "better": 0,
+            "worse": 7,
+            "gained": 1,
+            "lost": 11,
+            "contributing": 133,
+            "packP95Ms": 0.005100000000311411,
+            "ciVsStaged": [
+              -10.674157303370787,
+              -1.829268292682927
+            ],
+            "ciVsDensity": [
+              -14.285714285714286,
+              -3.6809815950920246
+            ]
+          },
+          "staged": {
+            "hits": 143,
+            "total": 170,
+            "recall": 0.8411764705882353,
+            "full": 12,
+            "avgChars": 2468.1,
+            "avgItems": 9,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 143,
+            "packP95Ms": 0.009000000000014552,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              -6.666666666666667,
+              0.6493506493506493
+            ]
+          },
+          "density": {
+            "hits": 148,
+            "total": 170,
+            "recall": 0.8705882352941177,
+            "full": 15,
+            "avgChars": 2462.34,
+            "avgItems": 13.53,
+            "better": 8,
+            "worse": 3,
+            "gained": 8,
+            "lost": 3,
+            "contributing": 148,
+            "packP95Ms": 0.08619999999973516,
+            "ciVsStaged": [
+              -0.6493506493506493,
+              6.666666666666667
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 148,
+            "total": 170,
+            "recall": 0.8705882352941177,
+            "full": 15,
+            "avgChars": 2464.84,
+            "avgItems": 13.45,
+            "better": 8,
+            "worse": 3,
+            "gained": 9,
+            "lost": 4,
+            "contributing": 148,
+            "packP95Ms": 0.09360000000015134,
+            "ciVsStaged": [
+              -0.6493506493506493,
+              6.666666666666667
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "facets": {
+            "hits": 147,
+            "total": 170,
+            "recall": 0.8647058823529412,
+            "full": 14,
+            "avgChars": 2465.07,
+            "avgItems": 13.45,
+            "better": 8,
+            "worse": 4,
+            "gained": 9,
+            "lost": 5,
+            "contributing": 147,
+            "packP95Ms": 0.11020000000007713,
+            "ciVsStaged": [
+              -1.6216216216216217,
+              6.25
+            ],
+            "ciVsDensity": [
+              -1.829268292682927,
+              0
+            ]
+          }
+        },
+        "withNeighbors_2500_20": {
+          "greedy": {
+            "hits": 126,
+            "total": 170,
+            "recall": 0.7411764705882353,
+            "full": 4,
+            "avgChars": 2469.86,
+            "avgItems": 6.47,
+            "better": 1,
+            "worse": 11,
+            "gained": 1,
+            "lost": 17,
+            "contributing": 126,
+            "packP95Ms": 0.005400000000008731,
+            "ciVsStaged": [
+              -16.11111111111111,
+              -3.468208092485549
+            ],
+            "ciVsDensity": [
+              -20.207253886010363,
+              -7.643312101910828
+            ]
+          },
+          "staged": {
+            "hits": 142,
+            "total": 170,
+            "recall": 0.8352941176470589,
+            "full": 11,
+            "avgChars": 2467.49,
+            "avgItems": 9.25,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 142,
+            "packP95Ms": 0.00860000000011496,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              -7.6923076923076925,
+              -0.5747126436781609
+            ]
+          },
+          "density": {
+            "hits": 149,
+            "total": 170,
+            "recall": 0.8764705882352941,
+            "full": 16,
+            "avgChars": 2462.75,
+            "avgItems": 13.48,
+            "better": 9,
+            "worse": 2,
+            "gained": 9,
+            "lost": 2,
+            "contributing": 149,
+            "packP95Ms": 0.0849000000007436,
+            "ciVsStaged": [
+              0.5681818181818182,
+              7.6923076923076925
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 149,
+            "total": 170,
+            "recall": 0.8764705882352941,
+            "full": 16,
+            "avgChars": 2462.94,
+            "avgItems": 13.41,
+            "better": 10,
+            "worse": 3,
+            "gained": 10,
+            "lost": 3,
+            "contributing": 149,
+            "packP95Ms": 0.0918999999994412,
+            "ciVsStaged": [
+              0,
+              8.024691358024691
+            ],
+            "ciVsDensity": [
+              -1.7241379310344827,
+              1.6666666666666667
+            ]
+          },
+          "facets": {
+            "hits": 149,
+            "total": 170,
+            "recall": 0.8764705882352941,
+            "full": 16,
+            "avgChars": 2463.7,
+            "avgItems": 13.43,
+            "better": 10,
+            "worse": 3,
+            "gained": 10,
+            "lost": 3,
+            "contributing": 149,
+            "packP95Ms": 0.10379999999986467,
+            "ciVsStaged": [
+              0,
+              8.024691358024691
+            ],
+            "ciVsDensity": [
+              -1.7241379310344827,
+              1.6666666666666667
+            ]
+          }
+        },
+        "records_4000_32": {
+          "greedy": {
+            "hits": 139,
+            "total": 170,
+            "recall": 0.8176470588235294,
+            "full": 9,
+            "avgChars": 3972.16,
+            "avgItems": 7.48,
+            "better": 1,
+            "worse": 10,
+            "gained": 1,
+            "lost": 12,
+            "contributing": 139,
+            "packP95Ms": 0.004800000000614091,
+            "ciVsStaged": [
+              -10.919540229885058,
+              -2.3529411764705883
+            ],
+            "ciVsDensity": [
+              -15.2046783625731,
+              -6.289308176100629
+            ]
+          },
+          "staged": {
+            "hits": 150,
+            "total": 170,
+            "recall": 0.8823529411764706,
+            "full": 18,
+            "avgChars": 3971.63,
+            "avgItems": 13.06,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 150,
+            "packP95Ms": 0.011599999999816646,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              -7.428571428571429,
+              -1.098901098901099
+            ]
+          },
+          "density": {
+            "hits": 157,
+            "total": 170,
+            "recall": 0.9235294117647059,
+            "full": 21,
+            "avgChars": 3952.54,
+            "avgItems": 20.54,
+            "better": 8,
+            "worse": 1,
+            "gained": 8,
+            "lost": 1,
+            "contributing": 157,
+            "packP95Ms": 0.12359999999989668,
+            "ciVsStaged": [
+              1.098901098901099,
+              7.428571428571429
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 157,
+            "total": 170,
+            "recall": 0.9235294117647059,
+            "full": 21,
+            "avgChars": 3950.22,
+            "avgItems": 20.48,
+            "better": 8,
+            "worse": 1,
+            "gained": 8,
+            "lost": 1,
+            "contributing": 157,
+            "packP95Ms": 0.127200000000812,
+            "ciVsStaged": [
+              1.098901098901099,
+              7.428571428571429
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "facets": {
+            "hits": 157,
+            "total": 170,
+            "recall": 0.9235294117647059,
+            "full": 21,
+            "avgChars": 3950.88,
+            "avgItems": 20.36,
+            "better": 8,
+            "worse": 1,
+            "gained": 8,
+            "lost": 1,
+            "contributing": 157,
+            "packP95Ms": 0.1687000000001717,
+            "ciVsStaged": [
+              1.098901098901099,
+              7.428571428571429
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          }
+        },
+        "withNeighbors_4000_32": {
+          "greedy": {
+            "hits": 130,
+            "total": 170,
+            "recall": 0.7647058823529411,
+            "full": 8,
+            "avgChars": 3969.03,
+            "avgItems": 7.28,
+            "better": 1,
+            "worse": 12,
+            "gained": 1,
+            "lost": 20,
+            "contributing": 130,
+            "packP95Ms": 0.005600000000413274,
+            "ciVsStaged": [
+              -17.341040462427745,
+              -5.194805194805195
+            ],
+            "ciVsDensity": [
+              -21.243523316062177,
+              -9.142857142857142
+            ]
+          },
+          "staged": {
+            "hits": 149,
+            "total": 170,
+            "recall": 0.8764705882352941,
+            "full": 15,
+            "avgChars": 3971.36,
+            "avgItems": 13.22,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 149,
+            "packP95Ms": 0.013299999999617285,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              -7.142857142857143,
+              -1.3245033112582782
+            ]
+          },
+          "density": {
+            "hits": 156,
+            "total": 170,
+            "recall": 0.9176470588235294,
+            "full": 20,
+            "avgChars": 3949.73,
+            "avgItems": 20.61,
+            "better": 7,
+            "worse": 0,
+            "gained": 8,
+            "lost": 1,
+            "contributing": 156,
+            "packP95Ms": 0.13240000000041618,
+            "ciVsStaged": [
+              1.3245033112582782,
+              7.142857142857143
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 157,
+            "total": 170,
+            "recall": 0.9235294117647059,
+            "full": 21,
+            "avgChars": 3948.71,
+            "avgItems": 20.51,
+            "better": 8,
+            "worse": 0,
+            "gained": 9,
+            "lost": 1,
+            "contributing": 157,
+            "packP95Ms": 0.1352999999999156,
+            "ciVsStaged": [
+              1.875,
+              7.82122905027933
+            ],
+            "ciVsDensity": [
+              0,
+              1.8518518518518519
+            ]
+          },
+          "facets": {
+            "hits": 157,
+            "total": 170,
+            "recall": 0.9235294117647059,
+            "full": 21,
+            "avgChars": 3949.91,
+            "avgItems": 20.37,
+            "better": 8,
+            "worse": 0,
+            "gained": 9,
+            "lost": 1,
+            "contributing": 157,
+            "packP95Ms": 0.17990000000008877,
+            "ciVsStaged": [
+              1.875,
+              7.82122905027933
+            ],
+            "ciVsDensity": [
+              0,
+              1.8518518518518519
+            ]
+          }
+        },
+        "records_6000_50": {
+          "greedy": {
+            "hits": 143,
+            "total": 170,
+            "recall": 0.8411764705882353,
+            "full": 12,
+            "avgChars": 5973.24,
+            "avgItems": 9.29,
+            "better": 1,
+            "worse": 12,
+            "gained": 1,
+            "lost": 13,
+            "contributing": 143,
+            "packP95Ms": 0.0052999999998064595,
+            "ciVsStaged": [
+              -11.11111111111111,
+              -2.9761904761904763
+            ],
+            "ciVsDensity": [
+              -14.814814814814815,
+              -6.25
+            ]
+          },
+          "staged": {
+            "hits": 155,
+            "total": 170,
+            "recall": 0.9117647058823529,
+            "full": 23,
+            "avgChars": 5968.09,
+            "avgItems": 16.18,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 155,
+            "packP95Ms": 0.015099999999620195,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              -7.100591715976331,
+              -0.546448087431694
+            ]
+          },
+          "density": {
+            "hits": 161,
+            "total": 170,
+            "recall": 0.9470588235294117,
+            "full": 24,
+            "avgChars": 5936.77,
+            "avgItems": 28.65,
+            "better": 6,
+            "worse": 1,
+            "gained": 7,
+            "lost": 1,
+            "contributing": 161,
+            "packP95Ms": 0.16190000000005966,
+            "ciVsStaged": [
+              0.546448087431694,
+              7.065217391304348
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 160,
+            "total": 170,
+            "recall": 0.9411764705882353,
+            "full": 24,
+            "avgChars": 5935.66,
+            "avgItems": 28.44,
+            "better": 6,
+            "worse": 1,
+            "gained": 6,
+            "lost": 1,
+            "contributing": 160,
+            "packP95Ms": 0.17199999999957072,
+            "ciVsStaged": [
+              0,
+              5.882352941176471
+            ],
+            "ciVsDensity": [
+              -1.829268292682927,
+              0
+            ]
+          },
+          "facets": {
+            "hits": 161,
+            "total": 170,
+            "recall": 0.9470588235294117,
+            "full": 24,
+            "avgChars": 5937.46,
+            "avgItems": 28.46,
+            "better": 6,
+            "worse": 1,
+            "gained": 7,
+            "lost": 1,
+            "contributing": 161,
+            "packP95Ms": 0.2066000000004351,
+            "ciVsStaged": [
+              0.546448087431694,
+              7.065217391304348
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          }
+        },
+        "withNeighbors_6000_50": {
+          "greedy": {
+            "hits": 139,
+            "total": 170,
+            "recall": 0.8176470588235294,
+            "full": 12,
+            "avgChars": 5972.5,
+            "avgItems": 8.81,
+            "better": 1,
+            "worse": 13,
+            "gained": 1,
+            "lost": 15,
+            "contributing": 139,
+            "packP95Ms": 0.005500000000211003,
+            "ciVsStaged": [
+              -12.804878048780488,
+              -3.6144578313253013
+            ],
+            "ciVsDensity": [
+              -19.161676646706585,
+              -9.202453987730062
+            ]
+          },
+          "staged": {
+            "hits": 153,
+            "total": 170,
+            "recall": 0.9,
+            "full": 19,
+            "avgChars": 5967.65,
+            "avgItems": 16.18,
+            "better": 0,
+            "worse": 0,
+            "gained": 0,
+            "lost": 0,
+            "contributing": 153,
+            "packP95Ms": 0.01599999999962165,
+            "ciVsStaged": [
+              0,
+              0
+            ],
+            "ciVsDensity": [
+              -9.042553191489361,
+              -2.824858757062147
+            ]
+          },
+          "density": {
+            "hits": 163,
+            "total": 170,
+            "recall": 0.9588235294117647,
+            "full": 25,
+            "avgChars": 5929.77,
+            "avgItems": 28.72,
+            "better": 10,
+            "worse": 0,
+            "gained": 11,
+            "lost": 1,
+            "contributing": 163,
+            "packP95Ms": 0.15860000000066066,
+            "ciVsStaged": [
+              2.824858757062147,
+              9.03954802259887
+            ],
+            "ciVsDensity": [
+              0,
+              0
+            ]
+          },
+          "terms": {
+            "hits": 162,
+            "total": 170,
+            "recall": 0.9529411764705882,
+            "full": 25,
+            "avgChars": 5925.77,
+            "avgItems": 28.5,
+            "better": 9,
+            "worse": 0,
+            "gained": 10,
+            "lost": 1,
+            "contributing": 162,
+            "packP95Ms": 0.19909999999981665,
+            "ciVsStaged": [
+              2.4242424242424243,
+              8.383233532934131
+            ],
+            "ciVsDensity": [
+              -1.829268292682927,
+              0
+            ]
+          },
+          "facets": {
+            "hits": 162,
+            "total": 170,
+            "recall": 0.9529411764705882,
+            "full": 25,
+            "avgChars": 5929.77,
+            "avgItems": 28.5,
+            "better": 9,
+            "worse": 0,
+            "gained": 10,
+            "lost": 1,
+            "contributing": 162,
+            "packP95Ms": 0.23869999999988067,
+            "ciVsStaged": [
+              2.4242424242424243,
+              8.383233532934131
+            ],
+            "ciVsDensity": [
+              -1.829268292682927,
+              0
+            ]
+          }
+        }
+      },
+      "pinAblation": {
+        "2500_20": {
+          "greedy3": {
+            "hits": 128,
+            "golds": 170,
+            "recall": 0.7529411764705882,
+            "avgChars": 2469.69,
+            "full": 4,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 131,
+            "golds": 170,
+            "recall": 0.7705882352941177,
+            "avgChars": 2469.52,
+            "full": 6,
+            "improved": 3,
+            "regressed": 1,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -1.0869565217391304,
+              4.938271604938271
+            ]
+          },
+          "greedy0": {
+            "hits": 133,
+            "golds": 170,
+            "recall": 0.7823529411764706,
+            "avgChars": 2469.94,
+            "full": 8,
+            "improved": 5,
+            "regressed": 2,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.6802721088435374,
+              7.18562874251497
+            ]
+          },
+          "staged3": {
+            "hits": 129,
+            "golds": 170,
+            "recall": 0.7588235294117647,
+            "avgChars": 2467.99,
+            "full": 4,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 136,
+            "golds": 170,
+            "recall": 0.8,
+            "avgChars": 2467.54,
+            "full": 9,
+            "improved": 6,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              1.1976047904191616,
+              7.594936708860759
+            ]
+          },
+          "staged0": {
+            "hits": 143,
+            "golds": 170,
+            "recall": 0.8411764705882353,
+            "avgChars": 2468.1,
+            "full": 12,
+            "improved": 9,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              3.2679738562091503,
+              13.69047619047619
+            ]
+          }
+        },
+        "4000_20": {
+          "greedy3": {
+            "hits": 136,
+            "golds": 170,
+            "recall": 0.8,
+            "avgChars": 3972.97,
+            "full": 9,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 138,
+            "golds": 170,
+            "recall": 0.8117647058823529,
+            "avgChars": 3973.54,
+            "full": 9,
+            "improved": 3,
+            "regressed": 1,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -1.1627906976744187,
+              3.5502958579881656
+            ]
+          },
+          "greedy0": {
+            "hits": 139,
+            "golds": 170,
+            "recall": 0.8176470588235294,
+            "avgChars": 3972.16,
+            "full": 9,
+            "improved": 4,
+            "regressed": 1,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.625,
+              4.371584699453552
+            ]
+          },
+          "staged3": {
+            "hits": 139,
+            "golds": 170,
+            "recall": 0.8176470588235294,
+            "avgChars": 3969.97,
+            "full": 11,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 147,
+            "golds": 170,
+            "recall": 0.8647058823529412,
+            "avgChars": 3970.24,
+            "full": 16,
+            "improved": 7,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              1.7142857142857142,
+              8.333333333333334
+            ]
+          },
+          "staged0": {
+            "hits": 150,
+            "golds": 170,
+            "recall": 0.8823529411764706,
+            "avgChars": 3971.14,
+            "full": 18,
+            "improved": 9,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              2.7624309392265194,
+              10.695187165775401
+            ]
+          }
+        },
+        "4000_32": {
+          "greedy3": {
+            "hits": 136,
+            "golds": 170,
+            "recall": 0.8,
+            "avgChars": 3972.97,
+            "full": 9,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 138,
+            "golds": 170,
+            "recall": 0.8117647058823529,
+            "avgChars": 3973.54,
+            "full": 9,
+            "improved": 3,
+            "regressed": 1,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -1.1627906976744187,
+              3.5502958579881656
+            ]
+          },
+          "greedy0": {
+            "hits": 139,
+            "golds": 170,
+            "recall": 0.8176470588235294,
+            "avgChars": 3972.16,
+            "full": 9,
+            "improved": 4,
+            "regressed": 1,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              -0.625,
+              4.371584699453552
+            ]
+          },
+          "staged3": {
+            "hits": 139,
+            "golds": 170,
+            "recall": 0.8176470588235294,
+            "avgChars": 3969.97,
+            "full": 11,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 147,
+            "golds": 170,
+            "recall": 0.8647058823529412,
+            "avgChars": 3970.73,
+            "full": 16,
+            "improved": 7,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              1.7142857142857142,
+              8.333333333333334
+            ]
+          },
+          "staged0": {
+            "hits": 150,
+            "golds": 170,
+            "recall": 0.8823529411764706,
+            "avgChars": 3971.63,
+            "full": 18,
+            "improved": 9,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              2.7624309392265194,
+              10.695187165775401
+            ]
+          }
+        },
+        "6000_20": {
+          "greedy3": {
+            "hits": 138,
+            "golds": 170,
+            "recall": 0.8117647058823529,
+            "avgChars": 5972.44,
+            "full": 11,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 143,
+            "golds": 170,
+            "recall": 0.8411764705882353,
+            "avgChars": 5971.46,
+            "full": 12,
+            "improved": 4,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0.5617977528089888,
+              6.282722513089006
+            ]
+          },
+          "greedy0": {
+            "hits": 143,
+            "golds": 170,
+            "recall": 0.8411764705882353,
+            "avgChars": 5973.24,
+            "full": 12,
+            "improved": 4,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0.5617977528089888,
+              6.282722513089006
+            ]
+          },
+          "staged3": {
+            "hits": 149,
+            "golds": 170,
+            "recall": 0.8764705882352941,
+            "avgChars": 5962.24,
+            "full": 18,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 152,
+            "golds": 170,
+            "recall": 0.8941176470588236,
+            "avgChars": 5908.76,
+            "full": 19,
+            "improved": 3,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              3.932584269662921
+            ]
+          },
+          "staged0": {
+            "hits": 155,
+            "golds": 170,
+            "recall": 0.9117647058823529,
+            "avgChars": 5898.24,
+            "full": 23,
+            "improved": 6,
+            "regressed": 1,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0.5524861878453039,
+              7.361963190184049
+            ]
+          }
+        },
+        "6000_32": {
+          "greedy3": {
+            "hits": 138,
+            "golds": 170,
+            "recall": 0.8117647058823529,
+            "avgChars": 5972.44,
+            "full": 11,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 143,
+            "golds": 170,
+            "recall": 0.8411764705882353,
+            "avgChars": 5971.46,
+            "full": 12,
+            "improved": 4,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0.5617977528089888,
+              6.282722513089006
+            ]
+          },
+          "greedy0": {
+            "hits": 143,
+            "golds": 170,
+            "recall": 0.8411764705882353,
+            "avgChars": 5973.24,
+            "full": 12,
+            "improved": 4,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0.5617977528089888,
+              6.282722513089006
+            ]
+          },
+          "staged3": {
+            "hits": 149,
+            "golds": 170,
+            "recall": 0.8764705882352941,
+            "avgChars": 5970.17,
+            "full": 18,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 152,
+            "golds": 170,
+            "recall": 0.8941176470588236,
+            "avgChars": 5968.36,
+            "full": 19,
+            "improved": 3,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              3.932584269662921
+            ]
+          },
+          "staged0": {
+            "hits": 155,
+            "golds": 170,
+            "recall": 0.9117647058823529,
+            "avgChars": 5968.09,
+            "full": 23,
+            "improved": 6,
+            "regressed": 1,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0.5524861878453039,
+              7.361963190184049
+            ]
+          }
+        },
+        "6000_50": {
+          "greedy3": {
+            "hits": 138,
+            "golds": 170,
+            "recall": 0.8117647058823529,
+            "avgChars": 5972.44,
+            "full": 11,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "greedy1": {
+            "hits": 143,
+            "golds": 170,
+            "recall": 0.8411764705882353,
+            "avgChars": 5971.46,
+            "full": 12,
+            "improved": 4,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0.5617977528089888,
+              6.282722513089006
+            ]
+          },
+          "greedy0": {
+            "hits": 143,
+            "golds": 170,
+            "recall": 0.8411764705882353,
+            "avgChars": 5973.24,
+            "full": 12,
+            "improved": 4,
+            "regressed": 0,
+            "reference": "greedy3",
+            "ciVsPinned3": [
+              0.5617977528089888,
+              6.282722513089006
+            ]
+          },
+          "staged3": {
+            "hits": 149,
+            "golds": 170,
+            "recall": 0.8764705882352941,
+            "avgChars": 5970.17,
+            "full": 18,
+            "improved": 0,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              0
+            ]
+          },
+          "staged1": {
+            "hits": 152,
+            "golds": 170,
+            "recall": 0.8941176470588236,
+            "avgChars": 5968.36,
+            "full": 19,
+            "improved": 3,
+            "regressed": 0,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0,
+              3.932584269662921
+            ]
+          },
+          "staged0": {
+            "hits": 155,
+            "golds": 170,
+            "recall": 0.9117647058823529,
+            "avgChars": 5968.09,
+            "full": 23,
+            "improved": 6,
+            "regressed": 1,
+            "reference": "staged3",
+            "ciVsPinned3": [
+              0.5524861878453039,
+              7.361963190184049
+            ]
+          }
+        }
+      }
+    }
+  },
+  "graph": {
+    "reportSha256": "8af0eb2b8c87a884f2243c4395b181ed1e06932d3dc20e9d05bc3cfccc14c01a",
+    "constructed": true,
+    "positives": 4,
+    "guards": 4,
+    "cases": [
+      {
+        "id": "reason",
+        "query": "Why did Atlas switch to SQLite?",
+        "role": "reason",
+        "edge": "causes",
+        "cap": 114,
+        "plain": {
+          "picked": [
+            "anchor",
+            "adjacent"
+          ],
+          "chars": 92,
+          "covered": []
+        },
+        "graph": {
+          "picked": [
+            "anchor",
+            "extra"
+          ],
+          "chars": 114,
+          "covered": [
+            "reason"
+          ]
+        },
+        "expected": "extra"
+      },
+      {
+        "id": "impact",
+        "query": "What happened after Cedar's cutover?",
+        "role": "impact",
+        "edge": "causes",
+        "cap": 101,
+        "plain": {
+          "picked": [
+            "anchor",
+            "adjacent"
+          ],
+          "chars": 98,
+          "covered": []
+        },
+        "graph": {
+          "picked": [
+            "anchor",
+            "extra"
+          ],
+          "chars": 101,
+          "covered": [
+            "impact"
+          ]
+        },
+        "expected": "extra"
+      },
+      {
+        "id": "previous",
+        "query": "What was the previous Ember policy?",
+        "role": "previous",
+        "edge": "supersedes",
+        "cap": 118,
+        "plain": {
+          "picked": [
+            "anchor",
+            "adjacent"
+          ],
+          "chars": 118,
+          "covered": []
+        },
+        "graph": {
+          "picked": [
+            "anchor",
+            "extra"
+          ],
+          "chars": 112,
+          "covered": [
+            "previous"
+          ]
+        },
+        "expected": "extra"
+      },
+      {
+        "id": "dependency",
+        "query": "What does the Indigo rollout depend on?",
+        "role": "dependency",
+        "edge": "depends_on",
+        "cap": 105,
+        "plain": {
+          "picked": [
+            "anchor",
+            "adjacent"
+          ],
+          "chars": 86,
+          "covered": []
+        },
+        "graph": {
+          "picked": [
+            "anchor",
+            "extra"
+          ],
+          "chars": 105,
+          "covered": [
+            "dependency"
+          ]
+        },
+        "expected": "extra"
+      },
+      {
+        "id": "weak-edge",
+        "query": "Why did Aspen switch to SQLite?",
+        "role": "reason",
+        "edge": "related_to",
+        "cap": 94,
+        "plain": {
+          "picked": [
+            "anchor",
+            "adjacent"
+          ],
+          "chars": 93,
+          "covered": []
+        },
+        "graph": {
+          "picked": [
+            "anchor",
+            "adjacent"
+          ],
+          "chars": 93,
+          "covered": []
+        },
+        "expected": "adjacent"
+      },
+      {
+        "id": "wrong-direction",
+        "query": "Why did Birch switch to SQLite?",
+        "role": "reason",
+        "edge": "causes",
+        "cap": 104,
+        "plain": {
+          "picked": [
+            "anchor",
+            "adjacent"
+          ],
+          "chars": 91,
+          "covered": []
+        },
+        "graph": {
+          "picked": [
+            "anchor",
+            "adjacent"
+          ],
+          "chars": 91,
+          "covered": []
+        },
+        "expected": "adjacent"
+      },
+      {
+        "id": "no-edge-provenance",
+        "query": "Why did Elm switch to SQLite?",
+        "role": "reason",
+        "edge": "causes",
+        "cap": 110,
+        "plain": {
+          "picked": [
+            "anchor",
+            "adjacent"
+          ],
+          "chars": 110,
+          "covered": []
+        },
+        "graph": {
+          "picked": [
+            "anchor",
+            "adjacent"
+          ],
+          "chars": 110,
+          "covered": []
+        },
+        "expected": "adjacent"
+      },
+      {
+        "id": "missing-raw-support",
+        "query": "Why did Juniper switch to SQLite?",
+        "role": "reason",
+        "edge": "causes",
+        "cap": 98,
+        "plain": {
+          "picked": [
+            "anchor",
+            "adjacent"
+          ],
+          "chars": 98,
+          "covered": []
+        },
+        "graph": {
+          "picked": [
+            "anchor",
+            "adjacent"
+          ],
+          "chars": 98,
+          "covered": []
+        },
+        "expected": "adjacent"
+      }
+    ]
+  }
+}

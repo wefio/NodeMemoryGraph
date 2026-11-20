@@ -197,10 +197,11 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
   registerProjection(
     graph: ActiveGraph,
     parts: Array<ActiveGraphProjectionPart<TPart>>,
-    projectionId: string = randomUUID(),
+    projectionId?: string,
   ): SessionActiveGraphProjection<TPart> {
     const sessionId = normalizedSessionId(graph.sessionId);
     const state = this.#state(sessionId, graph.taskId);
+    const resolvedId = projectionId ?? this.#uniqueProjectionId(state);
     const taskFrameId = graph.taskId.trim() || state.activeTaskFrameId;
     const frame = this.#activateFrame(state, taskFrameId);
     // Parent chain is frame-local: a projection belongs to the frame it was
@@ -212,16 +213,16 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     const createdAt = new Date(this.#now()).toISOString();
     const projectedGraph: ActiveGraph = deepFreezeGraph({
       ...graph,
-      id: projectionId,
+      id: resolvedId,
       agId: state.agId,
-      projectionId,
+      projectionId: resolvedId,
       projectionSequence: state.sequence,
       parentProjectionId,
       taskFrameId,
       traceIds,
     });
     const projection: SessionActiveGraphProjection<TPart> = Object.freeze({
-      projectionId,
+      projectionId: resolvedId,
       agId: state.agId,
       sessionId,
       taskFrameId,
@@ -231,28 +232,61 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
       parts: Object.freeze(parts.map(copyPart)),
       createdAt,
     });
-    frame.latestProjectionId = projectionId;
-    state.projections.set(projectionId, projection);
-    state.projectionOrder.push(projectionId);
-    this.#projectionOwners.set(projectionId, sessionId);
+    frame.latestProjectionId = resolvedId;
+    state.projections.set(resolvedId, projection);
+    state.projectionOrder.push(resolvedId);
+    this.#projectionOwners.set(resolvedId, sessionId);
     this.#activateProjectionItems(state, frame, projectedGraph, createdAt);
     this.#trimProjections(state);
     this.#touch(state);
     return projection;
   }
 
+  #uniqueProjectionId(state: SessionState<TPart>): string {
+    let candidate = randomUUID();
+    const usedPrefixes = new Set([...state.projections.keys()].map((id) => id.slice(0, 8)));
+    while (usedPrefixes.has(candidate.slice(0, 8))) candidate = randomUUID();
+    return candidate;
+  }
+
+  resolveProjectionId(projectionId: string, sessionId?: string | null): string | null {
+    const exactOwner = this.#projectionOwners.get(projectionId);
+    if (exactOwner) {
+      if (sessionId?.trim() && normalizedSessionId(sessionId) !== exactOwner) return null;
+      return projectionId;
+    }
+    const prefix = projectionId.trim().toLowerCase();
+    if (!/^[0-9a-f]{8,36}$/u.test(prefix)) return null;
+    const sessions = sessionId?.trim()
+      ? [this.#sessions.get(normalizedSessionId(sessionId))].filter(Boolean)
+      : [...this.#sessions.values()];
+    const matches: string[] = [];
+    for (const state of sessions) {
+      for (const id of state!.projections.keys()) {
+        const lower = id.toLowerCase();
+        if (lower === prefix || lower.startsWith(`${prefix}-`) || lower.startsWith(prefix))
+          matches.push(id);
+      }
+    }
+    return matches.length === 1 ? matches[0]! : null;
+  }
+
   projection(
     projectionId: string,
     sessionId?: string | null,
   ): SessionActiveGraphProjection<TPart> | null {
-    const owner = this.#projectionOwners.get(projectionId);
+    const resolved = this.resolveProjectionId(projectionId, sessionId);
+    if (!resolved) return null;
+    const owner = this.#projectionOwners.get(resolved);
     if (!owner) return null;
-    if (sessionId?.trim() && normalizedSessionId(sessionId) !== owner) return null;
-    return this.#sessions.get(owner)?.projections.get(projectionId) ?? null;
+    return this.#sessions.get(owner)?.projections.get(resolved) ?? null;
   }
 
   projectionOwner(projectionId: string): string | null {
-    return this.#projectionOwners.get(projectionId) ?? null;
+    const exact = this.#projectionOwners.get(projectionId);
+    if (exact) return exact;
+    const resolved = this.resolveProjectionId(projectionId);
+    return resolved ? (this.#projectionOwners.get(resolved) ?? null) : null;
   }
 
   /** Record that a projection was disclosed to the model (host-neutral
@@ -260,12 +294,13 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
    * session. Adapters call this instead of maintaining their own injection
    * window, so "already in context" is one shared, session-owned record. */
   markDisclosed(projectionId: string, sessionId?: string | null): boolean {
-    const owner = this.#projectionOwners.get(projectionId);
+    const resolved = this.resolveProjectionId(projectionId, sessionId);
+    if (!resolved) return false;
+    const owner = this.#projectionOwners.get(resolved);
     if (!owner) return false;
-    if (sessionId?.trim() && normalizedSessionId(sessionId) !== owner) return false;
     const state = this.#sessions.get(owner);
     if (!state) return false;
-    state.disclosedProjectionIds.add(projectionId);
+    state.disclosedProjectionIds.add(resolved);
     this.#touch(state);
     return true;
   }

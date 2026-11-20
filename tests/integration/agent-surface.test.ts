@@ -4,7 +4,11 @@ import test from "node:test";
 import { searchResultFixture } from "../helpers/search-result.ts";
 import type { MemoryContext } from "../../src/core/types.ts";
 import { SessionActiveGraphRuntime } from "../../src/core/session-active-graph.ts";
-import { compactSearchContext } from "../../src/integration/search-projection.ts";
+import {
+  compactDisclosureEntries,
+  compactSearchContext,
+  memoryDisclosureEntries,
+} from "../../src/integration/search-projection.ts";
 import { loadPrompts, renderDisclosure } from "../../src/prompts/load.ts";
 import {
   confirmInformationOutput,
@@ -144,7 +148,7 @@ test("shared agent surface keeps search compact and evidence exact", () => {
     postamble: "NMG evidence metadata: count=2",
   });
 
-  assert.match(search, /memory=memory-a/u);
+  assert.match(search, /`memory-a`/u);
   assert.match(search, /chains=Atlas flow/u);
   assert.match(search, /activeGraphId=ag-atlas/u);
   assert.match(search, /fields separated by "; "/u);
@@ -152,11 +156,12 @@ test("shared agent surface keeps search compact and evidence exact", () => {
   assert.doesNotMatch(search, /matches=/u);
   assert.doesNotMatch(search, /Exact source detail/u);
   assert.match(evidence, /Exact source detail/u);
-  assert.match(evidence, /time=2026-08-20/u);
+  assert.match(search, /\ntime=2026-08-20T12:00Z A,B/u);
+  assert.match(evidence, /; time=2026-08-20T12:00:00\.000Z/u);
   assert.match(evidence, /<nmg_logical_chains>/u);
   assert.equal(evidence.split("Atlas receives input.").length - 1, 1);
-  assert.ok(search.indexOf("NMG MEMORY CANDIDATES") < search.indexOf("memory=memory-a"));
-  assert.ok(search.indexOf("memory=memory-b") < search.indexOf("NMG search metadata: count=2"));
+  assert.ok(search.indexOf("NMG MEMORY CANDIDATES") < search.indexOf("`memory-a`"));
+  assert.ok(search.indexOf("`memory-b`") < search.indexOf("NMG search metadata: count=2"));
   assert.ok(evidence.indexOf("NMG selected evidence:") < evidence.indexOf("Atlas receives input."));
   assert.ok(
     evidence.indexOf("Atlas emits output.") < evidence.indexOf("NMG evidence metadata: count=2"),
@@ -208,24 +213,122 @@ test("shared disclosure wrappers preserve the complete surface and its protected
   assert.ok(headers.includes(searchBody), "wrapping must not replace or clip candidate data");
   assert.ok(evidence.includes(evidenceBody), "wrapping must not replace or clip evidence data");
   assert.deepEqual(memory, original, "rendering must not change the canonical result");
-  assert.match(headers, /\[external\] \[open\]/u);
+  assert.match(headers, /\[open\]/u);
+  assert.doesNotMatch(headers, /\[external\]|EXTERNAL_SOURCE|Exact source detail/u);
   assert.match(headers, /expires=2026-12-31/u);
   assert.match(headers, /mode=lexical; reason=embedding_unavailable/u);
   assert.match(headers, /activeGraphId=ag-atlas/u);
   assert.match(headers, /logical_chains=1/u);
-  assert.match(headers, /selected IDs and activeGraphId/u);
+  assert.match(headers, /use nmg_get with key \+ activeGraphId/u);
   assert.equal(compactSearchContext(memory).candidates[0].preview.length, 320);
   assert.ok(evidence.includes(first.statement), "exact statements are not shortened");
-  assert.match(evidence, /truth=unverified; scope=\{"project":"atlas"\}/u);
-  assert.match(evidence, /time=2026-08-20T12:00:00.000Z/u);
+  assert.match(evidence, /\[external, unverified\]/u);
+  assert.match(evidence, /\nscope=\{"project":"atlas"\}\n/u);
+  assert.equal([...evidence.matchAll(/^scope=|; scope=/gmu)].length, 1);
+  assert.match(headers, /\ntime=2026-08-20T12:00Z A,B/u);
+  assert.match(evidence, /; time=2026-08-20T12:00:00\.000Z/u);
   assert.match(
     evidence,
     /EXTERNAL_SOURCE=web:https:\/\/example.org\/atlas; retrievedAt=2026-10-10/u,
   );
   assert.match(evidence, /SOURCE=Exact source detail for memory-a/u);
   assert.match(evidence, /<nmg_logical_chains>/u);
-  assert.match(headers, /\ncount=2\n/u);
+  assert.doesNotMatch(headers, /\ncount=/u);
   assert.match(evidence, /\ncount=2$/u);
+});
+
+test("exact evidence compacts optional metadata and keeps distinct scopes with their records", () => {
+  const first = searchResultFixture("first", "A complete statement");
+  const second = searchResultFixture("second", "An inferred constraint");
+  second.memory.memoryType = "constraint";
+  second.memory.truthStatus = "inferred";
+  second.memory.scope = { project: "other" };
+  const context = { results: [first, second], relations: [] };
+  const search = renderSearchSurface(context);
+  assert.doesNotMatch(search, /node=|type=fact|memory=|preview=/u);
+  assert.match(search, /- \[constraint\] `second` An inferred constraint/u);
+
+  const text = renderEvidenceSurface(context);
+  assert.match(text, /memory=first; node=Atlas first; scope=\{"project":"atlas"\}/u);
+  assert.match(
+    text,
+    /memory=second; node=Atlas second; type=constraint; truth=inferred; scope=\{"project":"other"\}/u,
+  );
+  assert.doesNotMatch(text, /type=fact|truth=asserted/u);
+  assert.match(text, /A complete statement/u);
+  assert.match(text, /An inferred constraint/u);
+
+  second.memory.scope = { project: "atlas" };
+  const shared = renderEvidenceSurface(context);
+  assert.equal([...shared.matchAll(/scope=/gu)].length, 1);
+  assert.match(shared, /^scope=\{"project":"atlas"\}\n/u);
+  const typed = prepareEvidenceSurface(context);
+  assert.equal([...typed.text.matchAll(/scope=/gu)].length, 2);
+  assert.deepEqual(
+    typed.included.map(({ source, disclosure }) => [source, disclosure]),
+    [
+      [{ kind: "memory", memoryId: "first", activeGraphId: undefined }, "full"],
+      [{ kind: "memory", memoryId: "second", activeGraphId: undefined }, "full"],
+    ],
+  );
+});
+
+test("explicit search puts dates in a time chain without reordering candidates", () => {
+  const newest = searchResultFixture("new", "The decision was changed.");
+  const previous = searchResultFixture("old", "The original decision.");
+  newest.memory.eventTime = "2026-08-21T19:30:00.000Z";
+  previous.memory.eventTime = "2026-08-20";
+  const context = {
+    results: [newest, previous],
+    relations: [],
+    activeGraph: { id: "12345678-1234-4123-8123-123456789abc" } as MemoryContext["activeGraph"],
+  };
+  const search = renderSearchSurface(context);
+  assert.match(search, /- \[A\] `new` The decision was changed\./u);
+  assert.match(search, /- \[B\] `old` The original decision\./u);
+  assert.match(search, /\nactiveGraphId=12345678$/u);
+  assert.ok(search.indexOf("`new`") < search.indexOf("`old`"));
+  assert.match(search, /Event time:\n2026-08-20 B\n2026-08-21T19:30Z A/u);
+  assert.doesNotMatch(search, /; time=/u);
+  assert.match(
+    renderEvidenceSurface({ results: [newest], relations: [] }),
+    /memory=new[^\n]+time=2026-08-21T19:30:00.000Z/u,
+  );
+});
+
+test("explicit get renders the complete distinct sources for the selected record", () => {
+  const result = searchResultFixture("selected", "Saved statement.");
+  const primary = `Original supporting text.\n${"More source content. ".repeat(30)}Full end.`;
+  result.evidence.content = primary;
+  result.evidenceRecords = [
+    result.evidence,
+    { ...result.evidence, id: "another-source", content: "Independent second source." },
+    { ...result.evidence, id: "duplicate", content: primary },
+  ];
+  const context = { results: [result], relations: [] };
+  const search = renderSearchSurface(context);
+  const exact = renderEvidenceSurface(context);
+  assert.doesNotMatch(search, /Original supporting text|Independent second source|SOURCE=/u);
+  assert.ok(exact.includes(primary));
+  assert.match(exact, /SOURCE=Independent second source\./u);
+  assert.equal([...exact.matchAll(/Original supporting text/gu)].length, 1);
+  assert.doesNotMatch(prepareEvidenceSurface(context).text, /Full end|Independent second source/u);
+});
+
+test("disclosure folds by visible event times and the selected record's full sources", () => {
+  const row = searchResultFixture("selected", "Saved statement.");
+  row.memory.eventTime = "2026-08-20";
+  const secondary = { ...row.evidence, id: "second-source", content: "First supporting detail." };
+  row.evidenceRecords.push(secondary);
+  const context = { results: [row], relations: [] };
+  const beforeHeader = memoryDisclosureEntries(context, "header");
+  assert.deepEqual(compactDisclosureEntries(compactSearchContext(context)), beforeHeader);
+  const beforeEvidence = memoryDisclosureEntries(context, "evidence");
+  secondary.content = "Updated supporting detail.";
+  assert.deepEqual(memoryDisclosureEntries(context, "header"), beforeHeader);
+  assert.notDeepEqual(memoryDisclosureEntries(context, "evidence"), beforeEvidence);
+  row.memory.eventTime = "2026-08-21";
+  assert.notDeepEqual(memoryDisclosureEntries(context, "header"), beforeHeader);
 });
 
 test("shared disclosure keeps withdrawn content redacted in previews and evidence", () => {
@@ -237,14 +340,14 @@ test("shared disclosure keeps withdrawn content redacted in previews and evidenc
     next_step: prompts.get_hint,
     forget_hint: prompts.forget_hint,
   });
-  for (const rendered of [
-    renderSearchSurface(memory, { postamble: footer }),
-    renderEvidenceSurface(memory, { postamble: footer }),
-  ]) {
+  for (const [rendered, idPattern] of [
+    [renderSearchSurface(memory, { postamble: footer }), /`memory-a`/u],
+    [renderEvidenceSurface(memory, { postamble: footer }), /memory=memory-a/u],
+  ] as const) {
     assert.match(rendered, /\[forget\] \(content withdrawn\)/u);
     assert.match(rendered, /do not rely on it/u);
     assert.doesNotMatch(rendered, /Atlas receives input\.|Exact source detail for memory-a/u);
-    assert.match(rendered, /memory=memory-a/u);
+    assert.match(rendered, idPattern);
     assert.match(rendered, /Atlas emits output\./u);
   }
 });
@@ -264,7 +367,7 @@ test("degraded search keeps its cause code without injecting the provider respon
   assert.equal(projected.retrieval?.reason, "embedding_http_429");
   assert.match(rendered, /mode=lexical; reason=embedding_http_429/u);
   assert.match(rendered, /results are lexical-only/u);
-  assert.match(rendered, /memory=memory-a/u);
+  assert.match(rendered, /`memory-a`/u);
   assert.doesNotMatch(rendered, /provider-diagnostic-content|QuotaFailure/u);
   assert.equal(memory.retrieval.reason, reason, "the owning diagnostic remains intact");
   assert.notEqual(projected.retrieval, memory.retrieval);

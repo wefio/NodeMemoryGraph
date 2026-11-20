@@ -341,7 +341,7 @@ test("candidate rows retain preview, degradation and graph references under inde
     memoryId: "a",
     activeGraphId: "graph",
   });
-  assert.match(output.text, /memory=ref:a001/u);
+  assert.match(output.text, /`ref:a001\|/u);
   assert.match(output.text, /activeGraphId=graph/u);
   assert.match(output.text, /embedding_unavailable/u);
   assert.match(output.text, /not exact evidence/u);

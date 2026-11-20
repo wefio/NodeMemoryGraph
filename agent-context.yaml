@@ -257,6 +257,7 @@ routes:
     paths:
       - src/integration/mcp-tools.ts
       - src/integration/agent-surface.ts
+      - src/integration/evidence-rendering.ts
       - src/integration/aml-projection.ts
       - src/integration/multimodal-content.ts
       - src/integration/temporal-evidence.ts

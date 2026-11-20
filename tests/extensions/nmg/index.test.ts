@@ -30,7 +30,10 @@ import type { MemoryContext } from "../../../src/core/types.ts";
 import { assertGetToolContract } from "../../helpers/get-tool-contract.ts";
 import { assertAgentActivityContract } from "../../helpers/agent-activity-contract.ts";
 import { assertRememberToolContract } from "../../helpers/remember-tool-contract.ts";
-import { assertSearchToolContract } from "../../helpers/search-tool-contract.ts";
+import {
+  assertSearchToolContract,
+  searchCandidateKeys,
+} from "../../helpers/search-tool-contract.ts";
 import { assertLabToolContract } from "../../helpers/lab-tool-contract.ts";
 import { stripProviderEnv } from "../../helpers/test-env.ts";
 
@@ -1291,7 +1294,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     assert.match(recallContent, /Atlas must use SQLite/);
     assert.match(recallContent, /candidate preview; not exact evidence/);
     assert.doesNotMatch(recallContent, /^format:|^fields:/m);
-    assert.match(recallContent, /memory=[^\n;]+; node=[^\n;]+; type=[^\n;]+; preview=/);
+    assert.doesNotMatch(recallContent, /\b(?:node|type)=/u);
     assert.doesNotMatch(recallContent, /tier=L\d/);
     assert.doesNotMatch(recallContent, /matches=/);
     assert.doesNotMatch(recallContent, /deepestTier/);
@@ -1299,10 +1302,10 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     const feedbackBlock = /<nmg_guidance>\n([\s\S]*?)\n<\/nmg_guidance>/u.exec(recallContent);
     assert.ok(feedbackBlock);
     assert.equal([...feedbackBlock[1].matchAll(/activeGraphId=/gu)].length, 1);
-    assert.equal(
-      [...recallContent.matchAll(/activeGraphId=/gu)].length,
-      recalled.message!.details.count + 1,
-    );
+    const materialBlock = /<nmg_material>\n([\s\S]*?)\n<\/nmg_material>/u.exec(recallContent);
+    assert.ok(materialBlock);
+    assert.equal([...materialBlock[1].matchAll(/activeGraphId=/gu)].length, 1);
+    assert.equal(searchCandidateKeys(materialBlock[1]).length, recalled.message!.details.count);
     assert.match(feedbackBlock[1], /never invent labels/u);
     const preparedState = (await tools
       .get("nmg_state")!
@@ -1494,8 +1497,8 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
           getSessionFile: () => "other.jsonl",
         },
       })) as { content: Array<{ text: string }> };
-    assert.match(sameSession.content[0].text, /Session scratch/);
-    assert.doesNotMatch(otherSession.content[0].text, /Session scratch/);
+    assert.match(sameSession.content[0].text, /This session scratch color is cobalt\./u);
+    assert.doesNotMatch(otherSession.content[0].text, /This session scratch color is cobalt\./u);
 
     await handlers.get("session_shutdown")!({}, { sessionManager });
     assert.equal(isProcessAlive(started!.pid), false);
@@ -1927,9 +1930,9 @@ test("formatters keep search headers compact and exact evidence separate", () =>
   } as never;
   const headers = formatSearchHeaders(context);
   assert.doesNotMatch(headers, /works offline/);
-  assert.match(headers, /NMG MEMORY CANDIDATES/);
-  assert.match(headers, /\ncount=1\n/);
-  assert.match(headers, /order is not a guarantee of relevance/);
+  assert.match(headers, /NMG candidates/u);
+  assert.deepEqual(searchCandidateKeys(headers), ["memory-1"]);
+  assert.match(headers, /order != relevance/u);
   assert.match(headers, /More ranked records are folded/);
   assert.match(headers, /memory-2/);
   assert.match(headers, /do not repeat nmg_search/);
@@ -2006,7 +2009,7 @@ test("exact evidence projects logical chains without repeating statements", () =
   assert.match(evidenceOnly, /Atlas combines both inputs\./);
 });
 
-test("search headers close with the nmg_get hint when nothing is deferred", () => {
+test("search headers explain how to open exact evidence when nothing is deferred", () => {
   const context = {
     results: [
       {
@@ -2025,11 +2028,12 @@ test("search headers close with the nmg_get hint when nothing is deferred", () =
     progressiveDisclosure: undefined,
   } as never;
   const headers = formatSearchHeaders(context);
-  assert.match(headers, /Use nmg_get with selected IDs and activeGraphId/);
-  assert.match(headers, /exact records and source evidence/);
+  assert.match(headers, /nmg_get with key \+ activeGraphId/u);
+  assert.match(headers, /previews only, not evidence/u);
+  assert.doesNotMatch(headers, /More ranked records are folded/u);
 });
 
-test("formatters visibly mark external provenance and trust", () => {
+test("exact evidence displays external provenance and trust hidden from search", () => {
   const context = {
     results: [
       {
@@ -2055,7 +2059,10 @@ test("formatters visibly mark external provenance and trust", () => {
       },
     ],
   } as never;
-  assert.match(formatSearchHeaders(context), /\[external\]/);
+  const headers = formatSearchHeaders(context);
+  assert.deepEqual(searchCandidateKeys(headers), ["memory-external"]);
+  assert.match(headers, /A web page reports a release date\./u);
+  assert.doesNotMatch(headers, /\[external\]|EXTERNAL_SOURCE|example\.com/u);
   assert.match(formatMemoryContext(context), /\[external, unverified\]/);
   assert.match(formatMemoryContext(context), /web:https:\/\/example\.com/);
 });
@@ -2078,7 +2085,7 @@ test("formatters mark unresolved and reopened memories as open", () => {
       },
     ],
   } as never;
-  assert.match(formatSearchHeaders(context), /\[open\].*memory=memory-open/);
+  assert.match(formatSearchHeaders(context), /\[open\] .*\x60memory-open\x60/u);
   assert.match(formatMemoryContext(context), /\[open\] Verify Atlas portability/);
 });
 
@@ -2101,17 +2108,18 @@ test("revoked records show metadata but withhold the statement", () => {
     ],
   } as never;
   const headers = formatSearchHeaders(context);
-  // Metadata stays visible (id, node, type); the statement is
-  // withheld so the model cannot cite the revoked content.
-  assert.match(headers, /memory=memory-revoked/);
-  assert.match(headers, /node=Event preferences/);
-  assert.match(headers, /type=preference/);
+  // Metadata stays visible (id, non-default type); node belongs to exact get,
+  // and the statement is withheld so the model cannot cite revoked content.
+  assert.deepEqual(searchCandidateKeys(headers), ["memory-revoked"]);
+  assert.doesNotMatch(headers, /node=/);
+  assert.match(headers, /\[preference\]/u);
   assert.match(headers, /\(content withdrawn\)/);
   assert.doesNotMatch(headers, /modern electronic music festivals/);
   assert.match(headers, /\[forget\] means withdrawn content; do not rely on it/);
   // Exact lookup preserves the revocation boundary instead of re-disclosing
   // content that the user asked the Agent to forget.
   const evidence = formatMemoryContext(context);
+  assert.match(evidence, /node=Event preferences/);
   assert.match(evidence, /\[forget\] \(content withdrawn\)/);
   assert.doesNotMatch(evidence, /modern electronic music festivals/);
 });
@@ -2245,7 +2253,7 @@ test("session recall piggybacks a search proposal without a prepare RPC or injec
       cued.message?.content ?? "",
       /temporary assistant-proposed cue|heuristic skip/u,
     );
-    assert.match(cued.message?.content ?? "", /fixture-palette/u);
+    assert.match(cued.message?.content ?? "", /\x60 Fixture palette prefers azure/u);
     await lab.execute(
       "retire-trial",
       {

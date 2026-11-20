@@ -5,7 +5,10 @@ import {
   estimateResultTokens,
   selectWithinActiveGraphBudget,
 } from "../../src/core/store/active-graph.ts";
-import { SOURCE_EXCERPT_CHARS } from "../../src/integration/agent-surface.ts";
+import {
+  prepareEvidenceSurface,
+  SOURCE_EXCERPT_CHARS,
+} from "../../src/integration/agent-surface.ts";
 import type { MemorySearchResult } from "../../src/core/types.ts";
 
 function result(
@@ -77,6 +80,14 @@ test("evidence identical to the statement costs no extra source line", () => {
   const same = estimateResultTokens(result({ statement, evidence: statement }));
   const longer = estimateResultTokens(result({ statement, evidence: "e".repeat(400) }));
   assert.ok(same < longer);
+});
+
+test("evidence budget estimates the actual standalone row including printed node names", () => {
+  const candidate = result();
+  candidate.node.canonicalName = "printed-node ".repeat(20);
+  const { text } = prepareEvidenceSurface({ results: [candidate], relations: [] });
+  assert.equal(estimateResultTokens(candidate), Math.ceil(text.length / 4));
+  assert.match(text, /node=printed-node/u);
 });
 
 test("a 6,000 token budget fits a full page when records are rendered-sized", () => {

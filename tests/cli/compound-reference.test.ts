@@ -18,6 +18,7 @@ import {
   createMemoryReferences,
   resolveMemoryReferences,
 } from "../../src/integration/memory-reference.ts";
+import { searchCandidateKeys } from "../helpers/search-tool-contract.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
@@ -63,8 +64,11 @@ test("shared search displays a copied compound reference that exact get resolves
       limit: 1,
     });
     assert.equal(context.results[0]?.memory.id, saved.memory.id);
-    const key = /memory=([^;]+);/u.exec(renderSearchSurface(context))?.[1];
+    const surface = renderSearchSurface(context);
+    const [key] = searchCandidateKeys(surface);
     assert.ok(key?.startsWith("ref:"), "search must generate a copyable reference");
+    const shortGraphId = /^activeGraphId=([0-9a-f]{8})$/mu.exec(surface)?.[1];
+    assert.ok(shortGraphId);
     const params = {
       activeGraphId: context.activeGraph!.id,
       sessionId: "reference-reader",
@@ -73,7 +77,11 @@ test("shared search displays a copied compound reference that exact get resolves
       ...params,
       memoryIds: [saved.memory.id],
     });
-    const copied = await service.invoke("get", { ...params, memoryIds: [key] });
+    const copied = await service.invoke("get", {
+      ...params,
+      activeGraphId: shortGraphId,
+      memoryIds: [key],
+    });
     assert.equal(
       copied.results[0]!.memory.accessCount,
       canonical.results[0]!.memory.accessCount + 1,
@@ -87,6 +95,21 @@ test("shared search displays a copied compound reference that exact get resolves
     } finally {
       store.close();
     }
+  });
+});
+
+test("search uses the full ID when a statement would break the displayed key", async () => {
+  await withService(async (service) => {
+    const saved = await service.invoke("remember", {
+      statement: "Use `Atlas` for offline storage.",
+      nodeName: "Atlas storage",
+    });
+    const context = await service.invoke("search", {
+      query: "Atlas offline storage",
+      sessionId: "reference-reader",
+      limit: 1,
+    });
+    assert.deepEqual(searchCandidateKeys(renderSearchSurface(context)), [saved.memory.id]);
   });
 });
 

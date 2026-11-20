@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { TesseraHit, MemoryContext, MemorySearchResult } from "../core/types.ts";
 import type { SessionDisclosureLevel } from "../core/session-active-graph.ts";
 import { logicalChainCount, logicalChainNames } from "./chain-projection.ts";
+import { evidenceRecordParts } from "./evidence-rendering.ts";
 
 export const SEARCH_PREVIEW_CHARS = 320;
 
@@ -104,10 +105,16 @@ export function memoryDisclosureEntries(
   return context.results.map((result) => {
     const visible =
       disclosure === "header"
-        ? `${result.node.canonicalName}\n${result.memory.memoryType}\n${searchPreview(result.memory)}`
+        ? headerContent({
+            node: result.node.canonicalName,
+            type: result.memory.memoryType,
+            preview: searchPreview(result.memory),
+            eventTime: result.memory.eventTime,
+            expiresAt: result.memory.expiresAt ?? result.memory.validUntil,
+          })
         : disclosure === "exact"
           ? result.memory.statement
-          : `${result.memory.statement}\n${result.evidence.content}`;
+          : evidenceRecordParts(result, { fullSources: true }).parts.join("");
     return {
       memoryId: result.memory.id,
       contentHash: createHash("sha256").update(visible).digest("base64url"),
@@ -115,13 +122,23 @@ export function memoryDisclosureEntries(
   });
 }
 
+function headerContent(
+  candidate: Pick<CompactSearchCandidate, "node" | "type" | "preview" | "eventTime" | "expiresAt">,
+): string {
+  return JSON.stringify([
+    candidate.node,
+    candidate.type,
+    candidate.preview,
+    candidate.eventTime,
+    candidate.expiresAt,
+  ]);
+}
+
 export function compactDisclosureEntries(
   context: CompactSearchContext,
 ): Array<{ memoryId: string; contentHash: string }> {
   return context.candidates.map((candidate) => ({
     memoryId: candidate.id,
-    contentHash: createHash("sha256")
-      .update(`${candidate.node}\n${candidate.type}\n${candidate.preview}`)
-      .digest("base64url"),
+    contentHash: createHash("sha256").update(headerContent(candidate)).digest("base64url"),
   }));
 }

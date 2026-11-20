@@ -143,12 +143,15 @@ and copied-vector isolation.
 
 ### Evidence assembly
 
-Direct-result assembly and node-result assembly load linked evidence in batches
-of at most 400 distinct memory IDs. This preserves result order and each memory's
-SQL history-ID order. A linked ID with no history row remains in `evidenceIds`
-but contributes no `evidenceRecords` entry. Each result receives independent
-history objects; batching does not change candidate admission, scoring or the
-primary evidence selected by the existing query.
+Linked evidence is read in batches, preserving source order.
+
+A configured evidence ranker receives one bounded shortlist of authorized
+records after store and query-variant merge. Exact anchor lookup skips the
+ranker. The ranked page selects from the entire scored shortlist and includes at
+most 20 whole records. Statements, source text and separators share a budget of
+2,500 Unicode characters. Exact record reads use canonical
+evidence. If scoring fails, the same budget applies to results packed using
+base rank. A cancelled request exits without returning a ranked page.
 
 ### Temporal evidence presentation
 
@@ -185,12 +188,10 @@ not an NMG subsystem: the Agent or another LLM-facing harness method generates
 the hypothetical text, while NMG only searches the supplied clauses.
 
 The retrieval boundary owns stable-ID deduplication, primary-query priority,
-and the shared record/token budget. The verified Lite path currently appends
-unique secondary-query results after the primary ranking. Weighted reciprocal
-rank fusion is available as a deterministic Lab primitive, and reverse
-retrieval remains an offline candidate-generation probe. Neither changes the
-Lite default until a shared bounded implementation and matched product tests
-show a benefit outside one benchmark distribution.
+and the shared record/token budget. Unique secondary-query results follow the
+primary ranking. Within a query, [compact automatic recall](../recall-context-and-display.md#candidate-ordering)
+fuses the existing retrieval routes when using hybrid search. Reverse retrieval
+is an offline candidate-generation probe.
 
 Benchmark-owned answer and judge prompts remain upstream protocol. They may be
 used unchanged for comparability, but they do not define NMG query generation,
