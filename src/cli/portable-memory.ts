@@ -6,6 +6,11 @@ import {
   MemoryEngine,
   type MemoryQueryOptions,
 } from "../core/memory/engine.ts";
+import {
+  MAX_EVIDENCE_CANDIDATES,
+  rankEvidencePage,
+  type EvidenceRanker,
+} from "../core/memory/evidence-ranking.ts";
 import { exactLookupAnchor } from "../core/store/search-ranking.ts";
 import { MemoryLifecycleError } from "../core/memory/lifecycle.ts";
 import type { MemoryBackend } from "../core/memory/backend.ts";
@@ -101,6 +106,7 @@ export class PortableMemoryService {
   private readonly projects = new Map<string, Promise<MemoryEngine>>();
   private readonly projectBackends = new Set<MemoryBackend>();
   private readonly embeddings: LocalMemoryEmbeddings;
+  private readonly evidenceRanker?: EvidenceRanker;
   readonly local: boolean;
 
   constructor(
@@ -108,10 +114,12 @@ export class PortableMemoryService {
     local = false,
     embedding: () => EmbeddingClient | undefined = () => undefined,
     embeddingUnavailable: () => boolean = () => false,
+    evidenceRanker?: EvidenceRanker,
   ) {
     // Do not retain a caller-mutable credentials/options object.
     this.options = structuredClone(options);
     this.local = local;
+    this.evidenceRanker = evidenceRanker;
     this.embeddings = new LocalMemoryEmbeddings(embedding, embeddingUnavailable);
   }
 
@@ -237,23 +245,43 @@ export class PortableMemoryService {
   }
 
   async search(input: NmgSearchParams, signal?: AbortSignal) {
-    if (!this.local) {
-      allowOptions(input, SEARCH_FIELDS);
-      return (await this.engine()).search(input.query, input);
-    }
+    return this.local ? this.searchLocal(input, signal) : this.searchIndependent(input, signal);
+  }
+
+  private async searchIndependent(input: NmgSearchParams, signal?: AbortSignal) {
+    allowOptions(input, SEARCH_FIELDS);
+    const engine = await this.engine();
+    const ranker = this.evidenceRanker;
+    if (!ranker) return engine.search(input.query, input);
+    const context = await engine.search(input.query, {
+      ...input,
+      limit: rankedCandidateLimit(input),
+    });
+    return rankEvidencePage(input.query, context, ranker, input.limit, signal);
+  }
+
+  private async searchLocal(input: NmgSearchParams, signal?: AbortSignal) {
     allowOptions(input, LOCAL_SEARCH_FIELDS);
+    const ranker =
+      input.retrievalMode === undefined || input.retrievalMode === "hybrid"
+        ? this.evidenceRanker
+        : undefined;
     const shared = await this.engine();
     const project = await this.project(input.projectDir);
     const queries = [...new Set([input.query, ...(input.queries ?? [])])];
     const options = {
       ...input,
-      limit: candidateLimit(input),
+      limit: ranker ? rankedCandidateLimit(input) : candidateLimit(input),
+      evidenceShortlist: Boolean(ranker),
       findTesserae: !input.autoRecall,
       expandLeafContext:
         input.vectorGranularity === "hierarchy" || input.vectorGranularity === "union",
     };
     if (queries.length === 1 && input.retrievalMode === undefined && !input.autoRecall) {
-      const exact = await exactLocalLookup(shared, project, input.query, options);
+      const exact = await exactLocalLookup(shared, project, input.query, {
+        ...options,
+        limit: candidateLimit(input),
+      });
       signal?.throwIfAborted();
       if (exact) return exact;
     }
@@ -277,13 +305,14 @@ export class PortableMemoryService {
       }),
     );
     const primary = results[0]!;
-    return {
+    const context = {
       ...primary,
       results: limitSearchResults(
         results.flatMap((context) => context.results),
         options.limit,
       ),
     };
+    return ranker ? rankEvidencePage(input.query, context, ranker, input.limit, signal) : context;
   }
 
   async get(input: NmgGetParams) {
@@ -597,6 +626,12 @@ function projectForWrite(input: NmgRememberParams): string | undefined {
   return input.residence === "stg" && input.projectDir ? resolve(input.projectDir) : undefined;
 }
 
+function rankedCandidateLimit(input: NmgSearchParams): number {
+  const limit = input.limit ?? 20;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+    throw new Error("Search limit must be 1..100");
+  return MAX_EVIDENCE_CANDIDATES;
+}
 function candidateLimit(input: NmgSearchParams): number {
   return input.sessionId && (input.secondPass || input.progressiveWarmDisclosure)
     ? 50

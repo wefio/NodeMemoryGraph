@@ -954,6 +954,8 @@ export const TESSERA_REF_MARKER = "tessera_ref";
 export interface MemoryContext {
   /** Automatic presentation policy only; never changes candidate selection. */
   recallDisplayMode?: "compact" | "full";
+  /** Selection of the ranked source-evidence page when an evidence ranker was supplied. */
+  evidencePage?: { characters: number; ranked: boolean };
   results: MemorySearchResult[];
   /** Derived graph-scoped text selectors; canonical DTOs and record IDs stay unchanged. */
   memoryReferences?: Readonly<Record<string, string>>;

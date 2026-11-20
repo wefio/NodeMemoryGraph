@@ -143,12 +143,15 @@ and copied-vector isolation.
 
 ### Evidence assembly
 
-Direct-result assembly and node-result assembly load linked evidence in batches
-of at most 400 distinct memory IDs. This preserves result order and each memory's
-SQL history-ID order. A linked ID with no history row remains in `evidenceIds`
-but contributes no `evidenceRecords` entry. Each result receives independent
-history objects; batching does not change candidate admission, scoring or the
-primary evidence selected by the existing query.
+Linked evidence is read in batches, preserving source order.
+
+A configured evidence ranker receives one bounded shortlist of authorized
+records after store and query-variant merge. Exact anchor lookup skips the
+ranker. The ranked page selects from the entire scored shortlist and includes at
+most 20 whole records. Statements, source text and separators share a budget of
+2,500 Unicode characters. Exact record reads use canonical
+evidence. If scoring fails, the same budget applies to results packed using
+base rank. A cancelled request exits without returning a ranked page.
 
 ### Temporal evidence presentation
 

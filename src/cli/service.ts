@@ -1,3 +1,4 @@
+import type { EvidenceRanker } from "../core/memory/evidence-ranking.ts";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { deriveAnswerOverlapMemoryIds, statementFingerprint } from "../core/feedback.ts";
@@ -147,6 +148,7 @@ export interface NmgServiceOptions {
   dataDirectory?: string;
   databasePath?: string;
   environment?: NodeJS.ProcessEnv;
+  evidenceRanker?: EvidenceRanker;
 }
 
 export class NmgService {
@@ -234,6 +236,7 @@ export class NmgService {
       memoryBackend.kind === "sqlite" && memoryBackend.local === true,
       () => this.#configuredEmbeddingClient(),
       () => this.#embeddingError !== null,
+      options.evidenceRanker,
     );
     this.#dataDirectory = dataDirectory;
     this.#environment = environment;
@@ -561,21 +564,27 @@ export class NmgService {
     const directMs = performance.now() - started;
     if (!params.autoRecall)
       context.tesserae = await this.#resolveTesseraLines(context.tesserae ?? [], params);
-    if (params.sessionId) {
-      context.results = this.#recallContext.rank(
-        params.sessionId,
-        resolve(params.projectDir ?? process.cwd()),
-        params.query,
-        context.results,
-      );
-      if (params.autoRecall) context.recallDisplayMode = this.#recallContext.mode(params.sessionId);
-    }
+    this.#applyPortableRecallContext(context, params);
     return this.#registerPortableSearch(
       context,
       { ...params, graphHops: retrieval.graphHops },
       started,
       directMs,
     );
+  }
+
+  #applyPortableRecallContext(context: MemoryContext, params: NmgSearchParams): void {
+    if (params.sessionId) {
+      if (!context.evidencePage?.ranked) {
+        context.results = this.#recallContext.rank(
+          params.sessionId,
+          resolve(params.projectDir ?? process.cwd()),
+          params.query,
+          context.results,
+        );
+      }
+      if (params.autoRecall) context.recallDisplayMode = this.#recallContext.mode(params.sessionId);
+    }
   }
 
   #registerPortableSearch(

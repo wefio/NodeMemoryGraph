@@ -16,6 +16,7 @@ import {
   visibleMemory,
 } from "./model.ts";
 import type { MemoryInput } from "./model.ts";
+import { evidenceShortlist } from "./evidence-ranking.ts";
 import { MemoryPlan } from "./plan.ts";
 import { recordClaimOutcomes } from "./claim-outcomes.ts";
 import { changeResolution, proposeMemoryRelation, supersedeMemory } from "./lifecycle.ts";
@@ -60,6 +61,8 @@ export interface MemoryQueryOptions {
   eventTimeTo?: string;
   findTesserae?: boolean;
   expandLeafContext?: boolean;
+  /** Collect independent candidates for an injected evidence ranker before reading sources. */
+  evidenceShortlist?: boolean;
 }
 
 interface PlannedResult<T> {
@@ -471,8 +474,8 @@ export class MemoryEngine {
     const scores = new Map(vectors.map((item) => [item.entity.value.id, item]));
     const queryText = normalize(text);
     const terms = searchTerms(queryText);
-    return this.project(view, [...candidates.values()], options, false, (projected) =>
-      projected
+    return this.project(view, [...candidates.values()], options, false, (projected) => {
+      const ranked = projected
         .map((result): SearchCandidate => {
           const score = scores.get(result.memory.id);
           const vectorScore = score?.recordScore ?? 0;
@@ -497,9 +500,17 @@ export class MemoryEngine {
             recallReason,
           };
         })
-        .sort((left, right) => right.combinedScore - left.combinedScore)
-        .slice(0, limit),
-    );
+        .sort((left, right) => right.combinedScore - left.combinedScore);
+      if (options.evidenceShortlist && semantic.mode === "hybrid") {
+        return evidenceShortlist(
+          ranked,
+          vectors.map((item) => item.entity.value.id),
+          lexical.flatMap((item) => (item.kind === "memory" ? [item.value.id] : [])),
+          limit,
+        );
+      }
+      return ranked.slice(0, limit);
+    });
   }
 
   async linkNodes(
