@@ -38,22 +38,57 @@ without word overlap stay available through the retained page and exact get.
 ## Presentation and disclosure
 
 Automatic recall uses a session-local `compact` or `full` display profile. Compact
-limits candidate count and statement length; full retains all retrieved statement
-bodies subject to the combined output budget. Full does not include raw evidence
-or remove context limits. Forgotten records remain redacted in both modes.
+uses brief statement previews and defaults to the five-candidate economy tier.
+The shared preparation API accepts `economyLimit` of 3, 5 or 10. These tiers
+allow up to 1,000, 1,500 and 2,500 UTF-16 units of available context, respectively.
+Economy rows retain the memory ID, dates, flags and up to 160 code points of
+statement preview. The structured get result provides the candidate's node and
+memory type.
+Full uses the entire retrieved statement for each admitted candidate. Forgotten
+records remain redacted in both modes.
 
 The compact projection carries the selected profile. Shared candidate preparation
 applies Unicode code-point truncation before producing InformationView rows;
 reference IDs, graph scope, temporal labels and preview status are preserved.
-InformationView preparation admits whole rows and includes wrappers in its budget.
-Both profiles remain candidate previews, even when an entire statement fits.
-Exact record/evidence disclosure requires the existing get path and its receipts.
+Economy rendering displays identical preview and graph labels once for the group.
+Each source-bound view and receipt retains its own scope.
+The shared context renderer charges labels, section wrappers, separators and
+omission notices in UTF-16 units. It fills successive character stages and keeps
+whole candidate rows admitted at previous stages. Economy tiers pack in retrieved
+order; full mode applies floor-guarded length-density ordering ($k=40$, 400-unit
+floor, $\alpha=0.5$) so short records keep their retrieved order while oversized
+statements do not crowd out concise high-rank hits.
+The full-profile stages admit up to 20 rows at 2,500 units, 32 at 4,000 and 48 at 6,000.
+These are ceilings for the room available when recall is packed. Mixed context
+can leave less room after admitting state and other higher-priority views.
+For the same candidates and preceding content, advancing between the fixed
+stages retains the lower stage's candidate rows with their source labels.
+Both profiles produce candidate previews. Use get for exact record and source
+disclosure and its receipts.
 
 Pi uses the same candidate views inside its combined context output. OpenCode,
 DSH and WorkBuddy use the shared automatic recall preparation. Adapters do not
 clip the final prepared fragment or treat omitted candidates as delivered.
 Historical UI recall is separate from the current turn's injectable generation;
 a missing fresh result does not authorize reinjecting an old snapshot.
+
+## Explicit search and exact evidence
+
+Explicit search displays candidate previews with meaningful non-default types,
+omitting node names and default memory types. Event times are collected in a
+timeline keyed by local candidate labels. Equal times are grouped and known times
+are chronological. Unresolved phrases keep their wording in a separate group.
+Candidate order and executable memory references remain intact. Source excerpts
+and external provenance belong to the exact read.
+
+The get text shows the entire statement with its memory ID, node name, scope,
+meaningful types, original event time and non-default truth status. It includes
+external provenance and complete, distinct source texts for the selected records.
+Logical chain structure is shown when present. A homogeneous explicit read
+prints its shared scope once. The structured get result retains the underlying
+metadata, including default values. Independently composable
+evidence views carry their own scope and event time and use a bounded primary
+source excerpt. Active Graph estimates use that composable row.
 
 ## Session controls and limits
 

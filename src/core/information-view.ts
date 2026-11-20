@@ -5,6 +5,7 @@ export const TEMPORARY_INFORMATION_LABEL = "[temporary]";
 export const DEFAULT_CONTEXT_OUTPUT_CHARACTERS = 16_000;
 
 export type InformationPurpose = "state" | "material" | "reasoning" | "guidance" | "diagnostic";
+export type AutomaticRecallEconomyLimit = 3 | 5 | 10;
 
 /** Source identities retain domain ownership; views never grant write authority. */
 export type InformationSource =
@@ -29,6 +30,8 @@ export interface InformationView {
   readonly requiredLabels?: readonly string[];
   /** Preview disclosure must not upgrade to exact source evidence. */
   readonly preview?: boolean;
+  /** Candidate previews share either a compact economy tier or the full ladder. */
+  readonly automaticRecall?: AutomaticRecallEconomyLimit | "full";
 }
 
 export interface InformationOutputEntry {

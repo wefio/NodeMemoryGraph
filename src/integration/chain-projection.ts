@@ -1,4 +1,5 @@
 import type { MemoryContext, MemorySearchResult } from "../core/types.ts";
+import { eventTimeMillis } from "../core/event-time.ts";
 
 export const DEFAULT_LOGICAL_CHAIN_MAX_CHARS = 2_048;
 
@@ -46,6 +47,68 @@ function memoryLabel(index: number): string {
     value = Math.floor(value / 26);
   }
   return label;
+}
+
+/** Present known times for the current evidence page in chronological order. */
+export function projectTemporalChain(
+  records: readonly Pick<MemorySearchResult["memory"], "id" | "eventTime">[],
+): {
+  labels: Map<string, string>;
+  text: string;
+} {
+  const labels = new Map<string, string>();
+  if (records.length === 1) {
+    const value = records[0]!.eventTime;
+    if (!value) return { labels, text: "" };
+    const { time, milliseconds } = eventTimeLabel(value);
+    return {
+      labels,
+      text: milliseconds === null ? `Unresolved event time: ${time}` : `time=${time}`,
+    };
+  }
+  const groups = new Map<string, { time: string; milliseconds: number | null; labels: string[] }>();
+  for (const [index, record] of records.entries()) {
+    if (!record.eventTime) continue;
+    const { time, milliseconds } = eventTimeLabel(record.eventTime);
+    const group = groups.get(time) ?? { time, milliseconds, labels: [] };
+    const label = memoryLabel(index);
+    labels.set(record.id, label);
+    group.labels.push(label);
+    groups.set(time, group);
+  }
+  const ordered = [...groups.values()]
+    .filter((group) => group.milliseconds !== null)
+    .sort((a, b) => a.milliseconds! - b.milliseconds!);
+  const unresolved = [...groups.values()].filter((group) => group.milliseconds === null);
+  const line = (group: { time: string; labels: string[] }) =>
+    `${group.time} ${group.labels.join(",")}`;
+  if (ordered.length === 1 && unresolved.length === 0)
+    return { labels, text: `time=${line(ordered[0]!)}` };
+  const sections = [
+    ordered.length ? ["Event time:", ...ordered.map(line)] : [],
+    unresolved.length ? ["Unresolved event time by record:", ...unresolved.map(line)] : [],
+  ];
+  return { labels, text: sections.flat().join("\n") };
+}
+
+const STORED_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function eventTimeLabel(raw: string): { time: string; milliseconds: number | null } {
+  const safe = raw.replace(/[\r\n]+/gu, " ").trim();
+  // Older imported clocks include a redundant three-letter weekday.
+  const legacy = /^(\d{4}\/\d{2}\/\d{2}) \(([A-Z][a-z]{2})\) (\d{2}:\d{2})$/u.exec(safe);
+  if (legacy) {
+    const time = `${legacy[1]!.replaceAll("/", "-")} ${legacy[3]}`;
+    const milliseconds = eventTimeMillis(time);
+    if (milliseconds !== null && STORED_WEEKDAYS[new Date(milliseconds).getUTCDay()] === legacy[2])
+      return { time, milliseconds };
+  }
+  const milliseconds = eventTimeMillis(safe);
+  if (milliseconds === null) return { time: safe, milliseconds };
+  const time = safe
+    .replace(/(\d{2}:\d{2}):00(?:\.0+)?(Z|[+-]\d{2}:?\d{2})$/u, "$1$2")
+    .replace(/(\d{2}:\d{2}:\d{2})\.0+(Z|[+-]\d{2}:?\d{2})$/u, "$1$2");
+  return { time, milliseconds };
 }
 
 function compactEdgeLines(

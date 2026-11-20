@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type {
+  AutomaticRecallEconomyLimit,
   InformationOutputEntry,
   InformationOutputReceipt,
   InformationPurpose,
@@ -25,6 +26,8 @@ interface OutputRow {
   text: string;
   identity?: string;
   notice?: boolean;
+  recallHeader?: boolean;
+  fingerprintText?: string;
 }
 
 const PURPOSE_ENVELOPES: Record<InformationPurpose, readonly [string, string]> = {
@@ -42,6 +45,19 @@ const SELECTION_PRIORITY: Record<InformationPurpose, number> = {
   material: 3,
   guidance: 4,
 };
+
+const RECALL_CHARACTER_STAGES = [1_500, 2_000, 2_500, 3_000, 4_000, 5_000, 6_000, 8_000, 12_000];
+const RECALL_CHARACTERS_PER_SLOT = 125;
+const MIN_RECALL_SLOTS = 20;
+const MAX_RECALL_SLOTS = 48;
+const RECALL_RANK_DAMPING = 40;
+const RECALL_LENGTH_FLOOR = 400;
+const RECALL_LENGTH_EXPONENT = 0.5;
+const ECONOMY_RECALL_BUDGETS = new Map<AutomaticRecallEconomyLimit, number>([
+  [3, 1_000],
+  [5, 1_500],
+  [10, 2_500],
+]);
 
 /** Pure preparation: no storage, host API, disclosure write or tool execution.
  * Bodies/required labels are indivisible; omissions are explicit, not previews.
@@ -67,19 +83,8 @@ export function prepareInformationOutput(
           (a, b) => SELECTION_PRIORITY[purposeOf(a)] - SELECTION_PRIORITY[purposeOf(b)],
         )
       : snapshot;
-  const rows: OutputRow[] = [];
-  const omitted: InformationView[] = [];
-  const seen = new Map<string, Set<string>>();
   const size = new OutputSize(format);
-  for (const view of ordered) {
-    const row = prepareRow(view, seen);
-    if (!row) continue;
-    size.update(row, 1);
-    if (size.length > maxCharacters) {
-      size.update(row, -1);
-      omitted.push(view);
-    } else rows.push(row);
-  }
+  const { rows, omitted } = selectRows(ordered, size, format, maxCharacters);
   appendOmissionNotice(rows, omitted, maxCharacters, format, size);
   let included: readonly InformationOutputEntry[] | undefined;
   return Object.freeze({
@@ -92,6 +97,147 @@ export function prepareInformationOutput(
     },
     omitted: Object.freeze(omitted),
   });
+}
+
+function selectRows(
+  ordered: readonly InformationView[],
+  size: OutputSize,
+  format: "flat" | "context",
+  maximum: number,
+): { rows: OutputRow[]; omitted: InformationView[] } {
+  const seen = new Map<string, Set<string>>();
+  const prepared = ordered.map((view) => prepareRow(view, seen)).filter((row) => row !== undefined);
+  const staged = format === "context" ? prepared.filter(isAutomaticRecall) : [];
+  const stagedRows = new Set(staged);
+  const rows: OutputRow[] = [];
+  const omitted: InformationView[] = [];
+  let packedRecall = false;
+  for (const row of prepared) {
+    if (!stagedRows.has(row)) {
+      if (tryAppend(row, size, maximum)) rows.push(row);
+      else omitted.push(row.view);
+    } else if (!packedRecall) {
+      const selected = packAutomaticRecall(staged, size, maximum, prepared.length);
+      rows.push(...selected);
+      const retained = new Set(selected.map(({ view }) => view));
+      for (const candidate of staged)
+        if (!retained.has(candidate.view)) omitted.push(candidate.view);
+      packedRecall = true;
+    }
+  }
+  return { rows, omitted };
+}
+
+function isAutomaticRecall(row: OutputRow): boolean {
+  const { view } = row;
+  return (
+    (view.automaticRecall === "full" || ECONOMY_RECALL_BUDGETS.has(view.automaticRecall!)) &&
+    view.purpose === "material" &&
+    view.source?.kind === "memory" &&
+    view.preview === true
+  );
+}
+
+function tryAppend(row: OutputRow, size: OutputSize, ceiling: number): boolean {
+  size.update(row, 1);
+  if (size.length <= ceiling) return true;
+  size.update(row, -1);
+  return false;
+}
+
+function packAutomaticRecall(
+  recall: readonly OutputRow[],
+  size: OutputSize,
+  maximum: number,
+  rowCount: number,
+): OutputRow[] {
+  const used = size.length;
+  const stages = automaticRecallStages(recall, maximum - used);
+  const group = compactRecallGroup(recall);
+  const fullMode = !recall.some(({ view }) => typeof view.automaticRecall === "number");
+  const selected: OutputRow[] = [];
+  const remaining = new Set(orderRecallCandidates(group.rows, fullMode));
+  if (group.header) size.update(group.header, 1);
+  // The notice can always fit after a successful admission without removing its source row.
+  const noticeRoom = `\n\nomitted=${rowCount}`.length;
+  for (const { characters, slots } of stages) {
+    for (const row of remaining) {
+      if (selected.length >= slots) break;
+      if (!tryAppend(row, size, used + characters - noticeRoom)) continue;
+      selected.push(row);
+      remaining.delete(row);
+    }
+  }
+  if (group.header) {
+    if (selected.length > 0) return [group.header, ...selected];
+    size.update(group.header, -1);
+  }
+  return selected;
+}
+
+/** Guard short records (<=400 UTF-16 units) from length distortion while letting
+ * concise high-rank records outcompete oversized full statements under budget. */
+function orderRecallCandidates(rows: readonly OutputRow[], fullMode: boolean): OutputRow[] {
+  if (!fullMode) return [...rows];
+  return rows
+    .map((row, rank) => ({
+      row,
+      rank,
+      score:
+        RECALL_RANK_DAMPING /
+        (RECALL_RANK_DAMPING + rank) /
+        Math.pow(Math.max(row.text.length, RECALL_LENGTH_FLOOR), RECALL_LENGTH_EXPONENT),
+    }))
+    .sort((a, b) => b.score - a.score || a.rank - b.rank)
+    .map(({ row }) => row);
+}
+
+/** Keep per-record source labels for typed views and receipts, and show their common text once. */
+function compactRecallGroup(recall: readonly OutputRow[]): {
+  rows: readonly OutputRow[];
+  header?: OutputRow;
+} {
+  const labelText = recall[0]?.view.requiredLabels?.filter(Boolean).join(" ");
+  if (!labelText || !recall.every(isCompactRecallWithLabels(labelText))) return { rows: recall };
+  return {
+    header: { view: { purpose: "material", body: labelText }, text: labelText, recallHeader: true },
+    rows: recall.map((row) => ({ ...row, text: row.view.body, fingerprintText: row.text })),
+  };
+}
+
+function isCompactRecallWithLabels(labelText: string) {
+  return ({ view }: OutputRow) =>
+    typeof view.automaticRecall === "number" &&
+    Boolean(view.body) &&
+    view.requiredLabels?.filter(Boolean).join(" ") === labelText;
+}
+
+function automaticRecallStages(
+  recall: readonly OutputRow[],
+  available: number,
+): { characters: number; slots: number }[] {
+  const economy = recall
+    .map(({ view }) => view.automaticRecall)
+    .filter((limit): limit is AutomaticRecallEconomyLimit => typeof limit === "number");
+  if (economy.length) {
+    const stages: ReturnType<typeof automaticRecallStages> = [];
+    const limit = Math.min(...economy);
+    for (const [slots, budget] of ECONOMY_RECALL_BUDGETS) {
+      const characters = Math.min(budget, available);
+      stages.push({ characters, slots });
+      if (budget >= available || slots === limit) break;
+    }
+    return stages;
+  }
+  return RECALL_CHARACTER_STAGES.filter((stage) => stage < available)
+    .concat(available)
+    .map((characters) => ({
+      characters,
+      slots: Math.min(
+        MAX_RECALL_SLOTS,
+        Math.max(MIN_RECALL_SLOTS, Math.floor(characters / RECALL_CHARACTERS_PER_SLOT)),
+      ),
+    }));
 }
 
 /** A host reports the exact prepared fragment, not arbitrary surrounding text.
@@ -245,7 +391,9 @@ function appendContextOmissionNotice(
     const index = rows.findLastIndex(
       (row) =>
         !["state", "diagnostic"].includes(purposeOf(row.view)) &&
-        row.view.source?.kind !== "workspace",
+        row.view.source?.kind !== "workspace" &&
+        !row.recallHeader &&
+        !isAutomaticRecall(row),
     );
     if (index < 0) return;
     const [removed] = rows.splice(index, 1);
@@ -329,12 +477,12 @@ function sourceIdentity(source: InformationSource): string {
   }
 }
 
-function viewFingerprint({ view, text, identity }: OutputRow): string {
+function viewFingerprint({ view, text, identity, fingerprintText = text }: OutputRow): string {
   return createHash("sha256")
     .update(
       JSON.stringify([
         identity,
-        text,
+        fingerprintText,
         Boolean(view.preview),
         ...(view.purpose === undefined ? [] : [view.purpose]),
       ]),
@@ -350,5 +498,6 @@ function copyView(view: InformationView): InformationView {
     source: view.source ? copySource(view.source) : undefined,
     requiredLabels: view.requiredLabels ? Object.freeze([...view.requiredLabels]) : undefined,
     preview: view.preview,
+    ...(view.automaticRecall !== undefined ? { automaticRecall: view.automaticRecall } : {}),
   });
 }

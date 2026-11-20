@@ -650,8 +650,17 @@ export class NmgService {
     return [{ traceId, memoryIds, value: { store, traceId, memoryIds, referenceTargets } }];
   }
 
+  #resolveActiveGraphId(id: string, sessionId?: string): string {
+    return this.#sessionActiveGraphs.resolveProjectionId(id, sessionId) ?? id;
+  }
+
   async #getPortable(params: NmgGetParams): Promise<NmgMethodResult["get"]> {
     this.#countGetReferences(params.memoryIds);
+    if (params.activeGraphId)
+      params = {
+        ...params,
+        activeGraphId: this.#resolveActiveGraphId(params.activeGraphId, params.sessionId),
+      };
     const trace = params.activeGraphId
       ? this.#portableDisclosureTrace(params.activeGraphId, params.sessionId)
       : undefined;
@@ -1400,8 +1409,10 @@ export class NmgService {
       trained: false,
       activeGraphId: null,
     };
-    const owner =
-      params.activeGraphId && this.#sessionActiveGraphs.projectionOwner(params.activeGraphId);
+    const resolvedGraphId = params.activeGraphId
+      ? this.#resolveActiveGraphId(params.activeGraphId, params.sessionId)
+      : undefined;
+    const owner = resolvedGraphId && this.#sessionActiveGraphs.projectionOwner(resolvedGraphId);
     if (owner && owner !== (params.sessionId?.trim() || "__anonymous__")) return result;
     try {
       const learner = this.#getOnlineLearner();
@@ -1411,7 +1422,7 @@ export class NmgService {
       // fallback bound feedback to an unrelated staged decision whenever the
       // rated recall was not itself staged (e.g. an explicit search), silently
       // training on the wrong context. Skip rather than mis-bind.
-      const graphId = params.activeGraphId;
+      const graphId = resolvedGraphId;
       if (!graphId) return result; // no explicit graph: nothing safe to train on
       const trained = learner.consumeFeedback(graphId, params);
       learner.persistIfDirty();
@@ -1429,11 +1440,15 @@ export class NmgService {
 
   async #claimOutcomes(params: NmgRecordClaimOutcomesParams) {
     if (params.activeGraphId) {
+      params = {
+        ...params,
+        activeGraphId: this.#resolveActiveGraphId(params.activeGraphId, params.sessionId),
+      };
       const projection = this.#sessionActiveGraphs.projection(
-        params.activeGraphId,
+        params.activeGraphId!,
         params.sessionId,
       );
-      const trace = this.#portableDisclosureTrace(params.activeGraphId, params.sessionId);
+      const trace = this.#portableDisclosureTrace(params.activeGraphId!, params.sessionId);
       const exposed = new Set(projection?.graph.memoryIds ?? trace?.memoryIds);
       if (params.votes.some((vote) => !exposed.has(vote.memoryId)))
         throw new NmgProtocolError(

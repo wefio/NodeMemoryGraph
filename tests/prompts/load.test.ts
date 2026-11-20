@@ -79,15 +79,11 @@ test("loadPrompts reads every prompt section from the yaml source", () => {
 
 test("search disclosure explains previews and safeguards without repeating the row template", () => {
   const text = loadPrompts().search_disclosure;
-  assert.match(text, /NMG MEMORY CANDIDATES/u);
-  assert.match(text, /previews, not evidence/u);
-  assert.match(text, /order is not a guarantee of relevance/u);
-  assert.match(text, /node=semantic cluster/u);
-  assert.match(text, /time=event date/u);
-  assert.match(text, /expires=expiry date/u);
-  assert.match(text, /chains=logical/u);
-  assert.match(text, /\[external\]=external source/u);
-  assert.match(text, /\[open\]=unresolved/u);
+  assert.match(text, /NMG candidates/u);
+  assert.match(text, /previews only, not evidence/u);
+  assert.match(text, /order != relevance/u);
+  assert.match(text, /nmg_get with key \+ activeGraphId/u);
+  assert.doesNotMatch(text, /node=|\[external\]|SOURCE=/u);
   assert.doesNotMatch(text, /^format:|^fields:/mu);
   assert.doesNotMatch(text, /tier=L|score=|qpp=|latency=|tokens?=/iu);
 });
@@ -205,7 +201,7 @@ test("claim-outcome reminder is advisory and keeps the exact evidence boundary",
 test("disclosures keep placeholders for runtime substitution", () => {
   const prompts = loadPrompts();
   assert.doesNotMatch(prompts.search_disclosure, /\{count\}|\{next_step\}|\{forget_hint\}/);
-  assert.match(prompts.search_disclosure_metadata, /\{count\}/);
+  assert.doesNotMatch(prompts.search_disclosure_metadata, /\{count\}/);
   assert.match(prompts.search_disclosure_metadata, /\{next_step\}/);
   assert.doesNotMatch(prompts.get_disclosure, /\{count\}/);
   assert.match(prompts.get_disclosure, /NMG selected evidence:/u);

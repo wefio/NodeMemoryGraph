@@ -1291,7 +1291,8 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     assert.match(recallContent, /Atlas must use SQLite/);
     assert.match(recallContent, /candidate preview; not exact evidence/);
     assert.doesNotMatch(recallContent, /^format:|^fields:/m);
-    assert.match(recallContent, /memory=[^\n;]+; node=[^\n;]+; type=[^\n;]+; preview=/);
+    assert.match(recallContent, /memory=[^\n;]+; (?:time=[^\n;]+; )?preview=/u);
+    assert.doesNotMatch(recallContent, /\b(?:node|type)=/u);
     assert.doesNotMatch(recallContent, /tier=L\d/);
     assert.doesNotMatch(recallContent, /matches=/);
     assert.doesNotMatch(recallContent, /deepestTier/);
@@ -1299,9 +1300,12 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     const feedbackBlock = /<nmg_guidance>\n([\s\S]*?)\n<\/nmg_guidance>/u.exec(recallContent);
     assert.ok(feedbackBlock);
     assert.equal([...feedbackBlock[1].matchAll(/activeGraphId=/gu)].length, 1);
+    const materialBlock = /<nmg_material>\n([\s\S]*?)\n<\/nmg_material>/u.exec(recallContent);
+    assert.ok(materialBlock);
+    assert.equal([...materialBlock[1].matchAll(/activeGraphId=/gu)].length, 1);
     assert.equal(
-      [...recallContent.matchAll(/activeGraphId=/gu)].length,
-      recalled.message!.details.count + 1,
+      [...materialBlock[1].matchAll(/\bmemory=/gu)].length,
+      recalled.message!.details.count,
     );
     assert.match(feedbackBlock[1], /never invent labels/u);
     const preparedState = (await tools
@@ -2101,10 +2105,10 @@ test("revoked records show metadata but withhold the statement", () => {
     ],
   } as never;
   const headers = formatSearchHeaders(context);
-  // Metadata stays visible (id, node, type); the statement is
-  // withheld so the model cannot cite the revoked content.
+  // Metadata stays visible (id, non-default type); node belongs to exact get,
+  // and the statement is withheld so the model cannot cite revoked content.
   assert.match(headers, /memory=memory-revoked/);
-  assert.match(headers, /node=Event preferences/);
+  assert.doesNotMatch(headers, /node=/);
   assert.match(headers, /type=preference/);
   assert.match(headers, /\(content withdrawn\)/);
   assert.doesNotMatch(headers, /modern electronic music festivals/);
@@ -2112,6 +2116,7 @@ test("revoked records show metadata but withhold the statement", () => {
   // Exact lookup preserves the revocation boundary instead of re-disclosing
   // content that the user asked the Agent to forget.
   const evidence = formatMemoryContext(context);
+  assert.match(evidence, /node=Event preferences/);
   assert.match(evidence, /\[forget\] \(content withdrawn\)/);
   assert.doesNotMatch(evidence, /modern electronic music festivals/);
 });
@@ -2245,7 +2250,7 @@ test("session recall piggybacks a search proposal without a prepare RPC or injec
       cued.message?.content ?? "",
       /temporary assistant-proposed cue|heuristic skip/u,
     );
-    assert.match(cued.message?.content ?? "", /fixture-palette/u);
+    assert.match(cued.message?.content ?? "", /preview=Fixture palette prefers azure/u);
     await lab.execute(
       "retire-trial",
       {

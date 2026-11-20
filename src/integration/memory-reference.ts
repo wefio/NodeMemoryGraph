@@ -1,9 +1,14 @@
 import type { MemoryContext, MemorySearchResult } from "../core/types.ts";
 
+const UUID_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const MEMORY_ID =
   /^(?:[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/iu;
 const REFERENCE_PREFIX = "ref:";
 const QUOTE_CODE_POINTS = 6;
+
+export function shortActiveGraphId(id: string): string {
+  return UUID_ID.test(id) ? id.slice(0, 8) : id;
+}
 
 export class MemoryReferenceError extends Error {}
 

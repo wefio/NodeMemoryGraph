@@ -74,7 +74,7 @@ test("display profiles change only admitted views and remain session-local ephem
   const full = prepareAutomaticRecallSurface(
     compactSearchContext({ ...context, recallDisplayMode: "full" }),
   );
-  assert.equal(brief.included.length, 10);
+  assert.ok(brief.included.length > 0 && brief.included.length <= 5);
   assert.ok(brief.text.length < full.text.length);
   assert.ok(!brief.text.includes("😀".repeat(160)));
   assert.ok(full.text.includes("😀".repeat(400)));

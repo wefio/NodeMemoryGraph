@@ -90,10 +90,29 @@ units per candidate. These are initial operating values, not relevance guarantee
 No candidate is removed, so whole-page recall is preserved while smaller-cutoff
 quality remains an evaluation question.
 
-Automatic display defaults to ten candidates with 160-code-point statement
-previews. Full mode keeps statement text under the existing shared 16,000-character
-context budget; exact evidence remains behind get. Mode is session-local and
-daemon-memory-only, independent of ranking and context-cache eviction. The
-[owning design](../../design/recall-context-and-display.md) defines those boundaries;
-the operating reference owns switching commands. Natural noise reduction and
-downstream answer quality require separate held-out evidence.
+Automatic display uses the shared renderer to admit previews in increasing budget
+stages. The renderer can account for the whole row and its wrappers, including when
+the host combines recall with state or board views. Repacking independently at
+every budget can evict a smaller stage's evidence. The staged rule protects those
+rows and relaxes the count ceiling when additional space can carry more material.
+The economy budgets count the actual rendered output. A frozen replay of 1,867
+LoCoMo, BEAM and LongMemEval questions compared candidate count, visible evidence
+and short-answer wording. Keeping the preview width and trimming redundant metadata
+preserved the ten-candidate baseline's visible labels and short-answer matches
+under 2,500 UTF-16 units. Shorter preview text discarded more answer wording.
+The economy ceilings use the smallest 500-unit budget at which at least 95%
+of queries in each dataset can carry the target number of candidates.
+The five-row default balances daily preview cost and coverage. Early excerpts
+as budget placeholders showed uneven offline recall gains and are outside this
+policy. The [owning design](../../design/recall-context-and-display.md) defines the
+rendering and disclosure boundaries. A matched host answer evaluation is still
+needed to measure downstream quality.
+
+Explicit get prioritizes original statement text. The frozen render replay found
+metadata took a substantial share of the delivered character budget. The
+[explicit search and evidence contract](../../design/recall-context-and-display.md#explicit-search-and-exact-evidence)
+preserves the fields used to interpret and cite a record. A common page scope
+saves repeated text while individually composable evidence views stay self-contained.
+The search timeline uses local labels and groups equal event times.
+This saves repeated metadata while the exact read supplies each selected
+record's original clock and source text.

@@ -9,19 +9,33 @@ import {
 import {
   DEFAULT_INFORMATION_OUTPUT_CHARACTERS,
   TEMPORARY_INFORMATION_LABEL,
+  type AutomaticRecallEconomyLimit,
   type InformationView,
   type PreparedInformationOutput,
 } from "../core/information-view.ts";
 import { boardEntryView as boardBodyView } from "../core/board-entry-view.ts";
 import { prepareInformationOutput } from "./information-output.ts";
 import type { SessionActiveGraphSnapshot } from "../core/session-active-graph.ts";
-import { DEFAULT_LOGICAL_CHAIN_MAX_CHARS, projectLogicalChains } from "./chain-projection.ts";
+import {
+  DEFAULT_LOGICAL_CHAIN_MAX_CHARS,
+  projectLogicalChains,
+  projectTemporalChain,
+} from "./chain-projection.ts";
+import {
+  displayExcerpt,
+  evidenceRecordParts,
+  isDefaultMemoryType,
+  uniformEvidenceScope,
+} from "./evidence-rendering.ts";
+import { shortActiveGraphId } from "./memory-reference.ts";
 import {
   compactRetrievalReason,
   compactSearchContext,
   type CompactSearchCandidate,
   type CompactSearchContext,
 } from "./search-projection.ts";
+
+export { SOURCE_EXCERPT_CHARS } from "./evidence-rendering.ts";
 
 export interface SearchSurfaceOptions {
   preamble?: string;
@@ -200,22 +214,12 @@ export function renderSessionActiveGraphSurface(
   return prepareSessionActiveGraphSurface(snapshot, maxCharacters, options).text;
 }
 
-/** Characters of a record's source evidence that the evidence surface renders.
- *  `renderEvidenceSurface` and the budget estimator must agree on this, or the
- *  budget charges text nobody will ever read. */
-export const SOURCE_EXCERPT_CHARS = 320;
-
-function excerpt(value: string, maxLength: number): string {
-  const normalized = value.replace(/\s+/gu, " ").trim();
-  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}…`;
-}
-
-function temporalLabels(candidate: CompactSearchCandidate): string[] {
+function temporalLabels(candidate: CompactSearchCandidate, inlineEvent: boolean): string[] {
   const day = (value: string | null | undefined): string | null =>
     value ? value.slice(0, 10) : null;
   const labels: string[] = [];
   const event = day(candidate.eventTime);
-  if (event) labels.push(`time=${event}`);
+  if (inlineEvent && event) labels.push(`time=${event}`);
   const expires = day(candidate.expiresAt);
   if (expires) labels.push(`expires=${expires}`);
   return labels;
@@ -264,12 +268,17 @@ export function prepareCompactSearchSurface(
       { purpose: "diagnostic", body: options.emptyText ?? "No matching NMG memory found." },
     ]);
   }
+  const timeline = projectTemporalChain(context.candidates);
   return prepareMemorySurface([
     { purpose: "guidance", body: options.preamble ?? "" },
     { purpose: "diagnostic", body: retrievalNote },
     ...context.candidates.map((candidate) =>
-      candidateInformationView(candidate, context.activeGraphId, options.memoryReferences),
+      candidateInformationView(candidate, context.activeGraphId, options.memoryReferences, {
+        searchPage: true,
+        timeLabel: timeline.labels.get(candidate.id),
+      }),
     ),
+    { purpose: "material", body: timeline.text },
     ...bookmarks,
     {
       purpose: "guidance",
@@ -280,21 +289,30 @@ export function prepareCompactSearchSurface(
     },
     {
       purpose: "diagnostic",
-      body: context.activeGraphId ? `activeGraphId=${context.activeGraphId}` : "",
+      body: context.activeGraphId
+        ? `activeGraphId=${shortActiveGraphId(context.activeGraphId)}`
+        : "",
     },
     { purpose: "guidance", body: options.postamble ?? "" },
   ]);
+}
+
+interface CandidatePresentation {
+  economical?: boolean;
+  searchPage?: boolean;
+  timeLabel?: string;
 }
 
 function candidateInformationView(
   candidate: CompactSearchCandidate,
   activeGraphId: string | null | undefined,
   references: SearchSurfaceOptions["memoryReferences"],
+  presentation: CandidatePresentation,
 ): InformationView {
   return {
     purpose: "material",
     source: { kind: "memory", memoryId: candidate.id, activeGraphId: activeGraphId ?? undefined },
-    body: searchCandidateLine(candidate, activeGraphId ? references : undefined),
+    body: searchCandidateLine(candidate, activeGraphId ? references : undefined, presentation),
     preview: true,
   };
 }
@@ -313,19 +331,25 @@ function bookmarkInformationView(
 function searchCandidateLine(
   candidate: CompactSearchCandidate,
   references: SearchSurfaceOptions["memoryReferences"],
+  presentation: CandidatePresentation,
 ): string {
-  const flags = [candidate.external ? "[external]" : "", candidate.open ? "[open]" : ""].filter(
-    Boolean,
-  );
-  const fields = [
-    `memory=${searchMemoryReference(candidate, references)}`,
-    `node=${candidate.node}`,
-    `type=${candidate.type}`,
-    ...temporalLabels(candidate),
+  const key = searchMemoryReference(candidate, references);
+  const flags = [
+    presentation.timeLabel ? `[${presentation.timeLabel}]` : "",
+    !presentation.searchPage && candidate.external ? "[external]" : "",
+    candidate.open ? "[open]" : "",
+    !presentation.economical && !isDefaultMemoryType(candidate.type) ? `[${candidate.type}]` : "",
+  ].filter(Boolean);
+  const meta = [
+    ...temporalLabels(candidate, !presentation.searchPage),
     ...(candidate.chains.length > 0 ? [`chains=${candidate.chains.join(",")}`] : []),
-    `preview=${candidate.preview}`,
   ];
-  return `- ${flags.length > 0 ? `${flags.join(" ")} ` : ""}${fields.join("; ")}`;
+  const prefix = [
+    ...flags,
+    `\`${key}\``,
+    ...(meta.length > 0 ? [`(${meta.join("; ")})`] : []),
+  ].join(" ");
+  return `- ${prefix} ${candidate.preview}`;
 }
 
 /** Independent admitted candidate/bookmark rows for automatic context. Labels
@@ -338,31 +362,23 @@ export function searchInformationViews(context: MemoryContext): InformationView[
 export function compactSearchInformationViews(
   compact: CompactSearchContext,
   references?: SearchSurfaceOptions["memoryReferences"],
+  economyLimit: AutomaticRecallEconomyLimit = 5,
 ): InformationView[] {
   const labels = [
     "[candidate preview; not exact evidence]",
-    compact.activeGraphId ? `activeGraphId=${compact.activeGraphId}` : "",
+    compact.activeGraphId ? `activeGraphId=${shortActiveGraphId(compact.activeGraphId)}` : "",
   ].filter(Boolean);
-  const displayed =
-    compact.recallDisplayMode === "full" ? compact.candidates : compact.candidates.slice(0, 10);
-  const views: InformationView[] = displayed.map((candidate) => ({
+  const economical = compact.recallDisplayMode !== "full";
+  const views: InformationView[] = compact.candidates.map((candidate) => ({
     ...candidateInformationView(
-      compact.recallDisplayMode === "full"
-        ? candidate
-        : {
-            ...candidate,
-            preview: shortenRecallPreview(candidate.preview),
-          },
+      economical ? { ...candidate, preview: shortenRecallPreview(candidate.preview) } : candidate,
       compact.activeGraphId,
       references,
+      { economical },
     ),
     requiredLabels: labels,
+    automaticRecall: economical ? economyLimit : "full",
   }));
-  if (displayed.length < compact.candidates.length)
-    views.push({
-      purpose: "diagnostic",
-      body: `Showing ${displayed.length} of ${compact.candidates.length} retrieved candidates in compact mode; remaining records stay available through nmg_get or full display.`,
-    });
   for (const tessera of compact.tesserae ?? []) {
     views.push({
       ...bookmarkInformationView(tessera),
@@ -386,12 +402,17 @@ function shortenRecallPreview(text: string): string {
  */
 export function prepareAutomaticRecallSurface(
   context: CompactSearchContext,
-  options: { preamble?: string; postamble?: string; maxCharacters?: number } = {},
+  options: {
+    preamble?: string;
+    postamble?: string;
+    maxCharacters?: number;
+    economyLimit?: AutomaticRecallEconomyLimit;
+  } = {},
 ): PreparedInformationOutput {
   return prepareInformationOutput(
     [
       { purpose: "diagnostic", body: options.preamble ?? "" },
-      ...compactSearchInformationViews(context),
+      ...compactSearchInformationViews(context, undefined, options.economyLimit),
       {
         purpose: "guidance",
         body:
@@ -425,44 +446,33 @@ export function renderEvidenceSurface(
   context: MemoryContext,
   options: EvidenceSurfaceOptions = {},
 ): string {
-  return prepareEvidenceSurface(context, options).text;
-}
-
-/** A withdrawn or already-stated source must not be emitted a second time. */
-function evidenceSourceText(statement: string, content: string, forgotten: boolean): string {
-  if (forgotten || content.trim() === statement.trim()) return "";
-  return `\n  SOURCE=${excerpt(content, SOURCE_EXCERPT_CHARS)}`;
+  return prepareEvidence(context, options, true).text;
 }
 
 export function prepareEvidenceSurface(
   context: MemoryContext,
   options: EvidenceSurfaceOptions = {},
 ): PreparedInformationOutput {
+  return prepareEvidence(context, options);
+}
+
+function prepareEvidence(
+  context: MemoryContext,
+  options: EvidenceSurfaceOptions,
+  standalonePage = false,
+): PreparedInformationOutput {
+  const pageScope = standalonePage ? uniformEvidenceScope(context.results) : undefined;
   const chains = projectLogicalChains(
     context,
     options.logicalChainMaxChars ?? DEFAULT_LOGICAL_CHAIN_MAX_CHARS,
   );
-  const records = context.results.map(({ memory, node, evidence }) => {
-    const external = (memory.markers ?? []).find((marker) => marker.kind === "external_source");
-    const forgotten = (memory.markers ?? []).some((marker) => marker.kind === "forget");
-    const flags = [
-      chains.labels.get(memory.id) ? `[${chains.labels.get(memory.id)}]` : "",
-      external ? `[external, ${memory.truthStatus}]` : "",
-      memory.resolution === "open" || memory.resolution === "reopened" ? "[open]" : "",
-    ].filter(Boolean);
-    const details = [
-      `memory=${memory.id}`,
-      `node=${node.canonicalName}`,
-      `type=${memory.memoryType}`,
-      `truth=${memory.truthStatus}`,
-      `scope=${JSON.stringify(memory.scope)}`,
-      ...(memory.eventTime ? [`time=${memory.eventTime}`] : []),
-    ];
-    const externalSource = external?.attributes?.source
-      ? `\n  EXTERNAL_SOURCE=${String(external.attributes.source)}; retrievedAt=${String(external.attributes.retrievedAt ?? "unknown")}`
-      : "";
-    const source = evidenceSourceText(memory.statement, evidence.content, forgotten);
-    const statement = forgotten ? "[forget] (content withdrawn)" : memory.statement;
+  const records = context.results.map((result) => {
+    const { memory } = result;
+    const { parts, withdrawn } = evidenceRecordParts(result, {
+      chainLabel: chains.labels.get(memory.id),
+      pageScope,
+      fullSources: standalonePage,
+    });
     return {
       purpose: "material" as const,
       source: {
@@ -470,8 +480,8 @@ export function prepareEvidenceSurface(
         memoryId: memory.id,
         activeGraphId: context.activeGraph?.id,
       },
-      body: `- ${flags.length > 0 ? `${flags.join(" ")} ` : ""}${statement}\n  ${details.join("; ")}${externalSource}${source}`,
-      preview: forgotten,
+      body: parts.join(""),
+      preview: withdrawn,
     };
   });
   const missing = options.missingMemoryIds?.length
@@ -479,6 +489,7 @@ export function prepareEvidenceSurface(
     : "";
   const views: InformationView[] = [
     { purpose: "guidance", body: options.preamble ?? "" },
+    { purpose: "guidance", body: pageScope ? `scope=${pageScope}` : "" },
     ...records,
     { purpose: "diagnostic", body: missing },
     { purpose: "material", body: chains.text },
@@ -518,7 +529,7 @@ export function prepareRememberSurface(
       body: [
         "NMG found possible older values. Similarity is only a candidate signal; decide semantically.",
         ...supersede.map(
-          (candidate) => `- ${candidate.memoryId}: ${excerpt(candidate.statement, 180)}`,
+          (candidate) => `- ${candidate.memoryId}: ${displayExcerpt(candidate.statement, 180)}`,
         ),
         "If exactly one candidate is genuinely replaced in the same scope, call nmg_remember again with action=supersede, newMemoryId, supersededMemoryId, and a short reason. Otherwise do nothing.",
       ].join("\n"),
@@ -535,7 +546,9 @@ export function prepareRememberSurface(
         "Possible semantic neighbours were retained as distinct nodes:",
         ...duplicates
           .slice(0, 3)
-          .map((candidate) => `- ${candidate.memoryId}: ${excerpt(candidate.statement, 180)}`),
+          .map(
+            (candidate) => `- ${candidate.memoryId}: ${displayExcerpt(candidate.statement, 180)}`,
+          ),
         "Only if a relationship is useful, call nmg_remember again with action=relate, newMemoryId, relatedMemoryId, and relationJudgement. Similarity alone is not identity; otherwise do nothing.",
       ].join("\n"),
     });

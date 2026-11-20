@@ -383,3 +383,25 @@ function graph(id: string, sessionId: string, taskId: string, memoryId: string):
     createdAt: "2026-08-29T00:00:00.000Z",
   };
 }
+
+test("short activeGraphId prefix resolves uniquely within its session and fails closed across sessions", () => {
+  const runtime = new SessionActiveGraphRuntime<string>();
+  const first = runtime.registerProjection(
+    graph("t-1", "session-a", "task-1", "m1"),
+    [{ traceId: "t-1", memoryIds: new Set(["m1"]), value: "v1" }],
+    "abcdef12-1111-4111-8111-111111111111",
+  );
+  runtime.registerProjection(
+    graph("t-2", "session-b", "task-2", "m2"),
+    [{ traceId: "t-2", memoryIds: new Set(["m2"]), value: "v2" }],
+    "abcdef12-2222-4222-8222-222222222222",
+  );
+  assert.equal(runtime.resolveProjectionId("abcdef12", "session-a"), first.projectionId);
+  assert.equal(runtime.projection("abcdef12", "session-a")?.projectionId, first.projectionId);
+  // Ambiguous without session scope -> fails closed
+  assert.equal(runtime.resolveProjectionId("abcdef12"), null);
+  // Unknown prefix -> fails closed
+  assert.equal(runtime.resolveProjectionId("deadbeef", "session-a"), null);
+  // Too short (<8 hex) -> rejected
+  assert.equal(runtime.resolveProjectionId("abcdef", "session-a"), null);
+});

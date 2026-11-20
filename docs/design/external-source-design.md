@@ -84,10 +84,10 @@ Suggested rendering (adapter):
   source: https://example.com/page (retrieved 2026-07-31)
 ```
 
-The Pi adapter now renders this label in both compact search headers and exact
-memory expansion. When the caller omits `truthStatus`, an external marker
-defaults the memory to `unverified`; explicit later confirmation may raise
-trust without removing provenance.
+Automatic recall previews can carry an external badge. Explicit search presents
+candidate previews and leaves provenance to the selected exact read. When the
+caller omits `truthStatus`, an external marker defaults the memory to
+`unverified`. Explicit later confirmation may raise trust while preserving provenance.
 
 ## 5. Where external content enters
 
