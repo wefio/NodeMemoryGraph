@@ -4,6 +4,7 @@ import type {
   MemoryCommitReceipt,
   MemoryEntity,
   MemoryEntityQuery,
+  MemoryHybridPage,
   MemoryReadView,
   MemoryVectorQuery,
 } from "./backend.ts";
@@ -17,7 +18,7 @@ import {
 } from "./model.ts";
 import type { MemoryInput } from "./model.ts";
 import { evidenceShortlist } from "./evidence-ranking.ts";
-import { rankEconomyCandidates } from "./rank-fusion.ts";
+import { rankLocalLogOdds } from "./local-log-odds.ts";
 import { MemoryPlan } from "./plan.ts";
 import { recordClaimOutcomes } from "./claim-outcomes.ts";
 import { changeResolution, proposeMemoryRelation, supersedeMemory } from "./lifecycle.ts";
@@ -64,8 +65,6 @@ export interface MemoryQueryOptions {
   expandLeafContext?: boolean;
   /** Collect independent candidates for an injected evidence ranker before reading sources. */
   evidenceShortlist?: boolean;
-  /** Fuse the existing candidate routes for compact automatic recall. */
-  fuseEconomyRoutes?: boolean;
 }
 
 interface PlannedResult<T> {
@@ -458,6 +457,16 @@ export class MemoryEngine {
     limit: number,
   ): Promise<MemorySearchResult[]> {
     if (!this.backend.vectorIndex) throw new Error("This memory backend has no vector index");
+    if (semantic.mode === "hybrid" && this.backend.hybridCandidates) {
+      const page = this.backend.hybridCandidates(view, { ...query, text, limit: 100 }, semantic);
+      return this.project(
+        view,
+        page.candidates.map(({ entity }) => entity),
+        options,
+        false,
+        (candidates) => selectLocalHybrid(candidates, page, text, options.evidenceShortlist, limit),
+      );
+    }
     const semanticLimit = semantic.mode === "vector" ? 512 : 256;
     const vectors = this.backend.vectorIndex.candidates(
       view,
@@ -504,13 +513,10 @@ export class MemoryEngine {
           };
         })
         .sort((left, right) => right.combinedScore - left.combinedScore);
-      if (semantic.mode !== "hybrid" || (!options.fuseEconomyRoutes && !options.evidenceShortlist))
-        return ranked.slice(0, limit);
+      if (semantic.mode !== "hybrid" || !options.evidenceShortlist) return ranked.slice(0, limit);
       const vectorIds = vectors.map((item) => item.entity.value.id);
       const lexicalIds = lexical.flatMap((item) => (item.kind === "memory" ? [item.value.id] : []));
-      return options.fuseEconomyRoutes
-        ? rankEconomyCandidates(ranked, vectorIds, lexicalIds, limit)
-        : evidenceShortlist(ranked, vectorIds, lexicalIds, limit);
+      return evidenceShortlist(ranked, vectorIds, lexicalIds, limit);
     });
   }
 
@@ -958,6 +964,43 @@ export class MemoryEngine {
         throw new Error("The recorded operation result is unavailable");
     }
   }
+}
+
+function selectLocalHybrid(
+  candidates: SearchCandidate[],
+  page: MemoryHybridPage,
+  text: string,
+  shortlist: boolean | undefined,
+  limit: number,
+): SearchCandidate[] {
+  const byId = new Map(page.candidates.map((row) => [row.entity.value.id, row]));
+  const ranked = rankLocalLogOdds(candidates, ({ memory }) => {
+    const { recordScore, bm25 } = byId.get(memory.id)!;
+    return { id: memory.id, vectorScore: recordScore, bm25 };
+  }).map(({ candidate, score }) => ({ ...candidate, combinedScore: score }));
+  const selected = shortlist
+    ? evidenceShortlist(ranked, page.vectorIds, page.lexicalIds, limit)
+    : ranked.slice(0, limit);
+  const query = normalize(text);
+  const terms = searchTerms(query);
+  return selected.map((candidate) => {
+    const { memory, node } = candidate;
+    const { recordScore, bm25 } = byId.get(memory.id)!;
+    const triggers = recallTriggersFromStoredMarkers(memory.markers).join(" ");
+    // Preserve the historical component scale consumed by QPP and feedback.
+    const lexicalScore = lexicalTextScore(
+      query,
+      `${memory.statement} ${node.canonicalName} ${node.summary} ${triggers}`,
+      terms,
+    );
+    const recallReason =
+      recordScore > 0
+        ? bm25 > 0 || lexicalScore > 0
+          ? "hybrid_match"
+          : "vector_match"
+        : "lexical_match";
+    return { ...candidate, lexicalScore, vectorScore: recordScore, recallReason };
+  });
 }
 
 function boundedGraphHops(hops = 0): number {

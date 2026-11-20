@@ -1,4 +1,3 @@
-const ECONOMY_ROUTE_LIMIT = 100;
 export interface RankedRoute {
   ids: readonly string[];
   weight?: number;
@@ -38,24 +37,4 @@ export function reciprocalRankFusion(
         left.id.localeCompare(right.id),
     )
     .slice(0, Math.max(0, Math.floor(limit)));
-}
-
-/** Fuse authorized hybrid, vector and FTS candidates before loading evidence. */
-export function rankEconomyCandidates<T extends { memory: { id: string } }>(
-  hybrid: readonly T[],
-  vectorIds: readonly string[],
-  lexicalIds: readonly string[],
-  limit: number,
-): T[] {
-  const candidates = new Map(hybrid.map((row) => [row.memory.id, row]));
-  const eligible = (ids: readonly string[]) =>
-    ids.filter((id) => candidates.has(id)).slice(0, ECONOMY_ROUTE_LIMIT);
-  return reciprocalRankFusion(
-    [
-      { ids: hybrid.slice(0, ECONOMY_ROUTE_LIMIT).map(({ memory }) => memory.id), weight: 0.5 },
-      { ids: eligible(vectorIds), weight: 0.4 },
-      { ids: eligible(lexicalIds), weight: 0.1 },
-    ],
-    limit,
-  ).map(({ id }) => candidates.get(id)!);
 }

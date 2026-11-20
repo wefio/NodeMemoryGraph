@@ -14,17 +14,18 @@ query is used as supplied, and the Active Graph retains the original request.
 
 ## Candidate ordering
 
-Compact automatic recall uses fixed reciprocal rank fusion when it runs hybrid
-retrieval. The engine fuses the hybrid, vector and FTS ranks of eligible records
-within each store before loading evidence. The shared daemon carries this order
-into candidate selection and preview packing. Cross-store reconciliation and
-primary-query priority still govern assembly across stores and queries.
+SQLite hybrid retrieval uses the same calibrated score fusion for explicit
+search and both automatic recall profiles. The engine combines BM25 and vector
+cosine scores from up to 100 candidates per route before loading source evidence.
+The shared daemon carries this order into candidate selection and preview packing.
+Cross-store reconciliation and primary-query priority govern assembly across
+stores and queries. The [fusion decision](../decisions/implemented/2026-11-20-local-log-odds-fusion.md)
+records the weights and calibration.
 
-Explicit search, full automatic recall and compact recall without hybrid ranking
-use contextual ordering for session-bound results when no injected evidence
-ranking takes precedence. Contextual ordering reorders the retrieved page
-before feedback staging and preserves its membership and scores. The query
-preparation window is also available to compact automatic recall.
+Session-bound results without calibrated hybrid ranking use contextual ordering
+when no injected evidence ranking takes precedence. Contextual ordering reorders
+the retrieved page before feedback staging and preserves its membership and
+scores. The query preparation window is available to both automatic recall profiles.
 
 Native turn admission supplies only the user prompt and project identity. The
 daemon retains a bounded recent-prompt window per session. Assistant replies, tool

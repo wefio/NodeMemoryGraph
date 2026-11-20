@@ -195,6 +195,29 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
       recordScore: Number(row.recordScore),
     }));
   }
+
+  scoresFor(view: MemoryReadView, ids: readonly string[], semantic: MemoryVectorQuery) {
+    if (!ids.length) return new Map<string, number>();
+    const cosine = cosineScorer(semantic.vector);
+    const rows = this.reader(view)
+      .prepare(
+        `SELECT v.id, v.vector FROM json_each(?) wanted
+        CROSS JOIN nmg_memory_vectors v ON v.namespace=? AND v.model=?
+          AND v.id=wanted.value AND v.dimensions=?`,
+      )
+      .all(
+        JSON.stringify(ids),
+        this.namespace,
+        semantic.indexId,
+        semantic.vector.length,
+      ) as StoreRow[];
+    return new Map(
+      rows.map((row) => {
+        const score = cosine(scoringVector(row));
+        return [String(row.id), Number.isFinite(score) ? score : 0];
+      }),
+    );
+  }
 }
 
 const INDEXABLE_MEMORY = `json_extract(m.payload, '$.status') <> 'deleted'

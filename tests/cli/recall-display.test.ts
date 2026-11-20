@@ -77,7 +77,7 @@ test("lexical automatic recall keeps candidate membership across display modes",
   }
 });
 
-test("compact automatic recall returns the fused order through the shared daemon search", async (t) => {
+test("SQLite hybrid ordering is shared by explicit search and both automatic recall modes", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "nmg-economy-ranking-"));
   const path = join(dir, "nmg.sqlite");
   const namespace = "economy-ranking";
@@ -120,7 +120,7 @@ test("compact automatic recall returns the fused order through the shared daemon
           text: memory.statement,
         })),
         [
-          [0, 1],
+          [0.1, Math.sqrt(0.99)],
           [0.4, Math.sqrt(0.84)],
           [1, 0],
         ],
@@ -150,7 +150,7 @@ test("compact automatic recall returns the fused order through the shared daemon
   };
   const ids = (response: Awaited<ReturnType<typeof search>>) =>
     response.results.map(({ memory }) => memory.id);
-  const search = (extra: { autoRecall?: boolean; retrievalMode?: "fts5" }) =>
+  const search = (extra: { autoRecall?: boolean; retrievalMode?: "fts5" | "hybrid" }) =>
     service.invoke("search", { ...params, ...extra });
   const compact = await search({ autoRecall: true });
   assert.equal(compact.recallDisplayMode, "compact");
@@ -163,7 +163,7 @@ test("compact automatic recall returns the fused order through the shared daemon
     ),
     [agreement, lexical],
   );
-  assert.deepEqual(ids(await search({})), [lexical, agreement]);
+  assert.deepEqual(ids(await search({ retrievalMode: "hybrid" })), [agreement, lexical]);
   assert.deepEqual(ids(await search({ autoRecall: true, retrievalMode: "fts5" })), [
     lexical,
     agreement,
@@ -174,6 +174,6 @@ test("compact automatic recall returns the fused order through the shared daemon
     sessionId: "s",
     mode: "full",
   });
-  assert.deepEqual(ids(await search({ autoRecall: true })), [lexical, agreement]);
+  assert.deepEqual(ids(await search({ autoRecall: true })), [agreement, lexical]);
   assert.deepEqual(queryBatches, [1, 1, 1]);
 });

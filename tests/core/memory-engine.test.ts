@@ -7,6 +7,75 @@ import { openMemoryBackend } from "../../src/core/memory/open.ts";
 import { MemoryEngine } from "../../src/core/memory/engine.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
+test("SQLite hybrid search scores both sides of the union within the read scope", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-hybrid-union-"));
+  const backend = await openMemoryBackend({
+    kind: "sqlite",
+    path: join(directory, "memory.sqlite"),
+    namespace: "test",
+  });
+  t.after(async () => {
+    await backend.close();
+    removeTempDirectory(directory);
+  });
+  const engine = new MemoryEngine(backend);
+  const lexical = await engine.remember({ statement: "orchid", nodeName: "Plants" });
+  const vector = await engine.remember({
+    statement:
+      "orchid with exceptionally long inflorescences that flower in the middle of the season",
+    nodeName: "Plants",
+  });
+  const privateRecord = await engine.remember({
+    statement: "orchid in the private collection",
+    nodeName: "Plants",
+    residence: "stg",
+    sessionId: "private",
+  });
+  const semantic = { indexId: "test-model", vector: [1, 0], mode: "hybrid" } as const;
+  const vectors = new Map([
+    [lexical.memory.id, [0.6, 0.8]],
+    [vector.memory.id, [1, 0]],
+    [privateRecord.memory.id, [1, 0]],
+  ]);
+  const documents = backend.vectorIndex!.pending(semantic.indexId, 3);
+  assert.equal(documents.length, 3);
+  backend.vectorIndex!.save(
+    semantic.indexId,
+    documents,
+    documents.map(({ id }) => vectors.get(id)!),
+  );
+
+  const view = await backend.openRead();
+  try {
+    const query = { kind: "memory", text: "orchid", limit: 1 } as const;
+    const page = backend.hybridCandidates!(view, query, semantic);
+    const expanded = backend.hybridCandidates!(view, { ...query, limit: 3 }, semantic);
+    assert.deepEqual(page.lexicalIds, [lexical.memory.id]);
+    assert.deepEqual(page.vectorIds, [vector.memory.id]);
+    const actual = new Map(
+      page.candidates.map(({ entity, bm25, recordScore }) => [
+        entity.value.id,
+        [bm25, recordScore],
+      ]),
+    );
+    assert.equal(actual.size, 2);
+    for (const { entity, bm25, recordScore } of expanded.candidates) {
+      assert.ok(bm25 > 0 && recordScore > 0);
+      assert.deepEqual(actual.get(entity.value.id), [bm25, recordScore]);
+    }
+  } finally {
+    await backend.closeRead(view);
+  }
+
+  const result = await engine.search("orchid", { limit: 2 }, semantic);
+  assert.deepEqual(
+    result.results.map(({ memory }) => memory.id),
+    [vector.memory.id, lexical.memory.id],
+  );
+  assert.ok(result.results[0]!.combinedScore > result.results[1]!.combinedScore);
+  assert.equal(result.results[0]!.evidence.id, vector.history.id);
+});
+
 for (const kind of ["sqlite", "lancedb"] as const) {
   test(`${kind}: engine preserves evidence, replacement, graph access, privacy and replay`, async () => {
     const directory = mkdtempSync(join(tmpdir(), `nmg-engine-${kind}-`));
