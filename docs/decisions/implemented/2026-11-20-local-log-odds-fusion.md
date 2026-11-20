@@ -28,6 +28,8 @@ The evaluated 3:1 ratio improved evidence coverage over 6:1 at both tested
 candidate depths. The compact recall replay also favored 3:1 over the prior
 rank fusion at the same default five-item budget. Query-adaptive weights traded
 coverage across the evaluated datasets without improving the pooled result.
+The [experiment report](../../experiments/retrieval/local-log-odds-fusion-2026-11-20.md)
+records the quality and SQLite read measurements.
 
 ## Consequences
 
