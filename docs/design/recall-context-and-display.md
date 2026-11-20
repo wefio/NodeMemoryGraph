@@ -14,12 +14,17 @@ query is used as supplied, and the Active Graph retains the original request.
 
 ## Candidate ordering
 
-The shared daemon search path reorders session-bound results after retrieval and
-before feedback staging. Automatic and explicit search share the same ordering,
-independent of display mode. The candidate page, canonical IDs, scores, retrieval
-options and graph references remain intact. This pass does not remove candidates,
-increase the retrieval limit or perform another provider call. Preserving a page
-preserves recall at its full size; it does not guarantee recall at a smaller cutoff.
+Compact automatic recall uses fixed reciprocal rank fusion when it runs hybrid
+retrieval. The engine fuses the hybrid, vector and FTS ranks of eligible records
+within each store before loading evidence. The shared daemon carries this order
+into candidate selection and preview packing. Cross-store reconciliation and
+primary-query priority still govern assembly across stores and queries.
+
+Explicit search, full automatic recall and compact recall without hybrid ranking
+use contextual ordering for session-bound results when no injected evidence
+ranking takes precedence. Contextual ordering reorders the retrieved page
+before feedback staging and preserves its membership and scores. The query
+preparation window is also available to compact automatic recall.
 
 Native turn admission supplies only the user prompt and project identity. The
 daemon retains a bounded recent-prompt window per session. Assistant replies, tool
@@ -54,7 +59,7 @@ Economy rendering displays identical preview and graph labels once for the group
 Each source-bound view and receipt retains its own scope.
 The shared context renderer charges labels, section wrappers, separators and
 omission notices in UTF-16 units. It fills successive character stages and keeps
-whole candidate rows admitted at previous stages. Economy tiers pack in retrieved
+whole candidate rows admitted at previous stages. Economy tiers pack in ranked
 order; full mode applies floor-guarded length-density ordering ($k=40$, 400-unit
 floor, $\alpha=0.5$) so short records keep their retrieved order while oversized
 statements do not crowd out concise high-rank hits.

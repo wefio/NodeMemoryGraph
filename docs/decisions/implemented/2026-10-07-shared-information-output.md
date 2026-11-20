@@ -81,7 +81,7 @@ Unified local automatic recall also uses the nearby context to formulate admitte
 short continuation queries. It uses the same session and project window as
 candidate ordering.
 
-Shared session-bound search reorders its retrieved page using the latest query
+When contextual ordering applies, session-bound search reorders its page using the latest query
 and a bounded user-only context window. The initial score combines current term
 coverage (weight 2), compatible recent-topic coverage (0.35), and a reciprocal
 original-rank prior (0.15). The cache retains three prompts of at most 480 Unicode
@@ -89,6 +89,15 @@ code points in each of 32 sessions; tokenization examines at most 4,000 UTF-16
 units per candidate. These are initial operating values, not relevance guarantees.
 No candidate is removed, so whole-page recall is preserved while smaller-cutoff
 quality remains an evaluation question.
+
+Compact hybrid recall uses fixed RRF. It gives the hybrid, vector and FTS routes
+weights of 0.50, 0.40 and 0.10 with damping of 60 and up to 100 eligible records
+per route. The engine reuses the retrieval's query vector and lexical lookup.
+In a frozen replay of 1,867 single-turn questions, fixed RRF reduced the
+fraction of non-gold results in the first five across LoCoMo, BEAM and
+LongMemEval relative to session ordering. Applying contextual ordering over
+the fused list reduced first-hit accuracy across the three datasets. The replay
+had no conversation history.
 
 Automatic display uses the shared renderer to admit previews in increasing budget
 stages. The renderer can account for the whole row and its wrappers, including when

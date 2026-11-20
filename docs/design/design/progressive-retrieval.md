@@ -188,12 +188,10 @@ not an NMG subsystem: the Agent or another LLM-facing harness method generates
 the hypothetical text, while NMG only searches the supplied clauses.
 
 The retrieval boundary owns stable-ID deduplication, primary-query priority,
-and the shared record/token budget. The verified Lite path currently appends
-unique secondary-query results after the primary ranking. Weighted reciprocal
-rank fusion is available as a deterministic Lab primitive, and reverse
-retrieval remains an offline candidate-generation probe. Neither changes the
-Lite default until a shared bounded implementation and matched product tests
-show a benefit outside one benchmark distribution.
+and the shared record/token budget. Unique secondary-query results follow the
+primary ranking. Within a query, [compact automatic recall](../recall-context-and-display.md#candidate-ordering)
+fuses the existing retrieval routes when using hybrid search. Reverse retrieval
+is an offline candidate-generation probe.
 
 Benchmark-owned answer and judge prompts remain upstream protocol. They may be
 used unchanged for comparability, but they do not define NMG query generation,

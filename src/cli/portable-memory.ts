@@ -37,9 +37,11 @@ import {
 } from "../core/stg-projection.ts";
 import type { ClaimPosterior, MemoryContext, MemorySearchResult } from "../core/types.ts";
 import type { StgConsolidationPolicyConfig } from "../integration/config.ts";
-import { LocalMemoryEmbeddings } from "./local-memory-embeddings.ts";
+import { LocalMemoryEmbeddings, type QueryEmbedding } from "./local-memory-embeddings.ts";
 import { openLocalMemory } from "./local-memory-migration.ts";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
+
+type PortableSearchContext = MemoryContext & { economyRanked?: boolean };
 
 const METHODS = new Set<NmgMethod>(["remember", "rememberBatch", "search", "get", "deleteMemory"]);
 const LOCAL_METHODS = new Set<NmgMethod>([
@@ -244,8 +246,14 @@ export class PortableMemoryService {
     return { results: await (await this.engine()).rememberMany(inputs, operationId) };
   }
 
-  async search(input: NmgSearchParams, signal?: AbortSignal) {
-    return this.local ? this.searchLocal(input, signal) : this.searchIndependent(input, signal);
+  async search(
+    input: NmgSearchParams,
+    signal?: AbortSignal,
+    economy = false,
+  ): Promise<PortableSearchContext> {
+    return this.local
+      ? this.searchLocal(input, signal, economy)
+      : this.searchIndependent(input, signal);
   }
 
   private async searchIndependent(input: NmgSearchParams, signal?: AbortSignal) {
@@ -260,23 +268,18 @@ export class PortableMemoryService {
     return rankEvidencePage(input.query, context, ranker, input.limit, signal);
   }
 
-  private async searchLocal(input: NmgSearchParams, signal?: AbortSignal) {
+  private async searchLocal(
+    input: NmgSearchParams,
+    signal: AbortSignal | undefined,
+    economy: boolean,
+  ) {
     allowOptions(input, LOCAL_SEARCH_FIELDS);
-    const ranker =
-      input.retrievalMode === undefined || input.retrievalMode === "hybrid"
-        ? this.evidenceRanker
-        : undefined;
+    const hybrid = input.retrievalMode === undefined || input.retrievalMode === "hybrid";
+    const ranker = hybrid && !economy ? this.evidenceRanker : undefined;
     const shared = await this.engine();
     const project = await this.project(input.projectDir);
     const queries = [...new Set([input.query, ...(input.queries ?? [])])];
-    const options = {
-      ...input,
-      limit: ranker ? rankedCandidateLimit(input) : candidateLimit(input),
-      evidenceShortlist: Boolean(ranker),
-      findTesserae: !input.autoRecall,
-      expandLeafContext:
-        input.vectorGranularity === "hierarchy" || input.vectorGranularity === "union",
-    };
+    const options = localSearchOptions(input, Boolean(ranker), hybrid && economy);
     if (queries.length === 1 && input.retrievalMode === undefined && !input.autoRecall) {
       const exact = await exactLocalLookup(shared, project, input.query, {
         ...options,
@@ -292,21 +295,17 @@ export class PortableMemoryService {
     signal?.throwIfAborted();
     const results = await Promise.all(
       queries.map(async (query, i) => {
-        const { semantic, reason } = embeddings[i]!;
-        const search = async (engine: MemoryEngine) => {
-          const useVector =
-            semantic && engine.backend.vectorIndex?.has(semantic.indexId, semantic.vector.length);
-          const context = await engine.search(query, options, useVector ? semantic : undefined);
-          if (reason) context.retrieval = { mode: "lexical", degraded: true, reason };
-          return context;
-        };
-        const main = await search(shared);
-        return project ? mergeLocalContexts(await search(project), main) : main;
+        const embedding = embeddings[i]!;
+        const main = await searchLocalStore(shared, query, options, embedding);
+        return project
+          ? mergeLocalContexts(await searchLocalStore(project, query, options, embedding), main)
+          : main;
       }),
     );
     const primary = results[0]!;
     const context = {
       ...primary,
+      economyRanked: results.some((result) => result.economyRanked),
       results: limitSearchResults(
         results.flatMap((context) => context.results),
         options.limit,
@@ -626,6 +625,22 @@ function projectForWrite(input: NmgRememberParams): string | undefined {
   return input.residence === "stg" && input.projectDir ? resolve(input.projectDir) : undefined;
 }
 
+function localSearchOptions(
+  input: NmgSearchParams,
+  evidenceShortlist: boolean,
+  fuseEconomyRoutes: boolean,
+): MemoryQueryOptions & { limit: number } {
+  return {
+    ...input,
+    limit: evidenceShortlist ? rankedCandidateLimit(input) : candidateLimit(input),
+    evidenceShortlist,
+    fuseEconomyRoutes,
+    findTesserae: !input.autoRecall,
+    expandLeafContext:
+      input.vectorGranularity === "hierarchy" || input.vectorGranularity === "union",
+  };
+}
+
 function rankedCandidateLimit(input: NmgSearchParams): number {
   const limit = input.limit ?? 20;
   if (!Number.isInteger(limit) || limit < 1 || limit > 100)
@@ -655,6 +670,21 @@ async function exactLocalLookup(
   return result;
 }
 
+async function searchLocalStore(
+  engine: MemoryEngine,
+  query: string,
+  options: MemoryQueryOptions,
+  { semantic, reason }: QueryEmbedding,
+): Promise<PortableSearchContext> {
+  const useVector =
+    semantic && engine.backend.vectorIndex?.has(semantic.indexId, semantic.vector.length);
+  const context = await engine.search(query, options, useVector ? semantic : undefined);
+  if (reason) context.retrieval = { mode: "lexical", degraded: true, reason };
+  return options.fuseEconomyRoutes && useVector && context.results.length
+    ? { ...context, economyRanked: true }
+    : context;
+}
+
 function limitSearchResults(results: MemorySearchResult[], limit: number): MemorySearchResult[] {
   const ranked = new Map<string, MemorySearchResult>();
   const leaves = new Map<string, MemorySearchResult>();
@@ -671,9 +701,13 @@ function limitSearchResults(results: MemorySearchResult[], limit: number): Memor
   ];
 }
 
-function mergeLocalContexts(project: MemoryContext, main: MemoryContext): MemoryContext {
+function mergeLocalContexts(
+  project: PortableSearchContext,
+  main: PortableSearchContext,
+): PortableSearchContext {
   return {
     ...mergeStgLtgContexts(project, main),
+    economyRanked: project.economyRanked || main.economyRanked,
     tesserae: [
       ...new Map(
         [...(project.tesserae ?? []), ...(main.tesserae ?? [])].map((item) => [item.id, item]),

@@ -17,6 +17,7 @@ import {
 } from "./model.ts";
 import type { MemoryInput } from "./model.ts";
 import { evidenceShortlist } from "./evidence-ranking.ts";
+import { rankEconomyCandidates } from "./rank-fusion.ts";
 import { MemoryPlan } from "./plan.ts";
 import { recordClaimOutcomes } from "./claim-outcomes.ts";
 import { changeResolution, proposeMemoryRelation, supersedeMemory } from "./lifecycle.ts";
@@ -63,6 +64,8 @@ export interface MemoryQueryOptions {
   expandLeafContext?: boolean;
   /** Collect independent candidates for an injected evidence ranker before reading sources. */
   evidenceShortlist?: boolean;
+  /** Fuse the existing candidate routes for compact automatic recall. */
+  fuseEconomyRoutes?: boolean;
 }
 
 interface PlannedResult<T> {
@@ -501,15 +504,13 @@ export class MemoryEngine {
           };
         })
         .sort((left, right) => right.combinedScore - left.combinedScore);
-      if (options.evidenceShortlist && semantic.mode === "hybrid") {
-        return evidenceShortlist(
-          ranked,
-          vectors.map((item) => item.entity.value.id),
-          lexical.flatMap((item) => (item.kind === "memory" ? [item.value.id] : [])),
-          limit,
-        );
-      }
-      return ranked.slice(0, limit);
+      if (semantic.mode !== "hybrid" || (!options.fuseEconomyRoutes && !options.evidenceShortlist))
+        return ranked.slice(0, limit);
+      const vectorIds = vectors.map((item) => item.entity.value.id);
+      const lexicalIds = lexical.flatMap((item) => (item.kind === "memory" ? [item.value.id] : []));
+      return options.fuseEconomyRoutes
+        ? rankEconomyCandidates(ranked, vectorIds, lexicalIds, limit)
+        : evidenceShortlist(ranked, vectorIds, lexicalIds, limit);
     });
   }
 

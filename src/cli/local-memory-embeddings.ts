@@ -22,7 +22,7 @@ type IndexClient = Pick<
   "indexId" | "batchSize" | "embedDocuments" | "embedDocumentsForStorage" | "embedQueries"
 >;
 type IndexUpdate = { pending: boolean; task: Promise<void> };
-type QueryEmbedding = { semantic?: MemoryVectorQuery; reason?: string };
+export type QueryEmbedding = { semantic?: MemoryVectorQuery; reason?: string };
 
 /** Provider I/O stays outside SQLite transactions. Missing vectors remain durable work. */
 export class LocalMemoryEmbeddings {

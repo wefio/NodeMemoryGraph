@@ -544,27 +544,20 @@ export class NmgService {
     signal?.throwIfAborted();
     const memory = this.#portableMemory;
     const started = performance.now();
-    if (memory.local) this.#offerSearchCue(params);
-    const retrieval = { ...params };
-    if (memory.local) {
-      retrieval.graphHops ??= configuredGraphHops(0, this.#environment);
-      delete retrieval.recallCue;
-      delete retrieval.recallRevision;
-      delete retrieval.recallSource;
-      if (params.autoRecall && params.sessionId)
-        retrieval.query = this.#recallContext.automaticQuery(
-          params.sessionId,
-          resolve(params.projectDir ?? process.cwd()),
-          params.query,
-        );
-    }
-    const context = await memory.search(retrieval, signal);
+    const retrieval = memory.local ? this.#prepareLocalSearch(params) : params;
+    const recallDisplayMode =
+      params.autoRecall && params.sessionId
+        ? this.#recallContext.mode(params.sessionId)
+        : undefined;
+    const economy = params.autoRecall === true && recallDisplayMode !== "full";
+    const { economyRanked, ...context } = await memory.search(retrieval, signal, economy);
     signal?.throwIfAborted();
     if (!memory.local) return context;
     const directMs = performance.now() - started;
     if (!params.autoRecall)
       context.tesserae = await this.#resolveTesseraLines(context.tesserae ?? [], params);
-    this.#applyPortableRecallContext(context, params);
+    if (!economyRanked) this.#rankPortableSessionResults(context, params);
+    if (recallDisplayMode) context.recallDisplayMode = recallDisplayMode;
     return this.#registerPortableSearch(
       context,
       { ...params, graphHops: retrieval.graphHops },
@@ -573,18 +566,30 @@ export class NmgService {
     );
   }
 
-  #applyPortableRecallContext(context: MemoryContext, params: NmgSearchParams): void {
-    if (params.sessionId) {
-      if (!context.evidencePage?.ranked) {
-        context.results = this.#recallContext.rank(
-          params.sessionId,
-          resolve(params.projectDir ?? process.cwd()),
-          params.query,
-          context.results,
-        );
-      }
-      if (params.autoRecall) context.recallDisplayMode = this.#recallContext.mode(params.sessionId);
-    }
+  #prepareLocalSearch(params: NmgSearchParams): NmgSearchParams {
+    this.#offerSearchCue(params);
+    const retrieval = { ...params };
+    delete retrieval.recallCue;
+    delete retrieval.recallRevision;
+    delete retrieval.recallSource;
+    retrieval.graphHops ??= configuredGraphHops(0, this.#environment);
+    if (params.autoRecall && params.sessionId)
+      retrieval.query = this.#recallContext.automaticQuery(
+        params.sessionId,
+        resolve(params.projectDir ?? process.cwd()),
+        params.query,
+      );
+    return retrieval;
+  }
+
+  #rankPortableSessionResults(context: MemoryContext, params: NmgSearchParams): void {
+    if (!params.sessionId || context.evidencePage?.ranked) return;
+    context.results = this.#recallContext.rank(
+      params.sessionId,
+      resolve(params.projectDir ?? process.cwd()),
+      params.query,
+      context.results,
+    );
   }
 
   #registerPortableSearch(
