@@ -80,7 +80,7 @@ function referenceFor(
   if (!MEMORY_ID.test(memory.id) || memory.markers.some((marker) => marker.kind === "forget"))
     return undefined;
   const quote = statementQuote(memory.statement);
-  if (unsafeQuote(quote)) return undefined;
+  if (unsafeQuote(quote) || quote.includes("`")) return undefined;
   const hex = memory.id.replaceAll("-", "").toLowerCase();
   for (let length = 4; length <= hex.length; length += 2) {
     const prefix = hex.slice(0, length);
