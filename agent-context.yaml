@@ -405,10 +405,8 @@ routes:
       blocking: [check, test:product, build]
       advisory: []
 
-  # The supplied cloud memory application for AML runs as one package under
-  # onlion/ and imports the canonical root src. It owns HTTP, R2 snapshot and
-  # receipt wiring plus adapter-level retrieval compensation; it never carries
-  # a second NMG source tree, policy file or prompt set.
+  # The cloud adapter imports the shared memory HTTP protocol and service,
+  # which also run with local SQLite. onlion owns cloud storage and runtime wiring.
   - id: aml-cloud-service
     paths:
       - onlion/backend/**
@@ -417,9 +415,19 @@ routes:
       - onlion/package.json
       - onlion/tsconfig.json
       - onlion/.gitignore
+      - src/integration/extractive-summaries.ts
+      - src/integration/memory-http-protocol.ts
+      - src/integration/memory-http-ranking.ts
+      - src/integration/memory-http-service.ts
     owners:
       - docs/decisions/implemented/2026-10-22-onlion-aml-cloud-service.md
-    tests: []
+    tests:
+      [
+        tests/cli/local-memory-http.test.ts,
+        tests/cli/local-memory-http-config.test.ts,
+        tests/integration/memory-http-protocol.test.ts,
+        tests/integration/memory-http-ranking.test.ts,
+      ]
     verify:
       blocking: [check, build]
       advisory: []

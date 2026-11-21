@@ -41,6 +41,7 @@ export interface SearchSurfaceOptions {
   preamble?: string;
   postamble?: string;
   emptyText?: string;
+  includeGetHint?: boolean;
   memoryReferences?: Readonly<Record<string, string>>;
 }
 
@@ -313,7 +314,10 @@ export function prepareCompactSearchSurface(
       purpose: "guidance",
       body:
         context.logicalChainCount > 0
-          ? `logical_chains=${context.logicalChainCount}; use nmg_get for compact chain structure with exact evidence.`
+          ? `logical_chains=${context.logicalChainCount}` +
+            (options.includeGetHint === false
+              ? ""
+              : "; use nmg_get for compact chain structure with exact evidence.")
           : "",
     },
     {

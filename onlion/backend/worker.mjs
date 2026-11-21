@@ -41,13 +41,25 @@ import { memRequestStarted, memLog, memFields } from "./mem-trace.mjs";
 import { AmlMemoryService, AML_SEARCH_PROFILE, CORE_SOURCE } from "./memory-service.ts";
 import { memoryEmbeddingText } from "../../src/core/store/search-ranking.ts";
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
+import { describeContent } from "../../src/integration/multimodal-content.ts";
 import {
-  normalizeContent,
-  contentText,
-  describeContent,
-  ContentValidationError,
-} from "../../src/integration/multimodal-content.ts";
-import { createHash, timingSafeEqual } from "node:crypto";
+  HttpError,
+  MAX_QUERY_CHARS,
+  MAX_MESSAGE_CHARS,
+  MAX_COMBINED_MESSAGE_CHARS,
+  MAX_ORDERED_CONTENT_BYTES,
+  httpAddReceipt,
+  httpHash,
+  memoryHttpOperation,
+  readHttpAdd,
+  readHttpClauses,
+  readHttpJson,
+  readHttpTopK,
+  requireHttpApiKey,
+  sourceHttpMessageId,
+  textField,
+} from "../../src/integration/memory-http-protocol.ts";
+import { timingSafeEqual } from "node:crypto";
 import { page } from "./page.mjs";
 import {
   USER_LIMIT,
@@ -81,7 +93,7 @@ import {
   logEntryLanded,
   putLogEntry,
 } from "./append-log.mjs";
-import { cosineSimilarity } from "../../src/core/vector.ts";
+import { mergePendingHttpRows, rankHttpRows } from "../../src/integration/memory-http-ranking.ts";
 import {
   MAX_QUERY_FEATURES,
   MAX_QUERY_WINDOWS,
@@ -112,10 +124,6 @@ const BODY_TIMEOUT_MS = 30_000;
  *  The query cap is generous on purpose: query embedding is best-effort
  *  (`warmClauseVectors` swallows its failure), so a very long query degrades to
  *  lexical retrieval instead of failing the request. */
-const MAX_QUERY_CHARS = 1_000_000;
-const MAX_MESSAGE_CHARS = 1_000_000;
-const MAX_COMBINED_MESSAGE_CHARS = 1_500_000;
-const MAX_ORDERED_CONTENT_BYTES = 4 * 1024 * 1024;
 const TEXT_LIMITS = {
   max_query_chars: MAX_QUERY_CHARS,
   max_message_chars: MAX_MESSAGE_CHARS,
@@ -130,50 +138,24 @@ const SOURCE_REVISION =
 // Cache only the completed, I/O-free WASM instance. Pending operations belong
 // to their originating request and must never be chained across invocations.
 let ready;
-const hash = (text) => createHash("sha256").update(text).digest("hex");
+const hash = httpHash;
 const objectKey = (key) => `users/${key}.sqlite`;
 const json = (body, status = 200, headers = {}) =>
   Response.json(body, { status, headers: { "cache-control": "no-store", ...headers } });
-class HttpError extends Error {
-  constructor(status, code, message) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
+function authenticate(request, env) {
+  requireHttpApiKey(request, env.NMG_API_KEY);
 }
-function textField(value, label, max = 512) {
-  if (typeof value !== "string" || !value.trim() || value.length > max)
-    throw new HttpError(
-      400,
-      "invalid_request",
-      `${label} must be a nonempty string of at most ${max} characters`,
-    );
-  return value;
+
+function readJson(request, env) {
+  const timeout = Number(env?.NMG_BODY_TIMEOUT_MS);
+  return readHttpJson(request, MAX_BODY_BYTES, timeout > 0 ? timeout : BODY_TIMEOUT_MS);
 }
-function contentField(value, maxTextChars = MAX_MESSAGE_CHARS) {
-  try {
-    const content = normalizeContent(value, { maxTextChars });
-    if (
-      typeof content !== "string" &&
-      new TextEncoder().encode(JSON.stringify(content)).length > MAX_ORDERED_CONTENT_BYTES
-    ) {
-      throw new HttpError(
-        413,
-        "content_too_large",
-        `Ordered source content limit is ${MAX_ORDERED_CONTENT_BYTES} bytes`,
-      );
-    }
-    return content;
-  } catch (error) {
-    if (error instanceof ContentValidationError)
-      throw new HttpError(
-        error.code === "content_too_large" ? 413 : 400,
-        error.code,
-        error.message,
-      );
-    throw error;
-  }
+
+function readAddRequest(input) {
+  requestIdentity(input.user_id ?? input.userId, input.request_id);
+  return readHttpAdd(input);
 }
+
 function createContentView() {
   // Supplied captions are the retrieval view; no model is invoked.
   return (content) => describeContent(content);
@@ -212,66 +194,6 @@ async function sqliteReady() {
     memLog("sqlite_ready", null, { sqlite: sqliteStats() });
   }
   return ready;
-}
-function authenticate(request, env) {
-  const authorization = request.headers.get("authorization") || "";
-  const authorizationToken = authorization.match(/^(?:Bearer|Token)\s+(.+)$/i)?.[1] || "";
-  const supplied = request.headers.get("x-api-key") || authorizationToken;
-  if (!env.NMG_API_KEY)
-    throw new HttpError(503, "not_configured", "API authentication is not configured");
-  if (
-    !supplied ||
-    !timingSafeEqual(Buffer.from(hash(supplied)), Buffer.from(hash(env.NMG_API_KEY)))
-  )
-    throw new HttpError(
-      401,
-      "unauthorized",
-      "A valid Token, Bearer, or X-API-Key credential is required",
-    );
-}
-async function readJson(request, env) {
-  if (Number(request.headers.get("content-length")) > MAX_BODY_BYTES)
-    throw new HttpError(413, "request_too_large", "Request limit is 6 MiB");
-  if (!request.body) throw new HttpError(400, "invalid_json", "JSON body required");
-  // Nothing below this line has a deadline of its own, so this is the only place that can give a
-  // stalled upload one instead of holding the invocation to the platform ceiling.
-  const deadline =
-    Date.now() +
-    (Number(env?.NMG_BODY_TIMEOUT_MS) > 0 ? Number(env.NMG_BODY_TIMEOUT_MS) : BODY_TIMEOUT_MS);
-  const reader = request.body.getReader();
-  const chunks = [];
-  let length = 0;
-  try {
-    while (true) {
-      if (Date.now() > deadline) {
-        await reader.cancel().catch(() => {});
-        throw new HttpError(408, "request_body_timeout", "Request body did not arrive in time");
-      }
-      const { done, value } = await reader.read();
-      if (done) break;
-      length += value.length;
-      if (length > MAX_BODY_BYTES) {
-        await reader.cancel();
-        throw new HttpError(413, "request_too_large", "Request limit is 6 MiB");
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const body = new Uint8Array(length);
-  let offset = 0;
-  for (const c of chunks) {
-    body.set(c, offset);
-    offset += c.length;
-  }
-  try {
-    const v = JSON.parse(new TextDecoder().decode(body));
-    if (!v || typeof v !== "object" || Array.isArray(v)) throw 0;
-    return v;
-  } catch {
-    throw new HttpError(400, "invalid_json", "Body must be a JSON object");
-  }
 }
 /** Retry delay for a manifest CAS conflict: exponential with full jitter. The
  *  previous fixed 15-100 ms window made sixteen writers re-collide in lockstep, so
@@ -569,29 +491,6 @@ function copyLegacyReceipts(manifest, rows) {
       completed_at: row.completed_at,
     };
 }
-function normalizeAddMessage(m) {
-  if (!m || typeof m !== "object") throw new HttpError(400, "invalid_request", "Invalid message");
-  const content = contentField(m.content);
-  const role = textField(m.role, "message.role", 64);
-  if (!["user", "assistant"].includes(role))
-    throw new HttpError(400, "invalid_request", "message.role must be user or assistant");
-  let chat_time = m.chat_time;
-  if (chat_time === undefined && m.timestamp !== undefined) {
-    if (
-      typeof m.timestamp !== "number" ||
-      !Number.isFinite(m.timestamp) ||
-      !Number.isFinite(new Date(m.timestamp).getTime())
-    )
-      throw new HttpError(400, "invalid_request", "timestamp must be Unix milliseconds");
-    chat_time = new Date(m.timestamp).toISOString();
-  }
-  if (
-    chat_time !== undefined &&
-    (typeof chat_time !== "string" || !Number.isFinite(Date.parse(chat_time)))
-  )
-    throw new HttpError(400, "invalid_request", "chat_time must be a valid date string");
-  return { role, content, ...(chat_time ? { chat_time } : {}) };
-}
 async function existingReceipt(env, ctx, requestHash, fingerprint) {
   const previous = ctx.manifest.receipts[requestHash];
   if (previous) {
@@ -684,49 +583,10 @@ async function addOneBatch(env, ctx, requestId, batch, manifest, staged) {
 }
 /** Validation shared by both accept paths: the log and the synchronous write must
  *  reject exactly the same requests, or a mode switch changes what is legal. */
-function readAddRequest(input) {
-  const userId = textField(input.user_id ?? input.userId, "user_id");
-  requestIdentity(userId, input.request_id);
-  const requestId = textField(input.request_id, "request_id");
-  const sessionId = textField(input.session_id ?? input.conversationId, "session_id");
-  if (!Array.isArray(input.messages) || !input.messages.length || input.messages.length > 512)
-    throw new HttpError(400, "invalid_request", "messages must contain between 1 and 512 messages");
-  let chars = 0;
-  const messages = input.messages.map((m) => {
-    const message = normalizeAddMessage(m);
-    chars += contentText(message.content).length;
-    return message;
-  });
-  if (chars > MAX_COMBINED_MESSAGE_CHARS)
-    throw new HttpError(
-      413,
-      "request_too_large",
-      `Combined message content limit is ${MAX_COMBINED_MESSAGE_CHARS} characters`,
-    );
-  return {
-    userId,
-    requestId,
-    sessionId,
-    messages,
-    requestHash: hash(requestId),
-    fingerprint: hash(JSON.stringify({ sessionId, messages })),
-  };
-}
-/** Body returned by both accept paths. `completed` describes persistence, not
- *  compaction: after the log write the data is durable and readable through
- *  `pendingForSearch`, which is what the contract asks a 200 to mean. */
-function addResponse(key, requestId, userId, sessionId, requestHash, added) {
-  return {
-    success: true,
-    request_id: requestId,
-    user_id: userId,
-    session_id: sessionId,
-    task_id: `${key}.${requestHash}`,
-    status: "completed",
-    added,
-  };
-}
 /** Accepts an Add as one immutable log entry.
+ *
+ *  The receipt describes durability and searchability through the pending log,
+ *  independently of when the entry folds into a partition.
  *
  *  The cost is a manifest read, one log write, and a manifest CAS that carries the
  *  pending counter - no partition download, no SQLite export, no snapshot upload,
@@ -766,7 +626,11 @@ async function acceptAdd(env, input) {
         ? message
         : { ...message, indexText: await contentView(message.content) },
     );
-  const response = addResponse(key, requestId, userId, sessionId, requestHash, prepared.length);
+  const response = httpAddReceipt(
+    { requestId, userId, sessionId },
+    `${key}.${requestHash}`,
+    prepared.length,
+  );
   // Best effort inside a budget: the vectors travel with the entry, so the fold that eventually
   // applies it does not have to reach the provider. A timeout leaves them out and the fold embeds.
   const vectors = await inlineEntryVectors(env, prepared);
@@ -877,7 +741,7 @@ async function foldPending(env, userId, { deadline = null } = {}) {
       if ((entry.generation ?? null) !== generation) continue;
       const batch = entry.messages.map((message, index) => ({
         ...message,
-        source_message_id: `aml:${entry.request_hash}:${index}`,
+        source_message_id: sourceHttpMessageId(entry.request_hash, index),
       }));
       // The entry may carry the vectors its accept computed. Handing them to this entry's client
       // means the fold applies storage and nothing else.
@@ -958,145 +822,22 @@ async function reconcilePending(env, userId, count) {
     return { response: { pending: count } };
   });
 }
-/** Terms the lexical fallback scores against: the query features, split the way the
- *  store's own lexical channel splits them (lowercase, alphanumeric runs, stopword-ish
- *  short tokens dropped). */
-function queryTerms(features) {
-  const seen = new Set();
-  for (const feature of features)
-    for (const term of String(feature)
-      .toLowerCase()
-      .split(/[^a-z0-9一-鿿]+/u))
-      if (term.length > 2) seen.add(term);
-  return [...seen];
-}
-
-/** How many query terms a pending entry mentions. Zero means it is not a match, which is
- *  what keeps an unmatched query answering with an empty page in a lexical-only
- *  deployment. */
-function pendingTermScore(content, terms) {
-  const text = String(content).toLowerCase();
-  let score = 0;
-  for (const term of terms) if (text.includes(term)) score += 1;
-  return score;
-}
-/** Fuses the entries still in the log into the page, scored against the same clauses the
- *  partitions were searched with.
- *
- *  Each entry costs one embedding call, capped by `MAX_PENDING_READ`, because a search has
- *  to see an Add that was just accepted. It is also attributed to the clause it matches
- *  best: the per-clause counts must keep covering every returned memory, which is the
- *  multi-clause contract, and a pending record that skipped attribution made the sum fall
- *  short of the page size.
- *
- *  Without a vector channel the same fusion runs on term overlap instead, because a
- *  deployment that has no embeddings still has to return what it accepted - and a flat
- *  zero score would return every pending entry for every query, including one that
- *  matches nothing.
- */
 async function fusePendingRecords({
-  env,
-  ctx,
-  features,
-  candidates,
-  client,
-  modes,
-  topK,
-  contributions,
-  appendOnly,
-  appendedById,
+  env, ctx, features, candidates, client, modes, topK, contributions, appendOnly, appendedById,
 }) {
-  // No gate on the count here either. This is the short-circuit that made accepted entries
-  // invisible once the accept stopped maintaining the count: the manifest said zero while the log
-  // held entries. The listing inside `pendingForSearch` is bounded, so asking is always cheap.
-  const waiting = await pendingForSearch(env, ctx, Math.min(topK, MAX_PENDING_READ));
-  if (waiting.length === 0) return candidates;
-  const attribute = (clauseIndex) => {
-    const total = contributions?.[clauseIndex];
-    if (total && clauseIndex >= 0) total.contributed += 1;
-  };
-  const merge = (scored) => {
-    const page = [];
-    for (const item of scored) {
-      attribute(item.clause);
-      // An append-only clause never competes for the page: its matches are the supplement,
-      // exactly as they are for a folded record.
-      if (appendOnly?.[item.clause]) {
-        const prior = appendedById?.get(item.record.id);
-        if (prior && prior.score > item.record.score) continue;
-        appendedById?.set(item.record.id, item.record);
-        continue;
-      }
-      page.push(item.record);
-    }
-    return [...candidates, ...page]
-      .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
-      .slice(0, topK);
-  };
-
-  if (!client) {
-    const termsPerClause = features.map((list) => queryTerms(list));
-    const scored = [];
-    for (const record of waiting) {
-      const perClause = termsPerClause.map((terms) => pendingTermScore(record.content, terms));
-      const best = Math.max(...perClause);
-      if (best > 0)
-        scored.push({ record: { ...record, score: best }, clause: perClause.indexOf(best) });
-    }
-    return merge(scored);
-  }
-
-  // One batch call, not one call per feature and per record. The vectors are the same,
-  // and the sequential version spent up to forty round trips inside a single search -
-  // which is how a slow provider became a 120 s invocation the platform had to kill.
-  // A pending record the accept already embedded (the common case: the entry carries
-  // `vectors` and the index they belong to) is not re-embedded at all - the write side
-  // embeds, the read side reuses. Only a record whose accept lost the embed budget
-  // contributes its text to the provider call.
-  const texts = [];
-  const position = new Map();
-  const collect = (text) => {
-    if (!position.has(text)) position.set(text, texts.push(text) - 1);
-  };
-  for (const list of features) for (const text of list) collect(text);
-  for (const record of waiting)
-    if (!(record.vector && record.vector_model === client.indexId)) collect(record.content);
-  const vectors = texts.length ? await client.embedQueries(texts).catch(() => []) : [];
-  const byText = new Map();
-  texts.forEach((text, index) => {
-    if (vectors[index]) byText.set(text, vectors[index]);
+  const { results, usedVectors } = await mergePendingHttpRows({
+    waiting: await pendingForSearch(env, ctx),
+    features, candidates, client, topK, contributions, appendOnly, appendedById,
   });
-  const vectorOf = (record) =>
-    record.vector && record.vector_model === client.indexId
-      ? record.vector
-      : byText.get(record.content);
-  const vectorsPerClause = features.map((list) =>
-    list.map((text) => byText.get(text)).filter(Boolean),
-  );
-  const scored = [];
-  for (const record of waiting) {
-    const vector = vectorOf(record);
-    if (!vector) continue;
-    const perClause = vectorsPerClause.map((vectors) =>
-      vectors.reduce(
-        (best, feature) => Math.max(best, cosineSimilarity(vector, feature)),
-        -Infinity,
-      ),
-    );
-    const best = Math.max(...perClause);
-    if (!Number.isFinite(best)) continue;
-    modes.add("records");
-    scored.push({ record: { ...record, score: best }, clause: perClause.indexOf(best) });
-  }
-  return merge(scored);
+  if (usedVectors) modes.add("records");
+  return results;
 }
 
 /** Records that are still in the log, shaped like page items so the existing
  *  fusion by identity and highest score applies unchanged.
  *
- *  Scoring happens in `search`: one embedding call per entry, capped at
- *  `MAX_PENDING_READ`, because a search must see an Add that was just accepted. */
-async function pendingForSearch(env, ctx, limit) {
+ *  The log's default candidate budget is independent of the response's result limit. */
+async function pendingForSearch(env, ctx) {
   // No short-circuit on the count: it is a hint that can lag or be absent, and trusting a zero is
   // how accepted data becomes invisible (I1). The listing below is bounded by MAX_PENDING_READ, so
   // never trusting the hint costs one small request.
@@ -1105,7 +846,6 @@ async function pendingForSearch(env, ctx, limit) {
     // `stage_isolate: null`, which excluded every phase in the table without naming the one that
     // was actually running.
     measure,
-    limit: Math.min(limit, MAX_PENDING_READ),
     generation: ctx.manifest.generation ?? null,
     // Newest first: a streaming update has to be visible before it is folded, and taking
     // the oldest entries meant the most recent ones fell outside the window.
@@ -1158,7 +898,7 @@ async function add(env, input) {
       // Keep these internal IDs out of the existing receipt fingerprint.
       const batch = prepared
         .slice(offset, offset + batchSize)
-        .map((m, i) => ({ ...m, source_message_id: `aml:${requestHash}:${offset + i}` }));
+        .map((m, i) => ({ ...m, source_message_id: sourceHttpMessageId(requestHash, offset + i) }));
       added += await addOneBatch(
         env,
         { ...ctx, ...serviceContext },
@@ -1168,15 +908,7 @@ async function add(env, input) {
         staged,
       );
     }
-    const response = {
-      success: true,
-      request_id: requestId,
-      user_id: userId,
-      session_id: sessionId,
-      task_id: `${key}.${requestHash}`,
-      status: "completed",
-      added,
-    };
+    const response = httpAddReceipt({ requestId, userId, sessionId }, `${key}.${requestHash}`, added);
     manifest.receipts[requestHash] = {
       fingerprint,
       response,
@@ -1231,76 +963,6 @@ const HEALTH_PROBE_MS = 8_000;
 /** How long a search waits for the manifest before answering a partial page. */
 const MANIFEST_READ_MS = 8_000;
 
-/** Features to embed and search per clause, bounded by `MAX_QUERY_FEATURES`.
- *
- * The raw clause is never embedded: `selectQueryFeatures` returns its head window,
- * its end-anchored tail window, then the interior windows, so both ends of a long
- * clause reach the model instead of a megabyte string the model silently truncated.
- * Results fuse by identity on the highest score, so a record matches a clause by
- * its *best* feature. `warmClauseVectors` trims the tail end of this list when the
- * embedding budget runs out, which is why the order matters. */
-const MAX_SEARCH_CLAUSES = 8;
-/** One request may carry independent retrieval clauses: each is plain text plus
- * an optional label. The legacy `query`(+`options`) shape is one clause. */
-async function readClauses(input, optionTexts) {
-  const nodes = input.queries;
-  if (nodes === undefined) {
-    // Preserve query text; use opaque image references or optional pixel descriptions.
-    // Options never enter the vision request and are not used to infer an answer.
-    const queryContent = contentField(input.query, MAX_QUERY_CHARS);
-    const query = await createContentView()(queryContent);
-    return dedupeClauses([
-      { text: query, name: null },
-      ...optionTexts.map((choice) => ({ text: query + " " + choice, name: null })),
-    ]);
-  }
-  if (!Array.isArray(nodes) || nodes.length < 1 || nodes.length > MAX_SEARCH_CLAUSES)
-    throw new HttpError(
-      400,
-      "invalid_request",
-      `queries must be an array of 1 to ${MAX_SEARCH_CLAUSES} clauses`,
-    );
-  if (optionTexts.length > 0)
-    throw new HttpError(400, "invalid_request", "queries and options cannot be combined");
-  if (input.query !== undefined)
-    throw new HttpError(400, "invalid_request", "queries and query cannot be combined");
-  const clauses = nodes.map((node) => {
-    if (typeof node === "string")
-      return { text: textField(node, "query", MAX_QUERY_CHARS), name: null, appendOnly: false };
-    if (!node || typeof node !== "object")
-      throw new HttpError(
-        400,
-        "invalid_request",
-        "each query clause must be a string or an object with text",
-      );
-    const name = node.name === undefined ? null : textField(node.name, "name", 64);
-    // appendOnly clause results never compete for the page; they are returned as
-    // a supplement, so a broad dimension cannot crowd out ranked evidence.
-    const appendOnly = node.appendOnly === true || node.mode === "append";
-    return { text: textField(node.text ?? node.query, "query", MAX_QUERY_CHARS), name, appendOnly };
-  });
-  if (clauses[0].appendOnly)
-    throw new HttpError(
-      400,
-      "invalid_request",
-      "the first clause carries the presentation and cannot be appendOnly",
-    );
-  if (clauses.every((clause) => clause.appendOnly))
-    throw new HttpError(400, "invalid_request", "at least one clause must be ranked");
-  return dedupeClauses(clauses);
-}
-/** Identical clause text is collapsed before retrieval, keeping the first label,
- * so a fusion index always refers to one clause. */
-function dedupeClauses(clauses) {
-  const seen = new Set(),
-    kept = [];
-  for (const clause of clauses) {
-    if (seen.has(clause.text)) continue;
-    seen.add(clause.text);
-    kept.push(clause);
-  }
-  return kept;
-}
 /** Merge a partition's append-only results, keeping the highest score per id. */
 function addAppended(appended, memories) {
   for (const memory of memories ?? []) {
@@ -1540,8 +1202,7 @@ async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, a
       addAppended(appendedById, result.response.appended);
       candidates.push(...result.response.memories);
       // Bounded global Top K; never retain every shard's candidates in RAM.
-      candidates.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
-      candidates = candidates.slice(0, topK);
+      candidates = rankHttpRows(candidates, topK);
     }
   return { candidates, modes, partial, degraded };
 }
@@ -1596,14 +1257,8 @@ function searchAnswer({
 async function search(env, input) {
   const userId = textField(input.user_id ?? input.userId, "user_id");
   requestIdentity(userId, input.request_id);
-  const topK = input.top_k ?? input.topK;
-  if (!Number.isInteger(topK) || topK < 1 || topK > 100)
-    throw new HttpError(400, "invalid_request", "top_k must be an integer between 1 and 100");
-  const choices = input.options ?? [];
-  if (!Array.isArray(choices) || choices.length > 16)
-    throw new HttpError(400, "invalid_request", "options must be an array of at most 16 strings");
-  const optionTexts = choices.map((choice) => textField(choice, "option", 4096));
-  const clauses = await readClauses(input, optionTexts);
+  const topK = readHttpTopK(input);
+  const clauses = await readHttpClauses(input);
   const queries = clauses.map((clause) => clause.text);
   const features = selectQueryFeatures(queries);
   const appendOnly = clauses.map((clause) => clause.appendOnly === true);
@@ -2326,7 +1981,7 @@ async function adminDiagnosticsRoute(request, env, path) {
   return undefined;
 }
 async function searchRoute(request, env, _url, path) {
-  if (path !== "/search" || request.method !== "POST") return undefined;
+  if (memoryHttpOperation(request.method, path) !== "search") return undefined;
   const input = await readJson(request, env);
   if (request.headers.get("x-nmg-profile") === "1") {
     const { result, ...diagnostics } = await profileSearch(() => search(env, input));
@@ -2414,7 +2069,8 @@ async function foldRoute(request, env, url, path) {
   );
 }
 async function addRoute(request, env, path) {
-  if ((path !== "/add" && path !== "/remember") || request.method !== "POST") return undefined;
+  if (memoryHttpOperation(request.method, path === "/remember" ? "/add" : path) !== "add")
+    return undefined;
   const input = await readJson(request, env);
   if (addMode(env) !== "log") return json(await add(env, input));
   const startedAt = Date.now();

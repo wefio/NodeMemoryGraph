@@ -2,24 +2,24 @@
 
 [简体中文](README.zh-CN.md)
 
-The NMG HTTP service exposes memory Add and Search. The service and the CLI
-share the memory implementation under `src/`.
+The NMG memory HTTP API exposes Add and Search. Run it locally with `nmg http`
+or deploy the cloud adapter in `onlion`. Both entry points share request
+validation, memory writes and evidence projection.
 [Service design decision](../docs/decisions/implemented/2026-10-22-onlion-aml-cloud-service.md)
 
 ## Layout
 
-- `backend/worker.mjs` — HTTP surface, authentication, R2 snapshot and receipt
-  transaction wiring.
-- `backend/memory-service.ts` — maps HTTP requests and projects search results.
-- `backend/extractive-summaries.mjs` — deterministic, LLM-free retrieval-index
-  summaries through the store's provider mechanism.
-- `backend/storage.mjs`, `sqlite.mjs`, `page-delta.mjs` — R2 manifest
-  transactions, SQLite WASM request contexts, snapshot page deltas.
-- `vendor/` — SQLite WASM runtime glue only (the official 3.53.4 build plus a
-  callback module generated at build time from
-  `callbacks.manifest.json`, the readable coverage-set manifest; the generated
-  wasm is untracked). search-query-parser is a normal npm dependency.
-- `.runtime/` — untracked datasets, checkpoints, test persistence, receipts.
+- [`backend/worker.mjs`](backend/worker.mjs) handles HTTP routes, auth, write
+  receipts and the coordination of pending writes with search.
+- [`backend/memory-service.ts`](backend/memory-service.ts) binds cloud SQLite snapshots
+  to the [shared memory service](../src/integration/memory-http-service.ts).
+  Shared modules own evidence attribution, clause fusion and pending evidence scoring.
+- [`backend/append-log.mjs`](backend/append-log.mjs) owns pending writes.
+  [`backend/storage.mjs`](backend/storage.mjs) manages manifests and snapshots.
+  [`backend/sqlite.mjs`](backend/sqlite.mjs) opens request-scoped SQLite WASM
+  databases using the runtime under `sqlite-wasm/`.
+- Cloudflare binds R2 directly. [`backend/edgeone-entry.mjs`](backend/edgeone-entry.mjs)
+  connects the same Worker to the COS adapter.
 
 ## Commands
 
@@ -30,10 +30,52 @@ npm run check    # tsc --noEmit over the backend and root declarations
 npm run verify   # build, check, native temporal/media, backend, worker suites
 ```
 
-Test suites run against the built Worker in Miniflare with simulated R2 and no
-external model.
+The CI suite runs against the built Worker in Miniflare with simulated R2 and
+no external model. After building, run `npm run test:http-contract` for just
+the HTTP contract. It checks health, auth, immediate search visibility,
+out-of-order and duplicate Adds, conflicting request IDs, user isolation,
+and reset. A loopback relay injects a 429 and disconnects after a successful
+upstream Add to check recovery with the same request ID.
+
+## Local memory HTTP
+
+Set the database and listener in `nmg-http.json`, then run
+`nmg http --config ./nmg-http.json`. From a source checkout, use
+`npm run cli -- http --config ./nmg-http.json`.
+
+```json
+{
+  "databasePath": "./http-test.sqlite",
+  "host": "127.0.0.1",
+  "port": 8787,
+  "defaultTopK": 20,
+  "maxRequestBytes": 6291456
+}
+```
+
+`databasePath` is required. Resolve relative paths from the config file's directory.
+The other values are defaults. To protect Add and Search, set `apiKeyEnv` to the name
+of an environment variable containing the key; clients send `Authorization: Bearer <key>`.
+A non-loopback bind requires a key.
+
+```sh
+curl http://127.0.0.1:8787/health
+curl http://127.0.0.1:8787/add -H 'Content-Type: application/json' \
+  -d '{"user_id":"demo","session_id":"s1","request_id":"r1","messages":[{"role":"user","content":"I prefer morning meetings."}]}'
+curl http://127.0.0.1:8787/search -H 'Content-Type: application/json' \
+  -d '{"user_id":"demo","query":"When should meetings be scheduled?","top_k":5}'
+```
+
+The local listener isolates SQLite namespaces by `user_id`. Each Add atomically
+writes up to 128 messages. Repeating the same request ID and payload replays the
+receipt. Changing the payload with the same ID yields `409`. Search uses the
+shared engine for lexical retrieval with one query and returns both structured
+`data` and the NMG renderer's `rendered` text. The HTTP listener and daemon
+sessions use separate memory namespaces.
 
 ## Local deployment
+
+Use this path to debug the Cloudflare Worker and object storage adapter locally.
 
 ```bash
 npm run build
@@ -53,10 +95,8 @@ Deploy with Wrangler after enabling R2 on the target account:
 node node_modules/wrangler/bin/wrangler.js deploy --config dist/server/wrangler.json
 ```
 
-A `--dry-run` with `--outdir` verifies packaging without touching remote
-resources. The local smoke flow (health, Add, receipt conflict, text/image
-Search, isolation) lives in `.runtime/verification/smoke-local.mjs` and runs
-against `wrangler dev`.
+A `--dry-run` with `--outdir` verifies packaging without contacting remote
+resources.
 
 ## EdgeOne deployment
 
@@ -81,8 +121,11 @@ existing project, so verify placement with the `x-nmg-region` response header.
 Configuration comes from the platform environment, not from files:
 `NMG_API_KEY`, `NMG_COS_BUCKET`/`NMG_COS_REGION`/`NMG_COS_SECRET_ID`/`NMG_COS_SECRET_KEY`,
 and the optional `NMG_EMBED_*` set (same meaning as for the Wrangler target).
-`npm run smoke:edgeone` checks a deployed endpoint end to end
-(`NMG_ENDPOINT=... NMG_API_KEY=...`).
+Set `NMG_ENDPOINT` and `NMG_API_KEY` and run `npm run smoke:edgeone` to run
+the same HTTP contract over the network. Use an endpoint whose key allows
+Add, Search, capacity and reset. The run creates and resets only its own
+randomly named test users. Use [`soak-endpoint.mjs`](scripts/soak-endpoint.mjs)
+for sustained concurrency and latency measurements.
 
 ## Multimodal behavior
 

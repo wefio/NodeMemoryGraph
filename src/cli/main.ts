@@ -89,57 +89,24 @@ export async function runCli(
     return 0;
   }
 
+  if (parsed.command === "http") {
+    try {
+      const { serveLocalMemoryHttp } = await import("./local-memory-http.ts");
+      await serveLocalMemoryHttp(parsed.httpConfigPath!, io.stdout);
+      return 0;
+    } catch (error) {
+      io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+
   const service = new NmgService({
     dataDirectory: parsed.dataDirectory,
     databasePath: parsed.databasePath,
   });
-  if (isDaemonCommand(parsed.command)) {
-    try {
-      const result = await runDaemonAction(parsed.command, service, parsed);
-      io.stdout.write(
-        parsed.json ? `${JSON.stringify(result, null, 2)}\n` : humanDaemonResult(result),
-      );
-      return 0;
-    } catch (error) {
-      io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-      return 1;
-    } finally {
-      await service.close();
-    }
-  }
-  if (parsed.command === "inspect" || parsed.command === "graph") {
-    try {
-      if (parsed.command === "graph") {
-        const { exportGraphHtml } = await import("./graph-render.ts");
-        const outputPath = exportGraphHtml(
-          service.databasePath,
-          parsed.outPath ?? "nmg-graph.html",
-        );
-        io.stdout.write(`Wrote memory graph to ${outputPath}\n`);
-      } else {
-        const { runInspectTui } = await import("./inspect-tui.ts");
-        await runInspectTui(service.databasePath);
-      }
-      return 0;
-    } catch (error) {
-      io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-      return 1;
-    } finally {
-      await service.close();
-    }
-  }
-
   try {
-    const result = await invokeCliMethod(service, parsed.command, parsed);
-    const output =
-      parsed.compactJson && parsed.command === "search"
-        ? compactSearchContext(result as MemoryContext)
-        : result;
-    io.stdout.write(
-      parsed.json || parsed.compactJson
-        ? `${JSON.stringify(output, null, 2)}\n`
-        : renderCliHumanResult(result),
-    );
+    const output = await runServiceCommand(parsed.command, service, parsed);
+    if (output !== undefined) io.stdout.write(output);
     return 0;
   } catch (error) {
     io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -147,6 +114,36 @@ export async function runCli(
   } finally {
     await service.close();
   }
+}
+
+async function runServiceCommand(
+  command: Exclude<ParsedArguments["command"], "help" | "http">,
+  service: NmgService,
+  parsed: ParsedArguments,
+): Promise<string | undefined> {
+  if (isDaemonCommand(command)) {
+    const result = await runDaemonAction(command, service, parsed);
+    return parsed.json ? `${JSON.stringify(result, null, 2)}\n` : humanDaemonResult(result);
+  }
+  if (command === "graph") {
+    const { exportGraphHtml } = await import("./graph-render.ts");
+    const outputPath = exportGraphHtml(service.databasePath, parsed.outPath ?? "nmg-graph.html");
+    return `Wrote memory graph to ${outputPath}\n`;
+  }
+  if (command === "inspect") {
+    const { runInspectTui } = await import("./inspect-tui.ts");
+    await runInspectTui(service.databasePath);
+    return;
+  }
+
+  const result = await invokeCliMethod(service, command, parsed);
+  const output =
+    parsed.compactJson && command === "search"
+      ? compactSearchContext(result as MemoryContext)
+      : result;
+  return parsed.json || parsed.compactJson
+    ? `${JSON.stringify(output, null, 2)}\n`
+    : renderCliHumanResult(result);
 }
 
 async function invokeCliMethod(
@@ -400,7 +397,7 @@ function isDaemonCommand(command: ParsedArguments["command"]): command is Daemon
 }
 
 interface ParsedArguments {
-  command: NmgMethod | DaemonCommand | "inspect" | "graph" | "help";
+  command: NmgMethod | DaemonCommand | "inspect" | "graph" | "http" | "help";
   /** When set, help is scoped to this top-level command instead of global. */
   helpTopic?: string;
   params?:
@@ -423,6 +420,7 @@ interface ParsedArguments {
   databasePath?: string;
   /** Local `graph` command: output HTML path. */
   outPath?: string;
+  httpConfigPath?: string;
 }
 
 function parseArguments(argv: readonly string[]): ParsedArguments {
@@ -465,15 +463,16 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     throw new Error("--json and --compact-json are mutually exclusive");
   }
   if (spec.local) {
-    // Local commands (inspect, graph) validate through the registry but
+    // Local commands validate through the registry but
     // dispatch directly — no RPC method, no params, no --json.
     spec.buildParams(values);
     return {
-      command: spec.words[0] as "inspect" | "graph",
+      command: spec.words[0] as "inspect" | "graph" | "http",
       json: false,
       dataDirectory: firstOption(values, "data-dir"),
       databasePath: optionalResolvedPath(firstOption(values, "db")),
       outPath: optionalResolvedPath(firstOption(values, "out")),
+      httpConfigPath: optionalResolvedPath(firstOption(values, "config")),
     };
   }
   return {

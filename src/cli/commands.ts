@@ -50,6 +50,8 @@ export interface CliCommandSpec {
   requiresResident?: boolean;
   /** Set false to reject COMMON_FLAGS (e.g. --json) for this command. */
   includeCommonFlags?: boolean;
+  /** Set false when the command takes its own configuration. */
+  includeCommonOptions?: boolean;
   /** CLI words, e.g. ["search"] or ["retention", "candidates"]. */
   words: readonly [string, ...string[]] | readonly [string];
   /** The `nmg ...` line in the USAGE synopsis. */
@@ -960,6 +962,20 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
     },
   },
   {
+    local: true,
+    includeCommonFlags: false,
+    includeCommonOptions: false,
+    words: ["http"],
+    usageLine: "nmg http --config FILE",
+    options: ["config"],
+    flags: [],
+    usageDetail: "Start a local memory HTTP listener using a JSON configuration file.",
+    buildParams: (values) => {
+      rejectPositionals(values, "http");
+      if (!firstOption(values, "config")) throw new Error("nmg http requires --config FILE");
+    },
+  },
+  {
     // Local read-only TUI — no RPC method, no --json; main.ts dispatches it.
     local: true,
     includeCommonFlags: false,
@@ -1160,7 +1176,10 @@ export function cliCommandGroup(word: string): readonly CliCommandSpec[] {
 
 /** Reject options/flags outside the spec's allowed set (plus COMMON_*). */
 export function assertSpecOptions(spec: CliCommandSpec, values: OptionValues): void {
-  const allowedOptions = new Set([...COMMON_OPTIONS, ...spec.options]);
+  const allowedOptions = new Set([
+    ...(spec.includeCommonOptions === false ? [] : COMMON_OPTIONS),
+    ...spec.options,
+  ]);
   const allowedFlags = new Set([
     ...(spec.includeCommonFlags === false ? [] : COMMON_FLAGS),
     ...spec.flags,
@@ -1197,7 +1216,10 @@ export function cliCommandUsage(word: string): string | undefined {
   if (group.length === 0) return undefined;
   const synopsis = group.map((spec) => `  ${spec.usageLine}`).join("\n");
   const details = group.flatMap((spec) => (spec.usageDetail ? [spec.usageDetail] : []));
-  return `NMG command line — ${word}\n\nUsage:\n${synopsis}\n\n${[COMMON_OPTIONS_TEXT, ...details].filter(Boolean).join("\n\n")}\n`;
+  const common = group.some((spec) => spec.includeCommonOptions !== false)
+    ? COMMON_OPTIONS_TEXT
+    : "";
+  return `NMG command line — ${word}\n\nUsage:\n${synopsis}\n\n${[common, ...details].filter(Boolean).join("\n\n")}\n`;
 }
 
 function rememberParams(values: OptionValues): NmgRememberParams {

@@ -155,6 +155,9 @@ flow. Run `npm run cli -- <command> --help` for current arguments. For graph
 inspection, `npm run cli -- graph --out memory-graph.html` exports a local HTML
 view of nodes and relationships.
 
+For direct HTTP testing, use `nmg http --config ./nmg-http.json` to serve
+`/health`, `/add`, and `/search`. [Configuration and request examples](onlion/README.md#local-memory-http)
+
 ## Agent Skill
 
 The [NMG Skill](skills/nmg-memory/SKILL.md) teaches compatible agents when to
