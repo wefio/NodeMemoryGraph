@@ -722,7 +722,7 @@ export class NmgService {
       ? this.#portableDisclosureTrace(params.activeGraphId, params.sessionId)
       : undefined;
     params = await this.#resolvePortableGetReferences(params);
-    const context = await this.#portableMemory.get(params);
+    const context = await this.#portableMemory.get(params, true);
     const found = new Set(context.results.map((result) => result.memory.id));
     if (trace) {
       trace.store.recordActiveGraphDisclosure(trace.id, [...found], params.sessionId);

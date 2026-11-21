@@ -9,6 +9,10 @@ export function isUserProfileScope(scope?: MemoryScope): boolean {
   return scope?.profile === USER_PROFILE_SCOPE.profile && Object.keys(scope).length === 1;
 }
 
+export function isUserProfileCatalog(query: string, scope?: MemoryScope): boolean {
+  return isUserProfileScope(scope) && query.trim() === "*";
+}
+
 export function isUserProfileRecord(memory: MemoryRecord): boolean {
   return (
     isUserProfileScope(memory.scope) &&

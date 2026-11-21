@@ -40,6 +40,7 @@ export interface CompactSearchCandidate {
 }
 
 export interface CompactSearchContext {
+  userProfile?: MemoryContext["userProfile"];
   neighborhoodAnchorId?: string;
   recallDisplayMode?: MemoryContext["recallDisplayMode"];
   candidates: CompactSearchCandidate[];
@@ -58,6 +59,7 @@ export interface CompactSearchContext {
 /** Agent-facing search projection. Exact records and evidence remain behind `nmg get`. */
 export function compactSearchContext(context: MemoryContext): CompactSearchContext {
   return {
+    ...(context.userProfile ? { userProfile: context.userProfile } : {}),
     ...(context.neighborhoodAnchorId ? { neighborhoodAnchorId: context.neighborhoodAnchorId } : {}),
     ...(context.recallDisplayMode ? { recallDisplayMode: context.recallDisplayMode } : {}),
     candidates: context.results.map((result) => {

@@ -32,10 +32,11 @@ Use `--type preference` or `--type constraint`. Include any applicable condition
 an exact excerpt, and use a short `--recall-trigger` when the entry is useful for automatic recall.
 The shared remember tool accepts the same scope as `{"profile":"user"}`.
 
-Use `nmg search "*" --scope profile=user` to list the local profile, or supply a trigger phrase to narrow
-the search. Read exact evidence with get. Update an entry by writing its replacement with the same
-scope and `--supersedes "<MEMORY_ID>"`. Use the established [delete operation](#deleting-a-memory)
-to withdraw an entry.
+Use `nmg search "*" --scope profile=user` to review the complete local profile. A trigger phrase narrows
+an ordinary profile search. Open an entry with `nmg get "<MEMORY_ID>"` to read its exact sources.
+When an exact source supports current profile entries, get labels it `[profile evidence]` and gives
+their memory IDs. To update an entry, write its replacement with the same scope and
+`--supersedes "<MEMORY_ID>"`. Use the [delete operation](#deleting-a-memory) to withdraw an entry.
 
 See the [profile recall budget](../../../docs/design/recall-context-and-display.md#user-profile).
 

@@ -47,6 +47,7 @@ import { stgStorePath } from "../core/stg-projection.ts";
 import { histogramQuantile } from "../core/perf.ts";
 import type { MemoryContext } from "../core/types.ts";
 import { renderSearchHeaders } from "../integration/search-tool.ts";
+import { renderEvidenceSurface, renderUserProfile } from "../integration/agent-surface.ts";
 import { compactSearchContext } from "../integration/search-projection.ts";
 import { captureStateInvocation, renderStateOutput } from "../integration/state.ts";
 import { captureWorkingStateInvocation, renderLabOutput } from "../integration/lab-capabilities.ts";
@@ -580,6 +581,10 @@ function sourceSectionLines(
 function renderCliHumanResult(value: unknown): string {
   if (value && typeof value === "object" && "space" in value)
     return renderStateOutput(value as import("./protocol.ts").NmgStateResult);
+  if (value && typeof value === "object" && "userProfile" in value) {
+    const profile = (value as MemoryContext).userProfile;
+    if (profile) return `${renderUserProfile(profile)}\n`;
+  }
   if (value && typeof value === "object" && "searchPreviewCodePoints" in value) {
     const context = value as MemoryContext;
     return `${[renderSearchHeaders(context), ...searchTimingLines(context.timings)].join("\n")}\n`;
@@ -721,15 +726,7 @@ function humanResult(value: unknown): string {
     );
   }
   if ("missingMemoryIds" in result) {
-    const context = result as unknown as {
-      results: Array<{ memory: { id: string; statement: string } }>;
-      missingMemoryIds: string[];
-    };
-    const lines = context.results.map(({ memory }) => `${memory.id}\t${memory.statement}`);
-    if (context.missingMemoryIds.length > 0) {
-      lines.push(`Missing: ${context.missingMemoryIds.join(", ")}`);
-    }
-    return `${lines.join("\n")}\n`;
+    return renderCliEvidence(result as unknown as MemoryContext & { missingMemoryIds: string[] });
   }
   if ("results" in result) {
     const context = result as unknown as {
@@ -759,6 +756,15 @@ function humanResult(value: unknown): string {
     return `${lines.join("\n")}\n`;
   }
   return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+function renderCliEvidence(context: MemoryContext & { missingMemoryIds: string[] }): string {
+  if (context.results.some((result) => result.profileEvidence?.length))
+    return `${renderEvidenceSurface(context, { missingMemoryIds: context.missingMemoryIds })}\n`;
+  const lines = context.results.map(({ memory }) => `${memory.id}\t${memory.statement}`);
+  if (context.missingMemoryIds.length > 0)
+    lines.push(`Missing: ${context.missingMemoryIds.join(", ")}`);
+  return `${lines.join("\n")}\n`;
 }
 
 function searchTimingLines(timings?: {

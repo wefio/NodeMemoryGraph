@@ -340,13 +340,18 @@ export class PortableMemoryService {
     return ranker ? rankEvidencePage(input.query, context, ranker, input.limit, signal) : context;
   }
 
-  async get(input: NmgGetParams) {
+  async get(input: NmgGetParams, includeProfileEvidence = false) {
     allowOptions(input, [
       "memoryIds",
       "sessionId",
       ...(this.local ? ["projectDir", "graphHops", "activeGraphId"] : []),
     ]);
-    const main = await (await this.engine()).get(input.memoryIds, input);
+    const main = await (
+      await this.engine()
+    ).get(input.memoryIds, {
+      ...input,
+      includeProfileEvidence: this.local && includeProfileEvidence,
+    });
     const project = await this.project(input.projectDir);
     return project ? mergeLocalContexts(await project.get(input.memoryIds, input), main) : main;
   }

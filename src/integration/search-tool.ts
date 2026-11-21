@@ -7,7 +7,8 @@ import {
   type AdapterSearchBinding,
   type AdapterToolSession,
 } from "./adapter-tool-session.ts";
-import { renderSearchSurface } from "./agent-surface.ts";
+import { renderSearchSurface, renderUserProfile } from "./agent-surface.ts";
+import { isUserProfileCatalog } from "../core/user-profile.ts";
 import { isNeighborhoodQuery, shortActiveGraphId } from "./memory-reference.ts";
 import { SEARCH_REQUIRED_PARAMETERS, searchParameterProperties } from "./tool-contract.ts";
 
@@ -92,8 +93,20 @@ async function executeSearch(
   }
   await openSearchDisclosureTurn(input, session, graphSupported, search, neighborhood);
   const ranked = await runSearch(input, session, search, searchParameters, neighborhood);
+  if (ranked.userProfile) return { details: ranked, text: renderUserProfile(ranked.userProfile) };
+  return discloseSearch(input, ranked, session, graphSupported, search);
+}
+
+async function discloseSearch(
+  input: NmgSearchParams,
+  ranked: MemoryContext,
+  session: AdapterToolSession,
+  graphSupported: boolean,
+  search: AdapterSearchBinding,
+) {
+  const { sessionId, memory } = session;
   const visible = (await search.fold?.(ranked, input.limit !== undefined)) ?? ranked;
-  flow?.recordSearch(
+  memory?.recallFlow?.recordSearch(
     sessionId,
     visible.results.map(({ memory: entry }) => entry.id),
   );
@@ -116,7 +129,7 @@ async function openSearchDisclosureTurn(
   search: AdapterSearchBinding,
   neighborhood: boolean,
 ) {
-  if (neighborhood) return;
+  if (neighborhood || isUserProfileCatalog(input.query, input.scope)) return;
   if (!search.beginDisclosureTurn || !graphSupported || input.recallRevision !== undefined) return;
   await session
     .invoke("sessionActiveGraph", {
@@ -136,7 +149,6 @@ async function runSearch(
   const { recallCue, recallRevision, ...filters } = input;
   const params = {
     ...filters,
-    maxTier: filters.maxTier ?? search.defaultTier,
     sessionId: session.sessionId,
     projectDir: session.memory?.projectDir,
   };
@@ -150,6 +162,8 @@ async function runSearch(
       ),
       cliFallback,
     ) as Promise<MemoryContext>;
+  if (isUserProfileCatalog(input.query, input.scope)) return invoke(params, searchCli(params));
+  params.maxTier ??= search.defaultTier;
   if (neighborhood) return invoke(params, searchCli(params));
   const canProbe =
     input.limit === undefined &&

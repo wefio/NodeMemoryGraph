@@ -8,11 +8,117 @@ import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.
 import { MemoryEngine } from "../../src/core/memory/engine.ts";
 import { SqliteMemoryBackend } from "../../src/core/memory/sqlite-backend.ts";
 import { compactSearchContext } from "../../src/integration/search-projection.ts";
-import { prepareAutomaticRecallSurface } from "../../src/integration/agent-surface.ts";
+import {
+  prepareAutomaticRecallSurface,
+  renderEvidenceSurface,
+} from "../../src/integration/agent-surface.ts";
+import { createSearchTool } from "../../src/integration/search-tool.ts";
+import type { AdapterToolSession } from "../../src/integration/adapter-tool-session.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
+
+test("a complete profile joins every statement to its exact evidence and keeps current backlinks", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "nmg-profile-provenance-"));
+  const service = new NmgService({ dataDirectory: dir, environment: {} });
+  t.after(async () => {
+    await service.close();
+    removeTempDirectory(dir);
+  });
+  const scope = { profile: "user" };
+  const evidenceSource = {
+    actor: "user",
+    sourceMessageId: "fixture:user:weekend",
+    content: "On weekends, I want time to finish a walk before we plan the rest of the day.",
+  } as const;
+  const profileStatement =
+    "Give me time for a walk on weekends, then discuss the schedule. ".repeat(8) +
+    "Keep the morning flexible.";
+  const {
+    results: [source, profile, constraint],
+  } = await service.invoke("rememberBatch", {
+    items: [
+      {
+        nodeName: "Weekend conversation",
+        statement: "The user discussed weekends.",
+        evidenceSource,
+      },
+      {
+        statement: profileStatement,
+        nodeName: "Weekend preference",
+        scope,
+        memoryType: "preference",
+        sourceActor: "user",
+        evidenceSource,
+      },
+      {
+        statement: "Keep overnight trips out of weekday itineraries.",
+        nodeName: "Travel constraint",
+        scope,
+        memoryType: "constraint",
+        sourceActor: "user",
+        tier: 3,
+      },
+      ...Array.from({ length: 22 }, (_, index) => ({
+        statement: `I prefer edition ${index} of the fixture reading list.`,
+        nodeName: `Reading preference ${index}`,
+        scope,
+        memoryType: "preference" as const,
+        sourceActor: "user" as const,
+      })),
+    ],
+  });
+  assert.ok(source && profile && constraint);
+  assert.equal(source.history.id, profile.history.id);
+
+  const listing = { query: "*", scope, limit: 2, sessionId: "profile-review" };
+  const view = await service.invoke("search", listing);
+  assert.equal(view.userProfile?.length, 24);
+  assert.equal(compactSearchContext(view).userProfile?.length, 24);
+  const named = view.userProfile?.find(({ memoryId }) => memoryId === profile.memory.id);
+  assert.ok(named);
+  assert.equal(named.statement, profileStatement);
+  assert.deepEqual(named.evidenceIds, [source.history.id]);
+  const get = (memoryId: string) => service.invoke("get", { memoryIds: [memoryId] });
+  const resolved = await get(named.memoryId);
+  assert.equal(resolved.results[0]?.evidence.content, evidenceSource.content);
+  const original = await get(source.memory.id);
+  assert.deepEqual(original.results[0]?.profileEvidence, [
+    { evidenceId: source.history.id, profileMemoryIds: [profile.memory.id] },
+  ]);
+  assert.match(renderEvidenceSurface(original), /\[profile evidence\]/u);
+
+  const session = {
+    sessionId: "profile-review",
+    requester: "profile-review",
+    invoke: async (method, params) => {
+      assert.equal(method, "search");
+      return service.invoke("search", params);
+    },
+    memory: {
+      search: {
+        defaultTier: 0,
+        allocate: () => {
+          throw new Error("profile catalog must not allocate a recall budget");
+        },
+        fold: () => {
+          throw new Error("profile catalog must not fold entries");
+        },
+      },
+    },
+  } satisfies AdapterToolSession;
+  const shown = await createSearchTool(true).execute({ query: "*", scope }, session);
+  assert.match(shown.text, /Preferences/u);
+  assert.match(shown.text, /Constraints/u);
+  assert.ok(shown.text.includes(profileStatement));
+  assert.ok(shown.text.includes(constraint.memory.statement));
+  assert.ok(shown.text.includes(profile.memory.id));
+
+  await service.invoke("deleteMemory", { memoryId: profile.memory.id });
+  assert.equal((await get(source.memory.id)).results[0]?.profileEvidence, undefined);
+  assert.equal((await service.invoke("search", listing)).userProfile?.length, 23);
+});
 
 test("the local user profile admits only current personal records and spends at most one automatic slot", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "nmg-user-profile-"));

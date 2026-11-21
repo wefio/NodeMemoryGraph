@@ -26,8 +26,9 @@ nmg remember "<statement>" \
 自动召回的条目可以加简短的 `--recall-trigger`。共享 remember 工具接受同一作用域
 `{"profile":"user"}`。
 
-用 `nmg search "*" --scope profile=user` 查看本地画像，也可以提供触发词缩小范围。
-通过 get 读取原始证据。更新时，在同一作用域写入新条目并传入
+用 `nmg search "*" --scope profile=user` 集中查看完整的本地画像，也可以用触发词做普通画像检索。
+用 `nmg get "<MEMORY_ID>"` 读取画像条目的原始证据。如果一条证据正在支撑画像，get 会显示
+`[profile evidence]` 和对应的画像记忆 ID。更新时，在同一作用域写入新条目并传入
 `--supersedes "<MEMORY_ID>"`。撤回条目使用[删除操作](#删除记忆)。
 
 自动注入规则见[画像召回预算](../../../docs/design/recall-context-and-display.zh-CN.md#用户画像)。

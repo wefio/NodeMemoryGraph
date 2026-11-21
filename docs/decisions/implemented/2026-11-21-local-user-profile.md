@@ -26,7 +26,8 @@ injection would spend context on every turn.
 ## Consequences
 
 Profile selection runs locally without a separate embedding request.
-The explicit scope lets callers inspect the profile and update its source records.
+The explicit scope lets callers inspect the complete profile and update its
+source records. Shared evidence IDs support navigation in both directions.
 
 The [recall contract](../../design/recall-context-and-display.md#user-profile)
 owns admission, rendering and maintenance links.

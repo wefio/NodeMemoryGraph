@@ -55,6 +55,7 @@ import type {
 export interface MemoryQueryOptions {
   scope?: MemoryScope;
   excludeScope?: MemoryScope;
+  includeProfileEvidence?: boolean;
   sessionId?: string;
   limit?: number;
   maxTier?: 0 | 1 | 2 | 3;
@@ -182,6 +183,8 @@ export class MemoryEngine {
         graphHops,
         limit: Math.max(results.length, options.limit ?? 50),
       });
+      if (options.includeProfileEvidence && results.length)
+        await this.attachProfileEvidence(view, results);
       const tesserae = await this.attachedTesserae(view, results);
       return {
         results,
@@ -386,7 +389,21 @@ export class MemoryEngine {
         eventTimeFrom,
         eventTimeTo,
       });
-      return { results, relations: [], retrieval: { mode: "lexical", degraded: false } };
+      return {
+        results,
+        relations: [],
+        retrieval: { mode: "lexical", degraded: false },
+        ...(list
+          ? {
+              userProfile: rows.map(({ value: memory }) => ({
+                memoryId: memory.id,
+                memoryType: memory.memoryType,
+                statement: memory.statement,
+                evidenceIds: memory.evidenceIds,
+              })),
+            }
+          : {}),
+      };
     } finally {
       await this.backend.closeRead(view);
     }
@@ -397,8 +414,8 @@ export class MemoryEngine {
     query: string,
     list: boolean,
     options: MemoryQueryOptions,
-  ): Promise<MemoryEntity[]> {
-    const found: Array<{ entity: MemoryEntity; score: number }> = [];
+  ): Promise<Extract<MemoryEntity, { kind: "memory" }>[]> {
+    const found: Array<{ entity: Extract<MemoryEntity, { kind: "memory" }>; score: number }> = [];
     const filter = {
       kind: "memory",
       scope: USER_PROFILE_SCOPE,
@@ -423,6 +440,27 @@ export class MemoryEngine {
       if (page.length < filter.limit) break;
     }
     return found.sort((left, right) => right.score - left.score).map(({ entity }) => entity);
+  }
+
+  private async attachProfileEvidence(
+    view: MemoryReadView,
+    results: readonly MemorySearchResult[],
+  ): Promise<void> {
+    const byEvidence = new Map(
+      results.flatMap(({ evidenceRecords }) =>
+        evidenceRecords.map(({ id }): [string, string[]] => [id, []]),
+      ),
+    );
+    for (const { value: memory } of await this.profileCandidates(view, "", true, {})) {
+      for (const evidenceId of memory.evidenceIds) byEvidence.get(evidenceId)?.push(memory.id);
+    }
+    for (const result of results) {
+      const links = result.evidenceRecords.flatMap(({ id }) => {
+        const profileMemoryIds = byEvidence.get(id);
+        return profileMemoryIds?.length ? [{ evidenceId: id, profileMemoryIds }] : [];
+      });
+      if (links.length) result.profileEvidence = links;
+    }
   }
 
   searchExactAnchor(

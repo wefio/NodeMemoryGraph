@@ -825,6 +825,8 @@ export interface MemorySearchResult {
   node: MemoryNode;
   evidence: HistoryRecord;
   evidenceRecords: HistoryRecord[];
+  /** Active profile entries supported by these exact source records. */
+  profileEvidence?: { evidenceId: string; profileMemoryIds: string[] }[];
   lexicalScore: number;
   vectorScore: number;
   routeScore: number;
@@ -953,7 +955,16 @@ export interface TesseraHit {
 /** Marker kind linking a memory to one of its tesserae (memory ↔ tessera). */
 export const TESSERA_REF_MARKER = "tessera_ref";
 
+export interface UserProfileEntry {
+  memoryId: string;
+  memoryType: MemoryType;
+  statement: string;
+  evidenceIds: string[];
+}
+
 export interface MemoryContext {
+  /** Complete catalog on an explicit user profile inspection. */
+  userProfile?: UserProfileEntry[];
   neighborhoodAnchorId?: string;
   searchPreviewCodePoints?: number;
   /** Automatic presentation policy only; never changes candidate selection. */

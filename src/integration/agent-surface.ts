@@ -1,5 +1,5 @@
 import type { BoardNoticeMetadata } from "../core/board-notifications.ts";
-import type { MemoryContext, RememberResult } from "../core/types.ts";
+import type { MemoryContext, RememberResult, UserProfileEntry } from "../core/types.ts";
 import type { AgentWorkStatus } from "../core/coordination-events.ts";
 import {
   coordinationDirectoryViews,
@@ -235,6 +235,25 @@ export function renderSearchSurface(
   options: SearchSurfaceOptions = {},
 ): string {
   return prepareSearchSurface(context, options).text;
+}
+
+export function renderUserProfile(entries: readonly UserProfileEntry[]): string {
+  if (!entries.length) return "User profile has no current entries.";
+  const groups = [
+    { title: "Preferences", type: "preference" },
+    { title: "Constraints", type: "constraint" },
+  ];
+  const sections = groups.flatMap(({ title, type }) => {
+    const rows = entries
+      .filter(({ memoryType }) => memoryType === type)
+      .map(({ statement, memoryId }) => `- ${statement}\n  memory=${memoryId}`);
+    return rows.length ? [`${title}\n${rows.join("\n")}`] : [];
+  });
+  return [
+    "User profile",
+    ...sections,
+    "Use get with an entry's memory ID to read its original evidence.",
+  ].join("\n\n");
 }
 
 export function prepareSearchSurface(

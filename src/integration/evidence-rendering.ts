@@ -27,17 +27,15 @@ export function evidenceRecordParts(
     node,
     evidence,
     evidenceRecords,
+    profileEvidence,
   }: Pick<MemorySearchResult, "memory" | "evidence"> &
-    Partial<Pick<MemorySearchResult, "node" | "evidenceRecords">>,
+    Partial<Pick<MemorySearchResult, "node" | "evidenceRecords" | "profileEvidence">>,
   options: { chainLabel?: string; pageScope?: string; fullSources?: boolean } = {},
 ): { parts: string[]; withdrawn: boolean } {
   const external = memory.markers?.find((marker) => marker.kind === "external_source");
   const withdrawn = memory.markers?.some((marker) => marker.kind === "forget") ?? false;
-  const flags = [
-    options.chainLabel ? `[${options.chainLabel}]` : "",
-    external ? `[external, ${memory.truthStatus}]` : "",
-    memory.resolution === "open" || memory.resolution === "reopened" ? "[open]" : "",
-  ].filter(Boolean);
+  const profileLinks = withdrawn ? undefined : profileEvidence;
+  const flags = evidenceFlags(memory, Boolean(external), options.chainLabel, profileLinks);
   const statement = withdrawn ? "[forget] (content withdrawn)" : memory.statement;
   return {
     parts: [
@@ -49,9 +47,31 @@ export function evidenceRecordParts(
       options.fullSources
         ? fullSourceLines(memory.statement, [evidence, ...(evidenceRecords ?? [])], withdrawn)
         : primarySourceLine(memory.statement, evidence.content, withdrawn),
+      ...profileSupportLines(profileLinks),
     ],
     withdrawn,
   };
+}
+
+function evidenceFlags(
+  memory: MemoryRecord,
+  external: boolean,
+  chainLabel: string | undefined,
+  profileLinks: MemorySearchResult["profileEvidence"],
+): string[] {
+  return [
+    chainLabel ? `[${chainLabel}]` : "",
+    profileLinks?.length ? "[profile evidence]" : "",
+    external ? `[external, ${memory.truthStatus}]` : "",
+    memory.resolution === "open" || memory.resolution === "reopened" ? "[open]" : "",
+  ].filter(Boolean);
+}
+
+function profileSupportLines(links: MemorySearchResult["profileEvidence"]): string[] {
+  return (links ?? []).map(
+    ({ evidenceId, profileMemoryIds }) =>
+      `\n  PROFILE_SUPPORT source=${evidenceId} profileMemories=${profileMemoryIds.join(", ")}`,
+  );
 }
 
 function evidenceDetails(

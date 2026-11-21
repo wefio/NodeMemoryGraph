@@ -48,6 +48,14 @@ and constraints in the exact `profile=user` scope. Records must be asserted or
 verified. The existing visibility rules apply. Sensitive and externally
 sourced records are excluded.
 
+An explicit profile catalog shows the full statements grouped by preference
+and constraint. Its structured `userProfile` field includes every matching
+entry and its evidence IDs, independently of the bounded search candidate list.
+Each entry's canonical memory ID opens its original evidence through get.
+Exact reads mark source records with active profile links and return the
+supporting evidence ID and linked profile memory IDs. These links are derived
+from the current profile records in the same store and follow their lifecycle.
+
 Once a host admits automatic recall, the daemon checks profile triggers against
 the current request. A scoped search keeps its requested scope. An unscoped
 automatic search can admit one profile entry when an explicit trigger matches.
@@ -58,7 +66,7 @@ The shared renderer charges the entire line, including its reference and labels,
 to the host's context budget. It can omit the entry when space runs out.
 
 The [profile write and maintenance reference](../../skills/nmg-memory/references/writes.md#user-profile)
-shows how to list, update, and withdraw entries.
+shows how to inspect, update, and withdraw entries.
 
 ## Presentation and disclosure
 
