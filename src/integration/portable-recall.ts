@@ -27,6 +27,8 @@ import {
 import { MIN_WARM_DISCLOSURE_SIZE } from "../core/store/graph-policy.ts";
 import { hybridScore } from "../core/store/search-ranking.ts";
 import type { MemorySearchResult } from "../core/types.ts";
+import { searchPreview } from "./search-projection.ts";
+import { isUserProfileRecord, USER_PROFILE_PREVIEW_CODE_POINTS } from "../core/user-profile.ts";
 
 /** Apply the session graph budget to already-authorized engine results. */
 export function portableRecallGraph(
@@ -34,7 +36,19 @@ export function portableRecallGraph(
   input: NmgSearchParams,
   elapsedMs: number,
 ): MemoryContext & { activeGraph: ActiveGraph } {
-  const originalBudget = activeGraphBudget({ ...input, maxTier: input.maxTier ?? 3 });
+  const preview = context.searchPreviewCodePoints;
+  const estimate = (result: MemorySearchResult) => estimateSearchResult(result, preview);
+  const originalBudget = activeGraphBudget({
+    ...input,
+    maxTier: input.maxTier ?? 3,
+    activeGraphBudget:
+      preview === undefined
+        ? input.activeGraphBudget
+        : {
+            maxNodes: input.limit,
+            ...input.activeGraphBudget,
+          },
+  });
   const limit = Math.min(input.limit ?? originalBudget.maxEvidence, originalBudget.maxEvidence);
   const { candidates, openedTiers } = openRecallTiers(
     context.results,
@@ -47,6 +61,7 @@ export function portableRecallGraph(
     input,
     originalBudget,
     limit,
+    estimate,
   );
   const { results, selectedNodes, estimatedTokens, exhausted } = selection;
   const relations = (context.relations ?? [])
@@ -113,7 +128,7 @@ export function portableRecallGraph(
         reason: item.recallReason ?? "lexical_match",
         tier: item.memory.tier,
         rank: index + 1,
-        estimatedTokens: estimateResultTokens(item),
+        estimatedTokens: estimate(item),
         scores: {
           lexical: item.lexicalScore,
           vector: item.vectorScore,
@@ -124,6 +139,13 @@ export function portableRecallGraph(
       })),
     },
   };
+}
+
+function estimateSearchResult(result: MemorySearchResult, preview?: number): number {
+  const { memory } = result;
+  const codePoints = isUserProfileRecord(memory) ? USER_PROFILE_PREVIEW_CODE_POINTS : preview;
+  if (codePoints === undefined) return estimateResultTokens(result);
+  return Math.ceil((searchPreview(memory, codePoints).length + 96) / 4);
 }
 
 function openRecallTiers(
@@ -184,9 +206,10 @@ function selectRecallEvidence(
   input: NmgSearchParams,
   originalBudget: ActiveGraphBudget,
   limit: number,
+  estimateTokens: typeof estimateResultTokens,
 ) {
   let budget = originalBudget;
-  let selection = selectWithinActiveGraphBudget(candidates, budget, limit);
+  let selection = selectWithinActiveGraphBudget(candidates, budget, limit, estimateTokens);
   let qpp = recallQuality(input.query, selection.results);
   if (!input.secondPass) return { selection, budget, qpp };
   const maximum = expandActiveGraphBudget(originalBudget);

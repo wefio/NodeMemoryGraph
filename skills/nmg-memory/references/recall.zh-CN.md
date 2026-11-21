@@ -27,6 +27,19 @@ daemon 重启或会话释放后恢复默认，不影响其他会话，也不改�
 
 需要时用 `--node`、`--scope` 或 `--source-actor user` 缩小范围。用 `--from`／`--to` 限定事件时间（日期或 `上周三` 这类短语；只写日期时覆盖当天整天），也可以在查询里写 `time:2026-01-01..2026-06-30`。只有确实需要旧／已被替代状态时才用 `--include-historical`。从 `--max-tier 1` 和 `--limit 8` 开始，不要一次倾倒所有证据。
 
+## 查看某条记忆的临域
+
+从本地检索或自动召回结果拿到记忆 ID 后，把它用作下一次 search 的查询。短引用需保留完整
+`ref:` 键，并传入原会话的图 ID。宿主提供会话身份时，直接调用
+`nmg_search({query: "ref:abcd|SQLite", activeGraphId: "12345678", limit: 5})`。
+
+```text
+nmg search MEMORY_UUID --limit 5
+nmg search "ref:abcd|SQLite" --active-graph-id 12345678 --session-id SESSION --limit 5
+```
+
+按结果标注的关系选择候选，用 get 读取完整证据。[临域查询契约](../../../docs/design/recall-context-and-display.zh-CN.md#浏览记忆临域)
+
 ## 升级顺序
 
 1. 围绕缺失实体、时间或关系改写查询。

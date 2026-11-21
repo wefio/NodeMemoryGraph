@@ -98,7 +98,7 @@ test("search compact JSON exposes bounded headers without exact evidence", () =>
     assert.equal(compact.logicalChainCount, 1);
     assert.deepEqual(compact.candidates[0]?.chains, ["Compact projection chain"]);
     assert.ok(compact.candidates[0]!.preview.length > 160);
-    assert.equal(compact.candidates[0]!.preview.length, 320);
+    assert.equal(compact.candidates[0]!.preview.length, 240);
     assert.match(compact.candidates[0]!.preview, /…$/u);
     assert.ok(compact.activeGraphId);
     assert.equal((compact.candidates[0] as Record<string, unknown>).tier, undefined);

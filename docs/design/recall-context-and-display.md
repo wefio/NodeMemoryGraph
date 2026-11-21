@@ -41,6 +41,33 @@ Original rank provides a stable prior and tie break. Lexical overlap is a weak
 ordering signal, not a relevance label or evidence of truth. Semantic matches
 without word overlap stay available through the retained page and exact get.
 
+## User profile
+
+The local profile is a view over current long-term user-attributed preferences
+and constraints in the exact `profile=user` scope. Records must be asserted or
+verified. The existing visibility rules apply. Sensitive and externally
+sourced records are excluded.
+
+An explicit profile catalog shows the full statements grouped by preference
+and constraint. Its structured `userProfile` field includes every matching
+entry and its evidence IDs, independently of the bounded search candidate list.
+Each entry's canonical memory ID opens its original evidence through get.
+Exact reads mark source records with active profile links and return the
+supporting evidence ID and linked profile memory IDs. These links are derived
+from the current profile records in the same store and follow their lifecycle.
+
+Once a host admits automatic recall, the daemon checks profile triggers against
+the current request. A scoped search keeps its requested scope. An unscoped
+automatic search can admit one profile entry when an explicit trigger matches.
+The longest matching trigger takes priority. Earlier turns contribute to
+ordinary recall only. The profile entry spends one existing candidate slot and
+its preview is limited to 120 Unicode code points in both display modes.
+The shared renderer charges the entire line, including its reference and labels,
+to the host's context budget. It can omit the entry when space runs out.
+
+The [profile write and maintenance reference](../../skills/nmg-memory/references/writes.md#user-profile)
+shows how to inspect, update, and withdraw entries.
+
 ## Presentation and disclosure
 
 Automatic recall uses a session-local `compact` or `full` display profile. Compact
@@ -50,10 +77,10 @@ allow up to 1,000, 1,500 and 2,500 UTF-16 units of available context, respective
 Economy rows retain the memory ID, dates, flags and up to 160 code points of
 statement preview. The structured get result provides the candidate's node and
 memory type.
-Full uses the entire retrieved statement for each admitted candidate. Forgotten
+Full uses the entire retrieved statement for each admitted ordinary candidate. Forgotten
 records remain redacted in both modes.
 
-The compact projection carries the selected profile. Shared candidate preparation
+The compact projection carries the selected display mode. Shared candidate preparation
 applies Unicode code-point truncation before producing InformationView rows;
 reference IDs, graph scope, temporal labels and preview status are preserved.
 Economy rendering displays identical preview and graph labels once for the group.
@@ -95,6 +122,34 @@ prints its shared scope once. The structured get result retains the underlying
 metadata, including default values. Independently composable
 evidence views carry their own scope and event time and use a bounded primary
 source excerpt. Active Graph estimates use that composable row.
+
+Plain local search defaults to 20 results. It fits the ranked candidate
+prefix and available bookmarks into 5,500 UTF-16 units with up to 240 code
+points per preview. A requested limit above 20 raises the page budget
+proportionally. The graph records the fitted results and estimates their header
+cost. Progressive and automatic recall use their own admission rules.
+
+A plain hybrid search can use up to two tail slots for matching adjacent
+source turns linked from its first two direct hits. The engine checks source
+ordinals, scope, session, time filters and query terms before admitting a
+neighbor. The combined result keeps the other direct hits in ranking order.
+[Budget measurements](../experiments/retrieval/explicit-search-budget-2026-11-21.md)
+record the held-budget comparison.
+
+### Browse a memory neighborhood
+
+An explicit local search consisting of a canonical memory ID browses that
+record's neighborhood. A complete displayed `ref:` key uses the original
+`activeGraphId` in the same owner session and project. The response contains
+neighbors with their relationship to the anchor and their own readable references.
+Use the normal search filters and result limit to narrow the page.
+
+The engine looks for neighboring source ordinals within the same recorded source
+session, then follows configured graph hops and fills available slots with
+source-group and same-node records. Source adjacency requires an original numeric
+turn identifier. The anchor's scope bounds expansion. The economy display
+allocates its budget to the initial recall page. A caller can follow any visible
+key in a separate search.
 
 ## Session controls and limits
 

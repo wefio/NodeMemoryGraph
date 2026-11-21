@@ -37,6 +37,11 @@ export function isMemoryReference(value: string): boolean {
   return value.startsWith(REFERENCE_PREFIX);
 }
 
+export function isNeighborhoodQuery(query: string): boolean {
+  const value = query.trim();
+  return MEMORY_ID.test(value) || isMemoryReference(value);
+}
+
 function normalizedStatement(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
 }

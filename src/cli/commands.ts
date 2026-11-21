@@ -421,8 +421,9 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   {
     method: "search",
     words: ["search"],
-    usageLine: "nmg search QUERY [options] [--compact-json | --json]",
+    usageLine: "nmg search QUERY_OR_MEMORY_ID [options] [--compact-json | --json]",
     options: [
+      "active-graph-id",
       "node",
       "project-dir",
       "session-id",
@@ -449,6 +450,8 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
       "compact-json",
     ],
     usageDetail: `Search options:
+  --active-graph-id ID       Origin graph when the query is a ref: key
+  A memory ID or a ref: key searches its neighborhood.
   --node NAME                Restrict to one semantic node
   --max-tier N               Deepest tier 0..3
   --limit N                  Return 1..50 records
@@ -1300,6 +1303,7 @@ function searchParams(values: OptionValues): NmgSearchParams {
   if (!query) throw new Error("search requires a query");
   return compactObject({
     query,
+    activeGraphId: firstOption(values, "active-graph-id"),
     nodeName: firstOption(values, "node"),
     scope: scopeOptions(values),
     sourceActor: firstOption(values, "source-actor"),

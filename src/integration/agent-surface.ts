@@ -1,5 +1,5 @@
 import type { BoardNoticeMetadata } from "../core/board-notifications.ts";
-import type { MemoryContext, RememberResult } from "../core/types.ts";
+import type { MemoryContext, RememberResult, UserProfileEntry } from "../core/types.ts";
 import type { AgentWorkStatus } from "../core/coordination-events.ts";
 import {
   coordinationDirectoryViews,
@@ -237,6 +237,25 @@ export function renderSearchSurface(
   return prepareSearchSurface(context, options).text;
 }
 
+export function renderUserProfile(entries: readonly UserProfileEntry[]): string {
+  if (!entries.length) return "User profile has no current entries.";
+  const groups = [
+    { title: "Preferences", type: "preference" },
+    { title: "Constraints", type: "constraint" },
+  ];
+  const sections = groups.flatMap(({ title, type }) => {
+    const rows = entries
+      .filter(({ memoryType }) => memoryType === type)
+      .map(({ statement, memoryId }) => `- ${statement}\n  memory=${memoryId}`);
+    return rows.length ? [`${title}\n${rows.join("\n")}`] : [];
+  });
+  return [
+    "User profile",
+    ...sections,
+    "Use get with an entry's memory ID to read its original evidence.",
+  ].join("\n\n");
+}
+
 export function prepareSearchSurface(
   context: MemoryContext,
   options: SearchSurfaceOptions = {},
@@ -265,12 +284,22 @@ export function prepareCompactSearchSurface(
   if (context.candidates.length === 0 && bookmarks.length === 0) {
     return prepareMemorySurface([
       { purpose: "diagnostic", body: retrievalNote },
-      { purpose: "diagnostic", body: options.emptyText ?? "No matching NMG memory found." },
+      {
+        purpose: "diagnostic",
+        body:
+          context.neighborhoodAnchorId && options.emptyText !== ""
+            ? "No readable neighbors for this memory."
+            : (options.emptyText ?? "No matching NMG memory found."),
+      },
     ]);
   }
   const timeline = projectTemporalChain(context.candidates);
   return prepareMemorySurface([
     { purpose: "guidance", body: options.preamble ?? "" },
+    {
+      purpose: "diagnostic",
+      body: context.neighborhoodAnchorId ? `Neighborhood of ${context.neighborhoodAnchorId}` : "",
+    },
     { purpose: "diagnostic", body: retrievalNote },
     ...context.candidates.map((candidate) =>
       candidateInformationView(candidate, context.activeGraphId, options.memoryReferences, {
@@ -335,6 +364,8 @@ function searchCandidateLine(
 ): string {
   const key = searchMemoryReference(candidate, references);
   const flags = [
+    candidate.userProfile ? "[profile]" : "",
+    candidate.neighborhood ? `[${candidate.neighborhood.replaceAll("_", " ")}]` : "",
     presentation.timeLabel ? `[${presentation.timeLabel}]` : "",
     !presentation.searchPage && candidate.external ? "[external]" : "",
     candidate.open ? "[open]" : "",

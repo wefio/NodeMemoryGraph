@@ -825,6 +825,8 @@ export interface MemorySearchResult {
   node: MemoryNode;
   evidence: HistoryRecord;
   evidenceRecords: HistoryRecord[];
+  /** Active profile entries supported by these exact source records. */
+  profileEvidence?: { evidenceId: string; profileMemoryIds: string[] }[];
   lexicalScore: number;
   vectorScore: number;
   routeScore: number;
@@ -838,6 +840,8 @@ export interface MemorySearchResult {
    *  node (best-activation path). Lets the presentation layer explain "why
    *  related" (docs §7.1 multi-hop path retrieval). Empty/absent for seed hits. */
   path?: EdgePathStep[];
+  /** Provenance of a result in an explicit memory neighborhood. */
+  neighborhood?: "previous_turn" | "next_turn" | "graph" | "source_group" | "same_node";
   /** Query terms that literally appear in the candidate (lexical matches).
    *  Empty for pure-semantic/route recalls. */
   hitTerms?: string[];
@@ -951,7 +955,18 @@ export interface TesseraHit {
 /** Marker kind linking a memory to one of its tesserae (memory ↔ tessera). */
 export const TESSERA_REF_MARKER = "tessera_ref";
 
+export interface UserProfileEntry {
+  memoryId: string;
+  memoryType: MemoryType;
+  statement: string;
+  evidenceIds: string[];
+}
+
 export interface MemoryContext {
+  /** Complete catalog on an explicit user profile inspection. */
+  userProfile?: UserProfileEntry[];
+  neighborhoodAnchorId?: string;
+  searchPreviewCodePoints?: number;
   /** Automatic presentation policy only; never changes candidate selection. */
   recallDisplayMode?: "compact" | "full";
   /** Selection of the ranked source-evidence page when an evidence ranker was supplied. */

@@ -19,6 +19,20 @@ nmg remember "<statement>" \
 
 `--recall-trigger` 可选且可重复。只有当简短、精确的别名或可能的未来问题能比规范表述更可靠地找到同一事实时才使用。它是路由元数据，不是另一条事实：不得放入新声明、宽泛主题标签、秘密或完整陈述。Pi、MCP 和 DSH 的 `nmg_remember` 工具将同一字段暴露为 `recallTriggers`（最多 16 项，每项最多 80 个字符）。
 
+## 用户画像
+
+用 `--scope profile=user --actor user --residence ltg` 保存已确认的个人偏好或约束，类型选
+`--type preference` 或 `--type constraint`。把适用条件写进陈述，附上原始摘录。适合
+自动召回的条目可以加简短的 `--recall-trigger`。共享 remember 工具接受同一作用域
+`{"profile":"user"}`。
+
+用 `nmg search "*" --scope profile=user` 集中查看完整的本地画像，也可以用触发词做普通画像检索。
+用 `nmg get "<MEMORY_ID>"` 读取画像条目的原始证据。如果一条证据正在支撑画像，get 会显示
+`[profile evidence]` 和对应的画像记忆 ID。更新时，在同一作用域写入新条目并传入
+`--supersedes "<MEMORY_ID>"`。撤回条目使用[删除操作](#删除记忆)。
+
+自动注入规则见[画像召回预算](../../../docs/design/recall-context-and-display.zh-CN.md#用户画像)。
+
 ## 可变状态
 
 使用 `--type state` 和稳定的 `--state-key`。Key 标识属性，而非其当前值、日期、主题、节点、项目或分组。相同规范 scope 与 state key 的两次写入表示“同一个单值属性的连续取值”；较新的写入会自动取代旧值。

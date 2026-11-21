@@ -13,6 +13,8 @@ import type { ServerState } from "../../src/cli/lifecycle.ts";
 import type { NmgMethodResult } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
 import { renderSearchSurface } from "../../src/integration/agent-surface.ts";
+import { compactSearchContext } from "../../src/integration/search-projection.ts";
+import { renderSearchHeaders } from "../../src/integration/search-tool.ts";
 import {
   captureMemoryReferenceTargets,
   createMemoryReferences,
@@ -110,6 +112,102 @@ test("search uses the full ID when a statement would break the displayed key", a
       limit: 1,
     });
     assert.deepEqual(searchCandidateKeys(renderSearchSurface(context)), [saved.memory.id]);
+  });
+});
+
+test("explicit neighborhood search follows full IDs and owned preview keys", async () => {
+  await withService(async (service) => {
+    const scope = { project: "atlas" };
+    const sessionId = "neighborhood-reader";
+    const anchor = await service.invoke("remember", {
+      statement: "Atlas anchors a retrieval test.",
+      nodeName: "Atlas",
+      scope,
+    });
+    const peer = await service.invoke("remember", {
+      statement: "Retry waits 20 seconds.",
+      nodeName: "Atlas",
+      scope,
+    });
+    await service.invoke("remember", {
+      statement: "Other project internals.",
+      nodeName: "Atlas",
+      scope: { project: "other" },
+    });
+    const recall = await service.invoke("search", {
+      query: "anchors retrieval",
+      limit: 1,
+      sessionId,
+      autoRecall: true,
+      retrievalMode: "fts5",
+    });
+    assert.equal(recall.recallDisplayMode, "compact");
+    assert.equal(recall.neighborhoodAnchorId, undefined);
+    assert.deepEqual(
+      recall.results.map(({ memory }) => memory.id),
+      [anchor.memory.id],
+    );
+    const key = recall.memoryReferences?.[anchor.memory.id];
+    assert.ok(key);
+    const graph = recall.activeGraph!.id.slice(0, 8);
+    const full = await service.invoke("search", { query: anchor.memory.id, sessionId });
+    const automaticId = await service.invoke("search", {
+      query: anchor.memory.id,
+      sessionId,
+      autoRecall: true,
+      retrievalMode: "fts5",
+    });
+    assert.equal(automaticId.neighborhoodAnchorId, undefined);
+    assert.ok(automaticId.results.every((result) => !result.neighborhood));
+    const copied = await service.invoke("search", { query: key, activeGraphId: graph, sessionId });
+    assert.equal(copied.neighborhoodAnchorId, anchor.memory.id);
+    assert.deepEqual(copied.results, full.results);
+    assert.deepEqual(
+      full.results.map(({ memory, neighborhood }) => [memory.id, neighborhood]),
+      [[peer.memory.id, "same_node"]],
+    );
+    assert.match(renderSearchSurface(copied), /\[same node\]/u);
+    await assert.rejects(
+      service.invoke("search", { query: key, sessionId }),
+      /require their activeGraphId/u,
+    );
+    await assert.rejects(
+      service.invoke("search", { query: key, activeGraphId: graph, sessionId: "another-session" }),
+      /absent or not owned|another session/u,
+    );
+  });
+});
+
+test("plain search fits twenty long previews without spending the automatic recall budget", async () => {
+  await withService(async (service) => {
+    const memories = Array.from({ length: 22 }, (_, index) => ({
+      nodeName: `Budget fixture ${index}`,
+      statement: `Quartz budget fixture ${index} ${"🪨".repeat(250)}`,
+    }));
+    await service.invoke("rememberBatch", { items: memories });
+    const params = { query: "Quartz budget fixture", retrievalMode: "fts5" as const };
+    const ordinary = await service.invoke("search", params);
+    assert.ok(ordinary.results.length > 8 && ordinary.results.length <= 20);
+    assert.equal(ordinary.activeGraph?.budget.maxEvidence, 20);
+    assert.equal(ordinary.activeGraph?.budget.maxNodes, 20);
+    assert.ok(renderSearchHeaders(ordinary).length <= 5500);
+    assert.ok(
+      compactSearchContext(ordinary).candidates.every(
+        ({ preview }) => Array.from(preview).length === 240,
+      ),
+    );
+    assert.deepEqual(
+      ordinary.activeGraph?.memoryIds,
+      ordinary.results.map(({ memory }) => memory.id),
+    );
+    const automatic = await service.invoke("search", {
+      ...params,
+      autoRecall: true,
+      sessionId: "economy",
+    });
+    assert.equal(automatic.recallDisplayMode, "compact");
+    assert.equal(automatic.searchPreviewCodePoints, undefined);
+    assert.equal(automatic.activeGraph?.budget.maxEvidence, 8);
   });
 });
 

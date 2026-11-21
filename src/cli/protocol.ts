@@ -400,6 +400,8 @@ export interface NmgRecordFeedbackParams extends ContextFeedbackLabels {
 
 export interface NmgSearchParams {
   query: string;
+  /** Original search graph for a compound reference used as the query. */
+  activeGraphId?: string;
   /** Extra retrieval clauses fused with the primary query (union of results). */
   queries?: string[];
   /** Optional literal proposal piggybacked on an independently chosen search. */

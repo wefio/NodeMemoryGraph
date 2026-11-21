@@ -38,8 +38,14 @@ import {
 import type { ClaimPosterior, MemoryContext, MemorySearchResult } from "../core/types.ts";
 import type { StgConsolidationPolicyConfig } from "../integration/config.ts";
 import { LocalMemoryEmbeddings, type QueryEmbedding } from "./local-memory-embeddings.ts";
+import {
+  DEFAULT_EXPLICIT_SEARCH_LIMIT,
+  usesExplicitSearchPage,
+} from "../integration/explicit-search-page.ts";
 import { openLocalMemory } from "./local-memory-migration.ts";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
+import { isUserProfileScope, USER_PROFILE_SCOPE } from "../core/user-profile.ts";
+import { TASK_CONTEXT_SEPARATOR } from "../integration/session-task-window.ts";
 
 type PortableSearchContext = MemoryContext & { hybridRanked?: boolean };
 
@@ -78,6 +84,7 @@ const SEARCH_FIELDS = [
 ];
 const LOCAL_SEARCH_FIELDS = [
   ...SEARCH_FIELDS,
+  "activeGraphId",
   "projectDir",
   "autoRecall",
   "tieredDisclosure",
@@ -256,6 +263,23 @@ export class PortableMemoryService {
       : this.searchIndependent(input, signal);
   }
 
+  async automaticUserProfile(input: NmgSearchParams): Promise<MemorySearchResult[]> {
+    if (!this.local || !input.autoRecall || input.scope) return [];
+    const query = input.query.split(TASK_CONTEXT_SEPARATOR, 1)[0]!.trim();
+    if (!query || query === "*") return [];
+    return (await (await this.engine()).userProfile(query, { ...input, limit: 1 })).results;
+  }
+
+  async searchNeighborhood(id: string, input: NmgSearchParams): Promise<MemoryContext> {
+    const project = await this.project(input.projectDir);
+    const context =
+      (await project?.searchNeighborhood(id, input)) ??
+      (await (await this.engine()).searchNeighborhood(id, input));
+    if (!context)
+      throw new NmgProtocolError("NOT_FOUND", "Memory anchor is absent or not readable.");
+    return context;
+  }
+
   private async searchIndependent(input: NmgSearchParams, signal?: AbortSignal) {
     allowOptions(input, SEARCH_FIELDS);
     const engine = await this.engine();
@@ -274,6 +298,8 @@ export class PortableMemoryService {
     economy: boolean,
   ) {
     allowOptions(input, LOCAL_SEARCH_FIELDS);
+    if (!input.autoRecall && isUserProfileScope(input.scope))
+      return (await this.engine()).userProfile(input.query, input);
     const hybrid = input.retrievalMode === undefined || input.retrievalMode === "hybrid";
     const ranker = hybrid && !economy ? this.evidenceRanker : undefined;
     const shared = await this.engine();
@@ -314,13 +340,18 @@ export class PortableMemoryService {
     return ranker ? rankEvidencePage(input.query, context, ranker, input.limit, signal) : context;
   }
 
-  async get(input: NmgGetParams) {
+  async get(input: NmgGetParams, includeProfileEvidence = false) {
     allowOptions(input, [
       "memoryIds",
       "sessionId",
       ...(this.local ? ["projectDir", "graphHops", "activeGraphId"] : []),
     ]);
-    const main = await (await this.engine()).get(input.memoryIds, input);
+    const main = await (
+      await this.engine()
+    ).get(input.memoryIds, {
+      ...input,
+      includeProfileEvidence: this.local && includeProfileEvidence,
+    });
     const project = await this.project(input.projectDir);
     return project ? mergeLocalContexts(await project.get(input.memoryIds, input), main) : main;
   }
@@ -631,9 +662,11 @@ function localSearchOptions(
 ): MemoryQueryOptions & { limit: number } {
   return {
     ...input,
+    excludeScope: input.autoRecall ? USER_PROFILE_SCOPE : undefined,
     limit: evidenceShortlist ? rankedCandidateLimit(input) : candidateLimit(input),
     evidenceShortlist,
     findTesserae: !input.autoRecall,
+    expandSourceContext: !evidenceShortlist && usesExplicitSearchPage(input),
     expandLeafContext:
       input.vectorGranularity === "hierarchy" || input.vectorGranularity === "union",
   };
@@ -648,7 +681,7 @@ function rankedCandidateLimit(input: NmgSearchParams): number {
 function candidateLimit(input: NmgSearchParams): number {
   return input.sessionId && (input.secondPass || input.progressiveWarmDisclosure)
     ? 50
-    : (input.limit ?? 20);
+    : (input.limit ?? DEFAULT_EXPLICIT_SEARCH_LIMIT);
 }
 
 async function exactLocalLookup(
@@ -688,17 +721,30 @@ async function searchLocalStore(
 
 function limitSearchResults(results: MemorySearchResult[], limit: number): MemorySearchResult[] {
   const ranked = new Map<string, MemorySearchResult>();
+  const adjacent = new Map<string, MemorySearchResult>();
   const leaves = new Map<string, MemorySearchResult>();
   for (const item of results) {
-    const group = item.recallReason === "leaf_context" ? leaves : ranked;
+    const sourceNeighbor =
+      item.neighborhood === "previous_turn" || item.neighborhood === "next_turn";
+    const group = sourceNeighbor
+      ? adjacent
+      : item.recallReason === "leaf_context"
+        ? leaves
+        : ranked;
     group.set(item.memory.id, item);
   }
-  const hits = [...ranked.values()].slice(0, limit);
+  const neighbors = [...adjacent.values()]
+    .filter(({ memory }) => !ranked.has(memory.id))
+    .slice(0, Math.min(2, limit));
+  const hits = [...ranked.values()].slice(0, limit - neighbors.length);
+  hits.push(...neighbors);
   const room = Math.min(MAX_LEAF_CONTEXT_RESULTS, limit - hits.length);
   if (room === 0) return hits;
   return [
     ...hits,
-    ...[...leaves.values()].filter(({ memory }) => !ranked.has(memory.id)).slice(0, room),
+    ...[...leaves.values()]
+      .filter(({ memory }) => !ranked.has(memory.id) && !adjacent.has(memory.id))
+      .slice(0, room),
   ];
 }
 

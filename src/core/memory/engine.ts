@@ -7,6 +7,7 @@ import type {
   MemoryHybridPage,
   MemoryReadView,
   MemoryVectorQuery,
+  SourceNeighbor,
 } from "./backend.ts";
 import { MemoryOperationConflict } from "./backend.ts";
 import {
@@ -30,10 +31,11 @@ import type {
 import { MemoryWriteRejected } from "../write-policy.ts";
 import { hybridScore, lexicalTextScore, searchTerms } from "../store/search-ranking.ts";
 import type { ExactLookupAnchor } from "../store/search-ranking.ts";
-import { normalize } from "../memory-normalization.ts";
+import { normalize, normalizeStatement } from "../memory-normalization.ts";
 import { eventWindowEnd, eventWindowStart } from "../event-time.ts";
 import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import { TESSERA_REF_MARKER } from "../types.ts";
+import { isUserProfileRecord, userProfileMatch, USER_PROFILE_SCOPE } from "../user-profile.ts";
 import type {
   MemoryContext,
   EdgePathStep,
@@ -52,6 +54,8 @@ import type {
 
 export interface MemoryQueryOptions {
   scope?: MemoryScope;
+  excludeScope?: MemoryScope;
+  includeProfileEvidence?: boolean;
   sessionId?: string;
   limit?: number;
   maxTier?: 0 | 1 | 2 | 3;
@@ -63,6 +67,7 @@ export interface MemoryQueryOptions {
   eventTimeTo?: string;
   findTesserae?: boolean;
   expandLeafContext?: boolean;
+  expandSourceContext?: boolean;
   /** Collect independent candidates for an injected evidence ranker before reading sources. */
   evidenceShortlist?: boolean;
 }
@@ -178,6 +183,8 @@ export class MemoryEngine {
         graphHops,
         limit: Math.max(results.length, options.limit ?? 50),
       });
+      if (options.includeProfileEvidence && results.length)
+        await this.attachProfileEvidence(view, results);
       const tesserae = await this.attachedTesserae(view, results);
       return {
         results,
@@ -188,6 +195,95 @@ export class MemoryEngine {
     } finally {
       await this.backend.closeRead(view);
     }
+  }
+
+  /** Browse readable neighbors of a known record on a single backend snapshot. */
+  async searchNeighborhood(
+    id: string,
+    options: MemoryQueryOptions,
+  ): Promise<MemoryContext | undefined> {
+    const view = await this.backend.openRead();
+    try {
+      const entities = await this.backend.scan(view, {
+        kind: "memory",
+        ids: [id],
+        scope: options.scope,
+        sessionId: options.sessionId,
+        limit: 1,
+      });
+      const [anchor] = await this.project(view, entities, {
+        sessionId: options.sessionId,
+        includeHistorical: options.includeHistorical,
+      });
+      if (!anchor) return;
+      return await this.expandNeighborhood(view, anchor, options);
+    } finally {
+      await this.backend.closeRead(view);
+    }
+  }
+
+  private async expandNeighborhood(
+    view: MemoryReadView,
+    anchor: MemorySearchResult,
+    input: MemoryQueryOptions,
+  ): Promise<MemoryContext> {
+    const id = anchor.memory.id;
+    const limit = input.limit ?? 8;
+    const options = {
+      ...input,
+      scope: input.scope ?? anchor.memory.scope,
+      graphHops: boundedGraphHops(input.graphHops ?? 1),
+      eventTimeFrom: eventWindowStart(input.eventTimeFrom) ?? undefined,
+      eventTimeTo: eventWindowEnd(input.eventTimeTo) ?? undefined,
+    };
+    const query: MemoryEntityQuery = {
+      kind: "memory",
+      scope: options.scope,
+      sessionId: options.sessionId,
+      limit: limit * 2,
+      eventTimeFrom: options.eventTimeFrom,
+      eventTimeTo: options.eventTimeTo,
+    };
+    const neighbors = this.backend.adjacentSources?.(view, anchor.evidence, query) ?? [];
+    const reasons = new Map(neighbors.map(({ entity, relation }) => [entity.value.id, relation]));
+    const nearby = await this.project(
+      view,
+      neighbors.map(({ entity }) => entity),
+      options,
+    );
+    const results: MemorySearchResult[] = nearby.map((item) => ({
+      ...item,
+      neighborhood: reasons.get(item.memory.id),
+    }));
+    const graph = [anchor];
+    const relations = await this.expand(view, graph, { ...options, limit: limit + 1 });
+    results.push(
+      ...graph.slice(1).map((item): MemorySearchResult => ({ ...item, neighborhood: "graph" })),
+    );
+    const unique = new Map<string, MemorySearchResult>([[id, anchor]]);
+    for (const item of results) if (!unique.has(item.memory.id)) unique.set(item.memory.id, item);
+    const page = [...unique.values()].slice(0, limit + 1);
+    await this.appendLeafContext(view, page, [id], query, options, limit + 1 - page.length);
+    const selected = page.slice(1).map((item): MemorySearchResult => ({
+      ...item,
+      neighborhood: item.neighborhood ?? "source_group",
+    }));
+    if (selected.length < limit) {
+      const excluded = new Set(page.map(({ memory }) => memory.id));
+      const sameNode = await this.backend.scan(view, { ...query, nodeId: anchor.node.id });
+      const peers = await this.project(view, sameNode, options, false, (rows) =>
+        rows.filter(({ memory }) => !excluded.has(memory.id)).slice(0, limit - selected.length),
+      );
+      selected.push(
+        ...peers.map((item): MemorySearchResult => ({ ...item, neighborhood: "same_node" })),
+      );
+    }
+    return {
+      neighborhoodAnchorId: id,
+      results: selected,
+      relations,
+      chainEdges: this.projectChains(view, selected, options.sessionId),
+    };
   }
 
   async backfillTesseraFingerprint(input: {
@@ -273,6 +369,100 @@ export class MemoryEngine {
     return this.searchContext(text, options, semantic);
   }
 
+  async userProfile(text: string, options: MemoryQueryOptions = {}): Promise<MemoryContext> {
+    const limit = searchLimit(options.limit);
+    const list = text.trim() === "*";
+    const query = normalizeStatement(text);
+    const view = await this.backend.openRead();
+    try {
+      const eventTimeFrom = eventWindowStart(options.eventTimeFrom) ?? undefined;
+      const eventTimeTo = eventWindowEnd(options.eventTimeTo) ?? undefined;
+      const rows = await this.profileCandidates(view, query, list, {
+        ...options,
+        includeHistorical: false,
+        eventTimeFrom,
+        eventTimeTo,
+      });
+      const results = await this.project(view, rows.slice(0, limit), {
+        ...options,
+        includeHistorical: false,
+        eventTimeFrom,
+        eventTimeTo,
+      });
+      return {
+        results,
+        relations: [],
+        retrieval: { mode: "lexical", degraded: false },
+        ...(list
+          ? {
+              userProfile: rows.map(({ value: memory }) => ({
+                memoryId: memory.id,
+                memoryType: memory.memoryType,
+                statement: memory.statement,
+                evidenceIds: memory.evidenceIds,
+              })),
+            }
+          : {}),
+      };
+    } finally {
+      await this.backend.closeRead(view);
+    }
+  }
+
+  private async profileCandidates(
+    view: MemoryReadView,
+    query: string,
+    list: boolean,
+    options: MemoryQueryOptions,
+  ): Promise<Extract<MemoryEntity, { kind: "memory" }>[]> {
+    const found: Array<{ entity: Extract<MemoryEntity, { kind: "memory" }>; score: number }> = [];
+    const filter = {
+      kind: "memory",
+      scope: USER_PROFILE_SCOPE,
+      nodeIds: await this.searchNodeIds(view, options.nodeName),
+      eventTimeFrom: options.eventTimeFrom,
+      eventTimeTo: options.eventTimeTo,
+      limit: 128,
+    } as const;
+    const now = this.now();
+    for (let offset = 0; ; offset += filter.limit) {
+      const page = await this.backend.scan(view, { ...filter, offset });
+      for (const entity of page) {
+        if (entity.kind !== "memory" || !isUserProfileRecord(entity.value)) continue;
+        if (
+          !searchableMemory(entity.value, options, now) ||
+          entity.value.tier > (options.maxTier ?? 3)
+        )
+          continue;
+        const score = list ? 1 : userProfileMatch(query, entity.value);
+        if (score) found.push({ entity, score });
+      }
+      if (page.length < filter.limit) break;
+    }
+    return found.sort((left, right) => right.score - left.score).map(({ entity }) => entity);
+  }
+
+  private async attachProfileEvidence(
+    view: MemoryReadView,
+    results: readonly MemorySearchResult[],
+  ): Promise<void> {
+    const byEvidence = new Map(
+      results.flatMap(({ evidenceRecords }) =>
+        evidenceRecords.map(({ id }): [string, string[]] => [id, []]),
+      ),
+    );
+    for (const { value: memory } of await this.profileCandidates(view, "", true, {})) {
+      for (const evidenceId of memory.evidenceIds) byEvidence.get(evidenceId)?.push(memory.id);
+    }
+    for (const result of results) {
+      const links = result.evidenceRecords.flatMap(({ id }) => {
+        const profileMemoryIds = byEvidence.get(id);
+        return profileMemoryIds?.length ? [{ evidenceId: id, profileMemoryIds }] : [];
+      });
+      if (links.length) result.profileEvidence = links;
+    }
+  }
+
   searchExactAnchor(
     anchor: ExactLookupAnchor,
     options: MemoryQueryOptions,
@@ -287,9 +477,7 @@ export class MemoryEngine {
     exact?: RegExp,
   ): Promise<MemoryContext> {
     if (!text.trim()) throw new Error("Search query is required");
-    const limit = options.limit ?? 20;
-    if (!Number.isInteger(limit) || limit < 1 || limit > 100)
-      throw new Error("Search limit must be 1..100");
+    const limit = searchLimit(options.limit);
     boundedGraphHops(options.graphHops);
     const eventTimeFrom = eventWindowStart(options.eventTimeFrom) ?? undefined;
     const eventTimeTo = eventWindowEnd(options.eventTimeTo) ?? undefined;
@@ -300,6 +488,7 @@ export class MemoryEngine {
         kind: "memory",
         nodeIds: await this.searchNodeIds(view, options.nodeName),
         scope: options.scope,
+        excludeScope: options.excludeScope,
         sessionId: options.sessionId,
         eventTimeFrom,
         eventTimeTo,
@@ -310,6 +499,14 @@ export class MemoryEngine {
         : await this.lexicalResults(view, text, query, options, limit, exact);
       if (exact && !results.length)
         return { results, relations: [], retrieval: { mode: "lexical", degraded: false } };
+      await this.appendMatchingSourceNeighbors(
+        view,
+        results,
+        text,
+        query,
+        { ...options, limit },
+        semantic,
+      );
       const relations = await this.expandSearchStructure(view, results, query, {
         ...options,
         limit,
@@ -353,6 +550,53 @@ export class MemoryEngine {
     const budget = Math.min(MAX_LEAF_CONTEXT_RESULTS, options.limit - results.length);
     if (includeLeaves) await this.appendLeafContext(view, results, seeds, query, options, budget);
     return relations;
+  }
+
+  private async appendMatchingSourceNeighbors(
+    view: MemoryReadView,
+    results: MemorySearchResult[],
+    text: string,
+    query: MemoryEntityQuery,
+    options: MemoryQueryOptions & { limit: number },
+    semantic?: MemoryVectorQuery,
+  ): Promise<void> {
+    if (!options.expandSourceContext || semantic?.mode !== "hybrid") return;
+    if (!this.backend.adjacentSources || !results.length || options.limit < 10) return;
+    const terms = searchTerms(normalize(text)).filter((term) => /\p{L}/u.test(term));
+    const seen = new Set(results.map(({ memory }) => memory.id));
+    const matches: Array<SourceNeighbor & { overlap: number }> = [];
+    for (const anchor of results.slice(0, 2)) {
+      for (const neighbor of this.backend.adjacentSources(view, anchor.evidence, {
+        ...query,
+        scope: anchor.memory.scope,
+        limit: 8,
+      })) {
+        const { id, statement } = neighbor.entity.value;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const tokens = new Set(searchTerms(normalize(statement)));
+        const overlap = terms.filter((term) => tokens.has(term)).length;
+        if (overlap) matches.push({ ...neighbor, overlap });
+      }
+    }
+    matches.sort((a, b) => b.overlap - a.overlap);
+    const relation = new Map(matches.map(({ entity, relation }) => [entity.value.id, relation]));
+    const neighbors = await this.project(
+      view,
+      matches.map(({ entity }) => entity),
+      options,
+      false,
+      (rows) => rows.slice(0, 2),
+    );
+    const pivot = Math.min(results.length, options.limit - neighbors.length);
+    results.splice(
+      pivot,
+      results.length - pivot,
+      ...neighbors.map((result) => ({
+        ...result,
+        neighborhood: relation.get(result.memory.id),
+      })),
+    );
   }
 
   private async appendLeafContext(
@@ -937,6 +1181,7 @@ export class MemoryEngine {
             kind: "memory",
             nodeId: adjacent,
             scope: options.scope,
+            excludeScope: options.excludeScope,
             sessionId: options.sessionId,
             limit: 100,
           });
@@ -1006,6 +1251,12 @@ function selectLocalHybrid(
 function boundedGraphHops(hops = 0): number {
   if (!Number.isInteger(hops) || hops < 0 || hops > 3) throw new Error("Graph hops must be 0..3");
   return hops;
+}
+
+function searchLimit(limit = 20): number {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+    throw new Error("Search limit must be 1..100");
+  return limit;
 }
 
 function rememberRequest(input: MemoryInput): MemoryInput {

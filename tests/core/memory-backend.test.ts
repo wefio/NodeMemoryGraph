@@ -507,6 +507,154 @@ test("SQLite hybrid search restricts vector scoring to the named node and reads 
   assert.equal(evaluations, 2);
 });
 
+test("SQLite neighborhood uses adjacent source ordinals and indexed graph edges", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-neighborhood-"));
+  const path = join(directory, "memory.sqlite");
+  const backend = await openMemoryBackend({
+    kind: "sqlite",
+    path,
+    namespace: "tenant",
+  });
+  t.after(async () => {
+    await backend.close();
+    removeTempDirectory(directory);
+  });
+  const engine = new MemoryEngine(backend);
+  const records = await engine.rememberMany([
+    ...[
+      ["1", "earlier"],
+      ["2", "anchor"],
+      ["3", "later"],
+      ["5", "outside the adjacent window"],
+    ].map(([sourceMessageId, statement]) => ({
+      nodeName: statement!,
+      statement: statement!,
+      residence: "stg" as const,
+      sessionId: "owner",
+      evidenceSource: {
+        sourceMessageId: sourceMessageId!,
+        content: statement!,
+        actor: "user" as const,
+      },
+    })),
+    { nodeName: "Linked origin", statement: "Completed earlier change" },
+    { nodeName: "Related", statement: "Linked verification result" },
+  ]);
+  const [previous, anchor, next, , graphAnchor, linked] = records;
+  await engine.linkNodes({
+    sourceNodeId: graphAnchor!.node.id,
+    targetNodeId: linked!.node.id,
+    type: "related_to",
+  });
+  assert.equal(
+    await engine.searchNeighborhood(anchor!.memory.id, { sessionId: "foreign" }),
+    undefined,
+  );
+  const prepare = DatabaseSync.prototype.prepare;
+  let sourceSql = "";
+  t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+    if (sql.startsWith("WITH wanted(ordinal, relation)")) sourceSql = sql;
+    return prepare.call(this, sql);
+  });
+  const context = await engine.searchNeighborhood(anchor!.memory.id, {
+    sessionId: "owner",
+    limit: 3,
+  });
+  assert.deepEqual(
+    context?.results.map(({ memory, neighborhood }) => [memory.id, neighborhood]),
+    [
+      [previous!.memory.id, "previous_turn"],
+      [next!.memory.id, "next_turn"],
+    ],
+  );
+  const inspector = new DatabaseSync(path, { readOnly: true });
+  try {
+    const plan = inspector
+      .prepare(`EXPLAIN QUERY PLAN ${sourceSql}`)
+      .all("1", "3", "tenant", "owner", 6)
+      .map(({ detail }) => detail)
+      .join("\n");
+    assert.match(plan, /nmg_memory_history_source \(namespace=\? AND <expr>=\?\)/u);
+    assert.match(plan, /nmg_memory_leaf_evidence \(namespace=\? AND <expr>=\?\)/u);
+  } finally {
+    inspector.close();
+  }
+  const graph = await engine.searchNeighborhood(graphAnchor!.memory.id, {});
+  assert.equal(graph?.results[0]?.memory.id, linked!.memory.id);
+  assert.equal(graph?.results[0]?.neighborhood, "graph");
+  assert.equal(graph?.results[0]?.path?.[0]?.relationType, "related_to");
+  const bounded = await engine.searchNeighborhood(anchor!.memory.id, {
+    sessionId: "owner",
+    limit: 1,
+  });
+  assert.deepEqual(
+    bounded?.results.map(({ memory }) => memory.id),
+    [previous!.memory.id],
+  );
+});
+
+test("ordinary hybrid search can spend two tail slots on relevant adjacent source records", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-ranked-source-neighbors-"));
+  const backend = await openMemoryBackend({
+    kind: "sqlite",
+    path: join(directory, "memory.sqlite"),
+    namespace: "tenant",
+  });
+  t.after(async () => {
+    await backend.close();
+    removeTempDirectory(directory);
+  });
+  const engine = new MemoryEngine(backend);
+  const turns = [
+    "Quartz earlier " + "filler ".repeat(70),
+    "Quartz",
+    "Quartz later " + "filler ".repeat(70),
+  ];
+  const records = await engine.rememberMany([
+    ...turns.map((statement, index) => ({
+      statement,
+      nodeName: `Source ${index}`,
+      sessionId: "owner",
+      residence: "stg" as const,
+      evidenceSource: {
+        actor: "user" as const,
+        sourceMessageId: String(index + 1),
+        content: statement,
+      },
+    })),
+    ...Array.from({ length: 21 }, (_, index) => ({
+      statement: `Quartz detail number ${index}`,
+      nodeName: `Detail ${index}`,
+    })),
+  ]);
+  backend.vectorIndex!.save(
+    "test",
+    records.map(({ memory }) => ({
+      id: memory.id,
+      statement: memory.statement,
+      text: memory.statement,
+    })),
+    records.map((_, index) => (index === 1 ? [1, 0] : index < 3 ? [0, 1] : [0.8, 0.6])),
+  );
+  const options = { sessionId: "owner", limit: 20 };
+  const semantic = { indexId: "test", vector: [1, 0], mode: "hybrid" as const };
+  const baseline = await engine.search("quartz", options, semantic);
+  assert.equal(baseline.results[0]?.memory.id, records[1]?.memory.id);
+  const expanded = await engine.search(
+    "quartz",
+    { ...options, expandSourceContext: true },
+    semantic,
+  );
+  assert.deepEqual(expanded.results.slice(0, 18), baseline.results.slice(0, 18));
+  assert.deepEqual(
+    expanded.results.slice(18).map(({ memory, neighborhood }) => [memory.id, neighborhood]),
+    [
+      [records[0]!.memory.id, "previous_turn"],
+      [records[2]!.memory.id, "next_turn"],
+    ],
+  );
+});
+
 test("SQLite retains leaf memberships and expands same-source evidence without route vectors", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-structural-leaves-"));
   const path = join(directory, "memory.sqlite");

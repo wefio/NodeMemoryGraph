@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { MemoryEntity, MemoryEntityQuery } from "./backend.ts";
+import type { HistoryRecord } from "../types.ts";
+import type { MemoryEntity, MemoryEntityQuery, SourceNeighbor } from "./backend.ts";
 import { queryBounds, sqliteQueryWhere } from "./entity-rows.ts";
 
 const PRIMARY_EVIDENCE = "json_extract(payload, '$.evidenceId')";
@@ -84,4 +85,40 @@ export function readSqliteLeafPeers(
     )
     .all(JSON.stringify(seedIds), namespace, namespace, JSON.stringify(excluded), limit);
   return rows.map(({ payload }) => ({ kind: "memory", value: JSON.parse(String(payload)) }));
+}
+
+/** Follow an ordinal supplied by the source, using the history and evidence indexes. */
+export function readSqliteAdjacentSources(
+  db: DatabaseSync,
+  namespace: string,
+  source: HistoryRecord,
+  query: MemoryEntityQuery,
+): SourceNeighbor[] {
+  const { sessionId, sourceMessageId } = source;
+  if (!sessionId || !sourceMessageId || !/^(?:0|[1-9][0-9]*)$/u.test(sourceMessageId)) return [];
+  const ordinal = Number(sourceMessageId);
+  if (!Number.isSafeInteger(ordinal + 1)) return [];
+  const { limit } = queryBounds(query);
+  // Unary + drops h.id's TEXT affinity so SQLite can seek the JSON expression index.
+  return db
+    .prepare(
+      `WITH wanted(ordinal, relation) AS (VALUES (?, 'previous_turn'), (?, 'next_turn')),
+      neighbors AS (
+        SELECT m.*, w.relation FROM wanted w
+        CROSS JOIN nmg_memory_entities h INDEXED BY nmg_memory_history_source
+          ON h.namespace=? AND h.kind='history'
+          AND coalesce(nullif(h.name, ''), json_extract(h.payload, '$.sourceMessageId'))=w.ordinal
+          AND json_extract(h.payload, '$.sessionId')=?
+        CROSS JOIN nmg_memory_entities m INDEXED BY nmg_memory_leaf_evidence
+          ON m.namespace=h.namespace AND m.kind='memory'
+          AND json_extract(m.payload, '$.evidenceId')=+h.id
+      )
+      SELECT payload, relation FROM neighbors WHERE ${sqliteQueryWhere(query)}
+      ORDER BY relation DESC, id LIMIT ?`,
+    )
+    .all(String(ordinal - 1), String(ordinal + 1), namespace, sessionId, limit)
+    .map(({ payload, relation }) => ({
+      entity: { kind: "memory", value: JSON.parse(String(payload)) },
+      relation: relation === "previous_turn" ? "previous_turn" : "next_turn",
+    }));
 }

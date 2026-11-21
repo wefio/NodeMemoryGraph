@@ -130,12 +130,19 @@ export const SEARCH_TOOL_PARAMETERS: readonly SearchParameterContract[] = [
     schema: { type: "string", description: "Focused recall query." },
   },
   {
+    name: "activeGraphId",
+    schema: {
+      type: "string",
+      description: "Original result graph when query is a copied ref: memory key.",
+    },
+  },
+  {
     name: "limit",
     schema: {
       type: "integer",
       minimum: 1,
       maximum: 50,
-      description: "Return 1..50 records (default 8).",
+      description: "Return 1..50 records (plain local search defaults to 20).",
     },
   },
   {
@@ -167,7 +174,8 @@ export const SEARCH_TOOL_PARAMETERS: readonly SearchParameterContract[] = [
     schema: {
       type: "object",
       additionalProperties: { type: "string" },
-      description: 'Applicability scope, e.g. {"project":"nmg"}.',
+      description:
+        'Applicability scope, e.g. {"project":"nmg"}. For the local user profile, use {"profile":"user"} with query "*".',
     },
   },
   {

@@ -12,7 +12,9 @@ import type {
   MemoryHybridPage,
   MemoryReadView,
   MemoryVectorQuery,
+  SourceNeighbor,
 } from "./backend.ts";
+import type { HistoryRecord } from "../types.ts";
 import {
   ENTITY_COLUMNS,
   SQLITE_HISTORY_SOURCE,
@@ -28,10 +30,13 @@ import { readLegacyClaimRows, readLegacyMemoryRows } from "../store/legacy-memor
 import { requestHash } from "./model.ts";
 import { ensureLocalDaemonSchema, migrate } from "../store/schema.ts";
 import { ftsExpression } from "../store/search-ranking.ts";
+import { serializeScope } from "../scope.ts";
+import { USER_PROFILE_SCOPE } from "../user-profile.ts";
 import { ensureSqliteTextIndexes, textIndex, writeSqliteTextIndex } from "./sqlite-text-index.ts";
 import {
   ensureSqliteLeafGroups,
   importLegacySqliteLeaves,
+  readSqliteAdjacentSources,
   readSqliteLeafPeers,
 } from "./sqlite-leaves.ts";
 import { SqliteMemoryVectors } from "./sqlite-vectors.ts";
@@ -118,6 +123,9 @@ export class SqliteMemoryBackend implements MemoryBackend {
         ON nmg_memory_entities(namespace, kind, node, scope, id);
       CREATE INDEX IF NOT EXISTS nmg_memory_scope_name
         ON nmg_memory_entities(namespace, kind, name, scope, id);
+      CREATE INDEX IF NOT EXISTS nmg_memory_user_profile
+        ON nmg_memory_entities(namespace, kind, scope, id)
+        WHERE kind='memory' AND scope=${sqlLiteral(serializeScope(USER_PROFILE_SCOPE))};
       CREATE INDEX IF NOT EXISTS nmg_memory_state
         ON nmg_memory_entities(namespace, statekey, scope, id) WHERE kind='memory';
       CREATE INDEX IF NOT EXISTS nmg_memory_edge_source
@@ -162,6 +170,14 @@ export class SqliteMemoryBackend implements MemoryBackend {
       .prepare(page.sql)
       .all(...page.bind)
       .map(decodeEntity);
+  }
+
+  adjacentSources(
+    view: MemoryReadView,
+    source: HistoryRecord,
+    query: MemoryEntityQuery,
+  ): SourceNeighbor[] {
+    return readSqliteAdjacentSources(this.reader(view), this.namespace, source, query);
   }
 
   hybridCandidates(

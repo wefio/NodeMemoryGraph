@@ -49,6 +49,21 @@ date covers its whole day), or write `time:2026-01-01..2026-06-30` in the query.
 Use `--include-historical` only for old/superseded state. Start with `--max-tier 1`
 and `--limit 8`, not a full evidence dump.
 
+## Browse a memory neighborhood
+
+Use a memory ID from local search or automatic recall as the query to the next
+search. For a short reference, copy the whole `ref:` key and pass its original
+graph ID in the same session. When the host supplies the session identity,
+use `nmg_search({query: "ref:abcd|SQLite", activeGraphId: "12345678", limit: 5})`.
+
+```text
+nmg search MEMORY_UUID --limit 5
+nmg search "ref:abcd|SQLite" --active-graph-id 12345678 --session-id SESSION --limit 5
+```
+
+Select a candidate by its relationship and use get to read its complete evidence.
+[Neighborhood contract](../../../docs/design/recall-context-and-display.md#browse-a-memory-neighborhood)
+
 ## Escalation order
 
 1. Rewrite the query around the missing entity, time, or relation.
