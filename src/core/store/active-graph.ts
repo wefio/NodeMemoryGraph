@@ -124,6 +124,7 @@ export function selectWithinActiveGraphBudget(
   candidates: readonly MemorySearchResult[],
   budget: ActiveGraphBudget,
   limit: number,
+  estimateTokens = estimateResultTokens,
 ): ActiveGraphBudgetSelection {
   const selectedNodes = new Set<string>();
   const results: MemorySearchResult[] = [];
@@ -143,7 +144,7 @@ export function selectWithinActiveGraphBudget(
       exhausted.add("deepEvidence");
       continue;
     }
-    const candidateTokens = estimateResultTokens(candidate);
+    const candidateTokens = estimateTokens(candidate);
     if (results.length > 0 && estimatedTokens + candidateTokens > budget.maxTokens) {
       exhausted.add("tokens");
       continue;

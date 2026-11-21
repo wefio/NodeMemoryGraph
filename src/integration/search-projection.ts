@@ -7,11 +7,17 @@ import { evidenceRecordParts } from "./evidence-rendering.ts";
 
 export const SEARCH_PREVIEW_CHARS = 320;
 
-export function searchPreview(memory: MemorySearchResult["memory"]): string {
+export function searchPreview(memory: MemorySearchResult["memory"], codePoints?: number): string {
   if ((memory.markers ?? []).some((marker) => marker.kind === "forget")) {
     return "[forget] (content withdrawn)";
   }
   const normalized = memory.statement.replace(/\s+/gu, " ").trim();
+  if (codePoints !== undefined) {
+    const characters = Array.from(normalized);
+    return characters.length <= codePoints
+      ? normalized
+      : characters.slice(0, codePoints - 1).join("") + "…";
+  }
   return normalized.length <= SEARCH_PREVIEW_CHARS
     ? normalized
     : `${normalized.slice(0, SEARCH_PREVIEW_CHARS - 1)}…`;
@@ -63,7 +69,7 @@ export function compactSearchContext(context: MemoryContext): CompactSearchConte
         context.recallDisplayMode === "full" &&
         !result.memory.markers.some((marker) => marker.kind === "forget")
           ? result.memory.statement.replace(/\s+/gu, " ").trim()
-          : searchPreview(result.memory),
+          : searchPreview(result.memory, context.searchPreviewCodePoints),
       eventTime: result.memory.eventTime,
       expiresAt: result.memory.expiresAt ?? result.memory.validUntil,
       chains: logicalChainNames(result),

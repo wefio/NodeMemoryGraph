@@ -70,6 +70,11 @@ import {
   type MemoryReferenceTarget,
 } from "../integration/memory-reference.ts";
 import { portableRecallGraph } from "../integration/portable-recall.ts";
+import {
+  DEFAULT_EXPLICIT_SEARCH_LIMIT,
+  fitExplicitSearchPage,
+  usesExplicitSearchPage,
+} from "../integration/explicit-search-page.ts";
 import { ReasoningWorkspaces } from "../integration/reasoning-workspaces.ts";
 import { RecallContextPolicy } from "../integration/recall-context-policy.ts";
 import { STATE_AG_FIELDS, stateOperation } from "../integration/state.ts";
@@ -563,7 +568,7 @@ export class NmgService {
     if (recallDisplayMode) context.recallDisplayMode = recallDisplayMode;
     return this.#registerPortableSearch(
       context,
-      { ...params, graphHops: retrieval.graphHops },
+      { ...params, limit: retrieval.limit, graphHops: retrieval.graphHops },
       started,
       directMs,
     );
@@ -597,7 +602,7 @@ export class NmgService {
       ...params,
       query: id,
       graphHops: params.graphHops ?? 1,
-      limit: params.limit ?? 8,
+      limit: params.limit ?? DEFAULT_EXPLICIT_SEARCH_LIMIT,
       secondPass: false,
       progressiveWarmDisclosure: false,
       tieredDisclosure: false,
@@ -613,6 +618,7 @@ export class NmgService {
     delete retrieval.recallCue;
     delete retrieval.recallRevision;
     delete retrieval.recallSource;
+    if (usesExplicitSearchPage(params)) retrieval.limit ??= DEFAULT_EXPLICIT_SEARCH_LIMIT;
     retrieval.graphHops ??= configuredGraphHops(0, this.#environment);
     if (params.autoRecall && params.sessionId)
       retrieval.query = this.#recallContext.automaticQuery(
@@ -639,7 +645,8 @@ export class NmgService {
     started: number,
     directMs: number,
   ): MemoryContext {
-    const projected = portableRecallGraph(context, params, performance.now() - started);
+    const page = fitExplicitSearchPage(context, params);
+    const projected = portableRecallGraph(page, params, performance.now() - started);
     const taskFrame = this.#labAuthority.status(
       "working_state",
       params.sessionId ?? "",

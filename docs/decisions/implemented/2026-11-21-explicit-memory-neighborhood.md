@@ -30,3 +30,8 @@ reference. Reusing that pair keeps one search tool and lets the caller decide
 when a neighborhood is worth reading. An ID has no relevance text to embed.
 The [search and display contract](../../design/recall-context-and-display.md#browse-a-memory-neighborhood)
 defines the entry point and the result.
+
+Plain explicit search uses the measured 20-result preview page and can
+include query-matching adjacent turns in its final two slots. The
+[budget replay](../../experiments/retrieval/explicit-search-budget-2026-11-21.md)
+records the evidence and the narrower production provenance rule.

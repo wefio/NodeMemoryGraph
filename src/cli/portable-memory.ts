@@ -38,6 +38,10 @@ import {
 import type { ClaimPosterior, MemoryContext, MemorySearchResult } from "../core/types.ts";
 import type { StgConsolidationPolicyConfig } from "../integration/config.ts";
 import { LocalMemoryEmbeddings, type QueryEmbedding } from "./local-memory-embeddings.ts";
+import {
+  DEFAULT_EXPLICIT_SEARCH_LIMIT,
+  usesExplicitSearchPage,
+} from "../integration/explicit-search-page.ts";
 import { openLocalMemory } from "./local-memory-migration.ts";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
 
@@ -645,6 +649,7 @@ function localSearchOptions(
     limit: evidenceShortlist ? rankedCandidateLimit(input) : candidateLimit(input),
     evidenceShortlist,
     findTesserae: !input.autoRecall,
+    expandSourceContext: !evidenceShortlist && usesExplicitSearchPage(input),
     expandLeafContext:
       input.vectorGranularity === "hierarchy" || input.vectorGranularity === "union",
   };
@@ -659,7 +664,7 @@ function rankedCandidateLimit(input: NmgSearchParams): number {
 function candidateLimit(input: NmgSearchParams): number {
   return input.sessionId && (input.secondPass || input.progressiveWarmDisclosure)
     ? 50
-    : (input.limit ?? 20);
+    : (input.limit ?? DEFAULT_EXPLICIT_SEARCH_LIMIT);
 }
 
 async function exactLocalLookup(
@@ -699,17 +704,30 @@ async function searchLocalStore(
 
 function limitSearchResults(results: MemorySearchResult[], limit: number): MemorySearchResult[] {
   const ranked = new Map<string, MemorySearchResult>();
+  const adjacent = new Map<string, MemorySearchResult>();
   const leaves = new Map<string, MemorySearchResult>();
   for (const item of results) {
-    const group = item.recallReason === "leaf_context" ? leaves : ranked;
+    const sourceNeighbor =
+      item.neighborhood === "previous_turn" || item.neighborhood === "next_turn";
+    const group = sourceNeighbor
+      ? adjacent
+      : item.recallReason === "leaf_context"
+        ? leaves
+        : ranked;
     group.set(item.memory.id, item);
   }
-  const hits = [...ranked.values()].slice(0, limit);
+  const neighbors = [...adjacent.values()]
+    .filter(({ memory }) => !ranked.has(memory.id))
+    .slice(0, Math.min(2, limit));
+  const hits = [...ranked.values()].slice(0, limit - neighbors.length);
+  hits.push(...neighbors);
   const room = Math.min(MAX_LEAF_CONTEXT_RESULTS, limit - hits.length);
   if (room === 0) return hits;
   return [
     ...hits,
-    ...[...leaves.values()].filter(({ memory }) => !ranked.has(memory.id)).slice(0, room),
+    ...[...leaves.values()]
+      .filter(({ memory }) => !ranked.has(memory.id) && !adjacent.has(memory.id))
+      .slice(0, room),
   ];
 }
 

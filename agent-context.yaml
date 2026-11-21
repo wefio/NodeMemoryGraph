@@ -277,6 +277,7 @@ routes:
       - src/integration/memory-reference.ts
       - src/integration/reasoning-workspaces.ts
       - src/integration/recall-budget.ts
+      - src/integration/explicit-search-page.ts
       - src/integration/search-projection.ts
       - src/integration/search.ts
       - src/integration/tool-contract.ts

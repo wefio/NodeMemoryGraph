@@ -96,6 +96,19 @@ metadata, including default values. Independently composable
 evidence views carry their own scope and event time and use a bounded primary
 source excerpt. Active Graph estimates use that composable row.
 
+Plain local search defaults to 20 results. It fits the ranked candidate
+prefix and available bookmarks into 5,500 UTF-16 units with up to 240 code
+points per preview. A requested limit above 20 raises the page budget
+proportionally. The graph records the fitted results and estimates their header
+cost. Progressive and automatic recall use their own admission rules.
+
+A plain hybrid search can use up to two tail slots for matching adjacent
+source turns linked from its first two direct hits. The engine checks source
+ordinals, scope, session, time filters and query terms before admitting a
+neighbor. The combined result keeps the other direct hits in ranking order.
+[Budget measurements](../experiments/retrieval/explicit-search-budget-2026-11-21.md)
+record the held-budget comparison.
+
 ### Browse a memory neighborhood
 
 An explicit local search consisting of a canonical memory ID browses that

@@ -142,7 +142,7 @@ export const SEARCH_TOOL_PARAMETERS: readonly SearchParameterContract[] = [
       type: "integer",
       minimum: 1,
       maximum: 50,
-      description: "Return 1..50 records (default 8).",
+      description: "Return 1..50 records (plain local search defaults to 20).",
     },
   },
   {

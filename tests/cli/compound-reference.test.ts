@@ -13,6 +13,8 @@ import type { ServerState } from "../../src/cli/lifecycle.ts";
 import type { NmgMethodResult } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
 import { renderSearchSurface } from "../../src/integration/agent-surface.ts";
+import { compactSearchContext } from "../../src/integration/search-projection.ts";
+import { renderSearchHeaders } from "../../src/integration/search-tool.ts";
 import {
   captureMemoryReferenceTargets,
   createMemoryReferences,
@@ -173,6 +175,39 @@ test("explicit neighborhood search follows full IDs and owned preview keys", asy
       service.invoke("search", { query: key, activeGraphId: graph, sessionId: "another-session" }),
       /absent or not owned|another session/u,
     );
+  });
+});
+
+test("plain search fits twenty long previews without spending the automatic recall budget", async () => {
+  await withService(async (service) => {
+    const memories = Array.from({ length: 22 }, (_, index) => ({
+      nodeName: `Budget fixture ${index}`,
+      statement: `Quartz budget fixture ${index} ${"🪨".repeat(250)}`,
+    }));
+    await service.invoke("rememberBatch", { items: memories });
+    const params = { query: "Quartz budget fixture", retrievalMode: "fts5" as const };
+    const ordinary = await service.invoke("search", params);
+    assert.ok(ordinary.results.length > 8 && ordinary.results.length <= 20);
+    assert.equal(ordinary.activeGraph?.budget.maxEvidence, 20);
+    assert.equal(ordinary.activeGraph?.budget.maxNodes, 20);
+    assert.ok(renderSearchHeaders(ordinary).length <= 5500);
+    assert.ok(
+      compactSearchContext(ordinary).candidates.every(
+        ({ preview }) => Array.from(preview).length === 240,
+      ),
+    );
+    assert.deepEqual(
+      ordinary.activeGraph?.memoryIds,
+      ordinary.results.map(({ memory }) => memory.id),
+    );
+    const automatic = await service.invoke("search", {
+      ...params,
+      autoRecall: true,
+      sessionId: "economy",
+    });
+    assert.equal(automatic.recallDisplayMode, "compact");
+    assert.equal(automatic.searchPreviewCodePoints, undefined);
+    assert.equal(automatic.activeGraph?.budget.maxEvidence, 8);
   });
 });
 

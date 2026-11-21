@@ -955,6 +955,7 @@ export const TESSERA_REF_MARKER = "tessera_ref";
 
 export interface MemoryContext {
   neighborhoodAnchorId?: string;
+  searchPreviewCodePoints?: number;
   /** Automatic presentation policy only; never changes candidate selection. */
   recallDisplayMode?: "compact" | "full";
   /** Selection of the ranked source-evidence page when an evidence ranker was supplied. */

@@ -7,6 +7,7 @@ import type {
   MemoryHybridPage,
   MemoryReadView,
   MemoryVectorQuery,
+  SourceNeighbor,
 } from "./backend.ts";
 import { MemoryOperationConflict } from "./backend.ts";
 import {
@@ -63,6 +64,7 @@ export interface MemoryQueryOptions {
   eventTimeTo?: string;
   findTesserae?: boolean;
   expandLeafContext?: boolean;
+  expandSourceContext?: boolean;
   /** Collect independent candidates for an injected evidence ranker before reading sources. */
   evidenceShortlist?: boolean;
 }
@@ -399,6 +401,14 @@ export class MemoryEngine {
         : await this.lexicalResults(view, text, query, options, limit, exact);
       if (exact && !results.length)
         return { results, relations: [], retrieval: { mode: "lexical", degraded: false } };
+      await this.appendMatchingSourceNeighbors(
+        view,
+        results,
+        text,
+        query,
+        { ...options, limit },
+        semantic,
+      );
       const relations = await this.expandSearchStructure(view, results, query, {
         ...options,
         limit,
@@ -442,6 +452,53 @@ export class MemoryEngine {
     const budget = Math.min(MAX_LEAF_CONTEXT_RESULTS, options.limit - results.length);
     if (includeLeaves) await this.appendLeafContext(view, results, seeds, query, options, budget);
     return relations;
+  }
+
+  private async appendMatchingSourceNeighbors(
+    view: MemoryReadView,
+    results: MemorySearchResult[],
+    text: string,
+    query: MemoryEntityQuery,
+    options: MemoryQueryOptions & { limit: number },
+    semantic?: MemoryVectorQuery,
+  ): Promise<void> {
+    if (!options.expandSourceContext || semantic?.mode !== "hybrid") return;
+    if (!this.backend.adjacentSources || !results.length || options.limit < 10) return;
+    const terms = searchTerms(normalize(text)).filter((term) => /\p{L}/u.test(term));
+    const seen = new Set(results.map(({ memory }) => memory.id));
+    const matches: Array<SourceNeighbor & { overlap: number }> = [];
+    for (const anchor of results.slice(0, 2)) {
+      for (const neighbor of this.backend.adjacentSources(view, anchor.evidence, {
+        ...query,
+        scope: anchor.memory.scope,
+        limit: 8,
+      })) {
+        const { id, statement } = neighbor.entity.value;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const tokens = new Set(searchTerms(normalize(statement)));
+        const overlap = terms.filter((term) => tokens.has(term)).length;
+        if (overlap) matches.push({ ...neighbor, overlap });
+      }
+    }
+    matches.sort((a, b) => b.overlap - a.overlap);
+    const relation = new Map(matches.map(({ entity, relation }) => [entity.value.id, relation]));
+    const neighbors = await this.project(
+      view,
+      matches.map(({ entity }) => entity),
+      options,
+      false,
+      (rows) => rows.slice(0, 2),
+    );
+    const pivot = Math.min(results.length, options.limit - neighbors.length);
+    results.splice(
+      pivot,
+      results.length - pivot,
+      ...neighbors.map((result) => ({
+        ...result,
+        neighborhood: relation.get(result.memory.id),
+      })),
+    );
   }
 
   private async appendLeafContext(
