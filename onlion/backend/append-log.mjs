@@ -28,8 +28,8 @@ export const LOG_ENTRY_VERSION = 1; // must equal the HTTP payloads' `v`
  *  Sized against the fold trigger, not picked for taste: entries fold once a full batch is
  *  waiting, but with concurrent accepts a few more can arrive before that fold commits, and
  *  anything past this bound is invisible to a search. Two batches covers the trigger plus the
- *  accepts that can be in flight; the cost is one embedding call per entry actually pending,
- *  which is normally one batch and never this bound. */
+ *  accepts that can be in flight. Search applies this budget before scoring
+ *  the entries and uses the requested result limit after ranking. */
 export const MAX_PENDING_READ = 16;
 
 // received_ms is padded to a fixed 13 digits (enough for any millisecond

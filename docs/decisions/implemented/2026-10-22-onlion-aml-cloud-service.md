@@ -96,3 +96,18 @@ the AML required minimum (`task_id`, `status`, `added`, `stored_at`,
 `event_time`, `raw_content`), and multimodal `content` carries the temporal
 prefix — a deliberate presentation deviation recorded here and bounded by the
 withdrawal-safe projection.
+
+The Worker and deployed HTTP endpoint share one black-box verification suite.
+It injects retry faults at a loopback relay, so deployment tests exercise
+real Add and Search behavior without enabling fault injection on the server.
+The [service README](../../../onlion/README.md#commands) owns the commands.
+
+Pending-log search scores up to 16 eligible entries before applying the
+requested `top_k` to the ranked response. This keeps previously accepted
+evidence in the candidate window when a caller asks for a single result.
+
+HTTP validation, evidence attribution, projection and candidate fusion live in
+the shared integration layer. The Worker owns authentication policy, platform
+bindings, object-store transactions and pending-log lifecycle. The local
+listener opens a per-user namespace in configured SQLite and uses the same
+engine and search renderer. It can run independently of the daemon.

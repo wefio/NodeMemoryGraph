@@ -132,6 +132,9 @@ npm run cli -- search "How should answers be written?" --compact-json
 如果想看看图的形状，运行 `npm run cli -- graph --out memory-graph.html`，
 可导出本地节点和关系视图。
 
+要直接测试记忆 HTTP 接口，可用 `nmg http --config ./nmg-http.json` 启动本地
+`/health`、`/add` 和 `/search`。[配置与请求示例](onlion/README.zh-CN.md#本地记忆-http)
+
 ## Agent Skill
 
 [NMG Skill](skills/nmg-memory/SKILL.md)告诉兼容的 Agent 何时搜索、展开证据和

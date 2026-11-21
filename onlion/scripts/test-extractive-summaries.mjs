@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { AmlMemoryService } from '../backend/memory-service.ts';
-import { extractiveDigest, extractiveNodeSummary } from '../backend/extractive-summaries.mjs';
+import { extractiveDigest, extractiveNodeSummary } from '../../src/integration/extractive-summaries.ts';
 
 const key = `extractive-${randomBytes(12).toString('hex')}`;
 const service = new AmlMemoryService(key);

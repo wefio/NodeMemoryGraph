@@ -20,6 +20,7 @@
   },
   "include": [
     "backend/**/*.ts",
+    "scripts/http-contract.ts",
     "../src/**/*.d.ts"
   ],
   "exclude": [

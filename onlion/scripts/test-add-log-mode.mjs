@@ -184,7 +184,7 @@ try {
     }
     // And the read path must not trust a zero hint, or accepted data becomes invisible.
     assert.ok(
-      !/async function pendingForSearch\(env, ctx, limit\) \{\s*if \(pendingCount\(ctx\.manifest\) === 0\)/.test(
+      !/async function pendingForSearch\(env, ctx\) \{\s*if \(pendingCount\(ctx\.manifest\) === 0\)/.test(
         source,
       ),
       "the pending read must not short-circuit on the hint",
@@ -199,7 +199,7 @@ try {
     // one fold embeds a whole partition's backlog and is charged for it.
     {
       const service = fs.readFileSync(
-        path.join(path.dirname(fileURLToPath(import.meta.url)), "../backend/memory-service.ts"),
+        path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src/integration/memory-http-service.ts"),
         "utf8",
       );
       assert.match(

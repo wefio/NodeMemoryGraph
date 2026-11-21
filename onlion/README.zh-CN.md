@@ -2,16 +2,14 @@
 
 [English](README.md)
 
-NMG HTTP 服务提供记忆写入（Add）和检索（Search）。服务与 CLI 共用 `src/` 下的记忆实现。[服务设计决策](../docs/decisions/implemented/2026-10-22-onlion-aml-cloud-service.zh-CN.md)
+NMG 记忆 HTTP 接口提供写入和检索。本地通过 `nmg http` 运行，云端通过 `onlion` 部署。两个入口共用请求解析、记忆写入和结果投影。[服务设计决策](../docs/decisions/implemented/2026-10-22-onlion-aml-cloud-service.zh-CN.md)
 
 ## 目录布局
 
-- `backend/worker.mjs` — HTTP 面、鉴权、R2 快照与回执事务接线。
-- `backend/memory-service.ts` — 映射 HTTP 请求并整理检索结果。
-- `backend/extractive-summaries.mjs` — 确定性、无 LLM 的检索索引摘要，经 store 的 provider 机制写入。
-- `backend/storage.mjs`、`sqlite.mjs`、`page-delta.mjs` — R2 manifest 事务、SQLite WASM 请求上下文、快照页增量。
-- `vendor/` — 仅 SQLite WASM 运行时胶水（官方 3.53.4 构建加构建时由可读覆盖集清单 `callbacks.manifest.json` 生成的回调模块；生成的 wasm 不跟踪）。search-query-parser 是普通 npm 依赖。
-- `.runtime/` — 不跟踪的数据集、checkpoint、测试持久化与回执。
+- [`backend/worker.mjs`](backend/worker.mjs) 负责 HTTP 路由、鉴权、写入回执，以及待合并写入与检索的协调。
+- [`backend/memory-service.ts`](backend/memory-service.ts) 把云端 SQLite 快照接到[共享记忆服务](../src/integration/memory-http-service.ts)。写入归因、多子句融合和待合并证据打分由共享模块处理。
+- [`backend/append-log.mjs`](backend/append-log.mjs) 管理待合并写入。[`backend/storage.mjs`](backend/storage.mjs) 管理 manifest 与快照。[`backend/sqlite.mjs`](backend/sqlite.mjs) 使用 `sqlite-wasm/` 下的运行时，按请求打开 SQLite WASM 数据库。
+- Cloudflare 直接绑定 R2。[`backend/edgeone-entry.mjs`](backend/edgeone-entry.mjs) 通过适配器把同一个 Worker 接到 COS。
 
 ## 命令
 
@@ -22,9 +20,37 @@ npm run check    # 后端与根声明文件的 tsc --noEmit
 npm run verify   # build、check、原生 temporal/media、backend、worker 套件
 ```
 
-测试套件针对构建后的 Worker 在 Miniflare 与模拟 R2 中运行，不调用外部模型。
+CI 在 Miniflare 与模拟 R2 中运行构建后的 Worker，不调用外部模型。构建后可用 `npm run test:http-contract` 单独验证 HTTP 契约。它覆盖健康检查、鉴权、写完立即可查、乱序和重复写入、请求 ID 冲突、用户隔离及重置。回环代理会注入 429，并在上游 Add 成功后主动断开连接，验证用同一请求 ID 重试能恢复。
+
+## 本地记忆 HTTP
+
+在 `nmg-http.json` 中设置数据库和监听地址，然后运行 `nmg http --config ./nmg-http.json`。从源码运行时使用 `npm run cli -- http --config ./nmg-http.json`。
+
+```json
+{
+  "databasePath": "./http-test.sqlite",
+  "host": "127.0.0.1",
+  "port": 8787,
+  "defaultTopK": 20,
+  "maxRequestBytes": 6291456
+}
+```
+
+`databasePath` 是必填项，相对路径以配置文件所在目录为准。其他字段可省略，默认如上。需要鉴权时，用可选的 `apiKeyEnv` 指定存有密钥的环境变量名，写入和查询请求使用 `Authorization: Bearer <key>`。绑定非回环地址必须配置密钥。
+
+```sh
+curl http://127.0.0.1:8787/health
+curl http://127.0.0.1:8787/add -H 'Content-Type: application/json' \
+  -d '{"user_id":"demo","session_id":"s1","request_id":"r1","messages":[{"role":"user","content":"I prefer morning meetings."}]}'
+curl http://127.0.0.1:8787/search -H 'Content-Type: application/json' \
+  -d '{"user_id":"demo","query":"When should meetings be scheduled?","top_k":5}'
+```
+
+本地监听器按 `user_id` 隔离 SQLite 命名空间。每次 Add 最多原子写入 128 条消息，同一用户重复使用相同的请求 ID 会复用写入回执，更改内容会收到 `409`。Search 对单个查询执行统一引擎的词法检索，返回结构化 `data` 和经过 NMG 渲染器生成的 `rendered` 文本。这个入口的 HTTP 数据与 daemon 会话使用独立的命名空间。
 
 ## 本地部署
+
+此节用于在本机调试 Cloudflare Worker 与对象存储适配。
 
 ```bash
 npm run build
@@ -39,7 +65,7 @@ npm run start    # wrangler dev，127.0.0.1:8787，持久化到 .runtime/wrangle
 node node_modules/wrangler/bin/wrangler.js deploy --config dist/server/wrangler.json
 ```
 
-`--dry-run` 加 `--outdir` 可只验证打包、不触碰远端资源。本地冒烟全流程（健康检查、Add、回执冲突、图文 Search、隔离）位于 `.runtime/verification/smoke-local.mjs`，针对 `wrangler dev` 运行。
+`--dry-run` 加 `--outdir` 可在本地验证打包。
 
 ## EdgeOne 部署
 
@@ -54,7 +80,9 @@ npm run deploy:edgeone  # edgeone makers deploy ./dist/edgeone -n nmg-memory-api
 
 存储从 R2 换成腾讯云 COS。桶必须与函数**同地域**，且**不能开启版本控制**：适配器用 `x-cos-forbid-overwrite` 模拟 manifest 的 CAS，而 COS 对已开启版本控制的桶会忽略该头。函数地域是**项目级**控制台设置、下次部署才生效；`edgeone.json` 不会给已存在的项目改地域，所以用 `x-nmg-region` 响应头确认实际落点。
 
-配置全部来自平台环境变量，不读文件：`NMG_API_KEY`、`NMG_COS_BUCKET`/`NMG_COS_REGION`/`NMG_COS_SECRET_ID`/`NMG_COS_SECRET_KEY`，以及可选的 `NMG_EMBED_*`（含义与 Wrangler 目标一致）。`npm run smoke:edgeone` 验收已部署端点（`NMG_ENDPOINT=... NMG_API_KEY=...`）。
+平台环境变量包括 `NMG_API_KEY`、`NMG_COS_BUCKET`、`NMG_COS_REGION`、`NMG_COS_SECRET_ID`、`NMG_COS_SECRET_KEY`，以及与 Wrangler 目标含义相同的可选 `NMG_EMBED_*`。
+
+设置 `NMG_ENDPOINT` 和 `NMG_API_KEY` 后运行 `npm run smoke:edgeone`，即可通过网络验证同一套 HTTP 契约。密钥需要有写入、检索、容量查询和重置权限。测试只创建和重置本次随机生成的测试用户。持续并发与延迟测量使用 [`soak-endpoint.mjs`](scripts/soak-endpoint.mjs)。
 
 ## 多模态行为
 
