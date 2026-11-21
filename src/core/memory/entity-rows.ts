@@ -137,6 +137,8 @@ export function queryWhere(query: MemoryEntityQuery): string {
   if (query.nodeName !== undefined)
     clauses.push(`name = ${sqlLiteral(query.nodeName.trim().toLocaleLowerCase("en-US"))}`);
   if (query.scope !== undefined) clauses.push(`scope = ${sqlLiteral(serializeScope(query.scope))}`);
+  if (query.excludeScope !== undefined)
+    clauses.push(`scope <> ${sqlLiteral(serializeScope(query.excludeScope))}`);
   if (sessionScopedEntity(query.kind))
     clauses.push(`(session = '' OR session = ${sqlLiteral(query.sessionId ?? "")})`);
   if (query.claimMemoryId) clauses.push(`target = ${sqlLiteral(query.claimMemoryId)}`);

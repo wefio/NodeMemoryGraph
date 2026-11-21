@@ -558,13 +558,17 @@ export class NmgService {
         ? this.#recallContext.mode(params.sessionId)
         : undefined;
     const economy = params.autoRecall === true && recallDisplayMode !== "full";
-    const { hybridRanked, ...context } = await memory.search(retrieval, signal, economy);
+    const [{ hybridRanked, ...context }, profile] = await Promise.all([
+      memory.search(retrieval, signal, economy),
+      memory.automaticUserProfile(params),
+    ]);
     signal?.throwIfAborted();
     if (!memory.local) return context;
     const directMs = performance.now() - started;
     if (!params.autoRecall)
       context.tesserae = await this.#resolveTesseraLines(context.tesserae ?? [], params);
     if (!hybridRanked) this.#rankPortableSessionResults(context, params);
+    context.results.unshift(...profile);
     if (recallDisplayMode) context.recallDisplayMode = recallDisplayMode;
     return this.#registerPortableSearch(
       context,

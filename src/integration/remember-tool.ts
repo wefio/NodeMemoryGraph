@@ -40,7 +40,12 @@ const SAVE_FIELDS = {
   evidenceRole: enumString(["contradict", "example", "exception", "origin", "support", "update"]),
   tier: { type: "integer", minimum: 0, maximum: 3 },
   importance: unitInterval,
-  scope: { type: "object", additionalProperties: { type: "string" } },
+  scope: {
+    type: "object",
+    additionalProperties: { type: "string" },
+    description:
+      'Use {"profile":"user"} for a confirmed durable personal preference or constraint.',
+  },
   residence: enumString(["ltg", "stg"]),
   expiresAt: string(),
   writeReason: string(),

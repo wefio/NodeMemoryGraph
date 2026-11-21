@@ -44,6 +44,8 @@ import {
 } from "../integration/explicit-search-page.ts";
 import { openLocalMemory } from "./local-memory-migration.ts";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
+import { isUserProfileScope, USER_PROFILE_SCOPE } from "../core/user-profile.ts";
+import { TASK_CONTEXT_SEPARATOR } from "../integration/session-task-window.ts";
 
 type PortableSearchContext = MemoryContext & { hybridRanked?: boolean };
 
@@ -261,6 +263,13 @@ export class PortableMemoryService {
       : this.searchIndependent(input, signal);
   }
 
+  async automaticUserProfile(input: NmgSearchParams): Promise<MemorySearchResult[]> {
+    if (!this.local || !input.autoRecall || input.scope) return [];
+    const query = input.query.split(TASK_CONTEXT_SEPARATOR, 1)[0]!.trim();
+    if (!query || query === "*") return [];
+    return (await (await this.engine()).userProfile(query, { ...input, limit: 1 })).results;
+  }
+
   async searchNeighborhood(id: string, input: NmgSearchParams): Promise<MemoryContext> {
     const project = await this.project(input.projectDir);
     const context =
@@ -289,6 +298,8 @@ export class PortableMemoryService {
     economy: boolean,
   ) {
     allowOptions(input, LOCAL_SEARCH_FIELDS);
+    if (!input.autoRecall && isUserProfileScope(input.scope))
+      return (await this.engine()).userProfile(input.query, input);
     const hybrid = input.retrievalMode === undefined || input.retrievalMode === "hybrid";
     const ranker = hybrid && !economy ? this.evidenceRanker : undefined;
     const shared = await this.engine();
@@ -646,6 +657,7 @@ function localSearchOptions(
 ): MemoryQueryOptions & { limit: number } {
   return {
     ...input,
+    excludeScope: input.autoRecall ? USER_PROFILE_SCOPE : undefined,
     limit: evidenceShortlist ? rankedCandidateLimit(input) : candidateLimit(input),
     evidenceShortlist,
     findTesserae: !input.autoRecall,

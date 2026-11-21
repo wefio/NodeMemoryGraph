@@ -31,10 +31,11 @@ import type {
 import { MemoryWriteRejected } from "../write-policy.ts";
 import { hybridScore, lexicalTextScore, searchTerms } from "../store/search-ranking.ts";
 import type { ExactLookupAnchor } from "../store/search-ranking.ts";
-import { normalize } from "../memory-normalization.ts";
+import { normalize, normalizeStatement } from "../memory-normalization.ts";
 import { eventWindowEnd, eventWindowStart } from "../event-time.ts";
 import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import { TESSERA_REF_MARKER } from "../types.ts";
+import { isUserProfileRecord, userProfileMatch, USER_PROFILE_SCOPE } from "../user-profile.ts";
 import type {
   MemoryContext,
   EdgePathStep,
@@ -53,6 +54,7 @@ import type {
 
 export interface MemoryQueryOptions {
   scope?: MemoryScope;
+  excludeScope?: MemoryScope;
   sessionId?: string;
   limit?: number;
   maxTier?: 0 | 1 | 2 | 3;
@@ -364,6 +366,65 @@ export class MemoryEngine {
     return this.searchContext(text, options, semantic);
   }
 
+  async userProfile(text: string, options: MemoryQueryOptions = {}): Promise<MemoryContext> {
+    const limit = searchLimit(options.limit);
+    const list = text.trim() === "*";
+    const query = normalizeStatement(text);
+    const view = await this.backend.openRead();
+    try {
+      const eventTimeFrom = eventWindowStart(options.eventTimeFrom) ?? undefined;
+      const eventTimeTo = eventWindowEnd(options.eventTimeTo) ?? undefined;
+      const rows = await this.profileCandidates(view, query, list, {
+        ...options,
+        includeHistorical: false,
+        eventTimeFrom,
+        eventTimeTo,
+      });
+      const results = await this.project(view, rows.slice(0, limit), {
+        ...options,
+        includeHistorical: false,
+        eventTimeFrom,
+        eventTimeTo,
+      });
+      return { results, relations: [], retrieval: { mode: "lexical", degraded: false } };
+    } finally {
+      await this.backend.closeRead(view);
+    }
+  }
+
+  private async profileCandidates(
+    view: MemoryReadView,
+    query: string,
+    list: boolean,
+    options: MemoryQueryOptions,
+  ): Promise<MemoryEntity[]> {
+    const found: Array<{ entity: MemoryEntity; score: number }> = [];
+    const filter = {
+      kind: "memory",
+      scope: USER_PROFILE_SCOPE,
+      nodeIds: await this.searchNodeIds(view, options.nodeName),
+      eventTimeFrom: options.eventTimeFrom,
+      eventTimeTo: options.eventTimeTo,
+      limit: 128,
+    } as const;
+    const now = this.now();
+    for (let offset = 0; ; offset += filter.limit) {
+      const page = await this.backend.scan(view, { ...filter, offset });
+      for (const entity of page) {
+        if (entity.kind !== "memory" || !isUserProfileRecord(entity.value)) continue;
+        if (
+          !searchableMemory(entity.value, options, now) ||
+          entity.value.tier > (options.maxTier ?? 3)
+        )
+          continue;
+        const score = list ? 1 : userProfileMatch(query, entity.value);
+        if (score) found.push({ entity, score });
+      }
+      if (page.length < filter.limit) break;
+    }
+    return found.sort((left, right) => right.score - left.score).map(({ entity }) => entity);
+  }
+
   searchExactAnchor(
     anchor: ExactLookupAnchor,
     options: MemoryQueryOptions,
@@ -378,9 +439,7 @@ export class MemoryEngine {
     exact?: RegExp,
   ): Promise<MemoryContext> {
     if (!text.trim()) throw new Error("Search query is required");
-    const limit = options.limit ?? 20;
-    if (!Number.isInteger(limit) || limit < 1 || limit > 100)
-      throw new Error("Search limit must be 1..100");
+    const limit = searchLimit(options.limit);
     boundedGraphHops(options.graphHops);
     const eventTimeFrom = eventWindowStart(options.eventTimeFrom) ?? undefined;
     const eventTimeTo = eventWindowEnd(options.eventTimeTo) ?? undefined;
@@ -391,6 +450,7 @@ export class MemoryEngine {
         kind: "memory",
         nodeIds: await this.searchNodeIds(view, options.nodeName),
         scope: options.scope,
+        excludeScope: options.excludeScope,
         sessionId: options.sessionId,
         eventTimeFrom,
         eventTimeTo,
@@ -1083,6 +1143,7 @@ export class MemoryEngine {
             kind: "memory",
             nodeId: adjacent,
             scope: options.scope,
+            excludeScope: options.excludeScope,
             sessionId: options.sessionId,
             limit: 100,
           });
@@ -1152,6 +1213,12 @@ function selectLocalHybrid(
 function boundedGraphHops(hops = 0): number {
   if (!Number.isInteger(hops) || hops < 0 || hops > 3) throw new Error("Graph hops must be 0..3");
   return hops;
+}
+
+function searchLimit(limit = 20): number {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+    throw new Error("Search limit must be 1..100");
+  return limit;
 }
 
 function rememberRequest(input: MemoryInput): MemoryInput {

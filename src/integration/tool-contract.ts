@@ -174,7 +174,8 @@ export const SEARCH_TOOL_PARAMETERS: readonly SearchParameterContract[] = [
     schema: {
       type: "object",
       additionalProperties: { type: "string" },
-      description: 'Applicability scope, e.g. {"project":"nmg"}.',
+      description:
+        'Applicability scope, e.g. {"project":"nmg"}. For the local user profile, use {"profile":"user"} with query "*".',
     },
   },
   {

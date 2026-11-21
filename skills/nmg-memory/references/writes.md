@@ -25,6 +25,20 @@ claims, broad topic tags, secrets, or the full statement in it. The Pi, MCP, and
 DSH `nmg_remember` tools expose the same field as `recallTriggers` (maximum 16,
 maximum 80 characters each).
 
+## User profile
+
+Save a confirmed personal preference or constraint with `--scope profile=user --actor user --residence ltg`.
+Use `--type preference` or `--type constraint`. Include any applicable condition in the statement, attach
+an exact excerpt, and use a short `--recall-trigger` when the entry is useful for automatic recall.
+The shared remember tool accepts the same scope as `{"profile":"user"}`.
+
+Use `nmg search "*" --scope profile=user` to list the local profile, or supply a trigger phrase to narrow
+the search. Read exact evidence with get. Update an entry by writing its replacement with the same
+scope and `--supersedes "<MEMORY_ID>"`. Use the established [delete operation](#deleting-a-memory)
+to withdraw an entry.
+
+See the [profile recall budget](../../../docs/design/recall-context-and-display.md#user-profile).
+
 ## Changeable state
 
 Use `--type state` and a stable `--state-key`. The key identifies the property,

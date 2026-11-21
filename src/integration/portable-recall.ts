@@ -28,6 +28,7 @@ import { MIN_WARM_DISCLOSURE_SIZE } from "../core/store/graph-policy.ts";
 import { hybridScore } from "../core/store/search-ranking.ts";
 import type { MemorySearchResult } from "../core/types.ts";
 import { searchPreview } from "./search-projection.ts";
+import { isUserProfileRecord, USER_PROFILE_PREVIEW_CODE_POINTS } from "../core/user-profile.ts";
 
 /** Apply the session graph budget to already-authorized engine results. */
 export function portableRecallGraph(
@@ -36,11 +37,7 @@ export function portableRecallGraph(
   elapsedMs: number,
 ): MemoryContext & { activeGraph: ActiveGraph } {
   const preview = context.searchPreviewCodePoints;
-  const estimate =
-    preview === undefined
-      ? estimateResultTokens
-      : ({ memory }: MemorySearchResult) =>
-          Math.ceil((searchPreview(memory, preview).length + 96) / 4);
+  const estimate = (result: MemorySearchResult) => estimateSearchResult(result, preview);
   const originalBudget = activeGraphBudget({
     ...input,
     maxTier: input.maxTier ?? 3,
@@ -142,6 +139,13 @@ export function portableRecallGraph(
       })),
     },
   };
+}
+
+function estimateSearchResult(result: MemorySearchResult, preview?: number): number {
+  const { memory } = result;
+  const codePoints = isUserProfileRecord(memory) ? USER_PROFILE_PREVIEW_CODE_POINTS : preview;
+  if (codePoints === undefined) return estimateResultTokens(result);
+  return Math.ceil((searchPreview(memory, codePoints).length + 96) / 4);
 }
 
 function openRecallTiers(

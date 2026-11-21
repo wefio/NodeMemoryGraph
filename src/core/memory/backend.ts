@@ -75,6 +75,7 @@ export interface MemoryEntityQuery {
   nodeIds?: readonly string[];
   nodeName?: string;
   scope?: MemoryScope;
+  excludeScope?: MemoryScope;
   /** Shared rows plus this session's provisional rows. Omit for shared rows only. */
   sessionId?: string;
   text?: string;

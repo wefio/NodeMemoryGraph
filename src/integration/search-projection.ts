@@ -4,6 +4,7 @@ import type { TesseraHit, MemoryContext, MemorySearchResult } from "../core/type
 import type { SessionDisclosureLevel } from "../core/session-active-graph.ts";
 import { logicalChainCount, logicalChainNames } from "./chain-projection.ts";
 import { evidenceRecordParts } from "./evidence-rendering.ts";
+import { isUserProfileRecord, USER_PROFILE_PREVIEW_CODE_POINTS } from "../core/user-profile.ts";
 
 export const SEARCH_PREVIEW_CHARS = 320;
 
@@ -35,6 +36,7 @@ export interface CompactSearchCandidate {
   expiresAt: string | null;
   chains: string[];
   neighborhood?: MemorySearchResult["neighborhood"];
+  userProfile?: true;
 }
 
 export interface CompactSearchContext {
@@ -58,23 +60,23 @@ export function compactSearchContext(context: MemoryContext): CompactSearchConte
   return {
     ...(context.neighborhoodAnchorId ? { neighborhoodAnchorId: context.neighborhoodAnchorId } : {}),
     ...(context.recallDisplayMode ? { recallDisplayMode: context.recallDisplayMode } : {}),
-    candidates: context.results.map((result) => ({
-      id: result.memory.id,
-      node: result.node.canonicalName,
-      type: result.memory.memoryType,
-      open: result.memory.resolution === "open" || result.memory.resolution === "reopened",
-      external: (result.memory.markers ?? []).some((marker) => marker.kind === "external_source"),
-      forgotten: (result.memory.markers ?? []).some((marker) => marker.kind === "forget"),
-      preview:
-        context.recallDisplayMode === "full" &&
-        !result.memory.markers.some((marker) => marker.kind === "forget")
-          ? result.memory.statement.replace(/\s+/gu, " ").trim()
-          : searchPreview(result.memory, context.searchPreviewCodePoints),
-      eventTime: result.memory.eventTime,
-      expiresAt: result.memory.expiresAt ?? result.memory.validUntil,
-      chains: logicalChainNames(result),
-      ...(result.neighborhood ? { neighborhood: result.neighborhood } : {}),
-    })),
+    candidates: context.results.map((result) => {
+      const userProfile = isUserProfileRecord(result.memory);
+      return {
+        id: result.memory.id,
+        node: result.node.canonicalName,
+        type: result.memory.memoryType,
+        open: result.memory.resolution === "open" || result.memory.resolution === "reopened",
+        external: (result.memory.markers ?? []).some((marker) => marker.kind === "external_source"),
+        forgotten: (result.memory.markers ?? []).some((marker) => marker.kind === "forget"),
+        preview: compactMemoryPreview(context, result.memory, userProfile),
+        eventTime: result.memory.eventTime,
+        expiresAt: result.memory.expiresAt ?? result.memory.validUntil,
+        chains: logicalChainNames(result),
+        ...(result.neighborhood ? { neighborhood: result.neighborhood } : {}),
+        ...(userProfile ? { userProfile: true as const } : {}),
+      };
+    }),
     logicalChainCount: logicalChainCount(context),
     activeGraphId: context.activeGraph?.id ?? null,
     deferredMemoryIds: context.progressiveDisclosure?.deferredMemoryIds ?? [],
@@ -90,6 +92,17 @@ export function compactSearchContext(context: MemoryContext): CompactSearchConte
         }
       : {}),
   };
+}
+
+function compactMemoryPreview(
+  context: MemoryContext,
+  memory: MemorySearchResult["memory"],
+  userProfile: boolean,
+): string {
+  if (userProfile) return searchPreview(memory, USER_PROFILE_PREVIEW_CODE_POINTS);
+  if (context.recallDisplayMode === "full" && !memory.markers.some(({ kind }) => kind === "forget"))
+    return memory.statement.replace(/\s+/gu, " ").trim();
+  return searchPreview(memory, context.searchPreviewCodePoints);
 }
 
 /** Admit cause codes, not arbitrary provider bodies, into model-facing metadata.

@@ -13,6 +13,123 @@ import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
+
+test("the local user profile admits only current personal records and spends at most one automatic slot", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "nmg-user-profile-"));
+  const service = new NmgService({ dataDirectory: dir, environment: {} });
+  t.after(async () => {
+    await service.close();
+    removeTempDirectory(dir);
+  });
+  const scope = { profile: "user" };
+  const common = { scope, memoryType: "preference", sourceActor: "user" } as const;
+  const [first, second, manual, regular] = (
+    await service.invoke("rememberBatch", {
+      items: [
+        {
+          ...common,
+          nodeName: "Weekend pace",
+          statement: "On weekend plans, I prefer nature walks. " + "🌿".repeat(145),
+          recallTriggers: ["weekend plans"],
+        },
+        {
+          ...common,
+          nodeName: "Rest time",
+          statement: "For weekend plans I prefer a slow start.",
+          recallTriggers: ["weekend"],
+        },
+        {
+          ...common,
+          nodeName: "Reading preference",
+          statement: "I prefer hardcover books.",
+        },
+        {
+          nodeName: "Nature trail map",
+          statement: "The nature trail map is available each weekend.",
+        },
+        {
+          ...common,
+          nodeName: "Sensitive fixture",
+          statement: "I prefer the orange mug during weekend plans.",
+          markers: [{ kind: "sensitive" }],
+          recallTriggers: ["weekend plans"],
+        },
+        {
+          ...common,
+          nodeName: "Assistant guess",
+          statement: "The user probably prefers canoeing on weekend plans.",
+          truthStatus: "inferred",
+          recallTriggers: ["weekend plans"],
+        },
+        {
+          ...common,
+          nodeName: "Withdrawn fixture",
+          statement: "I prefer the blue mug during weekend plans.",
+          markers: [{ kind: "forget" }],
+          recallTriggers: ["weekend plans"],
+        },
+      ],
+    })
+  ).results.map(({ memory }) => memory.id);
+  const ids = ({ results }: Awaited<ReturnType<typeof listing>>) =>
+    results.map(({ memory }) => memory.id);
+  const listing = () => service.invoke("search", { query: "*", scope, sessionId: "profile-test" });
+  const automatic = (query: string, extra = {}) =>
+    service.invoke("search", {
+      query,
+      autoRecall: true,
+      sessionId: "profile-test",
+      retrievalMode: "fts5",
+      ...extra,
+    });
+  assert.deepEqual(new Set(ids(await listing())), new Set([first, second, manual]));
+  assert.ok(ids(await automatic("Show me the nature trail map")).includes(regular!));
+  assert.ok(!ids(await automatic("Show me the nature trail map")).includes(first!));
+  assert.ok(
+    !ids(await automatic("Continue\nRecent task context:\nweekend plans")).includes(first!),
+  );
+  assert.ok(
+    !ids(await automatic("weekend plans", { scope: { project: "test" } })).includes(first!),
+  );
+  const match = await automatic("Suggest some weekend plans", { limit: 2 });
+  assert.equal(ids(match)[0], first);
+  assert.ok(!ids(match).includes(second!));
+  assert.ok(ids(match).length <= 2);
+  assert.deepEqual(match.activeGraph?.memoryIds, ids(match));
+  const full = await service.invoke("sessionActiveGraph", {
+    action: "recallDisplay",
+    sessionId: "profile-test",
+    mode: "full",
+  });
+  assert.deepEqual(full, { action: "recallDisplay", mode: "full" });
+  const fullCandidate = compactSearchContext(await automatic("weekend plans")).candidates[0]!;
+  assert.equal(fullCandidate.id, first);
+  assert.ok(Array.from(fullCandidate.preview).length <= 120);
+  const rendered = prepareAutomaticRecallSurface(compactSearchContext(match), {
+    maxCharacters: 600,
+  });
+  assert.match(rendered.text, /\[profile\]/u);
+  assert.ok(rendered.text.length <= 600);
+  const smaller = prepareAutomaticRecallSurface(compactSearchContext(match), {
+    maxCharacters: 300,
+  });
+  assert.doesNotMatch(smaller.text, /\[profile\]/u);
+  assert.ok(smaller.text.length <= 300);
+
+  const { memory: updated } = await service.invoke("remember", {
+    ...common,
+    nodeName: "Weekend pace",
+    statement: "On weekend plans, I prefer botanical gardens.",
+    recallTriggers: ["weekend plans"],
+    supersedesId: first,
+  });
+  assert.equal(ids(await automatic("weekend plans"))[0], updated.id);
+  assert.ok(!ids(await listing()).includes(first!));
+  await service.invoke("deleteMemory", { memoryId: updated.id });
+  assert.deepEqual(new Set(ids(await listing())), new Set([second, manual]));
+  assert.equal(ids(await automatic("weekend plans"))[0], second);
+});
+
 test("lexical automatic recall keeps candidate membership across display modes", async () => {
   const dir = mkdtempSync(join(tmpdir(), "nmg-recall-display-"));
   const service = new NmgService({ dataDirectory: dir, environment: {} });

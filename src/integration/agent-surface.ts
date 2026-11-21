@@ -345,6 +345,7 @@ function searchCandidateLine(
 ): string {
   const key = searchMemoryReference(candidate, references);
   const flags = [
+    candidate.userProfile ? "[profile]" : "",
     candidate.neighborhood ? `[${candidate.neighborhood.replaceAll("_", " ")}]` : "",
     presentation.timeLabel ? `[${presentation.timeLabel}]` : "",
     !presentation.searchPage && candidate.external ? "[external]" : "",
