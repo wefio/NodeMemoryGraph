@@ -93,3 +93,43 @@ test("search schema and RPC use the same endpoint selection", async () => {
   );
   assert.equal(output.text, "No NMG match.");
 });
+
+test("the shared search tool follows a preview key without probing or reranking", async () => {
+  const searchTool = createSearchTool(true, [
+    "query",
+    "activeGraphId",
+    "sessionId",
+    "persistTrace",
+    "activeGraphBudget",
+  ]);
+  assert.ok(searchTool.inputSchema.properties.activeGraphId);
+  const response = await searchTool.execute(
+    { query: "ref:abcd|SQLite", activeGraphId: "12345678" },
+    {
+      sessionId: "bound",
+      requester: "agent:fixture",
+      memory: {
+        search: {
+          beginDisclosureTurn: true,
+          allocate: async () => {
+            assert.fail("explicit neighborhood should not run a probe");
+          },
+          rank: async () => {
+            assert.fail("explicit neighborhood should keep source order");
+          },
+        },
+      },
+      async invoke(method, params, cli) {
+        assert.equal(method, "search");
+        assert.deepEqual(params, {
+          query: "ref:abcd|SQLite",
+          activeGraphId: "12345678",
+          sessionId: "bound",
+        });
+        assert.ok(cli?.includes("--active-graph-id"));
+        return { results: [], relations: [], neighborhoodAnchorId: "anchor" };
+      },
+    },
+  );
+  assert.equal(response.text, "No readable neighbors for this memory.");
+});

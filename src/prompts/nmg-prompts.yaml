@@ -25,6 +25,8 @@ search_description: >-
   semantic similarity, and learned graph routes; returns ranked candidate
   headers (memory id, node, type, match terms, event date, preview) plus an
   activeGraphId. Exact records and source evidence are loaded via nmg_get.
+  To browse a memory's neighborhood on a local daemon, use its full ID
+  as the query, or its complete ref: key with the original activeGraphId.
   The store only contains what was explicitly saved - it is not a live
   source. A date phrase in the query ("as of Mar 10, 2029", "上周三", "3月10号之前")
   bounds the event-time window; time:from..to or the eventTimeFrom/eventTimeTo
@@ -365,7 +367,8 @@ semantic_task_id_parameter_description: >-
 
 search_query_parameter_description: >-
   Natural-language retrieval clause; may include key:value filters, -term
-  exclusions, and quoted phrases.
+  exclusions, and quoted phrases. A full memory ID or a ref: key by itself
+  browses the memory's neighborhood on a local daemon.
 
 search_queries_parameter_description: >-
   Optional Agent-generated retrieval clauses, such as query decomposition,

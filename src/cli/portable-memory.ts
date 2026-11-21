@@ -78,6 +78,7 @@ const SEARCH_FIELDS = [
 ];
 const LOCAL_SEARCH_FIELDS = [
   ...SEARCH_FIELDS,
+  "activeGraphId",
   "projectDir",
   "autoRecall",
   "tieredDisclosure",
@@ -254,6 +255,16 @@ export class PortableMemoryService {
     return this.local
       ? this.searchLocal(input, signal, economy)
       : this.searchIndependent(input, signal);
+  }
+
+  async searchNeighborhood(id: string, input: NmgSearchParams): Promise<MemoryContext> {
+    const project = await this.project(input.projectDir);
+    const context =
+      (await project?.searchNeighborhood(id, input)) ??
+      (await (await this.engine()).searchNeighborhood(id, input));
+    if (!context)
+      throw new NmgProtocolError("NOT_FOUND", "Memory anchor is absent or not readable.");
+    return context;
   }
 
   private async searchIndependent(input: NmgSearchParams, signal?: AbortSignal) {

@@ -130,6 +130,13 @@ export const SEARCH_TOOL_PARAMETERS: readonly SearchParameterContract[] = [
     schema: { type: "string", description: "Focused recall query." },
   },
   {
+    name: "activeGraphId",
+    schema: {
+      type: "string",
+      description: "Original result graph when query is a copied ref: memory key.",
+    },
+  },
+  {
     name: "limit",
     schema: {
       type: "integer",

@@ -12,7 +12,9 @@ import type {
   MemoryHybridPage,
   MemoryReadView,
   MemoryVectorQuery,
+  SourceNeighbor,
 } from "./backend.ts";
+import type { HistoryRecord } from "../types.ts";
 import {
   ENTITY_COLUMNS,
   SQLITE_HISTORY_SOURCE,
@@ -32,6 +34,7 @@ import { ensureSqliteTextIndexes, textIndex, writeSqliteTextIndex } from "./sqli
 import {
   ensureSqliteLeafGroups,
   importLegacySqliteLeaves,
+  readSqliteAdjacentSources,
   readSqliteLeafPeers,
 } from "./sqlite-leaves.ts";
 import { SqliteMemoryVectors } from "./sqlite-vectors.ts";
@@ -162,6 +165,14 @@ export class SqliteMemoryBackend implements MemoryBackend {
       .prepare(page.sql)
       .all(...page.bind)
       .map(decodeEntity);
+  }
+
+  adjacentSources(
+    view: MemoryReadView,
+    source: HistoryRecord,
+    query: MemoryEntityQuery,
+  ): SourceNeighbor[] {
+    return readSqliteAdjacentSources(this.reader(view), this.namespace, source, query);
   }
 
   hybridCandidates(

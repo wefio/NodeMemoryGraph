@@ -838,6 +838,8 @@ export interface MemorySearchResult {
    *  node (best-activation path). Lets the presentation layer explain "why
    *  related" (docs §7.1 multi-hop path retrieval). Empty/absent for seed hits. */
   path?: EdgePathStep[];
+  /** Provenance of a result in an explicit memory neighborhood. */
+  neighborhood?: "previous_turn" | "next_turn" | "graph" | "source_group" | "same_node";
   /** Query terms that literally appear in the candidate (lexical matches).
    *  Empty for pure-semantic/route recalls. */
   hitTerms?: string[];
@@ -952,6 +954,7 @@ export interface TesseraHit {
 export const TESSERA_REF_MARKER = "tessera_ref";
 
 export interface MemoryContext {
+  neighborhoodAnchorId?: string;
   /** Automatic presentation policy only; never changes candidate selection. */
   recallDisplayMode?: "compact" | "full";
   /** Selection of the ranked source-evidence page when an evidence ranker was supplied. */

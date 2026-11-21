@@ -113,6 +113,69 @@ test("search uses the full ID when a statement would break the displayed key", a
   });
 });
 
+test("explicit neighborhood search follows full IDs and owned preview keys", async () => {
+  await withService(async (service) => {
+    const scope = { project: "atlas" };
+    const sessionId = "neighborhood-reader";
+    const anchor = await service.invoke("remember", {
+      statement: "Atlas anchors a retrieval test.",
+      nodeName: "Atlas",
+      scope,
+    });
+    const peer = await service.invoke("remember", {
+      statement: "Retry waits 20 seconds.",
+      nodeName: "Atlas",
+      scope,
+    });
+    await service.invoke("remember", {
+      statement: "Other project internals.",
+      nodeName: "Atlas",
+      scope: { project: "other" },
+    });
+    const recall = await service.invoke("search", {
+      query: "anchors retrieval",
+      limit: 1,
+      sessionId,
+      autoRecall: true,
+      retrievalMode: "fts5",
+    });
+    assert.equal(recall.recallDisplayMode, "compact");
+    assert.equal(recall.neighborhoodAnchorId, undefined);
+    assert.deepEqual(
+      recall.results.map(({ memory }) => memory.id),
+      [anchor.memory.id],
+    );
+    const key = recall.memoryReferences?.[anchor.memory.id];
+    assert.ok(key);
+    const graph = recall.activeGraph!.id.slice(0, 8);
+    const full = await service.invoke("search", { query: anchor.memory.id, sessionId });
+    const automaticId = await service.invoke("search", {
+      query: anchor.memory.id,
+      sessionId,
+      autoRecall: true,
+      retrievalMode: "fts5",
+    });
+    assert.equal(automaticId.neighborhoodAnchorId, undefined);
+    assert.ok(automaticId.results.every((result) => !result.neighborhood));
+    const copied = await service.invoke("search", { query: key, activeGraphId: graph, sessionId });
+    assert.equal(copied.neighborhoodAnchorId, anchor.memory.id);
+    assert.deepEqual(copied.results, full.results);
+    assert.deepEqual(
+      full.results.map(({ memory, neighborhood }) => [memory.id, neighborhood]),
+      [[peer.memory.id, "same_node"]],
+    );
+    assert.match(renderSearchSurface(copied), /\[same node\]/u);
+    await assert.rejects(
+      service.invoke("search", { query: key, sessionId }),
+      /require their activeGraphId/u,
+    );
+    await assert.rejects(
+      service.invoke("search", { query: key, activeGraphId: graph, sessionId: "another-session" }),
+      /absent or not owned|another session/u,
+    );
+  });
+});
+
 // Contract: count caller input entries, not successful reads or internal lookups.
 test("status counts full-ID and compound-reference get attempts per service lifetime", async () => {
   await withService(async (service, directory) => {

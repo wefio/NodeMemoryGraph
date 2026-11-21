@@ -28,9 +28,11 @@ export interface CompactSearchCandidate {
   eventTime: string | null;
   expiresAt: string | null;
   chains: string[];
+  neighborhood?: MemorySearchResult["neighborhood"];
 }
 
 export interface CompactSearchContext {
+  neighborhoodAnchorId?: string;
   recallDisplayMode?: MemoryContext["recallDisplayMode"];
   candidates: CompactSearchCandidate[];
   logicalChainCount: number;
@@ -48,6 +50,7 @@ export interface CompactSearchContext {
 /** Agent-facing search projection. Exact records and evidence remain behind `nmg get`. */
 export function compactSearchContext(context: MemoryContext): CompactSearchContext {
   return {
+    ...(context.neighborhoodAnchorId ? { neighborhoodAnchorId: context.neighborhoodAnchorId } : {}),
     ...(context.recallDisplayMode ? { recallDisplayMode: context.recallDisplayMode } : {}),
     candidates: context.results.map((result) => ({
       id: result.memory.id,
@@ -64,6 +67,7 @@ export function compactSearchContext(context: MemoryContext): CompactSearchConte
       eventTime: result.memory.eventTime,
       expiresAt: result.memory.expiresAt ?? result.memory.validUntil,
       chains: logicalChainNames(result),
+      ...(result.neighborhood ? { neighborhood: result.neighborhood } : {}),
     })),
     logicalChainCount: logicalChainCount(context),
     activeGraphId: context.activeGraph?.id ?? null,

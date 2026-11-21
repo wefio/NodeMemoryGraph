@@ -8,7 +8,7 @@ import {
   type AdapterToolSession,
 } from "./adapter-tool-session.ts";
 import { renderSearchSurface } from "./agent-surface.ts";
-import { shortActiveGraphId } from "./memory-reference.ts";
+import { isNeighborhoodQuery, shortActiveGraphId } from "./memory-reference.ts";
 import { SEARCH_REQUIRED_PARAMETERS, searchParameterProperties } from "./tool-contract.ts";
 
 const prompts = loadPrompts();
@@ -35,7 +35,10 @@ const PROPERTIES = {
 
 export function createSearchTool(graphSupported: boolean, searchParameters?: readonly string[]) {
   const properties = Object.fromEntries(
-    Object.entries(PROPERTIES).filter(([key]) => allowsSearchParameter(key, searchParameters)),
+    Object.entries(PROPERTIES).filter(
+      ([key]) =>
+        (key !== "activeGraphId" || graphSupported) && allowsSearchParameter(key, searchParameters),
+    ),
   );
   return {
     name: "nmg_search" as const,
@@ -55,7 +58,11 @@ export function createSearchTool(graphSupported: boolean, searchParameters?: rea
         ),
       ) as unknown as NmgSearchParams;
       if (typeof input.query !== "string") throw new Error("nmg_search requires a query.");
-      return executeSearch(input, session, graphSupported, searchParameters);
+      const neighborhood =
+        graphSupported &&
+        Object.hasOwn(properties, "activeGraphId") &&
+        isNeighborhoodQuery(input.query);
+      return executeSearch(input, session, graphSupported, searchParameters, neighborhood);
     },
   };
 }
@@ -71,6 +78,7 @@ async function executeSearch(
   session: AdapterToolSession,
   graphSupported: boolean,
   searchParameters: readonly string[] | undefined,
+  neighborhood: boolean,
 ) {
   const { sessionId, memory } = session;
   const search: AdapterSearchBinding = memory?.search ?? {};
@@ -82,8 +90,8 @@ async function executeSearch(
       text: prompts.search_progression_required,
     };
   }
-  await openSearchDisclosureTurn(input, session, graphSupported, search);
-  const ranked = await runSearch(input, session, search, searchParameters);
+  await openSearchDisclosureTurn(input, session, graphSupported, search, neighborhood);
+  const ranked = await runSearch(input, session, search, searchParameters, neighborhood);
   const visible = (await search.fold?.(ranked, input.limit !== undefined)) ?? ranked;
   flow?.recordSearch(
     sessionId,
@@ -106,7 +114,9 @@ async function openSearchDisclosureTurn(
   session: AdapterToolSession,
   graphSupported: boolean,
   search: AdapterSearchBinding,
+  neighborhood: boolean,
 ) {
+  if (neighborhood) return;
   if (!search.beginDisclosureTurn || !graphSupported || input.recallRevision !== undefined) return;
   await session
     .invoke("sessionActiveGraph", {
@@ -121,6 +131,7 @@ async function runSearch(
   session: AdapterToolSession,
   search: AdapterSearchBinding,
   searchParameters: readonly string[] | undefined,
+  neighborhood: boolean,
 ) {
   const { recallCue, recallRevision, ...filters } = input;
   const params = {
@@ -139,6 +150,7 @@ async function runSearch(
       ),
       cliFallback,
     ) as Promise<MemoryContext>;
+  if (neighborhood) return invoke(params, searchCli(params));
   const canProbe =
     input.limit === undefined &&
     allowsSearchParameter("persistTrace", searchParameters) &&
@@ -162,6 +174,7 @@ function searchCli(params: NmgSearchParams): string[] {
   const argv = ["search", params.query, "--session-id", params.sessionId ?? "", "--json"];
   for (const [value, flag] of [
     [params.projectDir, "--project-dir"],
+    [params.activeGraphId, "--active-graph-id"],
     [params.limit, "--limit"],
     [params.maxTier, "--max-tier"],
     [params.graphHops, "--graph-hops"],

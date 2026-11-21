@@ -96,6 +96,21 @@ metadata, including default values. Independently composable
 evidence views carry their own scope and event time and use a bounded primary
 source excerpt. Active Graph estimates use that composable row.
 
+### Browse a memory neighborhood
+
+An explicit local search consisting of a canonical memory ID browses that
+record's neighborhood. A complete displayed `ref:` key uses the original
+`activeGraphId` in the same owner session and project. The response contains
+neighbors with their relationship to the anchor and their own readable references.
+Use the normal search filters and result limit to narrow the page.
+
+The engine looks for neighboring source ordinals within the same recorded source
+session, then follows configured graph hops and fills available slots with
+source-group and same-node records. Source adjacency requires an original numeric
+turn identifier. The anchor's scope bounds expansion. The economy display
+allocates its budget to the initial recall page. A caller can follow any visible
+key in a separate search.
+
 ## Session controls and limits
 
 `sessionActiveGraph action=recallDisplay` reads the profile, or sets it with

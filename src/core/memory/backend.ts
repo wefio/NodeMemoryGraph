@@ -123,6 +123,11 @@ export interface MemoryBackend {
   readonly namespace: string;
   readonly kind: "sqlite" | "lancedb";
   readonly vectorIndex?: MemoryVectorIndex;
+  adjacentSources?(
+    view: MemoryReadView,
+    source: HistoryRecord,
+    query: MemoryEntityQuery,
+  ): SourceNeighbor[];
   leafPeers?(
     view: MemoryReadView,
     seedIds: readonly string[],
@@ -152,6 +157,11 @@ export interface MemoryBackend {
   closeRead(view: MemoryReadView): Promise<void>;
   commit(request: MemoryCommitRequest): Promise<MemoryCommitOutcome>;
   close(): Promise<void>;
+}
+
+export interface SourceNeighbor {
+  entity: Extract<MemoryEntity, { kind: "memory" }>;
+  relation: "previous_turn" | "next_turn";
 }
 
 export interface MemoryChainProjection {

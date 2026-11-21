@@ -65,6 +65,7 @@ import {
   captureMemoryReferenceTargets,
   createMemoryReferences,
   isMemoryReference,
+  isNeighborhoodQuery,
   resolveMemoryReferences,
   type MemoryReferenceTarget,
 } from "../integration/memory-reference.ts";
@@ -544,6 +545,8 @@ export class NmgService {
     signal?.throwIfAborted();
     const memory = this.#portableMemory;
     const started = performance.now();
+    if (memory.local && !params.autoRecall && isNeighborhoodQuery(params.query))
+      return this.#searchPortableNeighborhood(params, started, signal);
     const retrieval = memory.local ? this.#prepareLocalSearch(params) : params;
     const recallDisplayMode =
       params.autoRecall && params.sessionId
@@ -564,6 +567,44 @@ export class NmgService {
       started,
       directMs,
     );
+  }
+
+  async #searchPortableNeighborhood(
+    params: NmgSearchParams,
+    started: number,
+    signal?: AbortSignal,
+  ): Promise<MemoryContext> {
+    const query = params.query.trim();
+    let id = query.toLowerCase();
+    if (isMemoryReference(query)) {
+      const graphId = params.activeGraphId
+        ? this.#resolveActiveGraphId(params.activeGraphId, params.sessionId)
+        : undefined;
+      if (graphId) this.#ownedPortableGraph(graphId, params.sessionId);
+      const resolved = await this.#resolvePortableGetReferences(
+        {
+          memoryIds: [query],
+          activeGraphId: graphId,
+          sessionId: params.sessionId,
+          projectDir: params.projectDir,
+        },
+        "query",
+      );
+      id = resolved.memoryIds[0]!;
+    }
+    // A followed reference starts a fresh page and records only the canonical anchor.
+    const options = {
+      ...params,
+      query: id,
+      graphHops: params.graphHops ?? 1,
+      limit: params.limit ?? 8,
+      secondPass: false,
+      progressiveWarmDisclosure: false,
+      tieredDisclosure: false,
+    };
+    const context = await this.#portableMemory.searchNeighborhood(id, options);
+    signal?.throwIfAborted();
+    return this.#registerPortableSearch(context, options, started, performance.now() - started);
   }
 
   #prepareLocalSearch(params: NmgSearchParams): NmgSearchParams {
@@ -707,7 +748,10 @@ export class NmgService {
     return undefined; // Live ephemeral probes have no persisted trace.
   }
 
-  async #resolvePortableGetReferences(params: NmgGetParams): Promise<NmgGetParams> {
+  async #resolvePortableGetReferences(
+    params: NmgGetParams,
+    parameter: "memoryIds" | "query" = "memoryIds",
+  ): Promise<NmgGetParams> {
     if (!params.memoryIds.some(isMemoryReference)) return params;
     if (!params.activeGraphId)
       throw new NmgProtocolError(
@@ -731,7 +775,7 @@ export class NmgService {
       };
     } catch (error) {
       if (error instanceof MemoryReferenceError)
-        throw new NmgProtocolError("INVALID_PARAMS", error.message, "memoryIds");
+        throw new NmgProtocolError("INVALID_PARAMS", error.message, parameter);
       throw error;
     }
   }
@@ -2011,6 +2055,7 @@ function parseSearchParams(value: unknown): NmgSearchParams {
   const params = objectParams(value);
   return {
     query: requiredString(params, "query"),
+    activeGraphId: optionalString(params, "activeGraphId"),
     queries: optionalStringArray(params, "queries"),
     recallCue: typeof params.recallCue === "string" ? params.recallCue : undefined,
     recallRevision:

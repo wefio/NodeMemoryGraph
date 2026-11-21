@@ -265,12 +265,22 @@ export function prepareCompactSearchSurface(
   if (context.candidates.length === 0 && bookmarks.length === 0) {
     return prepareMemorySurface([
       { purpose: "diagnostic", body: retrievalNote },
-      { purpose: "diagnostic", body: options.emptyText ?? "No matching NMG memory found." },
+      {
+        purpose: "diagnostic",
+        body:
+          context.neighborhoodAnchorId && options.emptyText !== ""
+            ? "No readable neighbors for this memory."
+            : (options.emptyText ?? "No matching NMG memory found."),
+      },
     ]);
   }
   const timeline = projectTemporalChain(context.candidates);
   return prepareMemorySurface([
     { purpose: "guidance", body: options.preamble ?? "" },
+    {
+      purpose: "diagnostic",
+      body: context.neighborhoodAnchorId ? `Neighborhood of ${context.neighborhoodAnchorId}` : "",
+    },
     { purpose: "diagnostic", body: retrievalNote },
     ...context.candidates.map((candidate) =>
       candidateInformationView(candidate, context.activeGraphId, options.memoryReferences, {
@@ -335,6 +345,7 @@ function searchCandidateLine(
 ): string {
   const key = searchMemoryReference(candidate, references);
   const flags = [
+    candidate.neighborhood ? `[${candidate.neighborhood.replaceAll("_", " ")}]` : "",
     presentation.timeLabel ? `[${presentation.timeLabel}]` : "",
     !presentation.searchPage && candidate.external ? "[external]" : "",
     candidate.open ? "[open]" : "",

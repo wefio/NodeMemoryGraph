@@ -190,6 +190,95 @@ export class MemoryEngine {
     }
   }
 
+  /** Browse readable neighbors of a known record on a single backend snapshot. */
+  async searchNeighborhood(
+    id: string,
+    options: MemoryQueryOptions,
+  ): Promise<MemoryContext | undefined> {
+    const view = await this.backend.openRead();
+    try {
+      const entities = await this.backend.scan(view, {
+        kind: "memory",
+        ids: [id],
+        scope: options.scope,
+        sessionId: options.sessionId,
+        limit: 1,
+      });
+      const [anchor] = await this.project(view, entities, {
+        sessionId: options.sessionId,
+        includeHistorical: options.includeHistorical,
+      });
+      if (!anchor) return;
+      return await this.expandNeighborhood(view, anchor, options);
+    } finally {
+      await this.backend.closeRead(view);
+    }
+  }
+
+  private async expandNeighborhood(
+    view: MemoryReadView,
+    anchor: MemorySearchResult,
+    input: MemoryQueryOptions,
+  ): Promise<MemoryContext> {
+    const id = anchor.memory.id;
+    const limit = input.limit ?? 8;
+    const options = {
+      ...input,
+      scope: input.scope ?? anchor.memory.scope,
+      graphHops: boundedGraphHops(input.graphHops ?? 1),
+      eventTimeFrom: eventWindowStart(input.eventTimeFrom) ?? undefined,
+      eventTimeTo: eventWindowEnd(input.eventTimeTo) ?? undefined,
+    };
+    const query: MemoryEntityQuery = {
+      kind: "memory",
+      scope: options.scope,
+      sessionId: options.sessionId,
+      limit: limit * 2,
+      eventTimeFrom: options.eventTimeFrom,
+      eventTimeTo: options.eventTimeTo,
+    };
+    const neighbors = this.backend.adjacentSources?.(view, anchor.evidence, query) ?? [];
+    const reasons = new Map(neighbors.map(({ entity, relation }) => [entity.value.id, relation]));
+    const nearby = await this.project(
+      view,
+      neighbors.map(({ entity }) => entity),
+      options,
+    );
+    const results: MemorySearchResult[] = nearby.map((item) => ({
+      ...item,
+      neighborhood: reasons.get(item.memory.id),
+    }));
+    const graph = [anchor];
+    const relations = await this.expand(view, graph, { ...options, limit: limit + 1 });
+    results.push(
+      ...graph.slice(1).map((item): MemorySearchResult => ({ ...item, neighborhood: "graph" })),
+    );
+    const unique = new Map<string, MemorySearchResult>([[id, anchor]]);
+    for (const item of results) if (!unique.has(item.memory.id)) unique.set(item.memory.id, item);
+    const page = [...unique.values()].slice(0, limit + 1);
+    await this.appendLeafContext(view, page, [id], query, options, limit + 1 - page.length);
+    const selected = page.slice(1).map((item): MemorySearchResult => ({
+      ...item,
+      neighborhood: item.neighborhood ?? "source_group",
+    }));
+    if (selected.length < limit) {
+      const excluded = new Set(page.map(({ memory }) => memory.id));
+      const sameNode = await this.backend.scan(view, { ...query, nodeId: anchor.node.id });
+      const peers = await this.project(view, sameNode, options, false, (rows) =>
+        rows.filter(({ memory }) => !excluded.has(memory.id)).slice(0, limit - selected.length),
+      );
+      selected.push(
+        ...peers.map((item): MemorySearchResult => ({ ...item, neighborhood: "same_node" })),
+      );
+    }
+    return {
+      neighborhoodAnchorId: id,
+      results: selected,
+      relations,
+      chainEdges: this.projectChains(view, selected, options.sessionId),
+    };
+  }
+
   async backfillTesseraFingerprint(input: {
     id: string;
     memoryId: string;
