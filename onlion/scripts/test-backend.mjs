@@ -557,6 +557,9 @@ print(json.dumps(r))`,
     for (const key of ["rss", "heapUsed", "external", "arrayBuffers"])
       assert.equal(typeof status.body.memory.mem[key], "number", `memory.${key} is reported`);
     assert.equal(status.body.memory.instance.seq, 4, "the instance counts its requests");
+    assert.equal(status.body.memory_service, "daemon-core-aml-v1");
+    assert.equal(status.body.harness, false);
+    assert.equal(status.body.search_profile.persistTrace, false);
     assert.equal(status.body.failures.scope, "isolate_only", "shared history is opt-in");
     assert.ok(Array.isArray(status.body.failures.summary.by_code));
     const body = JSON.stringify(status.body);
@@ -565,9 +568,29 @@ print(json.dumps(r))`,
   }
 
   const serviceHealth = await call("a", "/health");
-  assert.equal(serviceHealth.body.memory_service, "daemon-core-aml-v1");
-  assert.equal(serviceHealth.body.harness, false);
-  assert.equal(serviceHealth.body.search_profile.persistTrace, false);
+  assert.equal(serviceHealth.status, 200);
+  assert.deepEqual(serviceHealth.body, { status: "ok", storage: "R2", retrieval: "lexical" });
+  const healthWorker = await mf.getWorker("a");
+  const headHealth = await healthWorker.fetch("http://localhost/health", { method: "HEAD" });
+  assert.equal(headHealth.status, 200);
+  assert.equal(await headHealth.text(), "");
+  const afterHealth = await call("a", "/admin/status", undefined, undefined, owner);
+  assert.equal(afterHealth.status, 200);
+  assert.equal(
+    afterHealth.body.memory.instance.seq,
+    5,
+    "GET/HEAD /health must not increment mem-trace seq",
+  );
+  assert.equal((await healthWorker.fetch("http://localhost/health", { method: "POST" })).status, 401);
+  assert.equal(
+    (
+      await healthWorker.fetch("http://localhost/health", {
+        method: "POST",
+        headers: { authorization: "Bearer test-key" },
+      })
+    ).status,
+    404,
+  );
   const publicPage = await (await (await mf.getWorker("a")).fetch("http://localhost/")).text();
   assert.match(publicPage, /id="diagnostics" hidden/);
   const ownerPage = await (
@@ -937,7 +960,7 @@ print(json.dumps(r))`,
   // Add failed the same way above 128,000 characters per message. Both payloads
   // fit in a 6 MiB body, so both were our limit rejecting legitimate input.
   {
-    const limits = (await call("a", "/health")).body.limits;
+    const limits = (await call("a", "/admin/status", undefined, "test-key", owner)).body.limits;
     assert.deepEqual(limits, {
       max_query_chars: 1_000_000,
       max_message_chars: 1_000_000,

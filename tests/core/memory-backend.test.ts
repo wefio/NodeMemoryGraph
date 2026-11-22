@@ -805,3 +805,361 @@ test("SQLite pages missing vectors in order, scopes previous turns, and saves on
   ]);
   assert.deepEqual(index.stats("test"), { indexed: 3, pending: 0 });
 });
+
+test("SQLite combines unicode61+Han-bigram lexical recall with contentless trigram verbatim recall", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-two-route-fts-"));
+  const path = join(directory, "memory.sqlite");
+  const options = { kind: "sqlite", path, namespace: "tenant" } as const;
+  const backend = await openMemoryBackend(options);
+  const openBackends: Awaited<ReturnType<typeof openMemoryBackend>>[] = [backend];
+  t.after(async () => {
+    for (const item of openBackends) await item.close();
+    removeTempDirectory(directory);
+  });
+
+  const engine = new MemoryEngine(backend, () => "2026-11-21T00:00:00.000Z");
+  const phrase = await engine.remember({
+    nodeName: "Architecture",
+    statement: "我们设计了节点记忆图谱架构，支持增量检索与多跳推理",
+  });
+  const scattered = await engine.remember({
+    nodeName: "Notes",
+    statement: "记忆模块和图谱渲染器是两个独立的组件",
+  });
+  const ver123 = await engine.remember({
+    nodeName: "Release",
+    statement: "Release v1.2.3 fixed ERR_CONNECTION_REFUSED in src/core/memory/sqlite-backend.ts",
+    tesserae: [{ path: "src/core/memory/sqlite-backend.ts", snippet: "two-route verbatim check" }],
+  });
+  const ver123Slash = await engine.remember({
+    nodeName: "Release",
+    statement: "Release v1/2/3 used another separator format",
+  });
+  const ver124 = await engine.remember({
+    nodeName: "Release",
+    statement: "Release v1.2.4 updated docs/notes and fulltextKnapsack logging",
+  });
+  const english = await engine.remember({
+    nodeName: "Prose",
+    statement: "Atlas project uses ordinary lexical prose",
+  });
+
+  // Main lexical route: 2-char Han bigram and ordinary English word recall.
+  const twoCharHan = await engine.search("图谱");
+  assert.deepEqual(
+    twoCharHan.results.map(({ memory }) => memory.id).sort(),
+    [phrase.memory.id, scattered.memory.id].sort(),
+  );
+  const englishHits = await engine.search("ordinary");
+  assert.deepEqual(
+    englishHits.results.map(({ memory }) => memory.id),
+    [english.memory.id],
+  );
+
+  // Two-route Chinese phrase: 3-4 char Han query still recalls scattered bigrams via main route,
+  // while the contiguous substring in `phrase` is boosted first by the trigram route.
+  const hanPhraseHits = await engine.search("记忆图谱");
+  assert.equal(hanPhraseHits.results[0]?.memory.id, phrase.memory.id);
+  assert.ok(hanPhraseHits.results.some(({ memory }) => memory.id === scattered.memory.id));
+
+  // Verbatim trigram route: punctuation-preserving version ranks ahead of slash variant,
+  // file path resolves, and quoted mid-token substring rescues CamelCase compound.
+  const versionHits = await engine.search("v1.2.3");
+  assert.equal(versionHits.results[0]?.memory.id, ver123.memory.id);
+  assert.ok(!versionHits.results.some(({ memory }) => memory.id === ver124.memory.id));
+  assert.ok(versionHits.results.some(({ memory }) => memory.id === ver123Slash.memory.id));
+
+  const pathHits = await engine.search("src/core/memory/sqlite-backend.ts");
+  assert.equal(pathHits.results[0]?.memory.id, ver123.memory.id);
+
+  const substringHits = await engine.search('"knapsack"');
+  assert.deepEqual(
+    substringHits.results.map(({ memory }) => memory.id),
+    [ver124.memory.id],
+  );
+
+  // Hybrid candidate admission includes trigram-only verbatim hits with positive bm25.
+  assert.ok(backend.vectorIndex);
+  assert.ok(backend.hybridCandidates);
+  const pending = backend.vectorIndex.pending("test", 10);
+  backend.vectorIndex.save(
+    "test",
+    pending,
+    pending.map(() => [1, 0]),
+  );
+  const view = await backend.openRead();
+  try {
+    const hybrid = backend.hybridCandidates(
+      view,
+      { kind: "memory", text: '"knapsack"', limit: 10 },
+      { indexId: "test", mode: "hybrid", vector: [0, 1] },
+    );
+    assert.ok(hybrid.lexicalIds.includes(ver124.memory.id));
+    const rescued = hybrid.candidates.find(({ entity }) => entity.value.id === ver124.memory.id);
+    assert.ok(rescued && rescued.bm25 > 0);
+  } finally {
+    await backend.closeRead(view);
+  }
+
+  await backend.close();
+
+  // Simulating an existing contentless-lexical DB without trigram surface tables:
+  // reopening backfills both trigram tables without creating *_content shadow tables.
+  const raw = new DatabaseSync(path);
+  try {
+    raw.exec(`DROP TABLE nmg_memory_surface_fts;
+      DROP TABLE nmg_memory_tessera_surface_fts;`);
+  } finally {
+    raw.close();
+  }
+
+  const reopened = await openMemoryBackend(options);
+  openBackends.push(reopened);
+  const checkDb = new DatabaseSync(path, { readOnly: true });
+  try {
+    for (const table of ["nmg_memory_surface_fts", "nmg_memory_tessera_surface_fts"]) {
+      const schemaSql = String(
+        checkDb.prepare("SELECT sql FROM sqlite_schema WHERE name = ?").get(table)?.sql ?? "",
+      );
+      assert.match(schemaSql, /contentless_delete\s*=\s*1/iu);
+      assert.match(schemaSql, /tokenize\s*=\s*['"]?trigram/iu);
+      assert.equal(
+        checkDb.prepare("SELECT 1 FROM sqlite_schema WHERE name = ?").get(`${table}_content`),
+        undefined,
+      );
+    }
+    assert.equal(
+      checkDb
+        .prepare("SELECT count(*) AS n FROM nmg_memory_tessera_surface_fts WHERE text MATCH ?")
+        .get('"verbatim check"')?.n,
+      1,
+    );
+  } finally {
+    checkDb.close();
+  }
+
+  // Reopened engine finds backfilled memory rows via trigram and updates both indexes in sync.
+  const reopenedEngine = new MemoryEngine(reopened, () => "2026-11-21T01:00:00.000Z");
+  const backfilled = await reopenedEngine.search('"knapsack"');
+  assert.deepEqual(
+    backfilled.results.map(({ memory }) => memory.id),
+    [ver124.memory.id],
+  );
+
+  const readView = await reopened.openRead();
+  await reopened.closeRead(readView);
+  const updated = await reopened.commit({
+    expectedRevision: readView.revision,
+    operationId: "trigram-update",
+    requestHash: "trigram-update",
+    resultIds: [],
+    changes: {
+      upsert: [
+        {
+          kind: "memory",
+          value: { ...ver124.memory, statement: "Release v1.2.4 moved to paretoOptimizerV2" },
+        },
+      ],
+    },
+  });
+  assert.equal(updated.status, "committed");
+  assert.deepEqual((await reopenedEngine.search('"knapsack"')).results, []);
+  assert.deepEqual(
+    (await reopenedEngine.search('"paretooptimizerv2"')).results.map(({ memory }) => memory.id),
+    [ver124.memory.id],
+  );
+});
+
+test("SQLite upgrades to porter unicode61, CJK bigrams, and BM25F multi-column weights", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-sqlite-bm25f-porter-cjk-"));
+  const path = join(directory, "memory.sqlite");
+  const options = { kind: "sqlite", path, namespace: "tenant" } as const;
+  const backend = await openMemoryBackend(options);
+  const openBackends: Awaited<ReturnType<typeof openMemoryBackend>>[] = [backend];
+  t.after(async () => {
+    for (const item of openBackends) await item.close();
+    removeTempDirectory(directory);
+  });
+
+  const engine = new MemoryEngine(backend, () => "2026-11-22T00:00:00.000Z");
+
+  // 1) Porter stemming (lexical + hybrid) & CJK bigrams (Japanese kana + Korean Hangul)
+  const stemDoc = await engine.remember({
+    nodeName: "Hobby",
+    statement: "Alice was painting pottery and volunteering on weekends",
+  });
+  const jaDoc = await engine.remember({
+    nodeName: "Japanese",
+    statement: "ローカル記憶データベースとベクトル検索エンジンを構築した",
+  });
+  const koDoc = await engine.remember({
+    nodeName: "Korean",
+    statement: "로컬데이터베이스마이그레이션을단일트랜잭션으로실행했다",
+  });
+
+  assert.equal((await engine.search("paint")).results[0]?.memory.id, stemDoc.memory.id);
+  assert.equal((await engine.search("volunteer")).results[0]?.memory.id, stemDoc.memory.id);
+  assert.equal((await engine.search("データベース")).results[0]?.memory.id, jaDoc.memory.id);
+  assert.equal((await engine.search("마이그레이션")).results[0]?.memory.id, koDoc.memory.id);
+
+  // Hybrid search also admits Porter-stemmed lexical hits with positive bm25
+  assert.ok(backend.vectorIndex);
+  assert.ok(backend.hybridCandidates);
+  const pending = backend.vectorIndex.pending("test", 10);
+  backend.vectorIndex.save(
+    "test",
+    pending,
+    pending.map(() => [1, 0]),
+  );
+  const view = await backend.openRead();
+  try {
+    const hybrid = backend.hybridCandidates(
+      view,
+      { kind: "memory", text: "paint", limit: 10 },
+      { indexId: "test", mode: "hybrid", vector: [0, 1] },
+    );
+    const stemHybrid = hybrid.candidates.find(
+      ({ entity }) => entity.value.id === stemDoc.memory.id,
+    );
+    assert.ok(stemHybrid && stemHybrid.bm25 > 0);
+  } finally {
+    await backend.closeRead(view);
+  }
+
+  // 2) BM25F column weights: recall_triggers > statement, and tessera path/label > snippet
+  const bodyOnly = await engine.remember({
+    nodeName: "Cache",
+    statement: "General note mentioning sentinel cache policy details",
+  });
+  const triggerBoosted = await engine.remember({
+    nodeName: "Cache",
+    statement: "General note mentioning sentinel routing rules details",
+    recallTriggers: ["sentinel", "quorum"],
+  });
+  // Populate enough rows for stable non-degenerate BM25 IDF across memories and tesserae
+  for (let i = 0; i < 8; i += 1) {
+    await engine.remember({
+      nodeName: "Filler",
+      statement: `Background maintenance record number ${i} without query terms`,
+      tesserae: [
+        {
+          path: `docs/filler-${i}.md`,
+          label: `Filler ${i}`,
+          snippet: `Unrelated filler body ${i}`,
+        },
+      ],
+    });
+  }
+  const tesseraSnippetOnly = await engine.remember({
+    nodeName: "Docs",
+    statement: "Meeting minutes",
+    tesserae: [
+      {
+        path: "docs/notes.md",
+        label: "Weekly sync",
+        snippet: "Long notes mentioning anchorpath twice: anchorpath in plain excerpt text",
+      },
+    ],
+  });
+  const tesseraPathHit = await engine.remember({
+    nodeName: "Code",
+    statement: "Storage module",
+    tesserae: [
+      {
+        path: "src/anchorpath/engine.ts",
+        label: "anchorpath implementation",
+        snippet: "Core storage implementation",
+      },
+    ],
+  });
+
+  const triggerOnlyHits = await engine.search("quorum");
+  assert.equal(triggerOnlyHits.results[0]?.memory.id, triggerBoosted.memory.id);
+  const triggerWeightedHits = await engine.search("sentinel");
+  assert.equal(triggerWeightedHits.results[0]?.memory.id, triggerBoosted.memory.id);
+  assert.ok(triggerWeightedHits.results.some(({ memory }) => memory.id === bodyOnly.memory.id));
+
+  const tesseraIdOf = (record: Awaited<ReturnType<typeof engine.remember>>) =>
+    String(
+      record.memory.markers.find((marker) => marker.kind === "tessera_ref")?.attributes?.tesseraId,
+    );
+
+  const readTessera = await backend.openRead();
+  try {
+    const tesseraHits = await backend.scan(readTessera, { kind: "tessera", text: "anchorpath" });
+    assert.equal(tesseraHits[0]?.value.id, tesseraIdOf(tesseraPathHit));
+    assert.ok(tesseraHits.some(({ value }) => value.id === tesseraIdOf(tesseraSnippetOnly)));
+  } finally {
+    await backend.closeRead(readTessera);
+  }
+
+  await backend.close();
+
+  // 3) Upgrade migration from single-column contentless unicode61 DB preserving nmg_memory_fts_rows
+  const raw = new DatabaseSync(path);
+  let savedRowids: unknown;
+  try {
+    savedRowids = raw
+      .prepare("SELECT namespace, key, fts_rowid FROM nmg_memory_fts_rows ORDER BY key")
+      .all()
+      .map((row) => ({ ...row }));
+    raw.exec(`
+      DROP TABLE nmg_memory_fts;
+      CREATE VIRTUAL TABLE nmg_memory_fts
+        USING fts5(text, content='', contentless_delete=1, tokenize='unicode61');
+      DROP TABLE nmg_memory_tessera_fts;
+      CREATE VIRTUAL TABLE nmg_memory_tessera_fts
+        USING fts5(text, content='', contentless_delete=1, tokenize='unicode61');
+    `);
+  } finally {
+    raw.close();
+  }
+
+  const upgraded = await openMemoryBackend(options);
+  openBackends.push(upgraded);
+  const inspect = new DatabaseSync(path, { readOnly: true });
+  try {
+    for (const [table, expectedCol, expectedRank] of [
+      ["nmg_memory_fts", "triggers", "bm25(1.0, 1.5)"],
+      ["nmg_memory_tessera_fts", "label", "bm25(1.0, 2.5, 1.8)"],
+    ] as const) {
+      const schemaSql = String(
+        inspect.prepare("SELECT sql FROM sqlite_schema WHERE name = ?").get(table)?.sql ?? "",
+      );
+      assert.match(schemaSql, /contentless_delete\s*=\s*1/iu);
+      assert.match(schemaSql, /tokenize\s*=\s*['"]?porter\s+unicode61/iu);
+      assert.match(schemaSql, new RegExp(`\\b${expectedCol}\\b`, "iu"));
+      assert.equal(
+        inspect.prepare("SELECT 1 FROM sqlite_schema WHERE name = ?").get(`${table}_content`),
+        undefined,
+      );
+      assert.equal(
+        inspect.prepare(`SELECT v FROM ${table}_config WHERE k = 'rank'`).get()?.v,
+        expectedRank,
+      );
+    }
+    assert.deepEqual(
+      inspect
+        .prepare("SELECT namespace, key, fts_rowid FROM nmg_memory_fts_rows ORDER BY key")
+        .all()
+        .map((row) => ({ ...row })),
+      savedRowids,
+    );
+  } finally {
+    inspect.close();
+  }
+
+  const upgradedEngine = new MemoryEngine(upgraded, () => "2026-11-22T01:00:00.000Z");
+  assert.equal((await upgradedEngine.search("paint")).results[0]?.memory.id, stemDoc.memory.id);
+  assert.equal(
+    (await upgradedEngine.search("quorum")).results[0]?.memory.id,
+    triggerBoosted.memory.id,
+  );
+  const upgradedView = await upgraded.openRead();
+  try {
+    const hits = await upgraded.scan(upgradedView, { kind: "tessera", text: "anchorpath" });
+    assert.equal(hits[0]?.value.id, tesseraIdOf(tesseraPathHit));
+  } finally {
+    await upgraded.closeRead(upgradedView);
+  }
+});

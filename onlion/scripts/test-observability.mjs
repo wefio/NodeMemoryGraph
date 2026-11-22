@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- spies on console.log/error to assert /health stays silent */
 // Two invariants from docs/design/search-time-budget-design.md that must hold in code, not only in
 // prose:
 //
@@ -12,6 +13,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { hardDeadline } from "../backend/monitoring.mjs";
 import { measure, currentStage, currentStageAgeMs } from "../backend/diagnostics.mjs";
+import { worker } from "../dist/edgeone/cloud-functions/[[default]].js";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const passed = [];
@@ -166,6 +168,61 @@ function pass(what) {
     "an unreadable log must mark the page partial",
   );
   pass("the pending read is measured, bounded and reports itself in the response");
+}
+
+// 8. /health keeps the minimal HTTP health contract: no storage probe, no console logging.
+{
+  const logs = [];
+  const origLog = console.log;
+  const origError = console.error;
+  console.log = (...args) => logs.push(args.join(" "));
+  console.error = (...args) => logs.push(args.join(" "));
+  let headCalled = false;
+  try {
+    const getRes = await worker.fetch(new Request("http://localhost/health"), {
+      MEMORY: {
+        head: () => {
+          headCalled = true;
+          return Promise.resolve(null);
+        },
+      },
+    });
+    assert.equal(getRes.status, 200);
+    assert.deepEqual(await getRes.json(), { status: "ok", storage: "R2", retrieval: "lexical" });
+    assert.equal(headCalled, false, "/health must not probe object storage");
+
+    const headRes = await worker.fetch(new Request("http://localhost/health", { method: "HEAD" }), {
+      MEMORY: {},
+    });
+    assert.equal(headRes.status, 200);
+    assert.equal(await headRes.text(), "");
+
+    const hybridRes = await worker.fetch(new Request("http://localhost/health"), {
+      MEMORY: {},
+      NMG_EMBED_BASE_URL: "https://embed.test/v1",
+    });
+    assert.equal(hybridRes.status, 200);
+    assert.deepEqual(await hybridRes.json(), { status: "ok", storage: "R2", retrieval: "hybrid" });
+    assert.equal(logs.length, 0, `/health emitted unexpected logs: ${logs.join("\n")}`);
+  } finally {
+    console.log = origLog;
+    console.error = origError;
+  }
+
+  const unauthPost = await worker.fetch(new Request("http://localhost/health", { method: "POST" }), {
+    MEMORY: {},
+    NMG_API_KEY: "test-key",
+  });
+  assert.equal(unauthPost.status, 401);
+  const authPost = await worker.fetch(
+    new Request("http://localhost/health", {
+      method: "POST",
+      headers: { authorization: "Bearer test-key" },
+    }),
+    { MEMORY: {}, NMG_API_KEY: "test-key" },
+  );
+  assert.equal(authPost.status, 404);
+  pass("/health uses minimal GET/HEAD contract with no storage probe or console logs");
 }
 
 process.stdout.write(`PASS: observability - ${passed.length} checks.\n`);

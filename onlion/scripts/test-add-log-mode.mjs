@@ -84,6 +84,8 @@ function addBody(userId, requestId, content, sessionId = "s") {
 
 try {
   const health = await call("/health");
+  assert.equal(health.status, 200);
+  assert.deepEqual(health.body, { status: "ok", storage: "R2", retrieval: "hybrid" });
   // The fixture overrides the mode, so the code default is pinned at the source instead: a
   // future edit must not quietly put production back on the synchronous path.
   {
@@ -97,7 +99,11 @@ try {
       "the code default must be the log path, with NMG_ADD_MODE=sync as the escape hatch",
     );
   }
-  assert.equal(health.body.limits.add_mode, "log", "the fixture must run the log path");
+  const initialStatus = await call("/admin/status", undefined, {
+    "oai-authenticated-user-email": "owner@example.test",
+  });
+  assert.equal(initialStatus.status, 200);
+  assert.equal(initialStatus.body.limits.add_mode, "log", "the fixture must run the log path");
   {
     // A missing seventh argument is invisible at runtime: the signature defaults to null, the
     // snapshot is re-uploaded on every CAS retry, and only a bucket listing shows it. The same

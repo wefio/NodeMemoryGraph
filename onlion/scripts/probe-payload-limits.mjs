@@ -59,7 +59,12 @@ const check = (label, ok, detail) => {
 
 try {
   const health = await (await worker.fetch("http://localhost/health")).json();
-  console.log("health.limits =", JSON.stringify(health.limits));
+  const status = await (
+    await worker.fetch("http://localhost/admin/status", {
+      headers: { "oai-authenticated-user-email": "owner@example.test" },
+    })
+  ).json();
+  console.log("health =", JSON.stringify(health), "admin.limits =", JSON.stringify(status.limits));
 
   // Seed a few memories so retrieval has candidates.
   const turns = [
