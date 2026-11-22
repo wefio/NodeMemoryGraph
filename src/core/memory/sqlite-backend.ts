@@ -537,6 +537,42 @@ function twoRouteFtsSubquery(
       GROUP BY r.key)`;
 }
 
+function resolveEntityFtsSource(
+  namespace: string,
+  query: MemoryEntityQuery,
+  scoredExpression?: string,
+  scoredTable?: string,
+): { ftsFrom?: string; emptyFts: boolean } {
+  const [kind, lexicalTable, surfaceTable] = textIndex(query.kind);
+  if (scoredExpression !== undefined) {
+    return scoredExpression
+      ? {
+          ftsFrom: ftsSubquery(namespace, kind, scoredTable ?? lexicalTable, scoredExpression),
+          emptyFts: false,
+        }
+      : { emptyFts: true };
+  }
+  if (!query.text) return { emptyFts: false };
+  const lexicalExpr = ftsExpression(query.text);
+  const surfaceExpr = surfaceTrigramExpression(query.text);
+  if (!lexicalExpr && !surfaceExpr) return { emptyFts: true };
+  if (lexicalExpr && surfaceExpr) {
+    return {
+      ftsFrom: twoRouteFtsSubquery(
+        namespace,
+        kind,
+        lexicalTable,
+        surfaceTable,
+        lexicalExpr,
+        surfaceExpr,
+      ),
+      emptyFts: false,
+    };
+  }
+  const [table, expr] = lexicalExpr ? [lexicalTable, lexicalExpr] : [surfaceTable, surfaceExpr];
+  return { ftsFrom: ftsSubquery(namespace, kind, table, expr), emptyFts: false };
+}
+
 function entityPage(
   namespace: string,
   query: MemoryEntityQuery,
@@ -547,33 +583,12 @@ function entityPage(
   if (query.kind === "edge" && query.connectedTo !== undefined && !query.text)
     return { sql: adjacentEdgePage(namespace, query, query.connectedTo), bind: [limit, offset] };
   const where = `namespace = ${sqlLiteral(namespace)} AND ${sqliteQueryWhere(query)}`;
-  const [kind, lexicalTable, surfaceTable] = textIndex(query.kind);
-  let ftsFrom: string | undefined;
-  let emptyFts = false;
-  if (scoredExpression !== undefined) {
-    if (scoredExpression) {
-      ftsFrom = ftsSubquery(namespace, kind, scoredTable ?? lexicalTable, scoredExpression);
-    } else {
-      emptyFts = true;
-    }
-  } else if (query.text) {
-    const lexicalExpr = ftsExpression(query.text);
-    const surfaceExpr = surfaceTrigramExpression(query.text);
-    if (!lexicalExpr && !surfaceExpr) emptyFts = true;
-    else if (lexicalExpr && surfaceExpr) {
-      ftsFrom = twoRouteFtsSubquery(
-        namespace,
-        kind,
-        lexicalTable,
-        surfaceTable,
-        lexicalExpr,
-        surfaceExpr,
-      );
-    } else {
-      const [table, expr] = lexicalExpr ? [lexicalTable, lexicalExpr] : [surfaceTable, surfaceExpr];
-      ftsFrom = ftsSubquery(namespace, kind, table, expr);
-    }
-  }
+  const { ftsFrom, emptyFts } = resolveEntityFtsSource(
+    namespace,
+    query,
+    scoredExpression,
+    scoredTable,
+  );
   // Start from MATCH results so SQLite only looks up entities that matched.
   const from = ftsFrom
     ? `${ftsFrom} CROSS JOIN nmg_memory_entities ON key = fts_key`

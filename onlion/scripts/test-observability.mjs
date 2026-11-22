@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- spies on console.log/error to assert /health stays silent */
 // Two invariants from docs/design/search-time-budget-design.md that must hold in code, not only in
 // prose:
 //
