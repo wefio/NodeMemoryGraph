@@ -13,6 +13,8 @@ export interface LocalMemoryHttpConfig {
   maxRequestBytes: number;
 }
 
+const MAX_LOCAL_REQUEST_BYTES = 48 * 1024 * 1024;
+
 function integerOption(
   config: JsonObject,
   key: string,
@@ -53,7 +55,13 @@ export function parseLocalMemoryHttpConfig(
     databasePath: resolve(dirname(path), config.databasePath),
     port: integerOption(config, "port", 8787, 0, 65535),
     defaultTopK: integerOption(config, "defaultTopK", DEFAULT_EXPLICIT_SEARCH_LIMIT, 1, 100),
-    maxRequestBytes: integerOption(config, "maxRequestBytes", 6 * 1024 * 1024, 1, 6 * 1024 * 1024),
+    maxRequestBytes: integerOption(
+      config,
+      "maxRequestBytes",
+      MAX_LOCAL_REQUEST_BYTES,
+      1,
+      MAX_LOCAL_REQUEST_BYTES,
+    ),
   };
 }
 

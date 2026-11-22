@@ -2,13 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  HttpError,
   memoryHttpOperation,
   readHttpAdd,
   readHttpClauses,
   readHttpJson,
+  readHttpNow,
   readHttpTopK,
   requireHttpApiKey,
 } from "../../src/integration/memory-http-protocol.ts";
+import { decodedImageBytes } from "../../src/integration/multimodal-content.ts";
 
 const endpoint = "http://127.0.0.1:8787";
 const sample = {
@@ -189,4 +192,65 @@ test("HTTP JSON rejects both an oversized declaration and an oversized chunked u
     code: "request_too_large",
   });
   assert.equal(cancelled, true);
+});
+
+test("readHttpNow parses Unix ms and ISO timestamps and rejects invalid values", () => {
+  assert.equal(readHttpNow({}), undefined);
+  assert.equal(readHttpNow({ now: null }), undefined);
+  assert.equal(readHttpNow({ now: 1704067200000 }), "2024-01-01T00:00:00.000Z");
+  assert.equal(
+    readHttpNow({ current_time: "2026-10-30T13:39:00+08:00" }),
+    "2026-10-30T13:39:00+08:00",
+  );
+  assert.equal(readHttpNow({ timestamp: "2026-10-30T05:39:00Z" }), "2026-10-30T05:39:00Z");
+  for (const invalid of [
+    { now: "" },
+    { now: "2026-10-30" },
+    { now: "2026-02-31T10:00:00Z" },
+    { now: Number.NaN },
+    { now: true },
+  ]) {
+    assert.throws(() => readHttpNow(invalid), { status: 400, code: "invalid_request" });
+  }
+});
+
+test("readHttpAdd enforces nonempty text parts and 10 MiB / 30 MiB AML image budgets", () => {
+  const tinyImage = {
+    type: "image_url",
+    image_url: {
+      url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1cAAAAASUVORK5CYII=",
+    },
+  };
+  assert.throws(
+    () =>
+      readHttpAdd({
+        ...sample,
+        messages: [{ role: "user", content: [{ type: "text", text: "" }, tinyImage] }],
+      }),
+    (error: unknown) =>
+      error instanceof HttpError && error.status === 400 && error.code === "invalid_content",
+  );
+
+  const eightMiB = Buffer.alloc(8 * 1024 * 1024);
+  Buffer.from("89504e470d0a1a0a", "hex").copy(eightMiB);
+  const largeImage = {
+    type: "image_url" as const,
+    image_url: { url: `data:image/png;base64,${eightMiB.toString("base64")}` },
+  };
+  assert.equal(decodedImageBytes([largeImage]), 8 * 1024 * 1024);
+
+  const allowed = readHttpAdd({
+    ...sample,
+    messages: Array.from({ length: 3 }, () => ({ role: "user", content: [largeImage] })),
+  });
+  assert.equal(allowed.messages.length, 3);
+
+  assert.throws(
+    () =>
+      readHttpAdd({
+        ...sample,
+        messages: Array.from({ length: 4 }, () => ({ role: "user", content: [largeImage] })),
+      }),
+    { status: 413, code: "request_too_large" },
+  );
 });

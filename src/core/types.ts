@@ -841,7 +841,8 @@ export interface MemorySearchResult {
    *  related" (docs §7.1 multi-hop path retrieval). Empty/absent for seed hits. */
   path?: EdgePathStep[];
   /** Provenance of a result in an explicit memory neighborhood. */
-  neighborhood?: "previous_turn" | "next_turn" | "graph" | "source_group" | "same_node";
+  neighborhood?:
+    "previous_turn" | "next_turn" | "due_today" | "graph" | "source_group" | "same_node";
   /** Query terms that literally appear in the candidate (lexical matches).
    *  Empty for pure-semantic/route recalls. */
   hitTerms?: string[];

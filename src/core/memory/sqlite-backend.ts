@@ -129,6 +129,8 @@ export class SqliteMemoryBackend implements MemoryBackend {
         WHERE kind='memory' AND scope=${sqlLiteral(serializeScope(USER_PROFILE_SCOPE))};
       CREATE INDEX IF NOT EXISTS nmg_memory_state
         ON nmg_memory_entities(namespace, statekey, scope, id) WHERE kind='memory';
+      CREATE INDEX IF NOT EXISTS nmg_memory_event_time
+        ON nmg_memory_entities(namespace, json_extract(payload, '$.eventTime')) WHERE kind='memory';
       CREATE INDEX IF NOT EXISTS nmg_memory_edge_source
         ON nmg_memory_entities(namespace, source, id) WHERE kind='edge';
       CREATE INDEX IF NOT EXISTS nmg_memory_edge_target

@@ -31,8 +31,9 @@ import type {
 import { MemoryWriteRejected } from "../write-policy.ts";
 import { hybridScore, lexicalTextScore, searchTerms } from "../store/search-ranking.ts";
 import type { ExactLookupAnchor } from "../store/search-ranking.ts";
+import { hostTimeZone, queryEventWindow, referenceTimeZone } from "../store/advanced-query.ts";
 import { normalize, normalizeStatement } from "../memory-normalization.ts";
-import { eventWindowEnd, eventWindowStart } from "../event-time.ts";
+import { calendarDay, eventWindowEnd, eventWindowStart, futureDueDays } from "../event-time.ts";
 import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import { TESSERA_REF_MARKER } from "../types.ts";
 import { isUserProfileRecord, userProfileMatch, USER_PROFILE_SCOPE } from "../user-profile.ts";
@@ -65,6 +66,9 @@ export interface MemoryQueryOptions {
   nodeName?: string;
   eventTimeFrom?: string;
   eventTimeTo?: string;
+  /** Optional caller clock (ISO instant with Z or offset) for query-time windows and due reminders. */
+  now?: string;
+  dueReminders?: boolean;
   findTesserae?: boolean;
   expandLeafContext?: boolean;
   expandSourceContext?: boolean;
@@ -494,23 +498,16 @@ export class MemoryEngine {
         eventTimeTo,
         limit: 512,
       };
-      const results = semantic
-        ? await this.semanticResults(view, text, query, options, semantic, limit)
-        : await this.lexicalResults(view, text, query, options, limit, exact);
-      if (exact && !results.length)
-        return { results, relations: [], retrieval: { mode: "lexical", degraded: false } };
-      await this.appendMatchingSourceNeighbors(
-        view,
-        results,
-        text,
-        query,
-        { ...options, limit },
-        semantic,
-      );
-      const relations = await this.expandSearchStructure(view, results, query, {
-        ...options,
-        limit,
-      });
+      const normal = await this.retrieveResults(view, text, query, options, limit, semantic, exact);
+      if (exact && !normal.length)
+        return { results: normal, relations: [], retrieval: { mode: "lexical", degraded: false } };
+      const results = exact
+        ? normal
+        : await this.applyTemporalWindow(view, text, query, options, normal, limit, semantic);
+      const stepOptions = { ...options, limit };
+      await this.appendMatchingSourceNeighbors(view, results, text, query, stepOptions, semantic);
+      if (!exact) await this.appendDueToday(view, results, stepOptions, limit);
+      const relations = await this.expandSearchStructure(view, results, query, stepOptions);
       const tesserae = await this.searchTesserae(view, text, options, results);
       return {
         results,
@@ -565,7 +562,7 @@ export class MemoryEngine {
     const terms = searchTerms(normalize(text)).filter((term) => /\p{L}/u.test(term));
     const seen = new Set(results.map(({ memory }) => memory.id));
     const matches: Array<SourceNeighbor & { overlap: number }> = [];
-    for (const anchor of results.slice(0, 2)) {
+    for (const [anchorIndex, anchor] of results.slice(0, 2).entries()) {
       for (const neighbor of this.backend.adjacentSources(view, anchor.evidence, {
         ...query,
         scope: anchor.memory.scope,
@@ -576,7 +573,7 @@ export class MemoryEngine {
         seen.add(id);
         const tokens = new Set(searchTerms(normalize(statement)));
         const overlap = terms.filter((term) => tokens.has(term)).length;
-        if (overlap) matches.push({ ...neighbor, overlap });
+        if (overlap > 0 || anchorIndex === 0) matches.push({ ...neighbor, overlap });
       }
     }
     matches.sort((a, b) => b.overlap - a.overlap);
@@ -589,14 +586,135 @@ export class MemoryEngine {
       (rows) => rows.slice(0, 2),
     );
     const pivot = Math.min(results.length, options.limit - neighbors.length);
+    const floor = results.slice(0, pivot).at(-1)?.combinedScore;
     results.splice(
       pivot,
       results.length - pivot,
-      ...neighbors.map((result) => ({
-        ...result,
-        neighborhood: relation.get(result.memory.id),
-      })),
+      ...capTailScores(
+        floor,
+        neighbors.map((result) => ({
+          ...result,
+          neighborhood: relation.get(result.memory.id),
+        })),
+      ),
     );
+  }
+
+  private retrieveResults(
+    view: MemoryReadView,
+    text: string,
+    query: MemoryEntityQuery,
+    options: MemoryQueryOptions,
+    limit: number,
+    semantic?: MemoryVectorQuery,
+    exact?: RegExp,
+  ): Promise<MemorySearchResult[]> {
+    return semantic
+      ? this.semanticResults(view, text, query, options, semantic, limit)
+      : this.lexicalResults(view, text, query, options, limit, exact);
+  }
+
+  private async applyTemporalWindow(
+    view: MemoryReadView,
+    text: string,
+    query: MemoryEntityQuery,
+    options: MemoryQueryOptions,
+    normal: MemorySearchResult[],
+    limit: number,
+    semantic?: MemoryVectorQuery,
+  ): Promise<MemorySearchResult[]> {
+    if (options.eventTimeFrom || options.eventTimeTo) return normal;
+    const reference = options.now ?? this.now();
+    const zone = options.now ? undefined : hostTimeZone(new Date(reference));
+    const temporal = queryEventWindow(text, reference, zone);
+    if (!temporal.from && !temporal.to) return normal;
+    const windowed = await this.retrieveResults(
+      view,
+      text,
+      { ...query, eventTimeFrom: temporal.from, eventTimeTo: temporal.to },
+      { ...options, eventTimeFrom: temporal.from, eventTimeTo: temporal.to },
+      limit,
+      semantic,
+    );
+    return mergeTemporalWindow(normal, windowed, limit);
+  }
+
+  private async appendDueToday(
+    view: MemoryReadView,
+    results: MemorySearchResult[],
+    options: MemoryQueryOptions,
+    limit: number,
+  ): Promise<void> {
+    if (!options.dueReminders) return;
+    const reference = options.now ?? this.now();
+    const refDate = new Date(reference);
+    if (!Number.isFinite(refDate.getTime())) return;
+    const zone = options.now ? referenceTimeZone(reference, refDate) : hostTimeZone(refDate);
+    const today = calendarDay(refDate, zone);
+    const candidates = await this.scanDueTodayCandidates(
+      view,
+      results,
+      options,
+      refDate,
+      zone,
+      today,
+    );
+    if (!candidates.length) return;
+    const projected = await this.project(view, candidates, options, false, (rows) =>
+      rows.slice(0, Math.min(2, limit)),
+    );
+    if (!projected.length) return;
+    const tail = results.filter(isAdjacentTurn);
+    const ranked = results.filter((item) => !isAdjacentTurn(item));
+    const keepRanked = Math.max(0, limit - projected.length - tail.length);
+    const kept = ranked.slice(0, keepRanked);
+    const floor = kept.at(-1)?.combinedScore;
+    const due = capTailScores(
+      floor,
+      projected.map((item) => ({ ...item, neighborhood: "due_today" as const })),
+    );
+    const next = [
+      ...kept,
+      ...due,
+      ...capTailScores(due.at(-1)?.combinedScore ?? floor, tail),
+    ].slice(0, limit);
+    results.splice(0, results.length, ...next);
+  }
+
+  private async scanDueTodayCandidates(
+    view: MemoryReadView,
+    results: readonly MemorySearchResult[],
+    options: MemoryQueryOptions,
+    refDate: Date,
+    zone: string,
+    today: string,
+  ): Promise<Extract<MemoryEntity, { kind: "memory" }>[]> {
+    const seen = new Set(results.map(({ memory }) => memory.id));
+    const windowFrom = new Date(refDate.getTime() - 45 * 86_400_000).toISOString();
+    const windowTo = refDate.toISOString();
+    const matches: Extract<MemoryEntity, { kind: "memory" }>[] = [];
+    for (let page = 0; page < 4; page += 1) {
+      const rows = await this.backend.scan(view, {
+        kind: "memory",
+        scope: options.scope,
+        excludeScope: options.excludeScope,
+        sessionId: options.sessionId,
+        eventTimeFrom: windowFrom,
+        eventTimeTo: windowTo,
+        limit: 512,
+        offset: page * 512,
+      });
+      for (const entity of rows) {
+        if (isDueMemoryCandidate(entity, seen, zone, today)) matches.push(entity);
+      }
+      if (rows.length < 512) break;
+    }
+    matches.sort(
+      (a, b) =>
+        (b.value.eventTime ?? "").localeCompare(a.value.eventTime ?? "") ||
+        a.value.id.localeCompare(b.value.id),
+    );
+    return matches;
   }
 
   private async appendLeafContext(
@@ -1274,4 +1392,48 @@ function inEventWindow(memory: MemoryRecord, options: MemoryQueryOptions): boole
   return Boolean(
     time && (!eventTimeFrom || time >= eventTimeFrom) && (!eventTimeTo || time <= eventTimeTo),
   );
+}
+
+function mergeTemporalWindow(
+  normal: readonly MemorySearchResult[],
+  windowed: readonly MemorySearchResult[],
+  limit: number,
+): MemorySearchResult[] {
+  if (!windowed.length) return [...normal];
+  const maxNormal = normal.reduce((max, item) => Math.max(max, item.combinedScore), 0);
+  const boosted = windowed.slice(0, Math.ceil(limit / 2)).map((item) => ({
+    ...item,
+    combinedScore: item.combinedScore + maxNormal + 1,
+  }));
+  const seen = new Set(boosted.map(({ memory }) => memory.id));
+  return [...boosted, ...normal.filter(({ memory }) => !seen.has(memory.id))].slice(0, limit);
+}
+
+function isAdjacentTurn(result: MemorySearchResult): boolean {
+  return result.neighborhood === "previous_turn" || result.neighborhood === "next_turn";
+}
+
+function capTailScores(
+  floor: number | undefined,
+  items: readonly MemorySearchResult[],
+): MemorySearchResult[] {
+  if (floor === undefined) return [...items];
+  return items.map((item, index) => ({
+    ...item,
+    combinedScore: Math.min(item.combinedScore, Math.max(0, floor - (index + 1) * 1e-6)),
+  }));
+}
+
+function isDueMemoryCandidate(
+  entity: MemoryEntity,
+  seen: ReadonlySet<string>,
+  zone: string,
+  today: string,
+): entity is Extract<MemoryEntity, { kind: "memory" }> {
+  if (entity.kind !== "memory" || seen.has(entity.value.id)) return false;
+  const time = entity.value.eventTime;
+  if (!time) return false;
+  const anchor = new Date(time);
+  if (!Number.isFinite(anchor.getTime()) || calendarDay(anchor, zone) >= today) return false;
+  return futureDueDays(entity.value.statement, anchor, zone).includes(today);
 }

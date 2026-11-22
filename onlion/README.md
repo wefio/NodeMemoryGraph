@@ -49,7 +49,7 @@ Set the database and listener in `nmg-http.json`, then run
   "host": "127.0.0.1",
   "port": 8787,
   "defaultTopK": 20,
-  "maxRequestBytes": 6291456
+  "maxRequestBytes": 50331648
 }
 ```
 
@@ -68,9 +68,11 @@ curl http://127.0.0.1:8787/search -H 'Content-Type: application/json' \
 
 The local listener isolates SQLite namespaces by `user_id`. Each Add atomically
 writes up to 128 messages. Repeating the same request ID and payload replays the
-receipt. Changing the payload with the same ID yields `409`. Search uses the
-shared engine for lexical retrieval with one query and returns both structured
-`data` and the NMG renderer's `rendered` text. The HTTP listener and daemon
+receipt. Changing the payload with the same ID yields `409`. Search accepts
+single `query` (optionally with `options`) or `queries`, plus an optional `now`
+(`current_time`/`timestamp`) reference clock for relative date windows and
+due-today reminders; single-clause queries return both full `top_k` `data` and
+the NMG renderer's `rendered` text. The HTTP listener and daemon
 sessions use separate memory namespaces.
 
 ## Local deployment
@@ -129,8 +131,10 @@ for sustained concurrency and latency measurements.
 
 ## Multimodal behavior
 
-- Add and Search accept ordered `text`/`image_url` parts; Base64 data URLs
-  only (JPEG/PNG/WebP/GIF), bounded per image, content and request.
+- Add and Search accept ordered `text`/`image_url` parts (`type=text` must be
+  nonempty; `image_url.url` accepts Base64 PNG/JPEG/WebP/GIF data URLs, up to
+  10 MiB decoded per image and 30 MiB combined decoded images per Add on the
+  shared protocol; cloud Worker requests remain bounded by the 6 MiB body limit).
 - Retrieval uses the supplied caption text plus opaque per-image SHA-256
   references. No image-description model is required or invoked, and there is
   no multimodal embedding.

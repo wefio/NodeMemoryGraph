@@ -24,8 +24,9 @@ preparation centralizes the vendored core's only effective delta with
 score-equivalence tests.
 
 Ordered `text`/`image_url` parts are validated against bounded budgets (Base64
-JPEG/PNG/WebP/GIF data URLs only; per-image, per-content and per-request
-limits). The retrieval view is the supplied caption text plus an opaque
+JPEG/PNG/WebP/GIF data URLs only; nonempty trimmed `text` parts; up to 10 MiB
+decoded per image and 30 MiB combined decoded images per Add on the shared
+protocol, bounded further by the Worker's 6 MiB request body limit). The retrieval view is the supplied caption text plus an opaque
 per-image SHA-256 reference; no image-description model is required and none
 is invoked. Original ordered parts live in native history and are returned on
 Search; `raw_content` is the original evidence JSON, while `content` adds only
@@ -114,4 +115,8 @@ engine and search renderer. It can run independently of the daemon. `/health`
 serves the minimal unauthenticated contract (`status`, `storage`, `retrieval`)
 without storage probing or per-request diagnostic logging, while limits,
 revision, storage probes, and runtime diagnostics live on owner-authenticated
-`/admin/status`.
+`/admin/status`. `/search` accepts an optional `now` reference clock (aliases
+`current_time` and `timestamp`; Unix milliseconds or ISO 8601 with `Z`/offset;
+an extension beyond AML — omitting it preserves previous behavior) to prioritize
+query-time relative windows ("today"/"recent") and inject up to two `due_today`
+commitments at the tail.

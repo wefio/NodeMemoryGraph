@@ -92,6 +92,82 @@ function parseDateRange(value: string, now: Date): { from?: string; to?: string 
 
 const DATE_TOKEN =
   /[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4}|\d{4}-\d{1,2}-\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*[日号]|\d{1,2}\s*月\s*\d{1,2}\s*[日号]|[A-Za-z]{3,9}\.?\s+\d{4}/;
+const EN_RELATIVE_DAY = /\b(today|tonight|yesterday|\d+\s+days?\s+ago)\b/i;
+const RECENT = /最近|近期|这阵子|这几天|近来|\brecently\b|\blately\b/i;
+
+export function hostTimeZone(now: Date): string {
+  const offset = -now.getTimezoneOffset();
+  const sign = offset >= 0 ? "+" : "-";
+  const abs = Math.abs(offset);
+  return `${sign}${String(Math.floor(abs / 60)).padStart(2, "0")}:${String(abs % 60).padStart(2, "0")}`;
+}
+
+export function referenceTimeZone(reference: string, now: Date): string {
+  if (reference.endsWith("Z")) return "+00:00";
+  const match = reference.match(/([+-]\d{2}:\d{2})$/);
+  return match ? match[1]! : hostTimeZone(now);
+}
+
+function zoneOffsetMs(zone: string): number {
+  const match = zone.match(/^([+-])(\d{2}):(\d{2})$/);
+  if (!match) return 0;
+  const sign = match[1] === "+" ? 1 : -1;
+  return sign * (Number(match[2]) * 60 + Number(match[3])) * 60_000;
+}
+
+function shiftCalendarBound(bound: string, suffix: string, offsetMs: number): string {
+  if (!offsetMs || !bound.endsWith(suffix)) return bound;
+  return new Date(Date.parse(bound) - offsetMs).toISOString();
+}
+
+function windowResult(
+  from: string | null | undefined,
+  to: string | null | undefined,
+): { from?: string; to?: string } | null {
+  return from || to ? { ...(from ? { from } : {}), ...(to ? { to } : {}) } : null;
+}
+
+function extractPrepositionalEventWindow(
+  text: string,
+  now: Date,
+  timeZone?: string,
+): { from?: string; to?: string } | null {
+  // 1) "from <D1> to <D2>" / "between <D1> and <D2>" — explicit range
+  const rangeMatch = text.match(
+    new RegExp(
+      `\\b(?:from|between)\\s+(${DATE_TOKEN.source}),?\\s+(?:to|and)\\s+(${DATE_TOKEN.source})\\b`,
+      "i",
+    ),
+  );
+  if (rangeMatch) {
+    const window = windowResult(
+      eventWindowStart(rangeMatch[1]!, now, timeZone),
+      eventWindowEnd(rangeMatch[2]!, now, timeZone),
+    );
+    if (window) return window;
+  }
+  // 2) "as of / as at / by / before / until <D>" → inclusive through that day
+  const beforeMatch = text.match(
+    new RegExp(`\\b(?:as of|as at|by|before|until|up to)\\s+(${DATE_TOKEN.source})\\b`, "i"),
+  );
+  if (beforeMatch) {
+    const to = eventWindowEnd(beforeMatch[1]!, now, timeZone);
+    if (to) return { to };
+  }
+  // 3) "on <D>" → that exact day
+  const onMatch = text.match(new RegExp(`\\bon\\s+(${DATE_TOKEN.source})\\b`, "i"));
+  if (onMatch) {
+    const from = eventWindowStart(onMatch[1]!, now, timeZone);
+    if (from) return windowResult(from, eventWindowEnd(onMatch[1]!, now, timeZone));
+  }
+  // 4) "after / since <D>" → from that day onward
+  const afterMatch = text.match(new RegExp(`\\b(?:after|since)\\s+(${DATE_TOKEN.source})\\b`, "i"));
+  if (afterMatch) {
+    const from = eventWindowStart(afterMatch[1]!, now, timeZone);
+    if (from) return { from };
+  }
+  return null;
+}
 
 /**
  * Natural-language window for English prepositions and Chinese phrases alike.
@@ -101,42 +177,47 @@ const DATE_TOKEN =
 export function extractEventWindow(
   text: string,
   now: Date = new Date(),
+  timeZone?: string,
 ): { from?: string; to?: string } {
-  // 1) "from <D1> to <D2>" / "between <D1> and <D2>" — explicit range
-  let m = text.match(
-    new RegExp(
-      `\\b(?:from|between)\\s+(${DATE_TOKEN.source}),?\\s+(?:to|and)\\s+(${DATE_TOKEN.source})\\b`,
-      "i",
-    ),
-  );
-  if (m) {
-    const from = eventWindowStart(m[1]!, now);
-    const to = eventWindowEnd(m[2]!, now);
-    if (from || to) return { ...(from ? { from } : {}), ...(to ? { to } : {}) };
+  const prepositional = extractPrepositionalEventWindow(text, now, timeZone);
+  if (prepositional) return prepositional;
+  // 5) Standalone English relatives: today, tonight, yesterday, N days ago
+  const relativeMatch = text.match(EN_RELATIVE_DAY);
+  if (relativeMatch) {
+    const window = windowResult(
+      eventWindowStart(relativeMatch[1]!, now, timeZone),
+      eventWindowEnd(relativeMatch[1]!, now, timeZone),
+    );
+    if (window) return window;
   }
-  // 2) "as of / as at / by / before / until <D>" → inclusive through that day
-  m = text.match(
-    new RegExp(`\\b(?:as of|as at|by|before|until|up to)\\s+(${DATE_TOKEN.source})\\b`, "i"),
-  );
-  if (m) {
-    const to = eventWindowEnd(m[1]!, now);
-    if (to) return { to };
+  // 6) Chinese: 上周三 / 上个月 / 3月10号之前 / 从A到B
+  return extractChineseEventWindow(text, now, timeZone);
+}
+
+/** Resolve relative/recent query phrases into UTC instant bounds anchored on `reference`. */
+export function queryEventWindow(
+  text: string,
+  reference: string,
+  timeZone?: string,
+): { from?: string; to?: string } {
+  const now = new Date(reference);
+  if (!Number.isFinite(now.getTime())) return {};
+  const zone = timeZone ?? referenceTimeZone(reference, now);
+  const window = extractEventWindow(text, now, zone);
+  if (window.from || window.to) {
+    const offsetMs = zoneOffsetMs(zone);
+    return {
+      ...(window.from ? { from: shiftCalendarBound(window.from, "T00:00:00.000Z", offsetMs) } : {}),
+      ...(window.to ? { to: shiftCalendarBound(window.to, "T23:59:59.999Z", offsetMs) } : {}),
+    };
   }
-  // 3) "on <D>" → that exact day
-  m = text.match(new RegExp(`\\bon\\s+(${DATE_TOKEN.source})\\b`, "i"));
-  if (m) {
-    const from = eventWindowStart(m[1]!, now);
-    const to = eventWindowEnd(m[1]!, now);
-    if (from) return { from, ...(to ? { to } : {}) };
+  if (RECENT.test(text)) {
+    return {
+      from: new Date(now.getTime() - 7 * 86_400_000).toISOString(),
+      to: now.toISOString(),
+    };
   }
-  // 4) "after / since <D>" → from that day onward
-  m = text.match(new RegExp(`\\b(?:after|since)\\s+(${DATE_TOKEN.source})\\b`, "i"));
-  if (m) {
-    const from = eventWindowStart(m[1]!, now);
-    if (from) return { from };
-  }
-  // 5) Chinese: 上周三 / 上个月 / 3月10号之前 / 从A到B
-  return extractChineseEventWindow(text, now);
+  return {};
 }
 
 export function parseAdvancedQuery(query: string, now: Date = new Date()): ParsedAdvancedQuery {

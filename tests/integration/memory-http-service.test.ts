@@ -134,3 +134,43 @@ test("HttpMemoryService retrieves cross-chunk session neighbors in hybrid mode w
     !lexicalPage.memories.some((row) => row.raw_content.startsWith("Quartz later followup")),
   );
 });
+
+test("HttpMemoryService surfaces due-today commitments at the tail only when now is supplied", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-http-service-due-today-"));
+  const backend = await openMemoryBackend({
+    kind: "sqlite",
+    path: join(directory, "memory.sqlite"),
+    namespace: "http:u-due",
+  });
+  t.after(async () => {
+    await backend.close();
+    removeTempDirectory(directory);
+  });
+
+  const engine = new MemoryEngine(backend, () => "2026-10-06T00:00:00.000Z");
+  const service = new HttpMemoryService(engine);
+  await service.rememberBatch("u-due", "sample:0", "req-due-1", [
+    {
+      role: "user",
+      content: "约好下周二去老周修车摊换黄铜车铃",
+      chat_time: "2026-10-03T10:00:00+08:00",
+      source_message_id: sourceHttpMessageId("due1", 0),
+    },
+    {
+      role: "user",
+      content: "阳台地上昨夜下雨有点湿",
+      chat_time: "2026-10-06T07:30:00+08:00",
+      source_message_id: sourceHttpMessageId("due2", 1),
+    },
+  ]);
+
+  const withNow = await service.search(["阳台下雨有点湿"], 10, [], undefined, {
+    now: "2026-10-06T08:00:00+08:00",
+  });
+  assert.equal(withNow.memories[0]?.raw_content, "阳台地上昨夜下雨有点湿");
+  assert.ok(withNow.memories.some((row) => row.raw_content.includes("换黄铜车铃")));
+  assert.ok(withNow.memories[0]!.score >= withNow.memories[1]!.score);
+
+  const withoutNow = await service.search(["阳台下雨有点湿"], 10);
+  assert.ok(!withoutNow.memories.some((row) => row.raw_content.includes("换黄铜车铃")));
+});

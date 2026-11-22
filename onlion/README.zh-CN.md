@@ -32,7 +32,7 @@ CI 在 Miniflare 与模拟 R2 中运行构建后的 Worker，不调用外部模�
   "host": "127.0.0.1",
   "port": 8787,
   "defaultTopK": 20,
-  "maxRequestBytes": 6291456
+  "maxRequestBytes": 50331648
 }
 ```
 
@@ -46,7 +46,7 @@ curl http://127.0.0.1:8787/search -H 'Content-Type: application/json' \
   -d '{"user_id":"demo","query":"When should meetings be scheduled?","top_k":5}'
 ```
 
-本地监听器按 `user_id` 隔离 SQLite 命名空间。每次 Add 最多原子写入 128 条消息，同一用户重复使用相同的请求 ID 会复用写入回执，更改内容会收到 `409`。Search 对单个查询执行统一引擎的词法检索，返回结构化 `data` 和经过 NMG 渲染器生成的 `rendered` 文本。这个入口的 HTTP 数据与 daemon 会话使用独立的命名空间。
+本地监听器按 `user_id` 隔离 SQLite 命名空间。每次 Add 最多原子写入 128 条消息，同一用户重复使用相同的请求 ID 会复用写入回执，更改内容会收到 `409`。Search 支持单 `query`（可带 `options`）或 `queries`，以及可选参考时钟 `now`（别名 `current_time`/`timestamp`，用于启用相对时间窗与当天到期提醒）；单子句查询同时返回按完整 `top_k` 投影的 `data` 与 NMG 渲染器生成的 `rendered` 文本。这个入口的 HTTP 数据与 daemon 会话使用独立的命名空间。
 
 ## 本地部署
 
@@ -86,7 +86,7 @@ npm run deploy:edgeone  # edgeone makers deploy ./dist/edgeone -n nmg-memory-api
 
 ## 多模态行为
 
-- Add 与 Search 接受有序 `text`/`image_url` parts；仅 Base64 data URL（JPEG/PNG/WebP/GIF），单图、单条内容与单请求均有上限。
+- Add 与 Search 接受有序 `text`/`image_url` parts（`type=text` 须非空；仅 Base64 data URL，支持 JPEG/PNG/WebP/GIF；共享协议单图解码至多 10 MiB、单次 Add 解码图片合计至多 30 MiB，云端 Worker 同时受 6 MiB 单请求体上限约束）。
 - 检索使用随附描述文字加不透明的单图 SHA-256 引用。不要求、也不会调用任何图片描述模型；没有多模态向量。
 - Search 在 `content` 返回原始有序 parts；`raw_content` 是原始证据 JSON。`content` 可能携带共享的条件式时间前缀（[展示策略](../src/integration/temporal-evidence-policy.json)）。
 - 归因跟随消息角色；结构化内容标记携带格式、来源角色与内容哈希。

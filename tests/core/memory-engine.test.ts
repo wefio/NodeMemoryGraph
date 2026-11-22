@@ -256,3 +256,125 @@ for (const kind of ["sqlite", "lancedb"] as const) {
     }
   });
 }
+
+test("SQLite search uses caller now for today windows, due-today reminders, and Top-1 zero-overlap neighbors", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-engine-temporal-now-"));
+  const backend = await openMemoryBackend({
+    kind: "sqlite",
+    path: join(directory, "memory.sqlite"),
+    namespace: "temporal-test",
+  });
+  t.after(async () => {
+    await backend.close();
+    removeTempDirectory(directory);
+  });
+
+  const engine = new MemoryEngine(backend);
+  // 1) Today window: exact literal "韩阿姨今天" in old turn vs today's event without "今天"
+  const oldLiteral = await engine.remember({
+    statement: "小满，中午好。韩阿姨今天回来了，一进门我就闻见腌萝卜味儿",
+    nodeName: "Chat Oct 15",
+    eventTime: "2026-10-15T04:00:00.000Z",
+    evidenceSource: {
+      actor: "user",
+      sourceMessageId: "10",
+      content: "韩阿姨今天回来了",
+    },
+    sessionId: "s1",
+    residence: "stg",
+  });
+  const todayTurn = await engine.remember({
+    statement: "韩阿姨上午打扫时悄悄预支了工钱",
+    nodeName: "Chat Oct 30",
+    eventTime: "2026-10-30T03:00:00.000Z",
+    evidenceSource: {
+      actor: "user",
+      sourceMessageId: "20",
+      content: "韩阿姨上午打扫时悄悄预支了工钱",
+    },
+    sessionId: "s1",
+    residence: "stg",
+  });
+  const nextZeroOverlap = await engine.remember({
+    statement: "四千八百元刚好给儿子办婚事",
+    nodeName: "Chat Oct 30 follow",
+    sourceActor: "assistant",
+    eventTime: "2026-10-30T03:05:00.000Z",
+    evidenceSource: {
+      actor: "assistant",
+      sourceMessageId: "21",
+      content: "四千八百元刚好给儿子办婚事",
+    },
+    sessionId: "s1",
+    residence: "stg",
+  });
+
+  // 2) Due today: 10-03 promise due on 10-06 (Tuesday)
+  const duePromise = await engine.remember({
+    statement: "约好下周二去老周修车摊换黄铜车铃",
+    nodeName: "Errand Oct 03",
+    eventTime: "2026-10-03T02:00:00.000Z",
+  });
+  const filler = await engine.rememberMany(
+    Array.from({ length: 12 }, (_, index) => ({
+      statement: `阳台日常记录编号 ${index}`,
+      nodeName: `Filler ${index}`,
+      eventTime: "2026-10-05T02:00:00.000Z",
+    })),
+  );
+
+  // Without caller `now` for Oct 30, lexical literal match ranks Oct 15 first.
+  const withoutNow = await engine.search("我想把韩阿姨今天跟我说的事记进备忘录", {
+    sessionId: "s1",
+    now: "2026-11-22T12:00:00+08:00",
+  });
+  assert.equal(withoutNow.results[0]?.memory.id, oldLiteral.memory.id);
+
+  // With `now = 2026-10-30T13:39:00+08:00`, Oct 30 event takes Top-1.
+  const withNow = await engine.search("我想把韩阿姨今天跟我说的事记进备忘录", {
+    sessionId: "s1",
+    now: "2026-10-30T13:39:00+08:00",
+  });
+  assert.equal(withNow.results[0]?.memory.id, todayTurn.memory.id);
+
+  // Hybrid mode with expandSourceContext + limit >= 10 appends Top-1's zero-overlap next turn.
+  const allDocs = backend.vectorIndex!.pending("stub", 32);
+  backend.vectorIndex!.save(
+    "stub",
+    allDocs,
+    allDocs.map((doc) => {
+      if (doc.id === todayTurn.memory.id) return [1, 0];
+      if (doc.id === nextZeroOverlap.memory.id) return [0, 1];
+      if (doc.id === duePromise.memory.id) return [0, 1];
+      return filler.some((item) => item.memory.id === doc.id) ? [0.2, 0.9] : [0.5, 0.5];
+    }),
+  );
+  const neighborExpanded = await engine.search(
+    "我想把韩阿姨今天跟我说的事记进备忘录",
+    {
+      sessionId: "s1",
+      now: "2026-10-30T13:39:00+08:00",
+      limit: 10,
+      expandSourceContext: true,
+    },
+    { indexId: "stub", vector: [1, 0], mode: "hybrid" },
+  );
+  assert.equal(neighborExpanded.results[0]?.memory.id, todayTurn.memory.id);
+  const appendedZeroOverlap = neighborExpanded.results.find(
+    (item) => item.memory.id === nextZeroOverlap.memory.id,
+  );
+  assert.equal(appendedZeroOverlap?.neighborhood, "next_turn");
+
+  // Due-today scan surfaces Oct 03's "下周二" commitment when now is Oct 06, even with unrelated query.
+  const dueFound = await engine.search("昨晚雨下得久", {
+    now: "2026-10-06T08:00:00+08:00",
+    dueReminders: true,
+  });
+  const dueHit = dueFound.results.find((item) => item.memory.id === duePromise.memory.id);
+  assert.equal(dueHit?.neighborhood, "due_today");
+
+  const dueDisabled = await engine.search("昨晚雨下得久", {
+    now: "2026-10-06T08:00:00+08:00",
+  });
+  assert.ok(!dueDisabled.results.some((item) => item.memory.id === duePromise.memory.id));
+});

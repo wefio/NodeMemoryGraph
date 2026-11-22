@@ -4,6 +4,7 @@ import { projectAmlMultimodalMemory } from "../../src/integration/aml-projection
 import { searchResultFixture } from "../helpers/search-result.ts";
 import {
   ContentValidationError,
+  decodedImageBytes,
   describeContent,
   normalizeContent,
 } from "../../src/integration/multimodal-content.ts";
@@ -62,6 +63,7 @@ for (const value of [
   [{ type: "audio", data: "unsupported" }],
   [{ type: "text", text: 1 }],
   [{ type: "text", text: " " }],
+  [{ type: "text", text: "" }, image],
   [{ type: "image_url", image_url: { url: "https://example.test/image.png" } }],
   [{ type: "image_url", image_url: { url: "data:image/png;base64,bm90LWFuLWltYWdl" } }],
 ]) {
@@ -135,4 +137,7 @@ test("images without a supplied caption retain an opaque source reference, not a
 test("an explicitly enabled image describer must return a nonempty description", async () => {
   const content = normalizeContent([image]);
   await assert.rejects(() => describeContent(content, async () => " "), /empty|nonempty/i);
+  const expectedBytes = Buffer.from(image.image_url.url.split(",")[1]!, "base64").length;
+  assert.equal(decodedImageBytes(content), expectedBytes);
+  assert.equal(decodedImageBytes("plain text"), 0);
 });
