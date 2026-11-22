@@ -252,15 +252,20 @@ export function ftsExpression(query: string): string {
     .join(" OR ");
 }
 
+const CJK_RUN_PATTERN =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\u3005\u30FC\uFF70]+/gu;
+const CJK_SUBSTRING_RUN_PATTERN =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\u3005\u30FC\uFF70]{3,}/gu;
+
 /**
- * SQLite unicode61 keeps a contiguous Han run as one token. Append explicit
- * character bigrams so a longer recall question can match a shorter Chinese
+ * SQLite unicode61 keeps a contiguous CJK run as one token. Append explicit
+ * character bigrams so a longer recall question can match a shorter CJK
  * phrase (and vice versa) without requiring a platform-specific tokenizer.
- * The original text remains indexed for exact phrase and non-Han retrieval.
+ * The original text remains indexed for exact phrase and non-CJK retrieval.
  */
 export function ftsIndexedText(value: string): string {
   const bigrams: string[] = [];
-  for (const match of value.matchAll(/\p{Script=Han}+/gu)) {
+  for (const match of value.matchAll(CJK_RUN_PATTERN)) {
     const run = match[0];
     for (let index = 0; index < run.length - 1; index += 1) {
       bigrams.push(run.slice(index, index + 2));
@@ -275,6 +280,42 @@ export function ftsIndexedText(value: string): string {
 export function surfaceIndexedText(value: string): string {
   return normalize(value).replace(/\s+/gu, " ");
 }
+
+const ALL_CAPS_NON_ANCHOR_WORDS = new Set([
+  "ALL",
+  "AND",
+  "ANY",
+  "ARE",
+  "BUT",
+  "CAN",
+  "DID",
+  "DOES",
+  "FOR",
+  "FROM",
+  "HAS",
+  "HAVE",
+  "HOW",
+  "JUST",
+  "MAY",
+  "MUST",
+  "NEVER",
+  "NOT",
+  "ONLY",
+  "THAT",
+  "THE",
+  "THIS",
+  "VERY",
+  "WAS",
+  "WERE",
+  "WHAT",
+  "WHEN",
+  "WHERE",
+  "WHO",
+  "WHY",
+  "WILL",
+  "WITH",
+  "YES",
+]);
 
 /** Extract explicit surface anchors that embeddings commonly blur: quoted
  * phrases, paths/URLs, versions, error codes and code-like identifiers. Plain
@@ -295,11 +336,12 @@ export function surfaceAnchors(value: string): string[] {
     add(match[1] ?? match[2] ?? "");
   }
   for (const token of canonical.split(/\s+/gu)) {
-    const cleaned = token.replace(/^[,;!?()[\]{}"“”'‘’`]+|[,;!?()[\]{}"“”'‘’`]+$/gu, "");
+    const cleaned = token.replace(/^[,;!?()[\]{}"“”'‘’`]+|[.,:;!?()[\]{}"“”'‘’`]+$/gu, "");
     if (!cleaned) continue;
     const codeLike = /[\\/:._+#@-]/u.test(cleaned);
     const versioned = /\p{N}/u.test(cleaned);
-    const errorCode = /^[A-Z][A-Z0-9_]{2,}$/u.test(cleaned);
+    const errorCode =
+      /^[A-Z][A-Z0-9_]{2,}$/u.test(cleaned) && !ALL_CAPS_NON_ANCHOR_WORDS.has(cleaned);
     const camelCase = /^\p{Lu}[\p{L}\p{N}]*\p{Ll}[\p{L}\p{N}]*\p{Lu}[\p{L}\p{N}]*$/u.test(cleaned);
     if (codeLike || versioned || errorCode || camelCase) add(cleaned);
   }
@@ -309,6 +351,22 @@ export function surfaceAnchors(value: string): string[] {
 export function surfaceAnchorExpression(query: string): string {
   return surfaceAnchors(query)
     .map((anchor) => `"${anchor.replaceAll('"', '""')}"`)
+    .join(" OR ");
+}
+
+/** Contiguous surface substrings routed to the SQLite trigram index: explicit
+ *  surface anchors plus contiguous 3+ character CJK phrases. */
+export function surfaceTrigramTerms(query: string): string[] {
+  const terms = new Set(surfaceAnchors(query));
+  for (const match of normalize(query).matchAll(CJK_SUBSTRING_RUN_PATTERN)) {
+    terms.add(match[0]);
+  }
+  return [...terms];
+}
+
+export function surfaceTrigramExpression(query: string): string {
+  return surfaceTrigramTerms(query)
+    .map((term) => `"${term.replaceAll('"', '""')}"`)
     .join(" OR ");
 }
 
@@ -435,9 +493,10 @@ export function searchTerms(value: string): string[] {
   const terms = new Set<string>();
   for (const token of tokens) {
     if (token.length >= 2 && !ENGLISH_SEARCH_STOP_WORDS.has(token)) terms.add(token);
-    if (/\p{Script=Han}/u.test(token) && token.length > 4) {
-      for (let index = 0; index < token.length - 1; index += 1) {
-        terms.add(token.slice(index, index + 2));
+    for (const match of token.matchAll(CJK_SUBSTRING_RUN_PATTERN)) {
+      const run = match[0];
+      for (let index = 0; index < run.length - 1; index += 1) {
+        terms.add(run.slice(index, index + 2));
       }
     }
   }

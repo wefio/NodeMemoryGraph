@@ -29,7 +29,7 @@ import { graphImportRequest } from "./graph-import.ts";
 import { readLegacyClaimRows, readLegacyMemoryRows } from "../store/legacy-memory-snapshot.ts";
 import { requestHash } from "./model.ts";
 import { ensureLocalDaemonSchema, migrate } from "../store/schema.ts";
-import { ftsExpression } from "../store/search-ranking.ts";
+import { ftsExpression, surfaceTrigramExpression } from "../store/search-ranking.ts";
 import { serializeScope } from "../scope.ts";
 import { USER_PROFILE_SCOPE } from "../user-profile.ts";
 import { ensureSqliteTextIndexes, textIndex, writeSqliteTextIndex } from "./sqlite-text-index.ts";
@@ -54,6 +54,7 @@ import {
 
 const LOCAL_MEMORY_TABLE = "nmg_local_memory";
 const SQL_BATCH_SIZE = 64;
+const SURFACE_TRIGRAM_WEIGHT = 0.35;
 export const LOCAL_MEMORY_NAMESPACE = "local-memory-v1";
 function localNamespace(db: DatabaseSync): string | undefined {
   const exists = db
@@ -190,8 +191,38 @@ export class SqliteMemoryBackend implements MemoryBackend {
       vector.map(({ entity, recordScore }) => [entity.value.id, recordScore]),
     );
     const expression = ftsExpression(query.text);
+    const surfaceExpr = surfaceTrigramExpression(query.text);
     const db = this.reader(view);
-    const lexical = expression ? readLexicalMemoryPage(db, this.namespace, query, expression) : [];
+    const lexicalById = new Map<
+      string,
+      { entity: Extract<MemoryEntity, { kind: "memory" }>; bm25: number }
+    >();
+    if (expression) {
+      for (const hit of readLexicalMemoryPage(db, this.namespace, query, expression)) {
+        lexicalById.set(hit.entity.value.id, { ...hit });
+      }
+    }
+    if (surfaceExpr) {
+      for (const hit of readLexicalMemoryPage(
+        db,
+        this.namespace,
+        query,
+        surfaceExpr,
+        "nmg_memory_surface_fts",
+      )) {
+        const bm25 = hit.bm25 * SURFACE_TRIGRAM_WEIGHT;
+        const existing = lexicalById.get(hit.entity.value.id);
+        if (existing) existing.bm25 += bm25;
+        else lexicalById.set(hit.entity.value.id, { entity: hit.entity, bm25 });
+      }
+    }
+    const lexical = [...lexicalById.values()].sort(
+      (left, right) =>
+        right.bm25 - left.bm25 ||
+        (left.entity.value.id < right.entity.value.id
+          ? -1
+          : Number(left.entity.value.id > right.entity.value.id)),
+    );
     const lexicalIds = lexical.map(({ entity }) => entity.value.id);
     const lexicalSet = new Set(lexicalIds);
     const extraVector = this.vectorIndex.scoresFor(
@@ -199,14 +230,16 @@ export class SqliteMemoryBackend implements MemoryBackend {
       lexicalIds.filter((id) => !vectorScores.has(id)),
       semantic,
     );
-    const extraLexical = expression
-      ? readCrossBm25(
-          db,
-          this.namespace,
-          expression,
-          [...vectorScores.keys()].filter((id) => !lexicalSet.has(id)),
-        )
-      : new Map<string, number>();
+    const extraLexical =
+      expression || surfaceExpr
+        ? readCrossBm25(
+            db,
+            this.namespace,
+            expression,
+            surfaceExpr,
+            [...vectorScores.keys()].filter((id) => !lexicalSet.has(id)),
+          )
+        : new Map<string, number>();
     return {
       vectorIds: [...vectorScores.keys()],
       lexicalIds,
@@ -479,25 +512,76 @@ export class SqliteMemoryBackend implements MemoryBackend {
   }
 }
 
-function entityPage(namespace: string, query: MemoryEntityQuery, scoredExpression?: string) {
+function ftsSubquery(namespace: string, kind: string, table: string, expression: string): string {
+  return `(SELECT r.key AS fts_key, f.rank AS fts_rank FROM ${table} f
+      CROSS JOIN nmg_memory_fts_rows r ON r.fts_rowid=f.rowid
+      WHERE r.namespace = ${sqlLiteral(namespace)} AND r.key GLOB '${kind}:*'
+        AND ${table} MATCH ${sqlLiteral(expression)})`;
+}
+
+function twoRouteFtsSubquery(
+  namespace: string,
+  kind: string,
+  lexicalTable: string,
+  surfaceTable: string,
+  lexicalExpr: string,
+  surfaceExpr: string,
+): string {
+  return `(SELECT r.key AS fts_key, SUM(matched.fts_rank) AS fts_rank FROM (
+        SELECT f.rowid AS fts_rowid, f.rank AS fts_rank FROM ${lexicalTable} f WHERE ${lexicalTable} MATCH ${sqlLiteral(lexicalExpr)}
+        UNION ALL
+        SELECT s.rowid AS fts_rowid, s.rank * ${SURFACE_TRIGRAM_WEIGHT} AS fts_rank FROM ${surfaceTable} s WHERE ${surfaceTable} MATCH ${sqlLiteral(surfaceExpr)}
+      ) matched
+      CROSS JOIN nmg_memory_fts_rows r ON r.fts_rowid = matched.fts_rowid
+      WHERE r.namespace = ${sqlLiteral(namespace)} AND r.key GLOB '${kind}:*'
+      GROUP BY r.key)`;
+}
+
+function entityPage(
+  namespace: string,
+  query: MemoryEntityQuery,
+  scoredExpression?: string,
+  scoredTable?: string,
+) {
   const { limit, offset } = queryBounds(query);
   if (query.kind === "edge" && query.connectedTo !== undefined && !query.text)
     return { sql: adjacentEdgePage(namespace, query, query.connectedTo), bind: [limit, offset] };
   const where = `namespace = ${sqlLiteral(namespace)} AND ${sqliteQueryWhere(query)}`;
-  const fts = scoredExpression ?? (query.text ? ftsExpression(query.text) : undefined);
-  const [kind, table] = textIndex(query.kind);
+  const [kind, lexicalTable, surfaceTable] = textIndex(query.kind);
+  let ftsFrom: string | undefined;
+  let emptyFts = false;
+  if (scoredExpression !== undefined) {
+    if (scoredExpression) {
+      ftsFrom = ftsSubquery(namespace, kind, scoredTable ?? lexicalTable, scoredExpression);
+    } else {
+      emptyFts = true;
+    }
+  } else if (query.text) {
+    const lexicalExpr = ftsExpression(query.text);
+    const surfaceExpr = surfaceTrigramExpression(query.text);
+    if (!lexicalExpr && !surfaceExpr) emptyFts = true;
+    else if (lexicalExpr && surfaceExpr) {
+      ftsFrom = twoRouteFtsSubquery(
+        namespace,
+        kind,
+        lexicalTable,
+        surfaceTable,
+        lexicalExpr,
+        surfaceExpr,
+      );
+    } else {
+      const [table, expr] = lexicalExpr ? [lexicalTable, lexicalExpr] : [surfaceTable, surfaceExpr];
+      ftsFrom = ftsSubquery(namespace, kind, table, expr);
+    }
+  }
   // Start from MATCH results so SQLite only looks up entities that matched.
-  const from = fts
-    ? `(SELECT r.key AS fts_key, f.rank AS fts_rank FROM ${table} f
-      CROSS JOIN nmg_memory_fts_rows r ON r.fts_rowid=f.rowid
-      WHERE r.namespace = ${sqlLiteral(namespace)} AND r.key GLOB '${kind}:*'
-        AND f.text MATCH ${sqlLiteral(fts)})
-      CROSS JOIN nmg_memory_entities ON key = fts_key`
+  const from = ftsFrom
+    ? `${ftsFrom} CROSS JOIN nmg_memory_entities ON key = fts_key`
     : "nmg_memory_entities";
-  const order = fts ? "fts_rank, id" : "id";
+  const order = ftsFrom ? "fts_rank, id" : "id";
   return {
     sql: `SELECT kind, payload${scoredExpression ? ", -fts_rank AS bm25" : ""} FROM ${from}
-      WHERE ${fts === "" ? "1 = 0" : where} ORDER BY ${order} LIMIT ? OFFSET ?`,
+      WHERE ${emptyFts ? "1 = 0" : where} ORDER BY ${order} LIMIT ? OFFSET ?`,
     bind: [limit, offset],
   };
 }
@@ -507,8 +591,9 @@ function readLexicalMemoryPage(
   namespace: string,
   query: MemoryEntityQuery,
   expression: string,
+  table?: string,
 ) {
-  const page = entityPage(namespace, query, expression);
+  const page = entityPage(namespace, query, expression, table);
   return db
     .prepare(page.sql)
     .all(...page.bind)
@@ -518,9 +603,15 @@ function readLexicalMemoryPage(
     }));
 }
 
-function readCrossBm25(db: DatabaseSync, namespace: string, expression: string, ids: string[]) {
+function readCrossBm25(
+  db: DatabaseSync,
+  namespace: string,
+  expression: string,
+  surfaceExpr: string,
+  ids: string[],
+) {
   const scores = new Map<string, number>();
-  if (!ids.length) return scores;
+  if (!ids.length || (!expression && !surfaceExpr)) return scores;
   const wanted = new Map(
     db
       .prepare(
@@ -533,12 +624,17 @@ function readCrossBm25(db: DatabaseSync, namespace: string, expression: string, 
   );
   if (!wanted.size) return scores;
   // One MATCH scan shares the query's BM25 statistics. Probing each rowid repeats that work.
-  for (const row of db
-    .prepare(`SELECT rowid, -rank AS score FROM nmg_memory_fts WHERE text MATCH ?`)
-    .iterate(expression)) {
-    const id = wanted.get(row.rowid);
-    if (id !== undefined) scores.set(id, Number(row.score));
-  }
+  const accumulate = (table: string, expr: string, weight: number): void => {
+    if (!expr) return;
+    for (const row of db
+      .prepare(`SELECT rowid, -rank AS score FROM ${table} WHERE ${table} MATCH ?`)
+      .iterate(expr)) {
+      const id = wanted.get(row.rowid);
+      if (id !== undefined) scores.set(id, (scores.get(id) ?? 0) + Number(row.score) * weight);
+    }
+  };
+  accumulate("nmg_memory_fts", expression, 1);
+  accumulate("nmg_memory_surface_fts", surfaceExpr, SURFACE_TRIGRAM_WEIGHT);
   return scores;
 }
 
