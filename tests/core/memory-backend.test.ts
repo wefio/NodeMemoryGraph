@@ -655,6 +655,67 @@ test("ordinary hybrid search can spend two tail slots on relevant adjacent sourc
   );
 });
 
+test("SQLite adjacent source neighbors fall back to session insertion order for non-numeric IDs", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-session-rowid-neighbors-"));
+  const path = join(directory, "memory.sqlite");
+  const backend = await openMemoryBackend({ kind: "sqlite", path, namespace: "tenant" });
+  t.after(async () => {
+    await backend.close();
+    removeTempDirectory(directory);
+  });
+  const engine = new MemoryEngine(backend);
+  const scope = { aml_user: "u1" };
+  const addImported = (sessionId: string, sourceMessageId: string, statement: string) =>
+    engine.remember({
+      statement,
+      nodeName: `AML session ${sessionId}`,
+      memoryType: "event",
+      scope,
+      residence: "ltg",
+      sessionId: null,
+      importedEvidence: {
+        role: "user",
+        sessionId,
+        sourceMessageId,
+        sourceRef: sourceMessageId,
+        content: statement,
+      },
+    });
+  const chunk0 = await addImported("sample:0", "aml:hash0:0", "Earlier chunk zero turn");
+  await addImported("sample:other", "aml:other:0", "Unrelated session turn between chunks");
+  const chunk1 = await addImported("sample:0", "aml:hash1:0", "Anchor chunk one turn");
+  const chunk2 = await addImported("sample:0", "aml:hash2:0", "Later chunk two turn");
+
+  const prepare = DatabaseSync.prototype.prepare;
+  let sessionSql = "";
+  t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+    if (sql.startsWith("WITH anchor(rowid)")) sessionSql = sql;
+    return prepare.call(this, sql);
+  });
+
+  const context = await engine.searchNeighborhood(chunk1.memory.id, { limit: 4 });
+  assert.deepEqual(
+    context?.results.map(({ memory, neighborhood }) => [memory.id, neighborhood]),
+    [
+      [chunk0.memory.id, "previous_turn"],
+      [chunk2.memory.id, "next_turn"],
+    ],
+  );
+
+  const inspector = new DatabaseSync(path, { readOnly: true });
+  try {
+    const plan = inspector
+      .prepare(`EXPLAIN QUERY PLAN ${sessionSql}`)
+      .all("tenant", chunk1.history.id, "tenant", "sample:0", "tenant", "sample:0", "tenant", 8)
+      .map(({ detail }) => detail)
+      .join("\n");
+    assert.match(plan, /nmg_memory_history_session/u);
+    assert.match(plan, /nmg_memory_leaf_evidence/u);
+  } finally {
+    inspector.close();
+  }
+});
+
 test("SQLite retains leaf memberships and expands same-source evidence without route vectors", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-structural-leaves-"));
   const path = join(directory, "memory.sqlite");

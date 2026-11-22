@@ -68,11 +68,43 @@ function summariseClauses(
   return clauses;
 }
 
+function isSourceNeighbor(result: MemorySearchResult): boolean {
+  return result.neighborhood === "previous_turn" || result.neighborhood === "next_turn";
+}
+
+function compareCandidates(a: FusedCandidate, b: FusedCandidate): number {
+  return (
+    b.result.combinedScore - a.result.combinedScore ||
+    a.result.memory.id.localeCompare(b.result.memory.id)
+  );
+}
+
+/** Place source-turn neighbors at the tail without letting project()'s ordinal
+ * rank score (1 / (index + 1)) outrank real direct hits during clause fusion. */
+function appendTailNeighbors(
+  hits: readonly FusedCandidate[],
+  neighbors: readonly FusedCandidate[],
+): FusedCandidate[] {
+  if (!neighbors.length) return [...hits];
+  const floor = hits.at(-1)?.result.combinedScore;
+  const capped = neighbors.map((entry, index) => {
+    const combinedScore =
+      floor === undefined
+        ? entry.result.combinedScore
+        : Math.min(entry.result.combinedScore, Math.max(0, floor - (index + 1) * 1e-6));
+    return combinedScore === entry.result.combinedScore
+      ? entry
+      : { ...entry, result: { ...entry.result, combinedScore } };
+  });
+  return [...hits, ...capped];
+}
+
 // Fixed service profile, independent of agent sessions, online feedback and AG
 // disclosure. These are the same store/search primitives used by NmgService.
 export const HTTP_MEMORY_SEARCH_PROFILE = Object.freeze({
   maxTier: 3 as const,
   graphHops: 1,
+  expandSourceContext: true,
   persistTrace: false,
 });
 
@@ -289,6 +321,7 @@ export class HttpMemoryService {
     // Track which clauses surfaced each memory, so a caller can see whether the
     // retrieval dimension it added actually contributed to the page.
     const byId = new Map<string, FusedCandidate>();
+    const adjacentById = new Map<string, FusedCandidate>();
     const appendedById = new Map<string, MemorySearchResult>();
     let records = false;
     for (const [index, query] of queries.entries()) {
@@ -303,17 +336,19 @@ export class HttpMemoryService {
           continue;
         }
         // Attribution stays per clause: a chunk of clause i contributes to i.
-        for (const result of context.results) trackCandidate(byId, index, result);
+        for (const result of context.results) {
+          trackCandidate(isSourceNeighbor(result) ? adjacentById : byId, index, result);
+        }
       }
     }
     // Fuse clauses by identity, keep native scores, apply the AML hard cap.
-    const selected = [...byId.values()]
-      .sort(
-        (a, b) =>
-          b.result.combinedScore - a.result.combinedScore ||
-          a.result.memory.id.localeCompare(b.result.memory.id),
-      )
-      .slice(0, limit);
+    const ranked = [...byId.values()].sort(compareCandidates);
+    const neighbors = [...adjacentById.values()]
+      .filter((entry) => !byId.has(entry.result.memory.id))
+      .sort(compareCandidates)
+      .slice(0, Math.min(2, limit));
+    const hits = ranked.slice(0, limit - neighbors.length);
+    const selected = appendTailNeighbors(hits, neighbors);
     const page = new Set(selected.map((entry) => entry.result.memory.id));
     const appended = [...appendedById.values()]
       .filter((result) => !page.has(result.memory.id))
