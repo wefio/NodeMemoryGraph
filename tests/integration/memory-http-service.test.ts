@@ -174,3 +174,67 @@ test("HttpMemoryService surfaces due-today commitments at the tail only when now
   const withoutNow = await service.search(["阳台下雨有点湿"], 10);
   assert.ok(!withoutNow.memories.some((row) => row.raw_content.includes("换黄铜车铃")));
 });
+
+test("HttpMemoryService respects default, explicit, and env-configured backfill limits", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-http-service-backfill-"));
+  const backends: Array<Awaited<ReturnType<typeof openMemoryBackend>>> = [];
+  t.after(async () => {
+    for (const backend of backends) await backend.close();
+    removeTempDirectory(directory);
+  });
+
+  const makeBatch = (prefix: string, count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      role: "user" as const,
+      content: `${prefix} memory item ${index}`,
+      source_message_id: sourceHttpMessageId(prefix, index),
+    }));
+
+  const savedEnv = process.env.NMG_EMBED_BACKFILL_LIMIT;
+  delete process.env.NMG_EMBED_BACKFILL_LIMIT;
+  try {
+    const defaultBackend = await openMemoryBackend({
+      kind: "sqlite",
+      path: join(directory, "default.sqlite"),
+      namespace: "http:default",
+    });
+    backends.push(defaultBackend);
+    const defaultService = new HttpMemoryService(
+      new MemoryEngine(defaultBackend),
+      createStubEmbeddingClient(),
+    );
+    await defaultService.rememberBatch("u-default", "s0", "req-default", makeBatch("def", 40));
+    assert.deepEqual(defaultBackend.vectorIndex!.stats("stub-v1"), { indexed: 32, pending: 8 });
+
+    const explicitBackend = await openMemoryBackend({
+      kind: "sqlite",
+      path: join(directory, "explicit.sqlite"),
+      namespace: "http:explicit",
+    });
+    backends.push(explicitBackend);
+    const explicitService = new HttpMemoryService(
+      new MemoryEngine(explicitBackend),
+      createStubEmbeddingClient(),
+      { backfillLimit: 128 },
+    );
+    await explicitService.rememberBatch("u-explicit", "s0", "req-explicit", makeBatch("exp", 64));
+    assert.deepEqual(explicitBackend.vectorIndex!.stats("stub-v1"), { indexed: 64, pending: 0 });
+
+    process.env.NMG_EMBED_BACKFILL_LIMIT = "64";
+    const envBackend = await openMemoryBackend({
+      kind: "sqlite",
+      path: join(directory, "env.sqlite"),
+      namespace: "http:env",
+    });
+    backends.push(envBackend);
+    const envService = new HttpMemoryService(
+      new MemoryEngine(envBackend),
+      createStubEmbeddingClient(),
+    );
+    await envService.rememberBatch("u-env", "s0", "req-env", makeBatch("env", 50));
+    assert.deepEqual(envBackend.vectorIndex!.stats("stub-v1"), { indexed: 50, pending: 0 });
+  } finally {
+    if (savedEnv === undefined) delete process.env.NMG_EMBED_BACKFILL_LIMIT;
+    else process.env.NMG_EMBED_BACKFILL_LIMIT = savedEnv;
+  }
+});

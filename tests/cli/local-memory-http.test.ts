@@ -5,6 +5,9 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { LocalBackendPool } from "../../src/cli/local-memory-http.ts";
+import { MemoryEngine } from "../../src/core/memory/engine.ts";
+import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
 const cli = resolve(import.meta.dirname, "../../src/cli/main.ts");
 const apiKey = "fixture-http-key";
@@ -171,3 +174,70 @@ test(
     }
   },
 );
+
+test("LocalBackendPool reuses backends per namespace, isolates users, and defers LRU eviction while active", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "nmg-local-http-pool-"));
+  const pool = new LocalBackendPool(join(dir, "pool.sqlite"), 2);
+  t.after(async () => {
+    await pool.closeAll();
+    removeTempDirectory(dir);
+  });
+
+  // Sequential & concurrent calls on the same namespace reuse one backend instance.
+  const first = await pool.withBackend("http:u1", async (backend) => backend);
+  const second = await pool.withBackend("http:u1", async (backend) => backend);
+  assert.equal(first, second);
+  const [c1, c2] = await Promise.all([
+    pool.withBackend("http:u1", async (backend) => {
+      await new MemoryEngine(backend).remember({
+        statement: "User one secret note",
+        nodeName: "U1",
+      });
+      return backend;
+    }),
+    pool.withBackend("http:u1", async (backend) => backend),
+  ]);
+  assert.equal(c1, first);
+  assert.equal(c2, first);
+
+  // Distinct namespaces get separate handles and isolated data.
+  const u2Backend = await pool.withBackend("http:u2", async (backend) => {
+    const hits = await new MemoryEngine(backend).search("User one secret note");
+    assert.equal(hits.results.length, 0);
+    return backend;
+  });
+  assert.notEqual(u2Backend, first);
+
+  // In-flight LRU eviction keeps active backend usable until its call completes, then closes it.
+  let releaseInFlight!: () => void;
+  let inFlight!: Promise<void>;
+  const inFlightEntered = new Promise<void>((resolveReady) => {
+    inFlight = pool.withBackend("http:u2", async (backend) => {
+      assert.equal(backend, u2Backend);
+      resolveReady();
+      await new Promise<void>((done) => {
+        releaseInFlight = done;
+      });
+      // Still open and usable even though evicted from the pool mid-flight.
+      const view = await backend.openRead();
+      await backend.closeRead(view);
+    });
+  });
+  await inFlightEntered;
+
+  try {
+    // Refresh http:u1 so http:u2 is oldest, then open http:u3 to evict http:u2.
+    assert.equal(await pool.withBackend("http:u1", async (backend) => backend), first);
+    const u3Backend = await pool.withBackend("http:u3", async (backend) => backend);
+    assert.notEqual(u3Backend, u2Backend);
+    assert.notEqual(u3Backend, first);
+  } finally {
+    // Finish the evicted in-flight call and wait for its deferred close before reopening.
+    releaseInFlight();
+    await inFlight;
+  }
+
+  // Subsequent acquisition of http:u2 opens a fresh backend handle (evicting u1 as idle oldest).
+  const reopenedU2 = await pool.withBackend("http:u2", async (backend) => backend);
+  assert.notEqual(reopenedU2, u2Backend);
+});

@@ -210,8 +210,13 @@ try {
       );
       assert.match(
         service,
-        /vectorIndex\.pending\(this\.client\.indexId, 32\)/,
-        "a backfill must retrieve at most one batch of 32 missing records",
+        /export const DEFAULT_BACKFILL_LIMIT = 32;/,
+        "a backfill must default to 32 missing records",
+      );
+      assert.match(
+        service,
+        /vectorIndex\.pending\(this\.client\.indexId, this\.backfillLimit\)/,
+        "a backfill must retrieve at most one bounded batch of missing records",
       );
       const backfill = service.slice(service.indexOf("private async backfillVectors"), service.indexOf("get backfillStatus"));
       assert.doesNotMatch(backfill, /\b(?:for|while)\s*\(/, "one fold never drains the backlog");
