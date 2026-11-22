@@ -13,11 +13,11 @@ const captionParts = [{ type: 'text', text: 'A green triangle named Juniper.' },
 const request = { user_id: 'private-image-fixture', session_id: 'original-session', request_id: 'image-r1',
   messages: [{ role: 'user', content: parts, timestamp: 1674253800000 }] };
 let mf = createWorkerFixture({ storage });
-async function call(name, route, body) {
+async function call(name, route, body, extraHeaders = {}) {
   const worker = await mf.getWorker(name);
   const response = await worker.fetch(`http://localhost${route}`, {
     method: body ? 'POST' : 'GET',
-    headers: { authorization: 'Bearer test-key', 'content-type': 'application/json' },
+    headers: { authorization: 'Bearer test-key', 'content-type': 'application/json', ...extraHeaders },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   return { status: response.status, body: await response.json() };
@@ -25,10 +25,13 @@ async function call(name, route, body) {
 try {
   const health = await call('a', '/health');
   assert.equal(health.status, 200);
-  assert.equal(health.body.core_source, 'workspace:src');
-  assert.equal(health.body.multimodal.format, 'ordered-text-base64-image-parts');
-  assert.equal(health.body.multimodal.index_view, 'supplied-text-plus-image-hash');
-  assert.ok(health.body.source_revision);
+  assert.deepEqual(health.body, { status: 'ok', storage: 'R2', retrieval: 'lexical' });
+  const adminStatus = await call('a', '/admin/status', undefined, { 'oai-authenticated-user-email': 'owner@example.test' });
+  assert.equal(adminStatus.status, 200);
+  assert.equal(adminStatus.body.core_source, 'workspace:src');
+  assert.equal(adminStatus.body.multimodal.format, 'ordered-text-base64-image-parts');
+  assert.equal(adminStatus.body.multimodal.index_view, 'supplied-text-plus-image-hash');
+  assert.ok(adminStatus.body.source_revision);
   const added = await call('a', '/add', request);
   assert.equal(added.status, 200, JSON.stringify(added));
   assert.equal(added.body.success, true);
@@ -90,7 +93,7 @@ try {
   fs.mkdirSync('.runtime/verification', { recursive: true });
   fs.writeFileSync('.runtime/verification/worker-multimodal.json', JSON.stringify({
     status: 'passed', mode: 'miniflare-workers-r2-supplied-captions-no-external-model',
-    sourceRevision: health.body.source_revision, sourcePartsPreserved: true, rawContentIsOriginalEvidence: true,
+    sourceRevision: adminStatus.body.source_revision, sourcePartsPreserved: true, rawContentIsOriginalEvidence: true,
     imageQueryPassed: true, captionOnlyFlow: true, distinctImageSources: true,
     userIsolation: true, idempotentRetry: true, coldRestart: true, noVisionTextCompatibility: true,
     officialAmlSubmission: false, productionDeployment: false, realVisionProviderVerified: false,

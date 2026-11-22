@@ -958,8 +958,6 @@ const SEARCH_DEADLINE_MS = 25_000;
  *  successful embedding behind it - a user whose data was still in the log, so the partition loop
  *  never ran and the deadline that lives in it never applied. */
 const PENDING_READ_MS = 8_000;
-/** How long /health waits for its storage probe before answering anyway. */
-const HEALTH_PROBE_MS = 8_000;
 /** How long a search waits for the manifest before answering a partial page. */
 const MANIFEST_READ_MS = 8_000;
 
@@ -1577,80 +1575,20 @@ function beatResponse(env, path) {
   );
   return json({ ok: true, at: new Date().toISOString(), pid: process.pid });
 }
-async function healthResponse(env, path) {
-  if (path !== "/health") return undefined;
+function healthResponse(request, env, path) {
+  if (memoryHttpOperation(request.method, path) !== "health") return undefined;
   if (!env.MEMORY)
     throw new HttpError(503, "storage_unavailable", "Persistent storage binding missing");
-  // Deliberately no sqliteReady(): /health is the harness preflight, it is hit first, and it does
-  // not read a database. Loading SQLite here made the cheapest route pay a wasm decode and
-  // compile measured at 3.6-6.5 s per invocation on this platform.
-  //
-  // The probe is bounded. Measured on the live endpoint 2026-11-01: four consecutive /health calls
-  // took 1.8 s, 2.8 s, 4.5 s and then did not answer inside 45 s - the same intermittent object
-  // store stall that turns a search into a 120 s kill. This route is the benchmark's preflight, so
-  // a slow bucket must not be able to hold it: the probe reports how long it took instead of
-  // deciding the run may not start.
-  const probeStarted = Date.now();
-  const storageProbe = await hardDeadline(
-    () => env.MEMORY.head("health/probe").then(() => "ok"),
-    Number(env.NMG_HEALTH_PROBE_MS) > 0 ? Number(env.NMG_HEALTH_PROBE_MS) : HEALTH_PROBE_MS,
-    "health_probe",
-  ).catch((error) => (error?.code === "embedding_deadline" ? "timeout" : "error"));
-  const storageProbeMs = Date.now() - probeStarted;
+  if (request.method === "HEAD") {
+    return new Response(null, {
+      status: 200,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    });
+  }
   return json({
-    storage_probe: storageProbe,
-    storage_probe_ms: storageProbeMs,
     status: "ok",
-    service: "NodeMemoryGraph",
     storage: "R2",
-    sqlite: "deferred until a request needs it",
     retrieval: env.NMG_EMBED_PROVIDER || env.NMG_EMBED_BASE_URL ? "hybrid" : "lexical",
-    max_user_database_bytes: MAX_DATABASE_BYTES,
-    storage_format: "nmg-shards-v3",
-    supported_storage_formats: ["nmg-shards-v2", "nmg-shards-v3"],
-    search_page_deltas: env.NMG_SEARCH_DELTAS !== "0",
-    max_partition_bytes: 16 * 1024 * 1024,
-    max_add_partition_bytes: PART_LIMIT,
-    max_partitions: MAX_PARTS,
-    graph_scope: "partition",
-    max_request_bytes: MAX_BODY_BYTES,
-    limits: {
-      ...TEXT_LIMITS,
-      add_mode: addMode(env),
-      pending_read_limit: MAX_PENDING_READ,
-      merge_batch: FOLD_BATCH,
-      // Reported because they bound a request: an invocation is killed at 120 s, and a
-      // per-attempt timeout larger than that turns a slow provider into a dead request.
-      embed_timeout_ms:
-        Number(env.NMG_EMBED_TIMEOUT_MS) > 0 ? Number(env.NMG_EMBED_TIMEOUT_MS) : EMBED_TIMEOUT_MS,
-      embed_query_budget_ms:
-        Number(env.NMG_EMBED_QUERY_BUDGET_MS) > 0
-          ? Number(env.NMG_EMBED_QUERY_BUDGET_MS)
-          : EMBED_QUERY_BUDGET_MS,
-      embed_document_timeout_ms:
-        Number(env.NMG_EMBED_TIMEOUT_MS) > 0
-          ? Number(env.NMG_EMBED_TIMEOUT_MS)
-          : EMBED_DOCUMENT_TIMEOUT_MS,
-      embed_write_budget_ms:
-        Number(env.NMG_EMBED_WRITE_BUDGET_MS) > 0
-          ? Number(env.NMG_EMBED_WRITE_BUDGET_MS)
-          : EMBED_WRITE_BUDGET_MS,
-      slow_report_ms: Number(env.NMG_SLOW_REPORT_MS) > 0 ? Number(env.NMG_SLOW_REPORT_MS) : 60_000,
-    },
-    upstream_commit: SOURCE_REVISION.split("+")[0],
-    source_revision: SOURCE_REVISION,
-    core_source: CORE_SOURCE,
-    multimodal: {
-      format: "ordered-text-base64-image-parts",
-      index_view: "supplied-text-plus-image-hash",
-    },
-    query_terms_prepared: true,
-    memory_service: "daemon-core-aml-v1",
-    request_lifecycle: "independent-v2",
-    search_request_profile: true,
-    harness: false,
-    search_profile: AML_SEARCH_PROFILE,
-    reclamation: { user: "/reclaim/user", all: "/reclaim/all", automatic: false },
   });
 }
 async function reclaimAllRoute(request, env, path) {
@@ -1873,6 +1811,31 @@ async function capacityReport(env, userId) {
   if (listed === null) return { ...capacity, pending_entries: null, pending_capped: null };
   return { ...capacity, pending_entries: listed.length, pending_capped: listed.length >= cap };
 }
+function serviceLimits(env) {
+  return {
+    ...TEXT_LIMITS,
+    add_mode: addMode(env),
+    pending_read_limit: MAX_PENDING_READ,
+    merge_batch: FOLD_BATCH,
+    // Reported because they bound a request: an invocation is killed at 120 s, and a
+    // per-attempt timeout larger than that turns a slow provider into a dead request.
+    embed_timeout_ms:
+      Number(env.NMG_EMBED_TIMEOUT_MS) > 0 ? Number(env.NMG_EMBED_TIMEOUT_MS) : EMBED_TIMEOUT_MS,
+    embed_query_budget_ms:
+      Number(env.NMG_EMBED_QUERY_BUDGET_MS) > 0
+        ? Number(env.NMG_EMBED_QUERY_BUDGET_MS)
+        : EMBED_QUERY_BUDGET_MS,
+    embed_document_timeout_ms:
+      Number(env.NMG_EMBED_TIMEOUT_MS) > 0
+        ? Number(env.NMG_EMBED_TIMEOUT_MS)
+        : EMBED_DOCUMENT_TIMEOUT_MS,
+    embed_write_budget_ms:
+      Number(env.NMG_EMBED_WRITE_BUDGET_MS) > 0
+        ? Number(env.NMG_EMBED_WRITE_BUDGET_MS)
+        : EMBED_WRITE_BUDGET_MS,
+    slow_report_ms: Number(env.NMG_SLOW_REPORT_MS) > 0 ? Number(env.NMG_SLOW_REPORT_MS) : 60_000,
+  };
+}
 async function adminStatusResponse(env) {
   const [sqlite, r2, reclaim, history] = await Promise.all([
     check(() => sqliteReady().then(() => true)),
@@ -1896,6 +1859,9 @@ async function adminStatusResponse(env) {
   return json({
     status,
     checked_at: new Date().toISOString(),
+    service: "NodeMemoryGraph",
+    storage: "R2",
+    retrieval: env.NMG_EMBED_PROVIDER || env.NMG_EMBED_BASE_URL ? "hybrid" : "lexical",
     sqlite: sqlite.status,
     r2: r2.status,
     checks: {
@@ -1907,6 +1873,27 @@ async function adminStatusResponse(env) {
     authentication: { configured: !!env.NMG_API_KEY },
     maintenance: reclaim.value ?? null,
     revision: SOURCE_REVISION,
+    upstream_commit: SOURCE_REVISION.split("+")[0],
+    source_revision: SOURCE_REVISION,
+    core_source: CORE_SOURCE,
+    storage_format: "nmg-shards-v3",
+    supported_storage_formats: ["nmg-shards-v2", "nmg-shards-v3"],
+    search_page_deltas: env.NMG_SEARCH_DELTAS !== "0",
+    max_user_database_bytes: MAX_DATABASE_BYTES,
+    max_partition_bytes: 16 * 1024 * 1024,
+    max_add_partition_bytes: PART_LIMIT,
+    max_partitions: MAX_PARTS,
+    graph_scope: "partition",
+    max_request_bytes: MAX_BODY_BYTES,
+    limits: serviceLimits(env),
+    multimodal: {
+      format: "ordered-text-base64-image-parts",
+      index_view: "supplied-text-plus-image-hash",
+    },
+    memory_service: "daemon-core-aml-v1",
+    harness: false,
+    search_profile: AML_SEARCH_PROFILE,
+    reclamation: { user: "/reclaim/user", all: "/reclaim/all", automatic: false },
     embedding: embeddingDiagnostics(env),
     checks_ms: { sqlite: sqlite.ms, r2: r2.ms },
     load,
@@ -2115,7 +2102,7 @@ async function handle(request, env) {
     // Before auth on purpose: the scheduler carries no credentials, and the route exposes nothing
     // but the fact that an invocation happened.
     beatResponse(env, path) ??
-    (await healthResponse(env, path)) ??
+    healthResponse(request, env, path) ??
     (await reclaimAllRoute(request, env, path)) ??
     (await foldRoute(request, env, url, path));
   if (early) return early;
@@ -2138,6 +2125,7 @@ export default {
     const traceId = /^[a-zA-Z0-9-]{1,80}$/.test(rawRay) ? rawRay : crypto.randomUUID();
     const pathname = new URL(request.url).pathname;
     const normalized = pathname.replace(/^\/api(?=\/)/, "").replace(/\/$/, "") || "/";
+    const healthRequest = memoryHttpOperation(request.method, normalized) === "health";
     const route = normalized.startsWith("/add/status/")
       ? "/add/status/:task_id"
       : /^\/(?:add|remember|search|health|capacity|reset|reclaim(?:\/(?:user|all))?|admin\/(?:status|key|statistics|capacity|reset|reclaim-all|diagnostics\/(?:search|seed)))$/.test(
@@ -2149,15 +2137,16 @@ export default {
     return withRequest(context, () => {
       const track = statisticsEnabled();
       const startedAt = Date.now();
-      context.seq = memRequestStarted(route);
-      const stopSlowWatch = watchSlowRequest(env, context, startedAt);
+      if (!healthRequest) context.seq = memRequestStarted(route);
+      const stopSlowWatch = healthRequest ? null : watchSlowRequest(env, context, startedAt);
       if (track) requestAccepted();
       const received = track ? performance.now() : 0;
       let begun;
       const metadataRequest =
+        healthRequest ||
         (request.method === "GET" && pathname === "/") ||
         (request.method === "GET" &&
-          /^\/(?:api\/)?(?:health|admin\/status|admin\/key|admin\/capacity|capacity)\/?$/.test(
+          /^\/(?:api\/)?(?:admin\/status|admin\/key|admin\/capacity|capacity)\/?$/.test(
             pathname,
           )) ||
         /^\/(?:api\/)?(?:admin\/reclaim-all|reclaim\/all)\/?$/.test(pathname);
@@ -2212,7 +2201,8 @@ export default {
           })
         : job;
       return tracked.finally(() => {
-        stopSlowWatch();
+        stopSlowWatch?.();
+        if (healthRequest) return;
         // One line per request, never sampled. The 2026-10-30 incident showed why: a search
         // answered 503 in 90 ms with an empty platform log, and only this line can separate
         // "our handler returned an error" from "the platform never invoked us" - sampled

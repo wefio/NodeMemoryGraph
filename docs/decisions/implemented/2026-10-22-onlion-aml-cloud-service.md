@@ -110,4 +110,8 @@ HTTP validation, evidence attribution, projection and candidate fusion live in
 the shared integration layer. The Worker owns authentication policy, platform
 bindings, object-store transactions and pending-log lifecycle. The local
 listener opens a per-user namespace in configured SQLite and uses the same
-engine and search renderer. It can run independently of the daemon.
+engine and search renderer. It can run independently of the daemon. `/health`
+serves the minimal unauthenticated contract (`status`, `storage`, `retrieval`)
+without storage probing or per-request diagnostic logging, while limits,
+revision, storage probes, and runtime diagnostics live on owner-authenticated
+`/admin/status`.
