@@ -9,10 +9,10 @@ const PRIMARY_EVIDENCE = "json_extract(payload, '$.evidenceId')";
 export function ensureSqliteLeafGroups(db: DatabaseSync): void {
   const names = db.prepare(`SELECT name FROM sqlite_schema WHERE name IN
     ('nmg_memory_route_members', 'nmg_memory_route_vectors', 'nmg_memory_leaf_members',
-     'nmg_memory_leaf_members_by_leaf', 'nmg_memory_leaf_evidence')`);
+     'nmg_memory_leaf_members_by_leaf', 'nmg_memory_leaf_evidence', 'nmg_memory_history_session')`);
   const readNames = () => new Set(names.all().map(({ name }) => name));
   const needsMigration = (schema: ReturnType<typeof readNames>) =>
-    schema.size !== 3 ||
+    schema.size !== 4 ||
     schema.has("nmg_memory_route_members") ||
     schema.has("nmg_memory_route_vectors");
   if (!needsMigration(readNames())) return;
@@ -26,7 +26,9 @@ export function ensureSqliteLeafGroups(db: DatabaseSync): void {
       CREATE INDEX IF NOT EXISTS nmg_memory_leaf_members_by_leaf
         ON nmg_memory_leaf_members(namespace, leaf_id, ordinal, memory_id);
       CREATE INDEX IF NOT EXISTS nmg_memory_leaf_evidence
-        ON nmg_memory_entities(namespace, ${PRIMARY_EVIDENCE}, id) WHERE kind='memory';`);
+        ON nmg_memory_entities(namespace, ${PRIMARY_EVIDENCE}, id) WHERE kind='memory';
+      CREATE INDEX IF NOT EXISTS nmg_memory_history_session
+        ON nmg_memory_entities(namespace, json_extract(payload, '$.sessionId')) WHERE kind='history';`);
     if (schema.has("nmg_memory_route_members")) {
       db.exec(`INSERT OR IGNORE INTO nmg_memory_leaf_members(namespace, memory_id, leaf_id)
         SELECT namespace, memory_id, leaf_id FROM nmg_memory_route_members;
@@ -87,7 +89,14 @@ export function readSqliteLeafPeers(
   return rows.map(({ payload }) => ({ kind: "memory", value: JSON.parse(String(payload)) }));
 }
 
-/** Follow an ordinal supplied by the source, using the history and evidence indexes. */
+function mapNeighborRow({ payload, relation }: Record<string, unknown>): SourceNeighbor {
+  return {
+    entity: { kind: "memory", value: JSON.parse(String(payload)) },
+    relation: relation === "previous_turn" ? "previous_turn" : "next_turn",
+  };
+}
+
+/** Follow a source ordinal when numeric, or row insertion order within the session otherwise. */
 export function readSqliteAdjacentSources(
   db: DatabaseSync,
   namespace: string,
@@ -95,14 +104,15 @@ export function readSqliteAdjacentSources(
   query: MemoryEntityQuery,
 ): SourceNeighbor[] {
   const { sessionId, sourceMessageId } = source;
-  if (!sessionId || !sourceMessageId || !/^(?:0|[1-9][0-9]*)$/u.test(sourceMessageId)) return [];
-  const ordinal = Number(sourceMessageId);
-  if (!Number.isSafeInteger(ordinal + 1)) return [];
+  if (!sessionId) return [];
   const { limit } = queryBounds(query);
   // Unary + drops h.id's TEXT affinity so SQLite can seek the JSON expression index.
-  return db
-    .prepare(
-      `WITH wanted(ordinal, relation) AS (VALUES (?, 'previous_turn'), (?, 'next_turn')),
+  if (sourceMessageId && /^(?:0|[1-9][0-9]*)$/u.test(sourceMessageId)) {
+    const ordinal = Number(sourceMessageId);
+    if (!Number.isSafeInteger(ordinal + 1)) return [];
+    return db
+      .prepare(
+        `WITH wanted(ordinal, relation) AS (VALUES (?, 'previous_turn'), (?, 'next_turn')),
       neighbors AS (
         SELECT m.*, w.relation FROM wanted w
         CROSS JOIN nmg_memory_entities h INDEXED BY nmg_memory_history_source
@@ -115,10 +125,43 @@ export function readSqliteAdjacentSources(
       )
       SELECT payload, relation FROM neighbors WHERE ${sqliteQueryWhere(query)}
       ORDER BY relation DESC, id LIMIT ?`,
+      )
+      .all(String(ordinal - 1), String(ordinal + 1), namespace, sessionId, limit)
+      .map(mapNeighborRow);
+  }
+  return db
+    .prepare(
+      `WITH anchor(rowid) AS (
+        SELECT rowid FROM nmg_memory_entities WHERE namespace=? AND key='history:'||?
+      ),
+      wanted(id, relation) AS (
+        SELECT id, 'previous_turn' FROM (
+          SELECT h.id FROM anchor a
+          CROSS JOIN nmg_memory_entities h INDEXED BY nmg_memory_history_session
+            ON h.namespace=? AND h.kind='history'
+            AND json_extract(h.payload, '$.sessionId')=?
+            AND h.rowid < a.rowid
+          ORDER BY h.rowid DESC LIMIT 1
+        )
+        UNION ALL
+        SELECT id, 'next_turn' FROM (
+          SELECT h.id FROM anchor a
+          CROSS JOIN nmg_memory_entities h INDEXED BY nmg_memory_history_session
+            ON h.namespace=? AND h.kind='history'
+            AND json_extract(h.payload, '$.sessionId')=?
+            AND h.rowid > a.rowid
+          ORDER BY h.rowid ASC LIMIT 1
+        )
+      ),
+      neighbors AS (
+        SELECT m.*, w.relation FROM wanted w
+        CROSS JOIN nmg_memory_entities m INDEXED BY nmg_memory_leaf_evidence
+          ON m.namespace=? AND m.kind='memory'
+          AND json_extract(m.payload, '$.evidenceId')=+w.id
+      )
+      SELECT payload, relation FROM neighbors WHERE ${sqliteQueryWhere(query)}
+      ORDER BY relation DESC, id LIMIT ?`,
     )
-    .all(String(ordinal - 1), String(ordinal + 1), namespace, sessionId, limit)
-    .map(({ payload, relation }) => ({
-      entity: { kind: "memory", value: JSON.parse(String(payload)) },
-      relation: relation === "previous_turn" ? "previous_turn" : "next_turn",
-    }));
+    .all(namespace, source.id, namespace, sessionId, namespace, sessionId, namespace, limit)
+    .map(mapNeighborRow);
 }
