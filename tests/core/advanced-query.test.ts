@@ -5,6 +5,7 @@ import {
   applyAdvancedFilters,
   extractEventWindow,
   parseAdvancedQuery,
+  queryEventWindow,
 } from "../../src/core/store/advanced-query.ts";
 
 function fakeResult(overrides: {
@@ -185,4 +186,23 @@ test("parseAdvancedQuery: Chinese single day becomes both bounds", () => {
   );
   assert.equal(p.filters.eventTimeFrom, "2026-09-19T00:00:00.000Z");
   assert.equal(p.filters.eventTimeTo, "2026-09-19T23:59:59.999Z");
+});
+
+test("queryEventWindow shifts calendar days to the caller timezone and handles recent phrases", () => {
+  assert.deepEqual(
+    queryEventWindow("我想把韩阿姨今天跟我说的事记进备忘录", "2026-10-30T13:39:00+08:00"),
+    {
+      from: "2026-10-29T16:00:00.000Z",
+      to: "2026-10-30T15:59:59.999Z",
+    },
+  );
+  assert.deepEqual(queryEventWindow("What happened today?", "2026-10-30T13:39:00Z"), {
+    from: "2026-10-30T00:00:00.000Z",
+    to: "2026-10-30T23:59:59.999Z",
+  });
+  assert.deepEqual(queryEventWindow("最近发生了什么", "2026-10-30T13:39:00+08:00"), {
+    from: "2026-10-23T05:39:00.000Z",
+    to: "2026-10-30T05:39:00.000Z",
+  });
+  assert.deepEqual(queryEventWindow("What is the person's name?", "2026-10-30T13:39:00+08:00"), {});
 });

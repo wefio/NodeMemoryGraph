@@ -15,7 +15,7 @@ test("HTTP config resolves relative DB paths and defaults to an unauthenticated 
     port: 8787,
     apiKey: undefined,
     defaultTopK: 20,
-    maxRequestBytes: 6 * 1024 * 1024,
+    maxRequestBytes: 48 * 1024 * 1024,
   });
 });
 

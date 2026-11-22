@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import {
   ContentValidationError,
   contentText,
+  decodedImageBytes,
   describeContent,
   normalizeContent,
   type AmlContent,
@@ -49,7 +50,40 @@ export function readHttpQuery(query: unknown): Promise<string> {
 export const MAX_QUERY_CHARS = 1_000_000;
 export const MAX_MESSAGE_CHARS = 1_000_000;
 export const MAX_COMBINED_MESSAGE_CHARS = 1_500_000;
-export const MAX_ORDERED_CONTENT_BYTES = 4 * 1024 * 1024;
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_ADD_IMAGE_BYTES = 30 * 1024 * 1024;
+export const MAX_ORDERED_CONTENT_BYTES = 48 * 1024 * 1024;
+
+const HTTP_NOW_ISO =
+  /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/u;
+
+/** Optional reference clock for Search (not part of AML; AML clients may omit it). */
+export function readHttpNow(input: JsonObject): string | undefined {
+  const value = input.now ?? input.current_time ?? input.timestamp;
+  if (value === undefined || value === null) return undefined;
+  if (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    Number.isFinite(new Date(value).getTime())
+  )
+    return new Date(value).toISOString();
+  const match = typeof value === "string" ? HTTP_NOW_ISO.exec(value) : null;
+  if (match && Number.isFinite(Date.parse(value as string))) {
+    const [, year, month, day] = match;
+    const check = new Date(Date.UTC(+year!, +month! - 1, +day!));
+    if (
+      check.getUTCFullYear() === +year! &&
+      check.getUTCMonth() === +month! - 1 &&
+      check.getUTCDate() === +day!
+    )
+      return value as string;
+  }
+  throw new HttpError(
+    400,
+    "invalid_request",
+    "now must be Unix milliseconds or an ISO 8601 timestamp with Z or an offset",
+  );
+}
 
 export class HttpError extends Error {
   readonly status: number;
@@ -73,7 +107,11 @@ export function textField(value: unknown, label: string, max = 512) {
 }
 export function contentField(value: unknown, maxTextChars = MAX_MESSAGE_CHARS) {
   try {
-    const content = normalizeContent(value, { maxTextChars });
+    const content = normalizeContent(value, {
+      maxTextChars,
+      maxImageBytes: MAX_IMAGE_BYTES,
+      maxImages: 32,
+    });
     if (
       typeof content !== "string" &&
       new TextEncoder().encode(JSON.stringify(content)).length > MAX_ORDERED_CONTENT_BYTES
@@ -136,9 +174,11 @@ export function readHttpAdd(input: JsonObject, maxMessages = 512) {
       `messages must contain between 1 and ${maxMessages} messages`,
     );
   let chars = 0;
+  let imageBytes = 0;
   const messages = input.messages.map((m) => {
     const message = normalizeAddMessage(m);
     chars += contentText(message.content).length;
+    imageBytes += decodedImageBytes(message.content);
     return message;
   });
   if (chars > MAX_COMBINED_MESSAGE_CHARS)
@@ -147,6 +187,8 @@ export function readHttpAdd(input: JsonObject, maxMessages = 512) {
       "request_too_large",
       `Combined message content limit is ${MAX_COMBINED_MESSAGE_CHARS} characters`,
     );
+  if (imageBytes > MAX_ADD_IMAGE_BYTES)
+    throw new HttpError(413, "request_too_large", "Combined image limit is 30 MiB per Add");
   return {
     userId,
     requestId,

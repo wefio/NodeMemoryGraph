@@ -13,8 +13,9 @@ import {
   httpHash,
   memoryHttpOperation,
   readHttpAdd,
+  readHttpClauses,
   readHttpJson,
-  readHttpQuery,
+  readHttpNow,
   readHttpTopK,
   requireHttpApiKey,
   sourceHttpMessageId,
@@ -139,16 +140,30 @@ async function addMemory(service: HttpMemoryService, input: JsonObject) {
 }
 
 async function searchMemory(service: HttpMemoryService, input: JsonObject, defaultTopK: number) {
-  if (input.queries !== undefined || input.options !== undefined)
-    throw new HttpError(400, "invalid_request", "Local Search takes one query");
   const limit = readHttpTopK(input, defaultTopK);
-  const query = await readHttpQuery(input.query);
-  const result = await service.searchFeature(query, limit);
-  const page = fitExplicitSearchPage(result, { query, limit, persistTrace: false });
+  const now = readHttpNow(input);
+  const clauses = await readHttpClauses(input);
+  if (clauses.length === 1 && !clauses[0]!.appendOnly) {
+    const query = clauses[0]!.text;
+    const result = await service.searchFeature(query, limit, { now });
+    const page = fitExplicitSearchPage(result, { query, limit, persistTrace: false });
+    return {
+      data: result.results.slice(0, limit).map((row) => projectHttpMemory(row, query)),
+      retrieval_mode: result.retrieval?.mode ?? "lexical",
+      rendered: renderSearchSurface(page, { emptyText: "No NMG match.", includeGetHint: false }),
+    };
+  }
+  const searchResult = await service.search(
+    clauses.map((clause) => clause.text),
+    limit,
+    clauses.map((clause) => clause.appendOnly === true),
+    undefined,
+    { now },
+  );
   return {
-    data: page.results.map((row) => projectHttpMemory(row, query)),
-    retrieval_mode: page.retrieval?.mode ?? "lexical",
-    rendered: renderSearchSurface(page, { emptyText: "No NMG match.", includeGetHint: false }),
+    data: searchResult.memories,
+    retrieval_mode: searchResult.retrievalMode === "records" ? "hybrid" : "lexical",
+    ...(searchResult.appended.length ? { appended: searchResult.appended } : {}),
   };
 }
 

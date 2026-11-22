@@ -511,21 +511,29 @@ function endOfGranularity(parsed: ParsedEventTime): string {
   }
 }
 
+/** Calendar day (`YYYY-MM-DD`) of an instant in the caller's or supplied time zone. */
+export function calendarDay(now: Date, timeZone?: string): string {
+  const { year, month, day } = eventClock(now, timeZone).calendar;
+  return `${year}-${pad(month)}-${pad(day)}`;
+}
+
 /** Inclusive lower bound of a window side; null when the phrase is unusable. */
 export function eventWindowStart(
   raw: string | null | undefined,
   now: Date = new Date(),
+  timeZone?: string,
 ): string | null {
   // A lower bound starts at the day itself, not at the grain's end.
-  return parseEventTime(raw, now)?.start ?? null;
+  return parseEventTime(raw, now, timeZone)?.start ?? null;
 }
 
 /** Inclusive upper bound: a date phrase covers its whole day/month/year. */
 export function eventWindowEnd(
   raw: string | null | undefined,
   now: Date = new Date(),
+  timeZone?: string,
 ): string | null {
-  const parsed = parseEventTime(raw, now);
+  const parsed = parseEventTime(raw, now, timeZone);
   return parsed ? endOfGranularity(parsed) : null;
 }
 
@@ -542,9 +550,27 @@ const RELATIVE_TOKEN =
   "(?:\\d+|[一二三四五六七八九十两]+)\\s*(?:小时|天|日|周|星期|礼拜|个月|月|年)(?:前|后|以前|以后))";
 
 const CN_TOKEN = new RegExp(`${RELATIVE_TOKEN}|${DAY_TOKEN}`);
+const FUTURE_TOKEN = new RegExp(`${RELATIVE_TOKEN}|${DAY_TOKEN}`, "g");
 const CN_RANGE = new RegExp(
   `(?:从|自)?\\s*(${RELATIVE_TOKEN}|${DAY_TOKEN})\\s*(?:到|至|~|-|—)\\s*(${RELATIVE_TOKEN}|${DAY_TOKEN})`,
 );
+
+/** Calendar days a statement schedules after its own event day, e.g. "下周二" said on 10-03 → 10-06. */
+export function futureDueDays(text: string, anchor: Date, timeZone?: string): string[] {
+  if (!text || !Number.isFinite(anchor.getTime())) return [];
+  const clock = eventClock(anchor, timeZone);
+  const anchorDay = calendarDay(anchor, timeZone);
+  const days = new Set<string>();
+  for (const match of text.matchAll(FUTURE_TOKEN)) {
+    const token = match[0];
+    if (WEEK_SPAN.test(token) || MONTH_SPAN.test(token) || YEAR_SPAN.test(token)) continue;
+    const parsed = parseAbsolute(token, clock) ?? parseRelative(token, clock);
+    if (!parsed || parsed.granularity !== "day") continue;
+    const day = parsed.start.slice(0, 10);
+    if (day > anchorDay) days.add(day);
+  }
+  return [...days];
+}
 
 /** A date mention only binds a window when the query also asks about time. */
 const TEMPORAL_INTENT =
@@ -554,11 +580,15 @@ const TEMPORAL_INTENT =
 const BEFORE = /之前|以前/;
 const AFTER = /之后|以后|以来/;
 
-function chineseRange(text: string, now: Date): { from?: string; to?: string } | null {
+function chineseRange(
+  text: string,
+  now: Date,
+  timeZone?: string,
+): { from?: string; to?: string } | null {
   const match = text.match(CN_RANGE);
   if (!match) return null;
-  const from = eventWindowStart(match[1]!.trim(), now);
-  const to = eventWindowEnd(match[2]!.trim(), now);
+  const from = eventWindowStart(match[1]!.trim(), now, timeZone);
+  const to = eventWindowEnd(match[2]!.trim(), now, timeZone);
   return from || to ? { ...(from ? { from } : {}), ...(to ? { to } : {}) } : null;
 }
 
@@ -578,14 +608,15 @@ function bindsWindow(text: string, phrase: string): boolean {
 export function extractChineseEventWindow(
   text: string,
   now: Date = new Date(),
+  timeZone?: string,
 ): { from?: string; to?: string } {
   if (!text) return {};
-  const range = chineseRange(text, now);
+  const range = chineseRange(text, now, timeZone);
   if (range) return range;
   const found = text.match(CN_TOKEN);
   if (!found || !bindsWindow(text, found[0])) return {};
-  const start = eventWindowStart(found[0], now);
-  const end = eventWindowEnd(found[0], now);
+  const start = eventWindowStart(found[0], now, timeZone);
+  const end = eventWindowEnd(found[0], now, timeZone);
   if (!start) return {};
   // "3月10号之前" bounds the past up to that day; "之后" bounds from that day on.
   const relation = text.slice(found.index! + found[0].length);

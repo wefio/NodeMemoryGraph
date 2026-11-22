@@ -54,6 +54,7 @@ import {
   readHttpAdd,
   readHttpClauses,
   readHttpJson,
+  readHttpNow,
   readHttpTopK,
   requireHttpApiKey,
   sourceHttpMessageId,
@@ -1145,7 +1146,7 @@ async function fusePendingBounded({
     return { candidates, degraded: error?.code ?? "pending_unavailable" };
   }
 }
-async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, appendOnly, features, client, started, contributions, appendedById }) {
+async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, appendOnly, features, now, client, started, contributions, appendedById }) {
   const modes = new Set();
   let candidates = [];
   let partial = false;
@@ -1176,7 +1177,7 @@ async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, a
           const service = new AmlMemoryService(partKey, client, { allowBackfill: false });
           return {
             response: await measure("retrieval_including_embedding", () =>
-              service.search(queries, topK, appendOnly, features),
+              service.search(queries, topK, appendOnly, features, { now }),
             ),
             legacyReceipts: [],
             readOnly: true,
@@ -1256,6 +1257,7 @@ async function search(env, input) {
   const userId = textField(input.user_id ?? input.userId, "user_id");
   requestIdentity(userId, input.request_id);
   const topK = readHttpTopK(input);
+  const now = readHttpNow(input);
   const clauses = await readHttpClauses(input);
   const queries = clauses.map((clause) => clause.text);
   const features = selectQueryFeatures(queries);
@@ -1342,6 +1344,7 @@ async function search(env, input) {
         topK,
         appendOnly,
         features,
+        now,
         client,
         started,
         contributions,

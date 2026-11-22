@@ -3,10 +3,12 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import {
+  calendarDay,
   eventTimeMillis,
   eventWindowEnd,
   eventWindowStart,
   extractChineseEventWindow,
+  futureDueDays,
   normalizeEventTime,
   parseEventTime,
 } from "../../src/core/event-time.ts";
@@ -153,4 +155,14 @@ test("reopening a store repairs event times written before canonicalization", ()
   } finally {
     db.close();
   }
+});
+
+test("futureDueDays extracts future day commitments relative to the statement's event day", () => {
+  const anchor = new Date("2026-10-03T10:00:00+08:00");
+  assert.equal(calendarDay(anchor, "+08:00"), "2026-10-03");
+  assert.deepEqual(futureDueDays("我们约好下周二去老周修车摊换黄铜车铃", anchor, "+08:00"), [
+    "2026-10-06",
+  ]);
+  assert.deepEqual(futureDueDays("今天去买了菜，昨天也去了", anchor, "+08:00"), []);
+  assert.deepEqual(futureDueDays("下周去换车铃", anchor, "+08:00"), []);
 });

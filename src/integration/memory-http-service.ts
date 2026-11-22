@@ -68,8 +68,12 @@ function summariseClauses(
   return clauses;
 }
 
-function isSourceNeighbor(result: MemorySearchResult): boolean {
-  return result.neighborhood === "previous_turn" || result.neighborhood === "next_turn";
+function isTailContext(result: MemorySearchResult): boolean {
+  return (
+    result.neighborhood === "previous_turn" ||
+    result.neighborhood === "next_turn" ||
+    result.neighborhood === "due_today"
+  );
 }
 
 function compareCandidates(a: FusedCandidate, b: FusedCandidate): number {
@@ -77,6 +81,28 @@ function compareCandidates(a: FusedCandidate, b: FusedCandidate): number {
     b.result.combinedScore - a.result.combinedScore ||
     a.result.memory.id.localeCompare(b.result.memory.id)
   );
+}
+
+function selectTailCandidates(
+  byId: ReadonlyMap<string, FusedCandidate>,
+  adjacentById: ReadonlyMap<string, FusedCandidate>,
+  limit: number,
+): FusedCandidate[] {
+  const candidates = [...adjacentById.values()].filter(
+    (entry) => !byId.has(entry.result.memory.id),
+  );
+  const due = candidates
+    .filter((entry) => entry.result.neighborhood === "due_today")
+    .sort(compareCandidates)
+    .slice(0, Math.min(2, limit));
+  const dueIds = new Set(due.map((entry) => entry.result.memory.id));
+  const neighbors = candidates
+    .filter(
+      (entry) => entry.result.neighborhood !== "due_today" && !dueIds.has(entry.result.memory.id),
+    )
+    .sort(compareCandidates)
+    .slice(0, Math.min(2, limit));
+  return [...due, ...neighbors].slice(0, Math.min(4, limit));
 }
 
 /** Place source-turn neighbors at the tail without letting project()'s ordinal
@@ -281,8 +307,12 @@ export class HttpMemoryService {
     return this.engine.record(id);
   }
 
-  async searchFeature(text: string, limit: number) {
-    const options = { ...HTTP_MEMORY_SEARCH_PROFILE, limit };
+  async searchFeature(text: string, limit: number, context: { now?: string } = {}) {
+    const options = {
+      ...HTTP_MEMORY_SEARCH_PROFILE,
+      limit,
+      ...(context.now ? { now: context.now, dueReminders: true } : {}),
+    };
     const client = this.client;
     const vectorIndex = this.engine.backend.vectorIndex;
     if (!client || !vectorIndex?.has(client.indexId)) return this.engine.search(text, options);
@@ -316,6 +346,7 @@ export class HttpMemoryService {
     limit: number,
     appendOnly: readonly boolean[] = [],
     features?: readonly (readonly string[])[],
+    context: { now?: string } = {},
   ) {
     if (this.options.allowBackfill !== false) await this.backfillVectors();
     // Track which clauses surfaced each memory, so a caller can see whether the
@@ -329,26 +360,23 @@ export class HttpMemoryService {
       // legacy rows whose pre-upgrade scope differs. No session filter.
       const texts = features?.[index]?.length ? features[index]! : [query];
       for (const text of texts) {
-        const context = await this.searchFeature(text, limit);
-        records ||= context.retrieval?.mode === "hybrid";
+        const pageResult = await this.searchFeature(text, limit, context);
+        records ||= pageResult.retrieval?.mode === "hybrid";
         if (appendOnly[index]) {
-          trackAppended(appendedById, context.results);
+          trackAppended(appendedById, pageResult.results);
           continue;
         }
         // Attribution stays per clause: a chunk of clause i contributes to i.
-        for (const result of context.results) {
-          trackCandidate(isSourceNeighbor(result) ? adjacentById : byId, index, result);
+        for (const result of pageResult.results) {
+          trackCandidate(isTailContext(result) ? adjacentById : byId, index, result);
         }
       }
     }
     // Fuse clauses by identity, keep native scores, apply the AML hard cap.
     const ranked = [...byId.values()].sort(compareCandidates);
-    const neighbors = [...adjacentById.values()]
-      .filter((entry) => !byId.has(entry.result.memory.id))
-      .sort(compareCandidates)
-      .slice(0, Math.min(2, limit));
-    const hits = ranked.slice(0, limit - neighbors.length);
-    const selected = appendTailNeighbors(hits, neighbors);
+    const tail = selectTailCandidates(byId, adjacentById, limit);
+    const hits = ranked.slice(0, limit - tail.length);
+    const selected = appendTailNeighbors(hits, tail);
     const page = new Set(selected.map((entry) => entry.result.memory.id));
     const appended = [...appendedById.values()]
       .filter((result) => !page.has(result.memory.id))

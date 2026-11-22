@@ -56,8 +56,12 @@ function imageUrl(value: unknown, maxBytes: number): string {
 function contentPart(value: unknown, maxImageBytes: number): ContentPart {
   if (!value || typeof value !== "object") throw new ContentValidationError("Invalid content part");
   const part = value as Record<string, unknown>;
-  if (part.type === "text" && typeof part.text === "string")
+  if (part.type === "text") {
+    if (typeof part.text !== "string" || !part.text.trim()) {
+      throw new ContentValidationError("text content part must be nonempty");
+    }
     return { type: "text", text: part.text };
+  }
   if (part.type !== "image_url" || !part.image_url || typeof part.image_url !== "object") {
     throw new ContentValidationError("Only text and image_url content parts are supported");
   }
@@ -110,6 +114,21 @@ export function contentText(content: AmlContent): string {
 
 export function contentHasImages(content: AmlContent): boolean {
   return typeof content !== "string" && content.some((part) => part.type === "image_url");
+}
+
+/** Total decoded byte length across all inline image parts. */
+export function decodedImageBytes(content: AmlContent): number {
+  if (typeof content === "string") return 0;
+  let total = 0;
+  for (const part of content) {
+    if (part.type !== "image_url") continue;
+    const comma = part.image_url.url.indexOf(",");
+    if (comma < 0) continue;
+    const payload = part.image_url.url.slice(comma + 1);
+    const padding = payload.endsWith("==") ? 2 : payload.endsWith("=") ? 1 : 0;
+    total += Math.floor((payload.length * 3) / 4) - padding;
+  }
+  return total;
 }
 
 /** A derived retrieval view only. Callers retain the original ordered source parts.

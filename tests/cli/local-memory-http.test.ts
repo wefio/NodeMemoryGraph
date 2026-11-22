@@ -140,6 +140,22 @@ test(
             .data,
           [],
         );
+        const withOptions = await post(active.endpoint, "/search", {
+          ...query,
+          options: ["ceramic lantern", "stone bench"],
+        });
+        assert.equal(withOptions.status, 200);
+        const optionsBody = await withOptions.json();
+        assert.ok(Array.isArray(optionsBody.data) && optionsBody.data.length === 1);
+        const withNow = await post(active.endpoint, "/search", {
+          ...query,
+          now: "2023-11-15T08:00:00+08:00",
+        });
+        assert.equal(withNow.status, 200);
+        assert.equal(
+          (await post(active.endpoint, "/search", { ...query, now: "not-a-timestamp" })).status,
+          400,
+        );
         await assertStored(active.endpoint);
       } finally {
         await active.stop();
