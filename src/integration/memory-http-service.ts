@@ -147,12 +147,27 @@ export function projectHttpMemory(result: MemorySearchResult, query: string) {
   return projectAmlMultimodalMemory(result.memory, query, result.combinedScore, parts);
 }
 
+export const DEFAULT_BACKFILL_LIMIT = 32;
+const MAX_BACKFILL_LIMIT = 1024;
+
+function resolveBackfillLimit(explicit?: number): number {
+  const rawEnv =
+    typeof process !== "undefined" ? process.env?.NMG_EMBED_BACKFILL_LIMIT?.trim() : undefined;
+  const candidate = explicit !== undefined ? explicit : rawEnv ? Number(rawEnv) : undefined;
+  if (candidate === undefined || !Number.isInteger(candidate) || candidate < 1) {
+    return DEFAULT_BACKFILL_LIMIT;
+  }
+  return Math.min(MAX_BACKFILL_LIMIT, candidate);
+}
+
 /** HTTP evidence semantics over the caller's already-isolated memory engine. */
 export class HttpMemoryService {
   private readonly engine: MemoryEngine;
   private readonly client?: EmbeddingClient;
+  private readonly backfillLimit: number;
   private readonly options: {
     allowBackfill?: boolean;
+    backfillLimit?: number;
     isDeferredEmbedding?: (error: unknown) => boolean;
   };
 
@@ -164,6 +179,7 @@ export class HttpMemoryService {
     this.engine = engine;
     this.client = client;
     this.options = options;
+    this.backfillLimit = resolveBackfillLimit(options.backfillLimit);
   }
 
   /** The last backfill failure, for /admin/status. Deliberately not thrown: see backfillVectors. */
@@ -175,7 +191,7 @@ export class HttpMemoryService {
     const vectorIndex = this.engine.backend.vectorIndex;
     if (!this.client || !vectorIndex) return;
     try {
-      const docs = vectorIndex.pending(this.client.indexId, 32);
+      const docs = vectorIndex.pending(this.client.indexId, this.backfillLimit);
       if (docs.length) {
         const vectors = await this.client.embedDocuments(docs.map((document) => document.text));
         vectorIndex.save(this.client.indexId, docs, vectors);

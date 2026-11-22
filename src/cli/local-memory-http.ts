@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
-import { MemoryOperationConflict } from "../core/memory/backend.ts";
+import { MemoryOperationConflict, type MemoryBackend } from "../core/memory/backend.ts";
 import { MemoryEngine } from "../core/memory/engine.ts";
 import { openMemoryBackend } from "../core/memory/open.ts";
 import { MemoryWriteRejected } from "../core/write-policy.ts";
@@ -30,14 +30,117 @@ import {
 } from "./local-memory-http-config.ts";
 
 const BODY_TIMEOUT_MS = 30_000;
+const DEFAULT_BACKEND_POOL_SIZE = 64;
+
+type PoolEntry = {
+  promise: Promise<MemoryBackend>;
+  active: number;
+  closing: boolean;
+  closed: boolean;
+};
+
+/** Bounded per-namespace SQLite backend pool shared across local HTTP requests. */
+export class LocalBackendPool {
+  private readonly databasePath: string;
+  private readonly maxSize: number;
+  private readonly entries = new Map<string, PoolEntry>();
+  private readonly draining = new Set<Promise<void>>();
+
+  constructor(databasePath: string, maxSize = DEFAULT_BACKEND_POOL_SIZE) {
+    this.databasePath = databasePath;
+    this.maxSize = Math.max(1, Math.floor(maxSize));
+  }
+
+  async withBackend<T>(namespace: string, fn: (backend: MemoryBackend) => Promise<T>): Promise<T> {
+    const entry = this.acquire(namespace);
+    entry.active += 1;
+    try {
+      const backend = await entry.promise;
+      return await fn(backend);
+    } finally {
+      entry.active -= 1;
+      if (entry.closing && entry.active === 0) await this.trackClose(entry);
+    }
+  }
+
+  async closeAll(): Promise<void> {
+    const all = [...this.entries.values()];
+    this.entries.clear();
+    await Promise.all(
+      all.map(async (entry) => {
+        entry.closing = true;
+        if (entry.active === 0) await this.closeEntry(entry);
+      }),
+    );
+    await Promise.all([...this.draining]);
+  }
+
+  private acquire(namespace: string): PoolEntry {
+    const existing = this.entries.get(namespace);
+    if (existing) {
+      this.entries.delete(namespace);
+      this.entries.set(namespace, existing);
+      return existing;
+    }
+    const entry: PoolEntry = {
+      promise: Promise.resolve(undefined as unknown as MemoryBackend),
+      active: 0,
+      closing: false,
+      closed: false,
+    };
+    entry.promise = openMemoryBackend({
+      kind: "sqlite",
+      path: this.databasePath,
+      namespace,
+    }).catch((error: unknown) => {
+      if (this.entries.get(namespace) === entry) this.entries.delete(namespace);
+      throw error;
+    });
+    this.entries.set(namespace, entry);
+    this.evictOldest(namespace);
+    return entry;
+  }
+
+  private evictOldest(keepKey: string): void {
+    for (const [key, oldest] of this.entries) {
+      if (this.entries.size <= this.maxSize) break;
+      if (key === keepKey) continue;
+      this.entries.delete(key);
+      oldest.closing = true;
+      if (oldest.active === 0) void this.trackClose(oldest);
+    }
+  }
+
+  private async trackClose(entry: PoolEntry): Promise<void> {
+    const done = this.closeEntry(entry);
+    this.draining.add(done);
+    try {
+      await done;
+    } finally {
+      this.draining.delete(done);
+    }
+  }
+
+  private async closeEntry(entry: PoolEntry): Promise<void> {
+    if (entry.closed) return;
+    entry.closed = true;
+    try {
+      const backend = await entry.promise;
+      await backend.close();
+    } catch {
+      // Open failed; no backend handle to close.
+    }
+  }
+}
 
 export async function serveLocalMemoryHttp(
   configPath: string,
   stdout: Pick<NodeJS.WriteStream, "write">,
 ): Promise<void> {
   const config = await readLocalMemoryHttpConfig(configPath);
+  const pool = new LocalBackendPool(config.databasePath);
   const server = createServer({ requestTimeout: BODY_TIMEOUT_MS }, (incoming, outgoing) => {
-    void respond(incoming, outgoing, config);
+    void respond(incoming, outgoing, config, pool);
   });
   const stop = () => server.close();
   process.once("SIGINT", stop);
@@ -55,6 +158,7 @@ export async function serveLocalMemoryHttp(
     process.off("SIGINT", stop);
     process.off("SIGTERM", stop);
     if (server.listening) server.close();
+    await pool.closeAll();
   }
 }
 
@@ -62,6 +166,7 @@ async function respond(
   incoming: IncomingMessage,
   outgoing: ServerResponse,
   config: LocalMemoryHttpConfig,
+  pool: LocalBackendPool,
 ) {
   const method = incoming.method ?? "GET";
   try {
@@ -87,21 +192,13 @@ async function respond(
     if (config.apiKey) requireHttpApiKey(request, config.apiKey);
     const input = await readHttpJson(request, config.maxRequestBytes, BODY_TIMEOUT_MS);
     const userId = textField(input.user_id ?? input.userId, "user_id");
-    const backend = await openMemoryBackend({
-      kind: "sqlite",
-      path: config.databasePath,
-      namespace: `http:${httpHash(userId)}`,
-    });
-    try {
+    const result = await pool.withBackend(`http:${httpHash(userId)}`, async (backend) => {
       const service = new HttpMemoryService(new MemoryEngine(backend));
-      const result =
-        operation === "add"
-          ? await addMemory(service, input)
-          : await searchMemory(service, input, config.defaultTopK);
-      send(outgoing, 200, result);
-    } finally {
-      await backend.close();
-    }
+      return operation === "add"
+        ? addMemory(service, input)
+        : searchMemory(service, input, config.defaultTopK);
+    });
+    send(outgoing, 200, result);
   } catch (error) {
     if (!outgoing.headersSent) sendError(outgoing, error);
   }
