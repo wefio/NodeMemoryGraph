@@ -13,6 +13,7 @@ export function searchPreview(memory: MemorySearchResult["memory"], codePoints?:
     return "[forget] (content withdrawn)";
   }
   const normalized = memory.statement.replace(/\s+/gu, " ").trim();
+  if (codePoints === 0) return normalized;
   if (codePoints !== undefined) {
     const characters = Array.from(normalized);
     return characters.length <= codePoints

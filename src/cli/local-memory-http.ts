@@ -1,6 +1,7 @@
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
+import { createEmbeddingClientFromEnv, type EmbeddingClient } from "../core/embedding-provider.ts";
 import { MemoryOperationConflict, type MemoryBackend } from "../core/memory/backend.ts";
 import { MemoryEngine } from "../core/memory/engine.ts";
 import { openMemoryBackend } from "../core/memory/open.ts";
@@ -138,9 +139,10 @@ export async function serveLocalMemoryHttp(
   stdout: Pick<NodeJS.WriteStream, "write">,
 ): Promise<void> {
   const config = await readLocalMemoryHttpConfig(configPath);
+  const embeddingClient = createEmbeddingClientFromEnv();
   const pool = new LocalBackendPool(config.databasePath);
   const server = createServer({ requestTimeout: BODY_TIMEOUT_MS }, (incoming, outgoing) => {
-    void respond(incoming, outgoing, config, pool);
+    void respond(incoming, outgoing, config, pool, embeddingClient);
   });
   const stop = () => server.close();
   process.once("SIGINT", stop);
@@ -167,6 +169,7 @@ async function respond(
   outgoing: ServerResponse,
   config: LocalMemoryHttpConfig,
   pool: LocalBackendPool,
+  embeddingClient?: EmbeddingClient,
 ) {
   const method = incoming.method ?? "GET";
   try {
@@ -193,10 +196,10 @@ async function respond(
     const input = await readHttpJson(request, config.maxRequestBytes, BODY_TIMEOUT_MS);
     const userId = textField(input.user_id ?? input.userId, "user_id");
     const result = await pool.withBackend(`http:${httpHash(userId)}`, async (backend) => {
-      const service = new HttpMemoryService(new MemoryEngine(backend));
-      return operation === "add"
-        ? addMemory(service, input)
-        : searchMemory(service, input, config.defaultTopK);
+      const service = new HttpMemoryService(new MemoryEngine(backend), embeddingClient, {
+        preprocessMessages: config.preprocessMessages,
+      });
+      return operation === "add" ? addMemory(service, input) : searchMemory(service, input, config);
     });
     send(outgoing, 200, result);
   } catch (error) {
@@ -236,18 +239,34 @@ async function addMemory(service: HttpMemoryService, input: JsonObject) {
   return httpAddReceipt({ userId, sessionId, requestId }, operationId, result.added);
 }
 
-async function searchMemory(service: HttpMemoryService, input: JsonObject, defaultTopK: number) {
-  const limit = readHttpTopK(input, defaultTopK);
+async function searchMemory(
+  service: HttpMemoryService,
+  input: JsonObject,
+  config: LocalMemoryHttpConfig,
+) {
+  const limit = readHttpTopK(input, config.defaultTopK);
   const now = readHttpNow(input);
   const clauses = await readHttpClauses(input);
   if (clauses.length === 1 && !clauses[0]!.appendOnly) {
     const query = clauses[0]!.text;
     const result = await service.searchFeature(query, limit, { now });
-    const page = fitExplicitSearchPage(result, { query, limit, persistTrace: false });
+    const page = fitExplicitSearchPage(
+      result,
+      { query, limit, persistTrace: false },
+      {
+        maxCharacters: config.searchMaxCharacters,
+        previewCodePoints: config.searchPreviewCodePoints,
+      },
+    );
+    const surface = renderSearchSurface(page, {
+      emptyText: "No NMG match.",
+      includeGetHint: false,
+    });
+    const profile = config.preprocessMessages ? await service.profileSummary(query, now) : "";
     return {
       data: result.results.slice(0, limit).map((row) => projectHttpMemory(row, query)),
       retrieval_mode: result.retrieval?.mode ?? "lexical",
-      rendered: renderSearchSurface(page, { emptyText: "No NMG match.", includeGetHint: false }),
+      rendered: profile ? `${surface}\n\n${profile}` : surface,
     };
   }
   const searchResult = await service.search(

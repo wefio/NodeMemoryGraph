@@ -40,6 +40,7 @@ export interface GraphExperimentOutcome<TOut> {
 }
 
 function canonicalValue(value: unknown): string {
+  if (typeof value === "function") return `[fn:${sha256Hex(value.toString())}]`;
   if (Array.isArray(value)) return `[${value.map(canonicalValue).join(",")}]`;
   if (value !== null && typeof value === "object") {
     const entries = Object.entries(value)
@@ -50,6 +51,31 @@ function canonicalValue(value: unknown): string {
   }
   const encoded = JSON.stringify(value);
   return encoded === undefined ? "null" : encoded;
+}
+
+const ARRAY_SIG_CACHE = new WeakMap<readonly unknown[], { len: number; sig: string }>();
+
+function arraySignature(value: readonly unknown[]): string {
+  const cached = ARRAY_SIG_CACHE.get(value);
+  if (cached && cached.len === value.length) return cached.sig;
+  const sig = sha256Hex(`[${value.map(canonicalValue).join(",")}]`);
+  ARRAY_SIG_CACHE.set(value, { len: value.length, sig });
+  return sig;
+}
+
+function contextSignature(context: unknown): string {
+  if (context !== null && typeof context === "object" && !Array.isArray(context)) {
+    const entries = Object.entries(context)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) =>
+        Array.isArray(item)
+          ? `${JSON.stringify(key)}:${arraySignature(item)}`
+          : `${JSON.stringify(key)}:${canonicalValue(item)}`,
+      );
+    return sha256Hex(`{${entries.join(",")}}`);
+  }
+  return sha256Hex(canonicalValue(context));
 }
 
 function sha256Hex(text: string): string {
@@ -68,10 +94,14 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 /** Registry mapping operator names to pure or contextual functions. */
 export class ComputeRegistry<TContext = unknown> {
   private readonly operators = new Map<string, ComputeOperator<TContext>>();
+  private readonly signatures = new Map<string, string>();
+  private generation = 0;
 
   register(op: string, fn: ComputeOperator<TContext>): this {
     if (!op.trim()) throw new Error("Operator name must be non-empty");
+    this.generation += 1;
     this.operators.set(op, fn);
+    this.signatures.set(op, sha256Hex(`${this.generation}:${fn.toString()}`));
     return this;
   }
 
@@ -83,6 +113,12 @@ export class ComputeRegistry<TContext = unknown> {
     const fn = this.operators.get(op);
     if (!fn) throw new Error(`Unknown compute operator: ${op}`);
     return fn;
+  }
+
+  getSignature(op: string): string {
+    const sig = this.signatures.get(op);
+    if (!sig) throw new Error(`Unknown compute operator: ${op}`);
+    return sig;
   }
 }
 
@@ -198,17 +234,34 @@ function validateGraph(spec: ComputeGraphSpec): ValidatedGraph {
   return validated;
 }
 
-function nodeSignature(
+function subgraphSignature<TContext>(
+  spec: ComputeGraphSpec,
+  registry: ComputeRegistry<TContext>,
+): string {
+  const nodeSigs = spec.nodes.map((child) => {
+    const childOpSig = child.subgraph ? "subgraph" : registry.getSignature(child.op);
+    const childSubSig = child.subgraph ? subgraphSignature(child.subgraph, registry) : "";
+    return `${child.id}:${child.op}:${childOpSig}:${canonicalValue(child.params ?? {})}:${childSubSig}`;
+  });
+  return sha256Hex(`${spec.id}|${nodeSigs.join(";")}|${canonicalValue(spec.edges)}|${spec.output}`);
+}
+
+function nodeSignature<TContext>(
   node: ComputeNodeSpec,
   incoming: readonly ComputeEdgeSpec[],
   signatures: ReadonlyMap<string, string>,
+  registry: ComputeRegistry<TContext>,
+  contextSig: string,
 ): string {
   const upstream = incoming
     .map((edge) => `${edge.port ?? "default"}=${signatures.get(edge.from) ?? ""}`)
     .sort()
     .join("&");
-  const subSig = node.subgraph ? sha256Hex(canonicalValue(node.subgraph)) : "";
-  return sha256Hex(`${node.op}|${canonicalValue(node.params ?? {})}|${subSig}|${upstream}`);
+  const opSig = node.subgraph ? "subgraph" : registry.getSignature(node.op);
+  const subSig = node.subgraph ? subgraphSignature(node.subgraph, registry) : "";
+  return sha256Hex(
+    `${node.op}|${opSig}|${contextSig}|${canonicalValue(node.params ?? {})}|${subSig}|${upstream}`,
+  );
 }
 
 function gatherNodeInputs(
@@ -239,15 +292,17 @@ function inputSignature(input: unknown): string {
 function prepareRunState<TIn>(
   spec: ComputeGraphSpec,
   input: TIn,
+  context: unknown,
 ): {
   validated: ValidatedGraph;
   outputs: Map<string, unknown>;
   signatures: Map<string, string>;
+  contextSig: string;
 } {
   const validated = validateGraph(spec);
   const outputs = new Map<string, unknown>([[INPUT_NODE_ID, input]]);
   const signatures = new Map<string, string>([[INPUT_NODE_ID, inputSignature(input)]]);
-  return { validated, outputs, signatures };
+  return { validated, outputs, signatures, contextSig: contextSignature(context) };
 }
 
 /** Wrap any ComputeGraphSpec into a single composite operator for hierarchical nesting. */
@@ -271,10 +326,10 @@ export async function executeComputeGraph<TIn, TOut, TContext = unknown>(
   context: TContext,
   memo?: ComputeMemoCache,
 ): Promise<TOut> {
-  const { validated, outputs, signatures } = prepareRunState(spec, input);
+  const { validated, outputs, signatures, contextSig } = prepareRunState(spec, input, context);
   for (const node of validated.order) {
     const incoming = validated.incomingByNode.get(node.id)!;
-    const sig = nodeSignature(node, incoming, signatures);
+    const sig = nodeSignature(node, incoming, signatures, registry, contextSig);
     signatures.set(node.id, sig);
     const cached = memo?.get(sig);
     if (cached?.found) {
@@ -305,10 +360,10 @@ export function evaluateSyncComputeGraph<TIn, TOut, TContext = unknown>(
   context: TContext,
   memo?: ComputeMemoCache,
 ): TOut {
-  const { validated, outputs, signatures } = prepareRunState(spec, input);
+  const { validated, outputs, signatures, contextSig } = prepareRunState(spec, input, context);
   for (const node of validated.order) {
     const incoming = validated.incomingByNode.get(node.id)!;
-    const sig = nodeSignature(node, incoming, signatures);
+    const sig = nodeSignature(node, incoming, signatures, registry, contextSig);
     signatures.set(node.id, sig);
     const cached = memo?.get(sig);
     if (cached?.found) {

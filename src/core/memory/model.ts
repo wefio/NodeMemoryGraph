@@ -267,12 +267,19 @@ function claimFields(
   };
 }
 
+function defaultValidFrom(eventTime: string | null | undefined, now: string): string {
+  if (!eventTime) return now;
+  const eventMs = Date.parse(eventTime);
+  const nowMs = Date.parse(now);
+  return Number.isFinite(eventMs) && Number.isFinite(nowMs) && eventMs > nowMs ? now : eventTime;
+}
+
 function timeFields(
   input: MemoryInput,
   now: string,
 ): Pick<MemoryRecord, "validFrom" | "validUntil" | "openedAt" | "expiresAt"> {
   return {
-    validFrom: input.validFrom ?? input.eventTime ?? now,
+    validFrom: input.validFrom ?? defaultValidFrom(input.eventTime, now),
     validUntil: input.validUntil ?? null,
     openedAt: !input.resolution || input.resolution === "resolved" ? null : (input.openedAt ?? now),
     expiresAt: input.expiresAt ?? null,

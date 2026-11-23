@@ -11,10 +11,14 @@ import type {
   MemoryEntityQuery,
   MemoryHybridPage,
   MemoryReadView,
+  MemoryRelationalProjectionPage,
+  MemoryRelationalProjectionQuery,
+  MemoryVectorCandidate,
   MemoryVectorQuery,
+  RelationalMemoryNeighbor,
   SourceNeighbor,
 } from "./backend.ts";
-import type { HistoryRecord } from "../types.ts";
+import type { HistoryRecord, MemoryRecord } from "../types.ts";
 import {
   ENTITY_COLUMNS,
   SQLITE_HISTORY_SOURCE,
@@ -51,6 +55,13 @@ import {
   importLegacySqliteAssociations,
   retireLegacyMemoryTables,
 } from "./sqlite-legacy-retirement.ts";
+import {
+  ensureSqliteRelationalSchema,
+  projectRelationalMemories,
+  readRelationalMemoryNeighbors,
+  readSourceTurnMetadata,
+  writeSqliteRelationalEntities,
+} from "./sqlite-relational.ts";
 
 const LOCAL_MEMORY_TABLE = "nmg_local_memory";
 const SQL_BATCH_SIZE = 64;
@@ -143,6 +154,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
     this.writer.prepare("INSERT OR IGNORE INTO nmg_memory_head VALUES (?, 0)").run(this.namespace);
     ensureSqliteMemoryChains(this.writer);
     ensureSqliteMemoryAssociations(this.writer);
+    ensureSqliteRelationalSchema(this.writer, this.namespace);
   }
 
   async counts(view: MemoryReadView): Promise<{ memories: number; nodes: number }> {
@@ -195,6 +207,21 @@ export class SqliteMemoryBackend implements MemoryBackend {
     query: MemoryEntityQuery,
   ): SourceNeighbor[] {
     return readSqliteAdjacentSources(this.reader(view), this.namespace, source, query);
+  }
+
+  projectMemories(
+    view: MemoryReadView,
+    query: MemoryRelationalProjectionQuery,
+  ): MemoryRelationalProjectionPage {
+    return projectRelationalMemories(this.reader(view), this.namespace, query);
+  }
+
+  relationalNeighbors(
+    view: MemoryReadView,
+    anchor: MemoryRecord,
+    query: MemoryEntityQuery,
+  ): RelationalMemoryNeighbor[] {
+    return readRelationalMemoryNeighbors(this.reader(view), this.namespace, anchor, query);
   }
 
   hybridCandidates(
@@ -256,22 +283,23 @@ export class SqliteMemoryBackend implements MemoryBackend {
             [...vectorScores.keys()].filter((id) => !lexicalSet.has(id)),
           )
         : new Map<string, number>();
+    const candidates = [
+      ...lexical.map(({ entity, bm25 }) => ({
+        entity,
+        bm25,
+        recordScore: vectorScores.get(entity.value.id) ?? extraVector.get(entity.value.id) ?? 0,
+      })),
+      ...vector
+        .filter(({ entity }) => !lexicalSet.has(entity.value.id))
+        .map((candidate) => ({
+          ...candidate,
+          bm25: extraLexical.get(candidate.entity.value.id) ?? 0,
+        })),
+    ];
     return {
       vectorIds: [...vectorScores.keys()],
       lexicalIds,
-      candidates: [
-        ...lexical.map(({ entity, bm25 }) => ({
-          entity,
-          bm25,
-          recordScore: vectorScores.get(entity.value.id) ?? extraVector.get(entity.value.id) ?? 0,
-        })),
-        ...vector
-          .filter(({ entity }) => !lexicalSet.has(entity.value.id))
-          .map((candidate) => ({
-            ...candidate,
-            bm25: extraLexical.get(candidate.entity.value.id) ?? 0,
-          })),
-      ],
+      candidates: withSourceTurnMetadata(db, this.namespace, candidates),
     };
   }
 
@@ -488,6 +516,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
       if (row.kind === "memory" || row.kind === "tessera")
         writeSqliteTextIndex(this.writer, this.namespace, row);
     }
+    writeSqliteRelationalEntities(this.writer, this.namespace, request.changes.upsert);
     this.writer
       .prepare("UPDATE nmg_memory_head SET revision=? WHERE namespace=?")
       .run(receipt.revision, this.namespace);
@@ -621,7 +650,7 @@ function entityPage(
   const from = ftsFrom
     ? `${ftsFrom} CROSS JOIN nmg_memory_entities ON key = fts_key`
     : "nmg_memory_entities";
-  const order = ftsFrom ? "fts_rank, id" : "id";
+  const order = ftsFrom ? "fts_rank, nmg_memory_entities.rowid DESC, id" : "id";
   return {
     sql: `SELECT kind, payload${scoredExpression ? ", -fts_rank AS bm25" : ""} FROM ${from}
       WHERE ${emptyFts ? "1 = 0" : where} ORDER BY ${order} LIMIT ? OFFSET ?`,
@@ -699,4 +728,19 @@ function adjacentEdgePage(namespace: string, query: MemoryEntityQuery, nodeId: s
 
 function decodeEntity(row: { kind?: unknown; payload?: unknown }): MemoryEntity {
   return { kind: row.kind, value: JSON.parse(String(row.payload)) } as MemoryEntity;
+}
+
+function withSourceTurnMetadata(
+  db: DatabaseSync,
+  namespace: string,
+  candidates: Array<MemoryVectorCandidate & { bm25: number }>,
+): MemoryHybridPage["candidates"] {
+  const sourceIds = [
+    ...new Set(candidates.map(({ entity }) => entity.value.evidenceId).filter(Boolean)),
+  ];
+  const bySource = readSourceTurnMetadata(db, namespace, sourceIds);
+  return candidates.map((item) => {
+    const meta = bySource.get(item.entity.value.evidenceId);
+    return meta ? { ...item, sourceSessionId: meta.sessionId, turnOrdinal: meta.ordinal } : item;
+  });
 }

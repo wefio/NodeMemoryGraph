@@ -68,6 +68,9 @@ export function entityRow(entity: MemoryEntity): EntityRow {
   } else if (entity.kind === "edge") {
     row.source = entity.value.sourceNodeId;
     row.target = entity.value.targetNodeId;
+  } else if (entity.kind === "memoryRelation") {
+    row.source = entity.value.sourceId;
+    row.target = entity.value.targetId;
   } else if (entity.kind === "history") {
     row.name = entity.value.sourceMessageId ?? "";
   } else if (entity.kind === "tessera") {
