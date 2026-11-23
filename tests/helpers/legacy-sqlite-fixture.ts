@@ -128,9 +128,10 @@ export class LegacySqliteFixture {
   }
 
   private insertNode(input: RememberInput, now: string): string {
+    const nodeName = (input.nodeName ?? "").trim();
     const existing = this.db
       .prepare("SELECT id FROM memory_nodes WHERE canonical_name=?")
-      .get(input.nodeName);
+      .get(nodeName);
     if (existing) return String(existing.id);
     const id = randomUUID();
     this.db
@@ -139,9 +140,9 @@ export class LegacySqliteFixture {
       )
       .run(
         id,
-        input.nodeName,
+        nodeName,
         input.nodeKind ?? "concept",
-        input.nodeSummary ?? input.nodeName,
+        input.nodeSummary ?? nodeName,
         now,
         now,
         input.residence ?? "ltg",

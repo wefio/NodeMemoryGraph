@@ -54,6 +54,7 @@ import {
 
 const LOCAL_MEMORY_TABLE = "nmg_local_memory";
 const SQL_BATCH_SIZE = 64;
+const MAX_IDLE_READERS = 4;
 const SURFACE_TRIGRAM_WEIGHT = 0.35;
 export const LOCAL_MEMORY_NAMESPACE = "local-memory-v1";
 function localNamespace(db: DatabaseSync): string | undefined {
@@ -81,6 +82,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
   readonly kind = "sqlite" as const;
   private readonly writer: DatabaseSync;
   private readonly readers = new Map<MemoryReadView, DatabaseSync>();
+  private readonly idleReaders: DatabaseSync[] = [];
   private closed = false;
   private readonly path: string;
   readonly namespace: string;
@@ -108,7 +110,8 @@ export class SqliteMemoryBackend implements MemoryBackend {
   }
 
   private initializeSchema(): void {
-    this.writer.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
+    this.writer.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;
+      PRAGMA wal_autocheckpoint=4000; PRAGMA cache_size=-16000; PRAGMA temp_store=MEMORY;
       CREATE TABLE IF NOT EXISTS nmg_memory_head (namespace TEXT PRIMARY KEY, revision INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS nmg_memory_entities (namespace TEXT NOT NULL,
         ${ENTITY_COLUMNS.map((column) => `${column} TEXT NOT NULL`).join(",")},
@@ -154,15 +157,26 @@ export class SqliteMemoryBackend implements MemoryBackend {
 
   async openRead(): Promise<MemoryReadView> {
     this.assertOpen();
-    const db = this.requestScoped ? this.writer : new DatabaseSync(this.path, { readOnly: true });
+    if (this.requestScoped) {
+      const revision = this.revision(this.writer);
+      const view = Object.freeze({ revision });
+      this.readers.set(view, this.writer);
+      return view;
+    }
+    const db = this.idleReaders.pop() ?? new DatabaseSync(this.path, { readOnly: true });
     try {
-      if (!this.requestScoped) db.exec("PRAGMA query_only=ON; BEGIN");
+      db.exec("PRAGMA query_only=ON; BEGIN");
       const revision = this.revision(db);
       const view = Object.freeze({ revision });
       this.readers.set(view, db);
       return view;
     } catch (error) {
-      if (db !== this.writer) db.close();
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        // Ignore rollback failure on an unusable reader connection.
+      }
+      db.close();
       throw error;
     }
   }
@@ -305,7 +319,18 @@ export class SqliteMemoryBackend implements MemoryBackend {
     const db = this.readers.get(view);
     if (!db) return;
     this.readers.delete(view);
-    if (db !== this.writer) db.close();
+    if (db === this.writer) return;
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      db.close();
+      return;
+    }
+    if (!this.closed && this.idleReaders.length < MAX_IDLE_READERS) {
+      this.idleReaders.push(db);
+    } else {
+      db.close();
+    }
   }
 
   async commit(request: MemoryCommitRequest): Promise<MemoryCommitOutcome> {
@@ -490,7 +515,8 @@ export class SqliteMemoryBackend implements MemoryBackend {
 
   async close(): Promise<void> {
     if (this.closed) return;
-    for (const view of this.readers.keys()) await this.closeRead(view);
+    for (const view of [...this.readers.keys()]) await this.closeRead(view);
+    while (this.idleReaders.length > 0) this.idleReaders.pop()?.close();
     this.writer.close();
     this.closed = true;
   }

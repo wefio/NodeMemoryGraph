@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { recallTriggersFromMarkers } from "../recall-triggers.ts";
 import { ftsIndexedText, surfaceIndexedText } from "../store/search-ranking.ts";
-import { lexicalMemoryText, type EntityRow } from "./entity-rows.ts";
+import type { EntityRow } from "./entity-rows.ts";
 
 interface TextIndexSpec {
   readonly kind: "memory" | "tessera";
@@ -11,13 +11,43 @@ interface TextIndexSpec {
   readonly rank: string;
 }
 
+const INDEX_MONTHS = [
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
+] as const;
+
+/** Derive search-only English and Chinese calendar terms from canonical eventTime. */
+export function eventDateIndexText(eventTime: unknown): string {
+  if (typeof eventTime !== "string" || !eventTime.trim()) return "";
+  const ms = Date.parse(eventTime);
+  if (!Number.isFinite(ms)) return "";
+  const date = new Date(ms);
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + 1;
+  const day = date.getUTCDate();
+  const mm = String(month).padStart(2, "0");
+  const dd = String(day).padStart(2, "0");
+  const monthName = INDEX_MONTHS[month - 1]!;
+  return `${year}-${mm}-${dd} ${day} ${monthName} ${year} ${monthName} ${year} ${year}年${month}月${day}日 ${month}月${day}日 ${year}年${month}月`;
+}
+
 const TEXT_INDEX_SPECS: readonly TextIndexSpec[] = [
   {
     kind: "memory",
     lexicalTable: "nmg_memory_fts",
     surfaceTable: "nmg_memory_surface_fts",
-    columns: ["text", "triggers"],
-    rank: "bm25(1.0, 1.5)",
+    columns: ["text", "triggers", "dates"],
+    rank: "bm25(1.0, 1.5, 1.0)",
   },
   {
     kind: "tessera",
@@ -55,28 +85,33 @@ function isContentlessTrigram(sql: unknown): boolean {
   return isContentless(schema) && /tokenize\s*=\s*['"]?trigram/iu.test(schema);
 }
 
-function rawIndexText(kind: string, row: Pick<EntityRow, "payload" | "text">): string {
-  return kind === "memory" ? lexicalMemoryText(JSON.parse(row.payload)) : row.text;
-}
-
-function lexicalIndexFields(
+function extractTextIndexRow(
   kind: "memory" | "tessera",
   row: Pick<EntityRow, "payload" | "text">,
-): string[] {
+): { fields: string[]; surfaceText: string } {
+  const parsed = JSON.parse(row.payload);
   if (kind === "memory") {
-    const memory = JSON.parse(row.payload);
-    if (memory.storageState) return ["", ""];
-    return [
-      ftsIndexedText(String(memory.statement ?? "")),
-      ftsIndexedText(recallTriggersFromMarkers(memory.markers).join(" ")),
-    ];
+    if (parsed.storageState) {
+      return { fields: ["", "", ""], surfaceText: "" };
+    }
+    const triggers = recallTriggersFromMarkers(parsed.markers);
+    return {
+      fields: [
+        ftsIndexedText(String(parsed.statement ?? "")),
+        ftsIndexedText(triggers.join(" ")),
+        ftsIndexedText(eventDateIndexText(parsed.eventTime)),
+      ],
+      surfaceText: surfaceIndexedText([parsed.statement, ...triggers].join(" ")),
+    };
   }
-  const tessera = JSON.parse(row.payload);
-  return [
-    ftsIndexedText(String(tessera.snippet ?? "")),
-    ftsIndexedText(String(tessera.path ?? "")),
-    ftsIndexedText(String(tessera.label ?? "")),
-  ];
+  return {
+    fields: [
+      ftsIndexedText(String(parsed.snippet ?? "")),
+      ftsIndexedText(String(parsed.path ?? "")),
+      ftsIndexedText(String(parsed.label ?? "")),
+    ],
+    surfaceText: surfaceIndexedText(row.text),
+  };
 }
 
 export function hasContentlessMemoryTextIndex(db: DatabaseSync): boolean {
@@ -168,7 +203,8 @@ function migrateTextIndexes(db: DatabaseSync, tables: ReadonlyMap<string, unknow
       .all(kind)) {
       insertLexical.run(
         row.fts_rowid,
-        ...lexicalIndexFields(kind, { payload: String(row.payload), text: String(row.text) }),
+        ...extractTextIndexRow(kind, { payload: String(row.payload), text: String(row.text) })
+          .fields,
       );
     }
   }
@@ -188,9 +224,8 @@ function migrateTextIndexes(db: DatabaseSync, tables: ReadonlyMap<string, unknow
       .all(kind)) {
       insertSurface.run(
         row.fts_rowid,
-        surfaceIndexedText(
-          rawIndexText(kind, { payload: String(row.payload), text: String(row.text) }),
-        ),
+        extractTextIndexRow(kind, { payload: String(row.payload), text: String(row.text) })
+          .surfaceText,
       );
     }
   }
@@ -198,8 +233,7 @@ function migrateTextIndexes(db: DatabaseSync, tables: ReadonlyMap<string, unknow
 
 export function writeSqliteTextIndex(db: DatabaseSync, namespace: string, row: EntityRow): void {
   const { kind, lexicalTable, surfaceTable, columns } = specFor(row.kind);
-  const fields = lexicalIndexFields(kind, row);
-  const surfaceText = surfaceIndexedText(rawIndexText(kind, row));
+  const { fields, surfaceText } = extractTextIndexRow(kind, row);
   const previous = db
     .prepare("SELECT fts_rowid FROM nmg_memory_fts_rows WHERE namespace=? AND key=?")
     .get(namespace, row.key);

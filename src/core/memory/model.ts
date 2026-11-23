@@ -68,8 +68,12 @@ function canonicalJson(value: unknown): string {
   return encoded;
 }
 
+export function hasValidNodeName(nodeName: string | undefined): boolean {
+  return nodeName === undefined || Boolean(nodeName.trim());
+}
+
 export function validateMemoryInput(input: MemoryInput): void {
-  if (!input.statement.trim() || !input.nodeName.trim())
+  if (!input.statement.trim() || !hasValidNodeName(input.nodeName))
     throw new Error("Statement and node name are required");
   if (input.judgeDuplicates)
     throw new Error("Portable memory does not support duplicate callbacks");
@@ -145,11 +149,34 @@ export function newHistory(input: MemoryInput, id: string, now: string): History
   };
 }
 
+export function unboundMemoryNode(
+  residence: MemoryRecord["residence"],
+  now: string,
+  kind: MemoryNode["kind"] = "topic",
+): MemoryNode {
+  return {
+    id: "",
+    canonicalName: "",
+    summary: "",
+    kind,
+    createdAt: now,
+    updatedAt: now,
+    status: "active",
+    residence,
+    unbound: true,
+  };
+}
+
+export function isUnboundNode(node: MemoryNode): boolean {
+  return !node.id || Boolean(node.unbound);
+}
+
 export function newNode(input: MemoryInput, id: string, now: string): MemoryNode {
+  const canonicalName = (input.nodeName ?? "").trim();
   return {
     id,
-    canonicalName: input.nodeName.trim(),
-    summary: input.nodeSummary ?? input.nodeName.trim(),
+    canonicalName,
+    summary: input.nodeSummary ?? canonicalName,
     kind: input.nodeKind ?? "topic",
     createdAt: now,
     updatedAt: now,
@@ -255,11 +282,13 @@ function timeFields(
 function residenceFields(
   input: MemoryInput,
   now: string,
-): Pick<MemoryRecord, "residence" | "sessionId" | "promotedAt"> {
+): Pick<MemoryRecord, "residence" | "sessionId" | "sourceSessionId" | "promotedAt"> {
   const residence = memoryResidence(input);
+  const sourceSessionId = input.importedEvidence?.sessionId ?? input.sessionId ?? null;
   return {
     residence,
     sessionId: residence === "stg" ? (input.sessionId ?? null) : null,
+    ...(sourceSessionId ? { sourceSessionId } : {}),
     promotedAt: residence === "ltg" ? now : null,
   };
 }

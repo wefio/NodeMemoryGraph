@@ -1181,7 +1181,7 @@ test("SQLite upgrades to porter unicode61, CJK bigrams, and BM25F multi-column w
   const inspect = new DatabaseSync(path, { readOnly: true });
   try {
     for (const [table, expectedCol, expectedRank] of [
-      ["nmg_memory_fts", "triggers", "bm25(1.0, 1.5)"],
+      ["nmg_memory_fts", "dates", "bm25(1.0, 1.5, 1.0)"],
       ["nmg_memory_tessera_fts", "label", "bm25(1.0, 2.5, 1.8)"],
     ] as const) {
       const schemaSql = String(

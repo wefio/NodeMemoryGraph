@@ -14,10 +14,18 @@ import {
   memoryIdentity,
   requestHash,
   searchableMemory,
+  unboundMemoryNode,
   validateMemoryInput,
   visibleMemory,
 } from "./model.ts";
 import type { MemoryInput } from "./model.ts";
+import type { ComputeGraphSpec } from "../compute-graph.ts";
+import {
+  buildGraphProjection,
+  type GraphProjectionOptions,
+  type MemoryGraphProjection,
+} from "./graph-projection.ts";
+import { rerankCandidatesWithGraph } from "./piecewise-rerank.ts";
 import { evidenceShortlist } from "./evidence-ranking.ts";
 import { rankLocalLogOdds } from "./local-log-odds.ts";
 import { MemoryPlan } from "./plan.ts";
@@ -42,6 +50,7 @@ import type {
   EdgePathStep,
   MemoryActor,
   MemoryExportBundle,
+  MemoryNode,
   MemoryRecord,
   MemoryScope,
   MemoryStorageState,
@@ -74,6 +83,8 @@ export interface MemoryQueryOptions {
   expandSourceContext?: boolean;
   /** Collect independent candidates for an injected evidence ranker before reading sources. */
   evidenceShortlist?: boolean;
+  /** Optional composable rerank ComputeGraphSpec; pass false to bypass zero-model reranking. */
+  rerankGraph?: ComputeGraphSpec | false;
 }
 
 interface PlannedResult<T> {
@@ -360,7 +371,7 @@ export class MemoryEngine {
     );
     return selected.map((memory) => ({
       memory,
-      node: nodes.get(memory.nodeId)!,
+      node: resolveCandidateNode(memory, nodes),
       evidence: memory.evidenceIds.map((id) => evidence.get(id)!),
     }));
   }
@@ -371,6 +382,57 @@ export class MemoryEngine {
     semantic?: MemoryVectorQuery,
   ): Promise<MemoryContext> {
     return this.searchContext(text, options, semantic);
+  }
+
+  /** Build an on-demand multi-dimensional pivot graph across stored memories. */
+  async projectGraph(options: GraphProjectionOptions = {}): Promise<MemoryGraphProjection> {
+    const view = await this.backend.openRead();
+    try {
+      const now = this.now();
+      const limit = options.limit ?? 500;
+      const entities = await this.backend.scan(view, {
+        kind: "memory",
+        scope: options.scope,
+        excludeScope: options.excludeScope,
+        sessionId: options.sessionId,
+        limit,
+      });
+      const memories = entities.flatMap((entity) =>
+        entity.kind === "memory" &&
+        searchableMemory(entity.value, options, now, Boolean(options.includeHistorical)) &&
+        entity.value.tier <= (options.maxTier ?? 3)
+          ? [entity.value]
+          : [],
+      );
+      const nodeEntities = await this.readNodesForMemories(view, memories);
+      const explicitNodes = new Map(
+        nodeEntities.flatMap((row) =>
+          row.kind === "node" ? [[row.value.id, row.value] as const] : [],
+        ),
+      );
+      const explicitRelations: NodeRelation[] = [];
+      if (options.includeExplicitEdges !== false && explicitNodes.size) {
+        for (const nodeId of explicitNodes.keys()) {
+          const edges = await this.backend.scan(view, {
+            kind: "edge",
+            connectedTo: nodeId,
+            limit: 128,
+          });
+          for (const edge of edges) {
+            if (edge.kind === "edge") explicitRelations.push(edge.value);
+          }
+        }
+      }
+      return buildGraphProjection({
+        memories,
+        explicitNodes,
+        explicitRelations,
+        dimensions: options.dimensions,
+        includeExplicitEdges: options.includeExplicitEdges,
+      });
+    } finally {
+      await this.backend.closeRead(view);
+    }
   }
 
   async userProfile(text: string, options: MemoryQueryOptions = {}): Promise<MemoryContext> {
@@ -826,7 +888,15 @@ export class MemoryEngine {
         page.candidates.map(({ entity }) => entity),
         options,
         false,
-        (candidates) => selectLocalHybrid(candidates, page, text, options.evidenceShortlist, limit),
+        (candidates) =>
+          selectLocalHybrid(
+            candidates,
+            page,
+            text,
+            options.evidenceShortlist,
+            options.rerankGraph,
+            limit,
+          ),
       );
     }
     const semanticLimit = semantic.mode === "vector" ? 512 : 256;
@@ -979,6 +1049,28 @@ export class MemoryEngine {
 
   setResolution(input: MemoryResolutionChange) {
     return this.lifecycle("resolution", input, (plan) => changeResolution(plan, input, this.now()));
+  }
+
+  /** Attach or rebind an existing memory record to a named graph node progressively. */
+  attachNode(
+    memoryId: string,
+    input: {
+      nodeName: string;
+      nodeSummary?: string;
+      nodeKind?: MemoryNode["kind"];
+      sessionId?: string;
+    },
+    operationId: string = randomUUID(),
+  ) {
+    return this.mutate(
+      operationId,
+      { action: "attachNode", memoryId, input },
+      async (plan) => {
+        const result = await plan.attachNode(memoryId, input, this.now());
+        return { result, ids: [result.memory.id, result.node.id] };
+      },
+      async (_view, receipt) => receipt.result as Awaited<ReturnType<MemoryPlan["attachNode"]>>,
+    );
   }
 
   recordClaimOutcomes(input: RecordClaimOutcomesInput) {
@@ -1147,17 +1239,12 @@ export class MemoryEngine {
         : [],
     );
     if (!memories.length) return [];
-    const nodes = await this.backend.scan(view, {
-      kind: "node",
-      ids: [...new Set(memories.map((memory) => memory.nodeId))],
-      limit: 512,
-    });
+    const nodes = await this.readNodesForMemories(view, memories);
     const nodesById = new Map(
       nodes.flatMap((node) => (node.kind === "node" ? [[node.value.id, node.value] as const] : [])),
     );
     const candidates = memories.flatMap((memory, index): SearchCandidate[] => {
-      const node = nodesById.get(memory.nodeId);
-      if (!node) throw new Error("Broken memory references");
+      const node = resolveCandidateNode(memory, nodesById);
       if (options.nodeName && node.canonicalName !== options.nodeName) return [];
       return [
         {
@@ -1249,12 +1336,18 @@ export class MemoryEngine {
     return hits;
   }
 
+  private readNodesForMemories(view: MemoryReadView, memories: readonly MemoryRecord[]) {
+    const ids = [...new Set(memories.map((memory) => memory.nodeId).filter(Boolean))];
+    if (!ids.length) return Promise.resolve([] as MemoryEntity[]);
+    return this.backend.scan(view, { kind: "node", ids, limit: 512 });
+  }
+
   private async expand(
     view: MemoryReadView,
     results: MemorySearchResult[],
     options: MemoryQueryOptions,
   ): Promise<NodeRelation[]> {
-    let frontier = [...new Set(results.map((item) => item.node.id))];
+    let frontier = seedNodeIds(results);
     const visited = new Set(frontier);
     const paths = new Map<string, EdgePathStep[]>(frontier.map((id) => [id, []]));
     const relations = new Map<string, NodeRelation>();
@@ -1329,11 +1422,54 @@ export class MemoryEngine {
   }
 }
 
+function resolveCandidateNode(
+  memory: MemoryRecord,
+  nodesById: ReadonlyMap<string, MemoryNode>,
+): MemoryNode {
+  if (!memory.nodeId) return unboundMemoryNode(memory.residence, memory.createdAt);
+  const node = nodesById.get(memory.nodeId);
+  if (!node) throw new Error("Broken memory references");
+  return node;
+}
+
+function seedNodeIds(results: readonly MemorySearchResult[]): string[] {
+  return [...new Set(results.map((item) => item.node.id).filter(Boolean))];
+}
+
+function selectStandardHybrid(
+  ranked: readonly SearchCandidate[],
+  text: string,
+  limit: number,
+  rerankGraph: ComputeGraphSpec | false | undefined,
+): SearchCandidate[] {
+  if (rerankGraph === false) return ranked.slice(0, limit);
+  const ordered = rerankCandidatesWithGraph(
+    ranked.map((candidate) => ({
+      candidate,
+      id: candidate.memory.id,
+      statement: candidate.memory.statement,
+      combinedScore: candidate.combinedScore,
+      eventTime: candidate.memory.eventTime,
+      createdAt: candidate.memory.createdAt,
+      sessionId: candidate.memory.sourceSessionId ?? candidate.memory.sessionId,
+      nodeId: candidate.memory.nodeId,
+      evidenceId: candidate.memory.evidenceId,
+      markers: candidate.memory.markers,
+    })),
+    text,
+    rerankGraph,
+  );
+  return ordered
+    .slice(0, limit)
+    .map(({ candidate, combinedScore }) => ({ ...candidate, combinedScore }));
+}
+
 function selectLocalHybrid(
   candidates: SearchCandidate[],
   page: MemoryHybridPage,
   text: string,
   shortlist: boolean | undefined,
+  rerankGraph: ComputeGraphSpec | false | undefined,
   limit: number,
 ): SearchCandidate[] {
   const byId = new Map(page.candidates.map((row) => [row.entity.value.id, row]));
@@ -1343,7 +1479,7 @@ function selectLocalHybrid(
   }).map(({ candidate, score }) => ({ ...candidate, combinedScore: score }));
   const selected = shortlist
     ? evidenceShortlist(ranked, page.vectorIds, page.lexicalIds, limit)
-    : ranked.slice(0, limit);
+    : selectStandardHybrid(ranked, text, limit, rerankGraph);
   const query = normalize(text);
   const terms = searchTerms(query);
   return selected.map((candidate) => {

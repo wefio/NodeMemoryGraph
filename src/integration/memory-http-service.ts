@@ -1,129 +1,13 @@
 import { createHash } from "node:crypto";
+import type { ComputeGraphSpec } from "../core/compute-graph.ts";
 import type { MemoryEngine } from "../core/memory/engine.ts";
 import type { MemoryInput } from "../core/memory/model.ts";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
 import type { MemorySearchResult } from "../core/types.ts";
 import { projectAmlMemory, projectAmlMultimodalMemory } from "./aml-projection.ts";
+import { executeHttpSearchGraph, type HttpClauseHitBatch } from "./http-search-graph.ts";
 import { normalizeContent } from "./multimodal-content.ts";
-import { extractiveNodeSummary } from "./extractive-summaries.ts";
 import type { HttpMemoryMessage } from "./memory-http-protocol.ts";
-
-type ClauseContribution = {
-  /** Position of the clause in the request's clause list. */
-  index: number;
-  /** Returned memories this clause surfaced (it may have surfaced more). */
-  contributed: number;
-  /** Returned memories that no other clause surfaced. */
-  exclusive: number;
-};
-
-type FusedCandidate = { result: MemorySearchResult; sources: Set<number> };
-
-function trackAppended(
-  byId: Map<string, MemorySearchResult>,
-  results: readonly MemorySearchResult[],
-) {
-  for (const result of results) {
-    const prior = byId.get(result.memory.id);
-    if (!prior || result.combinedScore > prior.combinedScore) byId.set(result.memory.id, result);
-  }
-}
-
-/** Keep the highest-scoring occurrence of a memory, remembering every clause
- * that surfaced it. */
-function trackCandidate(
-  byId: Map<string, FusedCandidate>,
-  index: number,
-  result: MemorySearchResult,
-): void {
-  const prior = byId.get(result.memory.id);
-  if (!prior) {
-    byId.set(result.memory.id, { result, sources: new Set([index]) });
-    return;
-  }
-  prior.sources.add(index);
-  if (result.combinedScore > prior.result.combinedScore) prior.result = result;
-}
-
-/** Per-clause attribution over the returned page. */
-function summariseClauses(
-  selected: readonly FusedCandidate[],
-  clauseCount: number,
-): ClauseContribution[] {
-  const clauses: ClauseContribution[] = Array.from({ length: clauseCount }, (_unused, index) => ({
-    index,
-    contributed: 0,
-    exclusive: 0,
-  }));
-  for (const entry of selected) {
-    for (const source of entry.sources) {
-      const clause = clauses[source];
-      if (clause) clause.contributed += 1;
-    }
-    if (entry.sources.size !== 1) continue;
-    const [only] = [...entry.sources];
-    const clause = only === undefined ? undefined : clauses[only];
-    if (clause) clause.exclusive += 1;
-  }
-  return clauses;
-}
-
-function isTailContext(result: MemorySearchResult): boolean {
-  return (
-    result.neighborhood === "previous_turn" ||
-    result.neighborhood === "next_turn" ||
-    result.neighborhood === "due_today"
-  );
-}
-
-function compareCandidates(a: FusedCandidate, b: FusedCandidate): number {
-  return (
-    b.result.combinedScore - a.result.combinedScore ||
-    a.result.memory.id.localeCompare(b.result.memory.id)
-  );
-}
-
-function selectTailCandidates(
-  byId: ReadonlyMap<string, FusedCandidate>,
-  adjacentById: ReadonlyMap<string, FusedCandidate>,
-  limit: number,
-): FusedCandidate[] {
-  const candidates = [...adjacentById.values()].filter(
-    (entry) => !byId.has(entry.result.memory.id),
-  );
-  const due = candidates
-    .filter((entry) => entry.result.neighborhood === "due_today")
-    .sort(compareCandidates)
-    .slice(0, Math.min(2, limit));
-  const dueIds = new Set(due.map((entry) => entry.result.memory.id));
-  const neighbors = candidates
-    .filter(
-      (entry) => entry.result.neighborhood !== "due_today" && !dueIds.has(entry.result.memory.id),
-    )
-    .sort(compareCandidates)
-    .slice(0, Math.min(2, limit));
-  return [...due, ...neighbors].slice(0, Math.min(4, limit));
-}
-
-/** Place source-turn neighbors at the tail without letting project()'s ordinal
- * rank score (1 / (index + 1)) outrank real direct hits during clause fusion. */
-function appendTailNeighbors(
-  hits: readonly FusedCandidate[],
-  neighbors: readonly FusedCandidate[],
-): FusedCandidate[] {
-  if (!neighbors.length) return [...hits];
-  const floor = hits.at(-1)?.result.combinedScore;
-  const capped = neighbors.map((entry, index) => {
-    const combinedScore =
-      floor === undefined
-        ? entry.result.combinedScore
-        : Math.min(entry.result.combinedScore, Math.max(0, floor - (index + 1) * 1e-6));
-    return combinedScore === entry.result.combinedScore
-      ? entry
-      : { ...entry, result: { ...entry.result, combinedScore } };
-  });
-  return [...hits, ...capped];
-}
 
 // Fixed service profile, independent of agent sessions, online feedback and AG
 // disclosure. These are the same store/search primitives used by NmgService.
@@ -169,6 +53,7 @@ export class HttpMemoryService {
     allowBackfill?: boolean;
     backfillLimit?: number;
     isDeferredEmbedding?: (error: unknown) => boolean;
+    searchGraph?: ComputeGraphSpec;
   };
 
   constructor(
@@ -218,17 +103,6 @@ export class HttpMemoryService {
     messages: readonly HttpMemoryMessage[],
     operationId?: string,
   ) {
-    // Node-summary compensation without an LLM writer. The identity name below
-    // stays the stable session key; entity terms land on the non-identity
-    // summary face so later batches can never split the node.
-    const sessionDate = messages.find((message) => message.chat_time)?.chat_time?.slice(0, 10);
-    const nodeSummary = extractiveNodeSummary(
-      messages.map(
-        (message) =>
-          message.indexText ?? (typeof message.content === "string" ? message.content : ""),
-      ),
-      sessionDate,
-    );
     const inputs = messages.map((message): MemoryInput => {
       const sourceRef = `aml:${createHash("sha256")
         .update(JSON.stringify([userId, sessionId, requestId, message.source_message_id]))
@@ -246,8 +120,6 @@ export class HttpMemoryService {
       const statement = view;
       return {
         statement,
-        nodeName: `AML session ${sessionId}`,
-        nodeSummary,
         memoryType: "event",
         // Attribution follows the supplied message role. A derived retrieval
         // view changes indexing text, never who asserted the evidence.
@@ -265,6 +137,7 @@ export class HttpMemoryService {
         tier: 2,
         residence: "ltg",
         sessionId: null,
+        supersedeScan: false,
         writeSource: "import",
         writeReason: "aml_history_import",
         sourceRef,
@@ -365,43 +238,28 @@ export class HttpMemoryService {
     context: { now?: string } = {},
   ) {
     if (this.options.allowBackfill !== false) await this.backfillVectors();
-    // Track which clauses surfaced each memory, so a caller can see whether the
-    // retrieval dimension it added actually contributed to the page.
-    const byId = new Map<string, FusedCandidate>();
-    const adjacentById = new Map<string, FusedCandidate>();
-    const appendedById = new Map<string, MemorySearchResult>();
+    const batches: HttpClauseHitBatch[] = [];
     let records = false;
     for (const [index, query] of queries.entries()) {
       // User isolation is the physical manifest/partition boundary, including
       // legacy rows whose pre-upgrade scope differs. No session filter.
       const texts = features?.[index]?.length ? features[index]! : [query];
+      const isAppendOnly = Boolean(appendOnly[index]);
       for (const text of texts) {
         const pageResult = await this.searchFeature(text, limit, context);
         records ||= pageResult.retrieval?.mode === "hybrid";
-        if (appendOnly[index]) {
-          trackAppended(appendedById, pageResult.results);
-          continue;
-        }
-        // Attribution stays per clause: a chunk of clause i contributes to i.
-        for (const result of pageResult.results) {
-          trackCandidate(isTailContext(result) ? adjacentById : byId, index, result);
-        }
+        batches.push({ clauseIndex: index, appendOnly: isAppendOnly, results: pageResult.results });
       }
     }
-    // Fuse clauses by identity, keep native scores, apply the AML hard cap.
-    const ranked = [...byId.values()].sort(compareCandidates);
-    const tail = selectTailCandidates(byId, adjacentById, limit);
-    const hits = ranked.slice(0, limit - tail.length);
-    const selected = appendTailNeighbors(hits, tail);
-    const page = new Set(selected.map((entry) => entry.result.memory.id));
-    const appended = [...appendedById.values()]
-      .filter((result) => !page.has(result.memory.id))
-      .sort((a, b) => b.combinedScore - a.combinedScore || a.memory.id.localeCompare(b.memory.id))
-      .slice(0, limit);
+    const { selected, clauses, appended } = executeHttpSearchGraph(
+      batches,
+      { limit, clauseCount: queries.length },
+      this.options.searchGraph,
+    );
     return {
       retrievalMode: records ? "records" : "lexical",
       memories: selected.map((entry) => projectHttpMemory(entry.result, queries[0] ?? "")),
-      clauses: summariseClauses(selected, queries.length),
+      clauses,
       appended: appended.map((result) => projectHttpMemory(result, queries[0] ?? "")),
     };
   }

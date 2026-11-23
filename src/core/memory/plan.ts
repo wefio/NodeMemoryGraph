@@ -1,4 +1,10 @@
-import type { HistoryRecord, MemoryRecord, MemoryWriteEvent, RememberResult } from "../types.ts";
+import type {
+  HistoryRecord,
+  MemoryNode,
+  MemoryRecord,
+  MemoryWriteEvent,
+  RememberResult,
+} from "../types.ts";
 import { TESSERA_REF_MARKER } from "../types.ts";
 import { serializeScope } from "../scope.ts";
 import { normalizeStatement } from "../memory-normalization.ts";
@@ -12,6 +18,7 @@ import {
   newMemory,
   newNode,
   stateAliasId,
+  unboundMemoryNode,
   visibleMemory,
 } from "./model.ts";
 import type { MemoryInput } from "./model.ts";
@@ -47,12 +54,16 @@ export class MemoryPlan {
   }
 
   async prefetchRemember(inputs: readonly MemoryInput[]): Promise<void> {
-    if (inputs.length < 2 || !this.backend.scanBatch) return;
+    if (this.view.revision === 0 || inputs.length < 2 || !this.backend.scanBatch) return;
     const queries = new Map<string, MemoryEntityQuery>();
     for (const input of inputs) {
-      const { query: node } = this.nodeLookup(input);
-      const duplicate = duplicateLookup(input);
-      for (const query of [node, duplicate]) {
+      const lookUps: MemoryEntityQuery[] = [duplicateLookup(input)];
+      if (input.nodeName?.trim()) lookUps.push(this.nodeLookup(input).query);
+      const sourceMessageId = !input.evidenceHistoryId
+        ? (input.importedEvidence?.sourceMessageId ?? input.evidenceSource?.sourceMessageId?.trim())
+        : undefined;
+      if (sourceMessageId) lookUps.push({ kind: "history", sourceMessageId });
+      for (const query of lookUps) {
         const key = JSON.stringify({ ...query, limit: PLAN_PAGE_SIZE, offset: 0 });
         queries.set(key, { ...query, limit: PREFETCH_LIMIT });
       }
@@ -100,6 +111,7 @@ export class MemoryPlan {
   }
 
   private async readPage(query: MemoryEntityQuery): Promise<MemoryEntity[]> {
+    if (this.view.revision === 0) return [];
     const key = JSON.stringify(query);
     const cached = this.snapshotPages.get(key);
     if (cached) return cached;
@@ -135,10 +147,11 @@ export class MemoryPlan {
     const history = await this.history(input, `${id}_evidence`, now);
     const memory = newMemory(input, id, node.id, history.id, now);
     await this.replacePrevious(input, memory, now);
-    const supersedeCandidates = await this.possiblePredecessors(memory, now);
+    const supersedeCandidates =
+      input.supersedeScan === false ? [] : await this.possiblePredecessors(memory, now);
     await this.requireRelated(memory, sessionId, now);
     this.attachTesserae(input, memory, now);
-    this.put({ kind: "node", value: node });
+    if (node.id) this.put({ kind: "node", value: node });
     this.put({ kind: "history", value: history });
     this.put({ kind: "memory", value: memory });
     this.audit.push({
@@ -163,7 +176,7 @@ export class MemoryPlan {
   }
 
   private async possiblePredecessors(memory: MemoryRecord, now: string) {
-    if (memory.supersedesId || memory.stateKey) return [];
+    if (!memory.nodeId || memory.supersedesId || memory.stateKey) return [];
     const sessionId = memory.sessionId ?? undefined;
     const scope = serializeScope(memory.scope);
     const rows = await this.readPage({
@@ -236,7 +249,7 @@ export class MemoryPlan {
 
   private nodeLookup(input: MemoryInput) {
     const residence = memoryResidence(input);
-    const name = input.nodeName.trim().toLocaleLowerCase("en-US");
+    const name = (input.nodeName ?? "").trim().toLocaleLowerCase("en-US");
     const nodeId = memoryIdentity(
       this.backend.namespace,
       "node",
@@ -249,8 +262,10 @@ export class MemoryPlan {
     return { nodeId, query };
   }
 
-  private async node(input: MemoryInput, now: string) {
+  private async node(input: MemoryInput, now: string): Promise<MemoryNode> {
     const residence = memoryResidence(input);
+    const nodeName = (input.nodeName ?? "").trim();
+    if (!nodeName) return unboundMemoryNode(residence, now, input.nodeKind);
     const { nodeId, query } = this.nodeLookup(input);
     const nodes = await this.find(query);
     const active = nodes.flatMap((entity) =>
@@ -260,10 +275,45 @@ export class MemoryPlan {
         ? [entity.value]
         : [],
     );
-    const exact = active.find((node) => node.canonicalName === input.nodeName.trim());
+    const exact = active.find((node) => node.canonicalName === nodeName);
     if (exact) return exact;
     if (active.length > 1) throw new Error("Multiple active nodes match this name");
     return active[0] ?? newNode(input, nodeId, now);
+  }
+
+  async attachNode(
+    memoryId: string,
+    input: {
+      nodeName: string;
+      nodeSummary?: string;
+      nodeKind?: MemoryNode["kind"];
+      sessionId?: string;
+    },
+    now: string,
+  ): Promise<{ memory: MemoryRecord; node: MemoryNode }> {
+    const nodeName = input.nodeName.trim();
+    if (!nodeName) throw new Error("Node name is required");
+    const found = await this.find({ kind: "memory", ids: [memoryId], sessionId: input.sessionId });
+    const existing = found[0];
+    if (existing?.kind !== "memory" || existing.value.status === "deleted") {
+      throw new Error("Memory does not exist in this session");
+    }
+    const memory = existing.value;
+    const node = await this.node(
+      {
+        statement: memory.statement,
+        nodeName,
+        nodeSummary: input.nodeSummary,
+        nodeKind: input.nodeKind,
+        residence: memory.residence,
+        sessionId: memory.sessionId ?? undefined,
+      },
+      now,
+    );
+    const updated: MemoryRecord = { ...memory, nodeId: node.id };
+    this.put({ kind: "node", value: node });
+    this.put({ kind: "memory", value: updated });
+    return { memory: updated, node };
   }
 
   private async replacePrevious(
@@ -366,10 +416,17 @@ export class MemoryPlan {
   }
 
   private async result(memory: MemoryRecord): Promise<RememberResult> {
-    const nodes = await this.find({ kind: "node", ids: [memory.nodeId] });
     const history = await this.find({ kind: "history", ids: [memory.evidenceId] });
-    if (nodes[0]?.kind !== "node" || history[0]?.kind !== "history")
-      throw new Error("Broken memory references");
+    if (history[0]?.kind !== "history") throw new Error("Broken memory references");
+    if (!memory.nodeId) {
+      return {
+        memory,
+        node: unboundMemoryNode(memory.residence, memory.createdAt),
+        history: history[0].value,
+      };
+    }
+    const nodes = await this.find({ kind: "node", ids: [memory.nodeId] });
+    if (nodes[0]?.kind !== "node") throw new Error("Broken memory references");
     return { memory, node: nodes[0].value, history: history[0].value };
   }
 }
@@ -397,6 +454,7 @@ function lookupKey(query: MemoryEntityQuery): string | undefined {
     if (query.exactText !== undefined)
       return JSON.stringify(["text", scope, normalizeStatement(query.exactText)]);
     if (query.stateKey !== undefined) return JSON.stringify(["state", scope, query.stateKey]);
+    if (query.nodeId !== undefined) return JSON.stringify(["node_mem", scope, query.nodeId]);
   }
   return undefined;
 }
@@ -406,10 +464,11 @@ function entityLookups(entity: MemoryEntity): MemoryEntityQuery[] {
   if (entity.kind === "history" && entity.value.sourceMessageId)
     return [{ kind: "history", sourceMessageId: entity.value.sourceMessageId }];
   if (entity.kind !== "memory") return [];
-  const { statement, scope, stateKey } = entity.value;
+  const { statement, scope, stateKey, nodeId } = entity.value;
   return [
     { kind: "memory", exactText: statement, scope },
     ...(stateKey === null ? [] : [{ kind: "memory" as const, stateKey, scope }]),
+    ...(nodeId ? [{ kind: "memory" as const, nodeId, scope }] : []),
   ];
 }
 

@@ -24,7 +24,8 @@ try {
   const round = await service.search(['cafe museum visit'], 10);
   assert.ok(round.memories.length >= 1);
   const reference = await service.record(round.memories[0].id);
-  assert.ok(reference?.nodeId);
+  assert.equal(reference?.nodeId, '');
+  assert.equal(reference?.sourceSessionId, 's');
   // A later batch keeps identity stable and the mechanism idempotent.
   const second = Array.from({ length: 3 }, (_, index) => ({
     role: 'user',
@@ -36,7 +37,9 @@ try {
   const still = await service.search(['cafe museum visit'], 10);
   assert.ok(still.memories.length >= 1, 'routing survives later batches');
   const latest = await service.search(['auction follow-up'], 1);
-  assert.equal((await service.record(latest.memories[0].id)).nodeId, reference.nodeId);
+  const latestRecord = await service.record(latest.memories[0].id);
+  assert.equal(latestRecord?.nodeId, '');
+  assert.equal(latestRecord?.sourceSessionId, reference.sourceSessionId);
   mkdirSync('.runtime/verification', { recursive: true });
   writeFileSync('.runtime/verification/extractive-summaries.json', JSON.stringify({
     status: 'passed', mode: 'native-sqlite-extractive-no-llm',
