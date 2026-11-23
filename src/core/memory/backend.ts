@@ -224,6 +224,7 @@ export interface MemoryVectorDocument {
   id: string;
   statement: string;
   text: string;
+  readonly chunkIndex?: number;
 }
 
 export interface MemoryVectorCursor {

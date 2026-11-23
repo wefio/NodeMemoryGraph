@@ -5,6 +5,7 @@ import {
   memoryEmbeddingText,
   type StoreRow,
 } from "../store/search-ranking.ts";
+import { planEmbeddingWindows, resolveEmbedChunkChars } from "../text-chunking.ts";
 import { encodeVector, scoringVector } from "../store/vector-codec.ts";
 import type {
   MemoryEntityQuery,
@@ -31,6 +32,10 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
       namespace TEXT NOT NULL, model TEXT NOT NULL, id TEXT NOT NULL,
       dimensions INTEGER NOT NULL, vector BLOB NOT NULL,
       PRIMARY KEY(namespace, model, id));
+      CREATE TABLE IF NOT EXISTS nmg_memory_vector_chunks (
+        namespace TEXT NOT NULL, model TEXT NOT NULL, id TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL, dimensions INTEGER NOT NULL, vector BLOB NOT NULL,
+        PRIMARY KEY(namespace, model, id, chunk_index));
       CREATE TABLE IF NOT EXISTS nmg_memory_vector_import (
         namespace TEXT PRIMARY KEY);
       CREATE INDEX IF NOT EXISTS nmg_memory_embedding_order ON nmg_memory_entities
@@ -108,15 +113,8 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
       FROM pending m ORDER BY m.createdAt DESC, m.id`,
       )
       .all(...bind);
-    return rows.map((row) => ({
-      id: String(row.id),
-      createdAt: String(row.createdAt),
-      statement: String(row.text),
-      text: memoryEmbeddingText(row.text, {
-        eventTime: row.eventTime,
-        previousTurn: row.previousTurn,
-      }),
-    }));
+    const chunkChars = resolveEmbedChunkChars();
+    return rows.flatMap((row) => expandPendingRow(row, chunkChars));
   }
 
   save(
@@ -134,27 +132,63 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
         .get(this.namespace, indexId);
       if (existing && Number(existing.dimensions) !== dimensions)
         throw new Error("Embedding vector dimensions differ from the configured index");
-      for (let offset = 0; offset < documents.length; offset += 64) {
-        const batch = documents.slice(offset, offset + 64);
-        const bind = batch.flatMap((doc, i) => [
-          `memory:${doc.id}`,
-          doc.statement,
-          encoded[offset + i]!,
-        ]);
-        this.db
-          .prepare(
-            `WITH incoming(key, text, vector) AS (VALUES ${batch.map(() => "(?, ?, ?)").join(",")})
-          INSERT OR IGNORE INTO nmg_memory_vectors
-          SELECT m.namespace, ?, m.id, ?, incoming.vector FROM incoming
-          JOIN nmg_memory_entities m ON m.namespace=? AND m.key=incoming.key AND m.text=incoming.text
-          WHERE ${INDEXABLE_MEMORY}`,
-          )
-          .run(...bind, indexId, dimensions, this.namespace);
-      }
+      const primary = documents
+        .map((doc, i) => ({ doc, vec: encoded[i]! }))
+        .filter((entry) => entry.doc.chunkIndex === undefined);
+      const chunks = documents
+        .map((doc, i) => ({ doc, vec: encoded[i]! }))
+        .filter((entry) => entry.doc.chunkIndex !== undefined);
+      this.savePrimaryBatch(indexId, dimensions, primary);
+      this.saveChunkBatch(indexId, dimensions, chunks);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
+    }
+  }
+
+  private savePrimaryBatch(
+    indexId: string,
+    dimensions: number,
+    entries: readonly { doc: MemoryVectorDocument; vec: Uint8Array }[],
+  ): void {
+    for (let offset = 0; offset < entries.length; offset += 64) {
+      const batch = entries.slice(offset, offset + 64);
+      const bind = batch.flatMap(({ doc, vec }) => [`memory:${doc.id}`, doc.statement, vec]);
+      this.db
+        .prepare(
+          `WITH incoming(key, text, vector) AS (VALUES ${batch.map(() => "(?, ?, ?)").join(",")})
+          INSERT OR IGNORE INTO nmg_memory_vectors
+          SELECT m.namespace, ?, m.id, ?, incoming.vector FROM incoming
+          JOIN nmg_memory_entities m ON m.namespace=? AND m.key=incoming.key AND m.text=incoming.text
+          WHERE ${INDEXABLE_MEMORY}`,
+        )
+        .run(...bind, indexId, dimensions, this.namespace);
+    }
+  }
+
+  private saveChunkBatch(
+    indexId: string,
+    dimensions: number,
+    entries: readonly { doc: MemoryVectorDocument; vec: Uint8Array }[],
+  ): void {
+    for (let offset = 0; offset < entries.length; offset += 64) {
+      const batch = entries.slice(offset, offset + 64);
+      const bind = batch.flatMap(({ doc, vec }) => [
+        `memory:${doc.id}`,
+        doc.statement,
+        doc.chunkIndex!,
+        vec,
+      ]);
+      this.db
+        .prepare(
+          `WITH incoming(key, text, chunk_index, vector) AS (VALUES ${batch.map(() => "(?, ?, ?, ?)").join(",")})
+          INSERT OR REPLACE INTO nmg_memory_vector_chunks
+          SELECT m.namespace, ?, m.id, incoming.chunk_index, ?, incoming.vector FROM incoming
+          JOIN nmg_memory_entities m ON m.namespace=? AND m.key=incoming.key AND m.text=incoming.text
+          WHERE ${INDEXABLE_MEMORY}`,
+        )
+        .run(...bind, indexId, dimensions, this.namespace);
     }
   }
 
@@ -176,11 +210,17 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
         `WITH eligible AS (
       SELECT namespace, id, rowid AS entity_rowid FROM nmg_memory_entities m
       WHERE namespace=? AND ${sqliteQueryWhere(query)} AND ${INDEXABLE_MEMORY}
-    ), scores AS MATERIALIZED (
-      SELECT m.id, m.entity_rowid,
-        nmg_memory_cosine(v.vector) AS recordScore
+    ), raw_scores AS (
+      SELECT m.id, m.entity_rowid, nmg_memory_cosine(v.vector) AS s
       FROM eligible m JOIN nmg_memory_vectors v
         ON v.namespace=m.namespace AND v.model=? AND v.id=m.id AND v.dimensions=?
+      UNION ALL
+      SELECT m.id, m.entity_rowid, nmg_memory_cosine(c.vector) AS s
+      FROM eligible m JOIN nmg_memory_vector_chunks c
+        ON c.namespace=m.namespace AND c.model=? AND c.id=m.id AND c.dimensions=?
+    ), scores AS MATERIALIZED (
+      SELECT id, entity_rowid, (0.8 * MAX(s) + 0.2 * AVG(s)) AS recordScore
+      FROM raw_scores GROUP BY id, entity_rowid
     ), selected AS (
       SELECT * FROM scores
       WHERE recordScore>0 ORDER BY recordScore DESC, id LIMIT ?
@@ -189,7 +229,14 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
     CROSS JOIN nmg_memory_entities m ON m.rowid=selected.entity_rowid
     ORDER BY selected.recordScore DESC, selected.id`,
       )
-      .all(this.namespace, semantic.indexId, semantic.vector.length, limit) as StoreRow[];
+      .all(
+        this.namespace,
+        semantic.indexId,
+        semantic.vector.length,
+        semantic.indexId,
+        semantic.vector.length,
+        limit,
+      ) as StoreRow[];
     return rows.map((row) => ({
       entity: { kind: "memory", value: JSON.parse(String(row.payload)) },
       recordScore: Number(row.recordScore),
@@ -203,19 +250,38 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
       .prepare(
         `SELECT v.id, v.vector FROM json_each(?) wanted
         CROSS JOIN nmg_memory_vectors v ON v.namespace=? AND v.model=?
-          AND v.id=wanted.value AND v.dimensions=?`,
+          AND v.id=wanted.value AND v.dimensions=?
+        UNION ALL
+        SELECT c.id, c.vector FROM json_each(?) wanted
+        CROSS JOIN nmg_memory_vector_chunks c ON c.namespace=? AND c.model=?
+          AND c.id=wanted.value AND c.dimensions=?`,
       )
       .all(
         JSON.stringify(ids),
         this.namespace,
         semantic.indexId,
         semantic.vector.length,
+        JSON.stringify(ids),
+        this.namespace,
+        semantic.indexId,
+        semantic.vector.length,
       ) as StoreRow[];
+    const acc = new Map<string, { max: number; sum: number; count: number }>();
+    for (const row of rows) {
+      const id = String(row.id);
+      const score = cosine(scoringVector(row));
+      if (!Number.isFinite(score)) continue;
+      const cur = acc.get(id);
+      if (!cur) {
+        acc.set(id, { max: score, sum: score, count: 1 });
+      } else {
+        cur.max = Math.max(cur.max, score);
+        cur.sum += score;
+        cur.count += 1;
+      }
+    }
     return new Map(
-      rows.map((row) => {
-        const score = cosine(scoringVector(row));
-        return [String(row.id), Number.isFinite(score) ? score : 0];
-      }),
+      Array.from(acc.entries(), ([id, v]) => [id, 0.8 * v.max + 0.2 * (v.sum / v.count)]),
     );
   }
 }
@@ -248,6 +314,39 @@ const PREVIOUS_TURN = `(SELECT json_extract(prev.payload, '$.content')
     ORDER BY CAST(candidate.name AS INTEGER) DESC, candidate.id LIMIT 1
   )
   ORDER BY CAST(prev.name AS INTEGER) DESC, CAST(link.key AS INTEGER) LIMIT 1)`;
+
+function expandPendingRow(
+  row: Record<string, unknown>,
+  chunkChars: number,
+): (MemoryVectorDocument & MemoryVectorCursor)[] {
+  const id = String(row.id);
+  const createdAt = String(row.createdAt);
+  const statement = String(row.text);
+  const primary: MemoryVectorDocument & MemoryVectorCursor = {
+    id,
+    createdAt,
+    statement,
+    text: memoryEmbeddingText(statement, {
+      eventTime: row.eventTime as string | null | undefined,
+      previousTurn: row.previousTurn as string | null | undefined,
+    }),
+  };
+  if (chunkChars <= 0) return [primary];
+  const extraWindows = planEmbeddingWindows(statement, { windowChars: chunkChars });
+  if (extraWindows.length === 0) return [primary];
+  return [
+    primary,
+    ...extraWindows.map((chunk, chunkIndex) => ({
+      id,
+      createdAt,
+      statement,
+      chunkIndex,
+      text: memoryEmbeddingText(chunk, {
+        eventTime: row.eventTime as string | null | undefined,
+      }),
+    })),
+  ];
+}
 
 function validateVectors(vectors: readonly (number[] | Float32Array)[], expected: number): void {
   const dimensions = vectors[0]?.length;

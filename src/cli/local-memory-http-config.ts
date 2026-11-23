@@ -14,6 +14,7 @@ export interface LocalMemoryHttpConfig {
   searchPreviewCodePoints?: number;
   searchMaxCharacters?: number;
   preprocessMessages?: boolean;
+  sortResultsByTime?: boolean;
 }
 
 const MAX_LOCAL_REQUEST_BYTES = 48 * 1024 * 1024;
@@ -71,6 +72,7 @@ export function parseLocalMemoryHttpConfig(
     "searchPreviewCodePoints",
     "searchMaxCharacters",
     "preprocessMessages",
+    "sortResultsByTime",
   ];
   const unknown = Object.keys(config).find((key) => !allowed.includes(key));
   if (unknown) throw new Error(`Unknown HTTP configuration field: ${unknown}`);
@@ -90,6 +92,7 @@ export function parseLocalMemoryHttpConfig(
   );
   const searchMaxCharacters = optionalIntegerOption(config, "searchMaxCharacters", 256, 1_000_000);
   const preprocessMessages = optionalBooleanOption(config, "preprocessMessages");
+  const sortResultsByTime = optionalBooleanOption(config, "sortResultsByTime");
 
   return {
     host,
@@ -107,6 +110,7 @@ export function parseLocalMemoryHttpConfig(
     ...(searchPreviewCodePoints !== undefined ? { searchPreviewCodePoints } : {}),
     ...(searchMaxCharacters !== undefined ? { searchMaxCharacters } : {}),
     ...(preprocessMessages !== undefined ? { preprocessMessages } : {}),
+    ...(sortResultsByTime !== undefined ? { sortResultsByTime } : {}),
   };
 }
 

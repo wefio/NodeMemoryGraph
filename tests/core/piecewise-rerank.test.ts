@@ -16,6 +16,7 @@ import {
   type RerankCandidate,
 } from "../../src/core/memory/piecewise-rerank.ts";
 import { eventDateIndexText } from "../../src/core/memory/sqlite-text-index.ts";
+import { planEmbeddingWindows, sentenceAlignedPreview } from "../../src/core/text-chunking.ts";
 import { parseLocalMemoryHttpConfig } from "../../src/cli/local-memory-http-config.ts";
 import { renderSearchSurface } from "../../src/integration/agent-surface.ts";
 import { fitExplicitSearchPage } from "../../src/integration/explicit-search-page.ts";
@@ -942,5 +943,83 @@ test("HTTP profile HEAD resolves git-diff tombstones, overwrites, and uncertain 
     assert.equal(head.length, 6);
   } finally {
     await backend.closeRead(view);
+  }
+});
+
+test("geometric blind-spot windows, MaxP sub-chunks, sentence-aligned preview, and sortResultsByTime config", async (t) => {
+  const shortText = "I enjoy morning yoga. It keeps me grounded.";
+  assert.deepEqual(planEmbeddingWindows(shortText, { windowChars: 2000 }), []);
+
+  const longParagraph = [
+    "Yesterday we spent hours reviewing quarterly municipal budget spreadsheets and zoning approvals.",
+    "The committee argued about sidewalk paving schedules and downtown parking meter upgrades.",
+    "After lunch I secretly told Dana that I love surfing at quiet beaches along the Oregon coast.",
+    "Later in the afternoon we returned to endless compliance audits and tax filing reminders.",
+  ].join(" ");
+  const extraWindows = planEmbeddingWindows(longParagraph, { windowChars: 160 });
+  assert.ok(extraWindows.length >= 2);
+  assert.equal(extraWindows[0]!.includes("quarterly municipal budget spreadsheets"), false);
+  assert.ok(extraWindows.some((c) => c.includes("surfing at quiet beaches")));
+  assert.deepEqual(planEmbeddingWindows(longParagraph, { windowChars: 0 }), []);
+
+  const clipped = sentenceAlignedPreview(
+    "First sentence finishes cleanly here. Second sentence contains trailing extra words that exceed budget.",
+    55,
+  );
+  assert.equal(clipped, "First sentence finishes cleanly here.…");
+
+  const dir = mkdtempSync(join(tmpdir(), "nmg-maxp-chunks-"));
+  const cfg = parseLocalMemoryHttpConfig(
+    { databasePath: "./http.sqlite", sortResultsByTime: true },
+    join(dir, "nmg-http.json"),
+  );
+  assert.equal(cfg.sortResultsByTime, true);
+
+  const backend = await openMemoryBackend({
+    kind: "sqlite",
+    path: join(dir, "http.sqlite"),
+    namespace: "maxp-test",
+  });
+  t.after(async () => {
+    await backend.close();
+    removeTempDirectory(dir);
+  });
+
+  const embedText = (text: string): number[] => {
+    const lower = text.toLowerCase();
+    if (lower.includes("oregon coast") || lower.includes("surfing")) return [0, 1, 0];
+    if (lower.includes("budget") || lower.includes("zoning")) return [1, 0, 0];
+    return [0.7, 0.05, 0.7];
+  };
+  const fakeEmbedder = {
+    indexId: "fake-3d@v1",
+    model: "fake-3d",
+    profile: "bge-en",
+    embed: async (inputs: string[]) => inputs.map(embedText),
+    embedDocuments: async (inputs: string[]) => inputs.map(embedText),
+    embedQueries: async (inputs: string[]) => inputs.map(embedText),
+  };
+
+  const prevChunkEnv = process.env.NMG_EMBED_CHUNK_CHARS;
+  process.env.NMG_EMBED_CHUNK_CHARS = "160";
+  try {
+    const service = new HttpMemoryService(
+      new MemoryEngine(backend, () => "2026-11-23T20:00:00.000Z"),
+      fakeEmbedder,
+    );
+    await service.rememberBatch("u1", "s1", "req-long", [
+      { role: "user", content: longParagraph, source_message_id: "0" },
+    ]);
+    const res = await service.searchFeature("coastal surfing getaway", 5);
+    assert.equal(res.retrieval?.mode, "hybrid");
+    assert.ok(res.results.length >= 1);
+    assert.ok(res.results[0]!.memory.statement.includes("surfing at quiet beaches"));
+    assert.ok(
+      res.results[0]!.vectorScore > 0.8 && res.results[0]!.vectorScore < 0.99,
+      `expected damped 0.8*MaxP + 0.2*AvgP in (0.8, 0.99), got ${res.results[0]!.vectorScore}`,
+    );
+  } finally {
+    if (prevChunkEnv === undefined) delete process.env.NMG_EMBED_CHUNK_CHARS;
+    else process.env.NMG_EMBED_CHUNK_CHARS = prevChunkEnv;
   }
 });

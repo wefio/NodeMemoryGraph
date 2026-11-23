@@ -109,6 +109,19 @@
   - **基线（`240` 字符截断、原文 `/add`）**：**`32/129 = 24.81%`**（`ask_to_forget = 28.00%`、`therapy_background = 29.41%`、`neutral_preferences = 29.63%`、`health_and_medical_conditions = 29.41%`、`sensitive_info = 25.00%`）。
   - **开启写入预处理 + 全文摘要预算（`preprocessMessages: true` 提取 `recall_trigger=221, forget_directive=85`，`searchPreviewCodePoints: 0`、`searchMaxCharacters: 32000`）**：准确率大幅提升至 **`61/129 = 47.29%`（`+22.48 pp`）**，其中 `ask_to_forget` `28.00% -> 56.00%`、`therapy_background` `29.41% -> 58.82%`、`health_and_medical_conditions` `29.41% -> 58.82%`、`anti_stereotypical_pref` `12.50% -> 33.33%`、`sensitive_info` `25.00% -> 50.00%`。
 
+## 案例 5：几何盲区子块向量、`MaxP+AvgP` 聚合与 PersonaMem v2 帕累托扫参（2026-11-23）
+
+- **工程实现与配置汇总（`planEmbeddingWindows`、`0.8·MaxP + 0.2·AvgP` 与 HTTP 配置表）**：
+  - 新增 [`text-chunking.ts`](../../../src/core/text-chunking.ts)（`planEmbeddingWindows`，默认 `NMG_EMBED_CHUNK_CHARS=2000` 对齐句界并丢弃主向量已覆盖的第 `0` 窗；`sentenceAlignedPreview`）、[`sqlite-vectors.ts`](../../../src/core/memory/sqlite-vectors.ts) 的 `nmg_memory_vector_chunks` 伴随表与 `0.8·MaxP + 0.2·AvgP` 段落聚合、[`search-projection.ts`](../../../src/integration/search-projection.ts) 句界裁剪、[`local-memory-http-config.ts`](../../../src/cli/local-memory-http-config.ts) / [`local-memory-http.ts`](../../../src/cli/local-memory-http.ts) 可选 `sortResultsByTime` 时序输出，以及 [`onlion/README.md`](../../../onlion/README.md) / [`onlion/README.zh-CN.md`](../../../onlion/README.zh-CN.md) 双语配置汇总。
+- **PersonaMem v2 纯净对照（5 人设 / 129 题，`NMG_EMBED_CHUNK_CONCURRENCY=1`，`proxyErrors=0`，`hybrid: 129/129`，`auto/deepseek-v4-flash` 关闭思考，`preprocessMessages=false`，不截断）**：
+  - **纯净不切分基线（`W=0`）**：**`63/129 = 48.84%`**（`1,118` 条主向量，`avgTokens=4,376`，`ask_to_forget=68.00%`、`neutral_preferences=40.74%`、`anti_stereotypical_pref=37.50%`）。排查并发超时后确认，`W=0` 在纯净 100% hybrid 下已具备 `48.84%` 基线。
+  - **1024 字符重叠切分（`sortResultsByTime=false`）**：`58/129 = 44.96%`（多出 `648` 块子向量，`avgTokens=4,901`），因 Max-of-K 长度偏置把长助手回复挤进前 20 而回退（开 `sortResultsByTime=true` 后 `top_k=20` 为 `54/129 = 41.86%`、`top_k=100` 为 `59/129 = 45.74%`）。
+  - **`W=2000` 几何盲区窗 + 纯 `MaxP`**：`61/129 = 47.29%`（仅多出 `133` 块，`avgTokens=4,936`），提升了 `anti_stereotypical_pref`（`37.50% -> 41.67%`）与 `neutral_preferences`（`40.74% -> 44.44%`），但 `ask_to_forget` 回落至 `56.00%`。
+  - **`W=2000` 几何盲区窗 + `0.8·MaxP + 0.2·AvgP`**：**`64/129 = 49.61%`**（`133` 块，`avgTokens=5,134`），将 `ask_to_forget` 拉回至 **`72.00% (18/25)`**，并把 `stereotypical_pref` 推至 **`45.45% (5/11)`**、`neutral_preferences` 保持 **`44.44% (12/27)`**。
+- **零 LLM 纯召回 `Recall@5..100` 与 15 组计算图帕累托扫参（`12.7s`）**：
+  - 离线召回与端到端 QA 方向一致（`W=0`: `R@20=48.74%`、`Any@20=61.24%` vs `W=2000 0.8·MaxP+0.2·AvgP`: `R@20=49.25%`、`Any@20=62.02%`），且 **`R@100 = 79.15%`、`Any@100 = 85.27%`**（剔除 8 条非逐字 `sensitive_info` 题后，其余 121 题中 `Any@100 = 110/121 = 90.9%`）。
+  - 在 15 组计算图（`p_role_length`、`p_rocchio_prf`、`p_semantic_prior` 串联 `DEFAULT_PIECEWISE_RERANK_GRAPH`）中，帕累托前沿为 **`['SEM_100', 'SEM_200', 'COMBO_ALL']`**：`SEM_100` 零回退严格支配基线（`R@5`: `32.16% -> 32.66%`，`MRR@20`: `0.3544 -> 0.3558`），`Rocchio PRF` 被噪声锚点拖累证伪，所有线性重排在 `R@20` 均收敛在 `50.00%–50.25%`——说明 `R@20` 与 `R@100` 之间近 `30 pp` 的落差来自 33M `bge-small-en-v1.5` 双塔模型本身的语义辨别天花板。
+
 ## 后续实验记录模板
 
 后续新增计算图算子、子图配方或参数搜索实验时，可按以下结构直接追加在本文件末尾：

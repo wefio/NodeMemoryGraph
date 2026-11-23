@@ -5,6 +5,7 @@ import { createEmbeddingClientFromEnv, type EmbeddingClient } from "../core/embe
 import { MemoryOperationConflict, type MemoryBackend } from "../core/memory/backend.ts";
 import { MemoryEngine } from "../core/memory/engine.ts";
 import { openMemoryBackend } from "../core/memory/open.ts";
+import type { MemoryContext } from "../core/types.ts";
 import { MemoryWriteRejected } from "../core/write-policy.ts";
 import { renderSearchSurface } from "../integration/agent-surface.ts";
 import { fitExplicitSearchPage } from "../integration/explicit-search-page.ts";
@@ -258,7 +259,8 @@ async function searchMemory(
         previewCodePoints: config.searchPreviewCodePoints,
       },
     );
-    const surface = renderSearchSurface(page, {
+    const orderedPage = config.sortResultsByTime ? sortPageByTime(page) : page;
+    const surface = renderSearchSurface(orderedPage, {
       emptyText: "No NMG match.",
       includeGetHint: false,
     });
@@ -281,6 +283,15 @@ async function searchMemory(
     retrieval_mode: searchResult.retrievalMode === "records" ? "hybrid" : "lexical",
     ...(searchResult.appended.length ? { appended: searchResult.appended } : {}),
   };
+}
+
+function sortPageByTime(page: MemoryContext): MemoryContext {
+  const results = [...page.results].sort((a, b) => {
+    const ta = a.memory.eventTime ?? a.memory.createdAt ?? "";
+    const tb = b.memory.eventTime ?? b.memory.createdAt ?? "";
+    return ta.localeCompare(tb) || a.memory.id.localeCompare(b.memory.id);
+  });
+  return { ...page, results };
 }
 
 function sendError(outgoing: ServerResponse, error: unknown): void {

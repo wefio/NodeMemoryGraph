@@ -48,6 +48,38 @@ curl http://127.0.0.1:8787/search -H 'Content-Type: application/json' \
 
 本地监听器按 `user_id` 隔离 SQLite 命名空间。每次 Add 最多原子写入 128 条消息，同一用户重复使用相同的请求 ID 会复用写入回执，更改内容会收到 `409`。Search 支持单 `query`（可带 `options`）或 `queries`，以及可选参考时钟 `now`（别名 `current_time`/`timestamp`，用于启用相对时间窗与当天到期提醒）；单子句查询同时返回按完整 `top_k` 投影的 `data` 与 NMG 渲染器生成的 `rendered` 文本。这个入口的 HTTP 数据与 daemon 会话使用独立的命名空间。
 
+### 配置汇总
+
+`nmg-http.json` 可选配置项：
+
+| 字段                      | 类型与默认值              | 说明                                                                         |
+| ------------------------- | ------------------------- | ---------------------------------------------------------------------------- |
+| `databasePath`            | `string`（必填）          | SQLite 数据库路径（相对配置文件目录解析）。                                  |
+| `host`                    | `string`（`"127.0.0.1"`） | 监听地址；绑定非回环地址时必须配置 `apiKeyEnv`。                             |
+| `port`                    | `integer`（`8787`）       | 监听端口（`0..65535`，`0` 由系统分配临时端口）。                             |
+| `apiKeyEnv`               | `string`（未设置）        | 存放 Bearer 密钥的环境变量名，用于保护 `/add` 与 `/search`。                 |
+| `defaultTopK`             | `integer`（`20`）         | `/search` 省略 `top_k` 时的默认条数（`1..100`）。                            |
+| `maxRequestBytes`         | `integer`（`50331648`）   | 单次 HTTP JSON 请求体字节上限（默认 `48 MiB`）。                             |
+| `searchPreviewCodePoints` | `integer`（`240`）        | 单条预览字符上限（`0..100000`，`0` 表示不截断，按句界对齐裁剪）。            |
+| `searchMaxCharacters`     | `integer`（`5500`）       | 显式检索页总字符预算（`256..1000000`）。                                     |
+| `preprocessMessages`      | `boolean`（`false`）      | 开启零 LLM 确定性写入预处理（`forget_directive` / 偏好提取与用户画像视图）。 |
+| `sortResultsByTime`       | `boolean`（`false`）      | 在渲染 `rendered` 文本前将召回结果按时间顺序排列。                           |
+
+向量化与子块切片环境变量（`NMG_EMBED_*`）：
+
+| 变量                          | 默认值                                | 说明                                                                                                                                 |
+| ----------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `NMG_EMBED_PROVIDER`          | 未设置（有 Base URL 时推断 `openai`） | 向量提供方：`openai`、`gemini`、`jina` 或 `cloudflare`。                                                                             |
+| `NMG_EMBED_BASE_URL`          | 提供方默认                            | OpenAI 兼容 `/v1` 接口基地址。                                                                                                       |
+| `NMG_EMBED_API_KEY`           | 未设置                                | 向量服务 API Key。                                                                                                                   |
+| `NMG_EMBED_MODEL`             | 提供方默认                            | 向量模型名（同时决定向量索引模型 ID）。                                                                                              |
+| `NMG_EMBED_PROFILE`           | 自动（`bge-en` / `qwen3`）            | Query/Document 提示词模板（`bge-en`、`qwen3`、`plain`）。                                                                            |
+| `NMG_EMBED_CHUNK_CHARS`       | `2000`                                | 对齐句界的盲区补全窗口字符数（`128..16384`；`0` 关闭）。跳过主向量已覆盖的第 0 窗，仅对超长文本切分并按 `0.8·MaxP + 0.2·AvgP` 聚合。 |
+| `NMG_EMBED_BATCH_SIZE`        | `32`                                  | 单次向量请求的最大输入条数。                                                                                                         |
+| `NMG_EMBED_CHUNK_CONCURRENCY` | `4`                                   | 向量分批请求并发度（连接单线程本地模型服务时建议设为 `1`）。                                                                         |
+| `NMG_EMBED_BACKFILL_LIMIT`    | `32`                                  | 每次 `/add` 或 `/search` 最多回填的待向量化记忆条数（`1..1024`）。                                                                   |
+| `NMG_EMBED_TIMEOUT_MS`        | 提供方默认                            | 单次向量 HTTP 请求超时（毫秒）。                                                                                                     |
+
 ## 本地部署
 
 此节用于在本机调试 Cloudflare Worker 与对象存储适配。

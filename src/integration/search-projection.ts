@@ -4,6 +4,7 @@ import type { TesseraHit, MemoryContext, MemorySearchResult } from "../core/type
 import type { SessionDisclosureLevel } from "../core/session-active-graph.ts";
 import { logicalChainCount, logicalChainNames } from "./chain-projection.ts";
 import { evidenceRecordParts } from "./evidence-rendering.ts";
+import { sentenceAlignedPreview } from "../core/text-chunking.ts";
 import { isUserProfileRecord, USER_PROFILE_PREVIEW_CODE_POINTS } from "../core/user-profile.ts";
 
 export const SEARCH_PREVIEW_CHARS = 320;
@@ -15,10 +16,7 @@ export function searchPreview(memory: MemorySearchResult["memory"], codePoints?:
   const normalized = memory.statement.replace(/\s+/gu, " ").trim();
   if (codePoints === 0) return normalized;
   if (codePoints !== undefined) {
-    const characters = Array.from(normalized);
-    return characters.length <= codePoints
-      ? normalized
-      : characters.slice(0, codePoints - 1).join("") + "…";
+    return sentenceAlignedPreview(normalized, codePoints);
   }
   return normalized.length <= SEARCH_PREVIEW_CHARS
     ? normalized
