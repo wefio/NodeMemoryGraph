@@ -416,6 +416,7 @@ routes:
       - onlion/tsconfig.json
       - onlion/.gitignore
       - src/integration/extractive-summaries.ts
+      - src/integration/http-search-graph.ts
       - src/integration/memory-http-protocol.ts
       - src/integration/memory-http-ranking.ts
       - src/integration/memory-http-service.ts
