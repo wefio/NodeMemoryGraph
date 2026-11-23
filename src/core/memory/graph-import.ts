@@ -61,7 +61,7 @@ function validateGraph(entities: readonly MemoryEntity[], preserveLegacyLinks: b
   for (const entity of entities) {
     if (entity.kind === "memory") {
       const memory = entity.value;
-      requireEntity("node", memory.nodeId);
+      if (memory.nodeId) requireEntity("node", memory.nodeId);
       if (!memory.evidenceIds.includes(memory.evidenceId))
         throw new Error(`Snapshot memory ${memory.id} is missing its primary evidence link`);
       for (const id of memory.evidenceIds)

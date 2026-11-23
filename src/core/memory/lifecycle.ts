@@ -137,7 +137,7 @@ export async function proposeMemoryRelation(
   const source = await requireRecord(plan, input.newMemoryId, input.sessionId);
   const target = await requireRecord(plan, input.memoryId, input.sessionId);
   const judgement = input.relationJudgement;
-  if (source.nodeId === target.nodeId)
+  if (!source.nodeId || !target.nodeId || source.nodeId === target.nodeId)
     throw new MemoryLifecycleError("Semantic relation requires two distinct nodes");
   if (
     ["conflict", "refines", "same_entity"].includes(judgement) &&

@@ -37,6 +37,8 @@ export interface MemoryNode {
   updatedAt: string;
   status: "active" | "merged" | "split";
   residence: MemoryResidence;
+  /** True when a memory was ingested without materializing a graph node yet. */
+  unbound?: boolean;
 }
 
 export type MemoryTier = 0 | 1 | 2 | 3;
@@ -265,6 +267,8 @@ export interface MemoryRecord {
    *  (cached_from_ltg copies or LTG rows). Never nulled accidentally: see
    *  stg-shared-store-v2 docs §3.6 escape-hatch rule. */
   sessionId: string | null;
+  /** Provenance session ID preserved across promotion/import without enforcing STG isolation. */
+  sourceSessionId?: string | null;
   tier: MemoryTier;
   importance: number;
   accessCount: number;
@@ -319,7 +323,7 @@ export interface RetentionPolicy {
 
 export interface RememberInput {
   statement: string;
-  nodeName: string;
+  nodeName?: string;
   nodeSummary?: string;
   nodeKind?: MemoryNodeKind;
   memoryType?: MemoryType;
