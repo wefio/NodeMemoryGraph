@@ -108,7 +108,12 @@ routes:
     owners:
       - dsh/README.md
       - skills/nmg-memory/references/harness-adapters.md
-    tests: []
+    tests:
+      - tests/integration/tool-schema-json-safety.test.ts
+      - tests/extensions/dsh-state.test.ts
+      - tests/extensions/dsh-lab.test.ts
+      - tests/extensions/dsh-plugin-integration.test.ts
+      - tests/extensions/dsh-plugin-e2e.test.ts
     verify:
       blocking: [check]
       advisory: []
