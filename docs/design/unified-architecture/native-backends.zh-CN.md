@@ -7,7 +7,7 @@
 
 ## 应用边界
 
-`src/core/memory/engine.ts` 负责准入、证据、规范化精确去重、状态替换、会话可见性、图关系和有界检索，通过异步 `MemoryBackend` 领域接口读写。传输、凭据和本地协作由引擎之外的组件负责。原生后端动态加载 `@lancedb/lancedb` 0.41.0；SQLite 后端使用 `node:sqlite`。
+`src/core/memory/engine.ts` 负责准入、证据、规范化精确去重、状态替换、会话可见性、图关系和有界检索，并将检索、图投影与变更规划委托给[计算引擎设计](compute-engine.zh-CN.md)中定义的可组合计算图，通过异步 `MemoryBackend` 领域接口读写。传输、凭据和本地协作由引擎之外的组件负责。原生后端动态加载 `@lancedb/lancedb` 0.41.0；SQLite 后端使用 `node:sqlite`。
 
 ```mermaid
 flowchart TB

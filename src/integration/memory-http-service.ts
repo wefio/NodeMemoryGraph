@@ -56,6 +56,8 @@ export class HttpMemoryService {
     backfillLimit?: number;
     isDeferredEmbedding?: (error: unknown) => boolean;
     searchGraph?: ComputeGraphSpec;
+    writePreprocessGraph?: ComputeGraphSpec;
+    profileGraph?: ComputeGraphSpec;
     preprocessMessages?: boolean;
   };
 
@@ -122,7 +124,7 @@ export class HttpMemoryService {
       // marker attributes instead of polluting the retrieval statement.
       const statement = view;
       const preprocessed = this.options.preprocessMessages
-        ? preprocessHttpMessage(message.role, statement)
+        ? preprocessHttpMessage(message.role, statement, this.options.writePreprocessGraph)
         : undefined;
       return {
         statement,
@@ -215,13 +217,15 @@ export class HttpMemoryService {
         return renderHttpProfileSupplement(
           [...constraints.memories, ...preferences.memories],
           query,
+          undefined,
+          this.options.profileGraph,
         );
       }
       const entities = await backend.scan(view, { kind: "memory", limit: 1000 });
       const records = entities
         .filter((entity) => entity.kind === "memory")
         .map((entity) => entity.value);
-      return renderHttpProfileSupplement(records, query);
+      return renderHttpProfileSupplement(records, query, undefined, this.options.profileGraph);
     } finally {
       await backend.closeRead(view);
     }

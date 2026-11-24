@@ -134,67 +134,87 @@ function numParam(
 
 function buildHttpSearchRegistry(): ComputeRegistry<HttpSearchGraphContext> {
   const registry = new ComputeRegistry<HttpSearchGraphContext>();
+  const pureOp = {
+    version: "1.0.0",
+    effect: "pure" as const,
+    cacheable: true,
+    parallelSafe: true,
+    resources: { execution: "sync" as const, backend: "js" as const },
+  };
 
-  registry.register("fuse_clause_hits", (inputs) => {
-    const batches = (inputs.default as readonly HttpClauseHitBatch[] | undefined) ?? [];
-    const primaryById = new Map<string, FusedCandidate>();
-    const adjacentById = new Map<string, FusedCandidate>();
-    const appendedById = new Map<string, MemorySearchResult>();
-    for (const batch of batches) {
-      if (batch.appendOnly) {
-        trackAppended(appendedById, batch.results);
-        continue;
+  registry.register(
+    "fuse_clause_hits",
+    (inputs) => {
+      const batches = (inputs.default as readonly HttpClauseHitBatch[] | undefined) ?? [];
+      const primaryById = new Map<string, FusedCandidate>();
+      const adjacentById = new Map<string, FusedCandidate>();
+      const appendedById = new Map<string, MemorySearchResult>();
+      for (const batch of batches) {
+        if (batch.appendOnly) {
+          trackAppended(appendedById, batch.results);
+          continue;
+        }
+        for (const result of batch.results) {
+          trackCandidate(
+            isTailContext(result) ? adjacentById : primaryById,
+            batch.clauseIndex,
+            result,
+          );
+        }
       }
-      for (const result of batch.results) {
-        trackCandidate(
-          isTailContext(result) ? adjacentById : primaryById,
-          batch.clauseIndex,
-          result,
-        );
-      }
-    }
-    const primary = [...primaryById.values()].sort(compareCandidates);
-    return { primary, adjacentById, primaryById, appendedById } satisfies FusedHttpState;
-  });
+      const primary = [...primaryById.values()].sort(compareCandidates);
+      return { primary, adjacentById, primaryById, appendedById } satisfies FusedHttpState;
+    },
+    { ...pureOp, contract: "memory.rank_fusion" },
+  );
 
-  registry.register("select_supplemental_tail", (inputs, context, params) => {
-    const state = inputs.default as FusedHttpState;
-    const maxDue = Math.max(0, Math.floor(numParam(params, "maxDue", 2)));
-    const maxNeighbors = Math.max(0, Math.floor(numParam(params, "maxNeighbors", 2)));
-    const maxTotal = Math.max(0, Math.floor(numParam(params, "maxTotal", 4)));
-    const candidates = [...state.adjacentById.values()].filter(
-      (entry) => !state.primaryById.has(entry.result.memory.id),
-    );
-    const due = candidates
-      .filter((entry) => entry.result.neighborhood === "due_today")
-      .sort(compareCandidates)
-      .slice(0, Math.min(maxDue, context.limit));
-    const dueIds = new Set(due.map((entry) => entry.result.memory.id));
-    const neighbors = candidates
-      .filter(
-        (entry) => entry.result.neighborhood !== "due_today" && !dueIds.has(entry.result.memory.id),
-      )
-      .sort(compareCandidates)
-      .slice(0, Math.min(maxNeighbors, context.limit));
-    return [...due, ...neighbors].slice(0, Math.min(maxTotal, context.limit));
-  });
+  registry.register(
+    "select_supplemental_tail",
+    (inputs, context, params) => {
+      const state = inputs.default as FusedHttpState;
+      const maxDue = Math.max(0, Math.floor(numParam(params, "maxDue", 2)));
+      const maxNeighbors = Math.max(0, Math.floor(numParam(params, "maxNeighbors", 2)));
+      const maxTotal = Math.max(0, Math.floor(numParam(params, "maxTotal", 4)));
+      const candidates = [...state.adjacentById.values()].filter(
+        (entry) => !state.primaryById.has(entry.result.memory.id),
+      );
+      const due = candidates
+        .filter((entry) => entry.result.neighborhood === "due_today")
+        .sort(compareCandidates)
+        .slice(0, Math.min(maxDue, context.limit));
+      const dueIds = new Set(due.map((entry) => entry.result.memory.id));
+      const neighbors = candidates
+        .filter(
+          (entry) =>
+            entry.result.neighborhood !== "due_today" && !dueIds.has(entry.result.memory.id),
+        )
+        .sort(compareCandidates)
+        .slice(0, Math.min(maxNeighbors, context.limit));
+      return [...due, ...neighbors].slice(0, Math.min(maxTotal, context.limit));
+    },
+    { ...pureOp, contract: "memory.neighborhood_expand" },
+  );
 
-  registry.register("stitch_http_page", (inputs, context) => {
-    const state = inputs.fused as FusedHttpState;
-    const tail = (inputs.tail as readonly FusedCandidate[] | undefined) ?? [];
-    const hits = state.primary.slice(0, Math.max(0, context.limit - tail.length));
-    const selected = appendTailNeighbors(hits, tail);
-    const page = new Set(selected.map((entry) => entry.result.memory.id));
-    const appended = [...state.appendedById.values()]
-      .filter((result) => !page.has(result.memory.id))
-      .sort((a, b) => b.combinedScore - a.combinedScore || a.memory.id.localeCompare(b.memory.id))
-      .slice(0, context.limit);
-    return {
-      selected,
-      clauses: summariseClauses(selected, context.clauseCount),
-      appended,
-    } satisfies HttpSearchGraphOutput;
-  });
+  registry.register(
+    "stitch_http_page",
+    (inputs, context) => {
+      const state = inputs.fused as FusedHttpState;
+      const tail = (inputs.tail as readonly FusedCandidate[] | undefined) ?? [];
+      const hits = state.primary.slice(0, Math.max(0, context.limit - tail.length));
+      const selected = appendTailNeighbors(hits, tail);
+      const page = new Set(selected.map((entry) => entry.result.memory.id));
+      const appended = [...state.appendedById.values()]
+        .filter((result) => !page.has(result.memory.id))
+        .sort((a, b) => b.combinedScore - a.combinedScore || a.memory.id.localeCompare(b.memory.id))
+        .slice(0, context.limit);
+      return {
+        selected,
+        clauses: summariseClauses(selected, context.clauseCount),
+        appended,
+      } satisfies HttpSearchGraphOutput;
+    },
+    { ...pureOp, contract: "memory.context_assemble" },
+  );
 
   return registry;
 }

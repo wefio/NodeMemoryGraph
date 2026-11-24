@@ -27,8 +27,8 @@ terms:
   - term: surface anchor
     aliases: [表面锚点]
     definition: >-
-      A contentless Unicode-normalized trigram index entry that preserves explicit quoted phrases, paths, versions, IDs, error codes, code-like identifiers and recall triggers, so plain prose does not become an anchor merely because English words overlap a gold answer; summary text is index metadata and never appears as a candidate.
-      无内容的 Unicode 归一化 trigram 索引条目，用于保留显式引号短语、路径、版本、ID、错误码、类代码标识符与 recall triggers，因此纯散文不会仅仅因为英文词与金标答案重叠就变成锚点；摘要文本是索引元数据，永不出现在候选中。
+      A contentless Unicode-normalized trigram index entry that preserves explicit quoted phrases, paths, dotted or punctuated versions, mixed letter-digit identifiers, error codes, camelCase symbols, recall triggers and 3+ character CJK runs, while keeping plain prose, bare numbers, ordinals, decades and 12-hour clock tokens on the word/date FTS channel; summary text is index metadata and never appears as a candidate.
+      无内容的 Unicode 归一化 trigram 索引条目，用于保留显式引号短语、路径、带点号或标点的版本号、字母数字混合标识符、错误码、驼峰符号、recall triggers 与 3 字及以上中日韩连续片段，同时将纯散文、裸数字、序数词、年代缩写与 12 小时制时间词留在词级与日期 FTS 通道；摘要文本是索引元数据，永不出现在候选中。
     owner: evals/retrieval/README.md
     anchor: Protocol (pinned)
     status: canonical

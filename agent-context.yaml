@@ -77,6 +77,7 @@ routes:
     owners:
       - docs/design/design.md
       - docs/design/memory-graphs.md
+      - docs/design/unified-architecture/compute-engine.md
     tests: [tests/core/**]
     verify:
       blocking: [check, test:product, build]

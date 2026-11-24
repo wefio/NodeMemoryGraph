@@ -13,6 +13,7 @@ import {
   temporalPivotOperator,
   turnPivotOperator,
 } from "./bm25f-neighborhoods.ts";
+import { incrementalBm25ScoreOperator } from "./incremental-bm25.ts";
 
 export interface RerankCandidate {
   readonly id: string;
@@ -287,104 +288,137 @@ function resolveBands(params: Readonly<Record<string, unknown>>): readonly BandS
 
 function buildRerankRegistry(): ComputeRegistry<RerankContext> {
   const registry = new ComputeRegistry<RerankContext>();
-
-  registry.register("identity_rank", (inputs, context) => inputScored(inputs, context.candidates));
-
-  registry.register("r3_intent_boost", (inputs, context, params) => {
-    const base = inputScored(inputs, context.candidates);
-    const isDate = DATE_QUERY_RE.test(context.queryText);
-    const isNum = NUM_QUERY_RE.test(context.queryText);
-    if (!isDate && !isNum) return base;
-    const weight = numParam(params, "weight", 0.12);
-    const byId = new Map(context.candidates.map((candidate) => [candidate.id, candidate]));
-    return base
-      .map((entry) => {
-        const statement = byId.get(entry.id)?.statement ?? "";
-        const dateBonus = isDate && DATE_CAND_RE.test(statement) ? weight : 0;
-        const numBonus = isNum && NUM_CAND_RE.test(statement) ? weight : 0;
-        return { id: entry.id, score: entry.score + dateBonus + numBonus };
-      })
-      .sort(compareScored);
+  const rerankMeta = (opVersion = "1.0.0") => ({
+    version: opVersion,
+    effect: "pure" as const,
+    contract: "memory.candidate_rerank",
+    cacheable: true,
+    parallelSafe: true,
+    resources: { execution: "sync" as const, backend: "js" as const },
   });
 
-  registry.register("r5_recency_boost", (inputs, context, params) => {
-    const base = inputScored(inputs, context.candidates);
-    if (PAST_CONSTRAINT_RE.test(context.queryText)) return base;
-    const maxMs = maxTimestampMs(context.candidates);
-    const maxOrd = maxTurnOrdinal(context.candidates);
-    if (maxMs <= 0 && maxOrd <= 0) return base;
-    const weight = numParam(params, "weight", 0.12);
-    const byId = new Map(context.candidates.map((candidate) => [candidate.id, candidate]));
-    return base
-      .map((entry) => {
-        const delta = recencyBoostDelta(byId.get(entry.id), maxMs, maxOrd, weight);
-        return delta > 0 ? { id: entry.id, score: entry.score + delta } : entry;
-      })
-      .sort(compareScored);
-  });
+  registry.register(
+    "identity_rank",
+    (inputs, context) => inputScored(inputs, context.candidates),
+    rerankMeta(),
+  );
 
-  registry.register("r1_incremental_dedup", (inputs, context, params) => {
-    const base = inputScored(inputs, context.candidates);
-    const poolSize = Math.max(1, Math.floor(numParam(params, "poolSize", 40)));
-    const limit = Math.max(1, Math.floor(numParam(params, "limit", 25)));
-    const jaccardThresh = numParam(params, "jaccardThresh", 0.6);
-    const dupPenalty = numParam(params, "dupPenalty", 0.5);
-    const byId = new Map(context.candidates.map((candidate) => [candidate.id, candidate]));
-    const pool = base.slice(0, poolSize);
-    const tokenSets = pool.map((entry) => tokenizeForDedup(byId.get(entry.id)?.statement ?? ""));
-    const used = new Uint8Array(pool.length);
-    const penalized = new Uint8Array(pool.length);
-    const selected: ScoredCandidateId[] = [];
-    const target = Math.min(limit, pool.length);
-    for (let step = 0; step < target; step += 1) {
-      const idx = pickNextUnselectedIndex(pool, used, penalized, dupPenalty);
-      if (idx < 0) break;
-      used[idx] = 1;
-      selected.push(pool[idx]!);
-      markJaccardNeighbors(pool, tokenSets, tokenSets[idx]!, used, penalized, jaccardThresh);
-    }
-    return [...selected, ...pool.filter((_, i) => !used[i]), ...base.slice(pool.length)];
-  });
+  registry.register(
+    "r3_intent_boost",
+    (inputs, context, params) => {
+      const base = inputScored(inputs, context.candidates);
+      const isDate = DATE_QUERY_RE.test(context.queryText);
+      const isNum = NUM_QUERY_RE.test(context.queryText);
+      if (!isDate && !isNum) return base;
+      const weight = numParam(params, "weight", 0.12);
+      const byId = new Map(context.candidates.map((candidate) => [candidate.id, candidate]));
+      return base
+        .map((entry) => {
+          const statement = byId.get(entry.id)?.statement ?? "";
+          const dateBonus = isDate && DATE_CAND_RE.test(statement) ? weight : 0;
+          const numBonus = isNum && NUM_CAND_RE.test(statement) ? weight : 0;
+          return { id: entry.id, score: entry.score + dateBonus + numBonus };
+        })
+        .sort(compareScored);
+    },
+    rerankMeta(),
+  );
 
-  registry.register("w_session_pivot", (inputs, context, params) => {
-    const base = inputScored(inputs, context.candidates);
-    const weight = numParam(params, "weight", 0.2);
-    const byId = new Map(context.candidates.map((candidate) => [candidate.id, candidate]));
-    const sessionKeyOf = context.sessionKeyOf ?? defaultSessionKey;
-    const sRank = sessionRankMap(base, byId, sessionKeyOf);
-    return base
-      .map((entry) => {
-        const candidate = byId.get(entry.id);
-        const rank = candidate ? sRank.get(sessionKeyOf(candidate)) : undefined;
-        const boost = rank === undefined ? 0 : weight / (1 + 0.25 * rank);
-        return { id: entry.id, score: entry.score + boost };
-      })
-      .sort(compareScored);
-  });
+  registry.register(
+    "r5_recency_boost",
+    (inputs, context, params) => {
+      const base = inputScored(inputs, context.candidates);
+      if (PAST_CONSTRAINT_RE.test(context.queryText)) return base;
+      const maxMs = maxTimestampMs(context.candidates);
+      const maxOrd = maxTurnOrdinal(context.candidates);
+      if (maxMs <= 0 && maxOrd <= 0) return base;
+      const weight = numParam(params, "weight", 0.12);
+      const byId = new Map(context.candidates.map((candidate) => [candidate.id, candidate]));
+      return base
+        .map((entry) => {
+          const delta = recencyBoostDelta(byId.get(entry.id), maxMs, maxOrd, weight);
+          return delta > 0 ? { id: entry.id, score: entry.score + delta } : entry;
+        })
+        .sort(compareScored);
+    },
+    rerankMeta(),
+  );
 
-  registry.register("causal_band_stitch", (inputs, _context, params) => {
-    const bands = resolveBands(params);
-    const out: string[] = [];
-    const seen = new Set<string>();
-    for (const band of bands) {
-      const entries =
-        (inputs[band.port] as readonly (string | ScoredCandidateId)[] | undefined) ?? [];
-      for (const entry of entries) {
-        if (out.length >= band.endRank) break;
-        const id = candidateId(entry);
-        if (seen.has(id)) continue;
-        seen.add(id);
-        out.push(id);
+  registry.register(
+    "r1_incremental_dedup",
+    (inputs, context, params) => {
+      const base = inputScored(inputs, context.candidates);
+      const poolSize = Math.max(1, Math.floor(numParam(params, "poolSize", 40)));
+      const limit = Math.max(1, Math.floor(numParam(params, "limit", 25)));
+      const jaccardThresh = numParam(params, "jaccardThresh", 0.6);
+      const dupPenalty = numParam(params, "dupPenalty", 0.5);
+      const byId = new Map(context.candidates.map((candidate) => [candidate.id, candidate]));
+      const pool = base.slice(0, poolSize);
+      const tokenSets = pool.map((entry) => tokenizeForDedup(byId.get(entry.id)?.statement ?? ""));
+      const used = new Uint8Array(pool.length);
+      const penalized = new Uint8Array(pool.length);
+      const selected: ScoredCandidateId[] = [];
+      const target = Math.min(limit, pool.length);
+      for (let step = 0; step < target; step += 1) {
+        const idx = pickNextUnselectedIndex(pool, used, penalized, dupPenalty);
+        if (idx < 0) break;
+        used[idx] = 1;
+        selected.push(pool[idx]!);
+        markJaccardNeighbors(pool, tokenSets, tokenSets[idx]!, used, penalized, jaccardThresh);
       }
-    }
-    return out;
-  });
+      return [...selected, ...pool.filter((_, i) => !used[i]), ...base.slice(pool.length)];
+    },
+    rerankMeta(),
+  );
 
-  registry.register("bm25f_field_score", bm25fFieldScoreOperator);
-  registry.register("w_temporal_pivot", temporalPivotOperator);
-  registry.register("w_concept_pivot", conceptPivotOperator);
-  registry.register("w_lineage_pivot", lineagePivotOperator);
-  registry.register("w_turn_pivot", turnPivotOperator);
+  registry.register(
+    "w_session_pivot",
+    (inputs, context, params) => {
+      const base = inputScored(inputs, context.candidates);
+      const weight = numParam(params, "weight", 0.2);
+      const byId = new Map(context.candidates.map((candidate) => [candidate.id, candidate]));
+      const sessionKeyOf = context.sessionKeyOf ?? defaultSessionKey;
+      const sRank = sessionRankMap(base, byId, sessionKeyOf);
+      return base
+        .map((entry) => {
+          const candidate = byId.get(entry.id);
+          const rank = candidate ? sRank.get(sessionKeyOf(candidate)) : undefined;
+          const boost = rank === undefined ? 0 : weight / (1 + 0.25 * rank);
+          return { id: entry.id, score: entry.score + boost };
+        })
+        .sort(compareScored);
+    },
+    rerankMeta(),
+  );
+
+  registry.register(
+    "causal_band_stitch",
+    (inputs, _context, params) => {
+      const bands = resolveBands(params);
+      const out: string[] = [];
+      const seen = new Set<string>();
+      for (const band of bands) {
+        const entries =
+          (inputs[band.port] as readonly (string | ScoredCandidateId)[] | undefined) ?? [];
+        for (const entry of entries) {
+          if (out.length >= band.endRank) break;
+          const id = candidateId(entry);
+          if (seen.has(id)) continue;
+          seen.add(id);
+          out.push(id);
+        }
+      }
+      return out;
+    },
+    rerankMeta(),
+  );
+
+  registry.register("bm25f_field_score", bm25fFieldScoreOperator, rerankMeta());
+  registry.register("incremental_bm25_score", incrementalBm25ScoreOperator, rerankMeta());
+  registry.register("w_temporal_pivot", temporalPivotOperator, rerankMeta());
+  registry.register("w_concept_pivot", conceptPivotOperator, rerankMeta());
+  registry.register("w_lineage_pivot", lineagePivotOperator, rerankMeta());
+  registry.register("w_turn_pivot", turnPivotOperator, rerankMeta());
 
   return registry;
 }
@@ -393,6 +427,7 @@ export const RERANK_COMPUTE_REGISTRY = buildRerankRegistry();
 
 export interface PiecewiseRerankGraphOptions {
   readonly id?: string;
+  readonly qtfWeight?: number;
   readonly bm25fWeight?: number;
   readonly headWeight?: number;
   readonly recencyWeight?: number;
@@ -406,6 +441,25 @@ export interface PiecewiseRerankGraphOptions {
   readonly tailTurnWeight?: number;
   readonly bands?: readonly BandSpec[];
 }
+
+export const HEAD_QTF_R3_SUBGRAPH: ComputeGraphSpec = {
+  id: "head-qtf-010-r3-r5",
+  nodes: [
+    {
+      id: "bm25",
+      op: "incremental_bm25_score",
+      params: { variant: "bm25_qtf", k1: 1.5, b: 0.75, k3: 8.0, weight: 0.1 },
+    },
+    { id: "r3", op: "r3_intent_boost", params: { weight: 0.12 } },
+    { id: "r5", op: "r5_recency_boost", params: { weight: 0.02 } },
+  ],
+  edges: [
+    { from: INPUT_NODE_ID, to: "bm25" },
+    { from: "bm25", to: "r3" },
+    { from: "r3", to: "r5" },
+  ],
+  output: "r5",
+};
 
 export const HEAD_BM25F_R3_SUBGRAPH: ComputeGraphSpec = {
   id: "head-bm25f-010-r3-r5",
@@ -457,19 +511,45 @@ export const TAIL_SESSION_TEMPORAL_SUBGRAPH: ComputeGraphSpec = {
 };
 
 function resolveHeadSubgraph(options: PiecewiseRerankGraphOptions): ComputeGraphSpec {
-  if (options.bm25fWeight === undefined && options.headWeight === undefined) {
-    return HEAD_BM25F_R3_SUBGRAPH;
+  if (options.bm25fWeight !== undefined) {
+    return {
+      id: `${options.id ?? "piecewise"}-head`,
+      nodes: [
+        { id: "bm25f", op: "bm25f_field_score", params: { weight: options.bm25fWeight } },
+        { id: "r3", op: "r3_intent_boost", params: { weight: options.headWeight ?? 0.12 } },
+        { id: "r5", op: "r5_recency_boost", params: { weight: 0.02 } },
+      ],
+      edges: [
+        { from: INPUT_NODE_ID, to: "bm25f" },
+        { from: "bm25f", to: "r3" },
+        { from: "r3", to: "r5" },
+      ],
+      output: "r5",
+    };
+  }
+  if (options.qtfWeight === undefined && options.headWeight === undefined) {
+    return HEAD_QTF_R3_SUBGRAPH;
   }
   return {
     id: `${options.id ?? "piecewise"}-head`,
     nodes: [
-      { id: "bm25f", op: "bm25f_field_score", params: { weight: options.bm25fWeight ?? 0.1 } },
+      {
+        id: "bm25",
+        op: "incremental_bm25_score",
+        params: {
+          variant: "bm25_qtf",
+          k1: 1.5,
+          b: 0.75,
+          k3: 8.0,
+          weight: options.qtfWeight ?? 0.1,
+        },
+      },
       { id: "r3", op: "r3_intent_boost", params: { weight: options.headWeight ?? 0.12 } },
       { id: "r5", op: "r5_recency_boost", params: { weight: 0.02 } },
     ],
     edges: [
-      { from: INPUT_NODE_ID, to: "bm25f" },
-      { from: "bm25f", to: "r3" },
+      { from: INPUT_NODE_ID, to: "bm25" },
+      { from: "bm25", to: "r3" },
       { from: "r3", to: "r5" },
     ],
     output: "r5",
@@ -553,7 +633,7 @@ export function createPiecewiseRerankGraph(
   options: PiecewiseRerankGraphOptions = {},
 ): ComputeGraphSpec {
   return {
-    id: options.id ?? "piecewise-bm25f-r3-r1r5-wsess-temporal",
+    id: options.id ?? "piecewise-qtf-r3-r1r5-wsess-temporal",
     nodes: [
       { id: "head_r3", op: "subgraph", subgraph: resolveHeadSubgraph(options) },
       { id: "mid_r1_r5", op: "subgraph", subgraph: resolveMidSubgraph(options) },

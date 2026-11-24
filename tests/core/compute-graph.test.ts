@@ -144,19 +144,32 @@ test("compute graph validates cycles, dangling edges, missing outputs, and sync 
 
 test("runGraphExperiments shares upstream prefix cache, diffs graphs, and computes Pareto front", async () => {
   const calls = { recall: 0, fusion: 0, head: 0 };
+  const pure = { effect: "pure" as const };
   const registry = new ComputeRegistry()
-    .register("recall", (inputs) => {
-      calls.recall += 1;
-      return `${String(inputs.default)}:recalled`;
-    })
-    .register("fusion", (inputs) => {
-      calls.fusion += 1;
-      return `${String(inputs.default)}:fused`;
-    })
-    .register("rerank", (inputs, _ctx, params) => {
-      calls.head += 1;
-      return `${String(inputs.default)}:rerank(${String(params.mode)})`;
-    });
+    .register(
+      "recall",
+      (inputs) => {
+        calls.recall += 1;
+        return `${String(inputs.default)}:recalled`;
+      },
+      pure,
+    )
+    .register(
+      "fusion",
+      (inputs) => {
+        calls.fusion += 1;
+        return `${String(inputs.default)}:fused`;
+      },
+      pure,
+    )
+    .register(
+      "rerank",
+      (inputs, _ctx, params) => {
+        calls.head += 1;
+        return `${String(inputs.default)}:rerank(${String(params.mode)})`;
+      },
+      pure,
+    );
 
   const baseSpec: ComputeGraphSpec = {
     id: "baseline",
@@ -248,10 +261,14 @@ test("ComputeMemoCache includes execution context, function props, and operator 
   };
 
   let runs = 0;
-  const registry = new ComputeRegistry<Ctx>().register("ctx_op", (inputs, ctx) => {
-    runs += 1;
-    return `${String(inputs.default)}|${ctx.queryText}|${ctx.keyFn("k")}|v1`;
-  });
+  const registry = new ComputeRegistry<Ctx>().register(
+    "ctx_op",
+    (inputs, ctx) => {
+      runs += 1;
+      return `${String(inputs.default)}|${ctx.queryText}|${ctx.keyFn("k")}|v1`;
+    },
+    { effect: "pure" },
+  );
 
   const memo = new ComputeMemoCache();
   const sharedInput = ["item-a", "item-b"];
@@ -312,10 +329,14 @@ test("ComputeMemoCache includes execution context, function props, and operator 
   assert.equal(runs, 3);
 
   // 5) Re-registering the inner operator under the same name invalidates outer + inner cache entries.
-  registry.register("ctx_op", (inputs, ctx) => {
-    runs += 1;
-    return `${String(inputs.default)}|${ctx.queryText}|${ctx.keyFn("k")}|v2`;
-  });
+  registry.register(
+    "ctx_op",
+    (inputs, ctx) => {
+      runs += 1;
+      return `${String(inputs.default)}|${ctx.queryText}|${ctx.keyFn("k")}|v2`;
+    },
+    { effect: "pure" },
+  );
   assert.equal(
     evaluateSyncComputeGraph(
       rootSpec,

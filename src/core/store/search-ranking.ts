@@ -317,6 +317,8 @@ const ALL_CAPS_NON_ANCHOR_WORDS = new Set([
   "YES",
 ]);
 
+const PROSE_NUMERIC_SUFFIX_RE = /^\d+(?:st|nd|rd|th|am|pm|s)$/iu;
+
 /** Extract explicit surface anchors that embeddings commonly blur: quoted
  * phrases, paths/URLs, versions, error codes and code-like identifiers. Plain
  * prose intentionally produces no anchors so word overlap cannot become an
@@ -339,7 +341,8 @@ export function surfaceAnchors(value: string): string[] {
     const cleaned = token.replace(/^[,;!?()[\]{}"“”'‘’`]+|[.,:;!?()[\]{}"“”'‘’`]+$/gu, "");
     if (!cleaned) continue;
     const codeLike = /[\\/:._+#@-]/u.test(cleaned);
-    const versioned = /\p{N}/u.test(cleaned);
+    const versioned =
+      /\p{L}/u.test(cleaned) && /\p{N}/u.test(cleaned) && !PROSE_NUMERIC_SUFFIX_RE.test(cleaned);
     const errorCode =
       /^[A-Z][A-Z0-9_]{2,}$/u.test(cleaned) && !ALL_CAPS_NON_ANCHOR_WORDS.has(cleaned);
     const camelCase = /^\p{Lu}[\p{L}\p{N}]*\p{Ll}[\p{L}\p{N}]*\p{Lu}[\p{L}\p{N}]*$/u.test(cleaned);

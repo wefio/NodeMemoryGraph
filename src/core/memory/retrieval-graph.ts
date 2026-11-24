@@ -97,7 +97,14 @@ function buildRetrievalRegistry(): ComputeRegistry<RetrievalPipelineContext> {
       const limit = typeof params.limit === "number" ? params.limit : req.limit * 3;
       return ctx.lexicalRecall(req.queryText, limit);
     },
-    { version: "1.0.0" },
+    {
+      version: "1.0.0",
+      effect: "read",
+      contract: "memory.candidate_recall",
+      parallelSafe: true,
+      cacheable: false,
+      resources: { execution: "async_io" },
+    },
   );
 
   registry.register(
@@ -107,7 +114,14 @@ function buildRetrievalRegistry(): ComputeRegistry<RetrievalPipelineContext> {
       const limit = typeof params.limit === "number" ? params.limit : req.limit * 3;
       return ctx.vectorRecall(req.queryText, limit);
     },
-    { version: "1.0.0" },
+    {
+      version: "1.0.0",
+      effect: "read",
+      contract: "memory.candidate_recall",
+      parallelSafe: true,
+      cacheable: false,
+      resources: { execution: "async_io" },
+    },
   );
 
   registry.register(
@@ -117,7 +131,13 @@ function buildRetrievalRegistry(): ComputeRegistry<RetrievalPipelineContext> {
       const vector = (inputs.vector as readonly RecallCandidateItem[] | undefined) ?? [];
       return mergeRecallChannels(lexical, vector);
     },
-    { version: "1.0.0" },
+    {
+      version: "1.0.0",
+      effect: "pure",
+      contract: "memory.rank_fusion",
+      cacheable: true,
+      parallelSafe: true,
+    },
   );
 
   registry.register(
@@ -131,7 +151,13 @@ function buildRetrievalRegistry(): ComputeRegistry<RetrievalPipelineContext> {
         (params.graph as ComputeGraphSpec | undefined) ?? DEFAULT_PIECEWISE_RERANK_GRAPH;
       return rerankCandidatesWithGraph(candidates, req?.queryText ?? "", graph);
     },
-    { version: "1.0.0" },
+    {
+      version: "1.0.0",
+      effect: "pure",
+      contract: "memory.candidate_rerank",
+      cacheable: true,
+      parallelSafe: true,
+    },
   );
 
   registry.register(
@@ -148,7 +174,13 @@ function buildRetrievalRegistry(): ComputeRegistry<RetrievalPipelineContext> {
       });
       return { ranked, projection };
     },
-    { version: "1.0.0" },
+    {
+      version: "1.0.0",
+      effect: "pure",
+      contract: "memory.graph_projection",
+      cacheable: true,
+      parallelSafe: true,
+    },
   );
 
   return registry;

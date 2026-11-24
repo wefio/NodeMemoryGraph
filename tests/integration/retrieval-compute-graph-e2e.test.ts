@@ -130,36 +130,44 @@ test("end-to-end retrieval pipeline combines dates FTS5, optional nodes, HTTP se
 
   let recallExecutions = 0;
   const e2eRegistry = new ComputeRegistry<{ query: string }>()
-    .register("sqlite_hybrid_candidates", () => {
-      recallExecutions += 1;
-      const hybrid = backend.hybridCandidates!(
-        view,
-        { kind: "memory", text: "coffee espresso roast", limit: 50 },
-        { mode: "hybrid", indexId: embedder.indexId, vector: semantic.vector[0]! },
-      );
-      return hybrid.candidates.map(({ entity, recordScore, bm25 }): RerankCandidate => ({
-        id: entity.value.id,
-        statement: entity.value.statement,
-        combinedScore: recordScore * 0.75 + bm25 * 0.25,
-        eventTime: entity.value.eventTime,
-        createdAt: entity.value.createdAt,
-        sessionId: entity.value.sessionId,
-        nodeId: entity.value.nodeId,
-      }));
-    })
-    .register("rerank_subgraph", (inputs, ctx, params) => {
-      const candidates = inputs.default as readonly RerankCandidate[];
-      const rerankSpec = params.spec as ComputeGraphSpec;
-      const baseInput: readonly ScoredCandidateId[] = candidates
-        .map((c) => ({ id: c.id, score: c.combinedScore }))
-        .sort((left, right) => right.score - left.score);
-      return evaluateSyncComputeGraph<readonly ScoredCandidateId[], string[], RerankContext>(
-        rerankSpec,
-        RERANK_COMPUTE_REGISTRY,
-        baseInput,
-        { queryText: ctx.query, candidates },
-      );
-    });
+    .register(
+      "sqlite_hybrid_candidates",
+      () => {
+        recallExecutions += 1;
+        const hybrid = backend.hybridCandidates!(
+          view,
+          { kind: "memory", text: "coffee espresso roast", limit: 50 },
+          { mode: "hybrid", indexId: embedder.indexId, vector: semantic.vector[0]! },
+        );
+        return hybrid.candidates.map(({ entity, recordScore, bm25 }): RerankCandidate => ({
+          id: entity.value.id,
+          statement: entity.value.statement,
+          combinedScore: recordScore * 0.75 + bm25 * 0.25,
+          eventTime: entity.value.eventTime,
+          createdAt: entity.value.createdAt,
+          sessionId: entity.value.sessionId,
+          nodeId: entity.value.nodeId,
+        }));
+      },
+      { effect: "pure", cacheable: true },
+    )
+    .register(
+      "rerank_subgraph",
+      (inputs, ctx, params) => {
+        const candidates = inputs.default as readonly RerankCandidate[];
+        const rerankSpec = params.spec as ComputeGraphSpec;
+        const baseInput: readonly ScoredCandidateId[] = candidates
+          .map((c) => ({ id: c.id, score: c.combinedScore }))
+          .sort((left, right) => right.score - left.score);
+        return evaluateSyncComputeGraph<readonly ScoredCandidateId[], string[], RerankContext>(
+          rerankSpec,
+          RERANK_COMPUTE_REGISTRY,
+          baseInput,
+          { queryText: ctx.query, candidates },
+        );
+      },
+      { effect: "pure" },
+    );
 
   const baseRecipe: ComputeGraphSpec = {
     id: "recipe-default",

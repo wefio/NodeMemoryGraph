@@ -1,3 +1,9 @@
+import {
+  ComputeRegistry,
+  INPUT_NODE_ID,
+  evaluateSyncComputeGraph,
+  type ComputeGraphSpec,
+} from "../core/compute-graph.ts";
 import type { MemoryMarker, MemoryRecord } from "../core/types.ts";
 
 export interface ProfileHeadItem {
@@ -272,30 +278,107 @@ function rankProfileItems(
     .map((entry) => entry.item);
 }
 
+export interface HttpProfileRenderInput {
+  readonly memories: readonly MemoryRecord[];
+  readonly query: string;
+  readonly options?: { maxPreferences?: number; maxTombstones?: number };
+}
+
+interface RankedProfileSections {
+  readonly tombstones: readonly ProfileHeadItem[];
+  readonly preferences: readonly ProfileHeadItem[];
+}
+
+function buildHttpProfileRegistry(): ComputeRegistry<unknown> {
+  const registry = new ComputeRegistry<unknown>();
+  const pureMeta = {
+    version: "1.0.0",
+    effect: "pure" as const,
+    contract: "memory.profile_projection",
+    cacheable: true,
+    parallelSafe: true,
+    resources: { execution: "sync" as const, backend: "js" as const },
+  };
+
+  registry.register(
+    "resolve_profile_head",
+    (inputs): ProfileHeadItem[] => {
+      const req = inputs.default as HttpProfileRenderInput;
+      return resolveHttpProfileHead(req.memories);
+    },
+    pureMeta,
+  );
+
+  registry.register(
+    "rank_profile_sections",
+    (inputs): RankedProfileSections => {
+      const req = inputs.request as HttpProfileRenderInput;
+      const head = inputs.head as readonly ProfileHeadItem[];
+      if (head.length === 0) return { tombstones: [], preferences: [] };
+      const queryTokens = contentTokens(req.query);
+      return {
+        tombstones: rankProfileItems(
+          head.filter((item) => item.kind === "forget_directive"),
+          queryTokens,
+          req.options?.maxTombstones ?? 8,
+        ),
+        preferences: rankProfileItems(
+          head.filter((item) => item.kind === "preference"),
+          queryTokens,
+          req.options?.maxPreferences ?? 12,
+        ),
+      };
+    },
+    pureMeta,
+  );
+
+  registry.register(
+    "render_profile_supplement",
+    (inputs): string => {
+      const sections = inputs.default as RankedProfileSections;
+      const combined = [...sections.tombstones, ...sections.preferences];
+      if (combined.length === 0) return "";
+      const lines = combined.map((item) => {
+        const suffix = item.date ? ` (${item.date})` : "";
+        const tag = item.freshness === "new" ? `[${item.kind}][new]` : `[${item.kind}]`;
+        return `- ${tag} ${item.text}${suffix}`;
+      });
+      return `User Profile (current HEAD preferences & active forget directives):\n${lines.join("\n")}`;
+    },
+    pureMeta,
+  );
+
+  return registry;
+}
+
+export const HTTP_PROFILE_COMPUTE_REGISTRY = buildHttpProfileRegistry();
+
+export const DEFAULT_HTTP_PROFILE_GRAPH: ComputeGraphSpec = {
+  id: "http-profile-projection-v1",
+  nodes: [
+    { id: "head", op: "resolve_profile_head", contract: "memory.profile_projection" },
+    { id: "rank", op: "rank_profile_sections", contract: "memory.profile_projection" },
+    { id: "render", op: "render_profile_supplement", contract: "memory.profile_projection" },
+  ],
+  edges: [
+    { from: INPUT_NODE_ID, to: "head" },
+    { from: INPUT_NODE_ID, to: "rank", port: "request" },
+    { from: "head", to: "rank", port: "head" },
+    { from: "rank", to: "render" },
+  ],
+  output: "render",
+};
+
 export function renderHttpProfileSupplement(
   memories: readonly MemoryRecord[],
   query: string,
   options?: { maxPreferences?: number; maxTombstones?: number },
+  graph: ComputeGraphSpec = DEFAULT_HTTP_PROFILE_GRAPH,
 ): string {
-  const head = resolveHttpProfileHead(memories);
-  if (head.length === 0) return "";
-  const queryTokens = contentTokens(query);
-  const tombstones = rankProfileItems(
-    head.filter((item) => item.kind === "forget_directive"),
-    queryTokens,
-    options?.maxTombstones ?? 8,
+  return evaluateSyncComputeGraph<HttpProfileRenderInput, string, unknown>(
+    graph,
+    HTTP_PROFILE_COMPUTE_REGISTRY,
+    { memories, query, options },
+    {},
   );
-  const preferences = rankProfileItems(
-    head.filter((item) => item.kind === "preference"),
-    queryTokens,
-    options?.maxPreferences ?? 12,
-  );
-  const combined = [...tombstones, ...preferences];
-  if (combined.length === 0) return "";
-  const lines = combined.map((item) => {
-    const suffix = item.date ? ` (${item.date})` : "";
-    const tag = item.freshness === "new" ? `[${item.kind}][new]` : `[${item.kind}]`;
-    return `- ${tag} ${item.text}${suffix}`;
-  });
-  return `User Profile (current HEAD preferences & active forget directives):\n${lines.join("\n")}`;
 }

@@ -54,6 +54,11 @@ test("surfaceTrigramExpression extracts verbatim anchors and 3+ Han runs without
   assert.equal(surfaceTrigramExpression("记住 记忆图谱 和 检索器"), '"记忆图谱" OR "检索器"');
   assert.equal(surfaceTrigramExpression("Mention ONLY and ONLY four items."), "");
   assert.equal(surfaceTrigramExpression("Check summary: soon."), "");
+  assert.equal(surfaceTrigramExpression("What happened in 2023 at 3pm on the 10th?"), "");
+  assert.equal(surfaceTrigramExpression("Budget was $23,000 in the 1990s"), "");
+  assert.equal(surfaceTrigramExpression("1.2.3 2023-05-08"), '"1.2.3" OR "2023-05-08"');
+  assert.equal(surfaceTrigramExpression("sha256 node20 k8s"), '"sha256" OR "node20" OR "k8s"');
+  assert.equal(surfaceTrigramExpression('"2023"'), '"2023"');
   assert.equal(surfaceTrigramExpression(".env"), '".env"');
   assert.equal(surfaceTrigramExpression("OOM"), '"oom"');
   assert.equal(exactLookupAnchor("记忆图谱检索方案"), undefined);

@@ -604,11 +604,15 @@ test("ComputeGraph prevents mutable memo corruption, isolates sideEffect nodes, 
   // 1. Mutable array & object must NOT reuse stale ComputeMemoCache entries
   const reg = new ComputeRegistry<{ tag: string }>();
   let evals = 0;
-  reg.register("sum", (inputs) => {
-    evals += 1;
-    const nums = inputs.default as number[];
-    return nums.reduce((a, b) => a + b, 0);
-  });
+  reg.register(
+    "sum",
+    (inputs) => {
+      evals += 1;
+      const nums = inputs.default as number[];
+      return nums.reduce((a, b) => a + b, 0);
+    },
+    { effect: "pure" },
+  );
   const spec: ComputeGraphSpec = {
     id: "sum-graph",
     nodes: [{ id: "s", op: "sum" }],
