@@ -72,17 +72,34 @@ operation ID and receipt. Domain entities include records, immutable evidence,
 nodes and edges. The receipt and all changed entities become visible together.
 Readers pin one published revision and must close their read view.
 
-SQLite uses a native write transaction and independent WAL snapshot readers.
-Batch planning prefetches bounded duplicate and node lookups from one revision.
-It indexes the batch's changes in memory so later items see earlier changes in
-input order. Predecessor lookups reuse the snapshot candidates for their scope,
-node and session. SQLite groups entity upserts in the same commit. The
-contentless FTS5 projections for memories and file references store search
-terms, positions and document lengths for BM25. Text lives in the owning
-entities. A namespace/key registry maps entities to FTS rowids and is updated
-with the entities and projections. On first writable open, older full-content
-indexes are replaced in one transaction using the exact indexed text and
-existing rowids. Released SQLite pages are available for reuse.
+SQLite stores domain entities in normalized authoritative relational tables:
+`nmg_sources`, `nmg_nodes`, `nmg_memories`, `nmg_memory_evidence`,
+`nmg_memory_relations`, `nmg_memory_markers`, `nmg_tesserae`,
+`nmg_state_aliases`, `nmg_write_events`, `nmg_relation_proposals`,
+`nmg_claim_posteriors`, `nmg_claim_outcomes`, `nmg_resolution_events`, and
+`nmg_receipts`, with schema revisions recorded in `nmg_schema_migrations`.
+On first open of an unmigrated database containing `nmg_memory_entities`, a
+single transaction imports all rows into the authoritative relational tables,
+recovers missing primary evidence conservatively as `missing_recovered` empty
+rows without fabricating original source text, verifies per-kind row counts, and
+retires `nmg_memory_entities` via `DROP TABLE` (`openLocalMemory` writes a
+verified `.before-unified-*.sqlite` backup before opening). SQLite uses a native
+write transaction and independent WAL snapshot readers. Batch planning prefetches
+bounded duplicate and node lookups from one revision. It indexes the batch's
+changes in memory so later items see earlier changes in input order. Predecessor
+lookups reuse the snapshot candidates for their scope, node and session. SQLite
+groups relational upserts in the same commit. The contentless FTS5 projections for
+memories (`nmg_memory_fts` / `nmg_memory_surface_fts`) and file references store
+search terms, positions and document lengths for BM25 while authoritative text
+lives in `nmg_memories` and `nmg_tesserae`. Withdrawal, forgetting markers, and
+`quarantine`/`dormant` retention transitions immediately purge the memory's
+FTS5 entries and vector rows (`nmg_memory_vectors` / `nmg_memory_vector_chunks`)
+and demote linked relations. `rebuildDerivedIndexes()` rebuilds the derived FTS5
+projections and prunes orphaned vectors directly from the authoritative
+relational tables. A namespace/key registry (`nmg_memory_fts_rows`) maps records
+to FTS rowids and is updated with the entities and projections. On first writable
+open, older full-content indexes are replaced in one transaction using the exact
+indexed text and existing rowids. Released SQLite pages are available for reuse.
 
 Lance stores all domain entity kinds and receipts in one data table per namespace.
 A write creates a shallow branch from the pinned version, applies one merge and

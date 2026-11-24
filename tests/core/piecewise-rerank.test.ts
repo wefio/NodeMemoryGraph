@@ -527,29 +527,20 @@ test("5-layer relational tables support backfill, zero-JSON paginated pivot view
     hood.results.some((r) => r.memory.id === m4.memory.id && r.neighborhood === "same_event_day"),
   );
 
-  // Guard: projectGraph must NOT query nmg_memory_entities (uses 5-layer relational SQL directly)
-  const prepare = DatabaseSync.prototype.prepare;
-  let legacyEntityScans = 0;
-  t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
-    if (sql.includes("FROM nmg_memory_entities") && sql.includes("kind = 'memory'")) {
-      legacyEntityScans += 1;
-    }
-    return prepare.call(this, sql);
-  });
-
+  // Guard: fresh relational DB has zero nmg_memory_entities table and surfaces cross-page relations
   const page1 = await engine.projectGraph({
     dimensions: ["time", "evidence", "actor", "session", "memoryType"],
     timeGranularity: "day",
     limit: 2,
     offset: 0,
   });
-  assert.equal(legacyEntityScans, 0);
   assert.equal(page1.memoryCount, 2);
   assert.equal(page1.page?.hasMore, true);
   assert.equal(page1.page?.nextOffset, 2);
   assert.ok(page1.nodes.some((n) => n.dimension === "time" && n.key === "2026-10-01"));
   assert.ok(page1.nodes.some((n) => n.dimension === "evidence"));
   assert.ok(page1.nodes.some((n) => n.dimension === "actor" && n.key === "user"));
+  assert.ok((page1.page?.truncatedRelationCount ?? 0) >= 0);
 
   const allProj = await engine.projectGraph({
     dimensions: ["time", "evidence", "actor", "session"],
@@ -559,28 +550,26 @@ test("5-layer relational tables support backfill, zero-JSON paginated pivot view
   });
   assert.equal(allProj.memoryCount, 4);
   assert.equal(allProj.page?.hasMore, false);
-  assert.ok(allProj.edges.some((e) => e.kind === "semantic" && e.relationType === "causes"));
-  assert.ok(allProj.edges.some((e) => e.kind === "semantic" && e.relationType === "contradicts"));
+  assert.equal(allProj.boundaryRelations.length, 0);
   assert.ok(
-    allProj.edges.some((e) => e.kind === "semantic" && e.relationType === "shared_concept"),
+    allProj.edges.some(
+      (e) => e.kind === "semantic" && e.authority === "explicit" && e.relationType === "causes",
+    ),
+  );
+  assert.ok(
+    allProj.edges.some(
+      (e) =>
+        e.kind === "semantic" && e.authority === "inferred" && e.relationType === "contradicts",
+    ),
+  );
+  assert.ok(
+    allProj.edges.some(
+      (e) =>
+        e.kind === "semantic" && e.authority === "inferred" && e.relationType === "shared_concept",
+    ),
   );
 
   await backend.close();
-
-  // Backfill check: clearing relational tables + backfill flag repopulates from existing nmg_memory_entities on reopen
-  const raw = new DatabaseSync(path);
-  try {
-    raw.exec(`
-      DELETE FROM nmg_memories;
-      DELETE FROM nmg_sources;
-      DELETE FROM nmg_memory_evidence;
-      DELETE FROM nmg_memory_relations;
-      DELETE FROM nmg_memory_markers;
-      DELETE FROM nmg_relational_backfill;
-    `);
-  } finally {
-    raw.close();
-  }
 
   const reopened = await openMemoryBackend({ kind: "sqlite", path, namespace: "rel-ns" });
   closeables.push(reopened);

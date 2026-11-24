@@ -44,13 +44,11 @@ test("SQLite installs a full legacy snapshot atomically and can reopen after new
     try {
       const rejectWrite = new DatabaseSync(path);
       try {
-        rejectWrite.exec(`CREATE TRIGGER fail_migration BEFORE INSERT ON nmg_memory_entities
+        rejectWrite.exec(`CREATE TRIGGER fail_migration BEFORE INSERT ON nmg_sources
           WHEN NEW.id = 'extra-300' BEGIN SELECT RAISE(ABORT, 'test import interruption'); END`);
         await assert.rejects(backend.installLegacySnapshot(snapshot), /test import interruption/);
-        assert.equal(
-          rejectWrite.prepare("SELECT count(*) AS n FROM nmg_memory_entities").get()?.n,
-          0,
-        );
+        assert.equal(rejectWrite.prepare("SELECT count(*) AS n FROM nmg_sources").get()?.n, 0);
+        assert.equal(rejectWrite.prepare("SELECT count(*) AS n FROM nmg_memories").get()?.n, 0);
         assert.equal(rejectWrite.prepare("SELECT count(*) AS n FROM nmg_memory_fts").get()?.n, 0);
         rejectWrite.exec("DROP TRIGGER fail_migration");
       } finally {

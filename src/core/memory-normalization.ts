@@ -39,3 +39,33 @@ export function normalizeMarkers(markers: readonly MemoryMarker[] | undefined): 
   });
   return [...new Map(normalized.map((marker) => [JSON.stringify(marker), marker])).values()];
 }
+
+const INDEX_MONTHS = [
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
+] as const;
+
+/** Derive search-only English and Chinese calendar terms from canonical eventTime. */
+export function eventDateIndexText(eventTime: unknown): string {
+  if (typeof eventTime !== "string" || !eventTime.trim()) return "";
+  const ms = Date.parse(eventTime);
+  if (!Number.isFinite(ms)) return "";
+  const date = new Date(ms);
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + 1;
+  const day = date.getUTCDate();
+  const mm = String(month).padStart(2, "0");
+  const dd = String(day).padStart(2, "0");
+  const monthName = INDEX_MONTHS[month - 1]!;
+  return `${year}-${mm}-${dd} ${day} ${monthName} ${year} ${monthName} ${year} ${year}年${month}月${day}日 ${month}月${day}日 ${year}年${month}月`;
+}

@@ -1,56 +1,37 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const memoryFields = {
-  node_id: "nodeId",
-  statement: "statement",
-  memory_type: "memoryType",
-  tier: "tier",
-  importance: "importance",
-  status: "status",
-  created_at: "createdAt",
-  source_actor: "sourceActor",
-  truth_status: "truthStatus",
-  residence: "residence",
-  scope_json: "scope",
-  evidence_role: "evidenceRole",
-  access_count: "accessCount",
-  last_accessed_at: "lastAccessedAt",
-  expires_at: "expiresAt",
-  supersedes_id: "supersedesId",
-  storage_state: "storageState",
-};
-
-/** Expose the selected namespace to the local read-only inspector and graph queries. */
+/** Expose the selected namespace to the local read-only inspector directly from relational tables. */
 export function useUnifiedInspectViews(db: DatabaseSync): boolean {
   if (
     !db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='nmg_local_memory'").get()
   )
     return false;
-  view(db, "memory_records", "memory", memoryFields);
-  view(db, "memory_nodes", "node", {
-    canonical_name: "canonicalName",
-    kind: "kind",
-    status: "status",
-    residence: "residence",
-    summary: "summary",
-  });
-  view(db, "history_records", "history", {
-    role: "role",
-    content: "content",
-    created_at: "createdAt",
-  });
-  view(db, "node_relations", "edge", {
-    source_node_id: "sourceNodeId",
-    target_node_id: "targetNodeId",
-    relation_type: "type",
-    strength: "strength",
-    direction: "direction",
-    status: "status",
-  });
+  const nsSubquery = "(SELECT namespace FROM nmg_local_memory WHERE id=1)";
+  db.exec(`CREATE TEMP VIEW memory_records AS
+    SELECT id, node_id, statement, memory_type, tier, importance, status,
+      created_at, source_actor, truth_status, residence, scope AS scope_json,
+      evidence_role, access_count, NULLIF(last_accessed_at, '') AS last_accessed_at,
+      NULLIF(expires_at, '') AS expires_at, NULLIF(supersedes_id, '') AS supersedes_id,
+      NULLIF(storage_state, '') AS storage_state
+    FROM nmg_memories
+    WHERE namespace=${nsSubquery}`);
+  db.exec(`CREATE TEMP VIEW memory_nodes AS
+    SELECT id, canonical_name, kind, status, residence, summary
+    FROM nmg_nodes
+    WHERE namespace=${nsSubquery}`);
+  db.exec(`CREATE TEMP VIEW history_records AS
+    SELECT id, role, content, created_at
+    FROM nmg_sources
+    WHERE namespace=${nsSubquery}`);
+  db.exec(`CREATE TEMP VIEW node_relations AS
+    SELECT id, source_id AS source_node_id, target_id AS target_node_id,
+      relation_type, weight AS strength, direction, status
+    FROM nmg_memory_relations
+    WHERE namespace=${nsSubquery} AND origin='node_edge'`);
   db.exec(`CREATE TEMP VIEW memory_evidence_links AS
-    SELECT record.id AS memory_id, evidence.value AS history_id
-    FROM nmg_memory_entities record JOIN json_each(record.payload, '$.evidenceIds') evidence
-    WHERE record.kind='memory' AND record.namespace=(SELECT namespace FROM nmg_local_memory WHERE id=1)`);
+    SELECT memory_id, source_id AS history_id
+    FROM nmg_memory_evidence
+    WHERE namespace=${nsSubquery}`);
   if (
     db
       .prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='nmg_memory_associations'")
@@ -58,15 +39,6 @@ export function useUnifiedInspectViews(db: DatabaseSync): boolean {
   )
     db.exec(`CREATE TEMP VIEW node_pair_signals AS
       SELECT left_node_id, right_node_id, co_retrieval_count, useful_count FROM nmg_memory_associations
-      WHERE namespace=(SELECT namespace FROM nmg_local_memory WHERE id=1)`);
+      WHERE namespace=${nsSubquery}`);
   return true;
-}
-
-function view(db: DatabaseSync, name: string, kind: string, fields: Record<string, string>) {
-  const columns = Object.entries(fields).map(
-    ([column, field]) => `json_extract(payload, '$.${field}') AS ${column}`,
-  );
-  db.exec(`CREATE TEMP VIEW ${name} AS SELECT id, ${columns.join(", ")}
-    FROM nmg_memory_entities WHERE kind='${kind}'
-      AND namespace=(SELECT namespace FROM nmg_local_memory WHERE id=1)`);
 }

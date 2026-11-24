@@ -53,7 +53,7 @@ try {
 
 提交包含实体更新、规范化请求哈希、期望版本、操作 ID 和凭据。领域实体包括记忆记录、不可变证据、节点和边。凭据与全部实体变更一起可见。读取固定一个已发布版本，使用后必须关闭读取视图。
 
-SQLite 使用原生写事务和独立 WAL 快照读取。批量规划在同一版本预取有界的查重和节点候选，在内存中索引本批改动，使后续条目按输入顺序看到前项改动。前序记忆查询按作用域、节点和会话复用快照候选。SQLite 在同一提交中合并实体写入。记忆和文件引用使用无内容 FTS5，保留词项、位置和 BM25 所需的文档长度。文本保存在所属实体。命名空间和实体键通过映射表对应到 FTS rowid，映射、实体和索引在同一事务更新。旧库首次可写打开时，在一个事务内用原索引中的文本和 rowid 转换旧索引。SQLite 可以复用释放的页。
+SQLite 将领域实体存储在规范化的权威关系表中：`nmg_sources`、`nmg_nodes`、`nmg_memories`、`nmg_memory_evidence`、`nmg_memory_relations`、`nmg_memory_markers`、`nmg_tesserae`、`nmg_state_aliases`、`nmg_write_events`、`nmg_relation_proposals`、`nmg_claim_posteriors`、`nmg_claim_outcomes`、`nmg_resolution_events` 与 `nmg_receipts`，并在 `nmg_schema_migrations` 中记录模式版本。首次打开仍包含 `nmg_memory_entities` 的数据库时，会在单个事务中将所有记录导入权威关系表、以空内容 `missing_recovered` 保守补齐缺失主证据（不伪造原文）、校验各类行数后执行 `DROP TABLE nmg_memory_entities` 完成一次性退役（`openLocalMemory` 会在打开前生成经过校验的 `.before-unified-*.sqlite` 备份）。SQLite 使用原生写事务和独立 WAL 快照读取。批量规划在同一版本预取有界的查重和节点候选，在内存中索引本批改动，使后续条目按输入顺序看到前项改动。前序记忆查询按作用域、节点和会话复用快照候选。SQLite 在同一提交中合并关系表写入。记忆与文件引用使用无内容 FTS5（`nmg_memory_fts` 与 `nmg_memory_surface_fts`）保存词项、位置和 BM25 所需的文档长度，权威文本保存在 `nmg_memories` 与 `nmg_tesserae`。撤回、`forget` 标记及 `quarantine`／`dormant` 保留状态变更会立即清理该记忆的 FTS5 索引与向量行（`nmg_memory_vectors` 与 `nmg_memory_vector_chunks`），并降级关联边；`rebuildDerivedIndexes()` 可直接基于权威关系表重建 FTS5 并清理孤儿向量。命名空间与实体键通过 `nmg_memory_fts_rows` 对应到 FTS rowid，映射、关系表与索引在同一事务更新。旧库首次可写打开时，在一个事务内用原索引中的文本和 rowid 转换旧索引。SQLite 可以复用释放的页。
 
 Lance 每个命名空间使用一张数据表保存所有领域实体和凭据。写入从固定版本建立浅分支，执行一次合并并准备原生全文索引；独立的 head 表通过带版本条件的更新发布分支和版本。只有竞争获胜者能发布，其他写者从最新 head 重新规划。读者不查询未发布分支。对象存储须满足 Lance 原生 S3 驱动要求的条件写入和一致性语义；其他 S3 兼容服务须单独验证。
 

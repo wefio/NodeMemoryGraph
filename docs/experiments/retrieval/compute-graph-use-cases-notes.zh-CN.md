@@ -122,6 +122,18 @@
   - 离线召回与端到端 QA 方向一致（`W=0`: `R@20=48.74%`、`Any@20=61.24%` vs `W=2000 0.8·MaxP+0.2·AvgP`: `R@20=49.25%`、`Any@20=62.02%`），且 **`R@100 = 79.15%`、`Any@100 = 85.27%`**（剔除 8 条非逐字 `sensitive_info` 题后，其余 121 题中 `Any@100 = 110/121 = 90.9%`）。
   - 在 15 组计算图（`p_role_length`、`p_rocchio_prf`、`p_semantic_prior` 串联 `DEFAULT_PIECEWISE_RERANK_GRAPH`）中，帕累托前沿为 **`['SEM_100', 'SEM_200', 'COMBO_ALL']`**：`SEM_100` 零回退严格支配基线（`R@5`: `32.16% -> 32.66%`，`MRR@20`: `0.3544 -> 0.3558`），`Rocchio PRF` 被噪声锚点拖累证伪，所有线性重排在 `R@20` 均收敛在 `50.00%–50.25%`——说明 `R@20` 与 `R@100` 之间近 `30 pp` 的落差来自 33M `bge-small-en-v1.5` 双塔模型本身的语义辨别天花板。
 
+## 案例 6：权威关系型 SQLite 切换、规模基准测试与存储–计算图解耦（2026-11-24）
+
+- **架构迁移差异**：将 SQLite 记忆存储从 `nmg_memory_entities` 双写彻底切换至规范化关系 v2 权威表（`nmg_sources`、`nmg_nodes`、`nmg_memories`、`nmg_memory_evidence`、`nmg_memory_relations`、`nmg_memory_markers`、`nmg_tesserae`、`nmg_receipts`、`nmg_schema_migrations`）及 22 个核心关系索引；实现带备份校验的幂等 `nmg_memory_entities` 退役、删除/`forget`/`quarantine` 索引与向量即时清理、跨页显式 `boundaryRelations` 以及 SQLite 与 `ComputeGraph` 零跨层导入隔离（波次并行异步执行、`sideEffect` 隔离与深冻结缓存安全检查）。
+- **130 个迁移冻结库检索一致性校验（`1,867` 题：`1,532` LoCoMo + `235` BEAM + `100` LongMemEval，`62.13s`）**：
+  - 所有 130 个历史 SQLite 冻结库通过 `openMemoryBackend` 完成事务级迁移并删除 `nmg_memory_entities`（`130/130` 库均满足 `hasUnmigratedEntityTable === false`），并抽样执行 `rebuildDerivedIndexes()`。
+  - **`J1_BM25F_R3_TEMPORAL` 与迁移前基线全指标零回归（差异 `0.0000`）**：`R@1=29.08%`、`All@1=35.36%`、`R@3=42.57%`、`R@5=50.15%`、`All@20=65.32%`、`R@20=65.68%`、`R@100=84.44%`、`All@100=78.75%`、`MRR@20=0.5980`、`MRR@100=0.6010`。
+- **2,000 / 10,000 / 100,000 条记录规模基准对比（`bench-relational-v2`，旧 JSON 实体表 vs 权威关系型 v2）**：
+  - **2,000 条**：批量写入 `11,505` vs `18,935 ops/s`；单条读取 `p95=0.305` vs `0.071 ms`；50-ID 批量读 `p95=1.183` vs `0.455 ms`；多条件筛选 `p95=2.087` vs `8.121 ms`（**提速 3.9x**）；`projectGraph` offset 1k `p95=11.567` vs `13.394 ms`；邻域查询 `p95=1.626` vs `12.876 ms`（**提速 7.9x**）；FTS5 重建 `88.51` vs `42.56 ms`；库大小 `8.03` vs `5.10 MB`。
+  - **10,000 条**：批量写入 `8,312` vs `15,483 ops/s`；单条读取 `p95=0.280` vs `0.093 ms`；50-ID 批量读 `p95=1.490` vs `0.529 ms`；多条件筛选 `p95=7.283` vs `36.928 ms`（**提速 5.1x**）；`projectGraph` offset 0 `p95=18.704` vs `40.387 ms`；`projectGraph` offset 1k `p95=20.965` vs `39.949 ms`；邻域查询 `p95=2.234` vs `62.177 ms`（**提速 27.8x**）；FTS5 重建 `312.36` vs `173.98 ms`；库大小 `24.85` vs `25.14 MB`。
+  - **100,000 条**：批量写入 `4,200` vs `6,258 ops/s`（完整 `engine.rememberMany(100)` 抽样 `p50=57.202 ms`、`p95=61.135 ms`）；单条读取 `p95=0.299` vs `0.152 ms`；50-ID 批量读 `p95=2.226` vs `0.787 ms`；多条件筛选 `p95=121.606` vs `499.521 ms`（**提速 4.1x**）；`projectGraph` offset 0 `p95=24.633` vs `512.026 ms`（**提速 20.8x**）；`projectGraph` offset 1k `p95=21.353` vs `780.557 ms`（**提速 36.6x**）；邻域查询 `p95=8.344` vs `776.884 ms`（**提速 93.1x**）；FTS5 重建 `3,336.98` vs `1,961.58 ms`；库大小 **`220.18` vs `288.36 MB`（缩小 23.6%）**；进程 RSS **`893.21` vs `1,235.36 MB`（减少 27.7%）**。
+- **100k `EXPLAIN QUERY PLAN` 结果**：验证了 `sqlite_autoindex_nmg_memories_1`、`nmg_memories_by_event_time`（`projectGraph` 按时间排序无需 `TEMP B-TREE FOR ORDER BY`）、`nmg_memory_evidence`／`nmg_memory_markers` 主键、`nmg_memories_by_scope_state`、`nmg_memory_relations_edge_source` 与覆盖索引 `nmg_sources_by_session_msg` 均走索引检索，无意外全表扫描与逐条 N+1 查询。
+
 ## 后续实验记录模板
 
 后续新增计算图算子、子图配方或参数搜索实验时，可按以下结构直接追加在本文件末尾：

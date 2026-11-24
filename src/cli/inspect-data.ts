@@ -72,9 +72,9 @@ export function listMemories(db: DatabaseSync, limit = 500): InspectMemoryRow[] 
     db
       .prepare(
         `SELECT m.id, m.statement, m.memory_type, m.tier, m.importance, m.status,
-                m.created_at, n.canonical_name AS node_name
+                m.created_at, COALESCE(n.canonical_name, '') AS node_name
          FROM memory_records m
-         JOIN memory_nodes n ON n.id = m.node_id
+         LEFT JOIN memory_nodes n ON n.id = m.node_id
          WHERE m.status IN ('active', 'disputed')
          ORDER BY m.created_at DESC
          LIMIT ?`,
@@ -108,9 +108,9 @@ export function searchMemories(db: DatabaseSync, query: string, limit = 200): In
     db
       .prepare(
         `SELECT m.id, m.statement, m.memory_type, m.tier, m.importance, m.status,
-                m.created_at, n.canonical_name AS node_name
+                m.created_at, COALESCE(n.canonical_name, '') AS node_name
          FROM memory_records m
-         JOIN memory_nodes n ON n.id = m.node_id
+         LEFT JOIN memory_nodes n ON n.id = m.node_id
          WHERE m.status IN ('active', 'disputed')
            AND (m.statement LIKE ? ESCAPE '\\' OR n.canonical_name LIKE ? ESCAPE '\\')
          ORDER BY m.created_at DESC
@@ -130,10 +130,10 @@ function inspectFts(db: DatabaseSync, query: string, limit: number): InspectMemo
     db
       .prepare(
         `SELECT m.id, m.statement, m.memory_type, m.tier, m.importance, m.status,
-            m.created_at, n.canonical_name AS node_name
+            m.created_at, COALESCE(n.canonical_name, '') AS node_name
      FROM ${table} f ${join}
      JOIN memory_records m ON m.id=${id}
-     JOIN memory_nodes n ON n.id=m.node_id
+     LEFT JOIN memory_nodes n ON n.id=m.node_id
      WHERE ${table} MATCH ? AND m.status IN ('active', 'disputed') ${boundary}
      ORDER BY bm25(${table}), f.rowid LIMIT ?`,
       )
@@ -155,9 +155,9 @@ function inspectUnifiedFtsLink(db: DatabaseSync): { join: string; id: string; bo
 export function getMemoryDetail(db: DatabaseSync, memoryId: string): InspectMemoryDetail | null {
   const row = db
     .prepare(
-      `SELECT m.*, n.canonical_name AS node_name
+      `SELECT m.*, COALESCE(n.canonical_name, '') AS node_name
        FROM memory_records m
-       JOIN memory_nodes n ON n.id = m.node_id
+       LEFT JOIN memory_nodes n ON n.id = m.node_id
        WHERE m.id = ?`,
     )
     .get(memoryId) as Row | undefined;

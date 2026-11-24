@@ -497,6 +497,9 @@ export class MemoryEngine {
         nodeIds: params.nodeIds,
         stateKey: params.stateKey,
         memoryType: params.memoryType,
+        statuses: params.statuses,
+        evidenceId: params.evidenceId,
+        relationTypes: params.relationTypes,
         sourceActor: params.sourceActor,
         eventTimeFrom: params.eventTimeFrom,
         eventTimeTo: params.eventTimeTo,
@@ -531,6 +534,8 @@ export class MemoryEngine {
         searchableMemory(entity.value, params, params.now, Boolean(params.includeHistorical)) &&
         entity.value.tier <= (params.maxTier ?? 3) &&
         (!params.memoryType || entity.value.memoryType === params.memoryType) &&
+        (!params.statuses?.length || params.statuses.includes(entity.value.status)) &&
+        (!params.evidenceId || entity.value.evidenceIds.includes(params.evidenceId)) &&
         (!params.sourceSessionId ||
           entity.value.sourceSessionId === params.sourceSessionId ||
           entity.value.sessionId === params.sourceSessionId)

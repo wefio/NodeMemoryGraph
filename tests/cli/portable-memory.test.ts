@@ -170,7 +170,13 @@ test("legacy retirement rolls back if a retained table references a retired tabl
     try {
       assert.ok(restored.prepare("SELECT 1 FROM memory_records WHERE id=?").get(memory.id));
       assert.equal(restored.prepare("SELECT memory_id FROM report").get()?.memory_id, memory.id);
-      assert.equal(restored.prepare("SELECT count(*) AS n FROM nmg_memory_entities").get()?.n, 0);
+      assert.equal(restored.prepare("SELECT count(*) AS n FROM nmg_memories").get()?.n, 0);
+      assert.equal(
+        restored
+          .prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name='nmg_memory_entities'")
+          .get()?.n,
+        0,
+      );
     } finally {
       restored.close();
     }
@@ -995,11 +1001,12 @@ for (const first of ["memory", "coordination"] as const) {
       );
       const database = new DatabaseSync(databasePath, { readOnly: true });
       try {
+        assert.equal(database.prepare("SELECT count(*) AS n FROM nmg_memories").get()?.n, 1);
         assert.equal(
           database
-            .prepare("SELECT count(*) AS n FROM nmg_memory_entities WHERE kind='memory'")
+            .prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name='nmg_memory_entities'")
             .get()?.n,
-          1,
+          0,
         );
         assert.equal(
           database

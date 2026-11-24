@@ -10,9 +10,11 @@ import type {
   MemoryScope,
   MemoryContext,
   MemorySearchResult,
+  MemoryStatus,
   MemoryType,
   MemoryWriteEvent,
   NodeRelation,
+  NodeRelationType,
   TesseraRecord,
   TopologyProposal,
 } from "../types.ts";
@@ -133,6 +135,9 @@ export interface MemoryRelationalProjectionQuery {
   nodeIds?: readonly string[];
   stateKey?: string;
   memoryType?: MemoryType;
+  statuses?: readonly MemoryStatus[];
+  evidenceId?: string;
+  relationTypes?: readonly NodeRelationType[];
   sourceActor?: MemoryActor;
   eventTimeFrom?: string;
   eventTimeTo?: string;

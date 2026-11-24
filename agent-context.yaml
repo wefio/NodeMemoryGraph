@@ -416,7 +416,9 @@ routes:
       - onlion/tsconfig.json
       - onlion/.gitignore
       - src/integration/extractive-summaries.ts
+      - src/integration/http-profile-view.ts
       - src/integration/http-search-graph.ts
+      - src/integration/http-write-preprocess.ts
       - src/integration/memory-http-protocol.ts
       - src/integration/memory-http-ranking.ts
       - src/integration/memory-http-service.ts
@@ -426,6 +428,7 @@ routes:
       [
         tests/cli/local-memory-http.test.ts,
         tests/cli/local-memory-http-config.test.ts,
+        tests/integration/memory-http-profile-preprocess.test.ts,
         tests/integration/memory-http-protocol.test.ts,
         tests/integration/memory-http-ranking.test.ts,
       ]

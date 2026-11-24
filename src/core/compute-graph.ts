@@ -7,6 +7,8 @@ export interface ComputeNodeSpec {
   readonly op: string;
   readonly params?: Readonly<Record<string, unknown>>;
   readonly subgraph?: ComputeGraphSpec;
+  /** Mark nodes that mutate external/DB state so memo caching and downstream caching are bypassed. */
+  readonly sideEffect?: boolean;
 }
 
 export interface ComputeEdgeSpec {
@@ -27,6 +29,11 @@ export type ComputeOperator<TContext = unknown> = (
   context: TContext,
   params: Readonly<Record<string, unknown>>,
 ) => unknown;
+
+export interface ComputeRegisterOptions {
+  readonly version?: string;
+  readonly sideEffect?: boolean;
+}
 
 export interface GraphDiffEntry {
   readonly nodeId: string;
@@ -53,14 +60,26 @@ function canonicalValue(value: unknown): string {
   return encoded === undefined ? "null" : encoded;
 }
 
-const ARRAY_SIG_CACHE = new WeakMap<readonly unknown[], { len: number; sig: string }>();
+const FROZEN_ARRAY_SIG_CACHE = new WeakMap<readonly unknown[], string>();
+const FROZEN_INPUT_SIG_CACHE = new WeakMap<object, string>();
+
+function isDeeplyFrozen(value: unknown, seen = new WeakSet<object>()): boolean {
+  if (value === null || typeof value !== "object") return true;
+  if (!Object.isFrozen(value)) return false;
+  if (seen.has(value)) return true;
+  seen.add(value);
+  return Object.values(value).every((item) => isDeeplyFrozen(item, seen));
+}
 
 function arraySignature(value: readonly unknown[]): string {
-  const cached = ARRAY_SIG_CACHE.get(value);
-  if (cached && cached.len === value.length) return cached.sig;
-  const sig = sha256Hex(`[${value.map(canonicalValue).join(",")}]`);
-  ARRAY_SIG_CACHE.set(value, { len: value.length, sig });
-  return sig;
+  if (isDeeplyFrozen(value)) {
+    const cached = FROZEN_ARRAY_SIG_CACHE.get(value);
+    if (cached) return cached;
+    const sig = sha256Hex(`[${value.map(canonicalValue).join(",")}]`);
+    FROZEN_ARRAY_SIG_CACHE.set(value, sig);
+    return sig;
+  }
+  return sha256Hex(`[${value.map(canonicalValue).join(",")}]`);
 }
 
 function contextSignature(context: unknown): string {
@@ -91,22 +110,34 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   );
 }
 
-/** Registry mapping operator names to pure or contextual functions. */
+/** Registry mapping operator names to pure or side-effecting functions with versioned signatures. */
 export class ComputeRegistry<TContext = unknown> {
   private readonly operators = new Map<string, ComputeOperator<TContext>>();
   private readonly signatures = new Map<string, string>();
+  private readonly sideEffects = new Set<string>();
   private generation = 0;
 
-  register(op: string, fn: ComputeOperator<TContext>): this {
+  register(op: string, fn: ComputeOperator<TContext>, options?: ComputeRegisterOptions): this {
     if (!op.trim()) throw new Error("Operator name must be non-empty");
     this.generation += 1;
+    const version = options?.version ?? "v1";
+    const sideEffect = options?.sideEffect === true;
     this.operators.set(op, fn);
-    this.signatures.set(op, sha256Hex(`${this.generation}:${fn.toString()}`));
+    if (sideEffect) this.sideEffects.add(op);
+    else this.sideEffects.delete(op);
+    this.signatures.set(
+      op,
+      sha256Hex(`${version}:${sideEffect ? "fx" : "pure"}:${this.generation}:${fn.toString()}`),
+    );
     return this;
   }
 
   has(op: string): boolean {
     return this.operators.has(op);
+  }
+
+  isSideEffect(op: string): boolean {
+    return this.sideEffects.has(op);
   }
 
   get(op: string): ComputeOperator<TContext> {
@@ -150,6 +181,7 @@ interface ValidatedGraph {
   readonly nodeById: ReadonlyMap<string, ComputeNodeSpec>;
   readonly incomingByNode: ReadonlyMap<string, readonly ComputeEdgeSpec[]>;
   readonly order: readonly ComputeNodeSpec[];
+  readonly waves: readonly (readonly ComputeNodeSpec[])[];
 }
 
 function indexNodes(nodes: readonly ComputeNodeSpec[]): Map<string, ComputeNodeSpec> {
@@ -199,26 +231,33 @@ function topoOrder(
   nodeById: ReadonlyMap<string, ComputeNodeSpec>,
   outgoingByNode: ReadonlyMap<string, readonly string[]>,
   inDegree: Map<string, number>,
-): ComputeNodeSpec[] {
-  const queue = spec.nodes.filter((node) => inDegree.get(node.id) === 0).map((node) => node.id);
+): { order: ComputeNodeSpec[]; waves: ComputeNodeSpec[][] } {
+  let frontier = spec.nodes.filter((node) => inDegree.get(node.id) === 0).map((node) => node.id);
   const order: ComputeNodeSpec[] = [];
-  for (let head = 0; head < queue.length; head += 1) {
-    const currentId = queue[head]!;
-    order.push(nodeById.get(currentId)!);
-    for (const nextId of outgoingByNode.get(currentId)!) {
-      const nextDeg = inDegree.get(nextId)! - 1;
-      inDegree.set(nextId, nextDeg);
-      if (nextDeg === 0) queue.push(nextId);
+  const waves: ComputeNodeSpec[][] = [];
+  while (frontier.length > 0) {
+    const wave: ComputeNodeSpec[] = [];
+    const nextFrontier: string[] = [];
+    for (const currentId of frontier) {
+      const node = nodeById.get(currentId)!;
+      order.push(node);
+      wave.push(node);
+      for (const nextId of outgoingByNode.get(currentId)!) {
+        const nextDeg = inDegree.get(nextId)! - 1;
+        inDegree.set(nextId, nextDeg);
+        if (nextDeg === 0) nextFrontier.push(nextId);
+      }
     }
+    waves.push(wave);
+    frontier = nextFrontier;
   }
   if (order.length !== spec.nodes.length) {
     throw new Error(`Compute graph '${spec.id}' contains a cycle`);
   }
-  return order;
+  return { order, waves };
 }
 
 const VALIDATED_GRAPH_CACHE = new WeakMap<ComputeGraphSpec, ValidatedGraph>();
-const INPUT_SIG_CACHE = new WeakMap<object, string>();
 
 function validateGraph(spec: ComputeGraphSpec): ValidatedGraph {
   const cached = VALIDATED_GRAPH_CACHE.get(spec);
@@ -228,8 +267,8 @@ function validateGraph(spec: ComputeGraphSpec): ValidatedGraph {
     throw new Error(`Output node '${spec.output}' missing in graph '${spec.id}'`);
   }
   const { incomingByNode, outgoingByNode, inDegree } = indexEdges(spec, nodeById);
-  const order = topoOrder(spec, nodeById, outgoingByNode, inDegree);
-  const validated = { nodeById, incomingByNode, order };
+  const { order, waves } = topoOrder(spec, nodeById, outgoingByNode, inDegree);
+  const validated = { nodeById, incomingByNode, order, waves };
   VALIDATED_GRAPH_CACHE.set(spec, validated);
   return validated;
 }
@@ -246,13 +285,29 @@ function subgraphSignature<TContext>(
   return sha256Hex(`${spec.id}|${nodeSigs.join(";")}|${canonicalValue(spec.edges)}|${spec.output}`);
 }
 
+let executionNonce = 0;
+
+function hasSideEffect<TContext>(
+  node: ComputeNodeSpec,
+  registry: ComputeRegistry<TContext>,
+): boolean {
+  if (node.sideEffect) return true;
+  if (node.subgraph) return node.subgraph.nodes.some((child) => hasSideEffect(child, registry));
+  return registry.isSideEffect(node.op);
+}
+
 function nodeSignature<TContext>(
   node: ComputeNodeSpec,
   incoming: readonly ComputeEdgeSpec[],
   signatures: ReadonlyMap<string, string>,
   registry: ComputeRegistry<TContext>,
   contextSig: string,
+  uncacheable: boolean,
 ): string {
+  if (uncacheable) {
+    executionNonce += 1;
+    return `uncached:${executionNonce}`;
+  }
   const upstream = incoming
     .map((edge) => `${edge.port ?? "default"}=${signatures.get(edge.from) ?? ""}`)
     .sort()
@@ -279,11 +334,11 @@ function gatherNodeInputs(
 }
 
 function inputSignature(input: unknown): string {
-  if (input !== null && typeof input === "object") {
-    const cached = INPUT_SIG_CACHE.get(input);
+  if (input !== null && typeof input === "object" && isDeeplyFrozen(input)) {
+    const cached = FROZEN_INPUT_SIG_CACHE.get(input);
     if (cached) return cached;
     const sig = sha256Hex(canonicalValue(input));
-    INPUT_SIG_CACHE.set(input, sig);
+    FROZEN_INPUT_SIG_CACHE.set(input, sig);
     return sig;
   }
   return sha256Hex(canonicalValue(input));
@@ -318,7 +373,7 @@ export function graphAsOperator<TContext = unknown>(
   };
 }
 
-/** Execute a hierarchical ComputeGraphSpec asynchronously with optional shared prefix caching. */
+/** Execute a hierarchical ComputeGraphSpec asynchronously with wave-parallel scheduling and safe memoization. */
 export async function executeComputeGraph<TIn, TOut, TContext = unknown>(
   spec: ComputeGraphSpec,
   registry: ComputeRegistry<TContext>,
@@ -327,27 +382,45 @@ export async function executeComputeGraph<TIn, TOut, TContext = unknown>(
   memo?: ComputeMemoCache,
 ): Promise<TOut> {
   const { validated, outputs, signatures, contextSig } = prepareRunState(spec, input, context);
-  for (const node of validated.order) {
-    const incoming = validated.incomingByNode.get(node.id)!;
-    const sig = nodeSignature(node, incoming, signatures, registry, contextSig);
-    signatures.set(node.id, sig);
-    const cached = memo?.get(sig);
-    if (cached?.found) {
-      outputs.set(node.id, cached.value);
-      continue;
+  for (const wave of validated.waves) {
+    const pureNodes: ComputeNodeSpec[] = [];
+    const fxNodes: ComputeNodeSpec[] = [];
+    for (const node of wave) {
+      if (hasSideEffect(node, registry)) fxNodes.push(node);
+      else pureNodes.push(node);
     }
-    const inputs = gatherNodeInputs(incoming, outputs, input);
-    const value = node.subgraph
-      ? await executeComputeGraph(
-          node.subgraph,
-          registry,
-          Object.keys(inputs).length === 1 && "default" in inputs ? inputs.default : inputs,
-          context,
-          memo,
-        )
-      : await registry.get(node.op)(inputs, context, node.params ?? {});
-    memo?.set(sig, value);
-    outputs.set(node.id, value);
+    await Promise.all(
+      pureNodes.map(async (node) => {
+        const incoming = validated.incomingByNode.get(node.id)!;
+        const sig = nodeSignature(node, incoming, signatures, registry, contextSig, false);
+        signatures.set(node.id, sig);
+        const cached = memo?.get(sig);
+        if (cached?.found) {
+          outputs.set(node.id, cached.value);
+          return;
+        }
+        const inputs = gatherNodeInputs(incoming, outputs, input);
+        const payload =
+          Object.keys(inputs).length === 1 && "default" in inputs ? inputs.default : inputs;
+        const value = node.subgraph
+          ? await executeComputeGraph(node.subgraph, registry, payload, context, memo)
+          : await registry.get(node.op)(inputs, context, node.params ?? {});
+        memo?.set(sig, value);
+        outputs.set(node.id, value);
+      }),
+    );
+    for (const node of fxNodes) {
+      const incoming = validated.incomingByNode.get(node.id)!;
+      const sig = nodeSignature(node, incoming, signatures, registry, contextSig, true);
+      signatures.set(node.id, sig);
+      const inputs = gatherNodeInputs(incoming, outputs, input);
+      const payload =
+        Object.keys(inputs).length === 1 && "default" in inputs ? inputs.default : inputs;
+      const value = node.subgraph
+        ? await executeComputeGraph(node.subgraph, registry, payload, context, undefined)
+        : await registry.get(node.op)(inputs, context, node.params ?? {});
+      outputs.set(node.id, value);
+    }
   }
   return outputs.get(spec.output) as TOut;
 }
@@ -362,10 +435,11 @@ export function evaluateSyncComputeGraph<TIn, TOut, TContext = unknown>(
 ): TOut {
   const { validated, outputs, signatures, contextSig } = prepareRunState(spec, input, context);
   for (const node of validated.order) {
+    const uncacheable = hasSideEffect(node, registry);
     const incoming = validated.incomingByNode.get(node.id)!;
-    const sig = nodeSignature(node, incoming, signatures, registry, contextSig);
+    const sig = nodeSignature(node, incoming, signatures, registry, contextSig, uncacheable);
     signatures.set(node.id, sig);
-    const cached = memo?.get(sig);
+    const cached = uncacheable ? undefined : memo?.get(sig);
     if (cached?.found) {
       outputs.set(node.id, cached.value);
       continue;
@@ -377,13 +451,13 @@ export function evaluateSyncComputeGraph<TIn, TOut, TContext = unknown>(
           registry,
           Object.keys(inputs).length === 1 && "default" in inputs ? inputs.default : inputs,
           context,
-          memo,
+          uncacheable ? undefined : memo,
         )
       : registry.get(node.op)(inputs, context, node.params ?? {});
     if (isPromiseLike(value)) {
       throw new Error(`Sync compute graph encountered async node '${node.id}' (${node.op})`);
     }
-    memo?.set(sig, value);
+    if (!uncacheable) memo?.set(sig, value);
     outputs.set(node.id, value);
   }
   return outputs.get(spec.output) as TOut;

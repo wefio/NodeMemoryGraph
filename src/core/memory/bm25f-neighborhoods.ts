@@ -1,9 +1,8 @@
 import type { ComputeOperator } from "../compute-graph.ts";
-import { normalize } from "../memory-normalization.ts";
+import { eventDateIndexText, normalize } from "../memory-normalization.ts";
 import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import { searchTerms } from "../store/search-ranking.ts";
 import type { RerankCandidate, RerankContext, ScoredCandidateId } from "./piecewise-rerank.ts";
-import { eventDateIndexText } from "./sqlite-text-index.ts";
 
 const CONCEPT_STOP_WORDS = new Set([
   "the",
