@@ -5,6 +5,7 @@ import {
   memoryEmbeddingText,
   type StoreRow,
 } from "../store/search-ranking.ts";
+import { planEmbeddingWindows, resolveEmbedChunkChars } from "../text-chunking.ts";
 import { encodeVector, scoringVector } from "../store/vector-codec.ts";
 import type {
   MemoryEntityQuery,
@@ -15,7 +16,12 @@ import type {
   MemoryVectorIndex,
   MemoryVectorQuery,
 } from "./backend.ts";
-import { queryBounds, sqliteQueryWhere } from "./entity-rows.ts";
+import { queryBounds } from "./entity-rows.ts";
+import {
+  MEMORY_SELECT_COLUMNS,
+  buildMemoryQueryFilter,
+  hydrateMemoriesFromRows,
+} from "./sqlite-relational.ts";
 
 /** SQLite owns the vectors, the persisted missing-vector queue and the candidate queries. */
 export class SqliteMemoryVectors implements MemoryVectorIndex {
@@ -31,13 +37,12 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
       namespace TEXT NOT NULL, model TEXT NOT NULL, id TEXT NOT NULL,
       dimensions INTEGER NOT NULL, vector BLOB NOT NULL,
       PRIMARY KEY(namespace, model, id));
+      CREATE TABLE IF NOT EXISTS nmg_memory_vector_chunks (
+        namespace TEXT NOT NULL, model TEXT NOT NULL, id TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL, dimensions INTEGER NOT NULL, vector BLOB NOT NULL,
+        PRIMARY KEY(namespace, model, id, chunk_index));
       CREATE TABLE IF NOT EXISTS nmg_memory_vector_import (
-        namespace TEXT PRIMARY KEY);
-      CREATE INDEX IF NOT EXISTS nmg_memory_embedding_order ON nmg_memory_entities
-        (namespace, json_extract(payload, '$.createdAt') DESC, id) WHERE kind='memory';
-      CREATE INDEX IF NOT EXISTS nmg_memory_history_sequence ON nmg_memory_entities
-        (namespace, json_extract(payload, '$.sessionId'), CAST(name AS INTEGER) DESC, id)
-        WHERE kind='history';`);
+        namespace TEXT PRIMARY KEY);`);
   }
 
   importLegacy(): void {
@@ -45,15 +50,14 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
     if (existing.get(this.namespace)) return;
     const insert = this.db.prepare(`INSERT OR IGNORE INTO nmg_memory_vectors
       SELECT ?, model, memory_id, dimensions, COALESCE(vector_blob, vector_json)
-      FROM memory_embeddings JOIN nmg_memory_entities m ON m.namespace = ?
-        AND m.kind = 'memory' AND m.id = memory_id`);
+      FROM memory_embeddings JOIN nmg_memories m ON m.namespace = ? AND m.id = memory_id`);
     insert.run(this.namespace, this.namespace);
     this.db
       .prepare(
         `INSERT OR IGNORE INTO nmg_memory_vectors
       SELECT ?, ?, memory_id, dimensions, COALESCE(vector_blob, vector_json)
-      FROM memory_embeddings JOIN nmg_memory_entities m ON m.namespace = ?
-        AND m.kind = 'memory' AND m.id = memory_id WHERE model='nmg-hashing-v1'`,
+      FROM memory_embeddings JOIN nmg_memories m ON m.namespace = ? AND m.id = memory_id
+      WHERE model='nmg-hashing-v1'`,
       )
       .run(this.namespace, memoryEmbeddingModelId("nmg-hashing-v1"), this.namespace);
     this.db.prepare("INSERT INTO nmg_memory_vector_import VALUES (?)").run(this.namespace);
@@ -74,7 +78,7 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
       .get(this.namespace, indexId);
     const pending = this.db
       .prepare(
-        `SELECT count(*) AS n FROM nmg_memory_entities m
+        `SELECT count(*) AS n FROM nmg_memories m
       WHERE ${MISSING_VECTOR}`,
       )
       .get(this.namespace, indexId);
@@ -87,14 +91,13 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
     after?: MemoryVectorCursor,
   ): (MemoryVectorDocument & MemoryVectorCursor)[] {
     const start = [this.namespace, indexId] as const;
-    // Split the cursor at its timestamp so both parts can use ordered index ranges.
     const selection = after
       ? `same_time AS MATERIALIZED (
-          ${pendingSelection(`AND ${CREATED_AT}=? AND m.id>?`, "?", "m.id")}
+          ${pendingSelection("AND m.created_at=? AND m.id>?", "?", "m.id")}
         ), pending AS MATERIALIZED (
           SELECT * FROM same_time
           UNION ALL
-          SELECT * FROM (${pendingSelection(`AND ${CREATED_AT}<?`, "(SELECT ? - count(*) FROM same_time)")})
+          SELECT * FROM (${pendingSelection("AND m.created_at<?", "(SELECT ? - count(*) FROM same_time)")})
         )`
       : `pending AS MATERIALIZED (${pendingSelection()})`;
     const bind = after
@@ -103,20 +106,13 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
     const rows = this.db
       .prepare(
         `WITH ${selection}
-      SELECT m.id, m.text, m.createdAt, json_extract(m.payload, '$.eventTime') eventTime,
+      SELECT m.id, m.statement, m.createdAt, m.eventTime,
         ${PREVIOUS_TURN} previousTurn
       FROM pending m ORDER BY m.createdAt DESC, m.id`,
       )
       .all(...bind);
-    return rows.map((row) => ({
-      id: String(row.id),
-      createdAt: String(row.createdAt),
-      statement: String(row.text),
-      text: memoryEmbeddingText(row.text, {
-        eventTime: row.eventTime,
-        previousTurn: row.previousTurn,
-      }),
-    }));
+    const chunkChars = resolveEmbedChunkChars();
+    return rows.flatMap((row) => expandPendingRow(row, chunkChars));
   }
 
   save(
@@ -134,27 +130,84 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
         .get(this.namespace, indexId);
       if (existing && Number(existing.dimensions) !== dimensions)
         throw new Error("Embedding vector dimensions differ from the configured index");
-      for (let offset = 0; offset < documents.length; offset += 64) {
-        const batch = documents.slice(offset, offset + 64);
-        const bind = batch.flatMap((doc, i) => [
-          `memory:${doc.id}`,
-          doc.statement,
-          encoded[offset + i]!,
-        ]);
-        this.db
-          .prepare(
-            `WITH incoming(key, text, vector) AS (VALUES ${batch.map(() => "(?, ?, ?)").join(",")})
-          INSERT OR IGNORE INTO nmg_memory_vectors
-          SELECT m.namespace, ?, m.id, ?, incoming.vector FROM incoming
-          JOIN nmg_memory_entities m ON m.namespace=? AND m.key=incoming.key AND m.text=incoming.text
-          WHERE ${INDEXABLE_MEMORY}`,
-          )
-          .run(...bind, indexId, dimensions, this.namespace);
-      }
+      const primary = documents
+        .map((doc, i) => ({ doc, vec: encoded[i]! }))
+        .filter((entry) => entry.doc.chunkIndex === undefined);
+      const chunks = documents
+        .map((doc, i) => ({ doc, vec: encoded[i]! }))
+        .filter((entry) => entry.doc.chunkIndex !== undefined);
+      this.savePrimaryBatch(indexId, dimensions, primary);
+      this.saveChunkBatch(indexId, dimensions, chunks);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
+    }
+  }
+
+  /** Remove derived vectors immediately when a memory is deleted, forgotten, or retained. */
+  deleteForMemory(memoryId: string): void {
+    this.db
+      .prepare("DELETE FROM nmg_memory_vectors WHERE namespace=? AND id=?")
+      .run(this.namespace, memoryId);
+    this.db
+      .prepare("DELETE FROM nmg_memory_vector_chunks WHERE namespace=? AND id=?")
+      .run(this.namespace, memoryId);
+  }
+
+  /** Remove derived vector entries whose backing memory is absent, deleted, forgotten, or retained. */
+  pruneOrphans(): void {
+    const staleCondition = `NOT EXISTS (
+      SELECT 1 FROM nmg_memories m
+      WHERE m.namespace = v.namespace AND m.id = v.id AND ${INDEXABLE_MEMORY}
+    )`;
+    this.db
+      .prepare(`DELETE FROM nmg_memory_vectors AS v WHERE v.namespace=? AND ${staleCondition}`)
+      .run(this.namespace);
+    this.db
+      .prepare(
+        `DELETE FROM nmg_memory_vector_chunks AS v WHERE v.namespace=? AND ${staleCondition}`,
+      )
+      .run(this.namespace);
+  }
+
+  private savePrimaryBatch(
+    indexId: string,
+    dimensions: number,
+    entries: readonly { doc: MemoryVectorDocument; vec: Uint8Array }[],
+  ): void {
+    for (let offset = 0; offset < entries.length; offset += 64) {
+      const batch = entries.slice(offset, offset + 64);
+      const bind = batch.flatMap(({ doc, vec }) => [doc.id, doc.statement, vec]);
+      this.db
+        .prepare(
+          `WITH incoming(id, statement, vector) AS (VALUES ${batch.map(() => "(?, ?, ?)").join(",")})
+          INSERT OR IGNORE INTO nmg_memory_vectors
+          SELECT m.namespace, ?, m.id, ?, incoming.vector FROM incoming
+          JOIN nmg_memories m ON m.namespace=? AND m.id=incoming.id AND m.statement=incoming.statement
+          WHERE ${INDEXABLE_MEMORY}`,
+        )
+        .run(...bind, indexId, dimensions, this.namespace);
+    }
+  }
+
+  private saveChunkBatch(
+    indexId: string,
+    dimensions: number,
+    entries: readonly { doc: MemoryVectorDocument; vec: Uint8Array }[],
+  ): void {
+    for (let offset = 0; offset < entries.length; offset += 64) {
+      const batch = entries.slice(offset, offset + 64);
+      const bind = batch.flatMap(({ doc, vec }) => [doc.id, doc.statement, doc.chunkIndex!, vec]);
+      this.db
+        .prepare(
+          `WITH incoming(id, statement, chunk_index, vector) AS (VALUES ${batch.map(() => "(?, ?, ?, ?)").join(",")})
+          INSERT OR REPLACE INTO nmg_memory_vector_chunks
+          SELECT m.namespace, ?, m.id, incoming.chunk_index, ?, incoming.vector FROM incoming
+          JOIN nmg_memories m ON m.namespace=? AND m.id=incoming.id AND m.statement=incoming.statement
+          WHERE ${INDEXABLE_MEMORY}`,
+        )
+        .run(...bind, indexId, dimensions, this.namespace);
     }
   }
 
@@ -171,28 +224,44 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
       const score = cosine(scoringVector({ vector: value }));
       return Number.isFinite(score) ? score : 0;
     });
+    const filter = buildMemoryQueryFilter(this.namespace, query, "m");
     const rows = db
       .prepare(
         `WITH eligible AS (
-      SELECT namespace, id, rowid AS entity_rowid FROM nmg_memory_entities m
-      WHERE namespace=? AND ${sqliteQueryWhere(query)} AND ${INDEXABLE_MEMORY}
-    ), scores AS MATERIALIZED (
-      SELECT m.id, m.entity_rowid,
-        nmg_memory_cosine(v.vector) AS recordScore
+      SELECT namespace, id, rowid AS mem_rowid FROM nmg_memories m
+      WHERE ${filter.sql} AND ${INDEXABLE_MEMORY}
+    ), raw_scores AS (
+      SELECT m.id, m.mem_rowid, nmg_memory_cosine(v.vector) AS s
       FROM eligible m JOIN nmg_memory_vectors v
         ON v.namespace=m.namespace AND v.model=? AND v.id=m.id AND v.dimensions=?
+      UNION ALL
+      SELECT m.id, m.mem_rowid, nmg_memory_cosine(c.vector) AS s
+      FROM eligible m JOIN nmg_memory_vector_chunks c
+        ON c.namespace=m.namespace AND c.model=? AND c.id=m.id AND c.dimensions=?
+    ), scores AS MATERIALIZED (
+      SELECT id, mem_rowid, (0.8 * MAX(s) + 0.2 * AVG(s)) AS recordScore
+      FROM raw_scores GROUP BY id, mem_rowid
     ), selected AS (
       SELECT * FROM scores
       WHERE recordScore>0 ORDER BY recordScore DESC, id LIMIT ?
     )
-    SELECT m.payload, selected.recordScore FROM selected
-    CROSS JOIN nmg_memory_entities m ON m.rowid=selected.entity_rowid
+    SELECT ${MEMORY_SELECT_COLUMNS}, selected.recordScore FROM selected
+    CROSS JOIN nmg_memories m ON m.rowid=selected.mem_rowid
     ORDER BY selected.recordScore DESC, selected.id`,
       )
-      .all(this.namespace, semantic.indexId, semantic.vector.length, limit) as StoreRow[];
-    return rows.map((row) => ({
-      entity: { kind: "memory", value: JSON.parse(String(row.payload)) },
-      recordScore: Number(row.recordScore),
+      .all(
+        ...filter.bind,
+        semantic.indexId,
+        semantic.vector.length,
+        semantic.indexId,
+        semantic.vector.length,
+        limit,
+      ) as Array<Record<string, unknown>>;
+    if (!rows.length) return [];
+    const { memories } = hydrateMemoriesFromRows(db, this.namespace, rows);
+    return memories.map((value, idx) => ({
+      entity: { kind: "memory", value },
+      recordScore: Number(rows[idx]!.recordScore),
     }));
   }
 
@@ -203,51 +272,99 @@ export class SqliteMemoryVectors implements MemoryVectorIndex {
       .prepare(
         `SELECT v.id, v.vector FROM json_each(?) wanted
         CROSS JOIN nmg_memory_vectors v ON v.namespace=? AND v.model=?
-          AND v.id=wanted.value AND v.dimensions=?`,
+          AND v.id=wanted.value AND v.dimensions=?
+        UNION ALL
+        SELECT c.id, c.vector FROM json_each(?) wanted
+        CROSS JOIN nmg_memory_vector_chunks c ON c.namespace=? AND c.model=?
+          AND c.id=wanted.value AND c.dimensions=?`,
       )
       .all(
         JSON.stringify(ids),
         this.namespace,
         semantic.indexId,
         semantic.vector.length,
+        JSON.stringify(ids),
+        this.namespace,
+        semantic.indexId,
+        semantic.vector.length,
       ) as StoreRow[];
+    const acc = new Map<string, { max: number; sum: number; count: number }>();
+    for (const row of rows) {
+      const id = String(row.id);
+      const score = cosine(scoringVector(row));
+      if (!Number.isFinite(score)) continue;
+      const cur = acc.get(id);
+      if (!cur) {
+        acc.set(id, { max: score, sum: score, count: 1 });
+      } else {
+        cur.max = Math.max(cur.max, score);
+        cur.sum += score;
+        cur.count += 1;
+      }
+    }
     return new Map(
-      rows.map((row) => {
-        const score = cosine(scoringVector(row));
-        return [String(row.id), Number.isFinite(score) ? score : 0];
-      }),
+      Array.from(acc.entries(), ([id, v]) => [id, 0.8 * v.max + 0.2 * (v.sum / v.count)]),
     );
   }
 }
 
-const INDEXABLE_MEMORY = `json_extract(m.payload, '$.status') <> 'deleted'
-  AND json_extract(m.payload, '$.storageState') IS NULL
-  AND NOT EXISTS (SELECT 1 FROM json_each(m.payload, '$.markers') marker
-    WHERE json_extract(marker.value, '$.kind')='forget')`;
-const MISSING_VECTOR = `m.namespace=? AND m.kind='memory' AND ${INDEXABLE_MEMORY}
+const INDEXABLE_MEMORY = `m.status <> 'deleted' AND m.storage_state = '' AND m.has_forget = 0`;
+const MISSING_VECTOR = `m.namespace=? AND ${INDEXABLE_MEMORY}
   AND NOT EXISTS (SELECT 1 FROM nmg_memory_vectors v
     WHERE v.namespace=m.namespace AND v.model=? AND v.id=m.id)`;
 
-const CREATED_AT = "json_extract(m.payload, '$.createdAt')";
-
-function pendingSelection(boundary = "", limit = "?", order = `${CREATED_AT} DESC, m.id`): string {
-  return `SELECT m.namespace, m.id, m.text, m.payload, ${CREATED_AT} createdAt
-    FROM nmg_memory_entities m WHERE ${MISSING_VECTOR} ${boundary}
+function pendingSelection(boundary = "", limit = "?", order = "m.created_at DESC, m.id"): string {
+  return `SELECT m.namespace, m.id, m.statement, m.event_time AS eventTime, m.created_at AS createdAt
+    FROM nmg_memories m WHERE ${MISSING_VECTOR} ${boundary}
     ORDER BY ${order} LIMIT ${limit}`;
 }
 
-// Visit the few evidence IDs first, then seek directly to their history rows.
-const PREVIOUS_TURN = `(SELECT json_extract(prev.payload, '$.content')
-  FROM json_each(m.payload, '$.evidenceIds') link
-  CROSS JOIN nmg_memory_entities h ON h.namespace=m.namespace AND h.key='history:' || link.value
-  CROSS JOIN nmg_memory_entities prev ON prev.rowid=(
-    SELECT candidate.rowid FROM nmg_memory_entities candidate
-    WHERE candidate.namespace=m.namespace AND candidate.kind='history'
-      AND json_extract(candidate.payload, '$.sessionId')=json_extract(h.payload, '$.sessionId')
-      AND CAST(candidate.name AS INTEGER)<CAST(h.name AS INTEGER)
-    ORDER BY CAST(candidate.name AS INTEGER) DESC, candidate.id LIMIT 1
+const PREVIOUS_TURN = `(SELECT prev.content
+  FROM nmg_memory_evidence ev
+  CROSS JOIN nmg_sources h ON h.namespace=m.namespace AND h.id=ev.source_id
+  CROSS JOIN nmg_sources prev ON prev.rowid=(
+    SELECT candidate.rowid FROM nmg_sources candidate
+    WHERE candidate.namespace=m.namespace
+      AND candidate.session_id=h.session_id
+      AND candidate.source_message_id GLOB '[0-9]*'
+      AND candidate.ordinal<h.ordinal
+    ORDER BY candidate.ordinal DESC, candidate.id LIMIT 1
   )
-  ORDER BY CAST(prev.name AS INTEGER) DESC, CAST(link.key AS INTEGER) LIMIT 1)`;
+  WHERE ev.namespace=m.namespace AND ev.memory_id=m.id
+    AND h.source_message_id GLOB '[0-9]*'
+  ORDER BY prev.ordinal DESC, ev.ordinal LIMIT 1)`;
+
+function expandPendingRow(
+  row: Record<string, unknown>,
+  chunkChars: number,
+): (MemoryVectorDocument & MemoryVectorCursor)[] {
+  const id = String(row.id);
+  const createdAt = String(row.createdAt);
+  const statement = String(row.statement);
+  const eventTime = row.eventTime ? String(row.eventTime) : null;
+  const primary: MemoryVectorDocument & MemoryVectorCursor = {
+    id,
+    createdAt,
+    statement,
+    text: memoryEmbeddingText(statement, {
+      eventTime,
+      previousTurn: row.previousTurn as string | null | undefined,
+    }),
+  };
+  if (chunkChars <= 0) return [primary];
+  const extraWindows = planEmbeddingWindows(statement, { windowChars: chunkChars });
+  if (extraWindows.length === 0) return [primary];
+  return [
+    primary,
+    ...extraWindows.map((chunk, chunkIndex) => ({
+      id,
+      createdAt,
+      statement,
+      chunkIndex,
+      text: memoryEmbeddingText(chunk, { eventTime }),
+    })),
+  ];
+}
 
 function validateVectors(vectors: readonly (number[] | Float32Array)[], expected: number): void {
   const dimensions = vectors[0]?.length;

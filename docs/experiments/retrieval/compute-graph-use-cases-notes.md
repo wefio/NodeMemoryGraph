@@ -60,6 +60,100 @@ compute-graph recipes and measurements can be appended directly to this document
   while `w_session_pivot` clusters candidates via `sessionId -> sourceSessionId -> aml_session ->
 nodeId -> evidenceId -> id` before `stitch_http_page` caps tail context scores monotonically.
 
+## Case 3: 5-Layer Relational Projection, Context-Safe Caching & BM25F + Temporal Neighborhood Promotion (2026-11-23)
+
+- **Architecture & Caching Hardening**:
+  - Replaced single-table JSON `payload` dependencies in pivot projection with a 5-layer relational SQLite schema (`nmg_sources`, `nmg_memories`, `nmg_memory_evidence`, `nmg_memory_relations`, `nmg_memory_markers` in [`sqlite-relational.ts`](../../../src/core/memory/sqlite-relational.ts)), adding `time`, `evidence`, and `actor` pivot dimensions plus implicit/explicit `semantic` edges (`memory_relation`, `supersedes`, `related_to`, `contradicts`, `shared_concept`) and node-free `engine.linkMemories`.
+  - Fixed `ComputeMemoCache` ([`compute-graph.ts`](../../../src/core/compute-graph.ts)) to fold execution `context` signatures (including function properties via source hash and cached array references) and `ComputeRegistry` per-operator registration fingerprints into node cache keys.
+- **2,000-Row Relational Projection Benchmark** (800-row legacy JSON vs 5-layer SQLite):
+  - **Ingest (2,000 rows, batch=100)**: `906.84 ms` (`2,205 rows/s`) with atomic synchronization into all 5 relational tables plus dual FTS5.
+  - **Filtered + Paginated Pivot Query (`eventTimeFrom..To` + `sourceActor` + `memoryType`, `limit=200`, 200 matches)**: **`5.43 ms` p50 (`5.49 ms` avg)** via `nmg_memories_by_filter` vs **`8.62 ms` p50 (`8.77 ms` avg)** for full-table `JSON.parse(payload)` scan (**1.60x faster** even at 2,000 rows, scaling $O(\text{limit})$ instead of $O(N)$ with zero `JSON.parse(payload)` calls).
+- **1,867-Query Compute-Graph Experiment (`bm25f_field_score` & New Neighborhood Operators)**:
+  - Evaluated 11 compute-graph recipes derived via `replaceGraphNode` from `G4_DEFAULT_BASE` across LoCoMo (1,532), BEAM (235), and LongMemEval (100) using `RERANK_COMPUTE_REGISTRY` in [`bm25f-neighborhoods.ts`](../../../src/core/memory/bm25f-neighborhoods.ts) and [`piecewise-rerank.ts`](../../../src/core/memory/piecewise-rerank.ts):
+
+| Recipe (`Pipeline`)        | Graph Delta (`replaceGraphNode`)                                            |      All@1 |     All@20 |    All@100 |     MRR@20 | Net W/L@1 | Net W/L@20 | Net W/L@100 |
+| -------------------------- | --------------------------------------------------------------------------- | ---------: | ---------: | ---------: | ---------: | --------: | ---------: | ----------: |
+| `G4_DEFAULT_BASE`          | Baseline (`R3 + R1R5 + w_session(0.20)`)                                    |     35.22% |     65.32% |     78.71% |     0.5957 |       0/0 |        0/0 |         0/0 |
+| `B1_BM25F_ONLY`            | Head -> `bm25f_field_score(0.12)`                                           |     35.27% |     65.32% |     78.71% |     0.5974 |       5/8 |        0/0 |         0/0 |
+| `B2_HEAD_BM25F_R3`         | Head -> `bm25f(0.10) -> r3(0.12)`                                           |     35.36% |     65.32% |     78.71% |     0.5980 |       5/4 |        0/0 |         0/0 |
+| `B3_HEAD_BM25F_R3_18`      | Head -> `bm25f(0.18) -> r3(0.12)`                                           |     35.36% |     65.32% |     78.71% | **0.5993** |       8/7 |        0/0 |         0/0 |
+| `N1_TAIL_TEMPORAL`         | Tail -> `w_session(0.20) -> w_temporal_pivot(0.10)`                         |     35.22% |     65.32% |     78.75% |     0.5957 |       0/0 |        0/0 |         2/0 |
+| `N2_TAIL_CONCEPT`          | Tail -> `w_session(0.20) -> w_concept_pivot(0.10)`                          |     35.22% |     65.32% |     78.57% |     0.5957 |       0/0 |        0/0 |         1/2 |
+| `N3_TAIL_LINEAGE`          | Tail -> `w_session(0.20) -> w_lineage_pivot(0.14)`                          |     35.22% |     65.32% |     78.71% |     0.5957 |       0/0 |        0/0 |         0/0 |
+| **`J1_BM25F_R3_TEMPORAL`** | **Head `bm25f(0.10)->r3(0.12)` + Mid + Tail `w_session->w_temporal(0.10)`** | **35.36%** | **65.32%** | **78.75%** | **0.5980** |   **5/4** |    **0/0** |     **2/0** |
+
+- **Cache & Pareto Verdict**:
+  - Across `110,153` node evaluations in the 11-arm sweep (`54.53 s`), `ComputeMemoCache` achieved **`52,276` hits (47.5% hit rate)**.
+  - `findParetoOptimalGraphs` on `(All@1, All@20, All@100, MRR@20)` selected `['B3_HEAD_BM25F_R3_18', 'J1_BM25F_R3_TEMPORAL']`.
+  - **`J1_BM25F_R3_TEMPORAL`** strictly dominates `G4_DEFAULT_BASE` on `All@1` (`+0.14%`), `All@50` (`71.90% -> 72.18%`), `All@100` (`2W/0L`), and `MRR@20` (`+0.0023`) with zero regressions, and is promoted to **`DEFAULT_PIECEWISE_RERANK_GRAPH`** (`HEAD_BM25F_R3_SUBGRAPH` + `MID_DEDUP_RECENCY_SUBGRAPH` + `TAIL_SESSION_TEMPORAL_SUBGRAPH`). Meanwhile `w_concept_pivot` (`1W/2L` at `@100`) remains registered as an opt-in experimental operator rather than a default.
+
+## Case 4: Turn-Adjacency Operator (`w_turn_pivot`) & PersonaMem / HaluMem Evaluation (2026-11-23)
+
+Evaluated all **2,719 queries across 5 frozen benchmarks** (`LoCoMo` 1,532 + `BEAM` 235 + `LongMemEval` 100 + `PersonaMem` 500 + `HaluMem` 352 [272 labeled / 496 golds]) to test turn-adjacency neighborhood ranking (`w_turn_pivot` in [`bm25f-neighborhoods.ts`](../../../src/core/memory/bm25f-neighborhoods.ts)) and PersonaMem context tuning (`forget` marker admission + preference `recall_trigger` indexing).
+
+- **Graph Delta (`replaceGraphNode`)**:
+  - Added `turnOrdinal?: number | null` on `RerankCandidate` (populated in production from `nmg_sources.ordinal` via `readSourceTurnMetadata` in [`sqlite-relational.ts`](../../../src/core/memory/sqlite-relational.ts) -> `SqliteMemoryBackend.hybridCandidates` -> [`engine.ts`](../../../src/core/memory/engine.ts)).
+  - Chained `w_turn_pivot` (`maxRadius: 1`, `±1` adjacent dialogue turn within the same session) in **Mid** (`weight: 0.55, anchorTopK: 5`) and **Tail** (`weight: 0.35, anchorTopK: 6`), leaving the `Head` (`[1..5]`) untouched.
+- **5-Benchmark Offline Comparison (`J1_CURRENT_DEFAULT` vs Promoted `W_055_035_R1`)**:
+
+| Benchmark (Queries / Mode)                    | Graph Variant      |    R@1 |    R@5 |       R@10 |       R@20 |  All@1 |     All@20 |
+| --------------------------------------------- | ------------------ | -----: | -----: | ---------: | ---------: | -----: | ---------: |
+| LoCoMo (1,532)                                | `J1_DEFAULT`       | 25.47% | 48.25% |     56.77% |     66.27% | 31.14% |     69.45% |
+| LoCoMo (1,532)                                | **`W_055_035_R1`** | 25.47% | 48.25% | **57.84%** | **67.50%** | 31.14% | **71.41%** |
+| BEAM (235)                                    | `J1_DEFAULT`       |  6.48% | 15.73% |     23.89% |     33.13% |  8.94% |     28.51% |
+| BEAM (235)                                    | **`W_055_035_R1`** |  6.48% | 15.73% | **24.49%** | **34.21%** |  8.94% | **30.21%** |
+| LongMemEval (100)                             | `J1_DEFAULT`       | 55.29% | 86.47% |     94.71% |     97.65% | 66.00% |     98.00% |
+| LongMemEval (100)                             | **`W_055_035_R1`** | 55.29% | 86.47% |     94.71% |     97.65% | 66.00% |     98.00% |
+| HaluMem (352 / 272 labeled, no tail splice)   | `J1_DEFAULT`       | 27.22% | 59.27% |     70.97% |     78.43% |      - |     72.79% |
+| HaluMem (352 / 272 labeled, no tail splice)   | **`W_055_035_R1`** | 27.22% | 59.27% | **71.98%** | **79.84%** |      - | **74.63%** |
+| HaluMem (+ Tail Splice 2 `adjacentSources`)   | **`W_055_035_R1`** | 27.22% | 59.27% | **71.98%** | **81.05%** |      - | **76.47%** |
+| PersonaMem (500, `forget` hidden, no splice)  | `J1_DEFAULT`       |  6.26% | 21.87% |     30.04% |     38.01% |      - |     11.00% |
+| PersonaMem (500, `forget` hidden, no splice)  | **`W_055_035_R1`** |  6.26% | 21.87% | **30.76%** | **38.54%** |      - | **12.20%** |
+| PersonaMem (+ Tail Splice 2, `forget` hidden) | **`W_055_035_R1`** |  6.26% | 21.87% | **30.76%** | **39.13%** |      - | **14.40%** |
+
+- **PersonaMem Context-Tuning Analysis (`forget` Tag & Preference `recall_trigger`s)**:
+  - **Privacy vs Revocation Recall (`ask_to_forget`, 100/500 questions)**: Pre-ingested PersonaMem stores mark explicit user forget requests with `markers: [{ kind: "forget" }]` (`97` gold snippet labels hidden by `visibleMemory` / `searchableMemory`). Admitting only the paraphrased constraint `statement` does not match verbatim `history.content` golds (`R@20 = 38.21%`), whereas combining **`forget` context admission + preference `recall_trigger` markers (`WmTqKO`) + `W_055_035_R1` (`w_turn_pivot`) + Tail Splice 2** boosts PersonaMem-500 overall metrics to **`R@1 = 6.59%`, `R@5 = 23.52%`, `R@10 = 34.39%`, `R@20 = 43.68%` (`+5.67%`), `All@20 = 27.00%` (`+16.00%`)**, driven by `ask_to_forget` rising from `68.11%` to **`84.69%+`** (pairing the user's revocation turn with the assistant's acknowledgment turn via `w_turn_pivot`).
+- **Pareto & Promotion Verdict**:
+  - `W_055_035_R1` strictly dominates `J1_CURRENT_DEFAULT` across all 5 benchmarks (zero regressions on any cutoff; LongMemEval exact parity at `97.65% R@20` / `98.00% All@20`), and is promoted to **`DEFAULT_PIECEWISE_RERANK_GRAPH`** (`MID_DEDUP_RECENCY_SUBGRAPH` + `TAIL_SESSION_TEMPORAL_SUBGRAPH`).
+
+### Live End-to-End HTTP + LLM Evaluation (`auto/deepseek-v4-flash`, Concurrency 8, Thinking Off)
+
+Verified the updated HTTP service (`local-memory-http.ts` wired with `createEmbeddingClientFromEnv()`, `nmg_sources` ordinal metadata, head `r5_recency_boost(0.02)`, and future-`eventTime` `defaultValidFrom` visibility fix in `model.ts`) end-to-end against `BAAI/bge-small-en-v1.5` + `http://127.0.0.1:3425/v1` (`auto/deepseek-v4-flash`, `thinking: { type: "disabled" }`, concurrency 8):
+
+- **Suite 1 — Interleaved `ADD -> Search -> ADD (Update) -> Search` State Chain**: **`10/10 (100.0%)`** across variable overrides (`A: 1 -> 2 -> 3`), city relocations (`Austin -> Seattle -> Tokyo`), DB migration (`SQLite -> PostgreSQL`), and gateway port changes (`8080 -> 9443`). Running this live test exposed and fixed a visibility bug in `timeFields` ([`model.ts`](../../../src/core/memory/model.ts)) where future `eventTime` values (`> now`) had `validFrom > now` and were hidden by `visibleMemory`.
+- **Suite 2 — HaluMem User 1 Live HTTP End-to-End (67 sessions, 164 questions, OmniMemEval prompts & judge)**:
+  - **Batch (`ADD all -> Search all`, `240` char preview / `5,500` budget)**: **`139/164 = 84.76%`** (`+3.66 pp` over historical `trial17` `81.10%`; avg `255.2 ms` search, `1,924` prompt tokens).
+  - **Interleaved (`ADD session -> Search session -> ADD next`, `240` char preview / `5,500` budget)**: **`146/164 = 89.02%`** (`+7.92 pp` over `trial17`; `189.7 ms` avg search, `1,912` prompt tokens): `Memory Boundary` `97.44%`, `Basic Fact Recall` `82.50%`, `Memory Conflict` `92.31%`, `Generalization & Application` `90.32%`, `Multi-hop Inference` `88.89%`, `Dynamic Update` `50.00%` (remaining `s52-q3` `23,000` salary detail was retrieved at rank 2 `[B]` but fell after `240`-char excerpt truncation).
+  - **Controlled A/B — Compact (`240 / 5,500`) vs Unclipped (`searchPreviewCodePoints: 0`, `searchMaxCharacters: 32000`, `NMG_EMBED_CHUNK_CONCURRENCY=1`, `hybrid: 164/164`, `0` proxy errors)**: Compact scored **`147/164 = 89.63%`** (`avgItems=18.1`, `123` queries clipped below 20 items, `avgTokens=1,800`) vs Unclipped **`146/164 = 89.02%`** (`avgItems=19.9`, `avgTokens=2,383`, 4 vs 3 single-question flips; unclipping recovered truncated details like `s2-q2` pets `"dogs, cats, and parrots"`). An earlier cold run that scored `75.00%` (`123/164`) was traced to `ECONNRESET` against the single-threaded local `bge_server.py` under default `chunkConcurrency=4`, which caused `backfillVectors()` to swallow HTTP 500 errors and silently degrade part of the run to lexical-only retrieval.
+- **Suite 3 — PersonaMem v2 Live HTTP Sample (5 personas, 129 multiple-choice questions)**:
+  - **Baseline (`240` char preview, raw HTTP `/add`)**: **`32/129 = 24.81%`** (`ask_to_forget = 28.00%`, `therapy_background = 29.41%`, `neutral_preferences = 29.63%`, `health_and_medical_conditions = 29.41%`, `sensitive_info = 25.00%`).
+  - **With HTTP Write Preprocessor + Unclipped Config (`preprocessMessages: true`, `searchPreviewCodePoints: 0`, `searchMaxCharacters: 32000`, producing `recall_trigger=221`, `forget_directive=85`)**: **`61/129 = 47.29%` (`+22.48 pp`)**, with `ask_to_forget` rising `28.00% -> 56.00%`, `therapy_background` `29.41% -> 58.82%`, `health_and_medical_conditions` `29.41% -> 58.82%`, `anti_stereotypical_pref` `12.50% -> 33.33%`, and `sensitive_info` `25.00% -> 50.00%`.
+
+## Case 5: Geometric Blind-Spot Vector Windows, `MaxP+AvgP`, & PersonaMem v2 Pareto Sweep (2026-11-23)
+
+- **Implementation & Configuration (`planEmbeddingWindows`, `0.8·MaxP + 0.2·AvgP`, & HTTP Config Summary)**:
+  - Added [`text-chunking.ts`](../../../src/core/text-chunking.ts) (`planEmbeddingWindows`, default `NMG_EMBED_CHUNK_CHARS=2000`, dropping window `0` already covered by the primary vector; `sentenceAlignedPreview`), companion sub-chunk table `nmg_memory_vector_chunks` + `0.8·MaxP + 0.2·AvgP` aggregation in [`sqlite-vectors.ts`](../../../src/core/memory/sqlite-vectors.ts), sentence-aligned clipping in [`search-projection.ts`](../../../src/integration/search-projection.ts), optional `sortResultsByTime` in [`local-memory-http-config.ts`](../../../src/cli/local-memory-http-config.ts) / [`local-memory-http.ts`](../../../src/cli/local-memory-http.ts), and full bilingual HTTP/embedding configuration summaries in [`onlion/README.md`](../../../onlion/README.md) & [`onlion/README.zh-CN.md`](../../../onlion/README.zh-CN.md).
+- **PersonaMem v2 Clean Live HTTP Comparison (`5` personas / `129q`, `NMG_EMBED_CHUNK_CONCURRENCY=1`, `proxyErrors=0`, `hybrid: 129/129`, `auto/deepseek-v4-flash`, thinking off, `preprocessMessages=false`, unclipped)**:
+  - **Clean Unsplit Baseline (`W=0`)**: **`63/129 = 48.84%`** (`1,118` primary vectors, `avgTokens=4,376`, `ask_to_forget=68.00%`, `neutral_preferences=40.74%`, `anti_stereotypical_pref=37.50%`). (Separating concurrency errors proved clean `W=0` already accounts for most of the gain over the earlier noisy `24.81%` run.)
+  - **1024-char Overlapping Sentence Chunks (`sortResultsByTime=false`)**: `58/129 = 44.96%` (`648` extra chunks, `avgTokens=4,901`), degraded by Max-of-K length bias toward verbose assistant replies (`sortResultsByTime=true` at `top_k=20`: `54/129 = 41.86%`; at `top_k=100`: `59/129 = 45.74%`).
+  - **`W=2000` Geometric Blind-Spot Windows + Pure `MaxP`**: `61/129 = 47.29%` (`133` extra chunks, `avgTokens=4,936`), lifting `anti_stereotypical_pref` (`37.50% -> 41.67%`) and `neutral_preferences` (`40.74% -> 44.44%`), while `ask_to_forget` slipped to `56.00%`.
+  - **`W=2000` Geometric Blind-Spot Windows + `0.8·MaxP + 0.2·AvgP`**: **`64/129 = 49.61%`** (`133` extra chunks, `avgTokens=5,134`), recovering **`ask_to_forget = 72.00% (18/25)`**, lifting `stereotypical_pref` to **`45.45% (5/11)`**, and holding `neutral_preferences` at **`44.44% (12/27)`**.
+- **Zero-LLM Pure Recall@5..100 & 15-Arm ComputeGraph Pareto Sweep (`12.7s`)**:
+  - Offline retrieval tracked live QA directionally (`W=0`: `R@20=48.74%`, `Any@20=61.24%` vs `W=2000 0.8·MaxP+0.2·AvgP`: `R@20=49.25%`, `Any@20=62.02%`), while `R@100` reached **`79.15%`** and `Any@100` reached **`85.27%`** (`110/121 = 90.9%` excluding 8 non-verbatim `sensitive_info` rows).
+  - Sweeping 15 post/pre-graph variants (`p_role_length`, `p_rocchio_prf`, `p_semantic_prior` + `DEFAULT_PIECEWISE_RERANK_GRAPH`) produced Pareto frontier **`['SEM_100', 'SEM_200', 'COMBO_ALL']`**: `SEM_100` strictly dominated `BASE_DEFAULT` (`R@5`: `32.16% -> 32.66%`, `MRR@20`: `0.3544 -> 0.3558`), `Rocchio PRF` was falsified by noisy top-3 anchors, and linear rerankers plateaued around `R@20 = 50.00%–50.25%` — showing the remaining `+30 pp` gap between `R@20` and `R@100` is a `bge-small-en-v1.5` bi-encoder ceiling rather than reranker weights.
+
+## Case 6: Authoritative Relational SQLite Cutover, Scale Benchmarks, and Storage–Compute Decoupling (2026-11-24)
+
+- **Architecture Delta**: Cut over SQLite memory storage completely from `nmg_memory_entities` dual-write to normalized relational v2 tables (`nmg_sources`, `nmg_nodes`, `nmg_memories`, `nmg_memory_evidence`, `nmg_memory_relations`, `nmg_memory_markers`, `nmg_tesserae`, `nmg_receipts`, `nmg_schema_migrations`) with 22 core relational indexes, backup-verified idempotent `nmg_memory_entities` retirement, immediate deletion/forget/quarantine index purging, explicit cross-page `boundaryRelations`, and strict SQLite–`ComputeGraph` layer isolation (wave-parallel async execution, `sideEffect` and unfrozen mutable-memo safety).
+- **Retrieval Parity Across 130 Migrated Stores (`1,867` Queries: `1,532` LoCoMo + `235` BEAM + `100` LongMemEval, `62.13s`)**:
+  - Opening all 130 frozen SQLite stores via `openMemoryBackend` migrated every store transactionally and dropped `nmg_memory_entities` (`hasUnmigratedEntityTable === false` across `130/130` stores), with periodic `rebuildDerivedIndexes()` checks.
+  - **`J1_BM25F_R3_TEMPORAL` macro parity vs pre-migration baseline (`0.0000` delta across all metrics)**: `R@1=29.08%`, `All@1=35.36%`, `R@3=42.57%`, `R@5=50.15%`, `All@20=65.32%`, `R@20=65.68%`, `R@100=84.44%`, `All@100=78.75%`, `MRR@20=0.5980`, `MRR@100=0.6010`.
+- **2,000 / 10,000 / 100,000 Record Scale Comparison (`bench-relational-v2`, Legacy JSON vs Authoritative Relational v2)**:
+  - **2,000 records**: write `11,505` vs `18,935 ops/s`; single read `p95=0.305` vs `0.071 ms`; 50-ID batch `p95=1.183` vs `0.455 ms`; multi-condition filter `p95=2.087` vs `8.121 ms` (**3.9x faster**); `projectGraph` offset 1k `p95=11.567` vs `13.394 ms`; neighborhood queries `p95=1.626` vs `12.876 ms` (**7.9x faster**); FTS5 rebuild `88.51` vs `42.56 ms`; DB size `8.03` vs `5.10 MB`.
+  - **10,000 records**: write `8,312` vs `15,483 ops/s`; single read `p95=0.280` vs `0.093 ms`; 50-ID batch `p95=1.490` vs `0.529 ms`; multi-condition filter `p95=7.283` vs `36.928 ms` (**5.1x faster**); `projectGraph` offset 0 `p95=18.704` vs `40.387 ms`; `projectGraph` offset 1k `p95=20.965` vs `39.949 ms`; neighborhood queries `p95=2.234` vs `62.177 ms` (**27.8x faster**); FTS5 rebuild `312.36` vs `173.98 ms`; DB size `24.85` vs `25.14 MB`.
+  - **100,000 records**: write `4,200` vs `6,258 ops/s` (`engine.rememberMany(100)` sample `p50=57.202 ms`, `p95=61.135 ms`); single read `p95=0.299` vs `0.152 ms`; 50-ID batch `p95=2.226` vs `0.787 ms`; multi-condition filter `p95=121.606` vs `499.521 ms` (**4.1x faster**); `projectGraph` offset 0 `p95=24.633` vs `512.026 ms` (**20.8x faster**); `projectGraph` offset 1k `p95=21.353` vs `780.557 ms` (**36.6x faster**); neighborhood queries `p95=8.344` vs `776.884 ms` (**93.1x faster**); FTS5 rebuild `3,336.98` vs `1,961.58 ms`; DB size **`220.18` vs `288.36 MB` (-23.6%)**; process RSS **`893.21` vs `1,235.36 MB` (-27.7%)**.
+- **100k `EXPLAIN QUERY PLAN` Summary**: Verified B-tree `SEARCH` across `sqlite_autoindex_nmg_memories_1`, `nmg_memories_by_event_time` (streaming `projectGraph` without `TEMP B-TREE FOR ORDER BY`), `nmg_memory_evidence` / `nmg_memory_markers` primary keys, `nmg_memories_by_scope_state`, `nmg_memory_relations_edge_source`, and covering index `nmg_sources_by_session_msg` with zero unintended full-table scans or per-record N+1 loops.
+
 ## Template for Future Cases
 
 When adding a new compute-graph experiment or production operator to this document, append a

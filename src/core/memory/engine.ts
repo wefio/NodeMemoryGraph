@@ -46,12 +46,14 @@ import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import { TESSERA_REF_MARKER } from "../types.ts";
 import { isUserProfileRecord, userProfileMatch, USER_PROFILE_SCOPE } from "../user-profile.ts";
 import type {
+  LinkMemoriesInput,
   MemoryContext,
   EdgePathStep,
   MemoryActor,
   MemoryExportBundle,
   MemoryNode,
   MemoryRecord,
+  MemoryRelationRecord,
   MemoryScope,
   MemoryStorageState,
   MemorySearchResult,
@@ -283,14 +285,26 @@ export class MemoryEngine {
       ...item,
       neighborhood: item.neighborhood ?? "source_group",
     }));
-    if (selected.length < limit) {
-      const excluded = new Set(page.map(({ memory }) => memory.id));
+    const excluded = new Set([id, ...selected.map(({ memory }) => memory.id)]);
+    if (selected.length < limit && anchor.memory.nodeId) {
       const sameNode = await this.backend.scan(view, { ...query, nodeId: anchor.node.id });
       const peers = await this.project(view, sameNode, options, false, (rows) =>
         rows.filter(({ memory }) => !excluded.has(memory.id)).slice(0, limit - selected.length),
       );
+      for (const peer of peers) excluded.add(peer.memory.id);
       selected.push(
         ...peers.map((item): MemorySearchResult => ({ ...item, neighborhood: "same_node" })),
+      );
+    }
+    if (selected.length < limit && this.backend.relationalNeighbors) {
+      await this.appendRelationalNeighbors(
+        view,
+        anchor.memory,
+        selected,
+        excluded,
+        query,
+        options,
+        limit,
       );
     }
     return {
@@ -299,6 +313,35 @@ export class MemoryEngine {
       relations,
       chainEdges: this.projectChains(view, selected, options.sessionId),
     };
+  }
+
+  private async appendRelationalNeighbors(
+    view: MemoryReadView,
+    anchor: MemoryRecord,
+    selected: MemorySearchResult[],
+    excluded: Set<string>,
+    query: MemoryEntityQuery,
+    options: MemoryQueryOptions,
+    limit: number,
+  ): Promise<void> {
+    const rels = this.backend.relationalNeighbors?.(view, anchor, {
+      ...query,
+      limit: limit * 2,
+    });
+    if (!rels?.length) return;
+    const reasonById = new Map(rels.map(({ entity, reason }) => [entity.value.id, reason]));
+    const peers = await this.project(
+      view,
+      rels.map(({ entity }) => entity),
+      options,
+      false,
+      (rows) =>
+        rows.filter(({ memory }) => !excluded.has(memory.id)).slice(0, limit - selected.length),
+    );
+    for (const peer of peers) {
+      excluded.add(peer.memory.id);
+      selected.push({ ...peer, neighborhood: reasonById.get(peer.memory.id) ?? "memory_relation" });
+    }
   }
 
   async backfillTesseraFingerprint(input: {
@@ -389,50 +432,145 @@ export class MemoryEngine {
     const view = await this.backend.openRead();
     try {
       const now = this.now();
-      const limit = options.limit ?? 500;
-      const entities = await this.backend.scan(view, {
-        kind: "memory",
-        scope: options.scope,
-        excludeScope: options.excludeScope,
-        sessionId: options.sessionId,
+      const limit = Math.min(512, Math.max(1, Math.floor(options.limit ?? 500)));
+      const offset = Math.max(0, Math.floor(options.offset ?? 0));
+      const eventTimeFrom = eventWindowStart(options.eventTimeFrom) ?? undefined;
+      const eventTimeTo = eventWindowEnd(options.eventTimeTo) ?? undefined;
+      const nodeIds = options.nodeIds ?? (await this.searchNodeIds(view, options.nodeName));
+      const loaded = await this.loadProjectionMemories(view, {
+        ...options,
+        nodeIds,
+        eventTimeFrom,
+        eventTimeTo,
+        now,
         limit,
+        offset,
       });
-      const memories = entities.flatMap((entity) =>
-        entity.kind === "memory" &&
-        searchableMemory(entity.value, options, now, Boolean(options.includeHistorical)) &&
-        entity.value.tier <= (options.maxTier ?? 3)
-          ? [entity.value]
-          : [],
-      );
-      const nodeEntities = await this.readNodesForMemories(view, memories);
+      const nodeEntities = await this.readNodesForMemories(view, loaded.memories);
       const explicitNodes = new Map(
         nodeEntities.flatMap((row) =>
           row.kind === "node" ? [[row.value.id, row.value] as const] : [],
         ),
       );
-      const explicitRelations: NodeRelation[] = [];
-      if (options.includeExplicitEdges !== false && explicitNodes.size) {
-        for (const nodeId of explicitNodes.keys()) {
-          const edges = await this.backend.scan(view, {
-            kind: "edge",
-            connectedTo: nodeId,
-            limit: 128,
-          });
-          for (const edge of edges) {
-            if (edge.kind === "edge") explicitRelations.push(edge.value);
-          }
-        }
-      }
+      const explicitRelations = await this.loadProjectionNodeEdges(
+        view,
+        explicitNodes,
+        options.includeExplicitEdges !== false,
+      );
       return buildGraphProjection({
-        memories,
+        memories: loaded.memories,
         explicitNodes,
         explicitRelations,
+        explicitMemoryRelations: loaded.relations,
         dimensions: options.dimensions,
+        timeGranularity: options.timeGranularity,
         includeExplicitEdges: options.includeExplicitEdges,
+        includeSemanticEdges: options.includeSemanticEdges,
+        page: {
+          offset,
+          limit,
+          returned: loaded.memories.length,
+          nextOffset: loaded.hasMore ? offset + limit : null,
+          hasMore: loaded.hasMore,
+        },
       });
     } finally {
       await this.backend.closeRead(view);
     }
+  }
+
+  private async loadProjectionMemories(
+    view: MemoryReadView,
+    params: GraphProjectionOptions & { now: string; limit: number; offset: number },
+  ): Promise<{
+    memories: MemoryRecord[];
+    relations: MemoryRelationRecord[];
+    hasMore: boolean;
+  }> {
+    if (this.backend.projectMemories) {
+      return this.backend.projectMemories(view, {
+        scope: params.scope,
+        excludeScope: params.excludeScope,
+        sessionId: params.sessionId,
+        sourceSessionId: params.sourceSessionId,
+        nodeId: params.nodeId,
+        nodeIds: params.nodeIds,
+        stateKey: params.stateKey,
+        memoryType: params.memoryType,
+        statuses: params.statuses,
+        evidenceId: params.evidenceId,
+        relationTypes: params.relationTypes,
+        sourceActor: params.sourceActor,
+        eventTimeFrom: params.eventTimeFrom,
+        eventTimeTo: params.eventTimeTo,
+        includeHistorical: params.includeHistorical,
+        maxTier: params.maxTier,
+        text: params.text,
+        now: params.now,
+        limit: params.limit,
+        offset: params.offset,
+      });
+    }
+    const fetchLimit = Math.min(512, params.limit + 1);
+    const entities = await this.backend.scan(view, {
+      kind: "memory",
+      nodeId: params.nodeId,
+      nodeIds: params.nodeIds,
+      stateKey: params.stateKey,
+      scope: params.scope,
+      excludeScope: params.excludeScope,
+      sessionId: params.sessionId,
+      eventTimeFrom: params.eventTimeFrom,
+      eventTimeTo: params.eventTimeTo,
+      text: params.text,
+      limit: fetchLimit,
+      offset: params.offset,
+    });
+    const hasMore = entities.length > params.limit;
+    const memories = entities
+      .slice(0, params.limit)
+      .flatMap((entity) =>
+        entity.kind === "memory" &&
+        searchableMemory(entity.value, params, params.now, Boolean(params.includeHistorical)) &&
+        entity.value.tier <= (params.maxTier ?? 3) &&
+        (!params.memoryType || entity.value.memoryType === params.memoryType) &&
+        (!params.statuses?.length || params.statuses.includes(entity.value.status)) &&
+        (!params.evidenceId || entity.value.evidenceIds.includes(params.evidenceId)) &&
+        (!params.sourceSessionId ||
+          entity.value.sourceSessionId === params.sourceSessionId ||
+          entity.value.sessionId === params.sourceSessionId)
+          ? [entity.value]
+          : [],
+      );
+    return { memories, relations: [], hasMore };
+  }
+
+  private async loadProjectionNodeEdges(
+    view: MemoryReadView,
+    explicitNodes: ReadonlyMap<string, MemoryNode>,
+    enabled: boolean,
+  ): Promise<NodeRelation[]> {
+    if (!enabled || !explicitNodes.size) return [];
+    const nodeIdList = [...explicitNodes.keys()];
+    if (this.backend.scanBatch) {
+      const pages = await this.backend.scanBatch(
+        view,
+        nodeIdList.map((nodeId) => ({ kind: "edge", connectedTo: nodeId, limit: 128 })),
+      );
+      return pages.flat().flatMap((row) => (row.kind === "edge" ? [row.value] : []));
+    }
+    const explicitRelations: NodeRelation[] = [];
+    for (const nodeId of nodeIdList) {
+      const edges = await this.backend.scan(view, {
+        kind: "edge",
+        connectedTo: nodeId,
+        limit: 128,
+      });
+      for (const edge of edges) {
+        if (edge.kind === "edge") explicitRelations.push(edge.value);
+      }
+    }
+    return explicitRelations;
   }
 
   async userProfile(text: string, options: MemoryQueryOptions = {}): Promise<MemoryContext> {
@@ -1017,6 +1155,53 @@ export class MemoryEngine {
     );
   }
 
+  /** Link two memories directly without requiring any pre-created MemoryNode. */
+  async linkMemories(
+    input: LinkMemoriesInput,
+    operationId: string = randomUUID(),
+  ): Promise<MemoryRelationRecord> {
+    if (input.sourceMemoryId === input.targetMemoryId)
+      throw new Error("Self relations are not supported");
+    const timestamp = this.now();
+    return this.mutate(
+      operationId,
+      { action: "linkMemories", input },
+      async (plan) => {
+        const rows = await plan.find({
+          kind: "memory",
+          ids: [input.sourceMemoryId, input.targetMemoryId],
+          sessionId: input.sessionId,
+        });
+        const memories = rows.flatMap((row) => (row.kind === "memory" ? [row.value] : []));
+        if (memories.length !== 2 || memories.some((m) => m.status === "deleted")) {
+          throw new Error("Memory relations require two accessible memories");
+        }
+        const result: MemoryRelationRecord = {
+          id: memoryIdentity(
+            this.backend.namespace,
+            "memoryRelation",
+            input.sourceMemoryId,
+            input.targetMemoryId,
+            input.type,
+          ),
+          sourceId: input.sourceMemoryId,
+          targetId: input.targetMemoryId,
+          sourceKind: "memory",
+          targetKind: "memory",
+          relationType: input.type,
+          weight: input.weight ?? 1.0,
+          status: "consolidated",
+          direction: input.direction ?? "both",
+          origin: "explicit",
+          createdAt: timestamp,
+        };
+        plan.put({ kind: "memoryRelation", value: result });
+        return { result, ids: [result.id] };
+      },
+      async (_view, receipt) => receipt.result as MemoryRelationRecord,
+    );
+  }
+
   async withdraw(
     memoryId: string,
     operationId: string = randomUUID(),
@@ -1441,21 +1626,34 @@ function selectStandardHybrid(
   text: string,
   limit: number,
   rerankGraph: ComputeGraphSpec | false | undefined,
+  turnMeta?: ReadonlyMap<string, { sourceSessionId?: string | null; turnOrdinal?: number | null }>,
 ): SearchCandidate[] {
   if (rerankGraph === false) return ranked.slice(0, limit);
   const ordered = rerankCandidatesWithGraph(
-    ranked.map((candidate) => ({
-      candidate,
-      id: candidate.memory.id,
-      statement: candidate.memory.statement,
-      combinedScore: candidate.combinedScore,
-      eventTime: candidate.memory.eventTime,
-      createdAt: candidate.memory.createdAt,
-      sessionId: candidate.memory.sourceSessionId ?? candidate.memory.sessionId,
-      nodeId: candidate.memory.nodeId,
-      evidenceId: candidate.memory.evidenceId,
-      markers: candidate.memory.markers,
-    })),
+    ranked.map((candidate) => {
+      const meta = turnMeta?.get(candidate.memory.id);
+      return {
+        candidate,
+        id: candidate.memory.id,
+        statement: candidate.memory.statement,
+        combinedScore: candidate.combinedScore,
+        eventTime: candidate.memory.eventTime,
+        createdAt: candidate.memory.createdAt,
+        sessionId:
+          candidate.memory.sourceSessionId ??
+          candidate.memory.sessionId ??
+          meta?.sourceSessionId ??
+          null,
+        nodeId: candidate.memory.nodeId,
+        evidenceId: candidate.memory.evidenceId,
+        turnOrdinal: meta?.turnOrdinal ?? null,
+        markers: candidate.memory.markers,
+        stateKey: candidate.memory.stateKey,
+        predicateKey: candidate.memory.predicateKey,
+        supersedesId: candidate.memory.supersedesId,
+        relatedMemoryIds: candidate.memory.relatedMemoryIds,
+      };
+    }),
     text,
     rerankGraph,
   );
@@ -1479,7 +1677,7 @@ function selectLocalHybrid(
   }).map(({ candidate, score }) => ({ ...candidate, combinedScore: score }));
   const selected = shortlist
     ? evidenceShortlist(ranked, page.vectorIds, page.lexicalIds, limit)
-    : selectStandardHybrid(ranked, text, limit, rerankGraph);
+    : selectStandardHybrid(ranked, text, limit, rerankGraph, byId);
   const query = normalize(text);
   const terms = searchTerms(query);
   return selected.map((candidate) => {

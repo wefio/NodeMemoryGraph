@@ -228,3 +228,116 @@ test("runGraphExperiments shares upstream prefix cache, diffs graphs, and comput
   assert.deepEqual(calls, { recall: 1, fusion: 1, head: 2 });
   assert.equal(syncOutcome.cacheHits, 2);
 });
+
+test("ComputeMemoCache includes execution context, function props, and operator re-registration fingerprints", async () => {
+  interface Ctx {
+    queryText: string;
+    keyFn: (x: string) => string;
+  }
+  const childSpec: ComputeGraphSpec = {
+    id: "child-op-graph",
+    nodes: [{ id: "step", op: "ctx_op" }],
+    edges: [{ from: INPUT_NODE_ID, to: "step" }],
+    output: "step",
+  };
+  const rootSpec: ComputeGraphSpec = {
+    id: "root-op-graph",
+    nodes: [{ id: "wrapped", op: "subgraph", subgraph: childSpec }],
+    edges: [{ from: INPUT_NODE_ID, to: "wrapped" }],
+    output: "wrapped",
+  };
+
+  let runs = 0;
+  const registry = new ComputeRegistry<Ctx>().register("ctx_op", (inputs, ctx) => {
+    runs += 1;
+    return `${String(inputs.default)}|${ctx.queryText}|${ctx.keyFn("k")}|v1`;
+  });
+
+  const memo = new ComputeMemoCache();
+  const sharedInput = ["item-a", "item-b"];
+  const keyA = (x: string) => `${x}:A`;
+  const keyB = (x: string) => `${x}:B`;
+
+  // 1) Initial execution misses and caches both root subgraph and inner child.
+  assert.equal(
+    evaluateSyncComputeGraph(
+      rootSpec,
+      registry,
+      sharedInput,
+      { queryText: "q1", keyFn: keyA },
+      memo,
+    ),
+    "item-a,item-b|q1|k:A|v1",
+  );
+  assert.equal(runs, 1);
+
+  // 2) Same input, context, and operator implementation -> full cache hit on outer subgraph node.
+  assert.equal(
+    evaluateSyncComputeGraph(
+      rootSpec,
+      registry,
+      sharedInput,
+      { queryText: "q1", keyFn: keyA },
+      memo,
+    ),
+    "item-a,item-b|q1|k:A|v1",
+  );
+  assert.equal(runs, 1);
+  assert.equal(memo.hits, 1);
+
+  // 3) Changing scalar context.queryText misses cache despite identical input.
+  assert.equal(
+    evaluateSyncComputeGraph(
+      rootSpec,
+      registry,
+      sharedInput,
+      { queryText: "q2", keyFn: keyA },
+      memo,
+    ),
+    "item-a,item-b|q2|k:A|v1",
+  );
+  assert.equal(runs, 2);
+
+  // 4) Changing functional context property misses cache too.
+  assert.equal(
+    evaluateSyncComputeGraph(
+      rootSpec,
+      registry,
+      sharedInput,
+      { queryText: "q2", keyFn: keyB },
+      memo,
+    ),
+    "item-a,item-b|q2|k:B|v1",
+  );
+  assert.equal(runs, 3);
+
+  // 5) Re-registering the inner operator under the same name invalidates outer + inner cache entries.
+  registry.register("ctx_op", (inputs, ctx) => {
+    runs += 1;
+    return `${String(inputs.default)}|${ctx.queryText}|${ctx.keyFn("k")}|v2`;
+  });
+  assert.equal(
+    evaluateSyncComputeGraph(
+      rootSpec,
+      registry,
+      sharedInput,
+      { queryText: "q2", keyFn: keyB },
+      memo,
+    ),
+    "item-a,item-b|q2|k:B|v2",
+  );
+  assert.equal(runs, 4);
+
+  // Async execution also respects re-registration and context fingerprints.
+  assert.equal(
+    await executeComputeGraph(
+      rootSpec,
+      registry,
+      sharedInput,
+      { queryText: "q3", keyFn: keyB },
+      memo,
+    ),
+    "item-a,item-b|q3|k:B|v2",
+  );
+  assert.equal(runs, 5);
+});

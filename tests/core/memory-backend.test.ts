@@ -8,7 +8,7 @@ import type { FunctionOptions, SQLInputValue, SQLOutputValue } from "node:sqlite
 import { openMemoryBackend } from "../../src/core/memory/open.ts";
 import type { MemoryCommitRequest, MemoryEntity } from "../../src/core/memory/backend.ts";
 import { MemoryEngine } from "../../src/core/memory/engine.ts";
-import { sqliteQueryWhere } from "../../src/core/memory/entity-rows.ts";
+import { buildMemoryQueryFilter } from "../../src/core/memory/sqlite-relational.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
 const node = (id: string, name: string): MemoryEntity => ({
@@ -114,22 +114,22 @@ test("SQLite write lookups constrain the indexed name or node and exact scope be
   const db = new DatabaseSync(path, { readOnly: true });
   try {
     const scope = { project: "atlas" };
-    for (const [filter, constrained] of [
-      [{ exactText: "a new statement" }, "name"],
-      [{ nodeId: "node-1" }, "node"],
+    for (const [filter, constrained, indexName] of [
+      [{ exactText: "a new statement" }, "normalized_name", "nmg_memories_by_scope_name"],
+      [{ nodeId: "node-1" }, "node_id", "nmg_memories_by_scope_node"],
     ] as const) {
-      const where = sqliteQueryWhere({ kind: "memory", scope, ...filter });
+      const where = buildMemoryQueryFilter("tenant", { scope, ...filter }, "m");
       const details = db
         .prepare(
-          `EXPLAIN QUERY PLAN SELECT kind, payload FROM nmg_memory_entities
-          WHERE namespace='tenant' AND ${where} ORDER BY id LIMIT ? OFFSET ?`,
+          `EXPLAIN QUERY PLAN SELECT m.id FROM nmg_memories m
+          WHERE ${where.sql} ORDER BY m.id LIMIT ? OFFSET ?`,
         )
-        .all(80, 0)
+        .all(...where.bind, 80, 0)
         .map(({ detail }) => detail)
         .join("\n");
       assert.match(
         details,
-        new RegExp(`namespace=\\? AND kind=\\? AND ${constrained}=\\? AND scope=\\?`),
+        new RegExp(`${indexName} \\(namespace=\\? AND scope=\\? AND ${constrained}=\\?\\)`),
       );
     }
   } finally {
@@ -184,7 +184,7 @@ test("SQLite reads existing graph edges from both indexed endpoints in ID order"
   const raw = new DatabaseSync(path);
   try {
     raw.exec(
-      "DROP INDEX IF EXISTS nmg_memory_edge_source; DROP INDEX IF EXISTS nmg_memory_edge_target",
+      "DROP INDEX IF EXISTS nmg_memory_relations_edge_source; DROP INDEX IF EXISTS nmg_memory_relations_edge_target",
     );
   } finally {
     raw.close();
@@ -197,7 +197,7 @@ test("SQLite reads existing graph edges from both indexed endpoints in ID order"
   const prepare = DatabaseSync.prototype.prepare;
   let neighborSql = "";
   t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
-    if (sql.startsWith("SELECT") && sql.includes("kind = 'edge'")) neighborSql = sql;
+    if (sql.includes("origin = 'node_edge'") && sql.includes("UNION ALL")) neighborSql = sql;
     return prepare.call(this, sql);
   });
   const query = { kind: "edge", connectedTo: hub!.node.id } as const;
@@ -212,11 +212,11 @@ test("SQLite reads existing graph edges from both indexed endpoints in ID order"
     try {
       const plan = db
         .prepare(`EXPLAIN QUERY PLAN ${neighborSql}`)
-        .all(128, 0)
+        .all("tenant", hub!.node.id, "tenant", hub!.node.id, hub!.node.id, 128, 0)
         .map(({ detail }) => detail)
         .join("\n");
-      assert.match(plan, /nmg_memory_edge_source \(namespace=\? AND source=\?\)/);
-      assert.match(plan, /nmg_memory_edge_target \(namespace=\? AND target=\?\)/);
+      assert.match(plan, /nmg_memory_relations_edge_source \(namespace=\? AND source_id=\?\)/);
+      assert.match(plan, /nmg_memory_relations_edge_target \(namespace=\? AND target_id=\?\)/);
     } finally {
       db.close();
     }
@@ -259,11 +259,12 @@ test("SQLite makes both text indexes contentless and updates them at their origi
   const projections = ["nmg_memory_fts", "nmg_memory_tessera_fts"];
   for (const [index, table] of projections.entries()) {
     const kind = index === 0 ? "memory" : "tessera";
+    const sourceTable = kind === "memory" ? "nmg_memories" : "nmg_tesserae";
     raw.exec(`DROP TABLE ${table};
       CREATE VIRTUAL TABLE ${table} USING fts5(namespace UNINDEXED, key UNINDEXED, text);
       INSERT INTO ${table}(rowid, namespace, key, text)
-        SELECT 91, namespace, key, 'obsolete test projection'
-        FROM nmg_memory_entities WHERE kind='${kind}';`);
+        SELECT 91, namespace, '${kind}:' || id, 'obsolete test projection'
+        FROM ${sourceTable};`);
   }
   const before = raw
     .prepare("SELECT namespace, key, fts_rowid FROM nmg_memory_fts_rows ORDER BY key")
@@ -314,10 +315,12 @@ test("SQLite makes both text indexes contentless and updates them at their origi
     t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
       if (
         searchPlan === undefined &&
-        sql.startsWith("SELECT kind, payload") &&
-        sql.includes("MATCH")
+        sql.includes("nmg_memory_fts MATCH") &&
+        sql.includes("CROSS JOIN nmg_memories")
       )
-        searchPlan = prepare.call(this, `EXPLAIN QUERY PLAN ${sql}`).get(128, 0)?.detail;
+        searchPlan = prepare
+          .call(this, `EXPLAIN QUERY PLAN ${sql}`)
+          .get("tenant", '"obsolete"*', "tenant", "tenant", "", 100, 0)?.detail;
       return prepare.call(this, sql);
     });
     const view = await reopened.openRead();
@@ -390,7 +393,12 @@ test("SQLite batches write lookups and keeps earlier items visible inside the ba
   const prepare = DatabaseSync.prototype.prepare;
   let selects = 0;
   t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
-    if (sql.includes("SELECT kind, payload FROM nmg_memory_entities")) selects++;
+    if (
+      sql.includes("FROM nmg_memories") ||
+      sql.includes("FROM nmg_nodes") ||
+      sql.includes("FROM nmg_sources")
+    )
+      selects++;
     return prepare.call(this, sql);
   });
   const inputs = Array.from({ length: 32 }, (_, i) => ({
@@ -416,9 +424,7 @@ test("SQLite batches write lookups and keeps earlier items visible inside the ba
   });
   const raw = new DatabaseSync(path);
   try {
-    raw
-      .prepare("UPDATE nmg_memory_entities SET name='' WHERE key=?")
-      .run(`history:${original.history.id}`);
+    raw.prepare("UPDATE nmg_sources SET ordinal=NULL WHERE id=?").run(original.history.id);
   } finally {
     raw.close();
   }
@@ -571,11 +577,17 @@ test("SQLite neighborhood uses adjacent source ordinals and indexed graph edges"
   try {
     const plan = inspector
       .prepare(`EXPLAIN QUERY PLAN ${sourceSql}`)
-      .all("1", "3", "tenant", "owner", 6)
+      .all("1", "3", "tenant", "owner", "tenant", "{}", "owner", 6)
       .map(({ detail }) => detail)
       .join("\n");
-    assert.match(plan, /nmg_memory_history_source \(namespace=\? AND <expr>=\?\)/u);
-    assert.match(plan, /nmg_memory_leaf_evidence \(namespace=\? AND <expr>=\?\)/u);
+    assert.match(
+      plan,
+      /nmg_sources_by_session_msg \(namespace=\? AND session_id=\? AND source_message_id=\?\)/u,
+    );
+    assert.match(
+      plan,
+      /nmg_memories_by_primary_evidence \(namespace=\? AND primary_evidence_id=\?\)/u,
+    );
   } finally {
     inspector.close();
   }
@@ -706,11 +718,23 @@ test("SQLite adjacent source neighbors fall back to session insertion order for 
   try {
     const plan = inspector
       .prepare(`EXPLAIN QUERY PLAN ${sessionSql}`)
-      .all("tenant", chunk1.history.id, "tenant", "sample:0", "tenant", "sample:0", "tenant", 8)
+      .all(
+        "tenant",
+        chunk1.history.id,
+        "tenant",
+        "sample:0",
+        "tenant",
+        "sample:0",
+        "tenant",
+        "tenant",
+        '{"aml_user":"u1"}',
+        "",
+        8,
+      )
       .map(({ detail }) => detail)
       .join("\n");
-    assert.match(plan, /nmg_memory_history_session/u);
-    assert.match(plan, /nmg_memory_leaf_evidence/u);
+    assert.match(plan, /nmg_sources_by_session/u);
+    assert.match(plan, /nmg_memories_by_primary_evidence/u);
   } finally {
     inspector.close();
   }
@@ -835,9 +859,12 @@ test("SQLite pages missing vectors in order, scopes previous turns, and saves on
       .all("tenant", "test", cursor.createdAt, cursor.id, 2, "tenant", "test", cursor.createdAt, 2)
       .map(({ detail }) => detail)
       .join("\n");
-    assert.match(details, /nmg_memory_embedding_order \(namespace=\? AND <expr>=\? AND id>\?\)/);
-    assert.match(details, /SEARCH h .* \(namespace=\? AND key=\?\)/);
-    assert.match(details, /nmg_memory_history_sequence/);
+    assert.match(
+      details,
+      /nmg_memories_by_embedding_order \(namespace=\? AND created_at=\? AND id>\?\)/,
+    );
+    assert.match(details, /SEARCH h USING INDEX/);
+    assert.match(details, /nmg_sources_by_session_ord/);
   } finally {
     db.close();
   }

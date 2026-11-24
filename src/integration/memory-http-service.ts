@@ -5,7 +5,9 @@ import type { MemoryInput } from "../core/memory/model.ts";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
 import type { MemorySearchResult } from "../core/types.ts";
 import { projectAmlMemory, projectAmlMultimodalMemory } from "./aml-projection.ts";
+import { renderHttpProfileSupplement } from "./http-profile-view.ts";
 import { executeHttpSearchGraph, type HttpClauseHitBatch } from "./http-search-graph.ts";
+import { preprocessHttpMessage } from "./http-write-preprocess.ts";
 import { normalizeContent } from "./multimodal-content.ts";
 import type { HttpMemoryMessage } from "./memory-http-protocol.ts";
 
@@ -54,6 +56,7 @@ export class HttpMemoryService {
     backfillLimit?: number;
     isDeferredEmbedding?: (error: unknown) => boolean;
     searchGraph?: ComputeGraphSpec;
+    preprocessMessages?: boolean;
   };
 
   constructor(
@@ -118,9 +121,12 @@ export class HttpMemoryService {
       // collapsing into one plain-text memory; the content hash below stays in
       // marker attributes instead of polluting the retrieval statement.
       const statement = view;
+      const preprocessed = this.options.preprocessMessages
+        ? preprocessHttpMessage(message.role, statement)
+        : undefined;
       return {
         statement,
-        memoryType: "event",
+        memoryType: preprocessed?.memoryType ?? "event",
         // Attribution follows the supplied message role. A derived retrieval
         // view changes indexing text, never who asserted the evidence.
         sourceActor: message.role,
@@ -141,9 +147,13 @@ export class HttpMemoryService {
         writeSource: "import",
         writeReason: "aml_history_import",
         sourceRef,
+        ...(preprocessed?.recallTriggers.length
+          ? { recallTriggers: [...preprocessed.recallTriggers] }
+          : {}),
         markers: [
           { kind: "aml_session", attributes: { session_id: sessionId } },
           { kind: "aml_request_id", attributes: { value: requestId } },
+          ...(preprocessed?.markers ?? []),
           ...(structured
             ? [
                 {
@@ -190,6 +200,31 @@ export class HttpMemoryService {
 
   async close() {
     await this.engine.backend.close();
+  }
+
+  async profileSummary(query: string, now?: string): Promise<string> {
+    if (!this.options.preprocessMessages) return "";
+    const backend = this.engine.backend;
+    const view = await backend.openRead();
+    try {
+      const effectiveNow = now ?? new Date().toISOString();
+      if (backend.projectMemories) {
+        const base = { sourceActor: "user" as const, now: effectiveNow, limit: 200, offset: 0 };
+        const constraints = backend.projectMemories(view, { ...base, memoryType: "constraint" });
+        const preferences = backend.projectMemories(view, { ...base, memoryType: "preference" });
+        return renderHttpProfileSupplement(
+          [...constraints.memories, ...preferences.memories],
+          query,
+        );
+      }
+      const entities = await backend.scan(view, { kind: "memory", limit: 1000 });
+      const records = entities
+        .filter((entity) => entity.kind === "memory")
+        .map((entity) => entity.value);
+      return renderHttpProfileSupplement(records, query);
+    } finally {
+      await backend.closeRead(view);
+    }
   }
 
   async record(id: string) {

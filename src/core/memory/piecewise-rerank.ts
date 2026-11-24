@@ -6,6 +6,13 @@ import {
 } from "../compute-graph.ts";
 import { normalize } from "../memory-normalization.ts";
 import type { MemoryMarker } from "../types.ts";
+import {
+  bm25fFieldScoreOperator,
+  conceptPivotOperator,
+  lineagePivotOperator,
+  temporalPivotOperator,
+  turnPivotOperator,
+} from "./bm25f-neighborhoods.ts";
 
 export interface RerankCandidate {
   readonly id: string;
@@ -16,7 +23,12 @@ export interface RerankCandidate {
   readonly sessionId: string | null;
   readonly nodeId: string;
   readonly evidenceId?: string;
+  readonly turnOrdinal?: number | null;
   readonly markers?: readonly MemoryMarker[];
+  readonly stateKey?: string | null;
+  readonly predicateKey?: string | null;
+  readonly supersedesId?: string | null;
+  readonly relatedMemoryIds?: readonly string[];
 }
 
 export interface ScoredCandidateId {
@@ -159,6 +171,39 @@ function maxTimestampMs(candidates: readonly RerankCandidate[]): number {
   return maxMs;
 }
 
+function maxTurnOrdinal(candidates: readonly RerankCandidate[]): number {
+  let maxOrd = 0;
+  for (const candidate of candidates) {
+    if (
+      typeof candidate.turnOrdinal === "number" &&
+      Number.isFinite(candidate.turnOrdinal) &&
+      candidate.turnOrdinal > maxOrd
+    ) {
+      maxOrd = candidate.turnOrdinal;
+    }
+  }
+  return maxOrd;
+}
+
+function recencyBoostDelta(
+  candidate: RerankCandidate | undefined,
+  maxMs: number,
+  maxOrd: number,
+  weight: number,
+): number {
+  if (!candidate) return 0;
+  const ms = maxMs > 0 ? timestampMs(candidate) : null;
+  const timeBoost = ms === null ? 0 : weight / (1 + Math.max(0, (maxMs - ms) / 86_400_000) / 90);
+  const ordTieBreak =
+    maxOrd > 0 &&
+    typeof candidate.turnOrdinal === "number" &&
+    Number.isFinite(candidate.turnOrdinal) &&
+    candidate.turnOrdinal >= 0
+      ? 1e-4 * (candidate.turnOrdinal / (maxOrd + 1))
+      : 0;
+  return timeBoost + ordTieBreak;
+}
+
 function pickNextUnselectedIndex(
   pool: readonly ScoredCandidateId[],
   used: Uint8Array,
@@ -266,16 +311,14 @@ function buildRerankRegistry(): ComputeRegistry<RerankContext> {
     const base = inputScored(inputs, context.candidates);
     if (PAST_CONSTRAINT_RE.test(context.queryText)) return base;
     const maxMs = maxTimestampMs(context.candidates);
-    if (maxMs <= 0) return base;
+    const maxOrd = maxTurnOrdinal(context.candidates);
+    if (maxMs <= 0 && maxOrd <= 0) return base;
     const weight = numParam(params, "weight", 0.12);
     const byId = new Map(context.candidates.map((candidate) => [candidate.id, candidate]));
     return base
       .map((entry) => {
-        const candidate = byId.get(entry.id);
-        const ms = candidate ? timestampMs(candidate) : null;
-        if (ms === null) return entry;
-        const ageDays = Math.max(0, (maxMs - ms) / 86_400_000);
-        return { id: entry.id, score: entry.score + weight / (1 + ageDays / 90) };
+        const delta = recencyBoostDelta(byId.get(entry.id), maxMs, maxOrd, weight);
+        return delta > 0 ? { id: entry.id, score: entry.score + delta } : entry;
       })
       .sort(compareScored);
   });
@@ -337,6 +380,12 @@ function buildRerankRegistry(): ComputeRegistry<RerankContext> {
     return out;
   });
 
+  registry.register("bm25f_field_score", bm25fFieldScoreOperator);
+  registry.register("w_temporal_pivot", temporalPivotOperator);
+  registry.register("w_concept_pivot", conceptPivotOperator);
+  registry.register("w_lineage_pivot", lineagePivotOperator);
+  registry.register("w_turn_pivot", turnPivotOperator);
+
   return registry;
 }
 
@@ -344,20 +393,40 @@ export const RERANK_COMPUTE_REGISTRY = buildRerankRegistry();
 
 export interface PiecewiseRerankGraphOptions {
   readonly id?: string;
+  readonly bm25fWeight?: number;
   readonly headWeight?: number;
   readonly recencyWeight?: number;
+  readonly midTurnWeight?: number;
   readonly dedupPoolSize?: number;
   readonly dedupLimit?: number;
   readonly jaccardThresh?: number;
   readonly dupPenalty?: number;
   readonly sessionWeight?: number;
+  readonly temporalWeight?: number;
+  readonly tailTurnWeight?: number;
   readonly bands?: readonly BandSpec[];
 }
 
+export const HEAD_BM25F_R3_SUBGRAPH: ComputeGraphSpec = {
+  id: "head-bm25f-010-r3-r5",
+  nodes: [
+    { id: "bm25f", op: "bm25f_field_score", params: { weight: 0.1 } },
+    { id: "r3", op: "r3_intent_boost", params: { weight: 0.12 } },
+    { id: "r5", op: "r5_recency_boost", params: { weight: 0.02 } },
+  ],
+  edges: [
+    { from: INPUT_NODE_ID, to: "bm25f" },
+    { from: "bm25f", to: "r3" },
+    { from: "r3", to: "r5" },
+  ],
+  output: "r5",
+};
+
 export const MID_DEDUP_RECENCY_SUBGRAPH: ComputeGraphSpec = {
-  id: "mid-r5-r1-40",
+  id: "mid-r5-wturn-r1-40",
   nodes: [
     { id: "r5", op: "r5_recency_boost", params: { weight: 0.12 } },
+    { id: "wturn", op: "w_turn_pivot", params: { weight: 0.55, anchorTopK: 5, maxRadius: 1 } },
     {
       id: "r1",
       op: "r1_incremental_dedup",
@@ -366,14 +435,51 @@ export const MID_DEDUP_RECENCY_SUBGRAPH: ComputeGraphSpec = {
   ],
   edges: [
     { from: INPUT_NODE_ID, to: "r5" },
-    { from: "r5", to: "r1" },
+    { from: "r5", to: "wturn" },
+    { from: "wturn", to: "r1" },
   ],
   output: "r1",
 };
 
+export const TAIL_SESSION_TEMPORAL_SUBGRAPH: ComputeGraphSpec = {
+  id: "tail-wsess-temp-turn",
+  nodes: [
+    { id: "ws", op: "w_session_pivot", params: { weight: 0.2 } },
+    { id: "wt", op: "w_temporal_pivot", params: { weight: 0.1, anchorTopK: 5 } },
+    { id: "wturn", op: "w_turn_pivot", params: { weight: 0.35, anchorTopK: 6, maxRadius: 1 } },
+  ],
+  edges: [
+    { from: INPUT_NODE_ID, to: "ws" },
+    { from: "ws", to: "wt" },
+    { from: "wt", to: "wturn" },
+  ],
+  output: "wturn",
+};
+
+function resolveHeadSubgraph(options: PiecewiseRerankGraphOptions): ComputeGraphSpec {
+  if (options.bm25fWeight === undefined && options.headWeight === undefined) {
+    return HEAD_BM25F_R3_SUBGRAPH;
+  }
+  return {
+    id: `${options.id ?? "piecewise"}-head`,
+    nodes: [
+      { id: "bm25f", op: "bm25f_field_score", params: { weight: options.bm25fWeight ?? 0.1 } },
+      { id: "r3", op: "r3_intent_boost", params: { weight: options.headWeight ?? 0.12 } },
+      { id: "r5", op: "r5_recency_boost", params: { weight: 0.02 } },
+    ],
+    edges: [
+      { from: INPUT_NODE_ID, to: "bm25f" },
+      { from: "bm25f", to: "r3" },
+      { from: "r3", to: "r5" },
+    ],
+    output: "r5",
+  };
+}
+
 function resolveMidSubgraph(options: PiecewiseRerankGraphOptions): ComputeGraphSpec {
   if (
     options.recencyWeight === undefined &&
+    options.midTurnWeight === undefined &&
     options.dedupPoolSize === undefined &&
     options.jaccardThresh === undefined &&
     options.dupPenalty === undefined &&
@@ -385,6 +491,11 @@ function resolveMidSubgraph(options: PiecewiseRerankGraphOptions): ComputeGraphS
     id: `${options.id ?? "piecewise"}-mid`,
     nodes: [
       { id: "r5", op: "r5_recency_boost", params: { weight: options.recencyWeight ?? 0.12 } },
+      {
+        id: "wturn",
+        op: "w_turn_pivot",
+        params: { weight: options.midTurnWeight ?? 0.55, anchorTopK: 5, maxRadius: 1 },
+      },
       {
         id: "r1",
         op: "r1_incremental_dedup",
@@ -398,9 +509,42 @@ function resolveMidSubgraph(options: PiecewiseRerankGraphOptions): ComputeGraphS
     ],
     edges: [
       { from: INPUT_NODE_ID, to: "r5" },
-      { from: "r5", to: "r1" },
+      { from: "r5", to: "wturn" },
+      { from: "wturn", to: "r1" },
     ],
     output: "r1",
+  };
+}
+
+function resolveTailSubgraph(options: PiecewiseRerankGraphOptions): ComputeGraphSpec {
+  if (
+    options.sessionWeight === undefined &&
+    options.temporalWeight === undefined &&
+    options.tailTurnWeight === undefined
+  ) {
+    return TAIL_SESSION_TEMPORAL_SUBGRAPH;
+  }
+  return {
+    id: `${options.id ?? "piecewise"}-tail`,
+    nodes: [
+      { id: "ws", op: "w_session_pivot", params: { weight: options.sessionWeight ?? 0.2 } },
+      {
+        id: "wt",
+        op: "w_temporal_pivot",
+        params: { weight: options.temporalWeight ?? 0.1, anchorTopK: 5 },
+      },
+      {
+        id: "wturn",
+        op: "w_turn_pivot",
+        params: { weight: options.tailTurnWeight ?? 0.35, anchorTopK: 6, maxRadius: 1 },
+      },
+    ],
+    edges: [
+      { from: INPUT_NODE_ID, to: "ws" },
+      { from: "ws", to: "wt" },
+      { from: "wt", to: "wturn" },
+    ],
+    output: "wturn",
   };
 }
 
@@ -409,15 +553,11 @@ export function createPiecewiseRerankGraph(
   options: PiecewiseRerankGraphOptions = {},
 ): ComputeGraphSpec {
   return {
-    id: options.id ?? "piecewise-r3-r1r5-wsess020",
+    id: options.id ?? "piecewise-bm25f-r3-r1r5-wsess-temporal",
     nodes: [
-      { id: "head_r3", op: "r3_intent_boost", params: { weight: options.headWeight ?? 0.12 } },
+      { id: "head_r3", op: "subgraph", subgraph: resolveHeadSubgraph(options) },
       { id: "mid_r1_r5", op: "subgraph", subgraph: resolveMidSubgraph(options) },
-      {
-        id: "tail_wsess",
-        op: "w_session_pivot",
-        params: { weight: options.sessionWeight ?? 0.2 },
-      },
+      { id: "tail_wsess", op: "subgraph", subgraph: resolveTailSubgraph(options) },
       {
         id: "stitch",
         op: "causal_band_stitch",

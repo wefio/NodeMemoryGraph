@@ -6,6 +6,11 @@ import { renderSearchHeaders } from "./search-tool.ts";
 export const DEFAULT_EXPLICIT_SEARCH_LIMIT = 20;
 const DEFAULT_EXPLICIT_SEARCH_CHARACTERS = 5_500;
 const EXPLICIT_SEARCH_PREVIEW_CODE_POINTS = 240;
+
+export interface ExplicitSearchPageBudget {
+  readonly maxCharacters?: number;
+  readonly previewCodePoints?: number;
+}
 // The graph does not exist until after selection. This ID has the rendered ID's width.
 const PREVIEW_GRAPH = { id: "00000000-0000-4000-8000-000000000000" } as ActiveGraph;
 
@@ -21,15 +26,16 @@ export function usesExplicitSearchPage(input: NmgSearchParams): boolean {
 export function fitExplicitSearchPage(
   context: MemoryContext,
   input: NmgSearchParams,
+  budget?: ExplicitSearchPageBudget,
 ): MemoryContext {
   if (!usesExplicitSearchPage(input)) return context;
   const limit = input.limit ?? DEFAULT_EXPLICIT_SEARCH_LIMIT;
-  const characters =
-    DEFAULT_EXPLICIT_SEARCH_CHARACTERS * Math.max(1, limit / DEFAULT_EXPLICIT_SEARCH_LIMIT);
+  const maxChars = budget?.maxCharacters ?? DEFAULT_EXPLICIT_SEARCH_CHARACTERS;
+  const characters = maxChars * Math.max(1, limit / DEFAULT_EXPLICIT_SEARCH_LIMIT);
   const page = {
     ...context,
     results: context.results.slice(0, limit),
-    searchPreviewCodePoints: EXPLICIT_SEARCH_PREVIEW_CODE_POINTS,
+    searchPreviewCodePoints: budget?.previewCodePoints ?? EXPLICIT_SEARCH_PREVIEW_CODE_POINTS,
   };
   const sizing = { ...page, activeGraph: PREVIEW_GRAPH };
   const references = input.persistTrace === false ? undefined : createMemoryReferences(sizing);

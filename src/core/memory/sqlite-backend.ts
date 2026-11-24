@@ -11,28 +11,26 @@ import type {
   MemoryEntityQuery,
   MemoryHybridPage,
   MemoryReadView,
+  MemoryRelationalProjectionPage,
+  MemoryRelationalProjectionQuery,
+  MemoryVectorCandidate,
   MemoryVectorQuery,
+  RelationalMemoryNeighbor,
   SourceNeighbor,
 } from "./backend.ts";
-import type { HistoryRecord } from "../types.ts";
-import {
-  ENTITY_COLUMNS,
-  SQLITE_HISTORY_SOURCE,
-  commitRows,
-  queryBounds,
-  sqliteQueryWhere,
-  sqlLiteral,
-  validateCommit,
-} from "./entity-rows.ts";
-import type { EntityRow } from "./entity-rows.ts";
+import type { HistoryRecord, MemoryRecord } from "../types.ts";
+import { validateCommit } from "./entity-rows.ts";
 import { graphImportRequest } from "./graph-import.ts";
 import { readLegacyClaimRows, readLegacyMemoryRows } from "../store/legacy-memory-snapshot.ts";
 import { requestHash } from "./model.ts";
 import { ensureLocalDaemonSchema, migrate } from "../store/schema.ts";
 import { ftsExpression, surfaceTrigramExpression } from "../store/search-ranking.ts";
-import { serializeScope } from "../scope.ts";
-import { USER_PROFILE_SCOPE } from "../user-profile.ts";
-import { ensureSqliteTextIndexes, textIndex, writeSqliteTextIndex } from "./sqlite-text-index.ts";
+import {
+  ensureSqliteTextIndexes,
+  rebuildSqliteTextIndexes,
+  writeMemoryTextIndex,
+  writeTesseraTextIndex,
+} from "./sqlite-text-index.ts";
 import {
   ensureSqliteLeafGroups,
   importLegacySqliteLeaves,
@@ -51,12 +49,24 @@ import {
   importLegacySqliteAssociations,
   retireLegacyMemoryTables,
 } from "./sqlite-legacy-retirement.ts";
+import { ensureAuthoritativeRelationalSchema } from "./sqlite-entity-migration.ts";
+import { writeRelationalCommit } from "./sqlite-relational-writes.ts";
+import {
+  projectRelationalMemories,
+  readRelationalCounts,
+  readRelationalLexicalMemoryPage,
+  readRelationalMemoryNeighbors,
+  readRelationalReceipt,
+  readSourceTurnMetadata,
+  scanRelational,
+  scanRelationalBatch,
+} from "./sqlite-relational.ts";
 
 const LOCAL_MEMORY_TABLE = "nmg_local_memory";
-const SQL_BATCH_SIZE = 64;
 const MAX_IDLE_READERS = 4;
 const SURFACE_TRIGRAM_WEIGHT = 0.35;
 export const LOCAL_MEMORY_NAMESPACE = "local-memory-v1";
+
 function localNamespace(db: DatabaseSync): string | undefined {
   const exists = db
     .prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?")
@@ -77,7 +87,7 @@ export function activatedLocalMemory(path: string): string | undefined {
   }
 }
 
-/** Portable memory format. The legacy Store is imported explicitly, never opened as this schema. */
+/** Authoritative relational SQLite memory backend. Legacy schemas are imported once and retired. */
 export class SqliteMemoryBackend implements MemoryBackend {
   readonly kind = "sqlite" as const;
   private readonly writer: DatabaseSync;
@@ -111,33 +121,8 @@ export class SqliteMemoryBackend implements MemoryBackend {
 
   private initializeSchema(): void {
     this.writer.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;
-      PRAGMA wal_autocheckpoint=4000; PRAGMA cache_size=-16000; PRAGMA temp_store=MEMORY;
-      CREATE TABLE IF NOT EXISTS nmg_memory_head (namespace TEXT PRIMARY KEY, revision INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS nmg_memory_entities (namespace TEXT NOT NULL,
-        ${ENTITY_COLUMNS.map((column) => `${column} TEXT NOT NULL`).join(",")},
-        PRIMARY KEY(namespace, key));
-      CREATE INDEX IF NOT EXISTS nmg_memory_kind ON nmg_memory_entities(namespace, kind, id);
-      CREATE INDEX IF NOT EXISTS nmg_memory_node ON nmg_memory_entities(namespace, kind, node);
-      CREATE INDEX IF NOT EXISTS nmg_memory_node_name
-        ON nmg_memory_entities(namespace, name, id) WHERE kind='node';
-      CREATE INDEX IF NOT EXISTS nmg_memory_history_source
-        ON nmg_memory_entities(namespace, ${SQLITE_HISTORY_SOURCE}, id) WHERE kind='history';
-      DROP INDEX IF EXISTS nmg_memory_name;
-      CREATE INDEX IF NOT EXISTS nmg_memory_scope_node
-        ON nmg_memory_entities(namespace, kind, node, scope, id);
-      CREATE INDEX IF NOT EXISTS nmg_memory_scope_name
-        ON nmg_memory_entities(namespace, kind, name, scope, id);
-      CREATE INDEX IF NOT EXISTS nmg_memory_user_profile
-        ON nmg_memory_entities(namespace, kind, scope, id)
-        WHERE kind='memory' AND scope=${sqlLiteral(serializeScope(USER_PROFILE_SCOPE))};
-      CREATE INDEX IF NOT EXISTS nmg_memory_state
-        ON nmg_memory_entities(namespace, statekey, scope, id) WHERE kind='memory';
-      CREATE INDEX IF NOT EXISTS nmg_memory_event_time
-        ON nmg_memory_entities(namespace, json_extract(payload, '$.eventTime')) WHERE kind='memory';
-      CREATE INDEX IF NOT EXISTS nmg_memory_edge_source
-        ON nmg_memory_entities(namespace, source, id) WHERE kind='edge';
-      CREATE INDEX IF NOT EXISTS nmg_memory_edge_target
-        ON nmg_memory_entities(namespace, target, id) WHERE kind='edge';`);
+      PRAGMA wal_autocheckpoint=4000; PRAGMA cache_size=-16000; PRAGMA temp_store=MEMORY;`);
+    ensureAuthoritativeRelationalSchema(this.writer, this.namespace);
     ensureSqliteTextIndexes(this.writer);
     ensureSqliteLeafGroups(this.writer);
     this.writer.prepare("INSERT OR IGNORE INTO nmg_memory_head VALUES (?, 0)").run(this.namespace);
@@ -146,13 +131,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
   }
 
   async counts(view: MemoryReadView): Promise<{ memories: number; nodes: number }> {
-    const rows = this.reader(view)
-      .prepare(
-        "SELECT kind, count(*) AS n FROM nmg_memory_entities WHERE namespace=? AND kind IN ('memory','node') GROUP BY kind",
-      )
-      .all(this.namespace);
-    const counts = new Map(rows.map((row) => [String(row.kind), Number(row.n)]));
-    return { memories: counts.get("memory") ?? 0, nodes: counts.get("node") ?? 0 };
+    return readRelationalCounts(this.reader(view), this.namespace);
   }
 
   async openRead(): Promise<MemoryReadView> {
@@ -182,11 +161,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
   }
 
   async scan(view: MemoryReadView, query: MemoryEntityQuery): Promise<MemoryEntity[]> {
-    const page = entityPage(this.namespace, query);
-    return this.reader(view)
-      .prepare(page.sql)
-      .all(...page.bind)
-      .map(decodeEntity);
+    return scanRelational(this.reader(view), this.namespace, query);
   }
 
   adjacentSources(
@@ -195,6 +170,21 @@ export class SqliteMemoryBackend implements MemoryBackend {
     query: MemoryEntityQuery,
   ): SourceNeighbor[] {
     return readSqliteAdjacentSources(this.reader(view), this.namespace, source, query);
+  }
+
+  projectMemories(
+    view: MemoryReadView,
+    query: MemoryRelationalProjectionQuery,
+  ): MemoryRelationalProjectionPage {
+    return projectRelationalMemories(this.reader(view), this.namespace, query);
+  }
+
+  relationalNeighbors(
+    view: MemoryReadView,
+    anchor: MemoryRecord,
+    query: MemoryEntityQuery,
+  ): RelationalMemoryNeighbor[] {
+    return readRelationalMemoryNeighbors(this.reader(view), this.namespace, anchor, query);
   }
 
   hybridCandidates(
@@ -209,29 +199,13 @@ export class SqliteMemoryBackend implements MemoryBackend {
     const expression = ftsExpression(query.text);
     const surfaceExpr = surfaceTrigramExpression(query.text);
     const db = this.reader(view);
-    const lexicalById = new Map<
-      string,
-      { entity: Extract<MemoryEntity, { kind: "memory" }>; bm25: number }
-    >();
-    if (expression) {
-      for (const hit of readLexicalMemoryPage(db, this.namespace, query, expression)) {
-        lexicalById.set(hit.entity.value.id, { ...hit });
-      }
-    }
-    if (surfaceExpr) {
-      for (const hit of readLexicalMemoryPage(
-        db,
-        this.namespace,
-        query,
-        surfaceExpr,
-        "nmg_memory_surface_fts",
-      )) {
-        const bm25 = hit.bm25 * SURFACE_TRIGRAM_WEIGHT;
-        const existing = lexicalById.get(hit.entity.value.id);
-        if (existing) existing.bm25 += bm25;
-        else lexicalById.set(hit.entity.value.id, { entity: hit.entity, bm25 });
-      }
-    }
+    const lexicalById = collectHybridLexicalHits(
+      db,
+      this.namespace,
+      query,
+      expression,
+      surfaceExpr,
+    );
     const lexical = [...lexicalById.values()].sort(
       (left, right) =>
         right.bm25 - left.bm25 ||
@@ -256,22 +230,23 @@ export class SqliteMemoryBackend implements MemoryBackend {
             [...vectorScores.keys()].filter((id) => !lexicalSet.has(id)),
           )
         : new Map<string, number>();
+    const candidates = [
+      ...lexical.map(({ entity, bm25 }) => ({
+        entity,
+        bm25,
+        recordScore: vectorScores.get(entity.value.id) ?? extraVector.get(entity.value.id) ?? 0,
+      })),
+      ...vector
+        .filter(({ entity }) => !lexicalSet.has(entity.value.id))
+        .map((candidate) => ({
+          ...candidate,
+          bm25: extraLexical.get(candidate.entity.value.id) ?? 0,
+        })),
+    ];
     return {
       vectorIds: [...vectorScores.keys()],
       lexicalIds,
-      candidates: [
-        ...lexical.map(({ entity, bm25 }) => ({
-          entity,
-          bm25,
-          recordScore: vectorScores.get(entity.value.id) ?? extraVector.get(entity.value.id) ?? 0,
-        })),
-        ...vector
-          .filter(({ entity }) => !lexicalSet.has(entity.value.id))
-          .map((candidate) => ({
-            ...candidate,
-            bm25: extraLexical.get(candidate.entity.value.id) ?? 0,
-          })),
-      ],
+      candidates: withSourceTurnMetadata(db, this.namespace, candidates),
     };
   }
 
@@ -279,27 +254,11 @@ export class SqliteMemoryBackend implements MemoryBackend {
     view: MemoryReadView,
     queries: readonly MemoryEntityQuery[],
   ): Promise<MemoryEntity[][]> {
-    const db = this.reader(view);
-    const results: MemoryEntity[][] = queries.map(() => []);
-    for (let offset = 0; offset < queries.length; offset += SQL_BATCH_SIZE) {
-      const pages = queries
-        .slice(offset, offset + SQL_BATCH_SIZE)
-        .map((query) => entityPage(this.namespace, query));
-      const sql = pages
-        .map((page, i) => `SELECT ${offset + i} AS slot, * FROM (${page.sql})`)
-        .join(" UNION ALL ");
-      for (const row of db.prepare(sql).all(...pages.flatMap((page) => page.bind))) {
-        results[Number(row.slot)]!.push(decodeEntity(row));
-      }
-    }
-    return results;
+    return scanRelationalBatch(this.reader(view), this.namespace, queries);
   }
 
   async receipt(view: MemoryReadView, operationId: string): Promise<MemoryCommitReceipt | null> {
-    const row = this.reader(view)
-      .prepare("SELECT payload FROM nmg_memory_entities WHERE namespace=? AND key=?")
-      .get(this.namespace, `receipt:${operationId}`);
-    return row ? (JSON.parse(String(row.payload)) as MemoryCommitReceipt) : null;
+    return readRelationalReceipt(this.reader(view), this.namespace, operationId);
   }
 
   chainProjection(view: MemoryReadView, ids: readonly string[], sessionId?: string) {
@@ -313,6 +272,13 @@ export class SqliteMemoryBackend implements MemoryBackend {
     query: MemoryEntityQuery,
   ): Promise<MemoryEntity[]> {
     return readSqliteLeafPeers(this.reader(view), this.namespace, seedIds, excluded, query);
+  }
+
+  /** Rebuild derived FTS5 text indexes and prune orphaned vectors from authoritative relational tables. */
+  rebuildDerivedIndexes(): void {
+    this.assertOpen();
+    rebuildSqliteTextIndexes(this.writer);
+    this.vectorIndex.pruneOrphans();
   }
 
   async closeRead(view: MemoryReadView): Promise<void> {
@@ -376,7 +342,6 @@ export class SqliteMemoryBackend implements MemoryBackend {
       } else if (!current && !this.requestScoped) {
         ensureLocalDaemonSchema(this.writer);
       }
-      this.reindexLegacyRows();
       if (!current) this.markLocal();
     });
   }
@@ -399,12 +364,7 @@ export class SqliteMemoryBackend implements MemoryBackend {
 
   private importLegacyClaims(): void {
     const operationId = "migration:legacy-sqlite-claims:v1";
-    if (
-      this.writer
-        .prepare("SELECT 1 FROM nmg_memory_entities WHERE namespace=? AND key=?")
-        .get(this.namespace, `receipt:${operationId}`)
-    )
-      return;
+    if (readRelationalReceipt(this.writer, this.namespace, operationId)) return;
     const entities = readLegacyClaimRows(this.writer);
     this.write({
       operationId,
@@ -417,37 +377,6 @@ export class SqliteMemoryBackend implements MemoryBackend {
 
   private publish(request: MemoryCommitRequest): MemoryCommitOutcome {
     return this.transaction(() => this.write(request));
-  }
-
-  private reindexLegacyRows(): void {
-    this.reindexRows("migration:sqlite-tessera-index:v1", "kind='tessera'");
-    this.reindexRows(
-      "migration:sqlite-recall-trigger-index:v1",
-      "kind='memory' AND EXISTS (SELECT 1 FROM json_each(payload, '$.markers') marker WHERE json_extract(marker.value, '$.kind')='recall_trigger')",
-    );
-  }
-
-  private reindexRows(operationId: string, condition: string): void {
-    if (
-      this.writer
-        .prepare("SELECT 1 FROM nmg_memory_entities WHERE namespace=? AND key=?")
-        .get(this.namespace, `receipt:${operationId}`)
-    )
-      return;
-    const rows = this.writer
-      .prepare(`SELECT kind, payload FROM nmg_memory_entities WHERE namespace=? AND (${condition})`)
-      .all(this.namespace);
-    const entities = rows.map((row): MemoryEntity => ({
-      kind: row.kind as "tessera" | "memory",
-      value: JSON.parse(String(row.payload)),
-    }));
-    this.write({
-      operationId,
-      requestHash: requestHash(entities),
-      expectedRevision: this.revision(this.writer),
-      changes: { upsert: entities },
-      resultIds: [],
-    });
   }
 
   private transaction<T>(run: () => T): T {
@@ -464,14 +393,11 @@ export class SqliteMemoryBackend implements MemoryBackend {
   }
 
   private write(request: MemoryCommitRequest): MemoryCommitOutcome {
-    const previous = this.writer
-      .prepare("SELECT payload FROM nmg_memory_entities WHERE namespace=? AND key=?")
-      .get(this.namespace, `receipt:${request.operationId}`);
+    const previous = readRelationalReceipt(this.writer, this.namespace, request.operationId);
     if (previous) {
-      const receipt = JSON.parse(String(previous.payload)) as MemoryCommitReceipt;
-      if (receipt.requestHash !== request.requestHash)
+      if (previous.requestHash !== request.requestHash)
         throw new MemoryOperationConflict(request.operationId);
-      return { status: "replayed", receipt };
+      return { status: "replayed", receipt: previous };
     }
     const revision = this.revision(this.writer);
     if (revision !== request.expectedRevision) return { status: "conflict", revision };
@@ -482,35 +408,15 @@ export class SqliteMemoryBackend implements MemoryBackend {
       resultIds: [...request.resultIds],
       ...(request.result === undefined ? {} : { result: request.result }),
     };
-    const rows = commitRows(request, receipt);
-    this.writeEntities(rows);
-    for (const row of rows) {
-      if (row.kind === "memory" || row.kind === "tessera")
-        writeSqliteTextIndex(this.writer, this.namespace, row);
-    }
+    writeRelationalCommit(this.writer, this.namespace, request, receipt, {
+      onMemoryText: (memory) => writeMemoryTextIndex(this.writer, this.namespace, memory),
+      onMemoryPurged: (memoryId) => this.vectorIndex.deleteForMemory(memoryId),
+      onTesseraText: (tessera) => writeTesseraTextIndex(this.writer, this.namespace, tessera),
+    });
     this.writer
       .prepare("UPDATE nmg_memory_head SET revision=? WHERE namespace=?")
       .run(receipt.revision, this.namespace);
     return { status: "committed", receipt };
-  }
-
-  private writeEntities(rows: readonly EntityRow[]): void {
-    const tuple = `(${Array(ENTITY_COLUMNS.length + 1)
-      .fill("?")
-      .join(",")})`;
-    for (let offset = 0; offset < rows.length; offset += SQL_BATCH_SIZE) {
-      const batch = rows.slice(offset, offset + SQL_BATCH_SIZE);
-      this.writer
-        .prepare(
-          `INSERT OR REPLACE INTO nmg_memory_entities VALUES ${batch.map(() => tuple).join(",")}`,
-        )
-        .run(
-          ...batch.flatMap((row) => [
-            this.namespace,
-            ...ENTITY_COLUMNS.map((column) => row[column]),
-          ]),
-        );
-    }
   }
 
   async close(): Promise<void> {
@@ -540,110 +446,37 @@ export class SqliteMemoryBackend implements MemoryBackend {
   }
 }
 
-function ftsSubquery(namespace: string, kind: string, table: string, expression: string): string {
-  return `(SELECT r.key AS fts_key, f.rank AS fts_rank FROM ${table} f
-      CROSS JOIN nmg_memory_fts_rows r ON r.fts_rowid=f.rowid
-      WHERE r.namespace = ${sqlLiteral(namespace)} AND r.key GLOB '${kind}:*'
-        AND ${table} MATCH ${sqlLiteral(expression)})`;
-}
-
-function twoRouteFtsSubquery(
-  namespace: string,
-  kind: string,
-  lexicalTable: string,
-  surfaceTable: string,
-  lexicalExpr: string,
-  surfaceExpr: string,
-): string {
-  return `(SELECT r.key AS fts_key, SUM(matched.fts_rank) AS fts_rank FROM (
-        SELECT f.rowid AS fts_rowid, f.rank AS fts_rank FROM ${lexicalTable} f WHERE ${lexicalTable} MATCH ${sqlLiteral(lexicalExpr)}
-        UNION ALL
-        SELECT s.rowid AS fts_rowid, s.rank * ${SURFACE_TRIGRAM_WEIGHT} AS fts_rank FROM ${surfaceTable} s WHERE ${surfaceTable} MATCH ${sqlLiteral(surfaceExpr)}
-      ) matched
-      CROSS JOIN nmg_memory_fts_rows r ON r.fts_rowid = matched.fts_rowid
-      WHERE r.namespace = ${sqlLiteral(namespace)} AND r.key GLOB '${kind}:*'
-      GROUP BY r.key)`;
-}
-
-function resolveEntityFtsSource(
-  namespace: string,
-  query: MemoryEntityQuery,
-  scoredExpression?: string,
-  scoredTable?: string,
-): { ftsFrom?: string; emptyFts: boolean } {
-  const [kind, lexicalTable, surfaceTable] = textIndex(query.kind);
-  if (scoredExpression !== undefined) {
-    return scoredExpression
-      ? {
-          ftsFrom: ftsSubquery(namespace, kind, scoredTable ?? lexicalTable, scoredExpression),
-          emptyFts: false,
-        }
-      : { emptyFts: true };
-  }
-  if (!query.text) return { emptyFts: false };
-  const lexicalExpr = ftsExpression(query.text);
-  const surfaceExpr = surfaceTrigramExpression(query.text);
-  if (!lexicalExpr && !surfaceExpr) return { emptyFts: true };
-  if (lexicalExpr && surfaceExpr) {
-    return {
-      ftsFrom: twoRouteFtsSubquery(
-        namespace,
-        kind,
-        lexicalTable,
-        surfaceTable,
-        lexicalExpr,
-        surfaceExpr,
-      ),
-      emptyFts: false,
-    };
-  }
-  const [table, expr] = lexicalExpr ? [lexicalTable, lexicalExpr] : [surfaceTable, surfaceExpr];
-  return { ftsFrom: ftsSubquery(namespace, kind, table, expr), emptyFts: false };
-}
-
-function entityPage(
-  namespace: string,
-  query: MemoryEntityQuery,
-  scoredExpression?: string,
-  scoredTable?: string,
-) {
-  const { limit, offset } = queryBounds(query);
-  if (query.kind === "edge" && query.connectedTo !== undefined && !query.text)
-    return { sql: adjacentEdgePage(namespace, query, query.connectedTo), bind: [limit, offset] };
-  const where = `namespace = ${sqlLiteral(namespace)} AND ${sqliteQueryWhere(query)}`;
-  const { ftsFrom, emptyFts } = resolveEntityFtsSource(
-    namespace,
-    query,
-    scoredExpression,
-    scoredTable,
-  );
-  // Start from MATCH results so SQLite only looks up entities that matched.
-  const from = ftsFrom
-    ? `${ftsFrom} CROSS JOIN nmg_memory_entities ON key = fts_key`
-    : "nmg_memory_entities";
-  const order = ftsFrom ? "fts_rank, id" : "id";
-  return {
-    sql: `SELECT kind, payload${scoredExpression ? ", -fts_rank AS bm25" : ""} FROM ${from}
-      WHERE ${emptyFts ? "1 = 0" : where} ORDER BY ${order} LIMIT ? OFFSET ?`,
-    bind: [limit, offset],
-  };
-}
-
-function readLexicalMemoryPage(
+function collectHybridLexicalHits(
   db: DatabaseSync,
   namespace: string,
   query: MemoryEntityQuery,
   expression: string,
-  table?: string,
-) {
-  const page = entityPage(namespace, query, expression, table);
-  return db
-    .prepare(page.sql)
-    .all(...page.bind)
-    .map((row) => ({
-      entity: decodeEntity(row) as Extract<MemoryEntity, { kind: "memory" }>,
-      bm25: Number(row.bm25),
-    }));
+  surfaceExpr: string,
+): Map<string, { entity: Extract<MemoryEntity, { kind: "memory" }>; bm25: number }> {
+  const lexicalById = new Map<
+    string,
+    { entity: Extract<MemoryEntity, { kind: "memory" }>; bm25: number }
+  >();
+  if (expression) {
+    for (const hit of readRelationalLexicalMemoryPage(db, namespace, query, expression)) {
+      lexicalById.set(hit.entity.value.id, { ...hit });
+    }
+  }
+  if (surfaceExpr) {
+    for (const hit of readRelationalLexicalMemoryPage(
+      db,
+      namespace,
+      query,
+      surfaceExpr,
+      "nmg_memory_surface_fts",
+    )) {
+      const bm25 = hit.bm25 * SURFACE_TRIGRAM_WEIGHT;
+      const existing = lexicalById.get(hit.entity.value.id);
+      if (existing) existing.bm25 += bm25;
+      else lexicalById.set(hit.entity.value.id, { entity: hit.entity, bm25 });
+    }
+  }
+  return lexicalById;
 }
 
 function readCrossBm25(
@@ -666,7 +499,6 @@ function readCrossBm25(
       .map((row) => [row.fts_rowid, String(row.id)]),
   );
   if (!wanted.size) return scores;
-  // One MATCH scan shares the query's BM25 statistics. Probing each rowid repeats that work.
   const accumulate = (table: string, expr: string, weight: number): void => {
     if (!expr) return;
     for (const row of db
@@ -681,22 +513,17 @@ function readCrossBm25(
   return scores;
 }
 
-function adjacentEdgePage(namespace: string, query: MemoryEntityQuery, nodeId: string): string {
-  const where = `namespace = ${sqlLiteral(namespace)} AND ${sqliteQueryWhere({
-    ...query,
-    connectedTo: undefined,
-  })}`;
-  const node = sqlLiteral(nodeId);
-  const edges = `SELECT kind, payload, id FROM nmg_memory_entities WHERE ${where}`;
-  // Merge the two index ranges before paging. The source branch already includes any self-loop.
-  return `SELECT kind, payload FROM (
-    ${edges} AND source = ${node}
-    UNION ALL
-    ${edges} AND target = ${node} AND source <> ${node}
-    ORDER BY id LIMIT ? OFFSET ?
-  )`;
-}
-
-function decodeEntity(row: { kind?: unknown; payload?: unknown }): MemoryEntity {
-  return { kind: row.kind, value: JSON.parse(String(row.payload)) } as MemoryEntity;
+function withSourceTurnMetadata(
+  db: DatabaseSync,
+  namespace: string,
+  candidates: Array<MemoryVectorCandidate & { bm25: number }>,
+): MemoryHybridPage["candidates"] {
+  const sourceIds = [
+    ...new Set(candidates.map(({ entity }) => entity.value.evidenceId).filter(Boolean)),
+  ];
+  const bySource = readSourceTurnMetadata(db, namespace, sourceIds);
+  return candidates.map((item) => {
+    const meta = bySource.get(item.entity.value.evidenceId);
+    return meta ? { ...item, sourceSessionId: meta.sessionId, turnOrdinal: meta.ordinal } : item;
+  });
 }

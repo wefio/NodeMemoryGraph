@@ -2,14 +2,19 @@ import type {
   ClaimOutcomeEvent,
   ClaimPosterior,
   HistoryRecord,
+  MemoryActor,
   MemoryNode,
   MemoryRecord,
+  MemoryRelationRecord,
   MemoryResolution,
   MemoryScope,
   MemoryContext,
   MemorySearchResult,
+  MemoryStatus,
+  MemoryType,
   MemoryWriteEvent,
   NodeRelation,
+  NodeRelationType,
   TesseraRecord,
   TopologyProposal,
 } from "../types.ts";
@@ -29,6 +34,7 @@ export type MemoryEntity =
   | { kind: "history"; value: HistoryRecord }
   | { kind: "node"; value: MemoryNode }
   | { kind: "edge"; value: NodeRelation }
+  | { kind: "memoryRelation"; value: MemoryRelationRecord }
   | { kind: "stateAlias"; value: MemoryStateAlias }
   | { kind: "writeEvent"; value: MemoryWriteEvent }
   | { kind: "relationProposal"; value: TopologyProposal & { sessionId: string | null } }
@@ -120,6 +126,40 @@ export type MemoryCommitOutcome =
   | { status: "committed" | "replayed"; receipt: MemoryCommitReceipt }
   | { status: "conflict"; revision: number };
 
+export interface MemoryRelationalProjectionQuery {
+  scope?: MemoryScope;
+  excludeScope?: MemoryScope;
+  sessionId?: string;
+  sourceSessionId?: string;
+  nodeId?: string;
+  nodeIds?: readonly string[];
+  stateKey?: string;
+  memoryType?: MemoryType;
+  statuses?: readonly MemoryStatus[];
+  evidenceId?: string;
+  relationTypes?: readonly NodeRelationType[];
+  sourceActor?: MemoryActor;
+  eventTimeFrom?: string;
+  eventTimeTo?: string;
+  includeHistorical?: boolean;
+  maxTier?: 0 | 1 | 2 | 3;
+  text?: string;
+  now: string;
+  limit: number;
+  offset: number;
+}
+
+export interface MemoryRelationalProjectionPage {
+  memories: MemoryRecord[];
+  relations: MemoryRelationRecord[];
+  hasMore: boolean;
+}
+
+export interface RelationalMemoryNeighbor {
+  entity: Extract<MemoryEntity, { kind: "memory" }>;
+  reason: "memory_relation" | "same_state" | "same_event_day";
+}
+
 export interface MemoryBackend {
   readonly namespace: string;
   readonly kind: "sqlite" | "lancedb";
@@ -129,6 +169,15 @@ export interface MemoryBackend {
     source: HistoryRecord,
     query: MemoryEntityQuery,
   ): SourceNeighbor[];
+  projectMemories?(
+    view: MemoryReadView,
+    query: MemoryRelationalProjectionQuery,
+  ): MemoryRelationalProjectionPage;
+  relationalNeighbors?(
+    view: MemoryReadView,
+    anchor: MemoryRecord,
+    query: MemoryEntityQuery,
+  ): RelationalMemoryNeighbor[];
   leafPeers?(
     view: MemoryReadView,
     seedIds: readonly string[],
@@ -180,6 +229,7 @@ export interface MemoryVectorDocument {
   id: string;
   statement: string;
   text: string;
+  readonly chunkIndex?: number;
 }
 
 export interface MemoryVectorCursor {
@@ -193,7 +243,13 @@ export interface MemoryVectorCandidate {
 }
 
 export interface MemoryHybridPage {
-  candidates: Array<MemoryVectorCandidate & { bm25: number }>;
+  candidates: Array<
+    MemoryVectorCandidate & {
+      bm25: number;
+      sourceSessionId?: string | null;
+      turnOrdinal?: number | null;
+    }
+  >;
   vectorIds: string[];
   lexicalIds: string[];
 }

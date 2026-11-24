@@ -11,9 +11,33 @@ export interface LocalMemoryHttpConfig {
   apiKey?: string;
   defaultTopK: number;
   maxRequestBytes: number;
+  searchPreviewCodePoints?: number;
+  searchMaxCharacters?: number;
+  preprocessMessages?: boolean;
+  sortResultsByTime?: boolean;
 }
 
 const MAX_LOCAL_REQUEST_BYTES = 48 * 1024 * 1024;
+
+function optionalIntegerOption(
+  config: JsonObject,
+  key: string,
+  min: number,
+  max: number,
+): number | undefined {
+  const value = config[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max)
+    throw new Error(`${key} must be an integer between ${min} and ${max}`);
+  return value;
+}
+
+function optionalBooleanOption(config: JsonObject, key: string): boolean | undefined {
+  const value = config[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== "boolean") throw new Error(`${key} must be a boolean`);
+  return value;
+}
 
 function integerOption(
   config: JsonObject,
@@ -38,7 +62,18 @@ export function parseLocalMemoryHttpConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): LocalMemoryHttpConfig {
   if (!isJsonObject(config)) throw new Error("HTTP config must be a JSON object");
-  const allowed = ["host", "port", "databasePath", "apiKeyEnv", "defaultTopK", "maxRequestBytes"];
+  const allowed = [
+    "host",
+    "port",
+    "databasePath",
+    "apiKeyEnv",
+    "defaultTopK",
+    "maxRequestBytes",
+    "searchPreviewCodePoints",
+    "searchMaxCharacters",
+    "preprocessMessages",
+    "sortResultsByTime",
+  ];
   const unknown = Object.keys(config).find((key) => !allowed.includes(key));
   if (unknown) throw new Error(`Unknown HTTP configuration field: ${unknown}`);
   if (typeof config.databasePath !== "string" || !config.databasePath.trim())
@@ -48,6 +83,16 @@ export function parseLocalMemoryHttpConfig(
   const apiKey = configuredApiKey(config.apiKeyEnv, env);
   if (!apiKey && !["127.0.0.1", "::1", "localhost"].includes(host))
     throw new Error("apiKeyEnv is required for a non-loopback HTTP listener");
+
+  const searchPreviewCodePoints = optionalIntegerOption(
+    config,
+    "searchPreviewCodePoints",
+    0,
+    100_000,
+  );
+  const searchMaxCharacters = optionalIntegerOption(config, "searchMaxCharacters", 256, 1_000_000);
+  const preprocessMessages = optionalBooleanOption(config, "preprocessMessages");
+  const sortResultsByTime = optionalBooleanOption(config, "sortResultsByTime");
 
   return {
     host,
@@ -62,6 +107,10 @@ export function parseLocalMemoryHttpConfig(
       1,
       MAX_LOCAL_REQUEST_BYTES,
     ),
+    ...(searchPreviewCodePoints !== undefined ? { searchPreviewCodePoints } : {}),
+    ...(searchMaxCharacters !== undefined ? { searchMaxCharacters } : {}),
+    ...(preprocessMessages !== undefined ? { preprocessMessages } : {}),
+    ...(sortResultsByTime !== undefined ? { sortResultsByTime } : {}),
   };
 }
 

@@ -40,6 +40,100 @@
 - [`http-search-graph.ts`](../../../src/integration/http-search-graph.ts) 将 HTTP 多子句融合与尾部邻接拼装（`fuse_clause_hits -> select_supplemental_tail -> stitch_http_page`）抽象为独立可替换的 `ComputeGraphSpec`，并通过 `options.searchGraph` 注入 [`HttpMemoryService`](../../../src/integration/memory-http-service.ts)。
 - HTTP 写入去除伪造的 `AML session` 图节点后，通过 `sourceSessionId` 保留来源会话；`w_session_pivot` 按 `sessionId -> sourceSessionId -> aml_session -> nodeId -> evidenceId -> id` 的优先级稳定聚合，`stitch_http_page` 确保补充尾部邻居分数严格低于主命中下界。
 
+## 案例 3：五层关系库底座、上下文安全缓存与真 BM25F + 时间邻域计算图晋级（2026-11-23）
+
+- **底层架构与缓存修复**：
+  - 在 [`sqlite-relational.ts`](../../../src/core/memory/sqlite-relational.ts) 中落地以记忆为中心的 5 层关系表（`nmg_sources`、`nmg_memories`、`nmg_memory_evidence`、`nmg_memory_relations`、`nmg_memory_markers`），为透视查询提供零 `JSON.parse(payload)` 的原生索引过滤与分页；新增 `time`、`evidence`、`actor` 透视维度、隐式/显式 `semantic` 语义边及不依赖预设 `MemoryNode` 的 `engine.linkMemories`。
+  - 修复 [`compute-graph.ts`](../../../src/core/compute-graph.ts) 中 `ComputeMemoCache` 的缓存键，将执行 `context` 签名（含函数属性哈希与 `WeakMap` 数组签名缓存）及 `ComputeRegistry` 算子重注册指纹纳入节点签名。
+- **2,000 条记录关系透视性能压测**：
+  - **写入开销（2,000 条，batch=100）**：`906.84 ms`（`2,205 rows/s`），同一事务内同步写入 5 层关系表与双路 FTS5。
+  - **带过滤分页透视查询（`eventTimeFrom..To` + `sourceActor` + `memoryType`，`limit=200`）**：5 层原生索引路径 **`p50 = 5.43 ms`（均值 `5.49 ms`）**，对比全表扫描解析 `JSON.parse(payload)` 的 **`p50 = 8.62 ms`（均值 `8.77 ms`）**，在仅 2,000 条规模下即实现 **1.60x 加速**，且随总库容量扩大保持 $O(\text{limit})$。
+- **1,867 查询 BM25F 与新邻域计算图消融实验**：
+  - 在 LoCoMo（1,532 条）、BEAM（235 条）和 LongMemEval（100 条）共 1,867 条冻结查询上，使用 [`bm25f-neighborhoods.ts`](../../../src/core/memory/bm25f-neighborhoods.ts) 与 [`piecewise-rerank.ts`](../../../src/core/memory/piecewise-rerank.ts) 对比 11 组计算图配方：
+
+| 配方 (`Pipeline`)          | `replaceGraphNode` 改动点                                                   |      All@1 |     All@20 |    All@100 |     MRR@20 | 净胜/负@1 | 净胜/负@20 | 净胜/负@100 |
+| -------------------------- | --------------------------------------------------------------------------- | ---------: | ---------: | ---------: | ---------: | --------: | ---------: | ----------: |
+| `G4_DEFAULT_BASE`          | 基线默认（`R3 + R1R5 + w_session(0.20)`）                                   |     35.22% |     65.32% |     78.71% |     0.5957 |       0/0 |        0/0 |         0/0 |
+| `B1_BM25F_ONLY`            | Head -> `bm25f_field_score(0.12)`                                           |     35.27% |     65.32% |     78.71% |     0.5974 |       5/8 |        0/0 |         0/0 |
+| `B2_HEAD_BM25F_R3`         | Head -> `bm25f(0.10) -> r3(0.12)`                                           |     35.36% |     65.32% |     78.71% |     0.5980 |       5/4 |        0/0 |         0/0 |
+| `B3_HEAD_BM25F_R3_18`      | Head -> `bm25f(0.18) -> r3(0.12)`                                           |     35.36% |     65.32% |     78.71% | **0.5993** |       8/7 |        0/0 |         0/0 |
+| `N1_TAIL_TEMPORAL`         | Tail -> `w_session(0.20) -> w_temporal_pivot(0.10)`                         |     35.22% |     65.32% |     78.75% |     0.5957 |       0/0 |        0/0 |         2/0 |
+| `N2_TAIL_CONCEPT`          | Tail -> `w_session(0.20) -> w_concept_pivot(0.10)`                          |     35.22% |     65.32% |     78.57% |     0.5957 |       0/0 |        0/0 |         1/2 |
+| `N3_TAIL_LINEAGE`          | Tail -> `w_session(0.20) -> w_lineage_pivot(0.14)`                          |     35.22% |     65.32% |     78.71% |     0.5957 |       0/0 |        0/0 |         0/0 |
+| **`J1_BM25F_R3_TEMPORAL`** | **Head `bm25f(0.10)->r3(0.12)` + Mid + Tail `w_session->w_temporal(0.10)`** | **35.36%** | **65.32%** | **78.75%** | **0.5980** |   **5/4** |    **0/0** |     **2/0** |
+
+- **缓存与帕累托合入结论**：
+  - 11 组实验共 `110,153` 次节点求值（总耗时 `54.53 s`），`ComputeMemoCache` 命中 **`52,276` 次（命中率 47.5%）**。
+  - `findParetoOptimalGraphs` 在 `(All@1, All@20, All@100, MRR@20)` 上选出 `['B3_HEAD_BM25F_R3_18', 'J1_BM25F_R3_TEMPORAL']`。
+  - **`J1_BM25F_R3_TEMPORAL`** 在 `All@1`（`+0.14%`）、`All@50`（`71.90% -> 72.18%`）、`All@100`（`2W/0L`）与 `MRR@20`（`+0.0023`）上相对 `G4_DEFAULT_BASE` 零回退全面占优，已合入线上默认 **`DEFAULT_PIECEWISE_RERANK_GRAPH`**（`HEAD_BM25F_R3_SUBGRAPH` + `MID_DEDUP_RECENCY_SUBGRAPH` + `TAIL_SESSION_TEMPORAL_SUBGRAPH`）；而出现 `1W/2L` 抖动的 `w_concept_pivot` 继续作为可选实验算子保留，不进默认图。
+
+## 案例 4：轮次邻域算子（`w_turn_pivot`）与 PersonaMem / HaluMem 全量评测（2026-11-23）
+
+在 5 个冻结数据集共 **2,719 条查询**（LoCoMo 1,532 + BEAM 235 + LongMemEval 100 + PersonaMem 500 + HaluMem 352 [其中 272 题含金标，共 496 条证据]）上，验证轮次邻域算子（[`bm25f-neighborhoods.ts`](../../../src/core/memory/bm25f-neighborhoods.ts) 中的 `w_turn_pivot`）以及 PersonaMem 的上下文调优（`forget` 标记准入与偏好 `recall_trigger` 索引）。
+
+- **图结构差异（`replaceGraphNode`）**：
+  - 在 `RerankCandidate` 上扩展 `turnOrdinal?: number | null`，并在生产链路中通过 [`sqlite-relational.ts`](../../../src/core/memory/sqlite-relational.ts) 的 `readSourceTurnMetadata` 从 `nmg_sources.ordinal` 批量注入 `SqliteMemoryBackend.hybridCandidates` 与 [`engine.ts`](../../../src/core/memory/engine.ts)。
+  - 在 **Mid**（`weight: 0.55, anchorTopK: 5, maxRadius: 1`）与 **Tail**（`weight: 0.35, anchorTopK: 6, maxRadius: 1`）串联 `w_turn_pivot`（提升同会话 $\pm 1$ 相邻对话轮次），保持 `Head`（`[1..5]`）不动。
+- **5 数据集离线对比（`J1_DEFAULT` vs 合入默认方案 `W_055_035_R1`）**：
+
+| 数据集（查询数 / 模式）                  | 图配方             |    R@1 |    R@5 |       R@10 |       R@20 |  All@1 |     All@20 |
+| ---------------------------------------- | ------------------ | -----: | -----: | ---------: | ---------: | -----: | ---------: |
+| LoCoMo (1,532)                           | `J1_DEFAULT`       | 25.47% | 48.25% |     56.77% |     66.27% | 31.14% |     69.45% |
+| LoCoMo (1,532)                           | **`W_055_035_R1`** | 25.47% | 48.25% | **57.84%** | **67.50%** | 31.14% | **71.41%** |
+| BEAM (235)                               | `J1_DEFAULT`       |  6.48% | 15.73% |     23.89% |     33.13% |  8.94% |     28.51% |
+| BEAM (235)                               | **`W_055_035_R1`** |  6.48% | 15.73% | **24.49%** | **34.21%** |  8.94% | **30.21%** |
+| LongMemEval (100)                        | `J1_DEFAULT`       | 55.29% | 86.47% |     94.71% |     97.65% | 66.00% |     98.00% |
+| LongMemEval (100)                        | **`W_055_035_R1`** | 55.29% | 86.47% |     94.71% |     97.65% | 66.00% |     98.00% |
+| HaluMem (352 / 272 有金标，无尾插)       | `J1_DEFAULT`       | 27.22% | 59.27% |     70.97% |     78.43% |      - |     72.79% |
+| HaluMem (352 / 272 有金标，无尾插)       | **`W_055_035_R1`** | 27.22% | 59.27% | **71.98%** | **79.84%** |      - | **74.63%** |
+| HaluMem（+ 尾插 2 个 `adjacentSources`） | **`W_055_035_R1`** | 27.22% | 59.27% | **71.98%** | **81.05%** |      - | **76.47%** |
+| PersonaMem (500，隐藏 `forget`，无尾插)  | `J1_DEFAULT`       |  6.26% | 21.87% |     30.04% |     38.01% |      - |     11.00% |
+| PersonaMem (500，隐藏 `forget`，无尾插)  | **`W_055_035_R1`** |  6.26% | 21.87% | **30.76%** | **38.54%** |      - | **12.20%** |
+| PersonaMem（+ 尾插 2，隐藏 `forget`）    | **`W_055_035_R1`** |  6.26% | 21.87% | **30.76%** | **39.13%** |      - | **14.40%** |
+
+- **PersonaMem 上下文调优分析（`forget` 标记与偏好 `recall_trigger`）**：
+  - **隐私过滤 vs 撤回金标召回（`ask_to_forget`，共 100/500 题）**：预构建库中用户明确要求遗忘的记忆带有 `markers: [{ kind: "forget" }]`（默认被 `visibleMemory` / `searchableMemory` 拦截，共隐藏 97 条金标）。若仅准入脱敏改写后的 `statement` 约束摘要，无法匹配逐字对话金标（`R@20 = 38.21%`）；而采用 **`forget` 上下文准入 + 偏好 `recall_trigger`（`WmTqKO`）+ `W_055_035_R1`（`w_turn_pivot`）+ 尾插 2** 后，PersonaMem-500 整体指标提升至 **`R@1 = 6.59%`、`R@5 = 23.52%`、`R@10 = 34.39%`、`R@20 = 43.68%`（`+5.67%`）、`All@20 = 27.00%`（`+16.00%`）**，其中 `ask_to_forget` 类别 `R@20` 从 `68.11%` 跃升至 **`84.69%+`**（`w_turn_pivot` 将用户撤回轮与助手确认轮成对拉入前 20）。
+- **帕累托与合入结论**：
+  - `W_055_035_R1` 在全部 5 个数据集上相对 `J1_DEFAULT` 零回退严格占优（LongMemEval 全分位保持 `97.65% R@20` / `98.00% All@20` 持平），已正式合入线上 **`DEFAULT_PIECEWISE_RERANK_GRAPH`**。
+
+### 端到端 HTTP + LLM 真实评测（`auto/deepseek-v4-flash`，并发 8，关闭思考）
+
+将上述改动连同 [`local-memory-http.ts`](../../../src/cli/local-memory-http.ts)（接入 `createEmbeddingClientFromEnv()` 混合检索）、`nmg_sources.ordinal` 轮次注入、Head 段 `r5_recency_boost(0.02)` 及 [`model.ts`](../../../src/core/memory/model.ts) 的未来 `eventTime` 可见性修复接入真实 HTTP 服务（`BAAI/bge-small-en-v1.5` + `http://127.0.0.1:3425/v1` `auto/deepseek-v4-flash`）：
+
+- **Suite 1 — `ADD -> Search -> ADD 更新 -> Search` 交替状态链路**：10/10 步全部正确（**`100.0%`**，覆盖变量 `A: 1 -> 2 -> 3`、城市搬迁 `Austin -> Seattle -> Tokyo`、数据库迁移 `SQLite -> PostgreSQL`、端口变更 `8080 -> 9443`）。该真实测试暴露并修复了 [`model.ts`](../../../src/core/memory/model.ts) `timeFields` 中当写入携带未来 `eventTime` 时 `validFrom > now` 导致记录被 `visibleMemory` 屏蔽的问题。
+- **Suite 2 — HaluMem User 1 真实 HTTP 端到端（67 会话 / 164 题，OmniMemEval 官方 Prompt 与 Judge）**：
+  - **Batch（全量写入后统一检索，`240` 字符摘要 / `5,500` 预算）**：**`139/164 = 84.76%`**（较历史 `trial17` 的 `81.10%` 提升 `+3.66 pp`，平均检索 `255.2 ms`，均值 `1,924` prompt tokens）。
+  - **Interleaved（逐会话 `ADD -> Search` 交替作答，`240` 字符摘要 / `5,500` 预算）**：**`146/164 = 89.02%`**（较 `trial17` 提升 **`+7.92 pp`**，平均检索 `189.7 ms`，均值 `1,912` prompt tokens）：`Memory Boundary` `97.44%`、`Basic Fact Recall` `82.50%`、`Memory Conflict` `92.31%`、`Generalization & Application` `90.32%`、`Multi-hop Inference` `88.89%`、`Dynamic Update` `50.00%`（未命中样本如 `s52-q3` 实为第 2 名 `[B]` 已召回原轮次，但具体薪资数字 `23,000` 位于 240 字符摘要截断之后）。
+  - **控制变量 A/B — 紧凑预算（`240 / 5,500`）vs 不截断预算（`searchPreviewCodePoints: 0`、`searchMaxCharacters: 32000`，`NMG_EMBED_CHUNK_CONCURRENCY=1`，`hybrid: 164/164`，0 报错）**：紧凑预算 **`147/164 = 89.63%`**（平均 `18.1` 条、`123` 次查询被压到不足 20 条、均值 `1,800` prompt tokens），不截断预算 **`146/164 = 89.02%`**（平均 `19.9` 条、均值 `2,383` prompt tokens，仅 4 题退化 vs 3 题提升，并找回了 `s2-q2` 宠物偏好等截断细节）。此前冷启动复测出现 `75.00%`（`123/164`）实为默认 `chunkConcurrency=4` 并发打挂本地单线程 `bge_server.py`（`ECONNRESET`），导致 `backfillVectors()` 吞掉 500 错并静默降级为纯词法检索所致，与上下文长度无关。
+- **Suite 3 — PersonaMem v2 真实 HTTP 抽样评测（前 5 人设 / 129 道四选一）**：
+  - **基线（`240` 字符截断、原文 `/add`）**：**`32/129 = 24.81%`**（`ask_to_forget = 28.00%`、`therapy_background = 29.41%`、`neutral_preferences = 29.63%`、`health_and_medical_conditions = 29.41%`、`sensitive_info = 25.00%`）。
+  - **开启写入预处理 + 全文摘要预算（`preprocessMessages: true` 提取 `recall_trigger=221, forget_directive=85`，`searchPreviewCodePoints: 0`、`searchMaxCharacters: 32000`）**：准确率大幅提升至 **`61/129 = 47.29%`（`+22.48 pp`）**，其中 `ask_to_forget` `28.00% -> 56.00%`、`therapy_background` `29.41% -> 58.82%`、`health_and_medical_conditions` `29.41% -> 58.82%`、`anti_stereotypical_pref` `12.50% -> 33.33%`、`sensitive_info` `25.00% -> 50.00%`。
+
+## 案例 5：几何盲区子块向量、`MaxP+AvgP` 聚合与 PersonaMem v2 帕累托扫参（2026-11-23）
+
+- **工程实现与配置汇总（`planEmbeddingWindows`、`0.8·MaxP + 0.2·AvgP` 与 HTTP 配置表）**：
+  - 新增 [`text-chunking.ts`](../../../src/core/text-chunking.ts)（`planEmbeddingWindows`，默认 `NMG_EMBED_CHUNK_CHARS=2000` 对齐句界并丢弃主向量已覆盖的第 `0` 窗；`sentenceAlignedPreview`）、[`sqlite-vectors.ts`](../../../src/core/memory/sqlite-vectors.ts) 的 `nmg_memory_vector_chunks` 伴随表与 `0.8·MaxP + 0.2·AvgP` 段落聚合、[`search-projection.ts`](../../../src/integration/search-projection.ts) 句界裁剪、[`local-memory-http-config.ts`](../../../src/cli/local-memory-http-config.ts) / [`local-memory-http.ts`](../../../src/cli/local-memory-http.ts) 可选 `sortResultsByTime` 时序输出，以及 [`onlion/README.md`](../../../onlion/README.md) / [`onlion/README.zh-CN.md`](../../../onlion/README.zh-CN.md) 双语配置汇总。
+- **PersonaMem v2 纯净对照（5 人设 / 129 题，`NMG_EMBED_CHUNK_CONCURRENCY=1`，`proxyErrors=0`，`hybrid: 129/129`，`auto/deepseek-v4-flash` 关闭思考，`preprocessMessages=false`，不截断）**：
+  - **纯净不切分基线（`W=0`）**：**`63/129 = 48.84%`**（`1,118` 条主向量，`avgTokens=4,376`，`ask_to_forget=68.00%`、`neutral_preferences=40.74%`、`anti_stereotypical_pref=37.50%`）。排查并发超时后确认，`W=0` 在纯净 100% hybrid 下已具备 `48.84%` 基线。
+  - **1024 字符重叠切分（`sortResultsByTime=false`）**：`58/129 = 44.96%`（多出 `648` 块子向量，`avgTokens=4,901`），因 Max-of-K 长度偏置把长助手回复挤进前 20 而回退（开 `sortResultsByTime=true` 后 `top_k=20` 为 `54/129 = 41.86%`、`top_k=100` 为 `59/129 = 45.74%`）。
+  - **`W=2000` 几何盲区窗 + 纯 `MaxP`**：`61/129 = 47.29%`（仅多出 `133` 块，`avgTokens=4,936`），提升了 `anti_stereotypical_pref`（`37.50% -> 41.67%`）与 `neutral_preferences`（`40.74% -> 44.44%`），但 `ask_to_forget` 回落至 `56.00%`。
+  - **`W=2000` 几何盲区窗 + `0.8·MaxP + 0.2·AvgP`**：**`64/129 = 49.61%`**（`133` 块，`avgTokens=5,134`），将 `ask_to_forget` 拉回至 **`72.00% (18/25)`**，并把 `stereotypical_pref` 推至 **`45.45% (5/11)`**、`neutral_preferences` 保持 **`44.44% (12/27)`**。
+- **零 LLM 纯召回 `Recall@5..100` 与 15 组计算图帕累托扫参（`12.7s`）**：
+  - 离线召回与端到端 QA 方向一致（`W=0`: `R@20=48.74%`、`Any@20=61.24%` vs `W=2000 0.8·MaxP+0.2·AvgP`: `R@20=49.25%`、`Any@20=62.02%`），且 **`R@100 = 79.15%`、`Any@100 = 85.27%`**（剔除 8 条非逐字 `sensitive_info` 题后，其余 121 题中 `Any@100 = 110/121 = 90.9%`）。
+  - 在 15 组计算图（`p_role_length`、`p_rocchio_prf`、`p_semantic_prior` 串联 `DEFAULT_PIECEWISE_RERANK_GRAPH`）中，帕累托前沿为 **`['SEM_100', 'SEM_200', 'COMBO_ALL']`**：`SEM_100` 零回退严格支配基线（`R@5`: `32.16% -> 32.66%`，`MRR@20`: `0.3544 -> 0.3558`），`Rocchio PRF` 被噪声锚点拖累证伪，所有线性重排在 `R@20` 均收敛在 `50.00%–50.25%`——说明 `R@20` 与 `R@100` 之间近 `30 pp` 的落差来自 33M `bge-small-en-v1.5` 双塔模型本身的语义辨别天花板。
+
+## 案例 6：权威关系型 SQLite 切换、规模基准测试与存储–计算图解耦（2026-11-24）
+
+- **架构迁移差异**：将 SQLite 记忆存储从 `nmg_memory_entities` 双写彻底切换至规范化关系 v2 权威表（`nmg_sources`、`nmg_nodes`、`nmg_memories`、`nmg_memory_evidence`、`nmg_memory_relations`、`nmg_memory_markers`、`nmg_tesserae`、`nmg_receipts`、`nmg_schema_migrations`）及 22 个核心关系索引；实现带备份校验的幂等 `nmg_memory_entities` 退役、删除/`forget`/`quarantine` 索引与向量即时清理、跨页显式 `boundaryRelations` 以及 SQLite 与 `ComputeGraph` 零跨层导入隔离（波次并行异步执行、`sideEffect` 隔离与深冻结缓存安全检查）。
+- **130 个迁移冻结库检索一致性校验（`1,867` 题：`1,532` LoCoMo + `235` BEAM + `100` LongMemEval，`62.13s`）**：
+  - 所有 130 个历史 SQLite 冻结库通过 `openMemoryBackend` 完成事务级迁移并删除 `nmg_memory_entities`（`130/130` 库均满足 `hasUnmigratedEntityTable === false`），并抽样执行 `rebuildDerivedIndexes()`。
+  - **`J1_BM25F_R3_TEMPORAL` 与迁移前基线全指标零回归（差异 `0.0000`）**：`R@1=29.08%`、`All@1=35.36%`、`R@3=42.57%`、`R@5=50.15%`、`All@20=65.32%`、`R@20=65.68%`、`R@100=84.44%`、`All@100=78.75%`、`MRR@20=0.5980`、`MRR@100=0.6010`。
+- **2,000 / 10,000 / 100,000 条记录规模基准对比（`bench-relational-v2`，旧 JSON 实体表 vs 权威关系型 v2）**：
+  - **2,000 条**：批量写入 `11,505` vs `18,935 ops/s`；单条读取 `p95=0.305` vs `0.071 ms`；50-ID 批量读 `p95=1.183` vs `0.455 ms`；多条件筛选 `p95=2.087` vs `8.121 ms`（**提速 3.9x**）；`projectGraph` offset 1k `p95=11.567` vs `13.394 ms`；邻域查询 `p95=1.626` vs `12.876 ms`（**提速 7.9x**）；FTS5 重建 `88.51` vs `42.56 ms`；库大小 `8.03` vs `5.10 MB`。
+  - **10,000 条**：批量写入 `8,312` vs `15,483 ops/s`；单条读取 `p95=0.280` vs `0.093 ms`；50-ID 批量读 `p95=1.490` vs `0.529 ms`；多条件筛选 `p95=7.283` vs `36.928 ms`（**提速 5.1x**）；`projectGraph` offset 0 `p95=18.704` vs `40.387 ms`；`projectGraph` offset 1k `p95=20.965` vs `39.949 ms`；邻域查询 `p95=2.234` vs `62.177 ms`（**提速 27.8x**）；FTS5 重建 `312.36` vs `173.98 ms`；库大小 `24.85` vs `25.14 MB`。
+  - **100,000 条**：批量写入 `4,200` vs `6,258 ops/s`（完整 `engine.rememberMany(100)` 抽样 `p50=57.202 ms`、`p95=61.135 ms`）；单条读取 `p95=0.299` vs `0.152 ms`；50-ID 批量读 `p95=2.226` vs `0.787 ms`；多条件筛选 `p95=121.606` vs `499.521 ms`（**提速 4.1x**）；`projectGraph` offset 0 `p95=24.633` vs `512.026 ms`（**提速 20.8x**）；`projectGraph` offset 1k `p95=21.353` vs `780.557 ms`（**提速 36.6x**）；邻域查询 `p95=8.344` vs `776.884 ms`（**提速 93.1x**）；FTS5 重建 `3,336.98` vs `1,961.58 ms`；库大小 **`220.18` vs `288.36 MB`（缩小 23.6%）**；进程 RSS **`893.21` vs `1,235.36 MB`（减少 27.7%）**。
+- **100k `EXPLAIN QUERY PLAN` 结果**：验证了 `sqlite_autoindex_nmg_memories_1`、`nmg_memories_by_event_time`（`projectGraph` 按时间排序无需 `TEMP B-TREE FOR ORDER BY`）、`nmg_memory_evidence`／`nmg_memory_markers` 主键、`nmg_memories_by_scope_state`、`nmg_memory_relations_edge_source` 与覆盖索引 `nmg_sources_by_session_msg` 均走索引检索，无意外全表扫描与逐条 N+1 查询。
+
 ## 后续实验记录模板
 
 后续新增计算图算子、子图配方或参数搜索实验时，可按以下结构直接追加在本文件末尾：

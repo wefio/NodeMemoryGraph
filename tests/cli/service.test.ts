@@ -1460,14 +1460,13 @@ test("CLI writes pass through the governed memory admission policy", async () =>
     try {
       const event = reader
         .prepare(
-          "SELECT payload FROM nmg_memory_entities WHERE kind='writeEvent' AND json_extract(payload, '$.policyReason')=?",
+          "SELECT decision, session_id AS sessionId, memory_id AS memoryId FROM nmg_write_events WHERE policy_reason=?",
         )
         .get("coordination_state");
       assert.ok(event);
-      const value = JSON.parse(String(event.payload));
-      assert.equal(value.decision, "rejected");
-      assert.equal(value.sessionId, "sess-write-policy");
-      assert.equal(value.memoryId, null);
+      assert.equal(event.decision, "rejected");
+      assert.equal(event.sessionId, "sess-write-policy");
+      assert.equal(event.memoryId, null);
     } finally {
       reader.close();
     }

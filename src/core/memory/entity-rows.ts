@@ -1,7 +1,5 @@
 import { serializeScope } from "../scope.ts";
 import { normalizeStatement } from "../memory-normalization.ts";
-import { recallTriggersFromMarkers } from "../recall-triggers.ts";
-import { CANONICAL_EVENT_TIME_GLOB } from "../event-time.ts";
 import { MAX_MEMORY_COMMIT_ENTITIES, sessionScopedEntity } from "./backend.ts";
 import type {
   MemoryCommitReceipt,
@@ -68,6 +66,9 @@ export function entityRow(entity: MemoryEntity): EntityRow {
   } else if (entity.kind === "edge") {
     row.source = entity.value.sourceNodeId;
     row.target = entity.value.targetNodeId;
+  } else if (entity.kind === "memoryRelation") {
+    row.source = entity.value.sourceId;
+    row.target = entity.value.targetId;
   } else if (entity.kind === "history") {
     row.name = entity.value.sourceMessageId ?? "";
   } else if (entity.kind === "tessera") {
@@ -77,13 +78,6 @@ export function entityRow(entity: MemoryEntity): EntityRow {
   }
   if (entity.kind === "claimPosterior") row.target = entity.value.posterior.memoryId;
   return row;
-}
-
-export function lexicalMemoryText(
-  memory: Extract<MemoryEntity, { kind: "memory" }>["value"],
-): string {
-  if (memory.storageState) return "";
-  return [memory.statement, ...recallTriggersFromMarkers(memory.markers)].join(" ");
 }
 
 export function receiptRow(receipt: MemoryCommitReceipt): EntityRow {
@@ -158,39 +152,6 @@ export function queryBounds(query: MemoryEntityQuery): { limit: number; offset: 
     throw new Error("Read limit must be an integer from 1 to 512");
   if (!Number.isSafeInteger(offset) || offset < 0) throw new Error("Invalid read offset");
   return { limit, offset };
-}
-
-/** Older portable history rows projected the source message ID only in the payload. */
-export const SQLITE_HISTORY_SOURCE =
-  "coalesce(nullif(name, ''), json_extract(payload, '$.sourceMessageId'))";
-
-/** Filter the SQLite candidate pool before FTS or vector ranking applies its limit. */
-export function sqliteQueryWhere(query: MemoryEntityQuery): string {
-  const source = query.kind === "history" ? query.sourceMessageId : undefined;
-  const clauses =
-    source === undefined
-      ? [queryWhere(query)]
-      : [
-          queryWhere({ ...query, sourceMessageId: undefined }),
-          `${SQLITE_HISTORY_SOURCE} = ${sqlLiteral(source)}`,
-        ];
-  if (query.supersedesId)
-    clauses.push(`json_extract(payload, '$.supersedesId') = ${sqlLiteral(query.supersedesId)}`);
-  if (query.consolidatedFrom)
-    clauses.push(`EXISTS (
-    SELECT 1 FROM json_each(json_extract(payload, '$.markers'))
-    WHERE json_extract(value, '$.kind')='consolidated_from_stg'
-      AND json_extract(value, '$.attributes.sourceMemoryId')=${sqlLiteral(query.consolidatedFrom)}
-  )`);
-  if (query.eventTimeFrom)
-    clauses.push(`json_extract(payload, '$.eventTime') >= ${sqlLiteral(query.eventTimeFrom)}`);
-  if (query.eventTimeTo)
-    clauses.push(`json_extract(payload, '$.eventTime') <= ${sqlLiteral(query.eventTimeTo)}`);
-  if (query.eventTimeFrom || query.eventTimeTo)
-    clauses.push(
-      `json_extract(payload, '$.eventTime') GLOB ${sqlLiteral(CANONICAL_EVENT_TIME_GLOB)}`,
-    );
-  return clauses.join(" AND ");
 }
 
 export function validateCommit(

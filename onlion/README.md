@@ -75,6 +75,38 @@ due-today reminders; single-clause queries return both full `top_k` `data` and
 the NMG renderer's `rendered` text. The HTTP listener and daemon
 sessions use separate memory namespaces.
 
+### Configuration Reference
+
+Optional fields in `nmg-http.json`:
+
+| Field                     | Type & Default           | Purpose                                                                                |
+| ------------------------- | ------------------------ | -------------------------------------------------------------------------------------- |
+| `databasePath`            | `string` (required)      | SQLite database path (relative to the config file).                                    |
+| `host`                    | `string` (`"127.0.0.1"`) | Listener bind address; non-loopback requires `apiKeyEnv`.                              |
+| `port`                    | `integer` (`8787`)       | TCP port (`0..65535`; `0` lets the OS pick an ephemeral port).                         |
+| `apiKeyEnv`               | `string` (unset)         | Env var holding the Bearer token required by `/add` and `/search`.                     |
+| `defaultTopK`             | `integer` (`20`)         | Default `top_k` when omitted on `/search` (`1..100`).                                  |
+| `maxRequestBytes`         | `integer` (`50331648`)   | Maximum HTTP JSON body size in bytes (`48 MiB`).                                       |
+| `searchPreviewCodePoints` | `integer` (`240`)        | Per-record preview cap (`0..100000`; `0` disables clipping).                           |
+| `searchMaxCharacters`     | `integer` (`5500`)       | Explicit search page character budget (`256..1000000`).                                |
+| `preprocessMessages`      | `boolean` (`false`)      | Enable deterministic `forget_directive`, preference extraction, and user profile view. |
+| `sortResultsByTime`       | `boolean` (`false`)      | Sort ranked explicit-page results chronologically before rendering `rendered`.         |
+
+Embedding & sub-chunk environment variables (`NMG_EMBED_*`):
+
+| Variable                      | Default                             | Purpose                                                                                                                                                                 |
+| ----------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NMG_EMBED_PROVIDER`          | inferred (`openai` if base URL set) | Provider family: `openai`, `gemini`, `jina`, or `cloudflare`.                                                                                                           |
+| `NMG_EMBED_BASE_URL`          | provider default                    | OpenAI-compatible embeddings base URL.                                                                                                                                  |
+| `NMG_EMBED_API_KEY`           | unset                               | Provider API key.                                                                                                                                                       |
+| `NMG_EMBED_MODEL`             | provider default                    | Embedding model ID (also selects vector table index ID).                                                                                                                |
+| `NMG_EMBED_PROFILE`           | auto (`bge-en` / `qwen3`)           | Query/document prompt profile (`bge-en`, `qwen3`, `plain`).                                                                                                             |
+| `NMG_EMBED_CHUNK_CHARS`       | `2000`                              | Geometric blind-spot window size in chars (`128..16384`; `0` disables). Drops window 0 (covered by the primary vector) and blends sub-chunks via `0.8·MaxP + 0.2·AvgP`. |
+| `NMG_EMBED_BATCH_SIZE`        | `32`                                | Inputs per embedding HTTP request.                                                                                                                                      |
+| `NMG_EMBED_CHUNK_CONCURRENCY` | `4`                                 | Concurrent embedding requests (use `1` for single-threaded local servers).                                                                                              |
+| `NMG_EMBED_BACKFILL_LIMIT`    | `32`                                | Max pending memories backfilled per `/add` or `/search` call (`1..1024`).                                                                                               |
+| `NMG_EMBED_TIMEOUT_MS`        | provider default                    | Per-request embedding HTTP timeout in milliseconds.                                                                                                                     |
+
 ## Local deployment
 
 Use this path to debug the Cloudflare Worker and object storage adapter locally.

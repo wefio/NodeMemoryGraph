@@ -196,9 +196,7 @@ test("tessera simhash: legacy rows without a fingerprint are backfilled by the f
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(join(dirname(projectDir), "nmg.sqlite"));
     try {
-      db.prepare(
-        "UPDATE nmg_memory_entities SET payload=json_remove(payload, '$.fileSimhash') WHERE kind='tessera'",
-      ).run();
+      db.prepare("UPDATE nmg_tesserae SET file_simhash=NULL").run();
     } finally {
       db.close();
     }
@@ -263,9 +261,7 @@ test("tessera simhash: backfill skips files that are unreadable, stamping nothin
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(join(dirname(projectDir), "nmg.sqlite"));
     try {
-      db.prepare(
-        "UPDATE nmg_memory_entities SET payload=json_remove(payload, '$.fileSimhash') WHERE kind='tessera'",
-      ).run();
+      db.prepare("UPDATE nmg_tesserae SET file_simhash=NULL").run();
     } finally {
       db.close();
     }
@@ -347,9 +343,7 @@ test("tessera fts: rows missing from the fts index are rebuilt and then backfill
           check.prepare("SELECT COUNT(*) AS n FROM nmg_memory_tessera_fts").get() as { n: number }
         ).n;
         const content = (
-          check
-            .prepare("SELECT COUNT(*) AS n FROM nmg_memory_entities WHERE kind='tessera'")
-            .get() as { n: number }
+          check.prepare("SELECT COUNT(*) AS n FROM nmg_tesserae").get() as { n: number }
         ).n;
         assert.equal(docsize, content, "fts index converges to the content table");
       } finally {

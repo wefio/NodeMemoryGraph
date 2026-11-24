@@ -189,6 +189,29 @@ export type NodeRelationType =
   | "supports"
   | "supersedes";
 
+export interface MemoryRelationRecord {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  sourceKind: "memory" | "node";
+  targetKind: "memory" | "node";
+  relationType: NodeRelationType;
+  weight: number;
+  status: "consolidated" | "demoted";
+  direction: "both" | "source->target" | "target->source";
+  origin: "explicit" | "supersedes" | "related" | "node_edge";
+  createdAt: string;
+}
+
+export interface LinkMemoriesInput {
+  sourceMemoryId: string;
+  targetMemoryId: string;
+  type: NodeRelationType;
+  weight?: number;
+  direction?: "both" | "source->target" | "target->source";
+  sessionId?: string;
+}
+
 export interface NodeRelation {
   id: string;
   sourceNodeId: string;
@@ -846,7 +869,15 @@ export interface MemorySearchResult {
   path?: EdgePathStep[];
   /** Provenance of a result in an explicit memory neighborhood. */
   neighborhood?:
-    "previous_turn" | "next_turn" | "due_today" | "graph" | "source_group" | "same_node";
+    | "previous_turn"
+    | "next_turn"
+    | "due_today"
+    | "graph"
+    | "source_group"
+    | "same_node"
+    | "memory_relation"
+    | "same_state"
+    | "same_event_day";
   /** Query terms that literally appear in the candidate (lexical matches).
    *  Empty for pure-semantic/route recalls. */
   hitTerms?: string[];
