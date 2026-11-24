@@ -10,7 +10,8 @@ import { renderRememberSurface } from "./agent-surface.ts";
 import { supportedRememberActions } from "./tool-contract.ts";
 
 const prompts = loadPrompts();
-const string = (description?: string) => ({ type: "string", description });
+const string = (description?: string) =>
+  description === undefined ? { type: "string" } : { type: "string", description };
 const enumString = (values: readonly string[], description?: string) => ({
   ...string(description),
   enum: [...values],

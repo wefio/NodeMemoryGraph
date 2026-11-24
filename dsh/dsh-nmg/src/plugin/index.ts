@@ -24,7 +24,7 @@ import { ADAPTER_CAPABILITY_CATALOG } from '../../../../src/integration/adapter-
 // and `sandboxPolicy` are bound in composition.
 
 import { readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { connect } from 'node:net'
 import type { Context } from '@deepseek-ai/cordis'
@@ -82,7 +82,7 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
     (process.env.NMG_PROJECT_DIR && process.env.NMG_PROJECT_DIR.trim()) ||
     (sandboxPolicy && typeof sandboxPolicy.workspaceRoot === 'string' && sandboxPolicy.workspaceRoot) ||
     'C:\\Documents\\GitHub\\NodeMemoryGraph'
-  const binPath = workspaceRoot.replace(/[\\/]+$/, '') + '\\bin\\nmg.mjs'
+  const binPath = join(workspaceRoot, 'bin', 'nmg.mjs')
 
   // 裸名 'node' 只有在 PATH 正确时才解析得出来。Windows 上把 User 作用域的变量
   // （NVM_HOME / NVM_SYMLINK）写进 Machine PATH，进程拿到的就是没展开的字面量
@@ -265,7 +265,7 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
     // 把 node 自己所在目录顶到 PATH 最前，整条链就都对了。
     const nodeDir = node.includes('/') || node.includes('\\') ? node.slice(0, Math.max(node.lastIndexOf('/'), node.lastIndexOf('\\'))) : ''
     const env: Record<string, string> = {}
-    if (nodeDir) env.PATH = nodeDir + ';' + (process.env.PATH ?? '')
+    if (nodeDir) env.PATH = nodeDir + delimiter + (process.env.PATH ?? '')
     // Electron 宿主：execPath 就是 Electron 本体，必须显式声明按 node 运行。
     if (node === process.execPath && process.versions.electron) env.ELECTRON_RUN_AS_NODE = '1'
     const handle = subprocess.spawn({
