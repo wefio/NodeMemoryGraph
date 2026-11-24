@@ -32,7 +32,7 @@ export default {
       sandboxPolicy && typeof sandboxPolicy.workspaceRoot === 'string' && sandboxPolicy.workspaceRoot
         ? sandboxPolicy.workspaceRoot
         : 'C:\\Documents\\GitHub\\NodeMemoryGraph'
-    const binPath = workspaceRoot.replace(/[\\/]+$/, '') + '\\bin\\nmg.mjs'
+    const binPath = join(workspaceRoot, 'bin', 'nmg.mjs')
 
     let nodePromise
     function resolveNode() {
