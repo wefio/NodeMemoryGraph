@@ -134,6 +134,34 @@
   - **100,000 条**：批量写入 `4,200` vs `6,258 ops/s`（完整 `engine.rememberMany(100)` 抽样 `p50=57.202 ms`、`p95=61.135 ms`）；单条读取 `p95=0.299` vs `0.152 ms`；50-ID 批量读 `p95=2.226` vs `0.787 ms`；多条件筛选 `p95=121.606` vs `499.521 ms`（**提速 4.1x**）；`projectGraph` offset 0 `p95=24.633` vs `512.026 ms`（**提速 20.8x**）；`projectGraph` offset 1k `p95=21.353` vs `780.557 ms`（**提速 36.6x**）；邻域查询 `p95=8.344` vs `776.884 ms`（**提速 93.1x**）；FTS5 重建 `3,336.98` vs `1,961.58 ms`；库大小 **`220.18` vs `288.36 MB`（缩小 23.6%）**；进程 RSS **`893.21` vs `1,235.36 MB`（减少 27.7%）**。
 - **100k `EXPLAIN QUERY PLAN` 结果**：验证了 `sqlite_autoindex_nmg_memories_1`、`nmg_memories_by_event_time`（`projectGraph` 按时间排序无需 `TEMP B-TREE FOR ORDER BY`）、`nmg_memory_evidence`／`nmg_memory_markers` 主键、`nmg_memories_by_scope_state`、`nmg_memory_relations_edge_source` 与覆盖索引 `nmg_sources_by_session_msg` 均走索引检索，无意外全表扫描与逐条 N+1 查询。
 
+## 案例 7：统一记忆计算引擎、物理规划器与生产流程计算图接管（2026-11-24）
+
+- **架构演进差异**：完成逻辑契约与保守能力声明（`compute-contracts.ts`）、逻辑–物理编译器（`compute-planner.ts`，支持 CSE、DCE、契约绑定、`relational_query` 下推改写、线性 `fused_chain` 融合、资源冲突波次调度与引用计数表）、9 项运行时安全修复与零哈希快路径（`compute-graph.ts`）、清理废弃 `rank-fusion.ts`，并将 `MemoryEngine` 与 `HttpMemoryService` 全量检索、读取、投影、写入预处理与变更规划迁移至生产计算图（`search-compute-graph.ts`、`view-compute-graphs.ts`、`write-compute-graphs.ts`、`http-write-preprocess.ts`、`http-profile-view.ts`）。
+- **框架开销与粒度基准实测（`bench-compute-engine`，Node `v26.13.0`，2,000 次采样）**：
+  - 直接 JS 调用 `p50=0.10 us`；单节点同步零哈希快路径 `p50=0.40 us`（`p95=0.70 us`）；单节点异步执行 `p50=1.00 us`。
+  - 5 节点线性链：无缓存零哈希快路径 `p50=0.80 us`（`p95=1.30 us`），对比开启缓存未命中 `p50=9.50 us`／命中 `p50=7.90 us`。
+  - 等工作量 20 步划分粒度：`1` 粗节点 `p50=0.40 us`、`5` 节点 `p50=0.70 us`、`20` 细节点 `p50=2.00 us`，开启 `enableLinearFusion` 编译为 `fused_chain` 后降至 **`p50=1.10 us`（-45%）**。
+  - 10 阶段 2,000 维 `Float64Array` 流水线经引用计数即时释放，峰值活跃输出槽位稳定在 **`3 / 11`（堆增量 `+532.13 KB`）**。
+  - 100 题 × 8 配方实验扫描（`1,500` 命中 / `2,600` 执行，命中率 `36.6%`）：未冻结上下文因安全序列化签名耗时 `627.49 ms`（对比无缓存 `590.49 ms`、`0.94x`）；使用 `Object.freeze()` 固定候选并命中 `WeakMap` 签名缓存后总耗时降至 **`286.11 ms`（2.06x 加速）**。
+- **生产延迟、检索一致性与 7 项架构验证**：
+  - 2,000 条 SQLite v2 生产读写：`rememberMany(100)` `p50=69.988 ms`（`1,527 rows/s`），`get(50)` `p50=1.459 ms`，词法 `search(20)` `p50=12.746 ms`（`p95=17.949 ms`），混合 `search(20)` `p50=25.091 ms`（`p95=33.691 ms`）对比 `rerankGraph: false` `p50=22.592 ms`（分段重排图开销约 `+2.5 ms`），32 并发混合检索总耗时 `877.71 ms`（`36.5 qps`）。
+  - 复测 130 个迁移冻结库 / 1,867 题检索一致性：`J1_BM25F_R3_TEMPORAL` 全部 16 项指标与基线完全一致（`0.0000` 差异：`R@1=29.08%`、`All@1=35.36%`、`R@20=65.68%`、`All@20=65.32%`、`R@100=84.44%`、`MRR@20=0.5980`）。
+  - 在不改动 `engine.ts` 与 SQLite 表结构的前提下，在 [`compute-architecture-guardrails.test.ts`](../../../tests/core/compute-architecture-guardrails.test.ts) 中实测通过全部 7 项架构替换与演化任务。
+
+## 案例 8：增量 BM25+QTF、散文数字 Trigram 收紧与 176 图帕累托合入（2026-11-24）
+
+- **图结构与通道改动（`replaceGraphNode` / `surfaceAnchors`）**：
+  - 新增按查询动态重算 `N` / `avgdl` / `df` IDF 的增量倒排算子 `incremental_bm25_score`（[`incremental-bm25.ts`](../../../src/core/memory/incremental-bm25.ts)），支持标准 BM25（`k1=1.5, b=0.75`）、BM25L、BM25+、ATIRE BM25 与 BM25+QTF（`k3=8.0`），并配备 `STEM_CACHE`、纯 ASCII 跳过 CJK 扫描以及 `WeakMap` 候选词元缓存。
+  - 将 [`piecewise-rerank.ts`](../../../src/core/memory/piecewise-rerank.ts) 中 `DEFAULT_PIECEWISE_RERANK_GRAPH` 的默认头部升级为 `HEAD_QTF_R3_SUBGRAPH`（`bm25_qtf`, `weight: 0.1`），同时保留 `HEAD_BM25F_R3_SUBGRAPH` 导出以供对比与显式配置。
+  - 收紧 [`search-ranking.ts`](../../../src/core/store/search-ranking.ts) 中的 `surfaceAnchors`，使散文裸数字、序数词、年代缩写与 12 小时制时间词不再触发 `surface_fts` trigram 噪声，同时完整保留引号短语、路径、带点号版本、字母数字混合标识、错误码、驼峰符号及 3 字及以上中日韩连续片段。
+- **176 组计算图 5 基准网格扫描与缓存复用（Track A 纯词法 56 组 + Track B 全链路混合 120 组，2,639 题 / 5,365 金标，总耗时 `992.13s`）**：
+  - `ComputeMemoCache` 在 Track A 达到 **76.9%** 命中率（`527,800` hits / `158,340` execs），在 Track B 达到 **79.2%** 命中率（`1,955,499` hits / `514,605` execs）。
+  - Track A `paretoQuality8` 全部由跨引擎分段拼包揽（代表配方 `LPW_X_l1_porter20_fqtf100`：`[0..1] inc_bm25l -> [1..20] fts5_porter -> [20..100] RRF(fts5_bm25f, inc_bm25_qtf)`，`MRR` `0.4799 -> 0.4853`，`nDCG@20` `0.4713 -> 0.4745`）；零 SQLite 的纯内存 `LPW_INC_L1_k1225_QTF100` 在 **`0.39ms`** 下取得 `MRR=0.4801`。
+  - Track B `pareto2D_nDCG20_Latency` 沿 `HYB_FTS5_HEAD_NONE`（`2.70ms`, `nDCG@20=0.5386`）→ `HYB_PROD_FTS5_BM25F`（`9.69ms`, `0.5391`）→ `GPW_FTS_qtfOnly_006_h4_mdef_m20_t_def`（`16.50ms`, `R@5=46.77`, `0.5392`）→ `GPW_DUAL_fts5_porter_qtf5_m_def_t_def`（`16.78ms`, `MRR=0.5468`, `nDCG@20=0.5402`, `R@100=82.98`）→ `GPW_DUAL_fts5_porter_qtf5_m_qtf_006_t_def`（`21.96ms`, `R@20=63.65`, `nDCG@20=0.5404`）展开。
+- **生产双赢方案 5 基准对照实测（`67.80s`，真实独立链路计时）**：
+  - `PREV_PROD_BM25F`（旧 `surfaceAnchors` + `HEAD_BM25F_R3_SUBGRAPH`）：`R@1=24.09`、`R@5=46.50`、`R@10=55.91`、`R@20=63.50`、`R@50=74.02`、`R@100=82.96`、`Any@5=65.54`、`Any@10=72.47`、`Any@20=79.87`、`MRR=0.5450`、`nDCG@10=0.5157`、`nDCG@20=0.5391`，`avg=11.44ms`（`p95=16.99ms`）。
+  - `NEW_PROD_WINWIN`（收紧 `surfaceAnchors` + `HEAD_QTF_R3_SUBGRAPH`）：`R@1=24.18`、`R@5=46.49`、`R@10=55.91`、`R@20=63.54`、`R@50=74.02`、`R@100=82.96`、`Any@5=65.43`、`Any@10=72.47`、`Any@20=79.87`、**`MRR=0.5461`**、**`nDCG@10=0.5164`**、**`nDCG@20=0.5398`**，`avg=11.78ms`（`p95=17.70ms`，其中 BEAM 因减少散文数字 trigram 扫描从 `23.63ms` 降至 `20.30ms`）。
+
 ## 后续实验记录模板
 
 后续新增计算图算子、子图配方或参数搜索实验时，可按以下结构直接追加在本文件末尾：

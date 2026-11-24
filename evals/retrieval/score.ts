@@ -102,6 +102,12 @@ export interface AggregateMetrics {
   golds: number;
   /** Fraction of gold evidences hit within rank k. */
   recallAt: Record<string, number>;
+  /** Question-level fraction with >= 1 gold hit within rank k. */
+  anyAt: Record<string, number>;
+  /** Question-level fraction with all golds hit within rank k. */
+  allAt: Record<string, number>;
+  /** Mean binary nDCG@k over distinct gold first-hit ranks (deduplicated via max(rank_j, j+1)). */
+  ndcgAt: Record<string, number>;
   /** Fraction of questions with at least one gold hit within the full window. */
   anyEvidenceRate: number;
   /** Fraction of questions with every gold hit within the full window. */
@@ -140,6 +146,9 @@ export function aggregate(
   let legacyAll = 0;
   let legacyHits = 0;
   const hitCountAt = new Map(ks.map((k) => [k, 0]));
+  const anyHitAt = new Map(ks.map((k) => [k, 0]));
+  const allHitAt = new Map(ks.map((k) => [k, 0]));
+  const ndcgSumAt = new Map(ks.map((k) => [k, 0]));
   const latencies: number[] = [];
   let contextCharsTotal = 0;
   let questionsWithGolds = 0;
@@ -148,30 +157,16 @@ export function aggregate(
     if (question.goldRanks.length === 0) continue;
     questionsWithGolds += 1;
     golds += question.goldRanks.length;
-    let firstRank: number | null = null;
-    let every = true;
-    let everyK = true;
-    for (const [index, fullRank] of question.goldRanks.entries()) {
-      const rank = question.rankedGoldRanks[index] ?? null;
-      if (fullRank === null) every = false;
-      if (rank === null) {
-        everyK = false;
-        continue;
-      }
-      if (rank > maxK) everyK = false;
-      for (const k of ks) {
-        if (rank <= k) hitCountAt.set(k, hitCountAt.get(k)! + 1);
-      }
-      rankSumReciprocal += 1 / rank;
-      if (firstRank === null || rank < firstRank) firstRank = rank;
+    const summary = summarizeQuestionRanks(question, ks, hitCountAt);
+    rankSumReciprocal += summary.rankSumReciprocal;
+    if (summary.anyFull) anyHit += 1;
+    if (summary.allFull) allHit += 1;
+    if (summary.firstRank !== null) {
+      questionReciprocalSum += 1 / summary.firstRank;
+      if (summary.firstRank <= maxK) anyHitK += 1;
     }
-    if (question.goldRanks.some((rank) => rank !== null)) anyHit += 1;
-    if (firstRank !== null) {
-      if (firstRank <= maxK) anyHitK += 1;
-      questionReciprocalSum += 1 / firstRank;
-    }
-    if (every) allHit += 1;
-    if (everyK) allHitK += 1;
+    if (summary.maxRank !== null && summary.maxRank <= maxK) allHitK += 1;
+    accumulateCutoffRates(ks, question.goldRanks.length, summary, anyHitAt, allHitAt, ndcgSumAt);
     const legacyEvery = question.legacyHits.length > 0 && question.legacyHits.every(Boolean);
     if (question.legacyHits.some(Boolean)) legacyAny += 1;
     if (legacyEvery) legacyAll += 1;
@@ -182,14 +177,14 @@ export function aggregate(
     }
   }
 
-  const recallAt: Record<string, number> = {};
-  for (const k of ks) recallAt[String(k)] = ratio(hitCountAt.get(k)!, golds);
-
   return {
     questions: questions.length,
     questionsWithGolds,
     golds,
-    recallAt,
+    recallAt: ratiosByK(ks, hitCountAt, golds),
+    anyAt: ratiosByK(ks, anyHitAt, questionsWithGolds),
+    allAt: ratiosByK(ks, allHitAt, questionsWithGolds),
+    ndcgAt: ratiosByK(ks, ndcgSumAt, questionsWithGolds),
     anyEvidenceRate: ratio(anyHit, questionsWithGolds),
     allEvidenceRate: ratio(allHit, questionsWithGolds),
     anyEvidenceAtK: ratio(anyHitK, questionsWithGolds),
@@ -211,6 +206,96 @@ export function aggregate(
       p95: percentileNearestRank(latencies, 0.95),
     },
   };
+}
+
+interface QuestionRankSummary {
+  anyFull: boolean;
+  allFull: boolean;
+  firstRank: number | null;
+  maxRank: number | null;
+  rankSumReciprocal: number;
+  sortedFiniteRanks: number[];
+}
+
+function summarizeQuestionRanks(
+  question: ScoredQuestion,
+  ks: readonly number[],
+  hitCountAt: Map<number, number>,
+): QuestionRankSummary {
+  let anyFull = false;
+  let allFull = true;
+  let everyRanked = true;
+  let firstRank: number | null = null;
+  let maxRank = 0;
+  let rankSumReciprocal = 0;
+  const sortedFiniteRanks: number[] = [];
+  for (const [index, fullRank] of question.goldRanks.entries()) {
+    if (fullRank === null) allFull = false;
+    else anyFull = true;
+    const rank = question.rankedGoldRanks[index] ?? null;
+    if (rank === null) {
+      everyRanked = false;
+      continue;
+    }
+    for (const k of ks) {
+      if (rank <= k) hitCountAt.set(k, hitCountAt.get(k)! + 1);
+    }
+    rankSumReciprocal += 1 / rank;
+    if (firstRank === null || rank < firstRank) firstRank = rank;
+    if (rank > maxRank) maxRank = rank;
+    sortedFiniteRanks.push(rank);
+  }
+  sortedFiniteRanks.sort((a, b) => a - b);
+  return {
+    anyFull,
+    allFull,
+    firstRank,
+    maxRank: everyRanked ? maxRank : null,
+    rankSumReciprocal,
+    sortedFiniteRanks,
+  };
+}
+
+function accumulateCutoffRates(
+  ks: readonly number[],
+  goldCount: number,
+  summary: QuestionRankSummary,
+  anyHitAt: Map<number, number>,
+  allHitAt: Map<number, number>,
+  ndcgSumAt: Map<number, number>,
+): void {
+  for (const k of ks) {
+    if (summary.firstRank !== null && summary.firstRank <= k) {
+      anyHitAt.set(k, anyHitAt.get(k)! + 1);
+    }
+    if (summary.maxRank !== null && summary.maxRank <= k) {
+      allHitAt.set(k, allHitAt.get(k)! + 1);
+    }
+    ndcgSumAt.set(k, ndcgSumAt.get(k)! + ndcgAtCutoff(summary.sortedFiniteRanks, goldCount, k));
+  }
+}
+
+function ndcgAtCutoff(sortedFiniteRanks: readonly number[], goldCount: number, k: number): number {
+  if (goldCount <= 0) return 0;
+  let dcg = 0;
+  for (let j = 0; j < sortedFiniteRanks.length; j += 1) {
+    const effectiveRank = Math.max(sortedFiniteRanks[j]!, j + 1);
+    if (effectiveRank <= k) dcg += 1 / Math.log2(effectiveRank + 1);
+  }
+  const idealCount = Math.min(goldCount, k);
+  let idcg = 0;
+  for (let j = 1; j <= idealCount; j += 1) idcg += 1 / Math.log2(j + 1);
+  return idcg > 0 ? dcg / idcg : 0;
+}
+
+function ratiosByK(
+  ks: readonly number[],
+  totals: ReadonlyMap<number, number>,
+  denominator: number,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const k of ks) out[String(k)] = ratio(totals.get(k) ?? 0, denominator);
+  return out;
 }
 
 /** Aggregate per category, preserving first-seen order, plus an "overall" key. */

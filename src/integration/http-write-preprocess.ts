@@ -1,3 +1,9 @@
+import {
+  ComputeRegistry,
+  INPUT_NODE_ID,
+  evaluateSyncComputeGraph,
+  type ComputeGraphSpec,
+} from "../core/compute-graph.ts";
 import { MAX_RECALL_TRIGGER_CHARACTERS } from "../core/recall-triggers.ts";
 import type { MemoryMarker } from "../core/types.ts";
 
@@ -103,6 +109,102 @@ function applyPreferenceMatches(
   return found;
 }
 
+interface WritePreprocessInput {
+  readonly role: "user" | "assistant";
+  readonly text: string;
+}
+
+interface ForgetStageState extends WritePreprocessInput {
+  readonly active: boolean;
+  readonly hasForget: boolean;
+  readonly markers: MemoryMarker[];
+  readonly triggers: string[];
+  readonly seen: Set<string>;
+}
+
+interface PreferenceStageState extends ForgetStageState {
+  readonly hasPref: boolean;
+}
+
+function buildWritePreprocessRegistry(): ComputeRegistry<unknown> {
+  const registry = new ComputeRegistry<unknown>();
+  const pureMeta = {
+    version: "1.0.0",
+    effect: "pure" as const,
+    contract: "memory.write_preprocess",
+    cacheable: true,
+    parallelSafe: true,
+    resources: { execution: "sync" as const, backend: "js" as const },
+  };
+
+  registry.register(
+    "extract_forget_directive",
+    (inputs): ForgetStageState => {
+      const req = inputs.default as WritePreprocessInput;
+      if (req.role !== "user" || !req.text.trim()) {
+        return {
+          ...req,
+          active: false,
+          hasForget: false,
+          markers: [],
+          triggers: [],
+          seen: new Set(),
+        };
+      }
+      const markers: MemoryMarker[] = [];
+      const triggers: string[] = [];
+      const seen = new Set<string>();
+      const hasForget = applyForgetMatch(req.text, markers, triggers, seen);
+      return { ...req, active: true, hasForget, markers, triggers, seen };
+    },
+    pureMeta,
+  );
+
+  registry.register(
+    "extract_preference_signals",
+    (inputs): PreferenceStageState => {
+      const state = inputs.default as ForgetStageState;
+      if (!state.active) return { ...state, hasPref: false };
+      const markers = [...state.markers];
+      const triggers = [...state.triggers];
+      const seen = new Set(state.seen);
+      const hasPref = applyPreferenceMatches(state.text, state.hasForget, markers, triggers, seen);
+      return { ...state, markers, triggers, seen, hasPref };
+    },
+    pureMeta,
+  );
+
+  registry.register(
+    "classify_turn_type",
+    (inputs): PreprocessedHttpMessage => {
+      const state = inputs.default as PreferenceStageState;
+      if (!state.active) return { memoryType: "event", markers: [], recallTriggers: [] };
+      const memoryType = state.hasForget ? "constraint" : state.hasPref ? "preference" : "event";
+      return { memoryType, markers: state.markers, recallTriggers: state.triggers };
+    },
+    pureMeta,
+  );
+
+  return registry;
+}
+
+export const HTTP_WRITE_PREPROCESS_REGISTRY = buildWritePreprocessRegistry();
+
+export const DEFAULT_HTTP_WRITE_PREPROCESS_GRAPH: ComputeGraphSpec = {
+  id: "http-write-preprocess-v1",
+  nodes: [
+    { id: "forget", op: "extract_forget_directive", contract: "memory.write_preprocess" },
+    { id: "prefs", op: "extract_preference_signals", contract: "memory.write_preprocess" },
+    { id: "classify", op: "classify_turn_type", contract: "memory.write_preprocess" },
+  ],
+  edges: [
+    { from: INPUT_NODE_ID, to: "forget" },
+    { from: "forget", to: "prefs" },
+    { from: "prefs", to: "classify" },
+  ],
+  output: "classify",
+};
+
 /**
  * Lightweight deterministic write preprocessor for HTTP conversation turns.
  * Extracts explicit forget directives, same-turn replacements, and first-person preferences.
@@ -110,17 +212,12 @@ function applyPreferenceMatches(
 export function preprocessHttpMessage(
   role: "user" | "assistant",
   text: string,
+  graph: ComputeGraphSpec = DEFAULT_HTTP_WRITE_PREPROCESS_GRAPH,
 ): PreprocessedHttpMessage {
-  if (role !== "user" || !text.trim()) {
-    return { memoryType: "event", markers: [], recallTriggers: [] };
-  }
-  const triggers: string[] = [];
-  const seen = new Set<string>();
-  const markers: MemoryMarker[] = [];
-
-  const hasForget = applyForgetMatch(text, markers, triggers, seen);
-  const hasPref = applyPreferenceMatches(text, hasForget, markers, triggers, seen);
-  const memoryType = hasForget ? "constraint" : hasPref ? "preference" : "event";
-
-  return { memoryType, markers, recallTriggers: triggers };
+  return evaluateSyncComputeGraph<WritePreprocessInput, PreprocessedHttpMessage, unknown>(
+    graph,
+    HTTP_WRITE_PREPROCESS_REGISTRY,
+    { role, text },
+    {},
+  );
 }

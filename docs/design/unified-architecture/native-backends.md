@@ -8,7 +8,9 @@
 ## Application boundary
 
 `src/core/memory/engine.ts` owns admission, evidence, normalized duplicate detection,
-state replacement, session visibility, graph links and bounded retrieval. It uses
+state replacement, session visibility, graph links and bounded retrieval, delegating
+search, view projection, and change planning to composable graphs defined in the
+[compute engine design](compute-engine.md). It uses
 the asynchronous `MemoryBackend` domain port. Transport, credentials and local
 coordination stay outside that engine. The native backend dynamically loads
 `@lancedb/lancedb` 0.41.0; the SQLite backend uses `node:sqlite`.

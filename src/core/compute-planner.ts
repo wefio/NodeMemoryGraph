@@ -1,0 +1,628 @@
+import {
+  INPUT_NODE_ID,
+  combineChildCapabilities,
+  resolveCapabilities,
+  type ComputeEdgeSpec,
+  type ComputeGraphSpec,
+  type ComputeNodeSpec,
+  type ComputeOperatorFn,
+  type ComputeOperatorLookup,
+  type ComputeResourceProfile,
+  type ResolvedOperatorCapabilities,
+  type StructuredComputeExpr,
+} from "./compute-contracts.ts";
+
+export interface PhysicalPlanOptions {
+  readonly enableDce?: boolean;
+  readonly enableCse?: boolean;
+  readonly enableLinearFusion?: boolean;
+  readonly backendTarget?: "auto" | "sqlite" | "portable";
+  readonly contractBindings?: Readonly<Record<string, string>>;
+}
+
+export interface PhysicalNodePlan {
+  readonly id: string;
+  readonly op: string;
+  readonly params: Readonly<Record<string, unknown>>;
+  readonly incoming: readonly ComputeEdgeSpec[];
+  readonly capabilities: ResolvedOperatorCapabilities;
+  readonly kind: "operator" | "subgraph" | "inline_fn" | "lowered_expression" | "fused_chain";
+  readonly inlineFn?: ComputeOperatorFn<unknown>;
+  readonly expression?: StructuredComputeExpr;
+  readonly subgraphPlan?: PhysicalExecutionPlan;
+  readonly fusedSteps?: readonly PhysicalNodePlan[];
+  readonly loweredTarget?: "sqlite_pushdown" | "portable_scan";
+  readonly contract?: string;
+}
+
+export interface PhysicalWaveGroup {
+  readonly parallelGroups: readonly (readonly PhysicalNodePlan[])[];
+  readonly serialNodes: readonly PhysicalNodePlan[];
+}
+
+export interface PhysicalExecutionPlan {
+  readonly logicalGraphId: string;
+  readonly outputNodeId: string;
+  readonly order: readonly PhysicalNodePlan[];
+  readonly waves: readonly PhysicalWaveGroup[];
+  readonly consumerCounts: ReadonlyMap<string, number>;
+  readonly eliminatedNodeIds: readonly string[];
+  readonly cseMergedNodeIds: ReadonlyMap<string, string>;
+  readonly loweredNodes: ReadonlyMap<string, string>;
+  readonly hasUncacheableNode: boolean;
+}
+
+interface WorkingGraph {
+  readonly nodes: ComputeNodeSpec[];
+  readonly edges: ComputeEdgeSpec[];
+  readonly output: string;
+  readonly cseMergedNodeIds: Map<string, string>;
+  readonly eliminatedNodeIds: string[];
+  readonly loweredNodes: Map<string, string>;
+}
+
+const PLAN_CACHE = new WeakMap<ComputeGraphSpec, Map<string, PhysicalExecutionPlan>>();
+
+function canonicalParamValue(value: unknown): string {
+  if (typeof value === "function") return "[fn]";
+  if (Array.isArray(value)) return `[${value.map(canonicalParamValue).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, item]) => `${JSON.stringify(k)}:${canonicalParamValue(item)}`);
+    return `{${entries.join(",")}}`;
+  }
+  const encoded = JSON.stringify(value);
+  return encoded === undefined ? "null" : encoded;
+}
+
+function indexNodes(nodes: readonly ComputeNodeSpec[]): Map<string, ComputeNodeSpec> {
+  const byId = new Map<string, ComputeNodeSpec>();
+  for (const node of nodes) {
+    if (!node.id || node.id === INPUT_NODE_ID) throw new Error(`Invalid node id: ${node.id}`);
+    if (byId.has(node.id)) throw new Error(`Duplicate node id: ${node.id}`);
+    byId.set(node.id, node);
+  }
+  return byId;
+}
+
+function indexAndValidateEdges(
+  specId: string,
+  nodes: readonly ComputeNodeSpec[],
+  edges: readonly ComputeEdgeSpec[],
+  nodeById: ReadonlyMap<string, ComputeNodeSpec>,
+) {
+  const incoming = new Map<string, ComputeEdgeSpec[]>();
+  const outgoing = new Map<string, string[]>();
+  const inDegree = new Map<string, number>();
+  for (const node of nodes) {
+    incoming.set(node.id, []);
+    outgoing.set(node.id, []);
+    inDegree.set(node.id, 0);
+  }
+  for (const edge of edges) {
+    if (edge.from !== INPUT_NODE_ID && !nodeById.has(edge.from)) {
+      throw new Error(`Dangling edge source '${edge.from}' in graph '${specId}'`);
+    }
+    if (!nodeById.has(edge.to)) {
+      throw new Error(`Dangling edge target '${edge.to}' in graph '${specId}'`);
+    }
+    incoming.get(edge.to)!.push(edge);
+    if (edge.from !== INPUT_NODE_ID) {
+      outgoing.get(edge.from)!.push(edge.to);
+      inDegree.set(edge.to, inDegree.get(edge.to)! + 1);
+    }
+  }
+  return { incoming, outgoing, inDegree };
+}
+
+function computeTopoOrder(
+  specId: string,
+  nodes: readonly ComputeNodeSpec[],
+  nodeById: ReadonlyMap<string, ComputeNodeSpec>,
+  outgoing: ReadonlyMap<string, readonly string[]>,
+  inDegree: Map<string, number>,
+): { order: ComputeNodeSpec[]; waves: ComputeNodeSpec[][] } {
+  let frontier = nodes.filter((node) => inDegree.get(node.id) === 0).map((node) => node.id);
+  const order: ComputeNodeSpec[] = [];
+  const waves: ComputeNodeSpec[][] = [];
+  while (frontier.length > 0) {
+    const wave: ComputeNodeSpec[] = [];
+    const next: string[] = [];
+    for (const currentId of frontier) {
+      const node = nodeById.get(currentId)!;
+      order.push(node);
+      wave.push(node);
+      for (const targetId of outgoing.get(currentId)!) {
+        const deg = inDegree.get(targetId)! - 1;
+        inDegree.set(targetId, deg);
+        if (deg === 0) next.push(targetId);
+      }
+    }
+    waves.push(wave);
+    frontier = next;
+  }
+  if (order.length !== nodes.length) {
+    throw new Error(`Compute graph '${specId}' contains a cycle`);
+  }
+  return { order, waves };
+}
+
+function resolveNodeOp<TContext>(
+  node: ComputeNodeSpec,
+  registry: ComputeOperatorLookup<TContext>,
+  options: PhysicalPlanOptions,
+): string {
+  if (node.op && node.op !== "$contract") return node.op;
+  if (!node.contract) return node.op;
+  const bound = options.contractBindings?.[node.contract] ?? registry.findByContract(node.contract);
+  if (!bound) throw new Error(`No operator bound for contract '${node.contract}'`);
+  return bound;
+}
+
+function resolveNodeCapabilities<TContext>(
+  node: ComputeNodeSpec,
+  resolvedOp: string,
+  registry: ComputeOperatorLookup<TContext>,
+  subgraphPlan?: PhysicalExecutionPlan,
+): ResolvedOperatorCapabilities {
+  if (node.subgraph && subgraphPlan) {
+    const childCaps = subgraphPlan.order.map((n) => n.capabilities);
+    const combined = combineChildCapabilities(childCaps, node.meta?.version ?? "subgraph-v1");
+    return node.sideEffect
+      ? {
+          ...combined,
+          effect: "write",
+          cacheable: false,
+          parallelSafe: false,
+          reorderable: false,
+          eliminable: false,
+        }
+      : combined;
+  }
+  if (node.fn) {
+    const base = resolveCapabilities(node.meta);
+    return node.sideEffect
+      ? {
+          ...base,
+          effect: "write",
+          cacheable: false,
+          parallelSafe: false,
+          reorderable: false,
+          eliminable: false,
+        }
+      : base;
+  }
+  const regCaps = registry.has(resolvedOp)
+    ? registry.getCapabilities(resolvedOp)
+    : resolveCapabilities(node.meta);
+  if (!node.sideEffect && !node.meta) return regCaps;
+  return resolveCapabilities({
+    ...regCaps,
+    ...(node.contract ? { contract: node.contract } : {}),
+    ...node.meta,
+    ...(node.sideEffect ? { sideEffect: true } : {}),
+  });
+}
+
+function runCsePass<TContext>(
+  specId: string,
+  nodes: readonly ComputeNodeSpec[],
+  edges: readonly ComputeEdgeSpec[],
+  output: string,
+  registry: ComputeOperatorLookup<TContext>,
+  options: PhysicalPlanOptions,
+): {
+  nodes: ComputeNodeSpec[];
+  edges: ComputeEdgeSpec[];
+  merged: Map<string, string>;
+  output: string;
+} {
+  if (options.enableCse === false) {
+    return { nodes: [...nodes], edges: [...edges], merged: new Map(), output };
+  }
+  const nodeById = indexNodes(nodes);
+  const { incoming, outgoing, inDegree } = indexAndValidateEdges(specId, nodes, edges, nodeById);
+  const { order } = computeTopoOrder(specId, nodes, nodeById, outgoing, inDegree);
+  const merged = new Map<string, string>();
+  const seenExpr = new Map<string, string>();
+
+  const rewriteSource = (src: string): string => {
+    let cur = src;
+    while (merged.has(cur)) cur = merged.get(cur)!;
+    return cur;
+  };
+
+  for (const node of order) {
+    if (node.fn || node.expression || node.subgraph) continue;
+    const op = resolveNodeOp(node, registry, options);
+    const caps = resolveNodeCapabilities(node, op, registry);
+    if (caps.effect !== "pure") continue;
+    const normEdges = incoming
+      .get(node.id)!
+      .map((e) => `${e.port ?? "default"}=${rewriteSource(e.from)}`)
+      .sort()
+      .join("&");
+    const exprKey = `${op}|${caps.version}|${canonicalParamValue(node.params ?? {})}|${normEdges}`;
+    const existing = seenExpr.get(exprKey);
+    if (existing) merged.set(node.id, existing);
+    else seenExpr.set(exprKey, node.id);
+  }
+  if (!merged.size) return { nodes: [...nodes], edges: [...edges], merged, output };
+  const keptNodes = nodes.filter((n) => !merged.has(n.id));
+  const keptEdges: ComputeEdgeSpec[] = [];
+  const edgeKeys = new Set<string>();
+  for (const edge of edges) {
+    if (merged.has(edge.to)) continue;
+    const from = rewriteSource(edge.from);
+    const k = `${from}->${edge.to}:${edge.port ?? "default"}`;
+    if (edgeKeys.has(k)) continue;
+    edgeKeys.add(k);
+    keptEdges.push({ ...edge, from });
+  }
+  return { nodes: keptNodes, edges: keptEdges, merged, output: rewriteSource(output) };
+}
+
+function runDcePass<TContext>(
+  nodes: readonly ComputeNodeSpec[],
+  edges: readonly ComputeEdgeSpec[],
+  output: string,
+  registry: ComputeOperatorLookup<TContext>,
+  options: PhysicalPlanOptions,
+): { nodes: ComputeNodeSpec[]; edges: ComputeEdgeSpec[]; eliminated: string[] } {
+  if (options.enableDce === false) {
+    return { nodes: [...nodes], edges: [...edges], eliminated: [] };
+  }
+  const incomingByNode = new Map<string, ComputeEdgeSpec[]>();
+  for (const node of nodes) incomingByNode.set(node.id, []);
+  for (const edge of edges) incomingByNode.get(edge.to)?.push(edge);
+
+  const live = new Set<string>([output]);
+  for (const node of nodes) {
+    if (node.subgraph) continue;
+    const op = resolveNodeOp(node, registry, options);
+    const caps = resolveNodeCapabilities(node, op, registry);
+    if (!caps.eliminable) live.add(node.id);
+  }
+  const queue = [...live];
+  while (queue.length > 0) {
+    const id = queue.pop()!;
+    for (const edge of incomingByNode.get(id) ?? []) {
+      if (edge.from !== INPUT_NODE_ID && !live.has(edge.from)) {
+        live.add(edge.from);
+        queue.push(edge.from);
+      }
+    }
+  }
+  const eliminated = nodes.filter((n) => !live.has(n.id)).map((n) => n.id);
+  return {
+    nodes: nodes.filter((n) => live.has(n.id)),
+    edges: edges.filter((e) => live.has(e.to) && (e.from === INPUT_NODE_ID || live.has(e.from))),
+    eliminated,
+  };
+}
+
+function allResources(p: ComputeResourceProfile): string[] {
+  return [...(p.reads ?? []), ...(p.writes ?? []), ...(p.exclusive ?? [])];
+}
+
+function anyInSet(items: readonly string[] | undefined, set: ReadonlySet<string>): boolean {
+  return items ? items.some((item) => set.has(item)) : false;
+}
+
+function resourcesConflict(a: ComputeResourceProfile, b: ComputeResourceProfile): boolean {
+  const aEx = new Set(a.exclusive ?? []);
+  const bEx = new Set(b.exclusive ?? []);
+  if (anyInSet(allResources(b), aEx) || anyInSet(allResources(a), bEx)) return true;
+  const aWrites = new Set(a.writes ?? []);
+  const bWrites = new Set(b.writes ?? []);
+  return anyInSet(b.reads, aWrites) || anyInSet(b.writes, aWrites) || anyInSet(a.reads, bWrites);
+}
+
+function partitionWave(waveNodes: readonly PhysicalNodePlan[]): PhysicalWaveGroup {
+  const parallelCandidates: PhysicalNodePlan[] = [];
+  const serialNodes: PhysicalNodePlan[] = [];
+  for (const node of waveNodes) {
+    if (
+      node.capabilities.parallelSafe &&
+      (node.capabilities.effect === "pure" || node.capabilities.effect === "read")
+    ) {
+      parallelCandidates.push(node);
+    } else {
+      serialNodes.push(node);
+    }
+  }
+  const parallelGroups: PhysicalNodePlan[][] = [];
+  for (const candidate of parallelCandidates) {
+    let placed = false;
+    for (const group of parallelGroups) {
+      if (
+        !group.some((member) =>
+          resourcesConflict(member.capabilities.resources, candidate.capabilities.resources),
+        )
+      ) {
+        group.push(candidate);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) parallelGroups.push([candidate]);
+  }
+  return { parallelGroups, serialNodes };
+}
+
+function computeConsumerCounts(
+  nodes: readonly PhysicalNodePlan[],
+  edges: readonly ComputeEdgeSpec[],
+  outputNodeId: string,
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const node of nodes) counts.set(node.id, 0);
+  for (const edge of edges) {
+    if (edge.from !== INPUT_NODE_ID && counts.has(edge.from)) {
+      counts.set(edge.from, counts.get(edge.from)! + 1);
+    }
+  }
+  counts.set(outputNodeId, (counts.get(outputNodeId) ?? 0) + 1);
+  return counts;
+}
+
+function isFusableNode(node: PhysicalNodePlan): boolean {
+  return (
+    node.kind === "operator" &&
+    node.capabilities.effect === "pure" &&
+    node.capabilities.resources.execution !== "async_io"
+  );
+}
+
+function nextChainStep(
+  cur: PhysicalNodePlan,
+  outgoingTarget: ReadonlyMap<string, string>,
+  byId: ReadonlyMap<string, PhysicalNodePlan>,
+  consumerCounts: ReadonlyMap<string, number>,
+  outputNodeId: string,
+): PhysicalNodePlan | undefined {
+  if (cur.id === outputNodeId || consumerCounts.get(cur.id) !== 1) return undefined;
+  const nextId = outgoingTarget.get(cur.id);
+  const nextNode = nextId ? byId.get(nextId) : undefined;
+  if (!nextNode || !isFusableNode(nextNode) || nextNode.incoming.length !== 1) return undefined;
+  const edge = nextNode.incoming[0]!;
+  return edge.from === cur.id && (edge.port ?? "default") === "default" ? nextNode : undefined;
+}
+
+function buildLinearFusedOrder(
+  order: readonly PhysicalNodePlan[],
+  edges: readonly ComputeEdgeSpec[],
+  consumerCounts: ReadonlyMap<string, number>,
+  outputNodeId: string,
+): { order: PhysicalNodePlan[]; absorbedIds: Set<string> } {
+  const byId = new Map(order.map((n) => [n.id, n]));
+  const outgoingTarget = new Map<string, string>();
+  for (const edge of edges) if (edge.from !== INPUT_NODE_ID) outgoingTarget.set(edge.from, edge.to);
+  const absorbedIds = new Set<string>();
+  const nextOrder: PhysicalNodePlan[] = [];
+  for (const node of order) {
+    if (absorbedIds.has(node.id)) continue;
+    const firstNext = isFusableNode(node)
+      ? nextChainStep(node, outgoingTarget, byId, consumerCounts, outputNodeId)
+      : undefined;
+    if (!firstNext) {
+      nextOrder.push(node);
+      continue;
+    }
+    const chain: PhysicalNodePlan[] = [node];
+    let step: PhysicalNodePlan | undefined = firstNext;
+    while (step) {
+      absorbedIds.add(step.id);
+      chain.push(step);
+      step = nextChainStep(step, outgoingTarget, byId, consumerCounts, outputNodeId);
+    }
+    const last = chain[chain.length - 1]!;
+    nextOrder.push({
+      id: last.id,
+      op: `fused:${chain.map((s) => s.op).join(">")}`,
+      params: {},
+      incoming: node.incoming,
+      capabilities: last.capabilities,
+      kind: "fused_chain",
+      fusedSteps: chain,
+    });
+  }
+  return { order: nextOrder, absorbedIds };
+}
+
+function selectLoweredTarget(
+  node: ComputeNodeSpec,
+  options: PhysicalPlanOptions,
+): "sqlite_pushdown" | "portable_scan" {
+  if (options.backendTarget === "sqlite") return "sqlite_pushdown";
+  if (options.backendTarget === "portable") return "portable_scan";
+  return node.expression?.pushdownPreferred === false ? "portable_scan" : "sqlite_pushdown";
+}
+
+function buildPhysicalNode<TContext>(
+  node: ComputeNodeSpec,
+  incoming: readonly ComputeEdgeSpec[],
+  registry: ComputeOperatorLookup<TContext>,
+  options: PhysicalPlanOptions,
+  loweredNodes: Map<string, string>,
+): PhysicalNodePlan {
+  const op = resolveNodeOp(node, registry, options);
+  const subgraphPlan = node.subgraph
+    ? compileComputeGraph(node.subgraph, registry, options)
+    : undefined;
+  const capabilities = resolveNodeCapabilities(node, op, registry, subgraphPlan);
+  const params = node.params ?? {};
+  const contractProp = node.contract ? { contract: node.contract } : {};
+  if (node.expression) {
+    const loweredTarget = selectLoweredTarget(node, options);
+    loweredNodes.set(node.id, loweredTarget);
+    return {
+      id: node.id,
+      op,
+      params,
+      incoming,
+      capabilities,
+      kind: "lowered_expression",
+      expression: node.expression,
+      loweredTarget,
+      ...contractProp,
+    };
+  }
+  if (subgraphPlan) {
+    return {
+      id: node.id,
+      op: "subgraph",
+      params,
+      incoming,
+      capabilities,
+      kind: "subgraph",
+      subgraphPlan,
+    };
+  }
+  if (node.fn) {
+    return {
+      id: node.id,
+      op: node.op || `inline:${node.id}`,
+      params,
+      incoming,
+      capabilities,
+      kind: "inline_fn",
+      inlineFn: node.fn,
+    };
+  }
+  return { id: node.id, op, params, incoming, capabilities, kind: "operator", ...contractProp };
+}
+
+function planCacheKey<TContext>(
+  registry: ComputeOperatorLookup<TContext>,
+  options: PhysicalPlanOptions,
+): string {
+  return `${registry.generation}|${canonicalParamValue(options)}`;
+}
+
+/** Transform and compile a logical ComputeGraphSpec into a cached PhysicalExecutionPlan. */
+export function compileComputeGraph<TContext = unknown>(
+  spec: ComputeGraphSpec,
+  registry: ComputeOperatorLookup<TContext>,
+  options: PhysicalPlanOptions = {},
+): PhysicalExecutionPlan {
+  const cacheKey = planCacheKey(registry, options);
+  let byOptions = PLAN_CACHE.get(spec);
+  const cached = byOptions?.get(cacheKey);
+  if (cached) return cached;
+
+  const initialById = indexNodes(spec.nodes);
+  if (!initialById.has(spec.output)) {
+    throw new Error(`Output node '${spec.output}' missing in graph '${spec.id}'`);
+  }
+  indexAndValidateEdges(spec.id, spec.nodes, spec.edges, initialById);
+
+  const cse = runCsePass(spec.id, spec.nodes, spec.edges, spec.output, registry, options);
+  const dce = runDcePass(cse.nodes, cse.edges, cse.output, registry, options);
+  const work: WorkingGraph = {
+    nodes: dce.nodes,
+    edges: dce.edges,
+    output: cse.output,
+    cseMergedNodeIds: cse.merged,
+    eliminatedNodeIds: dce.eliminated,
+    loweredNodes: new Map(),
+  };
+
+  const nodeById = indexNodes(work.nodes);
+  const { incoming, outgoing, inDegree } = indexAndValidateEdges(
+    spec.id,
+    work.nodes,
+    work.edges,
+    nodeById,
+  );
+  const { order, waves } = computeTopoOrder(spec.id, work.nodes, nodeById, outgoing, inDegree);
+
+  const physicalById = new Map<string, PhysicalNodePlan>();
+  for (const node of order) {
+    const planNode = buildPhysicalNode(
+      node,
+      incoming.get(node.id) ?? [],
+      registry,
+      options,
+      work.loweredNodes,
+    );
+    physicalById.set(node.id, planNode);
+  }
+
+  let physicalOrder = order.map((n) => physicalById.get(n.id)!);
+  let consumerCounts = computeConsumerCounts(physicalOrder, work.edges, work.output);
+  let physicalWaves = waves.map((w) => partitionWave(w.map((n) => physicalById.get(n.id)!)));
+
+  if (options.enableLinearFusion) {
+    const fused = buildLinearFusedOrder(physicalOrder, work.edges, consumerCounts, work.output);
+    if (fused.absorbedIds.size > 0) {
+      physicalOrder = fused.order;
+      const keptIds = new Set(physicalOrder.map((n) => n.id));
+      const fusedEdges = work.edges.filter((e) => keptIds.has(e.to));
+      consumerCounts = computeConsumerCounts(physicalOrder, fusedEdges, work.output);
+      physicalWaves = physicalOrder.map((n) => partitionWave([n]));
+    }
+  }
+
+  const plan: PhysicalExecutionPlan = {
+    logicalGraphId: spec.id,
+    outputNodeId: work.output,
+    order: physicalOrder,
+    waves: physicalWaves,
+    consumerCounts,
+    eliminatedNodeIds: work.eliminatedNodeIds,
+    cseMergedNodeIds: work.cseMergedNodeIds,
+    loweredNodes: work.loweredNodes,
+    hasUncacheableNode: physicalOrder.some(
+      (n) => !n.capabilities.cacheable || n.capabilities.effect !== "pure",
+    ),
+  };
+
+  if (!byOptions) {
+    byOptions = new Map();
+    PLAN_CACHE.set(spec, byOptions);
+  }
+  byOptions.set(cacheKey, plan);
+  return plan;
+}
+
+/** Produce a compact human- and machine-readable explanation of a PhysicalExecutionPlan. */
+export function explainComputePlan(plan: PhysicalExecutionPlan): {
+  graphId: string;
+  outputNodeId: string;
+  steps: Array<{
+    id: string;
+    op: string;
+    kind: string;
+    effect: string;
+    cacheable: boolean;
+    parallelSafe: boolean;
+    loweredTarget?: string;
+    fusedCount?: number;
+  }>;
+  eliminatedNodeIds: readonly string[];
+  cseMergedNodeIds: Record<string, string>;
+  loweredNodes: Record<string, string>;
+  waveCount: number;
+} {
+  return {
+    graphId: plan.logicalGraphId,
+    outputNodeId: plan.outputNodeId,
+    steps: plan.order.map((node) => ({
+      id: node.id,
+      op: node.op,
+      kind: node.kind,
+      effect: node.capabilities.effect,
+      cacheable: node.capabilities.cacheable,
+      parallelSafe: node.capabilities.parallelSafe,
+      ...(node.loweredTarget ? { loweredTarget: node.loweredTarget } : {}),
+      ...(node.fusedSteps ? { fusedCount: node.fusedSteps.length } : {}),
+    })),
+    eliminatedNodeIds: plan.eliminatedNodeIds,
+    cseMergedNodeIds: Object.fromEntries(plan.cseMergedNodeIds),
+    loweredNodes: Object.fromEntries(plan.loweredNodes),
+    waveCount: plan.waves.length,
+  };
+}

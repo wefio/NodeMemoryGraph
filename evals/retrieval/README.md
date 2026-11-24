@@ -15,9 +15,11 @@ For new evaluations, use the [NMG HTTP guide](../omnimemeval/README.md).
   bounded surface-anchor channel — is required and its `indexId` is recorded in
   the manifest. Ordinary word-level FTS remains a zero-configuration product
   fallback, not a benchmark arm. Surface anchors preserve explicit quoted
-  phrases, paths, versions, IDs, error codes, code-like identifiers, and recall
-  triggers through a contentless Unicode-normalized trigram index; plain prose
-  does not become an anchor merely because English words overlap a gold answer.
+  phrases, paths, dotted or punctuated versions, mixed letter-digit technical
+  identifiers, error codes, camelCase symbols, recall triggers, and 3+
+  character CJK runs through a contentless Unicode-normalized trigram index;
+  plain prose, bare numbers, ordinals, decades, and 12-hour clock tokens stay on
+  the word/date FTS channel rather than triggering trigram matches.
   `--summaries` adds the leaf-block summary arm: after ingest, each block
   gets an LLM-written semantic summary (`NMG_SUMMARY_*` env, falling back to
   `NMG_JUDGE_*`; prompt version pinned in the manifest) and queries are routed
@@ -86,18 +88,55 @@ Per gold evidence the report records both its first rank in the ranked retrieval
 prefix and its first position in the complete rendered window. Chain and block
 members appended after ranking never acquire a ranked position.
 
-- `R@k` (k = 1, 5, 10, 20): fraction of gold evidences hit within rank k.
-- `any@20` / `all@20`: question-level any/all golds hit inside the ranked prefix.
-- `any@full` / `all@full`: question-level any/all golds found anywhere in the
-  rendered window, including unranked chain/block supplements.
-- `MRR(Q)`: mean reciprocal rank of each question's first-hit gold.
-- `legacy evid`: evidence recall over the rendered context, with the same
+- **`R@k` (`recallAt`, k = 1, 5, 10, 20, 50, 100)**: evidence-level micro recall
+  — fraction of all labeled gold evidences hit within rank `k`. On multi-gold
+  questions (e.g. BEAM ~3.54 golds/question, PersonaMem ~3.04 golds/question),
+  a single candidate matching one gold yields `1 / G`, capping `R@1` by `1 / G`.
+- **`Any@k` (`anyAt`, `any@20` for max `k`)**: question-level hit rate —
+  fraction of questions with at least one gold evidence hit within rank `k`.
+  Measures whether retrieval touches a relevant clue at all inside the cutoff.
+- **`All@k` (`allAt`, `all@20` for max `k`)**: question-level complete-evidence
+  rate — fraction of questions whose every labeled gold evidence appears within
+  rank `k`. Determines whether multi-hop questions receive every required fact.
+- **`MRR(Q)` / `MRR(G)` (`mrrQuestion`, `mrrGold`)**: mean reciprocal rank `1 / rank`
+  over each question's first-hit gold (`MRR(Q)`) or across all individual gold
+  evidences (`MRR(G)`), with misses scored as `0`. Both measure top-of-list
+  precision.
+- **`nDCG@k` (`ndcgAt`, k = 10, 20)**: normalized discounted cumulative gain with
+  binary relevance over deduplicated gold first-hit ranks (`max(rank_j, j + 1)`
+  so one multi-fact candidate matching multiple golds counts at one position
+  and stays bounded in `[0, 1]`). Rewards putting multiple distinct gold
+  evidences near the top of the LLM context window.
+- **`any@full` / `all@full`**: question-level any/all golds found anywhere in
+  the rendered window, including unranked chain/block supplements.
+- **`legacy evid`**: evidence recall over the rendered context, with the same
   definition as the legacy audits, for cross-checking against historical
   numbers.
-- Cost: mean rendered-context characters; search latency p50/p95.
+- **Cost**: `meanContextChars` and search latency `mean / p50 / p95` (`latencyMs`).
 
 Metrics are stratified: LoCoMo by category, LongMemEval and HaluMem by
 question type, BEAM by capability, and PersonaMem by preference type.
+
+### Choosing metrics by test goal
+
+- **Industry standard overlap vs memory-specific cutoffs**: `nDCG@10` (BEIR /
+  MTEB primary ranking metric), `MRR` (MS MARCO single-answer metric), and
+  `Recall@k` (`@5`, `@10`, `@20`, `@100`) are the standard IR metrics; memory
+  benchmarks add `Any@k` and `All@k` to separate single-clue reachability from
+  full multi-hop coverage.
+- **Coarse candidate recall & channel fusion** (`k = 50, 100`): track **`R@50`**,
+  **`R@100`**, and `all@full` to verify that vector, FTS5, and pivot expansion
+  bring golds into the fusion pool (`k = 100` ceiling).
+- **Single-hop lookup & entry routing** (`k = 1..10`): track **`Any@5`**,
+  **`Any@10`**, **`R@1`**, and **`MRR(Q)`** to measure whether the primary clue
+  lands at ranks 1–5 (typical LongMemEval / entry-session routing).
+- **Multi-hop synthesis, preference aggregation & conflict checks** (`k = 10, 20`):
+  track **`R@10`**, **`R@20`**, **`All@20`**, **`nDCG@10`**, and **`nDCG@20`**
+  so missing secondary evidence in BEAM, PersonaMem, or HaluMem is not masked
+  by `Any@k`.
+- **Multi-objective compute-graph selection**: pass `[R@1, R@20, R@100, MRR(Q),
+  nDCG@20, -latencyMs.mean]` into `findParetoOptimalGraphs` instead of optimizing
+  a single scalar cutoff.
 
 ## Output and reproducibility
 

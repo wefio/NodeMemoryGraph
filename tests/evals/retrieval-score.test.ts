@@ -88,6 +88,14 @@ test("aggregate computes recall@k, MRR and legacy rates", () => {
   assert.equal(metrics.recallAt["1"], 1 / 4);
   assert.equal(metrics.recallAt["2"], 2 / 4);
   assert.equal(metrics.recallAt["20"], 3 / 4);
+  assert.equal(metrics.anyAt["1"], 1 / 3);
+  assert.equal(metrics.anyAt["2"], 1 / 3);
+  assert.equal(metrics.anyAt["20"], 2 / 3);
+  assert.equal(metrics.allAt["1"], 0);
+  assert.equal(metrics.allAt["2"], 1 / 3);
+  assert.equal(metrics.allAt["20"], 2 / 3);
+  assert.equal(metrics.ndcgAt["1"], 1 / 3);
+  assert.equal(metrics.ndcgAt["20"], (1 + 0 + 1 / Math.log2(4)) / 3);
   assert.equal(metrics.mrrGold, (1 + 1 / 2 + 0 + 1 / 3) / 4);
   assert.equal(metrics.mrrQuestion, (1 + 0 + 1 / 3) / 3);
   assert.equal(metrics.anyEvidenceRate, 2 / 3);
