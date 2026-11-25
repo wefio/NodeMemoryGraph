@@ -223,7 +223,6 @@ async function runChild(values) {
 }
 
 function prepareBaseline(baselineRef, scratch) {
-  const archive = join(scratch, "baseline.tar");
   const relativeScratch = relative(root, scratch);
   const relativeArchive = join(relativeScratch, "baseline.tar");
   const ref = execFileSync("git", ["rev-parse", "--verify", baselineRef + "^{commit}"], {
