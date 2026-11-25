@@ -20,7 +20,9 @@ export {
   UnifiedRuntimeScheduler,
   ZeroPollLatch,
   getSharedRuntimeScheduler,
+  withRuntimePolicy,
   type RetryPolicy,
+  type RuntimeGraphOptions,
   type ScheduledTaskOptions,
   type TaskPriority,
 } from "./scheduler.ts";

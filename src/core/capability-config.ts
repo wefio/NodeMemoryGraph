@@ -40,7 +40,11 @@ export interface RuntimePolicyOverride {
   readonly minOffloadCpuMs?: number;
   readonly maxConcurrentBackground?: number;
   readonly starvationMaxWaitMs?: number;
+  readonly backgroundCpuBudgetMs?: number;
 }
+
+export type RuntimePolicy = Required<Omit<RuntimePolicyOverride, "backgroundCpuBudgetMs">> &
+  Pick<RuntimePolicyOverride, "backgroundCpuBudgetMs">;
 
 export interface NmgLayerConfig {
   readonly schemaVersion?: 1;
@@ -212,7 +216,7 @@ export const L0_PARAMETER_SCHEMA: readonly ParameterSchemaEntry[] = [
     path: "maintenance.autoMergeEnabled",
     kind: "boolean",
     default: false,
-    affectsResult: true,
+    affectsResult: false,
     summary: "Enable automatic topology merge actuation.",
   },
   {
@@ -221,14 +225,14 @@ export const L0_PARAMETER_SCHEMA: readonly ParameterSchemaEntry[] = [
     default: 1,
     min: 1,
     max: 4,
-    affectsResult: true,
+    affectsResult: false,
     summary: "Max automatic merges per sweep.",
   },
   {
     path: "stgSync.enabled",
     kind: "boolean",
     default: false,
-    affectsResult: true,
+    affectsResult: false,
     summary: "Enable automatic STG to LTG sync.",
   },
   {
@@ -237,7 +241,7 @@ export const L0_PARAMETER_SCHEMA: readonly ParameterSchemaEntry[] = [
     default: 20,
     min: 1,
     max: 200,
-    affectsResult: true,
+    affectsResult: false,
     summary: "Max records synced per pass.",
   },
   {
@@ -345,6 +349,15 @@ export const L0_PARAMETER_SCHEMA: readonly ParameterSchemaEntry[] = [
     summary: "Max concurrent background tasks on shared scheduler.",
   },
   {
+    path: "runtime.backgroundCpuBudgetMs",
+    kind: "number",
+    default: 100,
+    min: 1,
+    max: 1000,
+    affectsResult: false,
+    summary: "Background CPU millisecond ceiling per 100 ms admission window.",
+  },
+  {
     path: "runtime.starvationMaxWaitMs",
     kind: "integer",
     default: 1500,
@@ -391,7 +404,7 @@ function readNested(obj: Record<string, unknown> | undefined, path: string): unk
   const parts = path.split(".");
   let cur: unknown = obj;
   for (const part of parts) {
-    if (cur === null || typeof cur !== "object" || !(part in cur)) return undefined;
+    if (cur === null || typeof cur !== "object" || !Object.hasOwn(cur, part)) return undefined;
     cur = (cur as Record<string, unknown>)[part];
   }
   return cur;
@@ -423,7 +436,10 @@ function mergeBindingSpecs(
   over: SubgraphOverrideSpec,
 ): SubgraphOverrideSpec {
   if (!base) return over;
-  const mergedNodes: Record<string, SubgraphOverrideSpec> = { ...(base.nodeOverrides ?? {}) };
+  const mergedNodes: Record<string, SubgraphOverrideSpec> = Object.assign(
+    Object.create(null),
+    base.nodeOverrides,
+  );
   for (const [nodeId, childOver] of Object.entries(over.nodeOverrides ?? {})) {
     mergedNodes[nodeId] = mergeBindingSpecs(mergedNodes[nodeId], childOver);
   }
@@ -431,7 +447,7 @@ function mergeBindingSpecs(
     recipeId: over.recipeId ?? base.recipeId,
     spec: over.spec ?? base.spec,
     params: { ...(base.params ?? {}), ...(over.params ?? {}) },
-    nodeOverrides: mergedNodes,
+    ...(Object.keys(mergedNodes).length ? { nodeOverrides: mergedNodes } : {}),
   };
 }
 
@@ -491,7 +507,7 @@ function mergeLayerBindings(layers: {
   readonly l1?: { readonly config?: NmgLayerConfig; readonly source?: string };
   readonly l2?: { readonly config?: NmgLayerConfig; readonly source?: string };
 }) {
-  const bindings: Record<string, SubgraphOverrideSpec> = {};
+  const bindings: Record<string, SubgraphOverrideSpec> = Object.create(null);
   const bindingProvenance = new Map<string, { layer: ConfigLayer; source: string }>();
   for (const [contractId, spec] of Object.entries(layers.l1?.config?.bindings ?? {})) {
     bindings[contractId] = spec;
@@ -509,6 +525,8 @@ export function resolveLayeredConfig(layers: {
   readonly l1?: { readonly config?: NmgLayerConfig; readonly source?: string };
   readonly l2?: { readonly config?: NmgLayerConfig; readonly source?: string };
 }): ResolvedLayerBundle {
+  validateRuntimeLayer(layers.l1?.config);
+  validateRuntimeLayer(layers.l2?.config);
   const { values, provenance } = resolveEffectiveParameters(layers);
   const { bindings, bindingProvenance } = mergeLayerBindings(layers);
   const allowAlgorithmicOverrides =
@@ -540,6 +558,23 @@ export function resolveLayeredConfig(layers: {
   };
 }
 
+function validateRuntimeLayer(config: NmgLayerConfig | undefined): void {
+  if (config === undefined) return;
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    throw new Error("NMG capability configuration must be an object");
+  }
+  if (config.schemaVersion !== undefined && config.schemaVersion !== 1) {
+    throw new Error("Unsupported NMG capability configuration version");
+  }
+  if (config.runtime === undefined) return;
+  if (!config.runtime || typeof config.runtime !== "object" || Array.isArray(config.runtime)) {
+    throw new Error("runtime configuration must be an object");
+  }
+  for (const [key, value] of Object.entries(config.runtime)) {
+    if (value !== undefined) validateParameterValue("runtime." + key, value);
+  }
+}
+
 function selectRecipeSpec(
   contractId: string,
   defaultSpec: ComputeGraphSpec,
@@ -558,7 +593,7 @@ function selectRecipeSpec(
     return override.spec;
   }
   const recipeId = override.recipeId!;
-  const chosen = recipes?.[recipeId];
+  const chosen = recipes && Object.hasOwn(recipes, recipeId) ? recipes[recipeId] : undefined;
   if (!chosen) throw new PolicyViolationError(contractId, `unknown recipe '${recipeId}'`);
   const permitted =
     chosen.id === defaultSpec.id ||
@@ -581,6 +616,12 @@ function applyNodeOverride(
   policy: { allowAlgorithmicOverrides: boolean; allowedAlgorithmicVariants: readonly string[] },
 ): ComputeNodeSpec {
   if (!nodeOverride) return node;
+  if (
+    !node.subgraph &&
+    (nodeOverride.recipeId || nodeOverride.spec || nodeOverride.nodeOverrides)
+  ) {
+    throw new PolicyViolationError(contractId, `node '${node.id}' has no subgraph to bind`);
+  }
   let nextSubgraph = node.subgraph;
   if (nextSubgraph) {
     nextSubgraph = materializeBoundGraph(contractId, nextSubgraph, nodeOverride, recipes, policy);
@@ -605,6 +646,11 @@ export function materializeBoundGraph(
 ): ComputeGraphSpec {
   const base = selectRecipeSpec(contractId, defaultSpec, override, recipes, policy);
   if (!override?.nodeOverrides && !override?.params) return base;
+  for (const id of Object.keys(override.nodeOverrides ?? {})) {
+    if (!base.nodes.some((node) => node.id === id)) {
+      throw new PolicyViolationError(contractId, `unknown node '${id}' in graph '${base.id}'`);
+    }
+  }
   const nodes = base.nodes.map((node) => {
     const childOverride = override.nodeOverrides?.[node.id];
     const withRootParams =

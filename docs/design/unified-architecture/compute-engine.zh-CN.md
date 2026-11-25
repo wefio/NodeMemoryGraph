@@ -14,17 +14,41 @@ flowchart TB
   Config["三级配置与能力绑定 (L0 公共默认 -> L1 共享 nmg.config.json -> L2 适配器覆盖)"] --> Logical
   API["对外业务 API (MemoryEngine, HttpMemoryService, PortableMemoryService)"] --> Logical["逻辑计算图 (ComputeGraphSpec & MEMORY_COMPUTE_CONTRACTS)"]
   Logical --> Planner["执行规划器 (CSE, 递归 DCE, 契约绑定, 下推改写, 线性融合)"]
-  Planner --> Physical["物理执行计划 (依赖边, 资源锁, 代价模型, 引用计数释放)"]
-  Physical --> Runtime["计算图运行时 (同步快路径, 事件驱动 DAG, 状态戳, LRU 缓存)"]
-  Runtime --> Scheduler["统一运行时调度器 (HostLoadGovernor, Singleflight 去重, LocalWorkerThreadPool, SchedulingDomain)"]
+  Planner --> Physical["物理计划（数据和副作用依赖、资源、引用计数）"]
+  Physical --> Inline["同步内联执行"]
+  Physical --> Scheduler["UnifiedRuntimeScheduler（异步 DAG、主机预算、Worker 放置）"]
+  Config --> Scheduler
+  Inline --> Realizations
   Scheduler --> Realizations["算子 / 子图 / 第三方适配器 / 下推查询"]
   Realizations --> Storage["权威存储与公共服务 (MemoryBackend, MemoryPlan, EmbeddingClient)"]
 ```
 
 - **逻辑计算图（`ComputeGraphSpec`）**：使用 `src/core/compute-contracts.ts` 中的领域契约表达计算需求与数据流，不固化具体后端查询或执行顺序优化。
-- **三级配置与声明式能力绑定（`src/core/capability-config.ts`、`src/integration/runtime-config.ts`）**：按 `L0` 公共参数契约与默认子图（`NMG_L0_CONTRACT_GRAPHS`）→ `L1` 共享策略与图配置（`NMG_CONFIG_PATH` 或 `<dataDir>/nmg.config.json`）→ `L2` 适配器覆盖（`resolveEffectiveNmgConfig`）顺序解析，输出参数来源溯源与缓存身份 `configIdentity`，并通过 `PolicyViolationError` 拦截未经许可的语义变更算法替换。
-- **物理执行计划（`PhysicalExecutionPlan`）**：由 `src/core/compute-planner.ts` 编译（按图对象引用、基于 `WeakMap` 隔离的 `ComputeRegistry` 实例令牌、代数、`configIdentity` 与规划选项缓存），解析 `$contract` 契约节点，对 `pure` 节点执行公共子表达式消除，通过递归 `runDcePass` 保留含副作用的嵌套子图并消除其余死节点，将 `relational_query` 表达式改写为 `sqlite_pushdown` 或 `portable_scan`，可选将单消费者同步 `pure` 链路融合为 `fused_chain`（包含逐步参数签名），生成节点依赖边、共享 `ResourceLockManager` 资源集合（`src/core/resource-locks.ts`）与精确下游引用计数表。
-- **运行时与统一调度（`src/core/compute-graph.ts`、`src/core/canonical-value.ts`、`src/core/runtime/*`）**：小规模纯同步图在未传入 `ComputeMemoCache` 时走零哈希内联快路径；异步 DAG 通过节点就绪唤醒驱动执行而无需全波次 `Promise.all` 屏障；`canonical-value.ts` 为 `Map`、`Set`、`Date`、`RegExp`、`ArrayBuffer` 及类型化数组提供严谨深冻结检查与规范化哈希；`UnifiedRuntimeScheduler` 统筹 `ComputeCostModel`（HEFT 关键路径排序与拒绝微秒级算子跨线程卸载的 EFT 决策）、`HostLoadGovernor`（支持 `eco` / `balanced` / `performance` 三档策略与迟滞控制，在系统供电／温度遥测不可用时优雅退化为事件循环延迟与预算控制）、`LocalWorkerThreadPool`、可递归组合的 `SchedulingDomain`、`InFlightCoalescer` 与 `ZeroPollLatch`。
+- `resolveEffectiveNmgConfig` 绑定 L0 公共默认值与已注册图配方、L1 共享配置、L2 宿主覆盖。`bindMemoryEngineConfig` 向引擎提供检索、视图、投影、写入和生命周期图。HTTP 子句融合、写入预处理和画像也读取同一份有效配置。能力绑定保留来源并参与结果身份。未获准的语义变体触发 `PolicyViolationError`。
+- `PhysicalExecutionPlan` 解析 `$contract`、下推结构化表达式、消除可合并或无用节点，并可融合不持有命名资源的纯同步链。规划器输出去重后的父节点计数、副作用顺序边和消费者计数。计划缓存区分图和注册表身份、注册表代数及语义配置。
+- `executeComputeGraph` 将每个异步计划交给 `UnifiedRuntimeScheduler.executePlan`，子图递归进入同一就绪循环。`evaluateSyncComputeGraph` 保留同步拓扑执行，普通无 memo 调用无需排队或哈希。两条路径共享算子、输入、缓存签名和输出生命周期规则。
+
+## 运行策略与资源所有权
+
+Node daemon 和 portable RPC 从 `NMG_CONFIG_PATH` 或服务数据目录读取 L1，项目 STG 使用同一解析器。本地 HTTP 从数据库目录读取 L1，并以该宿主配置的 `runtime` 或 `bindings` 作为 L2。Onlion 通过 `NMG_CAPABILITY_CONFIG` 接收同结构的 L1 JSON，在每个请求快照内建立空线程域的调度器，以维持 WASM SQLite 和嵌入句柄的请求生命周期。
+
+| 配置 | 执行效果 |
+| --- | --- |
+| `runtime.profile` | 选择 `HostLoadGovernor` 的负载迟滞、后台并发、CPU 预算和 Worker 额度。 |
+| `runtime.objective` | 选择内联与 Worker 之间的最早完成时间比较裕量。 |
+| `runtime.maxWorkers` | 在主机额度和域容量内限制放置。零表示自动选取。线程按需创建，空闲后回收。 |
+| `runtime.minOffloadCpuMs` | 算子在当前输入规模分桶的 CPU 估计低于该值时，保持内联。 |
+| `runtime.maxConcurrentBackground` | 限制已准入的后台操作数，包含仍在等待服务 I/O 的操作。前台活跃时可将其收紧到一。 |
+| `runtime.backgroundCpuBudgetMs` | 限制每 100 ms 准入窗口的后台 CPU 毫秒。纯同步片段和 Worker CPU 实测计费，Worker 准入到完成之间保留估计额度。 |
+| `runtime.starvationMaxWaitMs` | 等待超时的后台任务按年龄排序，仍遵守资源和并发约束。 |
+
+物理策略独立于结果身份。`maintenance` 和 `stgSync` 保留兼容解析。维护及项目操作由对应的显式入口管理，基于声明反馈的 STG 合并使用独立的 `stgConsolidation`。
+
+就绪节点按前后台队列和关键路径排序。读写冲突的节点等待完整资源集合，期间不持有部分锁或执行槽。已获取的锁保留到操作实际完成，包括已经对调用者超时的写入。图失败会取消未启动的节点，等待已启动分支结束后再通知调用者关闭快照。动态嵌套任务如果在父任务持有命名锁时请求命名资源，会在准入时失败。普通子图由子节点自行申请资源。写计划状态属于单次变更，持久写入由存储层修订号检查和回执重放仲裁。
+
+CPU 放置考虑就绪 CPU 工作量、调用端输入字节数、已观测通信开销和被选叶节点的可用性。获准的 Worker 算子与内联共用实现。较大的默认重排批次可以进入放置路径，小批次、替代图和不宜转移的数据仍可内联计算。Worker 失败向调用者传播，取消会终止正在运行的线程。
+
+主机治理器采样系统 CPU 时间和进程事件循环压力，使用迟滞和后台事件循环让渡逐步恢复容量。诊断可记录队列与资源等待、同步线程 CPU、Worker 排队与通信时间，以及异步节点让渡后的墙钟时间。让渡后时间包含应用回调；任意同步 JavaScript 仍无法抢占。实测见[生产与合成对照](../../experiments/runtime/unified-runtime-convergence-2026-11-25.zh-CN.md)。
 
 ## 节点实现形态与渐进式能力声明
 
@@ -66,6 +90,7 @@ flowchart TB
 
 - **依赖方向护栏**：`tests/core/compute-architecture-guardrails.test.ts` 自动化校验核心计算层、规划器、领域计算图与读取视图模块零导入 SQLite、LanceDB 或 `MemoryEngine`，同时存储后端模块零导入计算层。
 - **保留的事务耦合边界**：`MemoryEngine` 仅保留参数前置校验、只读快照打开／关闭生命周期及基于 `MemoryBackend.commit` 的乐观并发重试／凭据重放。写入图仅在 `MemoryPlan` 上生成未提交变更，不直接提交数据库事务。
+- **入口**。CLI、daemon RPC 和 MCP 宿主适配器到达 `PortableMemoryService` 及 SQLite 或 LanceDB 引擎。WorkBuddy 和 DSH 在客户端复用召回、工作区和协调能力。本地 HTTP 和 Onlion 将检索交给 `HttpMemoryService`，Onlion 管理分区和待合并日志的可见性。`runGraphExperiments` 和解耦检索使用生产图执行器。OoO 的 Agent 任务调度负责会话、授权与任务提交生命周期。
 
 ## 算子接入规范与扩展边界
 

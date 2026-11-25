@@ -43,7 +43,10 @@ import {
   DEFAULT_EXPLICIT_SEARCH_LIMIT,
   usesExplicitSearchPage,
 } from "../integration/explicit-search-page.ts";
-import { resolveEffectiveNmgConfig } from "../integration/runtime-config.ts";
+import {
+  bindMemoryEngineConfig,
+  resolveEffectiveNmgConfig,
+} from "../integration/runtime-config.ts";
 import { openLocalMemory } from "./local-memory-migration.ts";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
 import { isUserProfileScope, USER_PROFILE_SCOPE } from "../core/user-profile.ts";
@@ -118,6 +121,7 @@ export class PortableMemoryService {
   private readonly projectBackends = new Set<MemoryBackend>();
   private readonly embeddings: LocalMemoryEmbeddings;
   private readonly evidenceRanker?: EvidenceRanker;
+  private readonly resolveConfig: typeof resolveEffectiveNmgConfig;
   readonly local: boolean;
 
   constructor(
@@ -126,12 +130,18 @@ export class PortableMemoryService {
     embedding: () => EmbeddingClient | undefined = () => undefined,
     embeddingUnavailable: () => boolean = () => false,
     evidenceRanker?: EvidenceRanker,
+    resolveConfig: typeof resolveEffectiveNmgConfig = resolveEffectiveNmgConfig,
   ) {
     // Do not retain a caller-mutable credentials/options object.
     this.options = structuredClone(options);
     this.local = local;
     this.evidenceRanker = evidenceRanker;
-    this.embeddings = new LocalMemoryEmbeddings(embedding, embeddingUnavailable);
+    this.resolveConfig = resolveConfig;
+    this.embeddings = new LocalMemoryEmbeddings(
+      embedding,
+      embeddingUnavailable,
+      () => this.resolveConfig().runtime,
+    );
   }
 
   static handles(method: NmgMethod): boolean {
@@ -612,21 +622,18 @@ export class PortableMemoryService {
     return (this.pending ??= this.open(this.options)
       .then((backend) => {
         this.backend = backend;
-        return new MemoryEngine(backend, undefined, {
-          configResolver: () => {
-            const cfg = resolveEffectiveNmgConfig();
-            return {
-              searchGraph: cfg.resolveGraph("memory.search"),
-              rerankGraph: cfg.resolveGraph("memory.candidate_rerank"),
-              configIdentity: cfg.resultIdentityHash,
-            };
-          },
-        });
+        return this.configuredEngine(backend);
       })
       .catch((error: unknown) => {
         this.pending = undefined;
         throw error;
       }));
+  }
+
+  private configuredEngine(backend: MemoryBackend): MemoryEngine {
+    return new MemoryEngine(backend, undefined, {
+      configResolver: () => bindMemoryEngineConfig(this.resolveConfig()),
+    });
   }
 
   private async open(options: MemoryBackendOptions): Promise<MemoryBackend> {
@@ -652,7 +659,7 @@ export class PortableMemoryService {
     const opened = this.open({ ...this.options, path, namespace })
       .then((backend) => {
         this.projectBackends.add(backend);
-        return new MemoryEngine(backend);
+        return this.configuredEngine(backend);
       })
       .catch((error: unknown) => {
         this.projects.delete(path);

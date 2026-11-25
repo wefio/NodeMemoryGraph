@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import type { ComputeGraphSpec } from "../core/compute-graph.ts";
-import { getSharedRuntimeScheduler } from "../core/runtime/scheduler.ts";
+import { getRuntimeScheduler } from "../core/runtime/scheduler.ts";
 import type { MemoryEngine } from "../core/memory/engine.ts";
 import type { MemoryInput } from "../core/memory/model.ts";
+import { saveEmbeddedDocuments } from "../core/memory/vector-backfill.ts";
 import { sortResultsChronologically } from "../core/memory/page-stitch-operators.ts";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
 import type { MemoryContext, MemorySearchResult } from "../core/types.ts";
@@ -13,6 +14,7 @@ import { executeHttpSearchGraph, type HttpClauseHitBatch } from "./http-search-g
 import { preprocessHttpMessage } from "./http-write-preprocess.ts";
 import { normalizeContent } from "./multimodal-content.ts";
 import type { HttpMemoryMessage } from "./memory-http-protocol.ts";
+import type { EffectiveNmgConfig } from "./runtime-config.ts";
 
 // Fixed service profile, independent of agent sessions, online feedback and AG
 // disclosure. These are the same store/search primitives used by NmgService.
@@ -64,6 +66,7 @@ export class HttpMemoryService {
     writePreprocessGraph?: ComputeGraphSpec;
     profileGraph?: ComputeGraphSpec;
     preprocessMessages?: boolean;
+    capabilities?: EffectiveNmgConfig;
   };
 
   constructor(
@@ -73,7 +76,17 @@ export class HttpMemoryService {
   ) {
     this.engine = engine;
     this.client = client;
-    this.options = options;
+    const config = options.capabilities;
+    this.options = config
+      ? {
+          searchGraph: config.resolveGraph("memory.http_clause_fusion"),
+          writePreprocessGraph: config.resolveGraph("memory.write_preprocess"),
+          profileGraph: config.resolveGraph("memory.http_profile"),
+          rerankGraph: config.resolveGraph("memory.candidate_rerank"),
+          configIdentity: config.resultIdentityHash,
+          ...options,
+        }
+      : options;
     this.backfillLimit = resolveBackfillLimit(options.backfillLimit);
   }
 
@@ -86,16 +99,17 @@ export class HttpMemoryService {
     const vectorIndex = this.engine.backend.vectorIndex;
     if (!this.client || !vectorIndex) return;
     try {
-      await getSharedRuntimeScheduler().runTask(
-        async () => {
-          if (!this.client) return;
-          const docs = vectorIndex.pending(this.client.indexId, this.backfillLimit);
-          if (docs.length) {
-            const vectors = await this.client.embedDocuments(docs.map((document) => document.text));
-            vectorIndex.save(this.client.indexId, docs, vectors);
-          }
-        },
-        { priority: "background", effect: "read", label: "http_vector_backfill" },
+      await this.engine.withRuntime(() =>
+        getRuntimeScheduler().runTask(
+          async (signal) => {
+            if (!this.client) return;
+            const docs = vectorIndex.pending(this.client.indexId, this.backfillLimit);
+            if (docs.length) {
+              await saveEmbeddedDocuments(vectorIndex, this.client, docs, signal);
+            }
+          },
+          { priority: "background", effect: "write", label: "http_vector_backfill" },
+        ),
       );
       this.lastBackfillError = null;
     } catch (error) {

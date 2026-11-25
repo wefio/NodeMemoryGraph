@@ -1,5 +1,6 @@
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { dirname } from "node:path";
 
 import { createEmbeddingClientFromEnv, type EmbeddingClient } from "../core/embedding-provider.ts";
 import { MemoryOperationConflict, type MemoryBackend } from "../core/memory/backend.ts";
@@ -24,7 +25,10 @@ import {
 } from "../integration/memory-http-protocol.ts";
 import { HttpMemoryService, projectHttpMemory } from "../integration/memory-http-service.ts";
 import { describeContent } from "../integration/multimodal-content.ts";
-import { resolveEffectiveNmgConfig } from "../integration/runtime-config.ts";
+import {
+  bindMemoryEngineConfig,
+  resolveEffectiveNmgConfig,
+} from "../integration/runtime-config.ts";
 import {
   readLocalMemoryHttpConfig,
   type LocalMemoryHttpConfig,
@@ -198,20 +202,13 @@ async function respond(
     const resolvedConfig = resolveEffectiveNmgConfig({
       l2: config.l2Overrides,
       l2Source: "http-config",
+      dataDir: dirname(config.databasePath),
     });
     const result = await pool.withBackend(`http:${httpHash(userId)}`, async (backend) => {
-      const engine = new MemoryEngine(backend, undefined, {
-        searchGraph: resolvedConfig.resolveGraph("memory.search"),
-        rerankGraph: resolvedConfig.resolveGraph("memory.candidate_rerank"),
-        configIdentity: resolvedConfig.resultIdentityHash,
-      });
+      const engine = new MemoryEngine(backend, undefined, bindMemoryEngineConfig(resolvedConfig));
       const service = new HttpMemoryService(engine, embeddingClient, {
         preprocessMessages: config.preprocessMessages,
-        searchGraph: resolvedConfig.resolveGraph("memory.http_clause_fusion"),
-        writePreprocessGraph: resolvedConfig.resolveGraph("memory.write_preprocess"),
-        profileGraph: resolvedConfig.resolveGraph("memory.http_profile"),
-        rerankGraph: resolvedConfig.resolveGraph("memory.candidate_rerank"),
-        configIdentity: resolvedConfig.resultIdentityHash,
+        capabilities: resolvedConfig,
       });
       return operation === "add" ? addMemory(service, input) : searchMemory(service, input, config);
     });

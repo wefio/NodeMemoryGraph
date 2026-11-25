@@ -8,5 +8,5 @@
 
 | 功能 | Gate／选项 | 默认值 | 含义 | owner | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| Shared L1 capability & policy config | `NMG_CONFIG_PATH` 或 `<dataDir>/nmg.config.json` | 可选（回退至 L0 默认） | `L0 -> L1 -> L2` 三级能力契约绑定、递归子图与参数覆盖、`allowedAlgorithms` 策略边界及缓存 `configIdentity` | `src/core/capability-config.ts`、`src/integration/runtime-config.ts`；[统一记忆计算引擎](../../unified-architecture/compute-engine.zh-CN.md) | 已实现 |
-| Unified runtime scheduling profile | `NMG_RUNTIME_PROFILE`（或 L1 `runtimePolicy.profile`） | `balanced` | `eco` / `balanced` / `performance` 负载感知后台并发度、CPU 时间片预算与线程池卸载策略；系统供电／温度遥测不可用时退化为事件循环利用率与延迟预算控制 | `src/core/runtime/load-governor.ts`、`src/core/runtime/scheduler.ts`；[统一记忆计算引擎](../../unified-architecture/compute-engine.zh-CN.md) | 已实现 |
+| 共享 L1 能力与策略 | `NMG_CONFIG_PATH`、`<dataDir>/nmg.config.json` 或 Onlion `NMG_CAPABILITY_CONFIG` JSON | 可选（使用 L0 默认） | 图配方及参数绑定、`allowedAlgorithmicVariants` 策略和结果身份 | `src/integration/runtime-config.ts`，[统一记忆计算引擎](../../unified-architecture/compute-engine.zh-CN.md) | 已实现 |
+| 统一运行时调度 | `NMG_RUNTIME_PROFILE` 或三级配置中的 `runtime.profile` | `balanced` | 负载档位、放置目标和容量、后台准入和 CPU 额度 | `src/core/runtime/scheduler.ts`，[运行策略](../../unified-architecture/compute-engine.zh-CN.md#运行策略与资源所有权) | 已实现 |

@@ -1,6 +1,7 @@
 import { setImmediate } from "node:timers/promises";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
-import { getSharedRuntimeScheduler } from "../core/runtime/scheduler.ts";
+import { getRuntimeScheduler, withRuntimePolicy } from "../core/runtime/scheduler.ts";
+import type { RuntimePolicy } from "../core/capability-config.ts";
 import type {
   MemoryVectorCursor,
   MemoryVectorIndex,
@@ -8,6 +9,7 @@ import type {
 } from "../core/memory/backend.ts";
 import { HashingVectorEmbedder } from "../core/vector.ts";
 import { memoryEmbeddingModelId } from "../core/store/search-ranking.ts";
+import { saveEmbeddedDocuments } from "../core/memory/vector-backfill.ts";
 import { DAEMON_AUTOMATIC_RECALL_MAX_MS, RecallBudget } from "../integration/recall-budget.ts";
 import type { NmgSearchParams } from "./protocol.ts";
 
@@ -29,6 +31,7 @@ export type QueryEmbedding = { semantic?: MemoryVectorQuery; reason?: string };
 export class LocalMemoryEmbeddings {
   private readonly configured: () => EmbeddingClient | undefined;
   private readonly unavailable: () => boolean;
+  private readonly runtime: () => RuntimePolicy | undefined;
   private readonly jobs = new Map<MemoryVectorIndex, Map<string, IndexUpdate>>();
   private readonly failures = new Map<string, number>();
   private closing = false;
@@ -36,9 +39,11 @@ export class LocalMemoryEmbeddings {
   constructor(
     configured: () => EmbeddingClient | undefined,
     unavailable: () => boolean = () => false,
+    runtime: () => RuntimePolicy | undefined = () => undefined,
   ) {
     this.configured = configured;
     this.unavailable = unavailable;
+    this.runtime = runtime;
   }
 
   async queries(
@@ -178,32 +183,23 @@ export class LocalMemoryEmbeddings {
     let after: MemoryVectorCursor | undefined;
     do {
       signal?.throwIfAborted();
-      const hasMore = await getSharedRuntimeScheduler().runTask(
-        async () => {
-          const documents = index.pending(client.indexId, limit, after);
-          if (!documents.length) return false;
-          const texts = [...new Set(documents.map((document) => document.text))];
-          const options = signal ? { signal } : undefined;
-          const vectors = await (client.embedDocumentsForStorage?.(texts, options) ??
-            client.embedDocuments(texts, options));
-          signal?.throwIfAborted();
-          if (vectors.length !== texts.length) throw new Error("Invalid document vector batch");
-          const byText = new Map(texts.map((text, i) => [text, vectors[i]!]));
-          index.save(
-            client.indexId,
-            documents,
-            documents.map(({ text }) => byText.get(text)!),
-          );
-          if (documents.length < limit) return false;
-          after = documents.at(-1);
-          return true;
-        },
-        {
-          priority: "background",
-          effect: "read",
-          signal,
-          label: `embedding_backfill:${client.indexId}`,
-        },
+      const hasMore = await withRuntimePolicy(this.runtime(), () =>
+        getRuntimeScheduler().runTask(
+          async (taskSignal) => {
+            const documents = index.pending(client.indexId, limit, after);
+            if (!documents.length) return false;
+            await saveEmbeddedDocuments(index, client, documents, taskSignal);
+            if (documents.length < limit) return false;
+            after = documents.at(-1);
+            return true;
+          },
+          {
+            priority: "background",
+            effect: "write",
+            signal,
+            label: `embedding_backfill:${client.indexId}`,
+          },
+        ),
       );
       if (!hasMore) return;
       // Yield between full pages so foreground work stays responsive.

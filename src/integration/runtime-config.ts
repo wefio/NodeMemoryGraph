@@ -4,6 +4,7 @@ import {
   type SubgraphOverrideSpec,
 } from "../core/capability-config.ts";
 import type { ComputeGraphSpec } from "../core/compute-graph.ts";
+import type { MemoryEngineGraphOptions } from "../core/memory/engine.ts";
 import {
   DEFAULT_PIECEWISE_RERANK_GRAPH,
   HEAD_BM25F_R3_SUBGRAPH,
@@ -84,11 +85,31 @@ export const NMG_NAMED_RECIPES: Readonly<Record<string, ComputeGraphSpec>> = {
   "tail-session-temporal": TAIL_SESSION_TEMPORAL_SUBGRAPH,
 };
 
+export function bindMemoryEngineConfig(config: EffectiveNmgConfig): MemoryEngineGraphOptions {
+  return {
+    searchGraph: config.resolveGraph("memory.search"),
+    rerankGraph: config.resolveGraph("memory.candidate_rerank"),
+    getGraph: config.resolveGraph("memory.get_context"),
+    neighborhoodGraph: config.resolveGraph("memory.neighborhood"),
+    projectGraph: config.resolveGraph("memory.graph_projection"),
+    userProfileGraph: config.resolveGraph("memory.user_profile"),
+    rememberPlanGraph: config.resolveGraph("memory.write_plan"),
+    lifecyclePlanGraph: config.resolveGraph("memory.lifecycle_plan"),
+    configIdentity: config.resultIdentityHash,
+    runtime: config.runtime,
+  };
+}
+
 /** Resolve unified L0 -> L1 -> L2 configuration with provenance and bound ComputeGraphSpec access. */
 export function resolveEffectiveNmgConfig(
   options: ResolveParameterConfigOptions = {},
 ): EffectiveNmgConfig {
   const { bundle, parameters } = resolveParameterBundle(options);
+  for (const contractId of bundle.bindingProvenance.keys()) {
+    if (!Object.hasOwn(NMG_L0_CONTRACT_GRAPHS, contractId)) {
+      throw new Error(`No L0 graph catalog entry for contract '${contractId}'`);
+    }
+  }
 
   const policy = {
     allowAlgorithmicOverrides: bundle.allowAlgorithmicOverrides,
@@ -97,7 +118,8 @@ export function resolveEffectiveNmgConfig(
 
   const resolveGraph = (contractId: string, override?: SubgraphOverrideSpec): ComputeGraphSpec => {
     const base = NMG_L0_CONTRACT_GRAPHS[contractId];
-    if (!base) throw new Error(`No L0 graph catalog entry for contract '${contractId}'`);
+    if (!Object.hasOwn(NMG_L0_CONTRACT_GRAPHS, contractId))
+      throw new Error(`No L0 graph catalog entry for contract '${contractId}'`);
     const effectiveOverride = override ?? bundle.bindings[contractId];
     return materializeBoundGraph(contractId, base, effectiveOverride, NMG_NAMED_RECIPES, policy);
   };

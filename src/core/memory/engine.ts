@@ -1,3 +1,5 @@
+import type { RuntimePolicy } from "../capability-config.ts";
+import { withRuntimePolicy, type UnifiedRuntimeScheduler } from "../runtime/scheduler.ts";
 import { randomUUID } from "node:crypto";
 import type { ComputeGraphSpec, ComputeMemoCache, ComputeRegistry } from "../compute-graph.ts";
 import type { ExactLookupAnchor } from "../store/search-ranking.ts";
@@ -77,11 +79,9 @@ export interface MemoryEngineGraphOptions {
   readonly searchMemo?: ComputeMemoCache;
   readonly rerankGraph?: ComputeGraphSpec | false;
   readonly configIdentity?: string;
-  readonly configResolver?: () => {
-    readonly searchGraph?: ComputeGraphSpec;
-    readonly rerankGraph?: ComputeGraphSpec | false;
-    readonly configIdentity?: string;
-  };
+  readonly configResolver?: () => MemoryEngineGraphOptions;
+  readonly runtime?: RuntimePolicy;
+  readonly scheduler?: UnifiedRuntimeScheduler;
   readonly getGraph?: ComputeGraphSpec;
   readonly neighborhoodGraph?: ComputeGraphSpec;
   readonly projectGraph?: ComputeGraphSpec;
@@ -113,6 +113,15 @@ export class MemoryEngine {
     this.graphs = graphs;
   }
 
+  private effectiveGraphs(): MemoryEngineGraphOptions {
+    return { ...this.graphs.configResolver?.(), ...this.graphs };
+  }
+
+  withRuntime<T>(run: () => T): T {
+    const { runtime, scheduler } = this.effectiveGraphs();
+    return withRuntimePolicy(runtime, run, scheduler);
+  }
+
   async remember(input: MemoryInput, operationId: string = randomUUID()): Promise<RememberResult> {
     return (await this.rememberMany([input], operationId))[0]!;
   }
@@ -129,12 +138,12 @@ export class MemoryEngine {
     return this.mutate(
       operationId,
       { action: "remember", inputs: inputs.map(rememberRequest) },
-      (plan) =>
+      (plan, graphs) =>
         executeRememberPlanGraph(
           { inputs, operationId, timestamp },
           plan,
-          this.graphs.rememberPlanGraph ?? DEFAULT_REMEMBER_PLAN_GRAPH,
-          this.graphs.writeRegistry ?? ENGINE_WRITE_REGISTRY,
+          graphs.rememberPlanGraph ?? DEFAULT_REMEMBER_PLAN_GRAPH,
+          graphs.writeRegistry ?? ENGINE_WRITE_REGISTRY,
         ),
       async (view, receipt) => {
         const result = receipt.result as RememberResult[];
@@ -146,12 +155,12 @@ export class MemoryEngine {
 
   async get(ids: readonly string[], options: MemoryQueryOptions = {}): Promise<MemoryContext> {
     boundedGraphHops(options.graphHops);
-    return this.withSnapshot((port) =>
+    return this.withSnapshot((port, _view, graphs) =>
       executeGetContextGraph(
         { ids, options },
         port,
-        this.graphs.getGraph ?? DEFAULT_GET_CONTEXT_GRAPH,
-        this.graphs.viewRegistry ?? ENGINE_VIEW_REGISTRY,
+        graphs.getGraph ?? DEFAULT_GET_CONTEXT_GRAPH,
+        graphs.viewRegistry ?? ENGINE_VIEW_REGISTRY,
       ),
     );
   }
@@ -161,12 +170,12 @@ export class MemoryEngine {
     id: string,
     options: MemoryQueryOptions,
   ): Promise<MemoryContext | undefined> {
-    return this.withSnapshot((port) =>
+    return this.withSnapshot((port, _view, graphs) =>
       executeNeighborhoodGraph(
         { id, options },
         port,
-        this.graphs.neighborhoodGraph ?? DEFAULT_NEIGHBORHOOD_GRAPH,
-        this.graphs.viewRegistry ?? ENGINE_VIEW_REGISTRY,
+        graphs.neighborhoodGraph ?? DEFAULT_NEIGHBORHOOD_GRAPH,
+        graphs.viewRegistry ?? ENGINE_VIEW_REGISTRY,
       ),
     );
   }
@@ -188,24 +197,24 @@ export class MemoryEngine {
 
   /** Build an on-demand multi-dimensional pivot graph across stored memories. */
   async projectGraph(options: GraphProjectionOptions = {}): Promise<MemoryGraphProjection> {
-    return this.withSnapshot((port) =>
+    return this.withSnapshot((port, _view, graphs) =>
       executeProjectGraph(
         { options },
         port,
-        this.graphs.projectGraph ?? DEFAULT_PROJECT_GRAPH,
-        this.graphs.viewRegistry ?? ENGINE_VIEW_REGISTRY,
+        graphs.projectGraph ?? DEFAULT_PROJECT_GRAPH,
+        graphs.viewRegistry ?? ENGINE_VIEW_REGISTRY,
       ),
     );
   }
 
   async userProfile(text: string, options: MemoryQueryOptions = {}): Promise<MemoryContext> {
     searchLimit(options.limit);
-    return this.withSnapshot((port) =>
+    return this.withSnapshot((port, _view, graphs) =>
       executeUserProfileGraph(
         { text, options },
         port,
-        this.graphs.userProfileGraph ?? DEFAULT_USER_PROFILE_GRAPH,
-        this.graphs.viewRegistry ?? ENGINE_VIEW_REGISTRY,
+        graphs.userProfileGraph ?? DEFAULT_USER_PROFILE_GRAPH,
+        graphs.viewRegistry ?? ENGINE_VIEW_REGISTRY,
       ),
     );
   }
@@ -254,7 +263,8 @@ export class MemoryEngine {
     await this.mutate(
       memoryIdentity("tessera-fingerprint", JSON.stringify(input)),
       input,
-      (plan) => this.runLifecyclePlan(plan, { action: "tesseraFingerprint", input }),
+      (plan, graphs) =>
+        this.runLifecyclePlan(plan, graphs, { action: "tesseraFingerprint", input }),
       async () => null,
     );
   }
@@ -312,8 +322,8 @@ export class MemoryEngine {
     return this.mutate(
       operationId,
       { action: "link", input },
-      (plan) =>
-        this.runLifecyclePlan<NodeRelation>(plan, {
+      (plan, graphs) =>
+        this.runLifecyclePlan<NodeRelation>(plan, graphs, {
           action: "linkNodes",
           namespace: this.backend.namespace,
           input,
@@ -335,8 +345,8 @@ export class MemoryEngine {
     return this.mutate(
       operationId,
       { action: "linkMemories", input },
-      (plan) =>
-        this.runLifecyclePlan<MemoryRelationRecord>(plan, {
+      (plan, graphs) =>
+        this.runLifecyclePlan<MemoryRelationRecord>(plan, graphs, {
           action: "linkMemories",
           namespace: this.backend.namespace,
           input,
@@ -354,7 +364,8 @@ export class MemoryEngine {
     return this.mutate(
       operationId,
       { action: "withdraw", memoryId, sessionId },
-      (plan) => this.runLifecyclePlan(plan, { action: "withdraw", memoryId, sessionId }),
+      (plan, graphs) =>
+        this.runLifecyclePlan(plan, graphs, { action: "withdraw", memoryId, sessionId }),
       async (_view, receipt) => receipt.result as { memoryId: string; memory: MemoryRecord },
     );
   }
@@ -395,8 +406,8 @@ export class MemoryEngine {
     return this.mutate(
       operationId,
       { action: "attachNode", memoryId, input },
-      (plan) =>
-        this.runLifecyclePlan<{ memory: MemoryRecord; node: MemoryNode }>(plan, {
+      (plan, graphs) =>
+        this.runLifecyclePlan<{ memory: MemoryRecord; node: MemoryNode }>(plan, graphs, {
           action: "attachNode",
           memoryId,
           input,
@@ -411,8 +422,8 @@ export class MemoryEngine {
     return this.mutate(
       randomUUID(),
       { action: "claimOutcomes", input },
-      (plan) =>
-        this.runLifecyclePlan<Awaited<ReturnType<typeof recordClaimOutcomes>>>(plan, {
+      (plan, graphs) =>
+        this.runLifecyclePlan<Awaited<ReturnType<typeof recordClaimOutcomes>>>(plan, graphs, {
           action: "claimOutcomes",
           input,
           now,
@@ -468,7 +479,8 @@ export class MemoryEngine {
     return this.mutate(
       randomUUID(),
       { action: "usage", ids, sessionId },
-      (plan) => this.runLifecyclePlan(plan, { action: "usage", ids, sessionId, now }),
+      (plan, graphs) =>
+        this.runLifecyclePlan(plan, graphs, { action: "usage", ids, sessionId, now }),
       async () => null,
     ).then(() => undefined);
   }
@@ -493,39 +505,42 @@ export class MemoryEngine {
     if (!text.trim()) throw new Error("Search query is required");
     searchLimit(options.limit);
     boundedGraphHops(options.graphHops);
-    const resolved = this.graphs.configResolver?.();
-    const searchGraph =
-      options.searchGraph ??
-      this.graphs.searchGraph ??
-      resolved?.searchGraph ??
-      DEFAULT_ENGINE_SEARCH_GRAPH;
-    const registry = this.graphs.searchRegistry ?? ENGINE_SEARCH_REGISTRY;
-    const resolvedRerank = this.graphs.rerankGraph ?? resolved?.rerankGraph;
-    const effectiveOptions =
-      options.rerankGraph === undefined && resolvedRerank !== undefined
-        ? { ...options, rerankGraph: resolvedRerank }
-        : options;
-    const configIdentity = this.graphs.configIdentity ?? resolved?.configIdentity;
-    const planOptions = configIdentity ? { configIdentity } : undefined;
-    return this.withSnapshot((port) =>
-      executeEngineSearchGraph(
+    return this.withSnapshot((port, _view, graphs) => {
+      const searchGraph = options.searchGraph ?? graphs.searchGraph ?? DEFAULT_ENGINE_SEARCH_GRAPH;
+      const effectiveOptions =
+        options.rerankGraph === undefined && graphs.rerankGraph !== undefined
+          ? { ...options, rerankGraph: graphs.rerankGraph }
+          : options;
+      const planOptions = graphs.configIdentity
+        ? { configIdentity: graphs.configIdentity }
+        : undefined;
+      return executeEngineSearchGraph(
         { text, options: effectiveOptions, callerNow: port.now, semantic, exact },
         port,
         searchGraph,
-        registry,
-        this.graphs.searchMemo,
+        graphs.searchRegistry ?? ENGINE_SEARCH_REGISTRY,
+        graphs.searchMemo,
         planOptions,
-      ),
-    );
+      );
+    });
   }
 
   private async withSnapshot<T>(
-    run: (port: MemorySnapshotPort, view: MemoryReadView) => Promise<T>,
+    run: (
+      port: MemorySnapshotPort,
+      view: MemoryReadView,
+      graphs: MemoryEngineGraphOptions,
+    ) => Promise<T>,
   ): Promise<T> {
     const view = await this.backend.openRead();
     try {
       const port = createSnapshotPort(this.backend, view, this.now());
-      return await run(port, view);
+      const graphs = this.effectiveGraphs();
+      return await withRuntimePolicy(
+        graphs.runtime,
+        () => run(port, view, graphs),
+        graphs.scheduler,
+      );
     } finally {
       await this.backend.closeRead(view);
     }
@@ -533,13 +548,14 @@ export class MemoryEngine {
 
   private runLifecyclePlan<T>(
     plan: MemoryPlan,
+    graphs: MemoryEngineGraphOptions,
     payload: LifecyclePlanPayload,
   ): Promise<PlannedResult<T>> {
     return executeLifecyclePlanGraph<T>(
       payload,
       plan,
-      this.graphs.lifecyclePlanGraph ?? DEFAULT_LIFECYCLE_PLAN_GRAPH,
-      this.graphs.writeRegistry ?? ENGINE_WRITE_REGISTRY,
+      graphs.lifecyclePlanGraph ?? DEFAULT_LIFECYCLE_PLAN_GRAPH,
+      graphs.writeRegistry ?? ENGINE_WRITE_REGISTRY,
     );
   }
 
@@ -551,7 +567,7 @@ export class MemoryEngine {
     return this.mutate(
       randomUUID(),
       { action, input },
-      (plan) => this.runLifecyclePlan<T>(plan, payload),
+      (plan, graphs) => this.runLifecyclePlan<T>(plan, graphs, payload),
       async (_view, receipt) => receipt.result as T,
     );
   }
@@ -592,8 +608,8 @@ export class MemoryEngine {
     await this.mutate(
       `audit:${id}`,
       metadata,
-      (plan) =>
-        this.runLifecyclePlan<null>(plan, {
+      (plan, graphs) =>
+        this.runLifecyclePlan<null>(plan, graphs, {
           action: "rejectionAudit",
           event: { ...metadata, createdAt: now },
         }),
@@ -604,10 +620,11 @@ export class MemoryEngine {
   private async mutate<T>(
     operationId: string,
     request: unknown,
-    prepare: (plan: MemoryPlan) => Promise<PlannedResult<T>>,
+    prepare: (plan: MemoryPlan, graphs: MemoryEngineGraphOptions) => Promise<PlannedResult<T>>,
     replay: (view: MemoryReadView, receipt: MemoryCommitReceipt) => Promise<T>,
   ): Promise<T> {
     const hash = requestHash(request);
+    const graphs = this.effectiveGraphs();
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const view = await this.backend.openRead();
       try {
@@ -617,7 +634,11 @@ export class MemoryEngine {
           return await replay(view, previous);
         }
         const plan = new MemoryPlan(this.backend, view);
-        const prepared = await prepare(plan);
+        const prepared = await withRuntimePolicy(
+          graphs.runtime,
+          () => prepare(plan, graphs),
+          graphs.scheduler,
+        );
         const outcome = await this.backend.commit({
           operationId,
           requestHash: hash,

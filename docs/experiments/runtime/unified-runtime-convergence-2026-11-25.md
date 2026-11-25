@@ -2,7 +2,38 @@
 
 [中文](unified-runtime-convergence-2026-11-25.zh-CN.md) · [Terms](unified-runtime-convergence-2026-11-25.terms.yaml)
 
-## Question and conclusion
+## Matched production comparison against PR #190
+
+The follow-up compares commit `604a89e9` with the consolidated runtime. The runner extracts the baseline source from Git, regenerates its prompts, and measures in both orders. Both arms use fixed clocks, operation IDs, data and request batches. Run with Node 22.19 or newer and a directory containing `locomo/locomo10.json`.
+
+```sh
+node docs/experiments/runtime/production-runtime-benchmark.mjs --baseline-ref 604a89e9 --data-root <OmniMemEval-data> --rounds 2 --out docs/experiments/runtime/artifacts/unified-runtime-2026-11-25/production-matched.json
+```
+
+The [matched runner](production-runtime-benchmark.mjs) and [raw observations](artifacts/unified-runtime-2026-11-25/production-matched.json) retain each latency, source revision, dataset digest, operation scope, CPU samples and Worker results. The host was Windows x64 with Node 26.13.0 and 20 logical CPUs.
+
+- **Application workload.** The first eight sessions and 32 questions of the first LoCoMo sample use the HTTP memory service and real SQLite, with 174 stored turns. The two retrieval modes use lexical search and offline hashing vectors. The exact ordered ID and score digests agree in all four mode/concurrency combinations in both rounds. The fixed golden engine/HTTP fixture agrees as well. Hosted provider latency and throughput remain outside the measurements.
+- **Synthetic controls.** The single-node graph measures runtime overhead. A matched wave barrier uses the same asymmetric DAG and timers as both event-driven arms. The mixed workload includes queue time for both foreground and background latency. The direct Worker pool uses the same dense function and verifies outputs at both input sizes. An independent Node process saturates the host while each scheduler admits twelve background operations.
+- **Production and contract tests.** The daemon consumes an edited L1 get graph through RPC. A configured ranking call reaches a real Worker and matches inline ranking. Graph tests cover resource contention, nesting, retry, failures, timeouts and cache isolation. The Onlion local fold test exercises request-scoped SQLite and deferred embedding.
+- **Deferred optimizations.** Worker-resident intermediate buffers and full DAG makespan modeling need sufficient transfer savings on real requests. The benchmark measures caller-resident input and local transfers. It records CPU, concurrency and task durations. Physical power and energy were outside measurement.
+
+| Metric, range across the two runs | PR #190 | Consolidated |
+| --- | --- | --- |
+| Synchronous single-node median, µs | 0.42–0.70 | 0.67–0.70 |
+| Asynchronous single-node median, µs | 1.26–1.44 | 9.82–10.72 |
+| Asymmetric DAG median, ms | 75.9–84.7 | 76.0–88.1 |
+| Mixed foreground P50 / P95 / P99, ms | 17.8–19.9 / 22.5–29.0 / 22.7–34.3 | 14.5–15.0 / 15.2–15.5 / 15.2–15.5 |
+| Mixed batch completion, ms | 342–369 | 1,167–1,530 |
+| Hybrid SQLite at eight concurrent requests, requests/s | 90.0–94.6 | 69.4–93.2 |
+| External CPU load, observed background peak before / during / after | 4 / 4 / 4 | 4 / 1 / 4 |
+
+The consolidated DAG took 76.0–88.1 ms against its matched wave control at 121.2–123.2 ms. PR #190 already had event-driven execution, and its DAG timings overlap the consolidated timings. Background yielding improved foreground tail latency at the cost of later background completion. Under sustained external load the host reached 100% sampled utilization, Worker allowance fell from 10 to 0, and the background CPU allowance fell from 50 to 8 ms per window. Recovery passed through light load before restoring idle allowance.
+
+Application timings varied with run order and load. Both eight-request hybrid runs were slower, one by 1.5% and one by 22.9%. The default application workload dispatched zero Worker operations. The forced placement regression verifies output parity on the production rerank operator. The 450,000-round direct Worker workload reached 278–287 tasks/s on four threads versus 92–93 tasks/s inline. For 2,000 rounds, four threads yielded 4,311–9,762 tasks/s versus 21,383–23,587 inline. At the larger task size, four-thread median queue time was about 37.7 ms and the measured median communication residual was 0.12–0.22 ms. These Worker measurements describe the synthetic workload.
+
+## PR #190 exploratory trials
+
+The original experiment used different operation IDs and background workloads between arms. Its wave and Worker scenarios remain characterization evidence. Use the paired follow-up for comparisons of production behavior.
 
 Does converging business semantics onto shared compute graphs, introducing `L0 -> L1 -> L2` capability configuration, and replacing full-wave `Promise.all` barriers with an event-driven `UnifiedRuntimeScheduler` preserve retrieval outputs and synchronous microsecond latency while eliminating asymmetric DAG barrier stalls and scaling multi-worker CPU execution?
 

@@ -22,7 +22,8 @@
 1. **规划与缓存正确性修复（`src/core/canonical-value.ts`、`src/core/compute-planner.ts`、`src/core/compute-graph.ts`）**：`PLAN_CACHE` 按 `WeakMap` 跟踪的 `ComputeRegistry` 实例令牌与 `configIdentity` 隔离；`runDcePass` 递归检查嵌套子图中的不可消除节点；`fused_chain` 纳入逐步参数签名并同步重写边关系；`canonical-value.ts` 严谨拒绝内建有状态容器和访问器的浅冻结快路径，并对其结构化哈希。
 2. **唯一公共语义库（`src/core/memory/page-stitch-operators.ts` 与各适配器）**：沉淀 `fuseDualChannelCandidates`、`capSupplementalTailScores`、`sortResultsChronologically` 与 `stitchSupplementalPage`，迁移 `MemoryEngine`、`PortableMemoryService`、`HttpMemoryService`、`local-memory-http.ts`、`workbuddy-plugin/nmg-hook.ts` 与 DSH 适配器复用统一实现。
 3. **`L0 -> L1 -> L2` 三级声明式配置（`src/core/capability-config.ts`、`src/integration/runtime-config.ts`）**：定义带边界校验的公共参数契约与默认子图（`L0`）、可热加载共享配置（`L1`，`NMG_CONFIG_PATH` 或 `<dataDir>/nmg.config.json`）及最小适配器覆盖（`L2`），保留来源溯源与缓存身份哈希，并以 `PolicyViolationError` 拦截未获准的语义变更算法替换。
-4. **事件驱动统一运行时调度（`src/core/resource-locks.ts`、`src/core/runtime/*`）**：`runAsyncPlan` 改为共享 `ResourceLockManager` 的就绪节点事件唤醒；提供 `ZeroPollLatch`、`InFlightCoalescer` 单飞去重、`ComputeCostModel`（HEFT 关键路径与拒绝微秒级算子卸载的 EFT 阈值）、`HostLoadGovernor`（`eco`／`balanced`／`performance` 与迟滞控制及系统遥测降级）、`LocalWorkerThreadPool`、可递归组合的 `SchedulingDomain` 与防饿死优先级老化，并接入 `NmgService.drain` 与后台嵌入回填。
+4. **事件驱动统一运行时**。生产和实验异步图都进入 `UnifiedRuntimeScheduler`。规划器输出数据与副作用依赖，调度器协调跨图资源、等待已启动的失败分支收尾、合并符合缓存契约的在途计算，以及按成本模型指派 Worker 叶节点。同步执行保留低开销内联循环。[计算引擎契约](../../design/unified-architecture/compute-engine.zh-CN.md)
+5. **宿主绑定与向量补齐**。Node HTTP、daemon、portable 引擎在各自的数据目录边界绑定同一份 L1 能力目录。两个回填入口共用单批嵌入校验与写入，daemon 保留游标管理，HTTP 保留有界批次和延迟嵌入重试契约。Onlion 为快照使用请求内调度器。[运行策略](../../design/unified-architecture/compute-engine.zh-CN.md#运行策略与资源所有权)
 
 ## 考虑过的替代方案
 
@@ -39,3 +40,4 @@
 
 - 跨主机分布式任务队列、远程工作窃取与分布式故障恢复（当前 `SchedulingDomain` 保持单机作用域）。
 - 直接调用 Windows EcoQoS Win32 原生 FFI 或 Linux cgroup 写控（当前按事件循环利用率、工作池并发度与时间片预算控制，待后续真实桌面／服务端争用样本确立收益再接入）。
+- Worker 常驻中间数据、通用抢占和全 DAG 完工时间优化。目前按就绪工作与输入、IPC 成本做放置，分别测量事件就绪、线程扩展和应用检索的表现。[实验记录](../../experiments/runtime/unified-runtime-convergence-2026-11-25.zh-CN.md)

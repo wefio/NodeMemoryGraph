@@ -150,6 +150,12 @@ function extractHttpL2Overrides(config: JsonObject): NmgLayerConfig | undefined 
     config.allowAlgorithmicOverrides !== undefined ||
     config.allowedAlgorithmicVariants !== undefined;
   if (!hasLayerFields) return undefined;
+  if (config.runtime !== undefined && !isJsonObject(config.runtime)) {
+    throw new Error("runtime configuration must be an object");
+  }
+  if (config.bindings !== undefined && !isJsonObject(config.bindings)) {
+    throw new Error("bindings configuration must be an object");
+  }
   return {
     ...(isJsonObject(config.bindings)
       ? { bindings: config.bindings as NmgLayerConfig["bindings"] }

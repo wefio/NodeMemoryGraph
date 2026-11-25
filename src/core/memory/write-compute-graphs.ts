@@ -358,7 +358,8 @@ function buildWriteRegistry(): ComputeRegistry<MemoryPlan> {
     eliminable: false,
     idempotentWrite: true,
     transactional: true,
-    resources: { execution: "async_io" as const, writes: ["memory_plan"] },
+    // The plan belongs to one mutation. Revision checks at commit arbitrate writers.
+    resources: { execution: "async_io" as const },
   });
 
   registry.register(

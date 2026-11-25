@@ -8,7 +8,7 @@ import {
   type NmgLayerConfig,
   type ResolvedLayerBundle,
   type RuntimePolicyOverride,
-  type SchedulingObjective,
+  type RuntimePolicy,
 } from "../core/capability-config.ts";
 
 export interface EffectiveAutoRecallPolicy {
@@ -20,14 +20,7 @@ export interface EffectiveAutoRecallPolicy {
   readonly graphHops: number;
 }
 
-export interface EffectiveRuntimePolicy {
-  readonly profile: "eco" | "balanced" | "performance";
-  readonly objective: SchedulingObjective;
-  readonly maxWorkers: number;
-  readonly minOffloadCpuMs: number;
-  readonly maxConcurrentBackground: number;
-  readonly starvationMaxWaitMs: number;
-}
+export type EffectiveRuntimePolicy = RuntimePolicy;
 
 export interface EffectiveParameterConfig {
   readonly autoRecall: EffectiveAutoRecallPolicy;

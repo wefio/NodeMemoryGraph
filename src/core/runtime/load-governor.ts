@@ -11,6 +11,7 @@ export interface HostTelemetrySample {
   readonly onBattery?: boolean;
   readonly thermalThrottled?: boolean;
   readonly loadAvgPerCore?: number;
+  readonly hostCpuUtilization?: number;
   readonly nowMs: number;
 }
 
@@ -21,6 +22,7 @@ export interface AdaptiveDispatchBudget {
   readonly backgroundCpuBudgetMs: number;
   readonly preferWorkerOffload: boolean;
   readonly recommendedWorkers: number;
+  readonly hostCpuUtilization?: number;
   readonly onBattery: boolean;
   readonly thermalThrottled: boolean;
   readonly telemetryAvailable: { readonly power: boolean; readonly thermal: boolean };
@@ -115,10 +117,32 @@ function probeLinuxSysfsTelemetry() {
   return { ...probePowerSupply(), ...probeThermalZones() };
 }
 
+function readCpuTimes(): { total: number; idle: number } {
+  let total = 0;
+  let idle = 0;
+  try {
+    for (const { times } of os.cpus()) {
+      idle += times.idle;
+      total += times.user + times.nice + times.sys + times.idle + times.irq;
+    }
+  } catch {
+    // Some managed hosts expose Node compatibility without host CPU counters.
+  }
+  return { total, idle };
+}
+
+export function availableHostCores(): number {
+  try {
+    return Math.max(1, os.availableParallelism());
+  } catch {
+    return 1;
+  }
+}
+
 /**
  * BOINC-inspired adaptive host load & power/thermal governor.
- * Uses Schmitt-trigger hysteresis so background concurrency never oscillates cleanly degrades
- * when hardware power or thermal sensors are unavailable on the host OS.
+ * Hysteresis limits changes in background admission. CPU and event-loop counters
+ * remain useful when the host exposes no hardware power or thermal telemetry.
  */
 export class HostLoadGovernor {
   private profile: RuntimePowerProfile;
@@ -126,6 +150,12 @@ export class HostLoadGovernor {
   private lastTransitionMs = 0;
   private readonly minDwellMs: number;
   private lastElu = performance.eventLoopUtilization();
+  private lastCpu = readCpuTimes();
+  private lastSampleMs = Date.now();
+  private lastBudget?: AdaptiveDispatchBudget;
+  private sysfs = probeLinuxSysfsTelemetry();
+  private lastSysfsMs = Date.now();
+  private readonly cores = availableHostCores();
   private readonly delayMonitor?: IntervalHistogram;
 
   constructor(
@@ -145,6 +175,7 @@ export class HostLoadGovernor {
 
   setProfile(profile: RuntimePowerProfile): void {
     this.profile = profile;
+    this.lastBudget = undefined;
   }
 
   currentState(): HostLoadState {
@@ -152,24 +183,36 @@ export class HostLoadGovernor {
   }
 
   sampleHost(nowMs = Date.now()): AdaptiveDispatchBudget {
+    if (this.lastBudget && nowMs - this.lastSampleMs < 250) return this.lastBudget;
     const currentElu = performance.eventLoopUtilization(this.lastElu);
     this.lastElu = performance.eventLoopUtilization();
-    const p99DelayMs = this.delayMonitor ? this.delayMonitor.percentile(99) / 1e6 : 0;
-    const sysfs = probeLinuxSysfsTelemetry();
-    const cpuCount = Math.max(1, os.cpus().length);
-    const loadAvgPerCore =
-      process.platform === "win32" ? undefined : (os.loadavg()[0] ?? 0) / cpuCount;
-    return this.evaluateSample(
+    const p99DelayMs = this.delayMonitor?.count ? this.delayMonitor.percentile(99) / 1e6 : 0;
+    this.delayMonitor?.reset();
+    const cpu = readCpuTimes();
+    const elapsed = cpu.total - this.lastCpu.total;
+    const hostCpuUtilization =
+      elapsed > 0
+        ? Math.max(0, Math.min(1, 1 - (cpu.idle - this.lastCpu.idle) / elapsed))
+        : this.lastBudget?.hostCpuUtilization;
+    this.lastCpu = cpu;
+    this.lastSampleMs = nowMs;
+    if (nowMs - this.lastSysfsMs >= 5000) {
+      this.sysfs = probeLinuxSysfsTelemetry();
+      this.lastSysfsMs = nowMs;
+    }
+    const sysfs = this.sysfs;
+    this.lastBudget = this.evaluateSample(
       {
         eventLoopUtilization: currentElu.utilization,
         p99DelayMs: Number.isFinite(p99DelayMs) ? p99DelayMs : 0,
         onBattery: sysfs.onBattery,
         thermalThrottled: sysfs.thermalThrottled,
-        loadAvgPerCore,
+        hostCpuUtilization,
         nowMs,
       },
       { power: sysfs.powerAvailable, thermal: sysfs.thermalAvailable },
     );
+    return this.lastBudget;
   }
 
   evaluateSample(
@@ -182,6 +225,7 @@ export class HostLoadGovernor {
     const spec = PROFILE_SPECS[this.profile];
     const effectiveLoad = Math.max(
       sample.eventLoopUtilization,
+      sample.hostCpuUtilization ?? 0,
       sample.loadAvgPerCore !== undefined ? Math.min(1, sample.loadAvgPerCore) : 0,
     );
     const isHeavySignal =
@@ -209,11 +253,6 @@ export class HostLoadGovernor {
 
     const batteryScale = sample.onBattery ? 0.5 : 1;
     const rawBg = Math.max(1, Math.floor(spec.maxBgByState[this.state] * batteryScale));
-    const cpuCount = Math.max(1, os.cpus().length);
-    const recommendedWorkers = Math.max(
-      1,
-      Math.floor(cpuCount * spec.maxWorkerRatio * batteryScale),
-    );
     return {
       profile: this.profile,
       loadState: this.state,
@@ -225,11 +264,21 @@ export class HostLoadGovernor {
         ),
       ),
       preferWorkerOffload: this.state !== "heavy" && !sample.thermalThrottled,
-      recommendedWorkers,
+      recommendedWorkers: this.workerBudget(spec, sample.hostCpuUtilization ?? 0, batteryScale),
+      hostCpuUtilization: sample.hostCpuUtilization,
       onBattery: sample.onBattery === true,
       thermalThrottled: sample.thermalThrottled === true,
       telemetryAvailable,
     };
+  }
+
+  private workerBudget(spec: ProfileBudgetSpec, cpu: number, batteryScale: number): number {
+    if (this.state === "heavy" || this.cores <= 1) return 0;
+    const stateScale = this.state === "light" ? 0.5 : 1;
+    return Math.max(
+      1,
+      Math.floor(this.cores * Math.min(spec.maxWorkerRatio * stateScale * batteryScale, 1 - cpu)),
+    );
   }
 
   private nextState(
@@ -243,8 +292,9 @@ export class HostLoadGovernor {
     if (this.state === "heavy") {
       return elu <= spec.exitHeavyElu && p99DelayMs < spec.heavyDelayMs * 0.6 ? "light" : "heavy";
     }
-    if (this.state === "idle") return isIdle ? "idle" : "light";
-    return isIdle ? "idle" : elu >= spec.exitIdleElu ? "light" : "light";
+    if (this.state === "idle")
+      return elu >= spec.exitIdleElu || p99DelayMs >= spec.heavyDelayMs * 0.6 ? "light" : "idle";
+    return isIdle ? "idle" : "light";
   }
 
   close(): void {

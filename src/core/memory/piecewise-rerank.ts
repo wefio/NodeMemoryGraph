@@ -2,10 +2,13 @@ import {
   ComputeRegistry,
   INPUT_NODE_ID,
   evaluateSyncComputeGraph,
+  executeComputeGraph,
   type ComputeGraphSpec,
 } from "../compute-graph.ts";
 import { normalize } from "../memory-normalization.ts";
 import type { MemoryMarker } from "../types.ts";
+import { defineLocalWorkerOperator } from "../runtime/worker-pool.ts";
+import { getRuntimeScheduler } from "../runtime/scheduler.ts";
 import {
   bm25fFieldScoreOperator,
   chronoSequencePivotOperator,
@@ -686,6 +689,88 @@ export function createPiecewiseRerankGraph(
 
 export const DEFAULT_PIECEWISE_RERANK_GRAPH: ComputeGraphSpec = createPiecewiseRerankGraph();
 
+function rankIds(
+  candidates: readonly RerankCandidate[],
+  queryText: string,
+  graph: ComputeGraphSpec,
+): string[] {
+  return evaluateSyncComputeGraph<readonly ScoredCandidateId[], string[], RerankContext>(
+    graph,
+    RERANK_COMPUTE_REGISTRY,
+    baseScored(candidates),
+    { queryText, candidates },
+  );
+}
+
+const RANK_IDS_OP = "piecewise_rank_ids";
+const rankCost = { baseMs: 0.1, perItemUs: 6 };
+const builtinRankingGeneration = RERANK_COMPUTE_REGISTRY.generation;
+interface RankRequest {
+  readonly candidates: readonly RerankCandidate[];
+  readonly queryText: string;
+}
+const rankIdsOp = (inputs: Readonly<Record<string, unknown>>) => {
+  const { candidates, queryText } = inputs.default as RankRequest;
+  return rankIds(candidates, queryText, DEFAULT_PIECEWISE_RERANK_GRAPH);
+};
+defineLocalWorkerOperator(RANK_IDS_OP, rankIdsOp);
+
+for (const op of [
+  "identity_rank",
+  "r3_intent_boost",
+  "r5_recency_boost",
+  "r1_incremental_dedup",
+  "w_session_pivot",
+  "bm25f_field_score",
+  "incremental_bm25_score",
+  "w_temporal_pivot",
+  "w_concept_pivot",
+  "w_lineage_pivot",
+  "w_turn_pivot",
+  "w_chrono_seq_pivot",
+]) {
+  defineLocalWorkerOperator(op, RERANK_COMPUTE_REGISTRY.get(op) as typeof rankIdsOp);
+}
+
+const rankingRegistry = new ComputeRegistry().register(RANK_IDS_OP, rankIdsOp, {
+  effect: "pure",
+  resources: { execution: "cpu" },
+  costHint: rankCost,
+});
+const rankingGraph: ComputeGraphSpec = {
+  id: "default-piecewise-ranking",
+  nodes: [{ id: "rank", op: RANK_IDS_OP }],
+  edges: [],
+  output: "rank",
+};
+
+/** Search can share CPU placement across concurrent requests with larger candidate batches. */
+export async function rankCandidatesForSearch(
+  candidates: readonly RerankCandidate[],
+  queryText: string,
+  graph: ComputeGraphSpec = DEFAULT_PIECEWISE_RERANK_GRAPH,
+): Promise<RerankCandidate[]> {
+  if (
+    graph !== DEFAULT_PIECEWISE_RERANK_GRAPH ||
+    candidates.length < 2 ||
+    RERANK_COMPUTE_REGISTRY.generation !== builtinRankingGeneration ||
+    !getRuntimeScheduler().exceedsOffloadFloor(RANK_IDS_OP, rankCost, candidates.length)
+  ) {
+    return rerankCandidatesWithGraph(candidates, queryText, graph);
+  }
+  const ids = await executeComputeGraph<RankRequest, string[]>(
+    rankingGraph,
+    rankingRegistry,
+    { candidates, queryText },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { itemEstimate: candidates.length },
+  );
+  return applyRanks(candidates, ids);
+}
+
 /** Reorder candidates with a causal piecewise rerank ComputeGraphSpec, preserving score scale. */
 export function rerankCandidatesWithGraph<T extends RerankCandidate>(
   candidates: readonly T[],
@@ -693,17 +778,17 @@ export function rerankCandidatesWithGraph<T extends RerankCandidate>(
   graph: ComputeGraphSpec = DEFAULT_PIECEWISE_RERANK_GRAPH,
 ): T[] {
   if (candidates.length < 2) return [...candidates];
+  return applyRanks(candidates, rankIds(candidates, queryText, graph));
+}
+
+function applyRanks<T extends RerankCandidate>(
+  candidates: readonly T[],
+  rankedIds: readonly string[],
+): T[] {
   const baseScores = candidates
     .map((candidate) => candidate.combinedScore)
     .sort((left, right) => right - left);
   const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
-  const context: RerankContext = { queryText, candidates };
-  const rankedIds = evaluateSyncComputeGraph<readonly ScoredCandidateId[], string[], RerankContext>(
-    graph,
-    RERANK_COMPUTE_REGISTRY,
-    baseScored(candidates),
-    context,
-  );
   const seen = new Set<string>();
   const ordered: T[] = [];
   for (const id of rankedIds) {

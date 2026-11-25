@@ -38,11 +38,9 @@ export interface StgSyncPolicyConfig {
   minimumIntervalMs: number;
 }
 
-export const DEFAULT_STG_SYNC_POLICY: StgSyncPolicyConfig = {
-  enabled: false,
-  limit: 20,
-  minimumIntervalMs: 5 * 60 * 1_000,
-};
+const defaults = resolveParameterConfig({ l1: {} });
+
+export const DEFAULT_STG_SYNC_POLICY = defaults.stgSync;
 
 export function configuredStgSyncPolicy(
   environment: NodeJS.ProcessEnv = process.env,
@@ -50,35 +48,16 @@ export function configuredStgSyncPolicy(
   return { ...resolveParameterConfig({ environment }).stgSync };
 }
 
-export const DEFAULT_STG_CONSOLIDATION_POLICY: StgConsolidationPolicyConfig = {
-  // Shadow by default until natural-use precision has been measured.
-  enabled: false,
-  minimumIndependentVotes: 3,
-  minimumPosteriorMean: 0.75,
-  minimumConservativeLowerBound: 0.5,
-  // Lower than promotion thresholds: a correction reopens the claim without
-  // immediately oscillating the materialized LTG projection.
-  minimumRetainedPosteriorMean: 0.65,
-  minimumRetainedConservativeLowerBound: 0.35,
-};
+export const DEFAULT_STG_CONSOLIDATION_POLICY = defaults.stgConsolidation;
 
 export function configuredStgConsolidationPolicy(
   environment: NodeJS.ProcessEnv = process.env,
+  dataDir?: string,
 ): StgConsolidationPolicyConfig {
-  return { ...resolveParameterConfig({ environment }).stgConsolidation };
+  return { ...resolveParameterConfig({ environment, dataDir }).stgConsolidation };
 }
 
-export const DEFAULT_MAINTENANCE_POLICY: MaintenancePolicyConfig = {
-  writeThreshold: 16,
-  accessThreshold: 32,
-  nodeLimit: 4,
-  semanticEveryBatches: 8,
-  expiryLimit: 256,
-  pairLimit: 64,
-  topologyNodeLimit: 32,
-  autoMergeEnabled: false,
-  autoMergeLimit: 1,
-};
+export const DEFAULT_MAINTENANCE_POLICY = defaults.maintenance;
 
 export function configuredMaintenancePolicy(
   environment: NodeJS.ProcessEnv = process.env,
@@ -89,8 +68,9 @@ export function configuredMaintenancePolicy(
 export function configuredGraphHops(
   fallback: number,
   environment: NodeJS.ProcessEnv = process.env,
+  dataDir?: string,
 ): number {
-  const resolved = resolveParameterConfig({ environment });
+  const resolved = resolveParameterConfig({ environment, dataDir });
   const prov = resolved.provenance.get("autoRecall.graphHops");
   return prov && prov.layer !== "L0" ? resolved.autoRecall.graphHops : fallback;
 }

@@ -11,6 +11,7 @@ import os from "node:os";
 import { performance } from "node:perf_hooks";
 import { parseArgs } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { heavyDenseWork } from "./dense-work.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -32,15 +33,7 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function heavyDenseWork(seed, rounds) {
-  let acc = seed * 0.137 + 1.0;
-  for (let i = 0; i < rounds; i += 1) {
-    acc = Math.sin(acc * 1.00013 + i * 0.001) + Math.cos(acc * 0.9997);
-  }
-  return acc;
-}
-
-async function runGoldenRetrieval(openMemoryBackend, MemoryEngine, HttpMemoryService) {
+export async function runGoldenRetrieval(openMemoryBackend, MemoryEngine, HttpMemoryService) {
   const dir = mkdtempSync(join(os.tmpdir(), "nmg-runtime-bench-"));
   const backend = await openMemoryBackend({
     kind: "sqlite",
@@ -136,7 +129,7 @@ async function runGoldenRetrieval(openMemoryBackend, MemoryEngine, HttpMemorySer
   }
 }
 
-function runSyncRerankMicrobench(rerankCandidatesWithGraph, DEFAULT_PIECEWISE_RERANK_GRAPH) {
+export function runSyncRerankMicrobench(rerankCandidatesWithGraph, DEFAULT_PIECEWISE_RERANK_GRAPH) {
   const candidates = Array.from({ length: 60 }, (_, idx) => ({
     id: `cand-${idx}`,
     statement: `database optimization step_${idx} query latency reduction note_${idx % 5}`,
@@ -171,6 +164,7 @@ function runSyncRerankMicrobench(rerankCandidatesWithGraph, DEFAULT_PIECEWISE_RE
   const sorted = [...latencies].sort((a, b) => a - b);
   return {
     iterations,
+    latencies,
     wallMs: round3(wallMs),
     p50Ms: round3(quantile(sorted, 0.5)),
     p95Ms: round3(quantile(sorted, 0.95)),
@@ -182,7 +176,7 @@ function runSyncRerankMicrobench(rerankCandidatesWithGraph, DEFAULT_PIECEWISE_RE
   };
 }
 
-async function runAsymmetricDiamondDag(ComputeRegistry, INPUT_NODE_ID, executeComputeGraph) {
+export async function runAsymmetricDiamondDag(ComputeRegistry, INPUT_NODE_ID, executeComputeGraph) {
   const reg = new ComputeRegistry();
   const readMeta = {
     version: "1.0.0",
@@ -234,6 +228,7 @@ async function runAsymmetricDiamondDag(ComputeRegistry, INPUT_NODE_ID, executeCo
   wallTimes.sort((a, b) => a - b);
   return {
     runs: wallTimes.length,
+    wallTimes,
     medianWallMs: round3(quantile(wallTimes, 0.5)),
     minWallMs: round3(wallTimes[0]),
     maxWallMs: round3(wallTimes[wallTimes.length - 1]),
@@ -336,7 +331,7 @@ async function runWorkerScaling(mode, runtimeMod) {
       await Promise.all(
         Array.from({ length: workers }, (_, w) =>
           pool.execute({
-            op: "__builtin_dense_bench",
+            op: "dense-bench", moduleUrl: fileURLToPath(new URL("./dense-work.mjs", import.meta.url)),
             inputs: { default: { seed: w + 1, rounds: 1000 } },
             context: {},
             params: {},
@@ -347,7 +342,7 @@ async function runWorkerScaling(mode, runtimeMod) {
       const outs = await Promise.all(
         Array.from({ length: tasks }, (_, i) =>
           pool.execute({
-            op: "__builtin_dense_bench",
+            op: "dense-bench", moduleUrl: fileURLToPath(new URL("./dense-work.mjs", import.meta.url)),
             inputs: { default: { seed: i + 1, rounds: workRounds } },
             context: {},
             params: {},
@@ -482,7 +477,7 @@ async function main() {
   process.stdout.write(`Wrote ${values.mode} benchmark report to ${outPath}\n`);
 }
 
-main().catch((err) => {
+if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) main().catch((err) => {
   process.stderr.write(`${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
   process.exit(1);
 });
