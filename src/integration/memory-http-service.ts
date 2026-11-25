@@ -88,12 +88,11 @@ export class HttpMemoryService {
     try {
       await getSharedRuntimeScheduler().runTask(
         async () => {
-          const docs = vectorIndex.pending(this.client!.indexId, this.backfillLimit);
+          if (!this.client) return;
+          const docs = vectorIndex.pending(this.client.indexId, this.backfillLimit);
           if (docs.length) {
-            const vectors = await this.client!.embedDocuments(
-              docs.map((document) => document.text),
-            );
-            vectorIndex.save(this.client!.indexId, docs, vectors);
+            const vectors = await this.client.embedDocuments(docs.map((document) => document.text));
+            vectorIndex.save(this.client.indexId, docs, vectors);
           }
         },
         { priority: "background", effect: "read", label: "http_vector_backfill" },

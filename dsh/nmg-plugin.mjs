@@ -78,11 +78,6 @@ export default {
       return { params, argv: [...argv, '--project-dir', workspaceRoot, '--compact-json'] }
     }
 
-    function clampInt(raw, min, max, fallback) {
-      const value = Number(raw)
-      return Number.isFinite(value) ? Math.max(min, Math.min(max, Math.floor(value))) : fallback
-    }
-
     async function runNmg(args, signal) {
       const node = await resolveNode()
       const handle = subprocess.spawn({
