@@ -68,9 +68,18 @@ test("Static architecture guardrails: layer boundaries, declared operator contra
   const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
   const memoryDir = join(repoRoot, "src", "core", "memory");
   const computeFiles = [
+    join(repoRoot, "src", "core", "canonical-value.ts"),
+    join(repoRoot, "src", "core", "capability-config.ts"),
     join(repoRoot, "src", "core", "compute-contracts.ts"),
     join(repoRoot, "src", "core", "compute-planner.ts"),
     join(repoRoot, "src", "core", "compute-graph.ts"),
+    join(repoRoot, "src", "core", "resource-locks.ts"),
+    join(repoRoot, "src", "core", "runtime", "cost-model.ts"),
+    join(repoRoot, "src", "core", "runtime", "load-governor.ts"),
+    join(repoRoot, "src", "core", "runtime", "worker-pool.ts"),
+    join(repoRoot, "src", "core", "runtime", "worker-entry.ts"),
+    join(repoRoot, "src", "core", "runtime", "scheduler.ts"),
+    join(memoryDir, "page-stitch-operators.ts"),
     join(memoryDir, "piecewise-rerank.ts"),
     join(memoryDir, "bm25f-neighborhoods.ts"),
     join(memoryDir, "incremental-bm25.ts"),
@@ -149,6 +158,7 @@ test("Static architecture guardrails: layer boundaries, declared operator contra
     "w_concept_pivot",
     "w_lineage_pivot",
     "w_turn_pivot",
+    "w_chrono_seq_pivot",
   ]);
   checkRegistryOps("RETRIEVAL", RETRIEVAL_COMPUTE_REGISTRY, [
     "lexical_recall",
@@ -667,4 +677,164 @@ test("Planner passes & 7 architecture validation scenarios on live SQLite backen
   } finally {
     await backend.close();
   }
+});
+
+test("Planner & cache correctness 1-4: registry isolation, recursive subgraph DCE, fused step params, container freeze", async () => {
+  // 1. Distinct ComputeRegistry instances with identical generation never share wrong PhysicalExecutionPlan
+  const graph: ComputeGraphSpec = {
+    id: "contract-bound",
+    nodes: [{ id: "step", op: "$contract", contract: "memory.candidate_rerank" }],
+    edges: [{ from: INPUT_NODE_ID, to: "step" }],
+    output: "step",
+  };
+  const regA = new ComputeRegistry().register("op_a", (i) => `${String(i.default)}:A`, {
+    effect: "pure",
+    contract: "memory.candidate_rerank",
+  });
+  const regB = new ComputeRegistry().register("op_b", (i) => `${String(i.default)}:B`, {
+    effect: "pure",
+    contract: "memory.candidate_rerank",
+  });
+  assert.equal(evaluateSyncComputeGraph(graph, regA, "x", {}), "x:A");
+  assert.equal(evaluateSyncComputeGraph(graph, regB, "x", {}), "x:B");
+
+  // 2. DCE retains unreachable nested subgraphs that contain side-effecting writes
+  let nestedSideEffectRuns = 0;
+  const sideReg = new ComputeRegistry()
+    .register("pure_id", (i) => i.default, { effect: "pure" })
+    .register(
+      "record_audit",
+      (i) => {
+        nestedSideEffectRuns += 1;
+        return i.default;
+      },
+      { effect: "write" },
+    );
+  const sideSubgraph: ComputeGraphSpec = {
+    id: "side-sub",
+    nodes: [{ id: "w", op: "record_audit" }],
+    edges: [{ from: INPUT_NODE_ID, to: "w" }],
+    output: "w",
+  };
+  const outer: ComputeGraphSpec = {
+    id: "outer-dce",
+    nodes: [
+      { id: "kept", op: "pure_id" },
+      { id: "dead_side", op: "subgraph", subgraph: sideSubgraph },
+    ],
+    edges: [
+      { from: INPUT_NODE_ID, to: "kept" },
+      { from: INPUT_NODE_ID, to: "dead_side" },
+    ],
+    output: "kept",
+  };
+  const outerPlan = compileComputeGraph(outer, sideReg);
+  assert.equal(outerPlan.eliminatedNodeIds.includes("dead_side"), false);
+  evaluateSyncComputeGraph(outer, sideReg, 42, {});
+  assert.equal(nestedSideEffectRuns, 1);
+
+  // 3. Fused linear pure chain signatures distinguish differing internal step params
+  const chainReg = new ComputeRegistry().register(
+    "add_k",
+    (i, _c, p) => Number(i.default) + Number(p.k ?? 0),
+    { effect: "pure" },
+  );
+  const chainBase: ComputeGraphSpec = {
+    id: "fused-chain-sig",
+    nodes: [
+      { id: "s1", op: "add_k", params: { k: 1 } },
+      { id: "s2", op: "add_k", params: { k: 10 } },
+    ],
+    edges: [
+      { from: INPUT_NODE_ID, to: "s1" },
+      { from: "s1", to: "s2" },
+    ],
+    output: "s2",
+  };
+  const chainModified = replaceGraphNode(
+    chainBase,
+    "s1",
+    { op: "add_k", params: { k: 100 } },
+    "fused-chain-sig",
+  );
+  const chainMemo = new ComputeMemoCache();
+  assert.equal(
+    evaluateSyncComputeGraph(chainBase, chainReg, 5, {}, chainMemo, { enableLinearFusion: true }),
+    16,
+  );
+  assert.equal(
+    evaluateSyncComputeGraph(chainModified, chainReg, 5, {}, chainMemo, {
+      enableLinearFusion: true,
+    }),
+    115,
+  );
+
+  // 4. Object.freeze(Map / Set / Date / Uint8Array) never bypasses cache cloning or collides hashes
+  const mapReg = new ComputeRegistry()
+    .register(
+      "make_frozen_map",
+      (i) => Object.freeze(new Map<string, number>([["val", Number(i.default)]])),
+      { effect: "pure" },
+    )
+    .register("echo_frozen_map", (i) => i.default, { effect: "pure" });
+  const mapSpec: ComputeGraphSpec = {
+    id: "frozen-map-g",
+    nodes: [{ id: "m", op: "make_frozen_map" }],
+    edges: [{ from: INPUT_NODE_ID, to: "m" }],
+    output: "m",
+  };
+  const mapMemo = new ComputeMemoCache();
+  const mFirst = evaluateSyncComputeGraph<number, Map<string, number>, unknown>(
+    mapSpec,
+    mapReg,
+    1,
+    {},
+    mapMemo,
+  );
+  mFirst.set("val", 999);
+  const mSecond = evaluateSyncComputeGraph<number, Map<string, number>, unknown>(
+    mapSpec,
+    mapReg,
+    1,
+    {},
+    mapMemo,
+  );
+  assert.equal(mSecond.get("val"), 1);
+
+  const echoSpec: ComputeGraphSpec = {
+    id: "echo-map-g",
+    nodes: [{ id: "e", op: "echo_frozen_map" }],
+    edges: [{ from: INPUT_NODE_ID, to: "e" }],
+    output: "e",
+  };
+  const rA = evaluateSyncComputeGraph<Map<string, number>, Map<string, number>, unknown>(
+    echoSpec,
+    mapReg,
+    Object.freeze(new Map([["k", 1]])),
+    {},
+    mapMemo,
+  );
+  const rB = evaluateSyncComputeGraph<Map<string, number>, Map<string, number>, unknown>(
+    echoSpec,
+    mapReg,
+    Object.freeze(new Map([["k", 2]])),
+    {},
+    mapMemo,
+  );
+  assert.equal(rA.get("k"), 1);
+  assert.equal(rB.get("k"), 2);
+});
+
+test("Adapter & convergence guardrails: thin adapters share config and wake/stitch primitives", () => {
+  const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
+  const workbuddy = readFileSync(join(repoRoot, "workbuddy-plugin", "nmg-hook.ts"), "utf8");
+  const dshMjs = readFileSync(join(repoRoot, "dsh", "nmg-plugin.mjs"), "utf8");
+  const dshTs = readFileSync(join(repoRoot, "dsh", "dsh-nmg", "src", "plugin", "index.ts"), "utf8");
+  assert.equal(workbuddy.includes("resolveNmgDataDir"), true);
+  assert.equal(workbuddy.includes("configuredAutoRecallLimit"), true);
+  assert.equal(workbuddy.includes("WAKE_KINDS"), false);
+  assert.equal(dshMjs.includes("compactSearchContext"), true);
+  assert.equal(dshMjs.includes("function searchPreviewOf"), false);
+  assert.equal(dshTs.includes("configuredAutoRecallLimit"), true);
+  assert.equal(dshTs.includes("readWakeConfig"), true);
 });

@@ -129,6 +129,37 @@ export {
 } from "./integration/state.ts";
 export type { NmgStateResult } from "./cli/protocol.ts";
 export { normalizeClaims } from "./core/claims.ts";
+export {
+  PolicyViolationError,
+  L0_PARAMETER_SCHEMA,
+  resolveLayeredConfig,
+  materializeBoundGraph,
+  type ConfigLayer,
+  type NmgLayerConfig,
+  type SubgraphOverrideSpec,
+} from "./core/capability-config.ts";
+export {
+  loadSharedL1Config,
+  resolveEffectiveNmgConfig,
+  NMG_L0_CONTRACT_GRAPHS,
+  NMG_NAMED_RECIPES,
+  type EffectiveNmgConfig,
+} from "./integration/runtime-config.ts";
+export {
+  ComputeCostModel,
+  HostLoadGovernor,
+  InFlightCoalescer,
+  LocalWorkerThreadPool,
+  ResourceLockManager,
+  SchedulingDomain,
+  UnifiedRuntimeScheduler,
+  ZeroPollLatch,
+  getSharedRuntimeScheduler,
+  computeUpwardRanks,
+  evaluatePlacementCost,
+  type RuntimeWorker,
+  type TaskPriority,
+} from "./core/runtime/index.ts";
 export type {
   ActivationSignal,
   ActiveGraph,

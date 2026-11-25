@@ -6,6 +6,7 @@ import {
   MemoryEngine,
   type MemoryQueryOptions,
 } from "../core/memory/engine.ts";
+import { stitchSupplementalPage } from "../core/memory/page-stitch-operators.ts";
 import {
   MAX_EVIDENCE_CANDIDATES,
   rankEvidencePage,
@@ -42,6 +43,7 @@ import {
   DEFAULT_EXPLICIT_SEARCH_LIMIT,
   usesExplicitSearchPage,
 } from "../integration/explicit-search-page.ts";
+import { resolveEffectiveNmgConfig } from "../integration/runtime-config.ts";
 import { openLocalMemory } from "./local-memory-migration.ts";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
 import { isUserProfileScope, USER_PROFILE_SCOPE } from "../core/user-profile.ts";
@@ -610,7 +612,16 @@ export class PortableMemoryService {
     return (this.pending ??= this.open(this.options)
       .then((backend) => {
         this.backend = backend;
-        return new MemoryEngine(backend);
+        return new MemoryEngine(backend, undefined, {
+          configResolver: () => {
+            const cfg = resolveEffectiveNmgConfig();
+            return {
+              searchGraph: cfg.resolveGraph("memory.search"),
+              rerankGraph: cfg.resolveGraph("memory.candidate_rerank"),
+              configIdentity: cfg.resultIdentityHash,
+            };
+          },
+        });
       })
       .catch((error: unknown) => {
         this.pending = undefined;
@@ -720,32 +731,11 @@ async function searchLocalStore(
 }
 
 function limitSearchResults(results: MemorySearchResult[], limit: number): MemorySearchResult[] {
-  const ranked = new Map<string, MemorySearchResult>();
-  const adjacent = new Map<string, MemorySearchResult>();
-  const leaves = new Map<string, MemorySearchResult>();
-  for (const item of results) {
-    const sourceNeighbor =
-      item.neighborhood === "previous_turn" || item.neighborhood === "next_turn";
-    const group = sourceNeighbor
-      ? adjacent
-      : item.recallReason === "leaf_context"
-        ? leaves
-        : ranked;
-    group.set(item.memory.id, item);
-  }
-  const neighbors = [...adjacent.values()]
-    .filter(({ memory }) => !ranked.has(memory.id))
-    .slice(0, Math.min(2, limit));
-  const hits = [...ranked.values()].slice(0, limit - neighbors.length);
-  hits.push(...neighbors);
-  const room = Math.min(MAX_LEAF_CONTEXT_RESULTS, limit - hits.length);
-  if (room === 0) return hits;
-  return [
-    ...hits,
-    ...[...leaves.values()]
-      .filter(({ memory }) => !ranked.has(memory.id) && !adjacent.has(memory.id))
-      .slice(0, room),
-  ];
+  return stitchSupplementalPage(results, {
+    limit,
+    maxAdjacent: 2,
+    maxLeafPeers: MAX_LEAF_CONTEXT_RESULTS,
+  });
 }
 
 function mergeLocalContexts(

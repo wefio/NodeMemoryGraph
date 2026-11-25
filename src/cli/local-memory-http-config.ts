@@ -1,8 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
+import type { NmgLayerConfig } from "../core/capability-config.ts";
 import { DEFAULT_EXPLICIT_SEARCH_LIMIT } from "../integration/explicit-search-page.ts";
 import { isJsonObject, type JsonObject } from "../integration/memory-http-protocol.ts";
+import { resolveEffectiveNmgConfig } from "../integration/runtime-config.ts";
 
 export interface LocalMemoryHttpConfig {
   host: string;
@@ -15,6 +17,9 @@ export interface LocalMemoryHttpConfig {
   searchMaxCharacters?: number;
   preprocessMessages?: boolean;
   sortResultsByTime?: boolean;
+  /** Optional L2 adapter overrides layered over shared L1 config. */
+  l2Overrides?: NmgLayerConfig;
+  effectiveConfigIdentity?: string;
 }
 
 const MAX_LOCAL_REQUEST_BYTES = 48 * 1024 * 1024;
@@ -56,6 +61,24 @@ export async function readLocalMemoryHttpConfig(path: string): Promise<LocalMemo
   return parseLocalMemoryHttpConfig(JSON.parse(await readFile(path, "utf8")), path);
 }
 
+function parseHttpOptionalOptions(config: JsonObject): Partial<LocalMemoryHttpConfig> {
+  const searchPreviewCodePoints = optionalIntegerOption(
+    config,
+    "searchPreviewCodePoints",
+    0,
+    100_000,
+  );
+  const searchMaxCharacters = optionalIntegerOption(config, "searchMaxCharacters", 256, 1_000_000);
+  const preprocessMessages = optionalBooleanOption(config, "preprocessMessages");
+  const sortResultsByTime = optionalBooleanOption(config, "sortResultsByTime");
+  return {
+    ...(searchPreviewCodePoints !== undefined ? { searchPreviewCodePoints } : {}),
+    ...(searchMaxCharacters !== undefined ? { searchMaxCharacters } : {}),
+    ...(preprocessMessages !== undefined ? { preprocessMessages } : {}),
+    ...(sortResultsByTime !== undefined ? { sortResultsByTime } : {}),
+  };
+}
+
 export function parseLocalMemoryHttpConfig(
   config: unknown,
   path: string,
@@ -73,6 +96,10 @@ export function parseLocalMemoryHttpConfig(
     "searchMaxCharacters",
     "preprocessMessages",
     "sortResultsByTime",
+    "bindings",
+    "runtime",
+    "allowAlgorithmicOverrides",
+    "allowedAlgorithmicVariants",
   ];
   const unknown = Object.keys(config).find((key) => !allowed.includes(key));
   if (unknown) throw new Error(`Unknown HTTP configuration field: ${unknown}`);
@@ -84,17 +111,15 @@ export function parseLocalMemoryHttpConfig(
   if (!apiKey && !["127.0.0.1", "::1", "localhost"].includes(host))
     throw new Error("apiKeyEnv is required for a non-loopback HTTP listener");
 
-  const searchPreviewCodePoints = optionalIntegerOption(
-    config,
-    "searchPreviewCodePoints",
-    0,
-    100_000,
-  );
-  const searchMaxCharacters = optionalIntegerOption(config, "searchMaxCharacters", 256, 1_000_000);
-  const preprocessMessages = optionalBooleanOption(config, "preprocessMessages");
-  const sortResultsByTime = optionalBooleanOption(config, "sortResultsByTime");
+  const l2Overrides = extractHttpL2Overrides(config);
+  const resolved = resolveEffectiveNmgConfig({
+    l2: l2Overrides,
+    l2Source: path,
+    environment: env,
+    dataDir: dirname(resolve(dirname(path), config.databasePath)),
+  });
 
-  return {
+  const result: LocalMemoryHttpConfig = {
     host,
     apiKey,
     databasePath: resolve(dirname(path), config.databasePath),
@@ -107,10 +132,37 @@ export function parseLocalMemoryHttpConfig(
       1,
       MAX_LOCAL_REQUEST_BYTES,
     ),
-    ...(searchPreviewCodePoints !== undefined ? { searchPreviewCodePoints } : {}),
-    ...(searchMaxCharacters !== undefined ? { searchMaxCharacters } : {}),
-    ...(preprocessMessages !== undefined ? { preprocessMessages } : {}),
-    ...(sortResultsByTime !== undefined ? { sortResultsByTime } : {}),
+    ...parseHttpOptionalOptions(config),
+    ...(l2Overrides ? { l2Overrides } : {}),
+  };
+  Object.defineProperty(result, "effectiveConfigIdentity", {
+    value: resolved.resultIdentityHash,
+    enumerable: false,
+    configurable: true,
+  });
+  return result;
+}
+
+function extractHttpL2Overrides(config: JsonObject): NmgLayerConfig | undefined {
+  const hasLayerFields =
+    config.bindings !== undefined ||
+    config.runtime !== undefined ||
+    config.allowAlgorithmicOverrides !== undefined ||
+    config.allowedAlgorithmicVariants !== undefined;
+  if (!hasLayerFields) return undefined;
+  return {
+    ...(isJsonObject(config.bindings)
+      ? { bindings: config.bindings as NmgLayerConfig["bindings"] }
+      : {}),
+    ...(isJsonObject(config.runtime)
+      ? { runtime: config.runtime as NmgLayerConfig["runtime"] }
+      : {}),
+    ...(typeof config.allowAlgorithmicOverrides === "boolean"
+      ? { allowAlgorithmicOverrides: config.allowAlgorithmicOverrides }
+      : {}),
+    ...(Array.isArray(config.allowedAlgorithmicVariants)
+      ? { allowedAlgorithmicVariants: config.allowedAlgorithmicVariants.map(String) }
+      : {}),
   };
 }
 

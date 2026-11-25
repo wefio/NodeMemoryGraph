@@ -270,6 +270,8 @@ routes:
       - src/integration/temporal-evidence-policy.json
       - src/integration/chain-projection.ts
       - src/integration/config.ts
+      - src/integration/parameter-config.ts
+      - src/integration/runtime-config.ts
       - src/integration/controller-channel.ts
       - src/integration/evidence.ts
       - src/integration/first-response-timing.ts

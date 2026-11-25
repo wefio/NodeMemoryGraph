@@ -3,6 +3,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { deriveAnswerOverlapMemoryIds, statementFingerprint } from "../core/feedback.ts";
 import type { PerfSnapshot } from "../core/perf.ts";
+import { ZeroPollLatch } from "../core/runtime/scheduler.ts";
 import { localEmbeddingFormatStore } from "./embedding-format-store.ts";
 
 import { MAX_BOARD_DELIVERY_ENTRIES, parseBoardNotification } from "../core/board-notifications.ts";
@@ -210,6 +211,7 @@ export class NmgService {
   #closing = false;
   /** Calls accepted and not yet answered; see drain(). */
   #inFlight = 0;
+  readonly #inFlightLatch = new ZeroPollLatch();
   /** Lazily loaded learned relevance gate; undefined until first read, null when
    *  no model is configured or it fails to load. */
   #relevanceModel: RelevanceModelLike | null | undefined;
@@ -334,16 +336,14 @@ export class NmgService {
    *  synchronous close() does not have. So close() requires that this has happened, instead of
    *  pretending it can fence a call it cannot see. */
   async drain(timeoutMs = 5_000): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (this.#inFlight > 0 && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    if (this.#inFlight > 0) {
-      throw new NmgProtocolError(
-        "DRAINING",
-        `${this.#inFlight} calls were still in flight after ${timeoutMs}ms`,
-      );
-    }
+    await this.#inFlightLatch.waitForZero(
+      timeoutMs,
+      () =>
+        new NmgProtocolError(
+          "DRAINING",
+          `${this.#inFlight} calls were still in flight after ${timeoutMs}ms`,
+        ),
+    );
   }
 
   /** Reload admission is reversible only when draining fails; no accepted call is cancelled. */
@@ -368,6 +368,7 @@ export class NmgService {
       throw new NmgProtocolError("SHUTTING_DOWN", "the service is closing and takes no new work");
     // Count the awaited application operation, including asynchronous backend publication.
     this.#inFlight += 1;
+    this.#inFlightLatch.increment();
     try {
       if (PortableMemoryService.handles(method))
         return (await this.#invokeMemory(method, params, signal)) as NmgMethodResult[M];
@@ -390,6 +391,7 @@ export class NmgService {
       throw error;
     } finally {
       this.#inFlight -= 1;
+      this.#inFlightLatch.decrement();
     }
   }
 

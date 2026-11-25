@@ -5,10 +5,8 @@ import { createEmbeddingClientFromEnv, type EmbeddingClient } from "../core/embe
 import { MemoryOperationConflict, type MemoryBackend } from "../core/memory/backend.ts";
 import { MemoryEngine } from "../core/memory/engine.ts";
 import { openMemoryBackend } from "../core/memory/open.ts";
-import type { MemoryContext } from "../core/types.ts";
 import { MemoryWriteRejected } from "../core/write-policy.ts";
 import { renderSearchSurface } from "../integration/agent-surface.ts";
-import { fitExplicitSearchPage } from "../integration/explicit-search-page.ts";
 import {
   HttpError,
   httpAddReceipt,
@@ -26,6 +24,7 @@ import {
 } from "../integration/memory-http-protocol.ts";
 import { HttpMemoryService, projectHttpMemory } from "../integration/memory-http-service.ts";
 import { describeContent } from "../integration/multimodal-content.ts";
+import { resolveEffectiveNmgConfig } from "../integration/runtime-config.ts";
 import {
   readLocalMemoryHttpConfig,
   type LocalMemoryHttpConfig,
@@ -196,9 +195,23 @@ async function respond(
     if (config.apiKey) requireHttpApiKey(request, config.apiKey);
     const input = await readHttpJson(request, config.maxRequestBytes, BODY_TIMEOUT_MS);
     const userId = textField(input.user_id ?? input.userId, "user_id");
+    const resolvedConfig = resolveEffectiveNmgConfig({
+      l2: config.l2Overrides,
+      l2Source: "http-config",
+    });
     const result = await pool.withBackend(`http:${httpHash(userId)}`, async (backend) => {
-      const service = new HttpMemoryService(new MemoryEngine(backend), embeddingClient, {
+      const engine = new MemoryEngine(backend, undefined, {
+        searchGraph: resolvedConfig.resolveGraph("memory.search"),
+        rerankGraph: resolvedConfig.resolveGraph("memory.candidate_rerank"),
+        configIdentity: resolvedConfig.resultIdentityHash,
+      });
+      const service = new HttpMemoryService(engine, embeddingClient, {
         preprocessMessages: config.preprocessMessages,
+        searchGraph: resolvedConfig.resolveGraph("memory.http_clause_fusion"),
+        writePreprocessGraph: resolvedConfig.resolveGraph("memory.write_preprocess"),
+        profileGraph: resolvedConfig.resolveGraph("memory.http_profile"),
+        rerankGraph: resolvedConfig.resolveGraph("memory.candidate_rerank"),
+        configIdentity: resolvedConfig.resultIdentityHash,
       });
       return operation === "add" ? addMemory(service, input) : searchMemory(service, input, config);
     });
@@ -250,24 +263,21 @@ async function searchMemory(
   const clauses = await readHttpClauses(input);
   if (clauses.length === 1 && !clauses[0]!.appendOnly) {
     const query = clauses[0]!.text;
-    const result = await service.searchFeature(query, limit, { now });
-    const page = fitExplicitSearchPage(
-      result,
-      { query, limit, persistTrace: false },
-      {
+    const { raw, page, profile } = await service.searchSingleClause(query, limit, {
+      now,
+      sortResultsByTime: config.sortResultsByTime,
+      budget: {
         maxCharacters: config.searchMaxCharacters,
         previewCodePoints: config.searchPreviewCodePoints,
       },
-    );
-    const orderedPage = config.sortResultsByTime ? sortPageByTime(page) : page;
-    const surface = renderSearchSurface(orderedPage, {
+    });
+    const surface = renderSearchSurface(page, {
       emptyText: "No NMG match.",
       includeGetHint: false,
     });
-    const profile = config.preprocessMessages ? await service.profileSummary(query, now) : "";
     return {
-      data: result.results.slice(0, limit).map((row) => projectHttpMemory(row, query)),
-      retrieval_mode: result.retrieval?.mode ?? "lexical",
+      data: raw.results.slice(0, limit).map((row) => projectHttpMemory(row, query)),
+      retrieval_mode: raw.retrieval?.mode ?? "lexical",
       rendered: profile ? `${surface}\n\n${profile}` : surface,
     };
   }
@@ -283,15 +293,6 @@ async function searchMemory(
     retrieval_mode: searchResult.retrievalMode === "records" ? "hybrid" : "lexical",
     ...(searchResult.appended.length ? { appended: searchResult.appended } : {}),
   };
-}
-
-function sortPageByTime(page: MemoryContext): MemoryContext {
-  const results = [...page.results].sort((a, b) => {
-    const ta = a.memory.eventTime ?? a.memory.createdAt ?? "";
-    const tb = b.memory.eventTime ?? b.memory.createdAt ?? "";
-    return ta.localeCompare(tb) || a.memory.id.localeCompare(b.memory.id);
-  });
-  return { ...page, results };
 }
 
 function sendError(outgoing: ServerResponse, error: unknown): void {

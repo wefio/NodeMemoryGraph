@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import {
-  COMPUTE_CACHE_TOKEN,
+  canonicalizeComputeValue,
+  functionIdentityToken,
+  isDeeplyFrozen,
+} from "./canonical-value.ts";
+import {
   COMPUTE_STATE_STAMP,
   INPUT_NODE_ID,
   SUBGRAPH_OPERATOR_META,
@@ -23,6 +27,7 @@ import {
   type PhysicalNodePlan,
   type PhysicalPlanOptions,
 } from "./compute-planner.ts";
+import { ResourceLockManager } from "./resource-locks.ts";
 
 export {
   COMPUTE_CACHE_TOKEN,
@@ -80,60 +85,22 @@ export interface ComputeExecutionDiagnostics {
   plan?: PhysicalExecutionPlan;
 }
 
-const FUNCTION_INSTANCE_IDS = new WeakMap<object, number>();
-let nextFunctionId = 1;
 const FROZEN_ARRAY_SIG_CACHE = new WeakMap<readonly unknown[], string>();
 const FROZEN_INPUT_SIG_CACHE = new WeakMap<object, string>();
 let executionNonce = 0;
-
-function functionIdentityToken(fn: object): string {
-  const explicit = (fn as { [COMPUTE_CACHE_TOKEN]?: unknown })[COMPUTE_CACHE_TOKEN];
-  if (typeof explicit === "string" && explicit.length > 0) return `[fn_tok:${explicit}]`;
-  let id = FUNCTION_INSTANCE_IDS.get(fn);
-  if (id === undefined) {
-    id = nextFunctionId;
-    nextFunctionId += 1;
-    FUNCTION_INSTANCE_IDS.set(fn, id);
-  }
-  return `[fn_id:${id}]`;
-}
-
-function canonicalValue(value: unknown): string {
-  if (typeof value === "function") return functionIdentityToken(value);
-  if (typeof value === "bigint") return `[bigint:${value.toString()}]`;
-  if (typeof value === "symbol") return `[sym:${String(value.description ?? "")}]`;
-  if (Array.isArray(value)) return `[${value.map(canonicalValue).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const entries = Object.entries(value)
-      .filter(([, item]) => item !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalValue(item)}`);
-    return `{${entries.join(",")}}`;
-  }
-  const encoded = JSON.stringify(value);
-  return encoded === undefined ? "null" : encoded;
-}
-
-function isDeeplyFrozen(value: unknown, seen = new WeakSet<object>()): boolean {
-  if (value === null || typeof value !== "object") return true;
-  if (!Object.isFrozen(value)) return false;
-  if (seen.has(value)) return true;
-  seen.add(value);
-  return Object.values(value).every((item) => isDeeplyFrozen(item, seen));
-}
 
 function arraySignature(value: readonly unknown[]): string {
   if (isDeeplyFrozen(value)) {
     const cached = FROZEN_ARRAY_SIG_CACHE.get(value);
     if (cached) return cached;
-    const sig = sha256Hex(`[${value.map(canonicalValue).join(",")}]`);
+    const sig = sha256Hex(`[${value.map((item) => canonicalizeComputeValue(item)).join(",")}]`);
     FROZEN_ARRAY_SIG_CACHE.set(value, sig);
     return sig;
   }
-  return sha256Hex(`[${value.map(canonicalValue).join(",")}]`);
+  return sha256Hex(`[${value.map((item) => canonicalizeComputeValue(item)).join(",")}]`);
 }
 
-function contextSignature(context: unknown): string {
+export function contextSignature(context: unknown): string {
   if (context !== null && typeof context === "object" && !Array.isArray(context)) {
     const stamp = (context as { [COMPUTE_STATE_STAMP]?: unknown })[COMPUTE_STATE_STAMP];
     const entries = Object.entries(context)
@@ -142,23 +109,23 @@ function contextSignature(context: unknown): string {
       .map(([key, item]) =>
         Array.isArray(item)
           ? `${JSON.stringify(key)}:${arraySignature(item)}`
-          : `${JSON.stringify(key)}:${canonicalValue(item)}`,
+          : `${JSON.stringify(key)}:${canonicalizeComputeValue(item)}`,
       );
-    const stampPart = stamp === undefined ? "" : `|$stamp:${canonicalValue(stamp)}`;
+    const stampPart = stamp === undefined ? "" : `|$stamp:${canonicalizeComputeValue(stamp)}`;
     return sha256Hex(`{${entries.join(",")}}${stampPart}`);
   }
-  return sha256Hex(canonicalValue(context));
+  return sha256Hex(canonicalizeComputeValue(context));
 }
 
-function inputSignature(input: unknown): string {
+export function inputSignature(input: unknown): string {
   if (input !== null && typeof input === "object" && isDeeplyFrozen(input)) {
     const cached = FROZEN_INPUT_SIG_CACHE.get(input);
     if (cached) return cached;
-    const sig = sha256Hex(canonicalValue(input));
+    const sig = sha256Hex(canonicalizeComputeValue(input));
     FROZEN_INPUT_SIG_CACHE.set(input, sig);
     return sig;
   }
-  return sha256Hex(canonicalValue(input));
+  return sha256Hex(canonicalizeComputeValue(input));
 }
 
 function sha256Hex(text: string): string {
@@ -360,12 +327,14 @@ function subgraphSignature<TContext>(
         ? functionIdentityToken(child.fn)
         : getSig(resolvedOp);
     const childSubSig = child.subgraph ? subgraphSignature(child.subgraph, registry) : "";
-    return `${child.id}:${resolvedOp}:${childOpSig}:${canonicalValue(child.params ?? {})}:${childSubSig}`;
+    return `${child.id}:${resolvedOp}:${childOpSig}:${canonicalizeComputeValue(child.params ?? {})}:${childSubSig}`;
   });
-  return sha256Hex(`${spec.id}|${nodeSigs.join(";")}|${canonicalValue(spec.edges)}|${spec.output}`);
+  return sha256Hex(
+    `${spec.id}|${nodeSigs.join(";")}|${canonicalizeComputeValue(spec.edges)}|${spec.output}`,
+  );
 }
 
-function isCacheableNode(
+export function isCacheableNode(
   node: PhysicalNodePlan,
   incoming: readonly ComputeEdgeSpec[],
   signatures: ReadonlyMap<string, string>,
@@ -392,15 +361,18 @@ function physicalPlanSignature<TContext>(
           ? functionIdentityToken(child.inlineFn)
           : child.kind === "fused_chain" && child.fusedSteps
             ? child.fusedSteps
-                .map((s) => `${s.id}:${s.op}:${registry.getSignature(s.op)}`)
+                .map(
+                  (s) =>
+                    `${s.id}:${s.op}:${registry.getSignature(s.op)}:${canonicalizeComputeValue(s.params)}`,
+                )
                 .join("+")
             : registry.getSignature(child.op);
-    return `${child.id}:${child.op}:${childOpSig}:${canonicalValue(child.params)}:${canonicalValue(child.incoming)}`;
+    return `${child.id}:${child.op}:${childOpSig}:${canonicalizeComputeValue(child.params)}:${canonicalizeComputeValue(child.incoming)}`;
   });
   return sha256Hex(`${plan.logicalGraphId}|${parts.join(";")}|${plan.outputNodeId}`);
 }
 
-function computeNodeSignature<TContext>(
+export function computeNodeSignature<TContext>(
   node: PhysicalNodePlan,
   incoming: readonly ComputeEdgeSpec[],
   signatures: ReadonlyMap<string, string>,
@@ -422,12 +394,19 @@ function computeNodeSignature<TContext>(
       : node.kind === "inline_fn" && node.inlineFn
         ? functionIdentityToken(node.inlineFn)
         : node.kind === "fused_chain" && node.fusedSteps
-          ? node.fusedSteps.map((s) => `${s.op}:${registry.getSignature(s.op)}`).join("+")
+          ? node.fusedSteps
+              .map(
+                (s) =>
+                  `${s.op}:${registry.getSignature(s.op)}:${canonicalizeComputeValue(s.params)}`,
+              )
+              .join("+")
           : registry.getSignature(node.op);
-  return sha256Hex(`${node.op}|${opSig}|${contextSig}|${canonicalValue(node.params)}|${upstream}`);
+  return sha256Hex(
+    `${node.op}|${opSig}|${contextSig}|${canonicalizeComputeValue(node.params)}|${upstream}`,
+  );
 }
 
-function gatherNodeInputs(
+export function gatherNodeInputs(
   incoming: readonly ComputeEdgeSpec[],
   outputs: ReadonlyMap<string, unknown>,
   graphInput: unknown,
@@ -441,7 +420,7 @@ function gatherNodeInputs(
   return inputs;
 }
 
-function releaseConsumedInputs(
+export function releaseConsumedInputs(
   incoming: readonly ComputeEdgeSpec[],
   remaining: Map<string, number>,
   outputs: Map<string, unknown>,
@@ -520,7 +499,7 @@ function invokeNodeSync<TContext>(
   return fn(inputs, context, resolvedNodeParams(node));
 }
 
-function invokeNodeAsync<TContext>(
+export function invokeNodeAsync<TContext>(
   node: PhysicalNodePlan,
   registry: ComputeRegistry<TContext>,
   inputs: Record<string, unknown>,
@@ -676,6 +655,30 @@ async function runAsyncNodeWithMemo<TContext>(
   return value;
 }
 
+function buildEventDependencies(order: readonly PhysicalNodePlan[]) {
+  const pendingDeps = new Map<string, number>();
+  const serialDeps = new Map<string, string[]>();
+  const nodeById = new Map(order.map((node) => [node.id, node]));
+  let lastSerial: string | undefined;
+  for (const node of order) {
+    const deps = new Set(node.incoming.filter((e) => e.from !== INPUT_NODE_ID).map((e) => e.from));
+    const serial =
+      !node.capabilities.parallelSafe ||
+      (node.capabilities.effect !== "pure" && node.capabilities.effect !== "read");
+    if (serial) {
+      if (lastSerial && !deps.has(lastSerial)) {
+        deps.add(lastSerial);
+        const list = serialDeps.get(lastSerial) ?? [];
+        list.push(node.id);
+        serialDeps.set(lastSerial, list);
+      }
+      lastSerial = node.id;
+    }
+    pendingDeps.set(node.id, deps.size);
+  }
+  return { pendingDeps, serialDeps, nodeById };
+}
+
 async function runAsyncPlan<TIn, TOut, TContext>(
   plan: PhysicalExecutionPlan,
   registry: ComputeRegistry<TContext>,
@@ -686,15 +689,23 @@ async function runAsyncPlan<TIn, TOut, TContext>(
 ): Promise<TOut> {
   if (diagnostics) diagnostics.plan = plan;
   const outputs = new Map<string, unknown>([[INPUT_NODE_ID, input]]);
+  if (plan.order.length === 0) return outputs.get(plan.outputNodeId) as TOut;
   const remaining = new Map<string, number>(plan.consumerCounts);
   const useMemo = memo !== undefined;
   const signatures = useMemo ? new Map([[INPUT_NODE_ID, inputSignature(input)]]) : undefined;
   const contextSig = useMemo ? contextSignature(context) : "";
+  const { pendingDeps, serialDeps, nodeById } = buildEventDependencies(plan.order);
+  const ready = plan.order.filter((node) => pendingDeps.get(node.id) === 0);
+  const locks = new ResourceLockManager();
 
-  for (const wave of plan.waves) {
-    for (const group of wave.parallelGroups) {
-      const results = await Promise.all(
-        group.map((node) =>
+  return new Promise<TOut>((resolve, reject) => {
+    let remainingNodes = plan.order.length;
+    let aborted = false;
+
+    const launchNode = (node: PhysicalNodePlan) => {
+      if (aborted) return;
+      locks
+        .withResources(node.capabilities.resources, () =>
           runAsyncNodeWithMemo(
             node,
             registry,
@@ -706,32 +717,39 @@ async function runAsyncPlan<TIn, TOut, TContext>(
             contextSig,
             diagnostics,
           ),
-        ),
-      );
-      group.forEach((node, index) => {
-        outputs.set(node.id, results[index]);
-        recordDiag(diagnostics, outputs.size, 0, 0, 0);
-        releaseConsumedInputs(node.incoming, remaining, outputs, plan.outputNodeId);
-      });
-    }
-    for (const node of wave.serialNodes) {
-      const value = await runAsyncNodeWithMemo(
-        node,
-        registry,
-        outputs,
-        input,
-        context,
-        memo,
-        signatures,
-        contextSig,
-        diagnostics,
-      );
-      outputs.set(node.id, value);
-      recordDiag(diagnostics, outputs.size, 0, 0, 0);
-      releaseConsumedInputs(node.incoming, remaining, outputs, plan.outputNodeId);
-    }
-  }
-  return outputs.get(plan.outputNodeId) as TOut;
+        )
+        .then((value) => {
+          if (aborted) return;
+          outputs.set(node.id, value);
+          recordDiag(diagnostics, outputs.size, 0, 0, 0);
+          releaseConsumedInputs(node.incoming, remaining, outputs, plan.outputNodeId);
+          remainingNodes -= 1;
+          if (remainingNodes === 0) {
+            resolve(outputs.get(plan.outputNodeId) as TOut);
+            return;
+          }
+          const nextIds = [
+            ...(plan.outgoing.get(node.id) ?? []),
+            ...(serialDeps.get(node.id) ?? []),
+          ];
+          for (const depId of nextIds) {
+            const left = (pendingDeps.get(depId) ?? 1) - 1;
+            pendingDeps.set(depId, left);
+            if (left === 0) {
+              const target = nodeById.get(depId);
+              if (target) launchNode(target);
+            }
+          }
+        })
+        .catch((error) => {
+          if (aborted) return;
+          aborted = true;
+          reject(error);
+        });
+    };
+
+    for (const node of ready) launchNode(node);
+  });
 }
 
 /** Wrap any ComputeGraphSpec into a single composite operator for hierarchical nesting. */
@@ -854,8 +872,8 @@ export function replaceGraphNode(
 
 /** Compare two graph recipes node-by-node for experiment auditing. */
 export function diffGraphSpecs(left: ComputeGraphSpec, right: ComputeGraphSpec): GraphDiffEntry[] {
-  const leftNodes = new Map(left.nodes.map((node) => [node.id, canonicalValue(node)]));
-  const rightNodes = new Map(right.nodes.map((node) => [node.id, canonicalValue(node)]));
+  const leftNodes = new Map(left.nodes.map((node) => [node.id, canonicalizeComputeValue(node)]));
+  const rightNodes = new Map(right.nodes.map((node) => [node.id, canonicalizeComputeValue(node)]));
   const ids = [...new Set([...leftNodes.keys(), ...rightNodes.keys()])].sort();
   const diffs: GraphDiffEntry[] = [];
   for (const nodeId of ids) {

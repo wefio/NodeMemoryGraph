@@ -28,9 +28,14 @@ import { delimiter, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { connect } from 'node:net'
 import type { Context } from '@deepseek-ai/cordis'
-import { coordinationEnabled as configuredCoordinationEnabled } from '../../../../src/integration/config.ts'
+import {
+  configuredAutoRecallLimit,
+  configuredAutoRecallTier,
+  coordinationEnabled as configuredCoordinationEnabled,
+} from '../../../../src/integration/config.ts'
+import { resolveNmgDataDir } from '../../../../src/cli/data-path.ts'
 import { requiresEventTimeReference } from '../../../../src/cli/protocol.ts'
-import { maybeBroadcastToWorld as broadcastWakeEntry } from '../../../../src/integration/board-wake.ts'
+import { maybeBroadcastToWorld as broadcastWakeEntry, readWakeConfig } from '../../../../src/integration/board-wake.ts'
 import { loadOrCreateAgentIdentity, renameAgentIdentity } from '../../../../src/integration/agent-identity.ts'
 import { compactSearchContext } from '../../../../src/integration/search-projection.ts'
 import { loadPrompts, renderDisclosure } from '../../../../src/prompts/load.ts'
@@ -398,8 +403,8 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
   }
 
   async function autoRecall(query, sessionId, searchBudgetMs, signal) {
-    const limit = clampInt(process.env.NMG_AUTO_RECALL_LIMIT, 1, 50, 13)
-    const tier = clampInt(process.env.NMG_AUTO_RECALL_TIER, 0, 3, 1)
+    const limit = configuredAutoRecallLimit()
+    const tier = configuredAutoRecallTier()
     try {
       const context = await daemonCall('search', {
         query,
@@ -692,18 +697,7 @@ export function apply(ctx: Context): (() => Promise<void>) & { ready: Promise<vo
   }
 
   function loadWakeConfig() {
-    try {
-      const home = process.env.USERPROFILE || process.env.HOME || ''
-      const dataDir = (process.env.NMG_DATA_DIR || join(home, '.nmg')).replace(
-        /[\\/]+$/,
-        '',
-      )
-      wakeConfig = JSON.parse(
-        readFileSync(join(dataDir, 'board-wake.json'), 'utf8'),
-      )
-    } catch {
-      wakeConfig = null
-    }
+    wakeConfig = readWakeConfig(resolveNmgDataDir(process.env))
   }
 
   function pushWakeEntry(entry, targetSessionId) {

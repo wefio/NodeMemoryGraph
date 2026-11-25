@@ -11,17 +11,20 @@
 
 ```mermaid
 flowchart TB
-  API["对外业务 API (MemoryEngine, HttpMemoryService)"] --> Logical["逻辑计算图 (ComputeGraphSpec & MEMORY_COMPUTE_CONTRACTS)"]
-  Logical --> Planner["执行规划器 (CSE, DCE, 契约绑定, 下推改写, 线性融合)"]
-  Planner --> Physical["物理执行计划 (波次并行组, 资源锁, 引用计数释放)"]
-  Physical --> Runtime["计算图运行时 (同步/异步执行器, 状态戳, LRU 缓存)"]
-  Runtime --> Realizations["算子 / 子图 / 第三方适配器 / 下推查询"]
+  Config["三级配置与能力绑定 (L0 公共默认 -> L1 共享 nmg.config.json -> L2 适配器覆盖)"] --> Logical
+  API["对外业务 API (MemoryEngine, HttpMemoryService, PortableMemoryService)"] --> Logical["逻辑计算图 (ComputeGraphSpec & MEMORY_COMPUTE_CONTRACTS)"]
+  Logical --> Planner["执行规划器 (CSE, 递归 DCE, 契约绑定, 下推改写, 线性融合)"]
+  Planner --> Physical["物理执行计划 (依赖边, 资源锁, 代价模型, 引用计数释放)"]
+  Physical --> Runtime["计算图运行时 (同步快路径, 事件驱动 DAG, 状态戳, LRU 缓存)"]
+  Runtime --> Scheduler["统一运行时调度器 (HostLoadGovernor, Singleflight 去重, LocalWorkerThreadPool, SchedulingDomain)"]
+  Scheduler --> Realizations["算子 / 子图 / 第三方适配器 / 下推查询"]
   Realizations --> Storage["权威存储与公共服务 (MemoryBackend, MemoryPlan, EmbeddingClient)"]
 ```
 
 - **逻辑计算图（`ComputeGraphSpec`）**：使用 `src/core/compute-contracts.ts` 中的领域契约表达计算需求与数据流，不固化具体后端查询或执行顺序优化。
-- **物理执行计划（`PhysicalExecutionPlan`）**：由 `src/core/compute-planner.ts` 编译（按图对象引用、注册表代数与规划选项缓存），解析 `$contract` 契约节点，对 `pure` 节点执行公共子表达式消除，对无消费纯节点执行死代码消除（保留 `write`、`nondeterministic` 与 `opaque` 节点），将 `relational_query` 表达式改写为 `sqlite_pushdown` 或 `portable_scan`，可选将单消费者同步 `pure` 链路融合为 `fused_chain`，按读写／独占资源冲突划分并行组与串行节点，并生成精确下游引用计数表。
-- **计算图运行时（`src/core/compute-graph.ts`）**：驱动同步与异步物理计划执行；未传入 `ComputeMemoCache` 时走零哈希快路径，完全跳过 JSON 规范化与 SHA-256 计算。
+- **三级配置与声明式能力绑定（`src/core/capability-config.ts`、`src/integration/runtime-config.ts`）**：按 `L0` 公共参数契约与默认子图（`NMG_L0_CONTRACT_GRAPHS`）→ `L1` 共享策略与图配置（`NMG_CONFIG_PATH` 或 `<dataDir>/nmg.config.json`）→ `L2` 适配器覆盖（`resolveEffectiveNmgConfig`）顺序解析，输出参数来源溯源与缓存身份 `configIdentity`，并通过 `PolicyViolationError` 拦截未经许可的语义变更算法替换。
+- **物理执行计划（`PhysicalExecutionPlan`）**：由 `src/core/compute-planner.ts` 编译（按图对象引用、基于 `WeakMap` 隔离的 `ComputeRegistry` 实例令牌、代数、`configIdentity` 与规划选项缓存），解析 `$contract` 契约节点，对 `pure` 节点执行公共子表达式消除，通过递归 `runDcePass` 保留含副作用的嵌套子图并消除其余死节点，将 `relational_query` 表达式改写为 `sqlite_pushdown` 或 `portable_scan`，可选将单消费者同步 `pure` 链路融合为 `fused_chain`（包含逐步参数签名），生成节点依赖边、共享 `ResourceLockManager` 资源集合（`src/core/resource-locks.ts`）与精确下游引用计数表。
+- **运行时与统一调度（`src/core/compute-graph.ts`、`src/core/canonical-value.ts`、`src/core/runtime/*`）**：小规模纯同步图在未传入 `ComputeMemoCache` 时走零哈希内联快路径；异步 DAG 通过节点就绪唤醒驱动执行而无需全波次 `Promise.all` 屏障；`canonical-value.ts` 为 `Map`、`Set`、`Date`、`RegExp`、`ArrayBuffer` 及类型化数组提供严谨深冻结检查与规范化哈希；`UnifiedRuntimeScheduler` 统筹 `ComputeCostModel`（HEFT 关键路径排序与拒绝微秒级算子跨线程卸载的 EFT 决策）、`HostLoadGovernor`（支持 `eco` / `balanced` / `performance` 三档策略与迟滞控制，在系统供电／温度遥测不可用时优雅退化为事件循环延迟与预算控制）、`LocalWorkerThreadPool`、可递归组合的 `SchedulingDomain`、`InFlightCoalescer` 与 `ZeroPollLatch`。
 
 ## 节点实现形态与渐进式能力声明
 
@@ -49,15 +52,15 @@ flowchart TB
 
 | 业务入口 | 生产计算图（`ComputeGraphSpec`） | 注册表与所属模块 |
 | --- | --- | --- |
-| 搜索与上下文组装 | `DEFAULT_ENGINE_SEARCH_GRAPH` | `ENGINE_SEARCH_REGISTRY`（`src/core/memory/search-compute-graph.ts`） |
+| 搜索与上下文组装 | `DEFAULT_ENGINE_SEARCH_GRAPH` | `ENGINE_SEARCH_REGISTRY`（`src/core/memory/search-compute-graph.ts`）；当混合检索 `limit > 80` 时冻结 `1..80` 名，并在 `81..100` 尾段补充相邻源轮次与 `same_state` 关系邻居 |
 | 精确记录与图扩展读取 | `DEFAULT_GET_CONTEXT_GRAPH` | `ENGINE_VIEW_REGISTRY`（`src/core/memory/view-compute-graphs.ts`） |
 | 有界邻域浏览 | `DEFAULT_NEIGHBORHOOD_GRAPH` | `ENGINE_VIEW_REGISTRY`（`src/core/memory/view-compute-graphs.ts`） |
 | 多维关系图按需投影 | `DEFAULT_PROJECT_GRAPH` | `ENGINE_VIEW_REGISTRY`（`src/core/memory/view-compute-graphs.ts`） |
 | 用户画像范围投影 | `DEFAULT_USER_PROFILE_GRAPH` | `ENGINE_VIEW_REGISTRY`（`src/core/memory/view-compute-graphs.ts`） |
 | 批量写入变更计划 | `DEFAULT_REMEMBER_PLAN_GRAPH` | `ENGINE_WRITE_REGISTRY`（`src/core/memory/write-compute-graphs.ts`） |
 | 生命周期与关系变更计划 | `DEFAULT_LIFECYCLE_PLAN_GRAPH` | `ENGINE_WRITE_REGISTRY`（`src/core/memory/write-compute-graphs.ts`） |
-| 三段式因果重排 | `DEFAULT_PIECEWISE_RERANK_GRAPH` | `RERANK_COMPUTE_REGISTRY`（`src/core/memory/piecewise-rerank.ts`） |
-| HTTP 多子句融合与拼页 | `DEFAULT_HTTP_SEARCH_GRAPH` | `HTTP_SEARCH_COMPUTE_REGISTRY`（`src/integration/http-search-graph.ts`） |
+| 三段式因果重排 | `DEFAULT_PIECEWISE_RERANK_GRAPH` | `RERANK_COMPUTE_REGISTRY`（`src/core/memory/piecewise-rerank.ts`）；中段（`[6..20]`）对含至少两个不同时间戳的分组应用 `w_chrono_seq_pivot` |
+| HTTP 多子句融合与拼页 | `DEFAULT_HTTP_SEARCH_GRAPH` | `HTTP_SEARCH_COMPUTE_REGISTRY`（`src/integration/http-search-graph.ts`）；与引擎搜索、`retrieval-graph.ts` 和 `PortableMemoryService` 共用 `src/core/memory/page-stitch-operators.ts` 中的双通道融合、按时间排序、尾段分数封顶（`capSupplementalTailScores`）与补齐拼页原语 |
 | HTTP 写入对话预处理 | `DEFAULT_HTTP_WRITE_PREPROCESS_GRAPH` | `HTTP_WRITE_PREPROCESS_REGISTRY`（`src/integration/http-write-preprocess.ts`） |
 | HTTP 画像摘要投影 | `DEFAULT_HTTP_PROFILE_GRAPH` | `HTTP_PROFILE_COMPUTE_REGISTRY`（`src/integration/http-profile-view.ts`） |
 

@@ -36,6 +36,11 @@ import {
 } from "./hydration.ts";
 import { rankLocalLogOdds } from "./local-log-odds.ts";
 import { searchableMemory } from "./model.ts";
+import {
+  capSupplementalTailScores,
+  isAdjacentTurnResult,
+  toRerankCandidateFromRecord,
+} from "./page-stitch-operators.ts";
 import { rerankCandidatesWithGraph } from "./piecewise-rerank.ts";
 
 export interface EngineSearchInput {
@@ -100,24 +105,14 @@ function selectStandardHybrid(
       const meta = turnMeta?.get(candidate.memory.id);
       return {
         candidate,
-        id: candidate.memory.id,
-        statement: candidate.memory.statement,
-        combinedScore: candidate.combinedScore,
-        eventTime: candidate.memory.eventTime,
-        createdAt: candidate.memory.createdAt,
-        sessionId:
-          candidate.memory.sourceSessionId ??
-          candidate.memory.sessionId ??
-          meta?.sourceSessionId ??
-          null,
-        nodeId: candidate.memory.nodeId,
-        evidenceId: candidate.memory.evidenceId,
-        turnOrdinal: meta?.turnOrdinal ?? null,
-        markers: candidate.memory.markers,
-        stateKey: candidate.memory.stateKey,
-        predicateKey: candidate.memory.predicateKey,
-        supersedesId: candidate.memory.supersedesId,
-        relatedMemoryIds: candidate.memory.relatedMemoryIds,
+        ...toRerankCandidateFromRecord(candidate.memory, candidate.combinedScore, {
+          sessionId:
+            candidate.memory.sourceSessionId ??
+            candidate.memory.sessionId ??
+            meta?.sourceSessionId ??
+            null,
+          turnOrdinal: meta?.turnOrdinal ?? null,
+        }),
       };
     }),
     text,
@@ -263,21 +258,6 @@ function mergeTemporalWindow(
   return [...boosted, ...normal.filter(({ memory }) => !seen.has(memory.id))].slice(0, limit);
 }
 
-function isAdjacentTurn(result: MemorySearchResult): boolean {
-  return result.neighborhood === "previous_turn" || result.neighborhood === "next_turn";
-}
-
-function capTailScores(
-  floor: number | undefined,
-  items: readonly MemorySearchResult[],
-): MemorySearchResult[] {
-  if (floor === undefined) return [...items];
-  return items.map((item, index) => ({
-    ...item,
-    combinedScore: Math.min(item.combinedScore, Math.max(0, floor - (index + 1) * 1e-6)),
-  }));
-}
-
 function isDueMemoryCandidate(
   entity: MemoryEntity,
   seen: ReadonlySet<string>,
@@ -328,6 +308,126 @@ async function scanDueTodayCandidates(
   return matches;
 }
 
+interface DeepTailCandidate {
+  readonly entity: Extract<MemoryEntity, { kind: "memory" }>;
+  readonly relation: SourceNeighbor["relation"] | "same_state";
+}
+
+function pushAdjacentTailCandidates(
+  port: MemorySnapshotPort,
+  anchor: MemorySearchResult,
+  baseQuery: MemoryEntityQuery,
+  seen: Set<string>,
+  out: DeepTailCandidate[],
+  maxExtra: number,
+): void {
+  if (!port.adjacentSources || out.length >= maxExtra) return;
+  for (const neighbor of port.adjacentSources(anchor.evidence, {
+    ...baseQuery,
+    scope: anchor.memory.scope,
+    limit: 4,
+  })) {
+    const id = neighbor.entity.value.id;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ entity: neighbor.entity, relation: neighbor.relation });
+    if (out.length >= maxExtra) break;
+  }
+}
+
+function pushSameStateTailCandidates(
+  port: MemorySnapshotPort,
+  anchor: MemorySearchResult,
+  baseQuery: MemoryEntityQuery,
+  seen: Set<string>,
+  out: DeepTailCandidate[],
+  maxExtra: number,
+): void {
+  if (!port.relationalNeighbors || !anchor.memory.stateKey || out.length >= maxExtra) return;
+  for (const neighbor of port.relationalNeighbors(anchor.memory, {
+    ...baseQuery,
+    scope: anchor.memory.scope,
+    limit: 4,
+  })) {
+    if (neighbor.reason !== "same_state") continue;
+    const id = neighbor.entity.value.id;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ entity: neighbor.entity, relation: "same_state" });
+    if (out.length >= maxExtra) break;
+  }
+}
+
+function gatherDeepTailCandidates(
+  port: MemorySnapshotPort,
+  anchors: readonly MemorySearchResult[],
+  baseQuery: MemoryEntityQuery,
+  seen: Set<string>,
+  maxExtra: number,
+): DeepTailCandidate[] {
+  const candidates: DeepTailCandidate[] = [];
+  for (const anchor of anchors) {
+    if (candidates.length >= maxExtra) break;
+    pushAdjacentTailCandidates(port, anchor, baseQuery, seen, candidates, maxExtra);
+    pushSameStateTailCandidates(port, anchor, baseQuery, seen, candidates, maxExtra);
+  }
+  return candidates;
+}
+
+async function collectDeepTailNeighbors(
+  port: MemorySnapshotPort,
+  results: readonly MemorySearchResult[],
+  analysis: AnalyzedSearchQuery,
+): Promise<MemorySearchResult[]> {
+  if (
+    analysis.semantic?.mode !== "hybrid" ||
+    analysis.options.evidenceShortlist ||
+    analysis.limit <= 80 ||
+    !results.length ||
+    (!port.adjacentSources && !port.relationalNeighbors)
+  ) {
+    return [...results];
+  }
+  const head = results.slice(0, 80);
+  const maxExtra = Math.min(20, analysis.limit - head.length);
+  if (maxExtra <= 0) return head;
+  const seen = new Set(head.map(({ memory }) => memory.id));
+  const candidates = gatherDeepTailCandidates(
+    port,
+    head.slice(0, 5),
+    analysis.baseQuery,
+    seen,
+    maxExtra,
+  );
+  if (!candidates.length) return [...results];
+  const hydrated = await hydrateCandidates(
+    port,
+    candidates.map(({ entity }) => entity),
+    { ...analysis.options, limit: analysis.limit },
+    false,
+    (rows) => rows.slice(0, maxExtra),
+  );
+  if (!hydrated.length) return [...results];
+  const relationById = new Map(
+    candidates.map(({ entity, relation }) => [entity.value.id, relation]),
+  );
+  const tagged = hydrated.map((item) => ({
+    ...item,
+    neighborhood: relationById.get(item.memory.id),
+  }));
+  const supplement = capSupplementalTailScores(head.at(-1)?.combinedScore, tagged);
+  const restBudget = Math.max(0, analysis.limit - head.length - supplement.length);
+  const rest = results
+    .slice(80)
+    .filter(({ memory }) => !seen.has(memory.id))
+    .slice(0, restBudget);
+  const cappedRest = capSupplementalTailScores(
+    supplement.at(-1)?.combinedScore ?? head.at(-1)?.combinedScore,
+    rest,
+  );
+  return [...head, ...supplement, ...cappedRest];
+}
+
 async function collectMatchingSourceNeighbors(
   port: MemorySnapshotPort,
   results: readonly MemorySearchResult[],
@@ -368,7 +468,7 @@ async function collectMatchingSourceNeighbors(
   out.splice(
     pivot,
     out.length - pivot,
-    ...capTailScores(
+    ...capSupplementalTailScores(
       floor,
       neighbors.map((result) => ({ ...result, neighborhood: relation.get(result.memory.id) })),
     ),
@@ -395,19 +495,20 @@ async function spliceDueReminders(
     rows.slice(0, Math.min(2, limit)),
   );
   if (!projected.length) return out;
-  const tail = out.filter(isAdjacentTurn);
-  const ranked = out.filter((item) => !isAdjacentTurn(item));
+  const tail = out.filter(isAdjacentTurnResult);
+  const ranked = out.filter((item) => !isAdjacentTurnResult(item));
   const keepRanked = Math.max(0, limit - projected.length - tail.length);
   const kept = ranked.slice(0, keepRanked);
   const floor = kept.at(-1)?.combinedScore;
-  const due = capTailScores(
+  const due = capSupplementalTailScores(
     floor,
     projected.map((item) => ({ ...item, neighborhood: "due_today" as const })),
   );
-  return [...kept, ...due, ...capTailScores(due.at(-1)?.combinedScore ?? floor, tail)].slice(
-    0,
-    limit,
-  );
+  return [
+    ...kept,
+    ...due,
+    ...capSupplementalTailScores(due.at(-1)?.combinedScore ?? floor, tail),
+  ].slice(0, limit);
 }
 
 async function searchIndependentTesserae(
@@ -546,7 +647,8 @@ function buildSearchRegistry(): ComputeRegistry<MemorySnapshotPort> {
       const analysis = inputs.analysis as AnalyzedSearchQuery;
       if (state.exactMiss) return { results: [], relations: [], exactMiss: true };
       const stepOptions = { ...analysis.options, limit: analysis.limit };
-      const withTurns = await collectMatchingSourceNeighbors(port, state.results, analysis);
+      const withDeepTail = await collectDeepTailNeighbors(port, state.results, analysis);
+      const withTurns = await collectMatchingSourceNeighbors(port, withDeepTail, analysis);
       const withDue = await spliceDueReminders(port, withTurns, {
         ...analysis,
         options: stepOptions,

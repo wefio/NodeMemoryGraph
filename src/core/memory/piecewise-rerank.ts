@@ -8,6 +8,7 @@ import { normalize } from "../memory-normalization.ts";
 import type { MemoryMarker } from "../types.ts";
 import {
   bm25fFieldScoreOperator,
+  chronoSequencePivotOperator,
   conceptPivotOperator,
   lineagePivotOperator,
   temporalPivotOperator,
@@ -419,6 +420,7 @@ function buildRerankRegistry(): ComputeRegistry<RerankContext> {
   registry.register("w_concept_pivot", conceptPivotOperator, rerankMeta());
   registry.register("w_lineage_pivot", lineagePivotOperator, rerankMeta());
   registry.register("w_turn_pivot", turnPivotOperator, rerankMeta());
+  registry.register("w_chrono_seq_pivot", chronoSequencePivotOperator, rerankMeta());
 
   return registry;
 }
@@ -432,6 +434,7 @@ export interface PiecewiseRerankGraphOptions {
   readonly headWeight?: number;
   readonly recencyWeight?: number;
   readonly midTurnWeight?: number;
+  readonly midChronoWeight?: number;
   readonly dedupPoolSize?: number;
   readonly dedupLimit?: number;
   readonly jaccardThresh?: number;
@@ -477,10 +480,15 @@ export const HEAD_BM25F_R3_SUBGRAPH: ComputeGraphSpec = {
 };
 
 export const MID_DEDUP_RECENCY_SUBGRAPH: ComputeGraphSpec = {
-  id: "mid-r5-wturn-r1-40",
+  id: "mid-r5-wturn-wchrono-r1-40",
   nodes: [
     { id: "r5", op: "r5_recency_boost", params: { weight: 0.12 } },
     { id: "wturn", op: "w_turn_pivot", params: { weight: 0.55, anchorTopK: 5, maxRadius: 1 } },
+    {
+      id: "wchrono",
+      op: "w_chrono_seq_pivot",
+      params: { weight: 0.18, anchorTopK: 5, maxSteps: 2 },
+    },
     {
       id: "r1",
       op: "r1_incremental_dedup",
@@ -490,7 +498,8 @@ export const MID_DEDUP_RECENCY_SUBGRAPH: ComputeGraphSpec = {
   edges: [
     { from: INPUT_NODE_ID, to: "r5" },
     { from: "r5", to: "wturn" },
-    { from: "wturn", to: "r1" },
+    { from: "wturn", to: "wchrono" },
+    { from: "wchrono", to: "r1" },
   ],
   output: "r1",
 };
@@ -556,15 +565,22 @@ function resolveHeadSubgraph(options: PiecewiseRerankGraphOptions): ComputeGraph
   };
 }
 
+const MID_OPTION_KEYS = [
+  "recencyWeight",
+  "midTurnWeight",
+  "midChronoWeight",
+  "dedupPoolSize",
+  "jaccardThresh",
+  "dupPenalty",
+  "dedupLimit",
+] as const;
+
+function hasCustomMidOptions(options: PiecewiseRerankGraphOptions): boolean {
+  return MID_OPTION_KEYS.some((key) => options[key] !== undefined);
+}
+
 function resolveMidSubgraph(options: PiecewiseRerankGraphOptions): ComputeGraphSpec {
-  if (
-    options.recencyWeight === undefined &&
-    options.midTurnWeight === undefined &&
-    options.dedupPoolSize === undefined &&
-    options.jaccardThresh === undefined &&
-    options.dupPenalty === undefined &&
-    options.dedupLimit === undefined
-  ) {
+  if (!hasCustomMidOptions(options)) {
     return MID_DEDUP_RECENCY_SUBGRAPH;
   }
   return {
@@ -575,6 +591,11 @@ function resolveMidSubgraph(options: PiecewiseRerankGraphOptions): ComputeGraphS
         id: "wturn",
         op: "w_turn_pivot",
         params: { weight: options.midTurnWeight ?? 0.55, anchorTopK: 5, maxRadius: 1 },
+      },
+      {
+        id: "wchrono",
+        op: "w_chrono_seq_pivot",
+        params: { weight: options.midChronoWeight ?? 0.18, anchorTopK: 5, maxSteps: 2 },
       },
       {
         id: "r1",
@@ -590,7 +611,8 @@ function resolveMidSubgraph(options: PiecewiseRerankGraphOptions): ComputeGraphS
     edges: [
       { from: INPUT_NODE_ID, to: "r5" },
       { from: "r5", to: "wturn" },
-      { from: "wturn", to: "r1" },
+      { from: "wturn", to: "wchrono" },
+      { from: "wchrono", to: "r1" },
     ],
     output: "r1",
   };

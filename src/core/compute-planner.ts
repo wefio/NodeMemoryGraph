@@ -1,3 +1,4 @@
+import { canonicalizeComputeValue } from "./canonical-value.ts";
 import {
   INPUT_NODE_ID,
   combineChildCapabilities,
@@ -18,6 +19,8 @@ export interface PhysicalPlanOptions {
   readonly enableLinearFusion?: boolean;
   readonly backendTarget?: "auto" | "sqlite" | "portable";
   readonly contractBindings?: Readonly<Record<string, string>>;
+  readonly configIdentity?: string;
+  readonly allowedAlgorithmicVariants?: readonly string[];
 }
 
 export interface PhysicalNodePlan {
@@ -45,6 +48,8 @@ export interface PhysicalExecutionPlan {
   readonly outputNodeId: string;
   readonly order: readonly PhysicalNodePlan[];
   readonly waves: readonly PhysicalWaveGroup[];
+  readonly edges: readonly ComputeEdgeSpec[];
+  readonly outgoing: ReadonlyMap<string, readonly string[]>;
   readonly consumerCounts: ReadonlyMap<string, number>;
   readonly eliminatedNodeIds: readonly string[];
   readonly cseMergedNodeIds: ReadonlyMap<string, string>;
@@ -62,19 +67,17 @@ interface WorkingGraph {
 }
 
 const PLAN_CACHE = new WeakMap<ComputeGraphSpec, Map<string, PhysicalExecutionPlan>>();
+const REGISTRY_INSTANCE_IDS = new WeakMap<object, number>();
+let nextRegistryInstanceId = 1;
 
-function canonicalParamValue(value: unknown): string {
-  if (typeof value === "function") return "[fn]";
-  if (Array.isArray(value)) return `[${value.map(canonicalParamValue).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const entries = Object.entries(value)
-      .filter(([, item]) => item !== undefined)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([k, item]) => `${JSON.stringify(k)}:${canonicalParamValue(item)}`);
-    return `{${entries.join(",")}}`;
+function registryInstanceToken<TContext>(registry: ComputeOperatorLookup<TContext>): number {
+  let id = REGISTRY_INSTANCE_IDS.get(registry);
+  if (id === undefined) {
+    id = nextRegistryInstanceId;
+    nextRegistryInstanceId += 1;
+    REGISTRY_INSTANCE_IDS.set(registry, id);
   }
-  const encoded = JSON.stringify(value);
-  return encoded === undefined ? "null" : encoded;
+  return id;
 }
 
 function indexNodes(nodes: readonly ComputeNodeSpec[]): Map<string, ComputeNodeSpec> {
@@ -244,7 +247,7 @@ function runCsePass<TContext>(
       .map((e) => `${e.port ?? "default"}=${rewriteSource(e.from)}`)
       .sort()
       .join("&");
-    const exprKey = `${op}|${caps.version}|${canonicalParamValue(node.params ?? {})}|${normEdges}`;
+    const exprKey = `${op}|${caps.version}|${canonicalizeComputeValue(node.params ?? {})}|${normEdges}`;
     const existing = seenExpr.get(exprKey);
     if (existing) merged.set(node.id, existing);
     else seenExpr.set(exprKey, node.id);
@@ -264,6 +267,19 @@ function runCsePass<TContext>(
   return { nodes: keptNodes, edges: keptEdges, merged, output: rewriteSource(output) };
 }
 
+function isNodeEliminable<TContext>(
+  node: ComputeNodeSpec,
+  registry: ComputeOperatorLookup<TContext>,
+  options: PhysicalPlanOptions,
+): boolean {
+  if (node.sideEffect) return false;
+  if (node.subgraph) {
+    return node.subgraph.nodes.every((child) => isNodeEliminable(child, registry, options));
+  }
+  const op = resolveNodeOp(node, registry, options);
+  return resolveNodeCapabilities(node, op, registry).eliminable;
+}
+
 function runDcePass<TContext>(
   nodes: readonly ComputeNodeSpec[],
   edges: readonly ComputeEdgeSpec[],
@@ -280,10 +296,7 @@ function runDcePass<TContext>(
 
   const live = new Set<string>([output]);
   for (const node of nodes) {
-    if (node.subgraph) continue;
-    const op = resolveNodeOp(node, registry, options);
-    const caps = resolveNodeCapabilities(node, op, registry);
-    if (!caps.eliminable) live.add(node.id);
+    if (!isNodeEliminable(node, registry, options)) live.add(node.id);
   }
   const queue = [...live];
   while (queue.length > 0) {
@@ -423,7 +436,7 @@ function buildLinearFusedOrder(
       id: last.id,
       op: `fused:${chain.map((s) => s.op).join(">")}`,
       params: {},
-      incoming: node.incoming,
+      incoming: node.incoming.map((edge) => ({ ...edge, to: last.id })),
       capabilities: last.capabilities,
       kind: "fused_chain",
       fusedSteps: chain,
@@ -499,7 +512,7 @@ function planCacheKey<TContext>(
   registry: ComputeOperatorLookup<TContext>,
   options: PhysicalPlanOptions,
 ): string {
-  return `${registry.generation}|${canonicalParamValue(options)}`;
+  return `${registryInstanceToken(registry)}:${registry.generation}|${options.configIdentity ?? ""}|${canonicalizeComputeValue(options)}`;
 }
 
 /** Transform and compile a logical ComputeGraphSpec into a cached PhysicalExecutionPlan. */
@@ -555,14 +568,21 @@ export function compileComputeGraph<TContext = unknown>(
   let consumerCounts = computeConsumerCounts(physicalOrder, work.edges, work.output);
   let physicalWaves = waves.map((w) => partitionWave(w.map((n) => physicalById.get(n.id)!)));
 
+  let finalEdges = work.edges;
+  let finalOutgoing = outgoing;
   if (options.enableLinearFusion) {
     const fused = buildLinearFusedOrder(physicalOrder, work.edges, consumerCounts, work.output);
     if (fused.absorbedIds.size > 0) {
       physicalOrder = fused.order;
-      const keptIds = new Set(physicalOrder.map((n) => n.id));
-      const fusedEdges = work.edges.filter((e) => keptIds.has(e.to));
-      consumerCounts = computeConsumerCounts(physicalOrder, fusedEdges, work.output);
+      finalEdges = physicalOrder.flatMap((n) => n.incoming);
+      consumerCounts = computeConsumerCounts(physicalOrder, finalEdges, work.output);
       physicalWaves = physicalOrder.map((n) => partitionWave([n]));
+      finalOutgoing = indexAndValidateEdges(
+        spec.id,
+        physicalOrder,
+        finalEdges,
+        indexNodes(physicalOrder),
+      ).outgoing;
     }
   }
 
@@ -571,6 +591,8 @@ export function compileComputeGraph<TContext = unknown>(
     outputNodeId: work.output,
     order: physicalOrder,
     waves: physicalWaves,
+    edges: finalEdges,
+    outgoing: finalOutgoing,
     consumerCounts,
     eliminatedNodeIds: work.eliminatedNodeIds,
     cseMergedNodeIds: work.cseMergedNodeIds,

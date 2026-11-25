@@ -75,6 +75,13 @@ export interface MemoryEngineGraphOptions {
   readonly searchGraph?: ComputeGraphSpec;
   readonly searchRegistry?: ComputeRegistry<MemorySnapshotPort>;
   readonly searchMemo?: ComputeMemoCache;
+  readonly rerankGraph?: ComputeGraphSpec | false;
+  readonly configIdentity?: string;
+  readonly configResolver?: () => {
+    readonly searchGraph?: ComputeGraphSpec;
+    readonly rerankGraph?: ComputeGraphSpec | false;
+    readonly configIdentity?: string;
+  };
   readonly getGraph?: ComputeGraphSpec;
   readonly neighborhoodGraph?: ComputeGraphSpec;
   readonly projectGraph?: ComputeGraphSpec;
@@ -201,6 +208,40 @@ export class MemoryEngine {
         this.graphs.viewRegistry ?? ENGINE_VIEW_REGISTRY,
       ),
     );
+  }
+
+  /** Read profile/constraint records over a single engine snapshot port (pushdown or scan fallback). */
+  async readProfileCandidates(options: {
+    readonly sourceActor?: MemoryActor;
+    readonly memoryTypes: readonly MemoryRecord["memoryType"][];
+    readonly limit?: number;
+    readonly now?: string;
+  }): Promise<MemoryRecord[]> {
+    return this.withSnapshot(async (port) => {
+      const effectiveNow = options.now ?? port.now;
+      if (port.projectMemories) {
+        const limit = options.limit ?? 200;
+        const pages = options.memoryTypes.map((memoryType) =>
+          port.projectMemories!({
+            sourceActor: options.sourceActor,
+            memoryType,
+            now: effectiveNow,
+            limit,
+            offset: 0,
+          }),
+        );
+        return pages.flatMap((page) => page.memories);
+      }
+      const entities = await port.scan({ kind: "memory", limit: 1000 });
+      const types = new Set(options.memoryTypes);
+      return entities.flatMap((entity) =>
+        entity.kind === "memory" &&
+        types.has(entity.value.memoryType) &&
+        (!options.sourceActor || entity.value.sourceActor === options.sourceActor)
+          ? [entity.value]
+          : [],
+      );
+    });
   }
 
   async backfillTesseraFingerprint(input: {
@@ -452,16 +493,28 @@ export class MemoryEngine {
     if (!text.trim()) throw new Error("Search query is required");
     searchLimit(options.limit);
     boundedGraphHops(options.graphHops);
+    const resolved = this.graphs.configResolver?.();
     const searchGraph =
-      options.searchGraph ?? this.graphs.searchGraph ?? DEFAULT_ENGINE_SEARCH_GRAPH;
+      options.searchGraph ??
+      this.graphs.searchGraph ??
+      resolved?.searchGraph ??
+      DEFAULT_ENGINE_SEARCH_GRAPH;
     const registry = this.graphs.searchRegistry ?? ENGINE_SEARCH_REGISTRY;
+    const resolvedRerank = this.graphs.rerankGraph ?? resolved?.rerankGraph;
+    const effectiveOptions =
+      options.rerankGraph === undefined && resolvedRerank !== undefined
+        ? { ...options, rerankGraph: resolvedRerank }
+        : options;
+    const configIdentity = this.graphs.configIdentity ?? resolved?.configIdentity;
+    const planOptions = configIdentity ? { configIdentity } : undefined;
     return this.withSnapshot((port) =>
       executeEngineSearchGraph(
-        { text, options, callerNow: port.now, semantic, exact },
+        { text, options: effectiveOptions, callerNow: port.now, semantic, exact },
         port,
         searchGraph,
         registry,
         this.graphs.searchMemo,
+        planOptions,
       ),
     );
   }
