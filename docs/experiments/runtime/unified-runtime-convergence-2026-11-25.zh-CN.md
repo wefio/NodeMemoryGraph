@@ -114,4 +114,19 @@ node docs/experiments/runtime/io-wait-probe.mjs --root . --out <产物路径>
 - 区分信号是进程 CPU：偏慢的 post 臂在同样的 32 条词法查询上花费 `172 ms`，其它每个臂都是 `94 ms`。多出的进程 CPU 只能来自编译、垃圾回收或主机降频，争用只会抬高墙钟、不会抬高进程 CPU。各臂的 golden 摘要与有序 ID 完全一致，不涉及语义差异。
 - 两个实验臂在同一进程内按顺序执行，post 代码的首次执行必然承担 V8 优化与自身分配模式触发的 GC；原始数据无法把这一项与主机降频分开。
 
-结论：`-22.9%` 是进程内比较带来的顺序／首次执行效应，`-1.5%` 落在该数据自身的波动范围内，都不能证明统一调度器拖慢了八并发混合检索。要确认剩余的首跑成分，需要让每个实验臂在独立进程中运行并记录 GC 次数与 CPU 拆分；该 runner 所需的 LoCoMo 数据集在本机不存在，因此本报告未重新执行原 runner。
+结论：`-22.9%` 是进程内比较带来的顺序／首次执行效应，`-1.5%` 落在该数据自身波动范围内，都不能证明统一调度器拖慢了八并发混合检索。[hybrid-isolation-probe.mjs](hybrid-isolation-probe.mjs) 直接验证这一判断：每个实验臂单独进程、交替先后顺序、`--rounds 24 --limit 1`，写入与查询循环与原实验相同，并在每个测量窗口内记录 CPU 拆分与 GC 时间。
+
+```bash
+node docs/experiments/runtime/hybrid-isolation-probe.mjs --baseline-ref 604a89e9   --data-root D:/Github/.benchmarks/official/OmniMemEval/data --rounds 24 --limit 1   --out docs/experiments/runtime/artifacts/unified-runtime-2026-11-25/hybrid-isolation.json
+```
+
+| 24 个隔离轮次的中位数 | PR #190 | 收敛后 | 请求速率变化 | 逐轮配对的均值 | 变慢轮次 |
+| --- | --- | --- | --- | --- | --- |
+| 混合，8 并发 | 89.2 req/s | 88.8 req/s | `-0.9%` | `+0.5%` ± 0.6 | 14/24 |
+| 混合，1 并发 | 94.7 req/s | 91.9 req/s | `-2.9%` | `-2.5%` ± 0.9 | 19/24 |
+| 词法，8 并发 | 279.6 req/s | 274.2 req/s | `-1.9%` | `-0.5%` ± 1.8 | 17/24 |
+| 词法，1 并发 | 329.2 req/s | 315.5 req/s | `-6.2%` | `-4.9%` ± 1.5 | 19/24 |
+
+隔离后，有争议的八并发混合臂回到 parity，整批延迟成组出现的现象在所有轮次中消失。窗口内的 GC 时间相同（词法中位 `16.0` 对 `14.8 ms`，混合 `6.5` 对 `6.9 ms`），因此 GC 不能解释剩余的单并发差距。
+
+该差距是已记录的每节点异步派发成本（约 `10.5 µs`／次）：一次词法检索要经过十几个节点，1 并发时这些派发不再与其它请求重叠。它属于统一派发路径的固有开销，而不是八并发臂的性质，绝对值也小（`315` 对 `329` req/s）。原始数据见 [hybrid-isolation.json](artifacts/unified-runtime-2026-11-25/hybrid-isolation.json)。

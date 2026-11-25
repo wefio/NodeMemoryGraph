@@ -114,4 +114,21 @@ The matched trial reported an eight-request hybrid throughput difference of `-1.
 - Process CPU is the distinguishing signal: the slow post arm spends `172 ms` of CPU on the same 32 lexical queries that cost `94 ms` in every other arm. Extra process CPU is compilation, garbage collection or a throttled host, not contention — contention inflates wall time without raising process CPU. Golden digests and ordered IDs agree in all arms, so no semantic difference is involved.
 - Both arms run inside one process, in arm order, so the first execution of the post code carries V8 optimization and any GC triggered by its allocation pattern. The artifact cannot separate that from host throttling.
 
-Conclusion: the `-22.9%` is an arm-order/first-run artifact of an in-process comparison, and `-1.5%` is within this artifact's own spread. It does not show that the unified scheduler slows eight-request hybrid search. Confirming the remaining first-run component needs a re-run that isolates each arm in its own process and records GC counts and a CPU split; the LoCoMo dataset for that runner is not present on this machine, so the original runner was not re-executed for this report.
+Conclusion: the `-22.9%` is an arm-order/first-run artifact of an in-process comparison, and `-1.5%` is within this artifact's own spread. It does not show that the unified scheduler slows eight-request hybrid search. [hybrid-isolation-probe.mjs](hybrid-isolation-probe.mjs) tests that reading directly: one process per arm, alternating arm order, `--rounds 24 --limit 1`, the same write and query loops, with the CPU split and GC time recorded inside each measurement window.
+
+```bash
+node docs/experiments/runtime/hybrid-isolation-probe.mjs --baseline-ref 604a89e9 \
+  --data-root D:/Github/.benchmarks/official/OmniMemEval/data --rounds 24 --limit 1 \
+  --out docs/experiments/runtime/artifacts/unified-runtime-2026-11-25/hybrid-isolation.json
+```
+
+| Median of 24 isolated rounds | PR #190 | Consolidated | Request-rate change | Paired mean over rounds | Rounds slower |
+| --- | --- | --- | --- | --- | --- |
+| Hybrid, 8 concurrent | 89.2 req/s | 88.8 req/s | `-0.9%` | `+0.5%` ± 0.6 | 14/24 |
+| Hybrid, 1 concurrent | 94.7 req/s | 91.9 req/s | `-2.9%` | `-2.5%` ± 0.9 | 19/24 |
+| Lexical, 8 concurrent | 279.6 req/s | 274.2 req/s | `-1.9%` | `-0.5%` ± 1.8 | 17/24 |
+| Lexical, 1 concurrent | 329.2 req/s | 315.5 req/s | `-6.2%` | `-4.9%` ± 1.5 | 19/24 |
+
+The isolated arms reproduce parity for the contested eight-request hybrid arm and the whole-batch latency clusters disappear from every round. GC time inside the window is equal (`16.0` vs `14.8 ms` median for lexical, `6.5` vs `6.9 ms` for hybrid), so garbage collection does not explain the remaining single-concurrency gap.
+
+That gap is the per-node asynchronous dispatch cost already recorded at about `10.5 µs` per call: a lexical search traverses a dozen or so nodes, and at concurrency 1 those dispatches no longer overlap with other requests. It is a property of unified dispatch, not of the eight-concurrent arm, and it is small in absolute terms (`315` against `329` requests/s). Raw observations are in [hybrid-isolation.json](artifacts/unified-runtime-2026-11-25/hybrid-isolation.json).
