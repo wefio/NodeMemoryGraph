@@ -97,3 +97,21 @@ Each arm ran three times. Raw observations are in `artifacts/unified-runtime-202
 - Layer validation is covered by `tests/core/unified-runtime-scheduler.test.ts` (unknown section, unknown parameter, wrong type, string-instead-of-array) rather than by timing, because it changes whether configuration is accepted, not how it executes.
 
 Measurement limits: this Windows host exposes no battery or thermal telemetry, timer granularity rounds a nominal 5 ms delay to roughly 15.6 ms, and thread CPU counters are too coarse for sub-millisecond attribution. The probe therefore reports relative dimensions and dispatch cost. It does not restate application retrieval throughput, which the change does not touch, and it makes no power or energy claim.
+
+## Re-analysis of the eight-request hybrid arm (2026-11-25)
+
+The matched trial reported an eight-request hybrid throughput difference of `-1.5%` in one round and `-22.9%` in the other and left it unattributed. Re-reading [the raw artifact](artifacts/unified-runtime-2026-11-25/production-matched.json) shows the difference is not a property of that arm.
+
+| Round (order)       | Arm      | Lexical, 8 concurrent: req/s, CPU ms | Hybrid, 8 concurrent: req/s, CPU ms | Median per-request latency ratio |
+| ------------------- | -------- | ------------------------------------ | ----------------------------------- | -------------------------------- |
+| 1 (baseline → post) | baseline | 307.0, 94                            | 90.0, 390                           | —                                |
+| 1 (baseline → post) | post     | 180.9, 172                           | 69.4, 469                           | 1.99 lexical / 1.45 hybrid       |
+| 2 (post → baseline) | post     | 317.0, 94                            | 93.2, 328                           | 0.94 lexical / 1.02 hybrid       |
+| 2 (post → baseline) | baseline | 305.5, 94                            | 94.6, 391                           | —                                |
+
+- The first round's post arm is slow across the board, and lexical concurrency 8 loses more (`-41%`) than hybrid concurrency 8 (`-23%`). Latency ratios arrive in whole eight-request clusters (`2.67x` lexical, `1.56x` hybrid), so entire batches were delayed rather than individual queries.
+- The same post code in the reverse-ordered round is at parity (`+3.8%` lexical, `-1.5%` hybrid) and its hybrid concurrency-1 arm is faster (`104.4` vs `97.7` req/s).
+- Process CPU is the distinguishing signal: the slow post arm spends `172 ms` of CPU on the same 32 lexical queries that cost `94 ms` in every other arm. Extra process CPU is compilation, garbage collection or a throttled host, not contention — contention inflates wall time without raising process CPU. Golden digests and ordered IDs agree in all arms, so no semantic difference is involved.
+- Both arms run inside one process, in arm order, so the first execution of the post code carries V8 optimization and any GC triggered by its allocation pattern. The artifact cannot separate that from host throttling.
+
+Conclusion: the `-22.9%` is an arm-order/first-run artifact of an in-process comparison, and `-1.5%` is within this artifact's own spread. It does not show that the unified scheduler slows eight-request hybrid search. Confirming the remaining first-run component needs a re-run that isolates each arm in its own process and records GC counts and a CPU split; the LoCoMo dataset for that runner is not present on this machine, so the original runner was not re-executed for this report.
