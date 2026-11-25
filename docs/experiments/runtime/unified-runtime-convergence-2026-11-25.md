@@ -114,7 +114,7 @@ The matched trial reported an eight-request hybrid throughput difference of `-1.
 - Process CPU is the distinguishing signal: the slow post arm spends `172 ms` of CPU on the same 32 lexical queries that cost `94 ms` in every other arm. Extra process CPU is compilation, garbage collection or a throttled host, not contention — contention inflates wall time without raising process CPU. Golden digests and ordered IDs agree in all arms, so no semantic difference is involved.
 - Both arms run inside one process, in arm order, so the first execution of the post code carries V8 optimization and any GC triggered by its allocation pattern. The artifact cannot separate that from host throttling.
 
-Conclusion: the `-22.9%` is an arm-order/first-run artifact of an in-process comparison, and `-1.5%` is within this artifact's own spread. It does not show that the unified scheduler slows eight-request hybrid search. [hybrid-isolation-probe.mjs](hybrid-isolation-probe.mjs) tests that reading directly: one process per arm, alternating arm order, `--rounds 24 --limit 1`, the same write and query loops, with the CPU split and GC time recorded inside each measurement window.
+Conclusion: the `-22.9%` belongs to the in-process, arm-ordered comparison rather than to the arm, and `-1.5%` is within this artifact's own spread. It does not show that the unified scheduler slows eight-request hybrid search. [hybrid-isolation-probe.mjs](hybrid-isolation-probe.mjs) tests that reading directly: one process per arm, alternating arm order, `--rounds 24 --limit 1`, the same write and query loops, with the CPU split and GC time recorded inside each measurement window.
 
 ```bash
 node docs/experiments/runtime/hybrid-isolation-probe.mjs --baseline-ref 604a89e9 \
@@ -122,13 +122,13 @@ node docs/experiments/runtime/hybrid-isolation-probe.mjs --baseline-ref 604a89e9
   --out docs/experiments/runtime/artifacts/unified-runtime-2026-11-25/hybrid-isolation.json
 ```
 
-| Median of 24 isolated rounds | PR #190 | Consolidated | Request-rate change | Paired mean over rounds | Rounds slower |
-| --- | --- | --- | --- | --- | --- |
-| Hybrid, 8 concurrent | 89.2 req/s | 88.8 req/s | `-0.9%` | `+0.5%` ± 0.6 | 14/24 |
-| Hybrid, 1 concurrent | 94.7 req/s | 91.9 req/s | `-2.9%` | `-2.5%` ± 0.9 | 19/24 |
-| Lexical, 8 concurrent | 279.6 req/s | 274.2 req/s | `-1.9%` | `-0.5%` ± 1.8 | 17/24 |
-| Lexical, 1 concurrent | 329.2 req/s | 315.5 req/s | `-6.2%` | `-4.9%` ± 1.5 | 19/24 |
+| Median of 24 isolated rounds | PR #190 | Consolidated | Median change | Per-round range |
+| --- | --- | --- | --- | --- |
+| Hybrid, 8 concurrent | 89.2 req/s | 88.8 req/s | `-0.9%` | `-3.3%` .. `+5.9%` |
+| Hybrid, 1 concurrent | 94.7 req/s | 91.9 req/s | `-2.9%` | `-10.3%` .. `+9.8%` |
+| Lexical, 8 concurrent | 279.6 req/s | 274.2 req/s | `-1.9%` | `-10.9%` .. `+26.0%` |
+| Lexical, 1 concurrent | 329.2 req/s | 315.5 req/s | `-6.2%` | `-16.7%` .. `+19.1%` |
 
-The isolated arms reproduce parity for the contested eight-request hybrid arm and the whole-batch latency clusters disappear from every round. GC time inside the window is equal (`16.0` vs `14.8 ms` median for lexical, `6.5` vs `6.9 ms` for hybrid), so garbage collection does not explain the remaining single-concurrency gap.
+The isolated arms reproduce the eight-request hybrid arm at parity and the whole-batch latency clusters disappear from every round. GC time inside the window is also equal (`16.0` vs `14.8 ms` median for lexical, `6.5` vs `6.9 ms` for hybrid).
 
-That gap is the per-node asynchronous dispatch cost already recorded at about `10.5 µs` per call: a lexical search traverses a dozen or so nodes, and at concurrency 1 those dispatches no longer overlap with other requests. It is a property of unified dispatch, not of the eight-concurrent arm, and it is small in absolute terms (`315` against `329` requests/s). Raw observations are in [hybrid-isolation.json](artifacts/unified-runtime-2026-11-25/hybrid-isolation.json).
+The two arms are still separate processes measured a second or so apart on a host whose load is not controlled, so only differences larger than the run-to-run spread are attributable to the code. That spread is `±5–8%` per round, which makes the `-0.9%` hybrid and `-1.9%` lexical figures at eight concurrent requests indistinguishable from noise, and the single-concurrency figures (`-2.9%` hybrid, `-6.2%` lexical) too small to attribute without a load-controlled host or an interleaved design. They are recorded as parity, not as a residual dispatch cost: the `-22.9%` this section set out to explain is an order of magnitude larger than this noise floor, order-dependent, and absent under isolation. Raw observations are in [hybrid-isolation.json](artifacts/unified-runtime-2026-11-25/hybrid-isolation.json).
