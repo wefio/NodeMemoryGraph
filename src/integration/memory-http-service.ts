@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
 import type { ComputeGraphSpec } from "../core/compute-graph.ts";
+import { getSharedRuntimeScheduler } from "../core/runtime/scheduler.ts";
 import type { MemoryEngine } from "../core/memory/engine.ts";
 import type { MemoryInput } from "../core/memory/model.ts";
+import { sortResultsChronologically } from "../core/memory/page-stitch-operators.ts";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
-import type { MemorySearchResult } from "../core/types.ts";
+import type { MemoryContext, MemorySearchResult } from "../core/types.ts";
 import { projectAmlMemory, projectAmlMultimodalMemory } from "./aml-projection.ts";
+import { fitExplicitSearchPage, type ExplicitSearchPageBudget } from "./explicit-search-page.ts";
 import { renderHttpProfileSupplement } from "./http-profile-view.ts";
 import { executeHttpSearchGraph, type HttpClauseHitBatch } from "./http-search-graph.ts";
 import { preprocessHttpMessage } from "./http-write-preprocess.ts";
@@ -56,6 +59,8 @@ export class HttpMemoryService {
     backfillLimit?: number;
     isDeferredEmbedding?: (error: unknown) => boolean;
     searchGraph?: ComputeGraphSpec;
+    rerankGraph?: ComputeGraphSpec | false;
+    configIdentity?: string;
     writePreprocessGraph?: ComputeGraphSpec;
     profileGraph?: ComputeGraphSpec;
     preprocessMessages?: boolean;
@@ -81,11 +86,18 @@ export class HttpMemoryService {
     const vectorIndex = this.engine.backend.vectorIndex;
     if (!this.client || !vectorIndex) return;
     try {
-      const docs = vectorIndex.pending(this.client.indexId, this.backfillLimit);
-      if (docs.length) {
-        const vectors = await this.client.embedDocuments(docs.map((document) => document.text));
-        vectorIndex.save(this.client.indexId, docs, vectors);
-      }
+      await getSharedRuntimeScheduler().runTask(
+        async () => {
+          const docs = vectorIndex.pending(this.client!.indexId, this.backfillLimit);
+          if (docs.length) {
+            const vectors = await this.client!.embedDocuments(
+              docs.map((document) => document.text),
+            );
+            vectorIndex.save(this.client!.indexId, docs, vectors);
+          }
+        },
+        { priority: "background", effect: "read", label: "http_vector_backfill" },
+      );
       this.lastBackfillError = null;
     } catch (error) {
       // EmbeddingPreparation is control flow, not a failure: `runPart` expects it to unwind the
@@ -206,29 +218,39 @@ export class HttpMemoryService {
 
   async profileSummary(query: string, now?: string): Promise<string> {
     if (!this.options.preprocessMessages) return "";
-    const backend = this.engine.backend;
-    const view = await backend.openRead();
-    try {
-      const effectiveNow = now ?? new Date().toISOString();
-      if (backend.projectMemories) {
-        const base = { sourceActor: "user" as const, now: effectiveNow, limit: 200, offset: 0 };
-        const constraints = backend.projectMemories(view, { ...base, memoryType: "constraint" });
-        const preferences = backend.projectMemories(view, { ...base, memoryType: "preference" });
-        return renderHttpProfileSupplement(
-          [...constraints.memories, ...preferences.memories],
-          query,
-          undefined,
-          this.options.profileGraph,
-        );
-      }
-      const entities = await backend.scan(view, { kind: "memory", limit: 1000 });
-      const records = entities
-        .filter((entity) => entity.kind === "memory")
-        .map((entity) => entity.value);
-      return renderHttpProfileSupplement(records, query, undefined, this.options.profileGraph);
-    } finally {
-      await backend.closeRead(view);
-    }
+    const records = await this.engine.readProfileCandidates({
+      sourceActor: "user",
+      memoryTypes: ["constraint", "preference"],
+      limit: 200,
+      now: now ?? new Date().toISOString(),
+    });
+    return renderHttpProfileSupplement(records, query, undefined, this.options.profileGraph);
+  }
+
+  /** Canonical single-clause HTTP search with vector backfill, chronological sort option, and page fit. */
+  async searchSingleClause(
+    query: string,
+    limit: number,
+    options: {
+      readonly now?: string;
+      readonly sortResultsByTime?: boolean;
+      readonly budget?: ExplicitSearchPageBudget;
+    } = {},
+  ): Promise<{ raw: MemoryContext; page: MemoryContext; profile: string }> {
+    if (this.options.allowBackfill !== false) await this.backfillVectors();
+    const raw = await this.searchFeature(query, limit, { now: options.now });
+    const fitted = fitExplicitSearchPage(
+      raw,
+      { query, limit, persistTrace: false },
+      options.budget,
+    );
+    const page = options.sortResultsByTime
+      ? { ...fitted, results: sortResultsChronologically(fitted.results) }
+      : fitted;
+    const profile = this.options.preprocessMessages
+      ? await this.profileSummary(query, options.now)
+      : "";
+    return { raw, page, profile };
   }
 
   async record(id: string) {
@@ -239,6 +261,7 @@ export class HttpMemoryService {
     const options = {
       ...HTTP_MEMORY_SEARCH_PROFILE,
       limit,
+      ...(this.options.rerankGraph !== undefined ? { rerankGraph: this.options.rerankGraph } : {}),
       ...(context.now ? { now: context.now, dueReminders: true } : {}),
     };
     const client = this.client;

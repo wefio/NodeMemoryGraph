@@ -1,0 +1,59 @@
+{
+  "mode": "baseline",
+  "measuredAt": "2026-11-25T11:15:06.556Z",
+  "environment": {
+    "node": "v26.13.0",
+    "platform": "win32",
+    "arch": "x64",
+    "cpuCount": 20,
+    "cpuModel": "12th Gen Intel(R) Core(TM) i7-12700H",
+    "powerTelemetryAvailable": false
+  },
+  "golden": {
+    "queryCount": 2,
+    "engineCount": 10,
+    "httpCount": 10,
+    "digest": "0b41ebddfc5beb71b6a274c410dd25e1d66062d2e06f16648fdb83dcd24eb994",
+    "topEngineIds": [
+      "3ac9410f0ab8c3ad4e509168168697158cce2294d49053ebf85058406f0bda50",
+      "a845a4ee3dc0732eefaf0f073a4d665c196f188f2a7d865468425ca7bfa80924",
+      "c71fdb497c8b6452e907b4f9f8afb964f48128a399f3626bc9a9a24bcd3006a6",
+      "bcc876fa3b51a5a315d2a7a4bcf9b3520c6e65558a5bc580fde095e71f502052",
+      "5f5f73e75c5e3be7359711a6e85aa1310867cdabb47ff371c6714480bd38f9e3"
+    ]
+  },
+  "syncRerank": {
+    "iterations": 200,
+    "wallMs": 56.04,
+    "p50Ms": 0.243,
+    "p95Ms": 0.468,
+    "opsPerSec": 3568.86,
+    "userCpuMs": 47,
+    "systemCpuMs": 0,
+    "heapDeltaMb": -0.216,
+    "rssMb": 86.773
+  },
+  "diamondDag": {
+    "runs": 3,
+    "medianWallMs": 123.358,
+    "minWallMs": 122.671,
+    "maxWallMs": 124.086,
+    "cpuMs": 16
+  },
+  "fgVsBg": {
+    "fgCount": 20,
+    "bgCount": 8,
+    "totalWallMs": 30.022,
+    "fgP50Ms": 7.062,
+    "fgP95Ms": 7.156,
+    "bgMedianMs": 14.13
+  },
+  "workerScaling": {
+    "inline0": {
+      "workers": 0,
+      "wallMs": 168.845,
+      "userCpuMs": 172,
+      "throughputTasksPerSec": 94.761
+    }
+  }
+}

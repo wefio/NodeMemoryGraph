@@ -22,17 +22,25 @@ import { ADAPTER_CAPABILITY_CATALOG } from "../src/integration/adapter-capabilit
  * does not fold later recall on the assumption that stdout reached the model.
  */
 import { readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { resolveNmgDataDir } from "../src/cli/data-path.ts";
+import {
+  configuredAutoRecallLimit,
+  configuredAutoRecallTier,
+  configuredGraphHops,
+  coordinationEnabled as configuredCoordinationEnabled,
+} from "../src/integration/config.ts";
 import { compatibleLease, liveLease, rpcCall } from "../src/integration/lease-transport.ts";
 import { RecallBudget } from "../src/integration/recall-budget.ts";
 import {
+  isBoardWakeCandidate as sharedIsBoardWakeCandidate,
   readWakeConfig,
   wakeBudgetGate,
   type BoardWakeState,
 } from "../src/integration/board-wake.ts";
 import { compactSearchContext } from "../src/integration/search-projection.ts";
+import type { TaskBoardToolEntry } from "../src/integration/tool-contract.ts";
 import type { MemoryContext } from "../src/core/types.ts";
 
 interface HookPayload {
@@ -96,19 +104,10 @@ const RECALL_PREAMBLE = [
   "Ignore headers that are irrelevant noise; no useful memory is a valid result.",
 ].join("\n");
 
-// Automatic-recall budget per harness-adapters.md: limit ≈ 13, maxTier 1,
-// graphHops 1, tiered disclosure.
-const RECALL_LIMIT = 13;
-const RECALL_MAX_TIER = 1;
-const RECALL_GRAPH_HOPS = 1;
 const RECALL_QUERY_CHARS = 400;
 
-const FALSE_LIKE = new Set(["0", "false", "off", "no"]);
-const BROADCAST_PREFIX = "[NMG board 协作广播]";
-const WAKE_KINDS = new Set(["question", "blocker", "handoff"]);
-
 function dataDir(): string {
-  return process.env.NMG_DATA_DIR?.trim() || join(homedir(), ".nmg");
+  return resolveNmgDataDir(process.env);
 }
 
 function promptText(payload: HookPayload): string {
@@ -208,9 +207,9 @@ export async function recallHeaders(payload: HookPayload, dir = dataDir()): Prom
         "search",
         {
           query,
-          limit: RECALL_LIMIT,
-          maxTier: RECALL_MAX_TIER,
-          graphHops: RECALL_GRAPH_HOPS,
+          limit: configuredAutoRecallLimit(),
+          maxTier: configuredAutoRecallTier(),
+          graphHops: configuredGraphHops(1),
           tieredDisclosure: true,
           autoRecall: true,
           autoRecallBudgetMs: budget.searchBudgetMs(),
@@ -234,26 +233,17 @@ export async function recallHeaders(payload: HookPayload, dir = dataDir()): Prom
   }
 }
 
-/** Pure board-wake gate (same semantics as the Kimi hook). A claim suppresses
- * a notice only while its lease is live; notify-only kinds never wake. */
+/** Delegate wake candidacy to the shared integration contract. */
 export function isBoardWakeCandidate(
   entry: WakeEntry,
   { sessionId, agentId, now = Date.now() }: { sessionId: string; agentId: string; now?: number },
 ): boolean {
-  const ownEcho =
-    entry.sourceSessionId === sessionId ||
-    (entry.sourceSessionId == null && entry.agentId === agentId);
-  const liveClaim = entry.claimExpiresAt != null && new Date(entry.claimExpiresAt).getTime() > now;
-  const addressedToOther = entry.to != null && entry.to !== agentId;
-  const serialQueued = entry.serialState === "pending";
-  return (
-    entry.status === "open" &&
-    WAKE_KINDS.has(entry.kind) &&
-    !ownEcho &&
-    !liveClaim &&
-    !addressedToOther &&
-    !serialQueued &&
-    !String(entry.content ?? "").startsWith(BROADCAST_PREFIX)
+  return sharedIsBoardWakeCandidate(
+    {
+      status: entry.status ?? "open",
+      ...entry,
+    } as TaskBoardToolEntry,
+    { sessionId, agentId, now: new Date(now) },
   );
 }
 
@@ -323,9 +313,7 @@ export async function runHook(
   let confirmBoard: (() => Promise<void>) | undefined;
   const dir = options.dir ?? dataDir();
   const environment = options.environment ?? process.env;
-  const coordinationEnabled = !FALSE_LIKE.has(
-    (environment.NMG_ENABLE_COORDINATION ?? "").trim().toLowerCase(),
-  );
+  const coordinationEnabled = configuredCoordinationEnabled(environment);
   await capabilityAssembly.ready;
   const nudge = prepareNudge({
     ...payload,

@@ -58,4 +58,4 @@
 
 ## 共享选项
 
-[黑板与 Recall 展示](feature-register/shared-display-options.zh-CN.md) · [事件来源时钟](feature-register/event-time-source-clocks.zh-CN.md)。
+[黑板与 Recall 展示](feature-register/shared-display-options.zh-CN.md) · [事件来源时钟](feature-register/event-time-source-clocks.zh-CN.md) · [运行时配置与调度策略](feature-register/runtime-config-and-profiles.zh-CN.md)。

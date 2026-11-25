@@ -1,4 +1,5 @@
 import type { MemoryTier } from "../core/types.ts";
+import { resolveParameterConfig } from "./parameter-config.ts";
 
 export type QppActuationMode = "off" | "shadow" | "active";
 export type SearchRecommendationMode = "off" | "advisory" | "guardrail";
@@ -46,21 +47,7 @@ export const DEFAULT_STG_SYNC_POLICY: StgSyncPolicyConfig = {
 export function configuredStgSyncPolicy(
   environment: NodeJS.ProcessEnv = process.env,
 ): StgSyncPolicyConfig {
-  return {
-    enabled: environment.NMG_STG_AUTO_SYNC === "1",
-    limit: Math.min(
-      200,
-      positiveInteger(environment.NMG_STG_AUTO_SYNC_LIMIT, DEFAULT_STG_SYNC_POLICY.limit),
-    ),
-    minimumIntervalMs:
-      Math.min(
-        86_400,
-        positiveInteger(
-          environment.NMG_STG_AUTO_SYNC_INTERVAL_SECONDS,
-          DEFAULT_STG_SYNC_POLICY.minimumIntervalMs / 1_000,
-        ),
-      ) * 1_000,
-  };
+  return { ...resolveParameterConfig({ environment }).stgSync };
 }
 
 export const DEFAULT_STG_CONSOLIDATION_POLICY: StgConsolidationPolicyConfig = {
@@ -78,37 +65,7 @@ export const DEFAULT_STG_CONSOLIDATION_POLICY: StgConsolidationPolicyConfig = {
 export function configuredStgConsolidationPolicy(
   environment: NodeJS.ProcessEnv = process.env,
 ): StgConsolidationPolicyConfig {
-  const minimumPosteriorMean = boundedNumber(
-    environment.NMG_STG_CONSOLIDATE_MIN_MEAN,
-    DEFAULT_STG_CONSOLIDATION_POLICY.minimumPosteriorMean,
-  );
-  const minimumConservativeLowerBound = boundedNumber(
-    environment.NMG_STG_CONSOLIDATE_MIN_LOWER_BOUND,
-    DEFAULT_STG_CONSOLIDATION_POLICY.minimumConservativeLowerBound,
-  );
-  return {
-    enabled: environment.NMG_STG_AUTO_CONSOLIDATE === "1",
-    minimumIndependentVotes: positiveInteger(
-      environment.NMG_STG_CONSOLIDATE_MIN_VOTES,
-      DEFAULT_STG_CONSOLIDATION_POLICY.minimumIndependentVotes,
-    ),
-    minimumPosteriorMean,
-    minimumConservativeLowerBound,
-    minimumRetainedPosteriorMean: Math.min(
-      minimumPosteriorMean,
-      boundedNumber(
-        environment.NMG_STG_RETAIN_MIN_MEAN,
-        DEFAULT_STG_CONSOLIDATION_POLICY.minimumRetainedPosteriorMean,
-      ),
-    ),
-    minimumRetainedConservativeLowerBound: Math.min(
-      minimumConservativeLowerBound,
-      boundedNumber(
-        environment.NMG_STG_RETAIN_MIN_LOWER_BOUND,
-        DEFAULT_STG_CONSOLIDATION_POLICY.minimumRetainedConservativeLowerBound,
-      ),
-    ),
-  };
+  return { ...resolveParameterConfig({ environment }).stgConsolidation };
 }
 
 export const DEFAULT_MAINTENANCE_POLICY: MaintenancePolicyConfig = {
@@ -126,43 +83,16 @@ export const DEFAULT_MAINTENANCE_POLICY: MaintenancePolicyConfig = {
 export function configuredMaintenancePolicy(
   environment: NodeJS.ProcessEnv = process.env,
 ): MaintenancePolicyConfig {
-  return {
-    writeThreshold: positiveInteger(
-      environment.NMG_MAINTENANCE_WRITE_THRESHOLD,
-      DEFAULT_MAINTENANCE_POLICY.writeThreshold,
-    ),
-    accessThreshold: positiveInteger(
-      environment.NMG_MAINTENANCE_ACCESS_THRESHOLD,
-      DEFAULT_MAINTENANCE_POLICY.accessThreshold,
-    ),
-    nodeLimit: Math.min(
-      64,
-      positiveInteger(environment.NMG_MAINTENANCE_NODE_LIMIT, DEFAULT_MAINTENANCE_POLICY.nodeLimit),
-    ),
-    semanticEveryBatches: positiveInteger(
-      environment.NMG_MAINTENANCE_SEMANTIC_EVERY,
-      DEFAULT_MAINTENANCE_POLICY.semanticEveryBatches,
-    ),
-    expiryLimit: DEFAULT_MAINTENANCE_POLICY.expiryLimit,
-    pairLimit: DEFAULT_MAINTENANCE_POLICY.pairLimit,
-    topologyNodeLimit: DEFAULT_MAINTENANCE_POLICY.topologyNodeLimit,
-    autoMergeEnabled: environment.NMG_TOPOLOGY_AUTO_MERGE === "1",
-    autoMergeLimit: Math.min(
-      4,
-      positiveInteger(
-        environment.NMG_TOPOLOGY_AUTO_MERGE_LIMIT,
-        DEFAULT_MAINTENANCE_POLICY.autoMergeLimit,
-      ),
-    ),
-  };
+  return { ...resolveParameterConfig({ environment }).maintenance };
 }
 
 export function configuredGraphHops(
   fallback: number,
   environment: NodeJS.ProcessEnv = process.env,
 ): number {
-  const configured = Number.parseInt(environment.NMG_GRAPH_HOPS ?? "", 10);
-  return Number.isInteger(configured) ? Math.max(0, Math.min(configured, 3)) : fallback;
+  const resolved = resolveParameterConfig({ environment });
+  const prov = resolved.provenance.get("autoRecall.graphHops");
+  return prov && prov.layer !== "L0" ? resolved.autoRecall.graphHops : fallback;
 }
 
 export function configuredQpp1Mode(environment: NodeJS.ProcessEnv = process.env): QppActuationMode {
@@ -206,30 +136,25 @@ export function configuredSearchRecommendationMode(
 }
 
 export function configuredAutoRecallTier(environment: NodeJS.ProcessEnv = process.env): MemoryTier {
-  const value = Number(environment.NMG_AUTO_RECALL_TIER ?? 1);
-  return Math.max(0, Math.min(3, Number.isFinite(value) ? Math.floor(value) : 1)) as MemoryTier;
+  return resolveParameterConfig({ environment }).autoRecall.tier;
 }
 
 export function configuredAutoRecallLimit(environment: NodeJS.ProcessEnv = process.env): number {
-  const value = Number(environment.NMG_AUTO_RECALL_LIMIT ?? 13);
-  return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 13));
+  return resolveParameterConfig({ environment }).autoRecall.limit;
 }
 
 export function configuredInitialTarget(environment: NodeJS.ProcessEnv = process.env): number {
-  const value = Number(environment.NMG_AUTO_RECALL_INITIAL_TARGET ?? 13);
-  return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 13));
+  return resolveParameterConfig({ environment }).autoRecall.initialTarget;
 }
 
 export function configuredStrongHitTopGap(environment: NodeJS.ProcessEnv = process.env): number {
-  const value = Number(environment.NMG_AUTO_RECALL_STRONG_HIT_TOP_GAP ?? 0.05);
-  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0.05));
+  return resolveParameterConfig({ environment }).autoRecall.strongHitTopGap;
 }
 
 export function configuredStrongHitInitialTarget(
   environment: NodeJS.ProcessEnv = process.env,
 ): number {
-  const value = Number(environment.NMG_AUTO_RECALL_STRONG_HIT_INITIAL_TARGET ?? 3);
-  return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 3));
+  return resolveParameterConfig({ environment }).autoRecall.strongHitInitialTarget;
 }
 
 function parseMode<const T extends string>(
@@ -238,16 +163,4 @@ function parseMode<const T extends string>(
 ): T | undefined {
   const normalized = value?.trim().toLowerCase();
   return modes.find((mode) => mode === normalized);
-}
-
-function positiveInteger(value: string | undefined, fallback: number): number {
-  if (!value?.trim()) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function boundedNumber(value: string | undefined, fallback: number): number {
-  if (!value?.trim()) return fallback;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(0, Math.min(parsed, 1)) : fallback;
 }

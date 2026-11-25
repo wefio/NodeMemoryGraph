@@ -1,0 +1,102 @@
+{
+  "mode": "post",
+  "measuredAt": "2026-11-25T11:27:31.459Z",
+  "environment": {
+    "node": "v26.13.0",
+    "platform": "win32",
+    "arch": "x64",
+    "cpuCount": 20,
+    "cpuModel": "12th Gen Intel(R) Core(TM) i7-12700H",
+    "powerTelemetryAvailable": false
+  },
+  "golden": {
+    "queryCount": 2,
+    "engineCount": 10,
+    "httpCount": 10,
+    "digest": "106b0fa9b97fd7dfea5304effd5c06960f78970824a7eb53a2c930b0feed40bb",
+    "topEngineIds": [
+      "3d107227fe0233c40a9ae680632e0ef52aae06d945bfd2f56d17c949d47ded18",
+      "43467ccfe416d5a962aed40c6247ea335e7aa7bb9c8757556163801cd2515259",
+      "828f9813e873c81859655eb543d3074395570f77ac45a645d7885a48111a01d0",
+      "0595640743cf28fa4ba843147e76f35a12abe5348deddc1aa4c0045aee42a1a9",
+      "248dba91b156fa1f4e701675f217edf0912b601728014e649032a60f152816c3"
+    ]
+  },
+  "syncRerank": {
+    "iterations": 200,
+    "wallMs": 53.415,
+    "p50Ms": 0.238,
+    "p95Ms": 0.38,
+    "opsPerSec": 3744.302,
+    "userCpuMs": 47,
+    "systemCpuMs": 0,
+    "heapDeltaMb": 3.164,
+    "rssMb": 95.785
+  },
+  "diamondDag": {
+    "runs": 3,
+    "medianWallMs": 86.669,
+    "minWallMs": 76.717,
+    "maxWallMs": 92.423,
+    "cpuMs": 0
+  },
+  "fgVsBg": {
+    "fgCount": 20,
+    "bgCount": 12,
+    "totalWallMs": 219.409,
+    "fgP50Ms": 20.576,
+    "fgP95Ms": 24.097,
+    "bgMedianMs": 32.423
+  },
+  "workerScaling": {
+    "inline0": {
+      "workers": 0,
+      "wallMs": 169.987,
+      "userCpuMs": 171,
+      "throughputTasksPerSec": 94.125
+    },
+    "workers1": {
+      "workers": 1,
+      "wallMs": 213.921,
+      "avgIpcUs": 201.856,
+      "throughputTasksPerSec": 74.794
+    },
+    "workers2": {
+      "workers": 2,
+      "wallMs": 86.84,
+      "avgIpcUs": 102.112,
+      "throughputTasksPerSec": 184.247
+    },
+    "workers4": {
+      "workers": 4,
+      "wallMs": 47.793,
+      "avgIpcUs": 123.256,
+      "throughputTasksPerSec": 334.776
+    }
+  },
+  "adaptiveLoad": {
+    "idle": {
+      "loadState": "idle",
+      "maxBackgroundConcurrency": 4,
+      "backgroundCpuBudgetMs": 50,
+      "preferWorkerOffload": true
+    },
+    "light": {
+      "loadState": "light",
+      "maxBackgroundConcurrency": 2,
+      "backgroundCpuBudgetMs": 25,
+      "preferWorkerOffload": true
+    },
+    "heavy": {
+      "loadState": "heavy",
+      "maxBackgroundConcurrency": 1,
+      "backgroundCpuBudgetMs": 8,
+      "preferWorkerOffload": false
+    },
+    "ecoBattery": {
+      "loadState": "light",
+      "maxBackgroundConcurrency": 1,
+      "backgroundCpuBudgetMs": 6
+    }
+  }
+}

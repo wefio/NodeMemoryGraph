@@ -54,8 +54,8 @@
 
 ### Explicit research probes
 
-Read the complete responsibility: [Explicit research probes](feature-register/explicit-research-probes.md).
+Read [Explicit research probes](feature-register/explicit-research-probes.md).
 
 ### Shared options
 
-[Board/recall display](feature-register/shared-display-options.md) · [Event clocks](feature-register/event-time-source-clocks.md).
+[Board/recall display](feature-register/shared-display-options.md) · [Event clocks](feature-register/event-time-source-clocks.md) · [Runtime config](feature-register/runtime-config-and-profiles.md).

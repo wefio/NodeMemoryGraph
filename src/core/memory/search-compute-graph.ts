@@ -36,6 +36,11 @@ import {
 } from "./hydration.ts";
 import { rankLocalLogOdds } from "./local-log-odds.ts";
 import { searchableMemory } from "./model.ts";
+import {
+  capSupplementalTailScores,
+  isAdjacentTurnResult,
+  toRerankCandidateFromRecord,
+} from "./page-stitch-operators.ts";
 import { rerankCandidatesWithGraph } from "./piecewise-rerank.ts";
 
 export interface EngineSearchInput {
@@ -100,24 +105,14 @@ function selectStandardHybrid(
       const meta = turnMeta?.get(candidate.memory.id);
       return {
         candidate,
-        id: candidate.memory.id,
-        statement: candidate.memory.statement,
-        combinedScore: candidate.combinedScore,
-        eventTime: candidate.memory.eventTime,
-        createdAt: candidate.memory.createdAt,
-        sessionId:
-          candidate.memory.sourceSessionId ??
-          candidate.memory.sessionId ??
-          meta?.sourceSessionId ??
-          null,
-        nodeId: candidate.memory.nodeId,
-        evidenceId: candidate.memory.evidenceId,
-        turnOrdinal: meta?.turnOrdinal ?? null,
-        markers: candidate.memory.markers,
-        stateKey: candidate.memory.stateKey,
-        predicateKey: candidate.memory.predicateKey,
-        supersedesId: candidate.memory.supersedesId,
-        relatedMemoryIds: candidate.memory.relatedMemoryIds,
+        ...toRerankCandidateFromRecord(candidate.memory, candidate.combinedScore, {
+          sessionId:
+            candidate.memory.sourceSessionId ??
+            candidate.memory.sessionId ??
+            meta?.sourceSessionId ??
+            null,
+          turnOrdinal: meta?.turnOrdinal ?? null,
+        }),
       };
     }),
     text,
@@ -261,21 +256,6 @@ function mergeTemporalWindow(
   }));
   const seen = new Set(boosted.map(({ memory }) => memory.id));
   return [...boosted, ...normal.filter(({ memory }) => !seen.has(memory.id))].slice(0, limit);
-}
-
-function isAdjacentTurn(result: MemorySearchResult): boolean {
-  return result.neighborhood === "previous_turn" || result.neighborhood === "next_turn";
-}
-
-function capTailScores(
-  floor: number | undefined,
-  items: readonly MemorySearchResult[],
-): MemorySearchResult[] {
-  if (floor === undefined) return [...items];
-  return items.map((item, index) => ({
-    ...item,
-    combinedScore: Math.min(item.combinedScore, Math.max(0, floor - (index + 1) * 1e-6)),
-  }));
 }
 
 function isDueMemoryCandidate(
@@ -435,13 +415,13 @@ async function collectDeepTailNeighbors(
     ...item,
     neighborhood: relationById.get(item.memory.id),
   }));
-  const supplement = capTailScores(head.at(-1)?.combinedScore, tagged);
+  const supplement = capSupplementalTailScores(head.at(-1)?.combinedScore, tagged);
   const restBudget = Math.max(0, analysis.limit - head.length - supplement.length);
   const rest = results
     .slice(80)
     .filter(({ memory }) => !seen.has(memory.id))
     .slice(0, restBudget);
-  const cappedRest = capTailScores(
+  const cappedRest = capSupplementalTailScores(
     supplement.at(-1)?.combinedScore ?? head.at(-1)?.combinedScore,
     rest,
   );
@@ -488,7 +468,7 @@ async function collectMatchingSourceNeighbors(
   out.splice(
     pivot,
     out.length - pivot,
-    ...capTailScores(
+    ...capSupplementalTailScores(
       floor,
       neighbors.map((result) => ({ ...result, neighborhood: relation.get(result.memory.id) })),
     ),
@@ -515,19 +495,20 @@ async function spliceDueReminders(
     rows.slice(0, Math.min(2, limit)),
   );
   if (!projected.length) return out;
-  const tail = out.filter(isAdjacentTurn);
-  const ranked = out.filter((item) => !isAdjacentTurn(item));
+  const tail = out.filter(isAdjacentTurnResult);
+  const ranked = out.filter((item) => !isAdjacentTurnResult(item));
   const keepRanked = Math.max(0, limit - projected.length - tail.length);
   const kept = ranked.slice(0, keepRanked);
   const floor = kept.at(-1)?.combinedScore;
-  const due = capTailScores(
+  const due = capSupplementalTailScores(
     floor,
     projected.map((item) => ({ ...item, neighborhood: "due_today" as const })),
   );
-  return [...kept, ...due, ...capTailScores(due.at(-1)?.combinedScore ?? floor, tail)].slice(
-    0,
-    limit,
-  );
+  return [
+    ...kept,
+    ...due,
+    ...capSupplementalTailScores(due.at(-1)?.combinedScore ?? floor, tail),
+  ].slice(0, limit);
 }
 
 async function searchIndependentTesserae(

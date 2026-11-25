@@ -11,7 +11,7 @@ import {
   type GraphProjectionDimension,
   type MemoryGraphProjection,
 } from "./graph-projection.ts";
-import { rankLocalLogOdds } from "./local-log-odds.ts";
+import { fuseDualChannelCandidates } from "./page-stitch-operators.ts";
 import {
   DEFAULT_PIECEWISE_RERANK_GRAPH,
   rerankCandidatesWithGraph,
@@ -43,48 +43,7 @@ function mergeRecallChannels(
   lexical: readonly RecallCandidateItem[],
   vector: readonly RecallCandidateItem[],
 ): Array<RerankCandidate & { memory: MemoryRecord }> {
-  const byId = new Map<string, { memory: MemoryRecord; bm25: number; vectorScore: number }>();
-  for (const item of lexical) {
-    byId.set(item.memory.id, {
-      memory: item.memory,
-      bm25: item.bm25 ?? 0,
-      vectorScore: item.vectorScore ?? 0,
-    });
-  }
-  for (const item of vector) {
-    const existing = byId.get(item.memory.id);
-    if (existing) {
-      existing.vectorScore = Math.max(existing.vectorScore, item.vectorScore ?? 0);
-      if (item.bm25 && !existing.bm25) existing.bm25 = item.bm25;
-    } else {
-      byId.set(item.memory.id, {
-        memory: item.memory,
-        bm25: item.bm25 ?? 0,
-        vectorScore: item.vectorScore ?? 0,
-      });
-    }
-  }
-  const fused = rankLocalLogOdds([...byId.values()], (row) => ({
-    id: row.memory.id,
-    bm25: row.bm25,
-    vectorScore: row.vectorScore,
-  }));
-  return fused.map(({ candidate, score }) => ({
-    memory: candidate.memory,
-    id: candidate.memory.id,
-    statement: candidate.memory.statement,
-    combinedScore: score,
-    eventTime: candidate.memory.eventTime,
-    createdAt: candidate.memory.createdAt,
-    sessionId: candidate.memory.sourceSessionId ?? candidate.memory.sessionId ?? null,
-    nodeId: candidate.memory.nodeId,
-    evidenceId: candidate.memory.evidenceId,
-    markers: candidate.memory.markers,
-    stateKey: candidate.memory.stateKey,
-    predicateKey: candidate.memory.predicateKey,
-    supersedesId: candidate.memory.supersedesId,
-    relatedMemoryIds: candidate.memory.relatedMemoryIds,
-  }));
+  return fuseDualChannelCandidates(lexical, vector);
 }
 
 function buildRetrievalRegistry(): ComputeRegistry<RetrievalPipelineContext> {

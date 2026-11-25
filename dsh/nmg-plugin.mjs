@@ -18,6 +18,9 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { resolveNmgDataDir } from '../src/cli/data-path.ts'
+import { configuredAutoRecallLimit, configuredAutoRecallTier } from '../src/integration/config.ts'
+import { compactSearchContext } from '../src/integration/search-projection.ts'
 import { appendRememberTimeContext } from '../src/integration/tool-contract.ts'
 
 export default {
@@ -224,8 +227,7 @@ export default {
     function resolveDaemon() {
       if (daemon) return daemon
       try {
-        const home = process.env.USERPROFILE || process.env.HOME || ''
-        const dataDir = (process.env.NMG_DATA_DIR || join(home, '.nmg')).replace(/[\\/]+$/, '')
+        const dataDir = resolveNmgDataDir(process.env)
         const state = JSON.parse(readFileSync(join(dataDir, 'nmg.sqlite.server.json'), 'utf8'))
         // No protocol-version check on purpose: the JSON-RPC envelope has been
         // stable across v2→v3, this path is only a fast path, and an
@@ -268,27 +270,8 @@ export default {
       }
     }
 
-    function searchPreviewOf(memory) {
-      const normalized = String((memory && memory.statement) || '').replace(/\s+/g, ' ').trim()
-      return normalized.length <= 320 ? normalized : normalized.slice(0, 319) + '…'
-    }
-
     function projectCompact(context) {
-      return {
-        candidates: (Array.isArray(context.results) ? context.results : []).map((r) => ({
-          id: r.memory.id,
-          node: (r.node && r.node.canonicalName) || '',
-          type: r.memory.memoryType,
-          tier: r.memory.tier,
-          preview: searchPreviewOf(r.memory),
-        })),
-        activeGraphId: context.activeGraph ? context.activeGraph.id : null,
-        deferredMemoryIds:
-          (context.progressiveDisclosure && context.progressiveDisclosure.deferredMemoryIds) || [],
-        tokens:
-          (context.activeGraph && context.activeGraph.usage && context.activeGraph.usage.estimatedTokens) ||
-          null,
-      }
+      return compactSearchContext(context)
     }
 
     function coerceScope(scope) {
@@ -329,8 +312,8 @@ export default {
     }
 
     async function autoRecall(query, signal) {
-      const limit = clampInt(process.env.NMG_AUTO_RECALL_LIMIT, 1, 50, 13)
-      const tier = clampInt(process.env.NMG_AUTO_RECALL_TIER, 0, 3, 1)
+      const limit = configuredAutoRecallLimit()
+      const tier = configuredAutoRecallTier()
       const budget = recallBudget(signal)
       try {
         const context = await daemonCall('search', {

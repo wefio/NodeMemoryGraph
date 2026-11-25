@@ -11,17 +11,20 @@
 
 ```mermaid
 flowchart TB
-  API["Public APIs (MemoryEngine, HttpMemoryService)"] --> Logical["Logical Compute Graph (ComputeGraphSpec & MEMORY_COMPUTE_CONTRACTS)"]
-  Logical --> Planner["Planner (CSE, DCE, Contract Binding, Lowering, Linear Fusion)"]
-  Planner --> Physical["Physical Execution Plan (Waves, Resource Locks, Ref Counts)"]
-  Physical --> Runtime["Compute Graph Runtime (Sync/Async Executors, State Stamps, LRU Cache)"]
-  Runtime --> Realizations["Operators / Subgraphs / External Adapters / Lowered Queries"]
+  Config["Layered Config & Bindings (L0 Capability Defaults -> L1 Shared nmg.config.json -> L2 Adapter Overrides)"] --> Logical
+  API["Public APIs (MemoryEngine, HttpMemoryService, PortableMemoryService)"] --> Logical["Logical Compute Graph (ComputeGraphSpec & MEMORY_COMPUTE_CONTRACTS)"]
+  Logical --> Planner["Planner (CSE, Recursive DCE, Contract Binding, Lowering, Linear Fusion)"]
+  Planner --> Physical["Physical Execution Plan (Dependency Edges, Resource Locks, Cost Model, Ref Counts)"]
+  Physical --> Runtime["Compute Graph Runtime (Sync Fast Path, Event-Driven DAG, State Stamps, LRU Cache)"]
+  Runtime --> Scheduler["UnifiedRuntimeScheduler (Load Governor, Singleflight Coalescer, LocalWorkerThreadPool, SchedulingDomain)"]
+  Scheduler --> Realizations["Operators / Subgraphs / External Adapters / Lowered Queries"]
   Realizations --> Storage["Authoritative Storage & Services (MemoryBackend, MemoryPlan, EmbeddingClient)"]
 ```
 
 - **Logical graph (`ComputeGraphSpec`):** expresses typed dataflow and domain contracts (`src/core/compute-contracts.ts`) without binding concrete storage queries or execution order tricks.
-- **Physical execution plan (`PhysicalExecutionPlan`):** compiles the logical graph in `src/core/compute-planner.ts` (cached per graph identity, registry generation, and plan options), resolves `$contract` nodes, applies common subexpression elimination (`pure` nodes) and dead-code elimination (preserving non-eliminable `write`, `nondeterministic`, and `opaque` nodes), lowers `relational_query` expressions (`sqlite_pushdown` or `portable_scan`), optionally fuses linear `pure` sync chains, partitions each wave into resource-conflict-free parallel groups and serial nodes, and computes exact output consumer reference counts.
-- **Runtime (`src/core/compute-graph.ts`):** executes physical plans over sync or async channels. When no `ComputeMemoCache` is supplied, the zero-hash fast path skips JSON canonicalization and SHA-256 hashing completely.
+- **Three-tier capability binding (`src/core/capability-config.ts`, `src/integration/runtime-config.ts`):** resolves `L0` public parameter schemas/default subgraphs (`NMG_L0_CONTRACT_GRAPHS`) -> `L1` shared policy/graph configuration (`NMG_CONFIG_PATH` or `<dataDir>/nmg.config.json`) -> `L2` adapter-specific overrides (`resolveEffectiveNmgConfig`). Preserves provenance and `configIdentity` for plan/cache keys and enforces `PolicyViolationError` when unapproved algorithmic variants are requested.
+- **Physical execution plan (`PhysicalExecutionPlan`):** compiles the logical graph in `src/core/compute-planner.ts` (cached per graph identity, WeakMap-keyed `ComputeRegistry` instance token, registry generation, `configIdentity`, and plan options), resolves `$contract` nodes, applies common subexpression elimination (`pure` nodes) and recursive dead-code elimination (`runDcePass`, preserving nested side-effecting subgraphs), lowers `relational_query` expressions (`sqlite_pushdown` or `portable_scan`), optionally fuses linear `pure` sync chains (including per-step parameter hashing), builds dependency edges and shared `ResourceLockManager` sets (`src/core/resource-locks.ts`), and computes exact output consumer reference counts.
+- **Runtime and unified scheduler (`src/core/compute-graph.ts`, `src/core/canonical-value.ts`, `src/core/runtime/*`):** executes small synchronous graphs on a zero-hash inline fast path when `memo` is absent, drives asynchronous DAG execution via ready-node wakeup without full-wave `Promise.all` barriers, validates strict immutability and built-in container canonicalization (`Map`, `Set`, `Date`, `RegExp`, `ArrayBuffer`, typed arrays) in `canonical-value.ts`, and coordinates foreground/background concurrency through `UnifiedRuntimeScheduler` (`ComputeCostModel` HEFT critical-path and EFT offload threshold refusing microsecond offloads, `HostLoadGovernor` hysteresis over `eco` / `balanced` / `performance` profiles with event-loop fallback when OS power telemetry is unavailable, `LocalWorkerThreadPool` & recursive `SchedulingDomain`, `InFlightCoalescer`, and `ZeroPollLatch`).
 
 ## Node realizations and progressive capabilities
 
@@ -57,7 +60,7 @@ Production memory paths execute registered compute graphs through narrow ports (
 | Batch remember change planning | `DEFAULT_REMEMBER_PLAN_GRAPH` | `ENGINE_WRITE_REGISTRY` (`src/core/memory/write-compute-graphs.ts`) |
 | Lifecycle & link mutation planning | `DEFAULT_LIFECYCLE_PLAN_GRAPH` | `ENGINE_WRITE_REGISTRY` (`src/core/memory/write-compute-graphs.ts`) |
 | Piecewise 3-band candidate rerank | `DEFAULT_PIECEWISE_RERANK_GRAPH` | `RERANK_COMPUTE_REGISTRY` (`src/core/memory/piecewise-rerank.ts`); mid band (`[6..20]`) applies `w_chrono_seq_pivot` over groups with at least two distinct timestamps |
-| HTTP multi-clause fusion & page stitch | `DEFAULT_HTTP_SEARCH_GRAPH` | `HTTP_SEARCH_COMPUTE_REGISTRY` (`src/integration/http-search-graph.ts`) |
+| HTTP multi-clause fusion & page stitch | `DEFAULT_HTTP_SEARCH_GRAPH` | `HTTP_SEARCH_COMPUTE_REGISTRY` (`src/integration/http-search-graph.ts`); shares canonical dual-channel fusion, chronological ordering, tail capping (`capSupplementalTailScores`), and page stitching (`src/core/memory/page-stitch-operators.ts`) with engine search, `retrieval-graph.ts`, and `PortableMemoryService` |
 | HTTP turn preprocessing | `DEFAULT_HTTP_WRITE_PREPROCESS_GRAPH` | `HTTP_WRITE_PREPROCESS_REGISTRY` (`src/integration/http-write-preprocess.ts`) |
 | HTTP profile supplement projection | `DEFAULT_HTTP_PROFILE_GRAPH` | `HTTP_PROFILE_COMPUTE_REGISTRY` (`src/integration/http-profile-view.ts`) |
 

@@ -1,5 +1,6 @@
 import { setImmediate } from "node:timers/promises";
 import type { EmbeddingClient } from "../core/embedding-provider.ts";
+import { getSharedRuntimeScheduler } from "../core/runtime/scheduler.ts";
 import type {
   MemoryVectorCursor,
   MemoryVectorIndex,
@@ -177,23 +178,35 @@ export class LocalMemoryEmbeddings {
     let after: MemoryVectorCursor | undefined;
     do {
       signal?.throwIfAborted();
-      const documents = index.pending(client.indexId, limit, after);
-      if (!documents.length) return;
-      const texts = [...new Set(documents.map((document) => document.text))];
-      const options = signal ? { signal } : undefined;
-      const vectors = await (client.embedDocumentsForStorage?.(texts, options) ??
-        client.embedDocuments(texts, options));
-      signal?.throwIfAborted();
-      if (vectors.length !== texts.length) throw new Error("Invalid document vector batch");
-      const byText = new Map(texts.map((text, i) => [text, vectors[i]!]));
-      index.save(
-        client.indexId,
-        documents,
-        documents.map(({ text }) => byText.get(text)!),
+      const hasMore = await getSharedRuntimeScheduler().runTask(
+        async () => {
+          const documents = index.pending(client.indexId, limit, after);
+          if (!documents.length) return false;
+          const texts = [...new Set(documents.map((document) => document.text))];
+          const options = signal ? { signal } : undefined;
+          const vectors = await (client.embedDocumentsForStorage?.(texts, options) ??
+            client.embedDocuments(texts, options));
+          signal?.throwIfAborted();
+          if (vectors.length !== texts.length) throw new Error("Invalid document vector batch");
+          const byText = new Map(texts.map((text, i) => [text, vectors[i]!]));
+          index.save(
+            client.indexId,
+            documents,
+            documents.map(({ text }) => byText.get(text)!),
+          );
+          if (documents.length < limit) return false;
+          after = documents.at(-1);
+          return true;
+        },
+        {
+          priority: "background",
+          effect: "read",
+          signal,
+          label: `embedding_backfill:${client.indexId}`,
+        },
       );
-      if (documents.length < limit) return;
-      after = documents.at(-1);
-      // Give the daemon a chance to process interactive work between full pages.
+      if (!hasMore) return;
+      // Yield between full pages so foreground work stays responsive.
       await setImmediate();
     } while (!this.closing);
   }

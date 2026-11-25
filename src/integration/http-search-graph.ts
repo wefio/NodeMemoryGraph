@@ -4,6 +4,10 @@ import {
   evaluateSyncComputeGraph,
   type ComputeGraphSpec,
 } from "../core/compute-graph.ts";
+import {
+  capScoreBelowFloor,
+  isSupplementalTailResult,
+} from "../core/memory/page-stitch-operators.ts";
 import type { MemorySearchResult } from "../core/types.ts";
 
 export interface ClauseContribution {
@@ -42,14 +46,6 @@ export interface HttpSearchGraphOutput {
   readonly selected: readonly FusedCandidate[];
   readonly clauses: ClauseContribution[];
   readonly appended: readonly MemorySearchResult[];
-}
-
-function isTailContext(result: MemorySearchResult): boolean {
-  return (
-    result.neighborhood === "previous_turn" ||
-    result.neighborhood === "next_turn" ||
-    result.neighborhood === "due_today"
-  );
 }
 
 function compareCandidates(left: FusedCandidate, right: FusedCandidate): number {
@@ -112,10 +108,7 @@ function appendTailNeighbors(
   if (!neighbors.length) return [...hits];
   const floor = hits.at(-1)?.result.combinedScore;
   const capped = neighbors.map((entry, index) => {
-    const combinedScore =
-      floor === undefined
-        ? entry.result.combinedScore
-        : Math.min(entry.result.combinedScore, Math.max(0, floor - (index + 1) * 1e-6));
+    const combinedScore = capScoreBelowFloor(entry.result.combinedScore, floor, index);
     return combinedScore === entry.result.combinedScore
       ? entry
       : { ...entry, result: { ...entry.result, combinedScore } };
@@ -156,7 +149,7 @@ function buildHttpSearchRegistry(): ComputeRegistry<HttpSearchGraphContext> {
         }
         for (const result of batch.results) {
           trackCandidate(
-            isTailContext(result) ? adjacentById : primaryById,
+            isSupplementalTailResult(result) ? adjacentById : primaryById,
             batch.clauseIndex,
             result,
           );
