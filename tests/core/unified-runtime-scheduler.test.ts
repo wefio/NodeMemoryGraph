@@ -308,7 +308,11 @@ test("Worker abort and serialization failure leave a usable pool", async () => {
   }
 });
 
-test("runtime.maxWorkers caps concurrent Worker dispatch across independent nodes", async () => {
+async function runWorkerCapCase(
+  candidates: readonly Record<string, unknown>[],
+  expected: readonly string[][],
+  maxWorkers: number,
+): Promise<number> {
   const rankOperator = localWorkerOperator("piecewise_rank_ids");
   assert.ok(rankOperator);
   const pool = new LocalWorkerThreadPool({ maxWorkers: 2 });
@@ -328,29 +332,56 @@ test("runtime.maxWorkers caps concurrent Worker dispatch across independent node
     domain: new SchedulingDomain("cap", [pool]),
     governor,
   });
+  // A large hint keeps the worker/inline comparison far from its 5% threshold,
+  // so the assertion measures the configured cap rather than a marginal EFT.
   const registry = new ComputeRegistry()
     .register("piecewise_rank_ids", rankOperator, {
       effect: "pure",
       parallelSafe: true,
       resources: { execution: "cpu" },
-      costHint: { baseMs: 5 },
+      costHint: { baseMs: 300 },
     })
-    .register("pair", (inputs) => [inputs.a, inputs.b], { effect: "pure" });
+    .register("collect", (inputs) => [inputs.a, inputs.b, inputs.c, inputs.d], { effect: "pure" });
+  const ids = ["a", "b", "c", "d"];
   const graph = {
     id: "worker-cap",
     nodes: [
-      { id: "a", op: "piecewise_rank_ids" },
-      { id: "b", op: "piecewise_rank_ids" },
-      { id: "pair", op: "pair" },
+      ...ids.map((id) => ({ id, op: "piecewise_rank_ids" })),
+      { id: "collect", op: "collect" },
     ],
     edges: [
-      { from: INPUT_NODE_ID, to: "a" },
-      { from: INPUT_NODE_ID, to: "b" },
-      { from: "a", to: "pair", port: "a" },
-      { from: "b", to: "pair", port: "b" },
+      ...ids.map((id) => ({ from: INPUT_NODE_ID, to: id })),
+      ...ids.map((id) => ({ from: id, to: "collect", port: id })),
     ],
-    output: "pair",
+    output: "collect",
   };
+  const policy = resolveEffectiveNmgConfig({
+    l1: { runtime: { objective: "throughput", minOffloadCpuMs: 0.1, maxWorkers } },
+  }).runtime;
+  try {
+    const result = await withRuntimePolicy(
+      policy,
+      () =>
+        executeComputeGraph(
+          graph,
+          registry,
+          { candidates, queryText: "database" },
+          undefined,
+          undefined,
+          { enableCse: false },
+          undefined,
+          { itemEstimate: candidates.length },
+        ),
+      scheduler,
+    );
+    assert.deepEqual(result, expected);
+    return workerCalls;
+  } finally {
+    await scheduler.close();
+  }
+}
+
+test("runtime.maxWorkers caps concurrent Worker dispatch across independent nodes", async () => {
   const candidates = Array.from({ length: 40 }, (_, i) => ({
     id: String(i),
     statement: "Database migration record " + i,
@@ -360,50 +391,10 @@ test("runtime.maxWorkers caps concurrent Worker dispatch across independent node
     nodeId: String(i),
   }));
   const rankIds = rerankCandidatesWithGraph(candidates, "database").map(({ id }) => id);
-  const input = { candidates, queryText: "database" };
-  const policy = (maxWorkers: number) =>
-    resolveEffectiveNmgConfig({
-      l1: { runtime: { objective: "throughput", minOffloadCpuMs: 0.1, maxWorkers } },
-    }).runtime;
-  try {
-    scheduler.costModel.observe("piecewise_rank_ids", { cpuMs: 21, itemCount: 40 });
-    const capped = await withRuntimePolicy(
-      policy(1),
-      () =>
-        executeComputeGraph(
-          graph,
-          registry,
-          input,
-          undefined,
-          undefined,
-          { enableCse: false },
-          undefined,
-          { itemEstimate: candidates.length },
-        ),
-      scheduler,
-    );
-    assert.deepEqual(capped, [rankIds, rankIds]);
-    assert.equal(workerCalls, 1);
-    const allowed = await withRuntimePolicy(
-      policy(2),
-      () =>
-        executeComputeGraph(
-          graph,
-          registry,
-          input,
-          undefined,
-          undefined,
-          { enableCse: false },
-          undefined,
-          { itemEstimate: candidates.length },
-        ),
-      scheduler,
-    );
-    assert.deepEqual(allowed, [rankIds, rankIds]);
-    assert.equal(workerCalls, 3);
-  } finally {
-    await scheduler.close();
-  }
+  const expected = [rankIds, rankIds, rankIds, rankIds];
+  // Four independent nodes: a cap of N dispatches exactly N and runs the rest inline.
+  assert.equal(await runWorkerCapCase(candidates, expected, 1), 1);
+  assert.equal(await runWorkerCapCase(candidates, expected, 2), 2);
 });
 
 test("L0 -> L1 -> L2 config inheritance, recursive subgraph override, policy guard, and cache isolation", async () => {
