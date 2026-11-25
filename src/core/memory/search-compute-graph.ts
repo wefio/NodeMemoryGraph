@@ -41,7 +41,7 @@ import {
   isAdjacentTurnResult,
   toRerankCandidateFromRecord,
 } from "./page-stitch-operators.ts";
-import { rerankCandidatesWithGraph } from "./piecewise-rerank.ts";
+import { rankCandidatesForSearch } from "./piecewise-rerank.ts";
 
 export interface EngineSearchInput {
   readonly text: string;
@@ -92,45 +92,43 @@ async function lexicalRecall(
   );
 }
 
-function selectStandardHybrid(
+async function selectStandardHybrid(
   ranked: readonly SearchCandidate[],
   text: string,
   limit: number,
   rerankGraph: ComputeGraphSpec | false | undefined,
   turnMeta?: ReadonlyMap<string, { sourceSessionId?: string | null; turnOrdinal?: number | null }>,
-): SearchCandidate[] {
+): Promise<SearchCandidate[]> {
   if (rerankGraph === false) return ranked.slice(0, limit);
-  const ordered = rerankCandidatesWithGraph(
+  const byId = new Map(ranked.map((candidate) => [candidate.memory.id, candidate]));
+  const ordered = await rankCandidatesForSearch(
     ranked.map((candidate) => {
       const meta = turnMeta?.get(candidate.memory.id);
-      return {
-        candidate,
-        ...toRerankCandidateFromRecord(candidate.memory, candidate.combinedScore, {
-          sessionId:
-            candidate.memory.sourceSessionId ??
-            candidate.memory.sessionId ??
-            meta?.sourceSessionId ??
-            null,
-          turnOrdinal: meta?.turnOrdinal ?? null,
-        }),
-      };
+      return toRerankCandidateFromRecord(candidate.memory, candidate.combinedScore, {
+        sessionId:
+          candidate.memory.sourceSessionId ??
+          candidate.memory.sessionId ??
+          meta?.sourceSessionId ??
+          null,
+        turnOrdinal: meta?.turnOrdinal ?? null,
+      });
     }),
     text,
     rerankGraph,
   );
   return ordered
     .slice(0, limit)
-    .map(({ candidate, combinedScore }) => ({ ...candidate, combinedScore }));
+    .map(({ id, combinedScore }) => ({ ...byId.get(id)!, combinedScore }));
 }
 
-function selectLocalHybrid(
+async function selectLocalHybrid(
   candidates: readonly SearchCandidate[],
   page: MemoryHybridPage,
   text: string,
   shortlist: boolean | undefined,
   rerankGraph: ComputeGraphSpec | false | undefined,
   limit: number,
-): SearchCandidate[] {
+): Promise<SearchCandidate[]> {
   const byId = new Map(page.candidates.map((row) => [row.entity.value.id, row]));
   const ranked = rankLocalLogOdds(candidates, ({ memory }) => {
     const { recordScore, bm25 } = byId.get(memory.id)!;
@@ -138,7 +136,7 @@ function selectLocalHybrid(
   }).map(({ candidate, score }) => ({ ...candidate, combinedScore: score }));
   const selected = shortlist
     ? evidenceShortlist(ranked, page.vectorIds, page.lexicalIds, limit)
-    : selectStandardHybrid(ranked, text, limit, rerankGraph, byId);
+    : await selectStandardHybrid(ranked, text, limit, rerankGraph, byId);
   const query = normalize(text);
   const terms = searchTerms(query);
   return selected.map((candidate) => {

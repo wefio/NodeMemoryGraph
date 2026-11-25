@@ -1,0 +1,71 @@
+{
+  "environment": {
+    "node": "v26.13.0",
+    "platform": "win32",
+    "arch": "x64",
+    "cpus": 20,
+    "root": "C:\\Documents\\GitHub\\NodeMemoryGraph",
+    "measuredAt": "2026-11-25T14:43:43.829Z"
+  },
+  "synchronousGraphPerCall": {
+    "medianUs": 0.512,
+    "samples": [
+      1.661,
+      0.92,
+      0.586,
+      0.548,
+      0.512,
+      0.492,
+      0.457,
+      0.352,
+      0.401,
+      0.412
+    ]
+  },
+  "asynchronousGraphPerCall": {
+    "medianUs": 10.311,
+    "samples": [
+      13.514,
+      13.192,
+      8.443,
+      10.311,
+      11.628,
+      7.99,
+      8.21,
+      7.984,
+      9.005,
+      10.576
+    ]
+  },
+  "fanOut": {
+    "width": 4,
+    "leafLatencyMs": 20,
+    "samples": [
+      31.518,
+      31.564,
+      30.054,
+      31.316,
+      30.621
+    ],
+    "medianMs": 31.316,
+    "observedWaitMs": 30.432,
+    "cpuEstimateMs": 0.082
+  },
+  "criticalPath": {
+    "estimates": {
+      "fast_read": {
+        "cpuMs": 0.082,
+        "waitMs": 14.264
+      },
+      "slow_read": {
+        "cpuMs": 0.082,
+        "waitMs": 29.743
+      }
+    },
+    "ranks": {
+      "fast": 14.428,
+      "slow": 29.907
+    },
+    "slowRanksAhead": true
+  }
+}

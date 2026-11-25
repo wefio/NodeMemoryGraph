@@ -56,7 +56,9 @@ export interface MemoryQueryOptions {
 }
 
 export type SearchCandidate = Omit<MemorySearchResult, "evidence" | "evidenceRecords">;
-export type SelectCandidates = (candidates: SearchCandidate[]) => SearchCandidate[];
+export type SelectCandidates = (
+  candidates: SearchCandidate[],
+) => SearchCandidate[] | Promise<SearchCandidate[]>;
 export const MAX_LEAF_CONTEXT_RESULTS = 4;
 
 /** Narrow read-only snapshot port passed to compute graphs instead of MemoryEngine or DB handles. */
@@ -276,7 +278,12 @@ export async function hydrateCandidates(
       },
     ];
   });
-  return attachEvidenceToCandidates(port, select ? select(candidates) : candidates, memories);
+  const selected = select?.(candidates) ?? candidates;
+  return attachEvidenceToCandidates(
+    port,
+    Array.isArray(selected) ? selected : await selected,
+    memories,
+  );
 }
 
 export async function attachedTesserae(

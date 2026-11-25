@@ -4,6 +4,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { deriveAnswerOverlapMemoryIds, statementFingerprint } from "../core/feedback.ts";
 import type { PerfSnapshot } from "../core/perf.ts";
 import { ZeroPollLatch } from "../core/runtime/scheduler.ts";
+import { resolveEffectiveNmgConfig } from "../integration/runtime-config.ts";
 import { localEmbeddingFormatStore } from "./embedding-format-store.ts";
 
 import { MAX_BOARD_DELIVERY_ENTRIES, parseBoardNotification } from "../core/board-notifications.ts";
@@ -245,6 +246,7 @@ export class NmgService {
       () => this.#configuredEmbeddingClient(),
       () => this.#embeddingError !== null,
       options.evidenceRanker,
+      () => resolveEffectiveNmgConfig({ dataDir: dataDirectory, environment }),
     );
     this.#dataDirectory = dataDirectory;
     this.#environment = environment;
@@ -625,7 +627,7 @@ export class NmgService {
     delete retrieval.recallRevision;
     delete retrieval.recallSource;
     if (usesExplicitSearchPage(params)) retrieval.limit ??= DEFAULT_EXPLICIT_SEARCH_LIMIT;
-    retrieval.graphHops ??= configuredGraphHops(0, this.#environment);
+    retrieval.graphHops ??= configuredGraphHops(0, this.#environment, this.#dataDirectory);
     if (params.autoRecall && params.sessionId)
       retrieval.query = this.#recallContext.automaticQuery(
         params.sessionId,
@@ -1520,7 +1522,7 @@ export class NmgService {
     }
     return this.#portableMemory.recordClaimOutcomes(
       params,
-      configuredStgConsolidationPolicy(this.#environment),
+      configuredStgConsolidationPolicy(this.#environment, this.#dataDirectory),
     );
   }
 

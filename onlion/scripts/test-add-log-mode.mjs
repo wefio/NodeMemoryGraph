@@ -43,6 +43,8 @@ const mf = createWorkerFixture({
   outboundService,
   bindings: {
     NMG_ADD_MODE: "log",
+    // Complete scheduled folds before comparing /capacity with a separate R2 listing.
+    NMG_FOLD_INLINE: "1",
     NMG_DEBUG_ERRORS: "1",
     NMG_EMBED_BASE_URL: "https://embed.test/v1",
     NMG_EMBED_MODEL: "BAAI/bge-small-en-v1.5",
@@ -286,9 +288,7 @@ try {
   // the log on every request.
   const waiting = await call("/capacity?user_id=alice");
   assert.ok(waiting.body.pending_entries > 0, "the burst must leave entries waiting");
-  // The counter is a derivation, not a history: after the burst's folds it must equal
-  // the number of entries actually in the log. Subtraction would drift here on a CAS
-  // retry, and a count below the log hides accepted data.
+  // The inline fixture leaves both reads on the same settled backlog.
   {
     const key = createHash("sha256").update("alice").digest("hex").slice(0, 24);
     const liveBucket = await mf.getR2Bucket("MEMORY", "a");
@@ -296,7 +296,7 @@ try {
     assert.equal(
       waiting.body.pending_entries,
       listed.objects.length,
-      "the counter must equal the number of log entries",
+      "capacity must report the number of log entries",
     );
   }
   const drain = await call(

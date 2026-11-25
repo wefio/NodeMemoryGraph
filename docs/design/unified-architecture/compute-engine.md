@@ -14,17 +14,41 @@ flowchart TB
   Config["Layered Config & Bindings (L0 Capability Defaults -> L1 Shared nmg.config.json -> L2 Adapter Overrides)"] --> Logical
   API["Public APIs (MemoryEngine, HttpMemoryService, PortableMemoryService)"] --> Logical["Logical Compute Graph (ComputeGraphSpec & MEMORY_COMPUTE_CONTRACTS)"]
   Logical --> Planner["Planner (CSE, Recursive DCE, Contract Binding, Lowering, Linear Fusion)"]
-  Planner --> Physical["Physical Execution Plan (Dependency Edges, Resource Locks, Cost Model, Ref Counts)"]
-  Physical --> Runtime["Compute Graph Runtime (Sync Fast Path, Event-Driven DAG, State Stamps, LRU Cache)"]
-  Runtime --> Scheduler["UnifiedRuntimeScheduler (Load Governor, Singleflight Coalescer, LocalWorkerThreadPool, SchedulingDomain)"]
+  Planner --> Physical["Physical plan (data and effect dependencies, resources, ref counts)"]
+  Physical --> Inline["Synchronous inline executor"]
+  Physical --> Scheduler["UnifiedRuntimeScheduler (asynchronous DAGs, host budgets, Worker placement)"]
+  Config --> Scheduler
+  Inline --> Realizations
   Scheduler --> Realizations["Operators / Subgraphs / External Adapters / Lowered Queries"]
   Realizations --> Storage["Authoritative Storage & Services (MemoryBackend, MemoryPlan, EmbeddingClient)"]
 ```
 
 - **Logical graph (`ComputeGraphSpec`):** expresses typed dataflow and domain contracts (`src/core/compute-contracts.ts`) without binding concrete storage queries or execution order tricks.
-- **Three-tier capability binding (`src/core/capability-config.ts`, `src/integration/runtime-config.ts`):** resolves `L0` public parameter schemas/default subgraphs (`NMG_L0_CONTRACT_GRAPHS`) -> `L1` shared policy/graph configuration (`NMG_CONFIG_PATH` or `<dataDir>/nmg.config.json`) -> `L2` adapter-specific overrides (`resolveEffectiveNmgConfig`). Preserves provenance and `configIdentity` for plan/cache keys and enforces `PolicyViolationError` when unapproved algorithmic variants are requested.
-- **Physical execution plan (`PhysicalExecutionPlan`):** compiles the logical graph in `src/core/compute-planner.ts` (cached per graph identity, WeakMap-keyed `ComputeRegistry` instance token, registry generation, `configIdentity`, and plan options), resolves `$contract` nodes, applies common subexpression elimination (`pure` nodes) and recursive dead-code elimination (`runDcePass`, preserving nested side-effecting subgraphs), lowers `relational_query` expressions (`sqlite_pushdown` or `portable_scan`), optionally fuses linear `pure` sync chains (including per-step parameter hashing), builds dependency edges and shared `ResourceLockManager` sets (`src/core/resource-locks.ts`), and computes exact output consumer reference counts.
-- **Runtime and unified scheduler (`src/core/compute-graph.ts`, `src/core/canonical-value.ts`, `src/core/runtime/*`):** executes small synchronous graphs on a zero-hash inline fast path when `memo` is absent, drives asynchronous DAG execution via ready-node wakeup without full-wave `Promise.all` barriers, validates strict immutability and built-in container canonicalization (`Map`, `Set`, `Date`, `RegExp`, `ArrayBuffer`, typed arrays) in `canonical-value.ts`, and coordinates foreground/background concurrency through `UnifiedRuntimeScheduler` (`ComputeCostModel` HEFT critical-path and EFT offload threshold refusing microsecond offloads, `HostLoadGovernor` hysteresis over `eco` / `balanced` / `performance` profiles with event-loop fallback when OS power telemetry is unavailable, `LocalWorkerThreadPool` & recursive `SchedulingDomain`, `InFlightCoalescer`, and `ZeroPollLatch`).
+- `resolveEffectiveNmgConfig` binds L0 public defaults and registered graph recipes, L1 shared configuration, and L2 host overrides. `bindMemoryEngineConfig` supplies search, views, projection, write and lifecycle graphs to the engine. HTTP service options use the same resolved configuration for clause fusion, preprocessing and profile rendering. Bindings carry provenance and contribute to result identity. Unapproved semantic variants raise `PolicyViolationError`. Every layer is validated against the same declared schema: an unknown section, an unknown parameter, or a value of the wrong type fails closed instead of silently keeping the L0 default.
+- `PhysicalExecutionPlan` resolves `$contract`, lowers structured expressions, eliminates eligible common or dead nodes, and can fuse linear synchronous pure chains without named resources. The planner emits unique-parent readiness counts, effect-order dependencies and consumer counts. Plans are keyed by graph and registry identity, registry generation, and semantic options.
+- `executeComputeGraph` submits every asynchronous plan to `UnifiedRuntimeScheduler.executePlan`. Child plans recursively enter the same dependency loop. `evaluateSyncComputeGraph` retains a synchronous topological loop with no queue or hashing for ordinary calls without memoization. Both use common operator, input, memo-signature and output-lifetime rules.
+
+## Runtime policy and resource ownership
+
+Node daemon and portable RPC paths resolve L1 from `NMG_CONFIG_PATH` or the service data directory. The project STG engines use that same resolver. Local HTTP uses the database directory for L1 and its own `runtime` or `bindings` overrides as L2. Onlion accepts the same L1 JSON through `NMG_CAPABILITY_CONFIG` and creates a scheduler with an empty local thread domain per request-scoped snapshot. This preserves the request lifetime for WASM SQLite and embedding handles.
+
+| Policy | Execution effect |
+| --- | --- |
+| `runtime.profile` | Selects the load hysteresis, background concurrency, CPU budget and Worker allowance from `HostLoadGovernor`. |
+| `runtime.objective` | Chooses the EFT margin for responding inline versus dispatching to the selected Worker. |
+| `runtime.maxWorkers` | Caps placement against the host allowance and domain availability. Zero uses automatic sizing. Threads are lazy and idle threads retire. |
+| `runtime.minOffloadCpuMs` | Rejects transfer for an operator and input-size bucket below the CPU estimate floor. |
+| `runtime.maxConcurrentBackground` | Caps admitted background operations, including outstanding provider I/O. Foreground work can reduce the cap to one. |
+| `runtime.backgroundCpuBudgetMs` | Caps the profile CPU allowance per 100 ms admission window. Inline slices and measured Worker CPU charge the budget. Worker admission reserves estimated CPU until settlement. |
+| `runtime.starvationMaxWaitMs` | Ages waiting background tasks while retaining resource and concurrency limits. |
+
+Physical runtime policies are excluded from result identity. `maintenance` and `stgSync` still parse for compatibility with existing consumers. The engine's explicit maintenance actions and project operations own those lifecycles. Claim-driven STG consolidation consumes its separate `stgConsolidation` policy.
+
+Ready nodes compete by foreground lane and critical-path rank. A conflicting read/write resource set waits without a partial lock or execution slot. The runtime holds acquired locks through actual settlement, including a timed-out write, and aborts queued siblings on failure. Graph completion drains started siblings before the caller closes its snapshot. A dynamic nested task declaring a lock while its parent holds named resources fails at admission. Ordinary child plans acquire their own resources. Write-plan state belongs to each mutation and durable writer arbitration remains with revision-checked commit and receipt replay.
+
+CPU placement prices runnable CPU work, caller-resident input bytes, observed communication, and the selected leaf's availability. Approved Worker operators share their implementation with inline execution. Larger default ranking batches can enter this path, while small batches, alternate graphs and non-transferable data can use the inline implementation. A Worker error propagates and cancellation terminates its active thread. Node and the host OS provide thread execution and CPU counters. [Node.js process API](https://nodejs.org/docs/latest-v22.x/api/process.html#processthreadcpuusagepreviousvalue)
+
+The governor samples host CPU times and event-loop pressure. Hysteresis and background event-loop yields let host capacity recover gradually. Queue/resource wait, synchronous thread CPU, I/O wait, Worker queue time and communication time are recorded as separate dimensions: an operator declaring `execution: "async_io"` records only its suspended wall time through `ComputeCostModel.observeWait`, which feeds critical-path ranks without moving its CPU estimate. Post-yield wall time includes application continuations. Arbitrary synchronous JavaScript remains non-preemptible. In-flight merging uses the same node signature and configuration identity as a memo scope, so it can share work between callers that already share a snapshot identity and never merges distinct per-request snapshots. See the matched [production and synthetic measurements](../../experiments/runtime/unified-runtime-convergence-2026-11-25.md).
 
 ## Node realizations and progressive capabilities
 
@@ -66,6 +90,7 @@ Production memory paths execute registered compute graphs through narrow ports (
 
 - **Dependency isolation:** `tests/core/compute-architecture-guardrails.test.ts` enforces zero imports from SQLite, LanceDB, or `MemoryEngine` inside core compute, planner, domain graph, and hydration modules, and zero compute imports inside SQLite/LanceDB storage modules.
 - **Transactional coupling boundary:** `MemoryEngine` retains `openRead`/`closeRead` lifetime control, synchronous pre-read input validation, and optimistic `mutate` retry/receipt replay over `MemoryBackend.commit`. Write graphs only plan entity mutations onto `MemoryPlan` and never commit directly.
+- **Entry points.** CLI, daemon RPC and MCP host adapters reach `PortableMemoryService` and its SQLite/LanceDB engine. WorkBuddy and DSH use shared recall, workspace and coordination helpers on the client side. Local HTTP and Onlion delegate retrieval to `HttpMemoryService`; Onlion owns partition and pending-log visibility. `runGraphExperiments` and decoupled retrieval use the production graph executor. Agent task scheduling in the OoO integration owns session, authorization and task-commit lifecycles.
 
 ## Operator onboarding and extension boundaries
 

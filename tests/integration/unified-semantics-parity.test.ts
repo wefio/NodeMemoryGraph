@@ -15,6 +15,44 @@ import { stripProviderEnv } from "../helpers/test-env.ts";
 
 stripProviderEnv();
 
+test("daemon get executes the L1-bound graph and observes an external file edit", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "nmg-l1-graph-"));
+  const service = new NmgService({ dataDirectory: dir, environment: {} });
+  t.after(async () => {
+    await service.close();
+    removeTempDirectory(dir);
+  });
+  const remembered = await service.invoke("remember", {
+    statement: "The runtime fixture stores evidence",
+    nodeName: "Runtime fixture",
+  });
+  const path = join(dir, "nmg.config.json");
+  writeFileSync(
+    path,
+    JSON.stringify({
+      allowAlgorithmicOverrides: true,
+      bindings: {
+        "memory.get_context": {
+          spec: {
+            id: "l1-get-probe",
+            nodes: [{ id: "out", op: "unregistered_get_probe" }],
+            edges: [],
+            output: "out",
+          },
+        },
+      },
+    }),
+  );
+  const input = { memoryIds: [remembered.memory.id] };
+  await assert.rejects(
+    service.invoke("get", input),
+    /Unknown compute operator: unregistered_get_probe/,
+  );
+  writeFileSync(path, JSON.stringify({ runtime: { profile: "eco" } }));
+  const result = await service.invoke("get", input);
+  assert.equal(result.results[0]?.memory.id, remembered.memory.id);
+});
+
 test("L1 shared config propagates across adapters without recompile while L2 isolates HTTP overrides", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "nmg-config-tiers-"));
   t.after(() => removeTempDirectory(dir));

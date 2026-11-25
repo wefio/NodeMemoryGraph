@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   canonicalizeComputeValue,
+  containsSharedMemory,
   functionIdentityToken,
   isDeeplyFrozen,
 } from "./canonical-value.ts";
@@ -27,7 +28,11 @@ import {
   type PhysicalNodePlan,
   type PhysicalPlanOptions,
 } from "./compute-planner.ts";
-import { ResourceLockManager } from "./resource-locks.ts";
+import {
+  getRuntimeScheduler,
+  withSyncResources,
+  type RuntimeGraphOptions,
+} from "./runtime/scheduler.ts";
 
 export {
   COMPUTE_CACHE_TOKEN,
@@ -83,6 +88,18 @@ export interface ComputeExecutionDiagnostics {
   executedNodes: number;
   cacheSkips: number;
   plan?: PhysicalExecutionPlan;
+  runtime?: {
+    queueMs: number;
+    resourceWaitMs: number;
+    inlineCpuMs: number;
+    asyncWallMs: number;
+    ioWaitMs: number;
+    workerCpuMs: number;
+    workerQueueMs: number;
+    communicationMs: number;
+    workerNodes: number;
+    coalescedNodes: number;
+  };
 }
 
 const FROZEN_ARRAY_SIG_CACHE = new WeakMap<readonly unknown[], string>();
@@ -128,6 +145,10 @@ export function inputSignature(input: unknown): string {
   return sha256Hex(canonicalizeComputeValue(input));
 }
 
+export function memoContextSignature(context: unknown, plan: PhysicalExecutionPlan): string {
+  return contextSignature(context) + ":" + (plan.configIdentity ?? "");
+}
+
 function sha256Hex(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
@@ -141,11 +162,12 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   );
 }
 
-function safeCloneForCache(value: unknown): { ok: true; value: unknown } | { ok: false } {
+export function safeCloneForCache(value: unknown): { ok: true; value: unknown } | { ok: false } {
   if (value === null || typeof value !== "object") return { ok: true, value };
   if (isDeeplyFrozen(value)) return { ok: true, value };
   try {
-    return { ok: true, value: structuredClone(value) };
+    const cloned = structuredClone(value);
+    return containsSharedMemory(cloned) ? { ok: false } : { ok: true, value: cloned };
   } catch {
     return { ok: false };
   }
@@ -436,7 +458,7 @@ export function releaseConsumedInputs(
   }
 }
 
-function unwrapDefaultPayload(inputs: Readonly<Record<string, unknown>>): unknown {
+export function unwrapDefaultPayload(inputs: Readonly<Record<string, unknown>>): unknown {
   return Object.keys(inputs).length === 1 && "default" in inputs ? inputs.default : inputs;
 }
 
@@ -504,21 +526,10 @@ export function invokeNodeAsync<TContext>(
   registry: ComputeRegistry<TContext>,
   inputs: Record<string, unknown>,
   context: TContext,
-  memo: ComputeMemoCache | undefined,
-  cacheable: boolean,
-): Promise<unknown> {
-  if (node.subgraphPlan) {
-    return runAsyncPlan(
-      node.subgraphPlan,
-      registry,
-      unwrapDefaultPayload(inputs),
-      context,
-      cacheable ? memo : undefined,
-    );
-  }
+): unknown {
   if (node.fusedSteps) return invokeFusedChainAsync(node.fusedSteps, registry, inputs, context);
   const fn = node.inlineFn ?? registry.get(node.op);
-  return Promise.resolve(fn(inputs, context, resolvedNodeParams(node)));
+  return fn(inputs, context, resolvedNodeParams(node));
 }
 
 function recordDiag(
@@ -535,6 +546,50 @@ function recordDiag(
   diag.cacheSkips += skipDelta;
 }
 
+export function prepareNodeMemo<TContext>(
+  node: PhysicalNodePlan,
+  registry: ComputeRegistry<TContext>,
+  signatures: Map<string, string>,
+  contextSig: string,
+  context: TContext,
+) {
+  const cacheable = isCacheableNode(node, node.incoming, signatures, context);
+  const signature = computeNodeSignature(
+    node,
+    node.incoming,
+    signatures,
+    registry,
+    contextSig,
+    cacheable,
+  );
+  signatures.set(node.id, signature);
+  return {
+    cacheable,
+    signature,
+    taint: () => signatures.set(node.id, `tainted:${++executionNonce}`),
+  };
+}
+
+function invokeInlineSync<TContext>(
+  node: PhysicalNodePlan,
+  registry: ComputeRegistry<TContext>,
+  inputs: Record<string, unknown>,
+  context: TContext,
+  memo: ComputeMemoCache | undefined,
+  cacheable: boolean,
+): unknown {
+  const resources = node.capabilities.resources;
+  const value = node.requiresResourceLock
+    ? withSyncResources(resources, () =>
+        invokeNodeSync(node, registry, inputs, context, memo, cacheable),
+      )
+    : invokeNodeSync(node, registry, inputs, context, memo, cacheable);
+  if (isPromiseLike(value)) {
+    throw new Error(`Sync compute graph encountered async node '${node.id}' (${node.op})`);
+  }
+  return value;
+}
+
 function runSyncNodeWithMemo<TContext>(
   node: PhysicalNodePlan,
   registry: ComputeRegistry<TContext>,
@@ -546,29 +601,16 @@ function runSyncNodeWithMemo<TContext>(
   contextSig: string,
   diagnostics?: ComputeExecutionDiagnostics,
 ): unknown {
-  const cacheable = isCacheableNode(node, node.incoming, signatures, context);
-  const sig = computeNodeSignature(
-    node,
-    node.incoming,
-    signatures,
-    registry,
-    contextSig,
-    cacheable,
-  );
-  signatures.set(node.id, sig);
-  const cached = cacheable ? memo.get(sig) : undefined;
+  const cache = prepareNodeMemo(node, registry, signatures, contextSig, context);
+  const cached = cache.cacheable ? memo.get(cache.signature) : undefined;
   if (cached?.found) {
     recordDiag(diagnostics, outputs.size, 0, 1, 0);
     return cached.value;
   }
   const inputs = gatherNodeInputs(node.incoming, outputs, graphInput);
-  const value = invokeNodeSync(node, registry, inputs, context, memo, cacheable);
-  if (isPromiseLike(value)) {
-    throw new Error(`Sync compute graph encountered async node '${node.id}' (${node.op})`);
-  }
-  const stored = cacheable ? memo.set(sig, value) : false;
-  if (cacheable && !stored) signatures.set(node.id, `tainted:${++executionNonce}`);
-  recordDiag(diagnostics, outputs.size, 1, 0, cacheable ? 0 : 1);
+  const value = invokeInlineSync(node, registry, inputs, context, memo, cache.cacheable);
+  if (cache.cacheable && !memo.set(cache.signature, value)) cache.taint();
+  recordDiag(diagnostics, outputs.size, 1, 0, cache.cacheable ? 0 : 1);
   return value;
 }
 
@@ -584,7 +626,7 @@ function runSyncPlan<TIn, TOut, TContext>(
   const outputs = new Map<string, unknown>([[INPUT_NODE_ID, input]]);
   const remaining = new Map<string, number>(plan.consumerCounts);
   const signatures = memo ? new Map([[INPUT_NODE_ID, inputSignature(input)]]) : undefined;
-  const contextSig = memo ? contextSignature(context) : "";
+  const contextSig = memo ? memoContextSignature(context, plan) : "";
 
   for (const node of plan.order) {
     let value: unknown;
@@ -602,10 +644,7 @@ function runSyncPlan<TIn, TOut, TContext>(
       );
     } else {
       const inputs = gatherNodeInputs(node.incoming, outputs, input);
-      value = invokeNodeSync(node, registry, inputs, context, undefined, false);
-      if (isPromiseLike(value)) {
-        throw new Error(`Sync compute graph encountered async node '${node.id}' (${node.op})`);
-      }
+      value = invokeInlineSync(node, registry, inputs, context, undefined, false);
       recordDiag(diagnostics, outputs.size, 1, 0, 0);
     }
     outputs.set(node.id, value);
@@ -613,143 +652,6 @@ function runSyncPlan<TIn, TOut, TContext>(
     releaseConsumedInputs(node.incoming, remaining, outputs, plan.outputNodeId);
   }
   return outputs.get(plan.outputNodeId) as TOut;
-}
-
-async function runAsyncNodeWithMemo<TContext>(
-  node: PhysicalNodePlan,
-  registry: ComputeRegistry<TContext>,
-  outputs: Map<string, unknown>,
-  graphInput: unknown,
-  context: TContext,
-  memo: ComputeMemoCache | undefined,
-  signatures: Map<string, string> | undefined,
-  contextSig: string,
-  diagnostics?: ComputeExecutionDiagnostics,
-): Promise<unknown> {
-  if (memo && signatures) {
-    const cacheable = isCacheableNode(node, node.incoming, signatures, context);
-    const sig = computeNodeSignature(
-      node,
-      node.incoming,
-      signatures,
-      registry,
-      contextSig,
-      cacheable,
-    );
-    signatures.set(node.id, sig);
-    const cached = cacheable ? memo.get(sig) : undefined;
-    if (cached?.found) {
-      recordDiag(diagnostics, outputs.size, 0, 1, 0);
-      return cached.value;
-    }
-    const inputs = gatherNodeInputs(node.incoming, outputs, graphInput);
-    const value = await invokeNodeAsync(node, registry, inputs, context, memo, cacheable);
-    const stored = cacheable ? memo.set(sig, value) : false;
-    if (cacheable && !stored) signatures.set(node.id, `tainted:${++executionNonce}`);
-    recordDiag(diagnostics, outputs.size, 1, 0, cacheable ? 0 : 1);
-    return value;
-  }
-  const inputs = gatherNodeInputs(node.incoming, outputs, graphInput);
-  const value = await invokeNodeAsync(node, registry, inputs, context, undefined, false);
-  recordDiag(diagnostics, outputs.size, 1, 0, 0);
-  return value;
-}
-
-function buildEventDependencies(order: readonly PhysicalNodePlan[]) {
-  const pendingDeps = new Map<string, number>();
-  const serialDeps = new Map<string, string[]>();
-  const nodeById = new Map(order.map((node) => [node.id, node]));
-  let lastSerial: string | undefined;
-  for (const node of order) {
-    const deps = new Set(node.incoming.filter((e) => e.from !== INPUT_NODE_ID).map((e) => e.from));
-    const serial =
-      !node.capabilities.parallelSafe ||
-      (node.capabilities.effect !== "pure" && node.capabilities.effect !== "read");
-    if (serial) {
-      if (lastSerial && !deps.has(lastSerial)) {
-        deps.add(lastSerial);
-        const list = serialDeps.get(lastSerial) ?? [];
-        list.push(node.id);
-        serialDeps.set(lastSerial, list);
-      }
-      lastSerial = node.id;
-    }
-    pendingDeps.set(node.id, deps.size);
-  }
-  return { pendingDeps, serialDeps, nodeById };
-}
-
-async function runAsyncPlan<TIn, TOut, TContext>(
-  plan: PhysicalExecutionPlan,
-  registry: ComputeRegistry<TContext>,
-  input: TIn,
-  context: TContext,
-  memo?: ComputeMemoCache,
-  diagnostics?: ComputeExecutionDiagnostics,
-): Promise<TOut> {
-  if (diagnostics) diagnostics.plan = plan;
-  const outputs = new Map<string, unknown>([[INPUT_NODE_ID, input]]);
-  if (plan.order.length === 0) return outputs.get(plan.outputNodeId) as TOut;
-  const remaining = new Map<string, number>(plan.consumerCounts);
-  const useMemo = memo !== undefined;
-  const signatures = useMemo ? new Map([[INPUT_NODE_ID, inputSignature(input)]]) : undefined;
-  const contextSig = useMemo ? contextSignature(context) : "";
-  const { pendingDeps, serialDeps, nodeById } = buildEventDependencies(plan.order);
-  const ready = plan.order.filter((node) => pendingDeps.get(node.id) === 0);
-  const locks = new ResourceLockManager();
-
-  return new Promise<TOut>((resolve, reject) => {
-    let remainingNodes = plan.order.length;
-    let aborted = false;
-
-    const launchNode = (node: PhysicalNodePlan) => {
-      if (aborted) return;
-      locks
-        .withResources(node.capabilities.resources, () =>
-          runAsyncNodeWithMemo(
-            node,
-            registry,
-            outputs,
-            input,
-            context,
-            memo,
-            signatures,
-            contextSig,
-            diagnostics,
-          ),
-        )
-        .then((value) => {
-          if (aborted) return;
-          outputs.set(node.id, value);
-          recordDiag(diagnostics, outputs.size, 0, 0, 0);
-          releaseConsumedInputs(node.incoming, remaining, outputs, plan.outputNodeId);
-          remainingNodes -= 1;
-          if (remainingNodes === 0) {
-            resolve(outputs.get(plan.outputNodeId) as TOut);
-            return;
-          }
-          const nextIds = [
-            ...(plan.outgoing.get(node.id) ?? []),
-            ...(serialDeps.get(node.id) ?? []),
-          ];
-          for (const depId of nextIds) {
-            const left = (pendingDeps.get(depId) ?? 1) - 1;
-            pendingDeps.set(depId, left);
-            if (left === 0) {
-              const target = nodeById.get(depId);
-              if (target) launchNode(target);
-            }
-          }
-        })
-        .catch((error) => {
-          if (aborted) return;
-          aborted = true;
-          reject(error);
-        });
-    };
-
-    for (const node of ready) launchNode(node);
-  });
 }
 
 /** Wrap any ComputeGraphSpec into a single composite operator for hierarchical nesting. */
@@ -780,9 +682,14 @@ export async function executeComputeGraph<TIn, TOut, TContext = unknown>(
   memo?: ComputeMemoCache,
   planOptions?: PhysicalPlanOptions,
   diagnostics?: ComputeExecutionDiagnostics,
+  runtime?: RuntimeGraphOptions<TContext>,
 ): Promise<TOut> {
   const plan = compileComputeGraph(spec, registry, planOptions);
-  return runAsyncPlan<TIn, TOut, TContext>(plan, registry, input, context, memo, diagnostics);
+  return getRuntimeScheduler().executePlan<TIn, TOut, TContext>(plan, registry, input, context, {
+    ...runtime,
+    memo: memo ?? runtime?.memo,
+    diagnostics: diagnostics ?? runtime?.diagnostics,
+  });
 }
 
 /** Synchronously evaluate a ComputeGraphSpec via its compiled PhysicalExecutionPlan. */

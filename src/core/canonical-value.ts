@@ -44,12 +44,31 @@ export function isDeeplyFrozen(value: unknown, seen = new WeakSet<object>()): bo
   if (!Object.isFrozen(value)) return false;
   if (seen.has(value)) return true;
   seen.add(value);
-  const descriptors = Object.values(Object.getOwnPropertyDescriptors(value));
+  const descriptors = Reflect.ownKeys(value).map((key) =>
+    Object.getOwnPropertyDescriptor(value, key)!,
+  );
   for (const desc of descriptors) {
     if (desc.get || desc.set) return false;
     if (!isDeeplyFrozen(desc.value, seen)) return false;
   }
   return true;
+}
+
+/** Structured clone preserves shared backing stores. Cache entries require isolation. */
+export function containsSharedMemory(value: unknown, visited = new WeakSet<object>()): boolean {
+  if (!value || typeof value !== "object" || visited.has(value)) return false;
+  visited.add(value);
+  if (typeof SharedArrayBuffer === "undefined") return false;
+  if (value instanceof SharedArrayBuffer) return true;
+  if (ArrayBuffer.isView(value)) return value.buffer instanceof SharedArrayBuffer;
+  if (value instanceof Map) {
+    for (const [key, item] of value) {
+      if (containsSharedMemory(key, visited) || containsSharedMemory(item, visited)) return true;
+    }
+    return false;
+  }
+  const items = value instanceof Set ? [...value] : Object.values(value);
+  return items.some((item) => containsSharedMemory(item, visited));
 }
 
 function bufferHex(view: ArrayBufferView): string {

@@ -9,7 +9,6 @@ export {
 } from "./cost-model.ts";
 export {
   HostLoadGovernor,
-  applyBackgroundOsPriority,
   type AdaptiveDispatchBudget,
   type HostLoadState,
   type HostTelemetrySample,
@@ -20,7 +19,9 @@ export {
   UnifiedRuntimeScheduler,
   ZeroPollLatch,
   getSharedRuntimeScheduler,
+  withRuntimePolicy,
   type RetryPolicy,
+  type RuntimeGraphOptions,
   type ScheduledTaskOptions,
   type TaskPriority,
 } from "./scheduler.ts";

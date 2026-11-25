@@ -2,7 +2,38 @@
 
 [中文](unified-runtime-convergence-2026-11-25.zh-CN.md) · [Terms](unified-runtime-convergence-2026-11-25.terms.yaml)
 
-## Question and conclusion
+## Matched production comparison against PR #190
+
+The follow-up compares commit `604a89e9` with the consolidated runtime. The runner extracts the baseline source from Git, regenerates its prompts, and measures in both orders. Both arms use fixed clocks, operation IDs, data and request batches. Run with Node 22.19 or newer and a directory containing `locomo/locomo10.json`.
+
+```sh
+node docs/experiments/runtime/production-runtime-benchmark.mjs --baseline-ref 604a89e9 --data-root <OmniMemEval-data> --rounds 2 --out docs/experiments/runtime/artifacts/unified-runtime-2026-11-25/production-matched.json
+```
+
+The [matched runner](production-runtime-benchmark.mjs) and [raw observations](artifacts/unified-runtime-2026-11-25/production-matched.json) retain each latency, source revision, dataset digest, operation scope, CPU samples and Worker results. The host was Windows x64 with Node 26.13.0 and 20 logical CPUs.
+
+- **Application workload.** The first eight sessions and 32 questions of the first LoCoMo sample use the HTTP memory service and real SQLite, with 174 stored turns. The two retrieval modes use lexical search and offline hashing vectors. The exact ordered ID and score digests agree in all four mode/concurrency combinations in both rounds. The fixed golden engine/HTTP fixture agrees as well. Hosted provider latency and throughput remain outside the measurements.
+- **Synthetic controls.** The single-node graph measures runtime overhead. A matched wave barrier uses the same asymmetric DAG and timers as both event-driven arms. The mixed workload includes queue time for both foreground and background latency. The direct Worker pool uses the same dense function and verifies outputs at both input sizes. An independent Node process saturates the host while each scheduler admits twelve background operations.
+- **Production and contract tests.** The daemon consumes an edited L1 get graph through RPC. A configured ranking call reaches a real Worker and matches inline ranking. Graph tests cover resource contention, nesting, retry, failures, timeouts and cache isolation. The Onlion local fold test exercises request-scoped SQLite and deferred embedding.
+- **Deferred optimizations.** Worker-resident intermediate buffers and full DAG makespan modeling need sufficient transfer savings on real requests. The benchmark measures caller-resident input and local transfers. It records CPU, concurrency and task durations. Physical power and energy were outside measurement.
+
+| Metric, range across the two runs | PR #190 | Consolidated |
+| --- | --- | --- |
+| Synchronous single-node median, µs | 0.42–0.70 | 0.67–0.70 |
+| Asynchronous single-node median, µs | 1.26–1.44 | 9.82–10.72 |
+| Asymmetric DAG median, ms | 75.9–84.7 | 76.0–88.1 |
+| Mixed foreground P50 / P95 / P99, ms | 17.8–19.9 / 22.5–29.0 / 22.7–34.3 | 14.5–15.0 / 15.2–15.5 / 15.2–15.5 |
+| Mixed batch completion, ms | 342–369 | 1,167–1,530 |
+| Hybrid SQLite at eight concurrent requests, requests/s | 90.0–94.6 | 69.4–93.2 |
+| External CPU load, observed background peak before / during / after | 4 / 4 / 4 | 4 / 1 / 4 |
+
+The consolidated DAG took 76.0–88.1 ms against its matched wave control at 121.2–123.2 ms. PR #190 already had event-driven execution, and its DAG timings overlap the consolidated timings. Background yielding improved foreground tail latency at the cost of later background completion. Under sustained external load the host reached 100% sampled utilization, Worker allowance fell from 10 to 0, and the background CPU allowance fell from 50 to 8 ms per window. Recovery passed through light load before restoring idle allowance.
+
+Application timings varied with run order and load. Both eight-request hybrid runs were slower, one by 1.5% and one by 22.9%. The default application workload dispatched zero Worker operations. The forced placement regression verifies output parity on the production rerank operator. The 450,000-round direct Worker workload reached 278–287 tasks/s on four threads versus 92–93 tasks/s inline. For 2,000 rounds, four threads yielded 4,311–9,762 tasks/s versus 21,383–23,587 inline. At the larger task size, four-thread median queue time was about 37.7 ms and the measured median communication residual was 0.12–0.22 ms. These Worker measurements describe the synthetic workload.
+
+## PR #190 exploratory trials
+
+The original experiment used different operation IDs and background workloads between arms. Its wave and Worker scenarios remain characterization evidence. Use the paired follow-up for comparisons of production behavior.
 
 Does converging business semantics onto shared compute graphs, introducing `L0 -> L1 -> L2` capability configuration, and replacing full-wave `Promise.all` barriers with an event-driven `UnifiedRuntimeScheduler` preserve retrieval outputs and synchronous microsecond latency while eliminating asymmetric DAG barrier stalls and scaling multi-worker CPU execution?
 
@@ -40,3 +71,64 @@ Measured results on the unified runtime show exact golden retrieval parity, sub-
 ## Architectural and correctness verification scope
 
 Dedicated test suites in `tests/core/compute-architecture-guardrails.test.ts`, `tests/core/unified-runtime-scheduler.test.ts`, and `tests/integration/unified-semantics-parity.test.ts` cover registry-isolated `PLAN_CACHE` generations, recursive subgraph preservation in `runDcePass`, per-step parameters inside `fused_chain`, `isDeeplyFrozen` / `canonicalizeComputeValue` safety over built-in containers, `L0 -> L1 -> L2` provenance and `PolicyViolationError` enforcement, event-driven DAG wakeup, `ResourceLockManager`, `InFlightCoalescer` singleflight deduplication, priority aging against starvation, semantic retry constraints, and `UnifiedRuntimeScheduler` execution alongside full engine and HTTP search parity.
+
+## Follow-up measurements (2026-11-25)
+
+The follow-up asks whether the cost model's wait dimension and layer configuration validation change execution or dispatch cost. [io-wait-probe.mjs](io-wait-probe.mjs) measures both trees from the same process shape and host:
+
+```sh
+git worktree add --detach .temp/baseline 0858eeff
+node docs/experiments/runtime/io-wait-probe.mjs --root .temp/baseline --out <artifact>
+node docs/experiments/runtime/io-wait-probe.mjs --root . --out <artifact>
+```
+
+Each arm ran three times. Raw observations are in `artifacts/unified-runtime-2026-11-25/io-wait-{baseline,change}-{1,2,3}.json`.
+
+| Observation, three runs | Baseline (0858eeff) | Follow-up |
+| --- | --- | --- |
+| Synchronous one-node graph, µs per call | 0.522–0.572 | 0.504–0.603 |
+| Asynchronous one-node graph, µs per call | 10.456–10.772 | 10.311–10.479 |
+| Four-wide async fan-out, 20 ms per leaf, ms | 30.857–31.359 | 30.750–31.316 |
+| Observed I/O wait of a fan leaf, ms | 0 | 29.684–30.432 |
+| Critical-path rank, 5 ms read / 20 ms read | 0.164 / 0.164 | 12.319–14.428 / 29.907–31.441 |
+
+- The wait dimension was previously declared and never sampled: every `waitMs` estimate was `0`, so two independent read branches with different I/O latency ranked identically. After the change the suspended time is a separate sample, ranks follow it, and the CPU estimate for the same operators stays at the `0.082 ms` hint.
+- Serialization and scheduling are unchanged: the synchronous path, the asynchronous dispatch floor and the four-wide fan-out stay inside their baseline ranges. The probe did not add a measurable cost to graphs whose operators do not declare `execution: "async_io"`.
+- Layer validation is covered by `tests/core/unified-runtime-scheduler.test.ts` (unknown section, unknown parameter, wrong type, string-instead-of-array) rather than by timing, because it changes whether configuration is accepted, not how it executes.
+
+Measurement limits: this Windows host exposes no battery or thermal telemetry, timer granularity rounds a nominal 5 ms delay to roughly 15.6 ms, and thread CPU counters are too coarse for sub-millisecond attribution. The probe therefore reports relative dimensions and dispatch cost. It does not restate application retrieval throughput, which the change does not touch, and it makes no power or energy claim.
+
+## Re-analysis of the eight-request hybrid arm (2026-11-25)
+
+The matched trial reported an eight-request hybrid throughput difference of `-1.5%` in one round and `-22.9%` in the other and left it unattributed. Re-reading [the raw artifact](artifacts/unified-runtime-2026-11-25/production-matched.json) shows the difference is not a property of that arm.
+
+| Round (order)       | Arm      | Lexical, 8 concurrent: req/s, CPU ms | Hybrid, 8 concurrent: req/s, CPU ms | Median per-request latency ratio |
+| ------------------- | -------- | ------------------------------------ | ----------------------------------- | -------------------------------- |
+| 1 (baseline → post) | baseline | 307.0, 94                            | 90.0, 390                           | —                                |
+| 1 (baseline → post) | post     | 180.9, 172                           | 69.4, 469                           | 1.99 lexical / 1.45 hybrid       |
+| 2 (post → baseline) | post     | 317.0, 94                            | 93.2, 328                           | 0.94 lexical / 1.02 hybrid       |
+| 2 (post → baseline) | baseline | 305.5, 94                            | 94.6, 391                           | —                                |
+
+- The first round's post arm is slow across the board, and lexical concurrency 8 loses more (`-41%`) than hybrid concurrency 8 (`-23%`). Latency ratios arrive in whole eight-request clusters (`2.67x` lexical, `1.56x` hybrid), so entire batches were delayed rather than individual queries.
+- The same post code in the reverse-ordered round is at parity (`+3.8%` lexical, `-1.5%` hybrid) and its hybrid concurrency-1 arm is faster (`104.4` vs `97.7` req/s).
+- Process CPU is the distinguishing signal: the slow post arm spends `172 ms` of CPU on the same 32 lexical queries that cost `94 ms` in every other arm. Extra process CPU is compilation, garbage collection or a throttled host, not contention — contention inflates wall time without raising process CPU. Golden digests and ordered IDs agree in all arms, so no semantic difference is involved.
+- Both arms run inside one process, in arm order, so the first execution of the post code carries V8 optimization and any GC triggered by its allocation pattern. The artifact cannot separate that from host throttling.
+
+Conclusion: the `-22.9%` belongs to the in-process, arm-ordered comparison rather than to the arm, and `-1.5%` is within this artifact's own spread. It does not show that the unified scheduler slows eight-request hybrid search. [hybrid-isolation-probe.mjs](hybrid-isolation-probe.mjs) tests that reading directly: one process per arm, alternating arm order, `--rounds 24 --limit 1`, the same write and query loops, with the CPU split and GC time recorded inside each measurement window.
+
+```bash
+node docs/experiments/runtime/hybrid-isolation-probe.mjs --baseline-ref 604a89e9 \
+  --data-root D:/Github/.benchmarks/official/OmniMemEval/data --rounds 24 --limit 1 \
+  --out docs/experiments/runtime/artifacts/unified-runtime-2026-11-25/hybrid-isolation.json
+```
+
+| Median of 24 isolated rounds | PR #190 | Consolidated | Median change | Per-round range |
+| --- | --- | --- | --- | --- |
+| Hybrid, 8 concurrent | 89.2 req/s | 88.8 req/s | `-0.9%` | `-3.3%` .. `+5.9%` |
+| Hybrid, 1 concurrent | 94.7 req/s | 91.9 req/s | `-2.9%` | `-10.3%` .. `+9.8%` |
+| Lexical, 8 concurrent | 279.6 req/s | 274.2 req/s | `-1.9%` | `-10.9%` .. `+26.0%` |
+| Lexical, 1 concurrent | 329.2 req/s | 315.5 req/s | `-6.2%` | `-16.7%` .. `+19.1%` |
+
+The isolated arms reproduce the eight-request hybrid arm at parity and the whole-batch latency clusters disappear from every round. GC time inside the window is also equal (`16.0` vs `14.8 ms` median for lexical, `6.5` vs `6.9 ms` for hybrid).
+
+The two arms are still separate processes measured a second or so apart on a host whose load is not controlled, so only differences larger than the run-to-run spread are attributable to the code. That spread is `±5–8%` per round, which makes the `-0.9%` hybrid and `-1.9%` lexical figures at eight concurrent requests indistinguishable from noise, and the single-concurrency figures (`-2.9%` hybrid, `-6.2%` lexical) too small to attribute without a load-controlled host or an interleaved design. They are recorded as parity, not as a residual dispatch cost: the `-22.9%` this section set out to explain is an order of magnitude larger than this noise floor, order-dependent, and absent under isolation. Raw observations are in [hybrid-isolation.json](artifacts/unified-runtime-2026-11-25/hybrid-isolation.json).

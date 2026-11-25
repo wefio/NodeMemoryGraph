@@ -550,7 +550,9 @@ async function addOneBatch(env, ctx, requestId, batch, manifest, staged) {
   }
   const compute = (part) =>
     runPart(env.MEMORY, part, ctx.sqlite, async ({ key: partKey }) => {
-      const service = new AmlMemoryService(partKey, ctx.client);
+      const service = new AmlMemoryService(partKey, ctx.client, {
+        capabilityConfig: env.NMG_CAPABILITY_CONFIG,
+      });
       return {
         response: await measure("nmg_write", () =>
           service.rememberBatch(ctx.userId, ctx.sessionId, requestId, batch),
@@ -1174,7 +1176,10 @@ async function readSearchCandidates(env, getSqlite, { manifest, queries, topK, a
           // Declining the backfill is what makes this read safe and cheap: without it the
           // service would embed vectorless records inside a search and change the SQLite
           // snapshot, which is what used to force the read path to write.
-          const service = new AmlMemoryService(partKey, client, { allowBackfill: false });
+          const service = new AmlMemoryService(partKey, client, {
+            allowBackfill: false,
+            capabilityConfig: env.NMG_CAPABILITY_CONFIG,
+          });
           return {
             response: await measure("retrieval_including_embedding", () =>
               service.search(queries, topK, appendOnly, features, { now }),

@@ -12,6 +12,7 @@ import {
   type ResolvedOperatorCapabilities,
   type StructuredComputeExpr,
 } from "./compute-contracts.ts";
+import { hasNamedResources } from "./resource-locks.ts";
 
 export interface PhysicalPlanOptions {
   readonly enableDce?: boolean;
@@ -29,6 +30,7 @@ export interface PhysicalNodePlan {
   readonly params: Readonly<Record<string, unknown>>;
   readonly incoming: readonly ComputeEdgeSpec[];
   readonly capabilities: ResolvedOperatorCapabilities;
+  readonly requiresResourceLock?: boolean;
   readonly kind: "operator" | "subgraph" | "inline_fn" | "lowered_expression" | "fused_chain";
   readonly inlineFn?: ComputeOperatorFn<unknown>;
   readonly expression?: StructuredComputeExpr;
@@ -45,11 +47,16 @@ export interface PhysicalWaveGroup {
 
 export interface PhysicalExecutionPlan {
   readonly logicalGraphId: string;
+  readonly configIdentity?: string;
   readonly outputNodeId: string;
   readonly order: readonly PhysicalNodePlan[];
   readonly waves: readonly PhysicalWaveGroup[];
   readonly edges: readonly ComputeEdgeSpec[];
   readonly outgoing: ReadonlyMap<string, readonly string[]>;
+  readonly dependencies: {
+    readonly counts: ReadonlyMap<string, number>;
+    readonly followers: ReadonlyMap<string, readonly PhysicalNodePlan[]>;
+  };
   readonly consumerCounts: ReadonlyMap<string, number>;
   readonly eliminatedNodeIds: readonly string[];
   readonly cseMergedNodeIds: ReadonlyMap<string, string>;
@@ -337,10 +344,7 @@ function partitionWave(waveNodes: readonly PhysicalNodePlan[]): PhysicalWaveGrou
   const parallelCandidates: PhysicalNodePlan[] = [];
   const serialNodes: PhysicalNodePlan[] = [];
   for (const node of waveNodes) {
-    if (
-      node.capabilities.parallelSafe &&
-      (node.capabilities.effect === "pure" || node.capabilities.effect === "read")
-    ) {
+    if (canRunInParallel(node)) {
       parallelCandidates.push(node);
     } else {
       serialNodes.push(node);
@@ -365,6 +369,34 @@ function partitionWave(waveNodes: readonly PhysicalNodePlan[]): PhysicalWaveGrou
   return { parallelGroups, serialNodes };
 }
 
+function canRunInParallel(node: PhysicalNodePlan): boolean {
+  const { parallelSafe, effect } = node.capabilities;
+  return parallelSafe && (effect === "pure" || effect === "read");
+}
+
+function buildDependencies(
+  order: readonly PhysicalNodePlan[],
+): PhysicalExecutionPlan["dependencies"] {
+  const counts = new Map<string, number>();
+  const followers = new Map<string, PhysicalNodePlan[]>();
+  let lastSerial: string | undefined;
+  for (const node of order) {
+    const parents = new Set(node.incoming.map(({ from }) => from));
+    parents.delete(INPUT_NODE_ID);
+    if (!canRunInParallel(node)) {
+      if (lastSerial) parents.add(lastSerial);
+      lastSerial = node.id;
+    }
+    counts.set(node.id, parents.size);
+    for (const parent of parents) {
+      const list = followers.get(parent) ?? [];
+      list.push(node);
+      followers.set(parent, list);
+    }
+  }
+  return { counts, followers };
+}
+
 function computeConsumerCounts(
   nodes: readonly PhysicalNodePlan[],
   edges: readonly ComputeEdgeSpec[],
@@ -385,7 +417,10 @@ function isFusableNode(node: PhysicalNodePlan): boolean {
   return (
     node.kind === "operator" &&
     node.capabilities.effect === "pure" &&
-    node.capabilities.resources.execution !== "async_io"
+    node.capabilities.parallelSafe &&
+    node.capabilities.resources.execution !== "async_io" &&
+    node.capabilities.resources.execution !== "cpu" &&
+    !hasNamedResources(node.capabilities.resources)
   );
 }
 
@@ -467,16 +502,20 @@ function buildPhysicalNode<TContext>(
     : undefined;
   const capabilities = resolveNodeCapabilities(node, op, registry, subgraphPlan);
   const params = node.params ?? {};
+  const base = {
+    id: node.id,
+    params,
+    incoming,
+    capabilities,
+    requiresResourceLock: hasNamedResources(capabilities.resources),
+  };
   const contractProp = node.contract ? { contract: node.contract } : {};
   if (node.expression) {
     const loweredTarget = selectLoweredTarget(node, options);
     loweredNodes.set(node.id, loweredTarget);
     return {
-      id: node.id,
+      ...base,
       op,
-      params,
-      incoming,
-      capabilities,
       kind: "lowered_expression",
       expression: node.expression,
       loweredTarget,
@@ -485,27 +524,21 @@ function buildPhysicalNode<TContext>(
   }
   if (subgraphPlan) {
     return {
-      id: node.id,
+      ...base,
       op: "subgraph",
-      params,
-      incoming,
-      capabilities,
       kind: "subgraph",
       subgraphPlan,
     };
   }
   if (node.fn) {
     return {
-      id: node.id,
+      ...base,
       op: node.op || `inline:${node.id}`,
-      params,
-      incoming,
-      capabilities,
       kind: "inline_fn",
       inlineFn: node.fn,
     };
   }
-  return { id: node.id, op, params, incoming, capabilities, kind: "operator", ...contractProp };
+  return { ...base, op, kind: "operator", ...contractProp };
 }
 
 function planCacheKey<TContext>(
@@ -588,11 +621,13 @@ export function compileComputeGraph<TContext = unknown>(
 
   const plan: PhysicalExecutionPlan = {
     logicalGraphId: spec.id,
+    configIdentity: options.configIdentity,
     outputNodeId: work.output,
     order: physicalOrder,
     waves: physicalWaves,
     edges: finalEdges,
     outgoing: finalOutgoing,
+    dependencies: buildDependencies(physicalOrder),
     consumerCounts,
     eliminatedNodeIds: work.eliminatedNodeIds,
     cseMergedNodeIds: work.cseMergedNodeIds,
