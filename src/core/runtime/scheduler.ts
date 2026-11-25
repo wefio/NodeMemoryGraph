@@ -653,7 +653,8 @@ export class UnifiedRuntimeScheduler {
     const itemCount = cpu ? (state.options.itemEstimate ?? sizeOfInput(inputs)) : 0;
     const placement = cpu ? this.selectPlacement(node, state, inputs, itemCount) : undefined;
     if (placement) return this.runWorker(node, placement, signal, itemCount, metrics);
-    return this.runInline(node.op, local, cpu ? itemCount : undefined, metrics);
+    const maySuspend = node.capabilities.resources.execution === "async_io";
+    return this.runInline(node.op, local, cpu ? itemCount : undefined, metrics, maySuspend || cpu);
   }
 
   private runInline(
@@ -661,19 +662,27 @@ export class UnifiedRuntimeScheduler {
     run: () => unknown,
     itemCount?: number,
     metrics?: ComputeExecutionDiagnostics["runtime"],
+    measureWait = false,
   ): unknown {
-    if (itemCount === undefined && !metrics) return run();
+    const sampleCpu = itemCount !== undefined || metrics !== undefined;
+    if (!sampleCpu && !measureWait) return run();
     const wallStart = performance.now();
-    const start = readThreadCpu();
+    const start = sampleCpu ? readThreadCpu() : undefined;
     const value = run();
     const cpuMs = start ? Math.min(elapsedThreadCpu(start), performance.now() - wallStart) : 0;
     if (start && itemCount !== undefined) this.costModel.observe(op, { cpuMs, itemCount });
-    if (!metrics) return value;
-    metrics.inlineCpuMs += cpuMs;
+    if (metrics) metrics.inlineCpuMs += cpuMs;
     if (!value || typeof (value as PromiseLike<unknown>).then !== "function") return value;
-    const asyncStart = performance.now();
+    // Interruption wait is its own sample: it informs critical-path ranks without
+    // ever being billed as CPU for the same operator.
+    const suspendStart = performance.now();
     return Promise.resolve(value).finally(() => {
-      metrics.asyncWallMs += performance.now() - asyncStart;
+      const waitMs = performance.now() - suspendStart;
+      this.costModel.observeWait(op, waitMs);
+      if (metrics) {
+        metrics.asyncWallMs += waitMs;
+        metrics.ioWaitMs += waitMs;
+      }
     });
   }
 

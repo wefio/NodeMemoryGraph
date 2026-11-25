@@ -5,7 +5,6 @@ import type { PhysicalExecutionPlan, PhysicalNodePlan } from "../compute-planner
 export interface OpCostStats {
   invocations: number;
   emaCpuMs: number;
-  emaWaitMs: number;
   emaSerializedBytes: number;
   emaCommunicationMs: number;
 }
@@ -42,6 +41,8 @@ const IPC_BYTES_PER_MS = 32_768;
 export class ComputeCostModel {
   private readonly stats = new Map<string, OpCostStats>();
   private readonly bySize = new Map<string, OpCostStats>();
+  /** Observed interruption/I/O wait per operator, kept out of the CPU samples. */
+  private readonly waits = new Map<string, number>();
   private readonly alpha: number;
 
   constructor(alpha = 0.25) {
@@ -54,9 +55,19 @@ export class ComputeCostModel {
       this.update(this.bySize, sizeKey(op, sample.itemCount), sample);
   }
 
+  /**
+   * Record the wall time an operator spent suspended (I/O, timers, provider calls).
+   * It is a separate sample so an I/O-bound operator never rewrites its CPU estimate.
+   */
+  observeWait(op: string, waitMs: number): void {
+    const wait = Math.max(0, waitMs);
+    const previous = this.waits.get(op);
+    const a = this.alpha;
+    this.waits.set(op, previous === undefined ? wait : (1 - a) * previous + a * wait);
+  }
+
   private update(stats: Map<string, OpCostStats>, key: string, sample: CostSample): void {
     const cpu = Math.max(0, sample.cpuMs);
-    const wait = Math.max(0, sample.waitMs ?? 0);
     const prev = stats.get(key);
     const bytes = sample.serializedBytes ?? prev?.emaSerializedBytes ?? 0;
     const communication = sample.communicationMs ?? prev?.emaCommunicationMs ?? 0;
@@ -64,7 +75,6 @@ export class ComputeCostModel {
       stats.set(key, {
         invocations: 1,
         emaCpuMs: cpu,
-        emaWaitMs: wait,
         emaSerializedBytes: bytes,
         emaCommunicationMs: communication,
       });
@@ -73,7 +83,6 @@ export class ComputeCostModel {
     const a = this.alpha;
     prev.invocations += 1;
     prev.emaCpuMs = (1 - a) * prev.emaCpuMs + a * cpu;
-    prev.emaWaitMs = (1 - a) * prev.emaWaitMs + a * wait;
     prev.emaSerializedBytes = (1 - a) * prev.emaSerializedBytes + a * bytes;
     prev.emaCommunicationMs = (1 - a) * prev.emaCommunicationMs + a * communication;
   }
@@ -90,7 +99,7 @@ export class ComputeCostModel {
       (hint?.baseMs ?? DEFAULT_BASE_MS) +
       ((hint?.perItemUs ?? DEFAULT_PER_ITEM_US) * itemCount) / 1000;
     const cpuMs = measured ? measured.emaCpuMs : hintCpu;
-    const waitMs = measured ? measured.emaWaitMs : 0;
+    const waitMs = this.waits.get(op) ?? 0;
     const transferMs = measured ? measured.emaSerializedBytes / IPC_BYTES_PER_MS : 0;
     return { cpuMs, waitMs, transferMs, totalMs: cpuMs + waitMs };
   }
@@ -98,7 +107,6 @@ export class ComputeCostModel {
 
 interface CostSample {
   readonly cpuMs: number;
-  readonly waitMs?: number;
   readonly serializedBytes?: number;
   readonly communicationMs?: number;
   readonly itemCount?: number;

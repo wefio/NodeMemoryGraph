@@ -9,6 +9,7 @@ import {
   executeComputeGraph,
   evaluateSyncComputeGraph,
 } from "../../src/core/compute-graph.ts";
+import { localWorkerOperator } from "../../src/core/runtime/worker-pool.ts";
 import {
   ComputeCostModel,
   HostLoadGovernor,
@@ -230,6 +231,12 @@ test("production graph singleflight shares only compatible cacheable nodes", asy
   assert.equal(calls, 1);
   await run("different");
   assert.equal(calls, 2);
+  // Distinct snapshot identities never merge, even when they share a memo scope.
+  const runIn = (snapshot: string) =>
+    executeComputeGraph<null, { value: number[] }>(graph, registry, null, { snapshot }, memo);
+  const [c, d] = await Promise.all([runIn("a"), runIn("b")]);
+  assert.deepEqual(c, d);
+  assert.equal(calls, 4);
   assert.equal(memo.set("shared", { bytes: new Uint8Array(new SharedArrayBuffer(4)) }), false);
 });
 
@@ -298,6 +305,104 @@ test("Worker abort and serialization failure leave a usable pool", async () => {
     assert.deepEqual((await pool.execute(request)).value, expected);
   } finally {
     await pool.close();
+  }
+});
+
+test("runtime.maxWorkers caps concurrent Worker dispatch across independent nodes", async () => {
+  const rankOperator = localWorkerOperator("piecewise_rank_ids");
+  assert.ok(rankOperator);
+  const pool = new LocalWorkerThreadPool({ maxWorkers: 2 });
+  pool.estimatedQueueWaitMs = () => 0;
+  const original = pool.execute.bind(pool);
+  let workerCalls = 0;
+  pool.execute = (...args) => {
+    workerCalls += 1;
+    return original(...args);
+  };
+  const governor = new HostLoadGovernor();
+  governor.sampleHost = () => ({
+    ...governor.evaluateSample({ eventLoopUtilization: 0, p99DelayMs: 0, nowMs: Date.now() }),
+    recommendedWorkers: 4,
+  });
+  const scheduler = new UnifiedRuntimeScheduler({
+    domain: new SchedulingDomain("cap", [pool]),
+    governor,
+  });
+  const registry = new ComputeRegistry()
+    .register("piecewise_rank_ids", rankOperator, {
+      effect: "pure",
+      parallelSafe: true,
+      resources: { execution: "cpu" },
+      costHint: { baseMs: 5 },
+    })
+    .register("pair", (inputs) => [inputs.a, inputs.b], { effect: "pure" });
+  const graph = {
+    id: "worker-cap",
+    nodes: [
+      { id: "a", op: "piecewise_rank_ids" },
+      { id: "b", op: "piecewise_rank_ids" },
+      { id: "pair", op: "pair" },
+    ],
+    edges: [
+      { from: INPUT_NODE_ID, to: "a" },
+      { from: INPUT_NODE_ID, to: "b" },
+      { from: "a", to: "pair", port: "a" },
+      { from: "b", to: "pair", port: "b" },
+    ],
+    output: "pair",
+  };
+  const candidates = Array.from({ length: 40 }, (_, i) => ({
+    id: String(i),
+    statement: "Database migration record " + i,
+    combinedScore: 40 - i,
+    eventTime: null,
+    sessionId: null,
+    nodeId: String(i),
+  }));
+  const rankIds = rerankCandidatesWithGraph(candidates, "database").map(({ id }) => id);
+  const input = { candidates, queryText: "database" };
+  const policy = (maxWorkers: number) =>
+    resolveEffectiveNmgConfig({
+      l1: { runtime: { objective: "throughput", minOffloadCpuMs: 0.1, maxWorkers } },
+    }).runtime;
+  try {
+    scheduler.costModel.observe("piecewise_rank_ids", { cpuMs: 21, itemCount: 40 });
+    const capped = await withRuntimePolicy(
+      policy(1),
+      () =>
+        executeComputeGraph(
+          graph,
+          registry,
+          input,
+          undefined,
+          undefined,
+          { enableCse: false },
+          undefined,
+          { itemEstimate: candidates.length },
+        ),
+      scheduler,
+    );
+    assert.deepEqual(capped, [rankIds, rankIds]);
+    assert.equal(workerCalls, 1);
+    const allowed = await withRuntimePolicy(
+      policy(2),
+      () =>
+        executeComputeGraph(
+          graph,
+          registry,
+          input,
+          undefined,
+          undefined,
+          { enableCse: false },
+          undefined,
+          { itemEstimate: candidates.length },
+        ),
+      scheduler,
+    );
+    assert.deepEqual(allowed, [rankIds, rankIds]);
+    assert.equal(workerCalls, 3);
+  } finally {
+    await scheduler.close();
   }
 });
 
@@ -378,6 +483,65 @@ test("L0 -> L1 -> L2 config inheritance, recursive subgraph override, policy gua
     () => resolveLayeredConfig({ l1: { config: { autoRecall: { limit: 999 } } } }),
     /autoRecall\.limit/,
   );
+
+  // A key that cannot control anything fails closed instead of resolving to its L0 default.
+  for (const [bad, pattern] of [
+    [{ runtime: { profil: "eco" } }, /runtime\.profil/],
+    [{ autoRecall: { limitt: 5 } }, /autoRecall\.limitt/],
+    [{ maintenance: { nodeLimit: 0 } }, /maintenance\.nodeLimit/],
+    [{ runtimex: {} }, /Unknown NMG capability configuration key: runtimex/],
+    [{ allowAlgorithmicOverrides: "yes" }, /must be a boolean/],
+    [{ allowedAlgorithmicVariants: "piecewise-bm25f" }, /array of recipe ids/],
+  ] as const) {
+    assert.throws(() => resolveLayeredConfig({ l1: { config: bad as never } }), pattern);
+  }
+});
+
+test("observed I/O wait informs critical-path ranks without inflating CPU cost", async () => {
+  const scheduler = new UnifiedRuntimeScheduler();
+  const hint = { baseMs: 1, perItemUs: 1 };
+  const registry = new ComputeRegistry().register(
+    "cpu_then_io",
+    async (inputs: Readonly<Record<string, unknown>>) => {
+      const started = performance.now();
+      while (performance.now() - started < 10) {
+        // A bounded synchronous prefix stands in for real CPU work.
+      }
+      await sleep(80);
+      return inputs.default;
+    },
+    { effect: "pure", resources: { execution: "cpu" }, costHint: hint },
+  );
+  const graph = {
+    id: "io-wait",
+    nodes: [{ id: "io", op: "cpu_then_io" }],
+    edges: [],
+    output: "io",
+  };
+  try {
+    const value = await withRuntimePolicy(
+      undefined,
+      () => executeComputeGraph(graph, registry, 1, undefined),
+      scheduler,
+    );
+    assert.equal(value, 1);
+    const stats = scheduler.costModel.getStats("cpu_then_io");
+    const estimate = scheduler.costModel.estimate("cpu_then_io", hint, 1);
+    assert.ok(stats !== undefined);
+    // The two dimensions stay separate: suspended wall time is wait, never CPU.
+    assert.ok(estimate.waitMs >= 50 && estimate.waitMs < 1000, `wait ${estimate.waitMs}`);
+    assert.ok(estimate.cpuMs < 40, `cpu estimate ${estimate.cpuMs}`);
+    assert.ok(
+      estimate.cpuMs + 20 <= estimate.waitMs,
+      `cpu ${estimate.cpuMs} wait ${estimate.waitMs}`,
+    );
+    assert.ok(estimate.totalMs >= estimate.waitMs);
+
+    const ranks = computeUpwardRanks(compileComputeGraph(graph, registry), scheduler.costModel, 1);
+    assert.ok(ranks.get("io")! >= estimate.cpuMs + estimate.waitMs - 1e-9);
+  } finally {
+    await scheduler.close();
+  }
 });
 
 test("Event-driven async DAG bypasses wave barriers and preserves coalescing, locks, and semantic retry", async () => {

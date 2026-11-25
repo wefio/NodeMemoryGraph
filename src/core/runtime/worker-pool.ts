@@ -39,7 +39,6 @@ export interface WorkerTaskResponse {
 }
 
 export interface RuntimeWorker extends WorkerPlacementTarget {
-  readonly dataLocality?: string;
   supports(op: string): boolean;
   supportsOperator?(op: string, implementation: unknown): boolean;
   execute(task: WorkerTaskRequest, signal?: AbortSignal): Promise<WorkerTaskResponse>;
@@ -132,7 +131,6 @@ function plainTransferObject(value: object): boolean {
 export class LocalWorkerThreadPool implements RuntimeWorker {
   readonly id: string;
   readonly kind = "worker_thread" as const;
-  readonly dataLocality = "worker_thread";
   readonly maxWorkers: number;
   private readonly slots = new Set<WorkerSlot>();
   private readonly queue: WorkerCall[] = [];

@@ -9,7 +9,6 @@ export {
 } from "./cost-model.ts";
 export {
   HostLoadGovernor,
-  applyBackgroundOsPriority,
   type AdaptiveDispatchBudget,
   type HostLoadState,
   type HostTelemetrySample,

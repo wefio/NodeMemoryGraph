@@ -71,3 +71,29 @@ node docs/experiments/runtime/production-runtime-benchmark.mjs --baseline-ref 60
 ## 架构护栏与正确性验证覆盖
 
 `tests/core/compute-architecture-guardrails.test.ts`、`tests/core/unified-runtime-scheduler.test.ts` 与 `tests/integration/unified-semantics-parity.test.ts` 覆盖：按 `ComputeRegistry` 实例隔离的 `PLAN_CACHE`、递归子图 `runDcePass` 副作用保留、`fused_chain` 逐步参数哈希、`Map`/`Set`/`Date`/`RegExp`/`ArrayBuffer` 深冻结与规范化哈希、`L0 -> L1 -> L2` 溯源与 `PolicyViolationError` 护栏、事件驱动 DAG 唤醒、`ResourceLockManager`、`InFlightCoalescer` 去重、防止后台饿死的优先级老化、语义可控重试以及引擎／HTTP 搜索结果等价性。
+
+## 后续测量（2026-11-25）
+
+本次复核要回答：成本模型的等待维度与层级配置校验是否改变执行或派发开销。[io-wait-probe.mjs](io-wait-probe.mjs) 在同一主机、同一进程形态下分别测量两棵树：
+
+```sh
+git worktree add --detach .temp/baseline 0858eeff
+node docs/experiments/runtime/io-wait-probe.mjs --root .temp/baseline --out <产物路径>
+node docs/experiments/runtime/io-wait-probe.mjs --root . --out <产物路径>
+```
+
+每个实验臂运行三次。原始观测见 `artifacts/unified-runtime-2026-11-25/io-wait-{baseline,change}-{1,2,3}.json`。
+
+| 三次运行观测 | 基线（0858eeff） | 复核后 |
+| --- | --- | --- |
+| 同步单节点图，单次调用 µs | 0.522–0.572 | 0.504–0.603 |
+| 异步单节点图，单次调用 µs | 10.456–10.772 | 10.311–10.479 |
+| 四宽异步扇出，每叶 20 ms，ms | 30.857–31.359 | 30.750–31.316 |
+| 扇出叶节点的已观测 I/O 等待，ms | 0 | 29.684–30.432 |
+| 关键路径秩序值，5 ms 读 / 20 ms 读 | 0.164 / 0.164 | 12.319–14.428 / 29.907–31.441 |
+
+- 等待维度此前只声明、从未采样：所有 `waitMs` 估计恒为 `0`，两条 I/O 延迟不同的独立读分支秩序值完全相同。改动后挂起时间成为独立样本，秩序值随之区分，而同一算子的 CPU 估计仍为 `0.082 ms` 的提示值。
+- 串行与调度行为未变：同步路径、异步派发下限和四宽扇出都落在基线区间内。对未声明 `execution: "async_io"` 的算子，探针没有测到额外成本。
+- 层级校验由 `tests/core/unified-runtime-scheduler.test.ts` 覆盖（未知分区、未知参数、类型不符、以字符串代替数组），不通过计时证明，因为它改变的是配置是否被接受，而不是执行方式。
+
+测量限制：该 Windows 主机没有电池与温度遥测；计时器粒度会把名义 5 ms 的等待放大到约 15.6 ms；线程 CPU 计数器精度不足以做亚毫秒归因。因此探针报告的是相对维度与派发成本。它不复述应用层检索吞吐（本次改动未触及），也不作功耗或能耗结论。

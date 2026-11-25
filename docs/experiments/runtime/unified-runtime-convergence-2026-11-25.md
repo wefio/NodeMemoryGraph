@@ -71,3 +71,29 @@ Measured results on the unified runtime show exact golden retrieval parity, sub-
 ## Architectural and correctness verification scope
 
 Dedicated test suites in `tests/core/compute-architecture-guardrails.test.ts`, `tests/core/unified-runtime-scheduler.test.ts`, and `tests/integration/unified-semantics-parity.test.ts` cover registry-isolated `PLAN_CACHE` generations, recursive subgraph preservation in `runDcePass`, per-step parameters inside `fused_chain`, `isDeeplyFrozen` / `canonicalizeComputeValue` safety over built-in containers, `L0 -> L1 -> L2` provenance and `PolicyViolationError` enforcement, event-driven DAG wakeup, `ResourceLockManager`, `InFlightCoalescer` singleflight deduplication, priority aging against starvation, semantic retry constraints, and `UnifiedRuntimeScheduler` execution alongside full engine and HTTP search parity.
+
+## Follow-up measurements (2026-11-25)
+
+The follow-up asks whether the cost model's wait dimension and layer configuration validation change execution or dispatch cost. [io-wait-probe.mjs](io-wait-probe.mjs) measures both trees from the same process shape and host:
+
+```sh
+git worktree add --detach .temp/baseline 0858eeff
+node docs/experiments/runtime/io-wait-probe.mjs --root .temp/baseline --out <artifact>
+node docs/experiments/runtime/io-wait-probe.mjs --root . --out <artifact>
+```
+
+Each arm ran three times. Raw observations are in `artifacts/unified-runtime-2026-11-25/io-wait-{baseline,change}-{1,2,3}.json`.
+
+| Observation, three runs | Baseline (0858eeff) | Follow-up |
+| --- | --- | --- |
+| Synchronous one-node graph, µs per call | 0.522–0.572 | 0.504–0.603 |
+| Asynchronous one-node graph, µs per call | 10.456–10.772 | 10.311–10.479 |
+| Four-wide async fan-out, 20 ms per leaf, ms | 30.857–31.359 | 30.750–31.316 |
+| Observed I/O wait of a fan leaf, ms | 0 | 29.684–30.432 |
+| Critical-path rank, 5 ms read / 20 ms read | 0.164 / 0.164 | 12.319–14.428 / 29.907–31.441 |
+
+- The wait dimension was previously declared and never sampled: every `waitMs` estimate was `0`, so two independent read branches with different I/O latency ranked identically. After the change the suspended time is a separate sample, ranks follow it, and the CPU estimate for the same operators stays at the `0.082 ms` hint.
+- Serialization and scheduling are unchanged: the synchronous path, the asynchronous dispatch floor and the four-wide fan-out stay inside their baseline ranges. The probe did not add a measurable cost to graphs whose operators do not declare `execution: "async_io"`.
+- Layer validation is covered by `tests/core/unified-runtime-scheduler.test.ts` (unknown section, unknown parameter, wrong type, string-instead-of-array) rather than by timing, because it changes whether configuration is accepted, not how it executes.
+
+Measurement limits: this Windows host exposes no battery or thermal telemetry, timer granularity rounds a nominal 5 ms delay to roughly 15.6 ms, and thread CPU counters are too coarse for sub-millisecond attribution. The probe therefore reports relative dimensions and dispatch cost. It does not restate application retrieval throughput, which the change does not touch, and it makes no power or energy claim.

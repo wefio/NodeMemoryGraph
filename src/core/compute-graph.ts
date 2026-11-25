@@ -93,6 +93,7 @@ export interface ComputeExecutionDiagnostics {
     resourceWaitMs: number;
     inlineCpuMs: number;
     asyncWallMs: number;
+    ioWaitMs: number;
     workerCpuMs: number;
     workerQueueMs: number;
     communicationMs: number;

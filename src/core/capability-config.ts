@@ -525,8 +525,8 @@ export function resolveLayeredConfig(layers: {
   readonly l1?: { readonly config?: NmgLayerConfig; readonly source?: string };
   readonly l2?: { readonly config?: NmgLayerConfig; readonly source?: string };
 }): ResolvedLayerBundle {
-  validateRuntimeLayer(layers.l1?.config);
-  validateRuntimeLayer(layers.l2?.config);
+  validateLayerConfig(layers.l1?.config);
+  validateLayerConfig(layers.l2?.config);
   const { values, provenance } = resolveEffectiveParameters(layers);
   const { bindings, bindingProvenance } = mergeLayerBindings(layers);
   const allowAlgorithmicOverrides =
@@ -558,7 +558,27 @@ export function resolveLayeredConfig(layers: {
   };
 }
 
-function validateRuntimeLayer(config: NmgLayerConfig | undefined): void {
+const PARAMETER_SECTIONS = [
+  "autoRecall",
+  "maintenance",
+  "stgSync",
+  "stgConsolidation",
+  "runtime",
+] as const;
+
+const LAYER_KEYS = new Set<string>([
+  "schemaVersion",
+  "allowAlgorithmicOverrides",
+  "allowedAlgorithmicVariants",
+  "bindings",
+  ...PARAMETER_SECTIONS,
+]);
+
+/**
+ * Reject configuration that cannot control anything. A misspelled section or key
+ * would otherwise resolve to its L0 default and look like an effective override.
+ */
+function validateLayerConfig(config: NmgLayerConfig | undefined): void {
   if (config === undefined) return;
   if (!config || typeof config !== "object" || Array.isArray(config)) {
     throw new Error("NMG capability configuration must be an object");
@@ -566,12 +586,44 @@ function validateRuntimeLayer(config: NmgLayerConfig | undefined): void {
   if (config.schemaVersion !== undefined && config.schemaVersion !== 1) {
     throw new Error("Unsupported NMG capability configuration version");
   }
-  if (config.runtime === undefined) return;
-  if (!config.runtime || typeof config.runtime !== "object" || Array.isArray(config.runtime)) {
-    throw new Error("runtime configuration must be an object");
+  assertKnownLayerKeys(config);
+  validateLayerOptions(config);
+  validateParameterSections(config);
+}
+
+function assertKnownLayerKeys(config: NmgLayerConfig): void {
+  for (const key of Object.keys(config)) {
+    if (!LAYER_KEYS.has(key)) throw new Error(`Unknown NMG capability configuration key: ${key}`);
   }
-  for (const [key, value] of Object.entries(config.runtime)) {
-    if (value !== undefined) validateParameterValue("runtime." + key, value);
+}
+
+function validateLayerOptions(config: NmgLayerConfig): void {
+  const { allowAlgorithmicOverrides, allowedAlgorithmicVariants, bindings } = config;
+  if (allowAlgorithmicOverrides !== undefined && typeof allowAlgorithmicOverrides !== "boolean") {
+    throw new Error("allowAlgorithmicOverrides must be a boolean");
+  }
+  if (allowedAlgorithmicVariants !== undefined && !isRecipeIdList(allowedAlgorithmicVariants)) {
+    throw new Error("allowedAlgorithmicVariants must be an array of recipe ids");
+  }
+  if (bindings !== undefined && (typeof bindings !== "object" || !bindings)) {
+    throw new Error("bindings configuration must be an object");
+  }
+}
+
+function isRecipeIdList(value: unknown): boolean {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
+function validateParameterSections(config: NmgLayerConfig): void {
+  for (const section of PARAMETER_SECTIONS) {
+    const value = config[section];
+    if (value === undefined) continue;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`${section} configuration must be an object`);
+    }
+    for (const [key, entry] of Object.entries(value)) {
+      if (entry !== undefined) validateParameterValue(`${section}.${key}`, entry);
+    }
   }
 }
 

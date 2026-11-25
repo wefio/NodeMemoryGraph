@@ -24,7 +24,7 @@ flowchart TB
 ```
 
 - **逻辑计算图（`ComputeGraphSpec`）**：使用 `src/core/compute-contracts.ts` 中的领域契约表达计算需求与数据流，不固化具体后端查询或执行顺序优化。
-- `resolveEffectiveNmgConfig` 绑定 L0 公共默认值与已注册图配方、L1 共享配置、L2 宿主覆盖。`bindMemoryEngineConfig` 向引擎提供检索、视图、投影、写入和生命周期图。HTTP 子句融合、写入预处理和画像也读取同一份有效配置。能力绑定保留来源并参与结果身份。未获准的语义变体触发 `PolicyViolationError`。
+- `resolveEffectiveNmgConfig` 绑定 L0 公共默认值与已注册图配方、L1 共享配置、L2 宿主覆盖。`bindMemoryEngineConfig` 向引擎提供检索、视图、投影、写入和生命周期图。HTTP 子句融合、写入预处理和画像也读取同一份有效配置。能力绑定保留来源并参与结果身份。未获准的语义变体触发 `PolicyViolationError`。各层都按同一份声明式 schema 校验：未知分区、未知参数或类型不符会直接失败，不再静默沿用 L0 默认值。
 - `PhysicalExecutionPlan` 解析 `$contract`、下推结构化表达式、消除可合并或无用节点，并可融合不持有命名资源的纯同步链。规划器输出去重后的父节点计数、副作用顺序边和消费者计数。计划缓存区分图和注册表身份、注册表代数及语义配置。
 - `executeComputeGraph` 将每个异步计划交给 `UnifiedRuntimeScheduler.executePlan`，子图递归进入同一就绪循环。`evaluateSyncComputeGraph` 保留同步拓扑执行，普通无 memo 调用无需排队或哈希。两条路径共享算子、输入、缓存签名和输出生命周期规则。
 
@@ -48,7 +48,7 @@ Node daemon 和 portable RPC 从 `NMG_CONFIG_PATH` 或服务数据目录读取 L
 
 CPU 放置考虑就绪 CPU 工作量、调用端输入字节数、已观测通信开销和被选叶节点的可用性。获准的 Worker 算子与内联共用实现。较大的默认重排批次可以进入放置路径，小批次、替代图和不宜转移的数据仍可内联计算。Worker 失败向调用者传播，取消会终止正在运行的线程。
 
-主机治理器采样系统 CPU 时间和进程事件循环压力，使用迟滞和后台事件循环让渡逐步恢复容量。诊断可记录队列与资源等待、同步线程 CPU、Worker 排队与通信时间，以及异步节点让渡后的墙钟时间。让渡后时间包含应用回调；任意同步 JavaScript 仍无法抢占。实测见[生产与合成对照](../../experiments/runtime/unified-runtime-convergence-2026-11-25.zh-CN.md)。
+主机治理器采样系统 CPU 时间和进程事件循环压力，使用迟滞和后台事件循环让渡逐步恢复容量。队列／资源等待、同步线程 CPU、I/O 等待、Worker 排队与通信时间分别记账：声明 `execution: "async_io"` 的算子只把挂起墙钟时间记为等待（`ComputeCostModel.observeWait`），用于关键路径排序，不改写该算子的 CPU 估计。让渡后时间包含应用回调；任意同步 JavaScript 仍无法抢占。在途合并使用与 memo 作用域相同的节点签名和配置身份，因此只能在同一快照身份内共享工作，不会合并不同的逐请求快照。实测见[生产与合成对照](../../experiments/runtime/unified-runtime-convergence-2026-11-25.zh-CN.md)。
 
 ## 节点实现形态与渐进式能力声明
 

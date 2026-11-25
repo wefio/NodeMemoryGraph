@@ -301,13 +301,3 @@ export class HostLoadGovernor {
     this.delayMonitor?.disable();
   }
 }
-
-/** Hint the host OS scheduler for background priority when supported by the platform. */
-export function applyBackgroundOsPriority(): boolean {
-  try {
-    os.setPriority(os.constants.priority.PRIORITY_BELOW_NORMAL);
-    return true;
-  } catch {
-    return false;
-  }
-}
