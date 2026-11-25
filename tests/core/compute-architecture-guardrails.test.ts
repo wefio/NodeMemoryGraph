@@ -149,6 +149,7 @@ test("Static architecture guardrails: layer boundaries, declared operator contra
     "w_concept_pivot",
     "w_lineage_pivot",
     "w_turn_pivot",
+    "w_chrono_seq_pivot",
   ]);
   checkRegistryOps("RETRIEVAL", RETRIEVAL_COMPUTE_REGISTRY, [
     "lexical_recall",

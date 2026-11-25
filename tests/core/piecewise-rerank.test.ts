@@ -1012,3 +1012,207 @@ test("geometric blind-spot windows, MaxP sub-chunks, sentence-aligned preview, a
     else process.env.NMG_EMBED_CHUNK_CHARS = prevChunkEnv;
   }
 });
+
+test("w_chrono_seq_pivot lifts multi-timestamp state/node trajectories and skips single-timestamp groups", () => {
+  const candidates: RerankCandidate[] = [];
+  // Anchor in top-5 belongs to a multi-timestamp state trajectory ("deploy.db").
+  candidates.push({
+    id: "chrono-anchor",
+    statement: "Switched billing service database engine from Postgres to MySQL",
+    combinedScore: 12.0,
+    eventTime: "2025-01-10T10:00:00Z",
+    sessionId: "s-mig-1",
+    nodeId: "n-db",
+    stateKey: "deploy.db",
+  });
+  for (let i = 1; i <= 4; i += 1) {
+    candidates.push({
+      id: `head-pad-${i}`,
+      statement: `Unrelated billing quarterly note number ${i}`,
+      combinedScore: 11.8 - i * 0.1,
+      eventTime: "2025-01-05T10:00:00Z",
+      sessionId: `s-pad-${i}`,
+      nodeId: `n-pad-${i}`,
+    });
+  }
+  // Single-timestamp group in mid band [6..20]: identical timestamps share one bucket so order stays untouched.
+  for (let i = 0; i < 4; i += 1) {
+    candidates.push({
+      id: `flat-${i}`,
+      statement: `Weekly engineering standup topic alpha_${i} unique_${i}`,
+      combinedScore: 9.2 - i * 0.04,
+      eventTime: "2025-01-01T00:00:00Z",
+      sessionId: "s-flat",
+      nodeId: "n-flat",
+    });
+  }
+  // Distinct-timestamp successor for "deploy.db" starts outside top-20 by baseScore (~8.9) and moves into mid.
+  for (let i = 0; i < 12; i += 1) {
+    candidates.push({
+      id: `mid-noise-${i}`,
+      statement: `Distinct background note delta_${i} marker_${i}`,
+      combinedScore: 9.0 - i * 0.01,
+      eventTime: "2025-01-01T00:00:00Z",
+      sessionId: `s-noise-${i}`,
+      nodeId: `n-noise-${i}`,
+    });
+  }
+  candidates.push({
+    id: "chrono-successor",
+    statement: "Completed final MySQL read-replica cutover and retired legacy instance",
+    combinedScore: 8.85,
+    eventTime: "2025-02-15T10:00:00Z",
+    sessionId: "s-mig-2",
+    nodeId: "n-db",
+    stateKey: "deploy.db",
+  });
+
+  const reranked = rerankCandidatesWithGraph(
+    candidates,
+    "billing database engine",
+    DEFAULT_PIECEWISE_RERANK_GRAPH,
+  );
+  const successorIdx = reranked.findIndex((c) => c.id === "chrono-successor");
+  assert.ok(
+    successorIdx >= 5 && successorIdx < 12,
+    `expected chrono-successor in mid band [5..11], got ${successorIdx}`,
+  );
+
+  // Pure single-timestamp session candidates keep exact relative ordering (no arbitrary ID tie-break lift).
+  const singleTimestampOnly: RerankCandidate[] = Array.from({ length: 12 }, (_, idx) => ({
+    id: idx === 0 ? "anchor" : `same-ts-${12 - idx}`,
+    statement: `Distinct note item_${idx} token_${idx}`,
+    combinedScore: 10 - idx * 0.05,
+    eventTime: "2025-03-01T12:00:00Z",
+    sessionId: "s-single",
+    nodeId: "n-single",
+  }));
+  const noChrono = createPiecewiseRerankGraph({ id: "no-chrono", midChronoWeight: 0 });
+  const withDefault = rerankCandidatesWithGraph(
+    singleTimestampOnly,
+    "distinct note",
+    DEFAULT_PIECEWISE_RERANK_GRAPH,
+  );
+  const withZeroChrono = rerankCandidatesWithGraph(singleTimestampOnly, "distinct note", noChrono);
+  assert.deepEqual(
+    withDefault.map((c) => c.id),
+    withZeroChrono.map((c) => c.id),
+  );
+});
+
+test("hybrid search with limit > 80 freezes 1..80 and supplements [81..100] with store neighbors", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "nmg-deep-tail-"));
+  const backend = await openMemoryBackend({
+    kind: "sqlite",
+    path: join(dir, "memory.sqlite"),
+    namespace: "deep-tail-test",
+  });
+  t.after(async () => {
+    await backend.close();
+    removeTempDirectory(dir);
+  });
+
+  let seq = 0;
+  const engine = new MemoryEngine(backend, () => {
+    seq += 1;
+    return `2026-10-${String(1 + Math.floor(seq / 60)).padStart(2, "0")}T00:${String(seq % 60).padStart(2, "0")}:00.000Z`;
+  });
+
+  // Write an earlier historical state peer BEFORE the active anchor so anchorTurn supersedes it (status: "active").
+  const historicalPeer = await engine.remember({
+    statement: "Earlier thermal sensor baseline drift logged before recalibration",
+    nodeName: "Orbital Bench",
+    memoryType: "state",
+    stateKey: "orbital.calibration",
+    evidence: "Earlier thermal sensor baseline drift logged before recalibration",
+  });
+  // Top anchor with an adjacent follow-up turn sharing zero lexical overlap and an orthogonal vector.
+  const anchorTurn = await engine.remember({
+    statement: "Primary orbital telemetry calibration run succeeded on bench alpha",
+    nodeName: "Orbital Bench",
+    memoryType: "state",
+    stateKey: "orbital.calibration",
+    sessionId: "s-orb",
+    residence: "stg",
+    evidenceSource: {
+      actor: "user",
+      content: "Primary orbital telemetry calibration run succeeded on bench alpha",
+      sourceMessageId: "1",
+    },
+  });
+  const adjacentTurn = await engine.remember({
+    statement: "Remember to clean the blue quartz optical filter afterward",
+    nodeName: "Filter Maintenance",
+    sourceActor: "assistant",
+    sessionId: "s-orb",
+    residence: "stg",
+    evidenceSource: {
+      actor: "assistant",
+      content: "Remember to clean the blue quartz optical filter afterward",
+      sourceMessageId: "2",
+    },
+  });
+  const fillers = await engine.rememberMany(
+    Array.from({ length: 86 }, (_, index) => ({
+      statement: `orbital telemetry routine checklist sample_${index}`,
+      nodeName: `Checklist ${index}`,
+      eventTime: "2026-10-01T00:00:00.000Z",
+    })),
+  );
+  const stgStatePeer = await engine.remember({
+    statement: "Blue anodized torque wrench setting noted during teardown",
+    nodeName: "Orbital Bench",
+    memoryType: "state",
+    stateKey: "orbital.calibration",
+    residence: "stg",
+    sessionId: "s-orb",
+    evidence: "Blue anodized torque wrench setting noted during teardown",
+  });
+
+  const pending = backend.vectorIndex!.pending("stub", 200);
+  backend.vectorIndex!.save(
+    "stub",
+    pending,
+    pending.map((doc) => {
+      if (doc.id === anchorTurn.memory.id) return [1, 0];
+      if (
+        doc.id === adjacentTurn.memory.id ||
+        doc.id === stgStatePeer.memory.id ||
+        doc.id === historicalPeer.memory.id
+      ) {
+        return [-1, 0];
+      }
+      return fillers.some((f) => f.memory.id === doc.id) ? [0.85, 0.2] : [0.5, 0.5];
+    }),
+  );
+
+  // Limit <= 20 must leave primary results untouched (no deep-tail injection).
+  const smallPage = await engine.search(
+    "orbital telemetry calibration bench alpha",
+    { sessionId: "s-orb", limit: 20 },
+    { indexId: "stub", vector: [1, 0], mode: "hybrid" },
+  );
+  assert.equal(smallPage.results.length, 20);
+  assert.equal(
+    smallPage.results.some((r) => r.memory.id === adjacentTurn.memory.id),
+    false,
+  );
+
+  // Limit > 80 (100) freezes [0..80) and surfaces adjacentTurn / same_state peers inside [80..100).
+  const deepPage = await engine.search(
+    "orbital telemetry calibration bench alpha",
+    { sessionId: "s-orb", limit: 100, includeHistorical: true },
+    { indexId: "stub", vector: [1, 0], mode: "hybrid" },
+  );
+  assert.ok(deepPage.results.length >= 82);
+  const head80Ids = deepPage.results.slice(0, 80).map((r) => r.memory.id);
+  assert.equal(head80Ids.includes(adjacentTurn.memory.id), false);
+  const tailSlice = deepPage.results.slice(80);
+  const adjHit = tailSlice.find((r) => r.memory.id === adjacentTurn.memory.id);
+  const stateHit = tailSlice.find(
+    (r) => r.memory.id === stgStatePeer.memory.id || r.memory.id === historicalPeer.memory.id,
+  );
+  assert.equal(adjHit?.neighborhood, "next_turn");
+  assert.equal(stateHit?.neighborhood, "same_state");
+  assert.ok(deepPage.results[79]!.combinedScore >= tailSlice[0]!.combinedScore);
+});

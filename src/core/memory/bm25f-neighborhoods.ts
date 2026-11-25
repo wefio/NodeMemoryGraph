@@ -466,3 +466,103 @@ export const turnPivotOperator: ComputeOperator<RerankContext> = (inputs, contex
     })
     .sort(compareScored);
 };
+
+function chronoGroupKey(
+  candidate: RerankCandidate,
+  sessionKeyOf: (candidate: RerankCandidate) => string,
+): string {
+  if (candidate.stateKey) return `state:${candidate.stateKey}`;
+  if (candidate.nodeId) return `node:${candidate.nodeId}`;
+  const session = sessionKeyOf(candidate);
+  return session ? `sess:${session}` : "";
+}
+
+function collectChronoBuckets(
+  candidates: readonly RerankCandidate[],
+  sessionKeyOf: (candidate: RerankCandidate) => string,
+): Map<string, Map<number, string[]>> {
+  const buckets = new Map<string, Map<number, string[]>>();
+  for (const candidate of candidates) {
+    const group = chronoGroupKey(candidate, sessionKeyOf);
+    if (!group) continue;
+    const ms = Date.parse(candidate.eventTime ?? candidate.createdAt ?? "");
+    if (!Number.isFinite(ms)) continue;
+    let byMs = buckets.get(group);
+    if (!byMs) {
+      byMs = new Map<number, string[]>();
+      buckets.set(group, byMs);
+    }
+    const ids = byMs.get(ms) ?? [];
+    ids.push(candidate.id);
+    byMs.set(ms, ids);
+  }
+  return buckets;
+}
+
+function deriveChronoStepPositions(
+  candidates: readonly RerankCandidate[],
+  sessionKeyOf: (candidate: RerankCandidate) => string,
+): Map<string, { group: string; stepIdx: number }> {
+  const positions = new Map<string, { group: string; stepIdx: number }>();
+  for (const [group, byMs] of collectChronoBuckets(candidates, sessionKeyOf)) {
+    if (byMs.size < 2) continue;
+    const orderedSteps = [...byMs.entries()].sort((left, right) => left[0] - right[0]);
+    for (let stepIdx = 0; stepIdx < orderedSteps.length; stepIdx += 1) {
+      for (const id of orderedSteps[stepIdx]![1]) {
+        positions.set(id, { group, stepIdx });
+      }
+    }
+  }
+  return positions;
+}
+
+function bestChronoStepSignal(
+  stepIdx: number,
+  anchors: readonly { stepIdx: number; vote: number }[],
+  maxSteps: number,
+): number {
+  let bestSignal = 0;
+  for (const anchor of anchors) {
+    const dist = Math.abs(stepIdx - anchor.stepIdx);
+    if (dist < 1 || dist > maxSteps) continue;
+    const signal = anchor.vote / (1 + 0.5 * (dist - 1));
+    if (signal > bestSignal) bestSignal = signal;
+  }
+  return bestSignal;
+}
+
+/** Boost distinct-timestamp chronological neighbors (+-maxSteps) within the same state/node/session group. */
+export const chronoSequencePivotOperator: ComputeOperator<RerankContext> = (
+  inputs,
+  context,
+  params,
+) => {
+  const base = inputScored(inputs, context.candidates);
+  if (base.length < 3) return base;
+  const weight = numParam(params, "weight", 0.18);
+  const anchorTopK = Math.max(1, Math.floor(numParam(params, "anchorTopK", 5)));
+  const maxSteps = Math.max(1, Math.floor(numParam(params, "maxSteps", 2)));
+  const sessionKeyOf = context.sessionKeyOf ?? defaultTurnSessionKey;
+  const positions = deriveChronoStepPositions(context.candidates, sessionKeyOf);
+  if (!positions.size) return base;
+
+  const anchorsByGroup = new Map<string, Array<{ stepIdx: number; vote: number }>>();
+  for (let i = 0; i < Math.min(anchorTopK, base.length); i += 1) {
+    const info = positions.get(base[i]!.id);
+    if (!info) continue;
+    const list = anchorsByGroup.get(info.group) ?? [];
+    list.push({ stepIdx: info.stepIdx, vote: 1 / (1 + 0.25 * i) });
+    anchorsByGroup.set(info.group, list);
+  }
+  if (!anchorsByGroup.size) return base;
+
+  return base
+    .map((entry) => {
+      const info = positions.get(entry.id);
+      const anchors = info ? anchorsByGroup.get(info.group) : undefined;
+      if (!info || !anchors) return entry;
+      const signal = bestChronoStepSignal(info.stepIdx, anchors, maxSteps);
+      return signal > 0 ? { id: entry.id, score: entry.score + weight * signal } : entry;
+    })
+    .sort(compareScored);
+};
