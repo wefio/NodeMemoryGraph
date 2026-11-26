@@ -1,7 +1,14 @@
 import type { ComputeOperator } from "../compute-graph.ts";
 import { eventDateIndexText, normalize } from "../memory-normalization.ts";
 import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
-import type { RerankCandidate, RerankContext, ScoredCandidateId } from "./piecewise-rerank.ts";
+import {
+  compareScored,
+  getRerankCandidateIndex,
+  inputScored,
+  numParam,
+  type RerankCandidate,
+  type RerankContext,
+} from "./rerank-types.ts";
 
 export type Bm25Variant = "bm25" | "bm25l" | "bm25_plus" | "bm25_atire" | "bm25_qtf";
 
@@ -428,19 +435,6 @@ export class IncrementalBm25Index {
   }
 }
 
-function numParam(
-  params: Readonly<Record<string, unknown>>,
-  key: string,
-  fallback: number,
-): number {
-  const value = params[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function compareScored(left: ScoredCandidateId, right: ScoredCandidateId): number {
-  return right.score - left.score || (left.id < right.id ? -1 : Number(left.id > right.id));
-}
-
 function candidateDocumentText(candidate: RerankCandidate): string {
   const triggers = recallTriggersFromStoredMarkers(candidate.markers ?? []).join(" ");
   const dates = eventDateIndexText(candidate.eventTime);
@@ -464,9 +458,7 @@ export const incrementalBm25ScoreOperator: ComputeOperator<RerankContext> = (
   context,
   params,
 ) => {
-  const base = Array.isArray(inputs.default)
-    ? (inputs.default as ScoredCandidateId[])
-    : context.candidates.map((c) => ({ id: c.id, score: c.combinedScore })).sort(compareScored);
+  const base = inputScored(inputs, context.candidates);
   if (context.candidates.length < 2) return base;
 
   const queryTokens = tokenizeForIncrementalBm25(context.queryText);
@@ -475,7 +467,7 @@ export const incrementalBm25ScoreOperator: ComputeOperator<RerankContext> = (
   const weight = numParam(params, "weight", 0.1);
   const poolSize = Math.max(2, Math.floor(numParam(params, "poolSize", 200)));
   const poolEntries = base.slice(0, poolSize);
-  const byId = new Map(context.candidates.map((c) => [c.id, c]));
+  const { byId } = getRerankCandidateIndex(context.candidates);
 
   const index = new IncrementalBm25Index();
   for (const entry of poolEntries) {

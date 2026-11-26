@@ -27,24 +27,21 @@ import {
 import { DEFAULT_HTTP_PROFILE_GRAPH } from "./http-profile-view.ts";
 import { DEFAULT_HTTP_SEARCH_GRAPH } from "./http-search-graph.ts";
 import { DEFAULT_HTTP_WRITE_PREPROCESS_GRAPH } from "./http-write-preprocess.ts";
-import {
+export {
   loadSharedL1Config,
-  resolveParameterBundle,
   resolveParameterConfig,
   type EffectiveAutoRecallPolicy,
+  type EffectiveOptimizationPolicy,
   type EffectiveParameterConfig,
   type EffectiveRuntimePolicy,
   type ResolveParameterConfigOptions,
 } from "./parameter-config.ts";
 
-export {
-  loadSharedL1Config,
-  resolveParameterConfig,
-  type EffectiveAutoRecallPolicy,
+import {
+  resolveParameterBundle,
   type EffectiveParameterConfig,
-  type EffectiveRuntimePolicy,
   type ResolveParameterConfigOptions,
-};
+} from "./parameter-config.ts";
 
 export interface EffectiveNmgConfig extends EffectiveParameterConfig {
   resolveGraph(contractId: string, override?: SubgraphOverrideSpec): ComputeGraphSpec;
@@ -97,6 +94,7 @@ export function bindMemoryEngineConfig(config: EffectiveNmgConfig): MemoryEngine
     lifecyclePlanGraph: config.resolveGraph("memory.lifecycle_plan"),
     configIdentity: config.resultIdentityHash,
     runtime: config.runtime,
+    optimization: config.optimization,
   };
 }
 

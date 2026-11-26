@@ -233,12 +233,28 @@ function executeChannelRecall(
   query: MemoryEntityQuery,
   options: MemoryQueryOptions,
   limit: number,
+  useLexicalPushdown: boolean,
   semantic?: MemoryVectorQuery,
   exact?: RegExp,
 ): Promise<MemorySearchResult[]> {
-  return semantic
-    ? semanticRecall(port, text, query, options, semantic, limit)
-    : lexicalRecall(port, text, query, options, limit, exact);
+  if (semantic) return semanticRecall(port, text, query, options, semantic, limit);
+  if (useLexicalPushdown && !exact && port.lexicalSearchPage) {
+    return Promise.resolve(
+      port.lexicalSearchPage({
+        text,
+        baseQuery: query,
+        includeHistorical: options.includeHistorical,
+        sourceActor: options.sourceActor,
+        nodeName: options.nodeName,
+        eventTimeFrom: options.eventTimeFrom,
+        eventTimeTo: options.eventTimeTo,
+        maxTier: options.maxTier,
+        limit,
+        now: port.now,
+      }),
+    );
+  }
+  return lexicalRecall(port, text, query, options, limit, exact);
 }
 
 function mergeTemporalWindow(
@@ -592,7 +608,7 @@ function buildSearchRegistry(): ComputeRegistry<MemorySnapshotPort> {
 
   registry.register(
     "recall_primary_candidates",
-    async (inputs, port): Promise<SearchBatchState> => {
+    async (inputs, port, params): Promise<SearchBatchState> => {
       const analysis = inputs.default as AnalyzedSearchQuery;
       const results = await executeChannelRecall(
         port,
@@ -600,17 +616,25 @@ function buildSearchRegistry(): ComputeRegistry<MemorySnapshotPort> {
         analysis.baseQuery,
         analysis.options,
         analysis.limit,
+        params.$loweredTarget === "sqlite_pushdown",
         analysis.semantic,
         analysis.exact,
       );
       return { results, exactMiss: Boolean(analysis.exact && !results.length) };
     },
-    readOp("memory.candidate_recall"),
+    {
+      ...readOp("memory.candidate_recall"),
+      lowering: {
+        target: "sqlite",
+        exprKind: "relational_query",
+        operation: "lexical_search_page",
+      },
+    },
   );
 
   registry.register(
     "recall_temporal_window",
-    async (inputs, port): Promise<SearchBatchState> => {
+    async (inputs, port, params): Promise<SearchBatchState> => {
       const state = inputs.candidates as SearchBatchState;
       const analysis = inputs.analysis as AnalyzedSearchQuery;
       if (state.exactMiss || analysis.exact || !analysis.temporalWindow) return state;
@@ -628,6 +652,7 @@ function buildSearchRegistry(): ComputeRegistry<MemorySnapshotPort> {
           eventTimeTo: analysis.temporalWindow.to,
         },
         analysis.limit,
+        params.$loweredTarget === "sqlite_pushdown",
         analysis.semantic,
       );
       return {
@@ -635,7 +660,14 @@ function buildSearchRegistry(): ComputeRegistry<MemorySnapshotPort> {
         results: mergeTemporalWindow(state.results, windowed, analysis.limit),
       };
     },
-    readOp("memory.candidate_recall"),
+    {
+      ...readOp("memory.candidate_recall"),
+      lowering: {
+        target: "sqlite",
+        exprKind: "relational_query",
+        operation: "lexical_search_page",
+      },
+    },
   );
 
   registry.register(
@@ -729,6 +761,9 @@ export function executeEngineSearchGraph(
     input,
     port,
     memo,
-    planOptions,
+    {
+      backendTarget: port.hasRelationalPushdown ? "sqlite" : "portable",
+      ...planOptions,
+    },
   );
 }

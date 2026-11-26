@@ -32,6 +32,8 @@ export interface ComputeCostHint {
 export interface ComputeLoweringDescriptor {
   readonly target: "sqlite" | "js" | "numeric" | "external";
   readonly exprKind?: string;
+  readonly operation?: string;
+  readonly fusableWithUpstream?: readonly string[];
 }
 
 export interface ComputeRegisterOptions {
@@ -138,13 +140,27 @@ export interface ComputeContractSpec {
   readonly invariants?: readonly string[];
 }
 
+export type RelationalOperationKind =
+  | "project_memories"
+  | "project_memories_with_topology"
+  | "user_profile_query"
+  | "lexical_search_page"
+  | "ordered_get_page";
+
 export interface RelationalQueryExpr {
   readonly kind: "relational_query";
-  readonly operation: "project_memories";
+  readonly operation: RelationalOperationKind;
   readonly pushdownPreferred?: boolean;
+  readonly joins?: readonly ("nodes" | "sources" | "edges" | "markers" | "relations")[];
+  readonly predicates?: readonly string[];
 }
 
-export type StructuredComputeExpr = RelationalQueryExpr;
+export interface PurePipelineExpr {
+  readonly kind: "pure_pipeline";
+  readonly stageOps: readonly string[];
+}
+
+export type StructuredComputeExpr = RelationalQueryExpr | PurePipelineExpr;
 
 export type ComputeOperatorFn<TContext = unknown> = (
   inputs: Readonly<Record<string, unknown>>,

@@ -12,13 +12,27 @@ import {
   type ResolvedOperatorCapabilities,
   type StructuredComputeExpr,
 } from "./compute-contracts.ts";
+import {
+  DEFAULT_BACKEND_REGISTRY,
+  compileFusedChainSyncRunner,
+  compileSyncPlanKernel,
+  runBackendLoweringPass,
+  type CompiledSyncKernel,
+  type ComputeBackendRegistry,
+  type LoweredTargetKind,
+  type LoweringPassResult,
+} from "./compute-lowering.ts";
 import { hasNamedResources } from "./resource-locks.ts";
 
 export interface PhysicalPlanOptions {
   readonly enableDce?: boolean;
   readonly enableCse?: boolean;
   readonly enableLinearFusion?: boolean;
+  readonly enableRegionLowering?: boolean;
+  readonly enableSyncKernel?: boolean;
   readonly backendTarget?: "auto" | "sqlite" | "portable";
+  readonly costRatioThreshold?: number;
+  readonly backendRegistry?: ComputeBackendRegistry;
   readonly contractBindings?: Readonly<Record<string, string>>;
   readonly configIdentity?: string;
   readonly allowedAlgorithmicVariants?: readonly string[];
@@ -36,7 +50,9 @@ export interface PhysicalNodePlan {
   readonly expression?: StructuredComputeExpr;
   readonly subgraphPlan?: PhysicalExecutionPlan;
   readonly fusedSteps?: readonly PhysicalNodePlan[];
-  readonly loweredTarget?: "sqlite_pushdown" | "portable_scan";
+  readonly compiledFusedSync?: (inputs: Record<string, unknown>, context: unknown) => unknown;
+  readonly loweredTarget?: LoweredTargetKind;
+  readonly loweredRegionNodeIds?: readonly string[];
   readonly contract?: string;
 }
 
@@ -48,6 +64,7 @@ export interface PhysicalWaveGroup {
 export interface PhysicalExecutionPlan {
   readonly logicalGraphId: string;
   readonly configIdentity?: string;
+  readonly backendVersionSignature?: string;
   readonly outputNodeId: string;
   readonly order: readonly PhysicalNodePlan[];
   readonly waves: readonly PhysicalWaveGroup[];
@@ -61,6 +78,7 @@ export interface PhysicalExecutionPlan {
   readonly eliminatedNodeIds: readonly string[];
   readonly cseMergedNodeIds: ReadonlyMap<string, string>;
   readonly loweredNodes: ReadonlyMap<string, string>;
+  readonly syncKernel?: CompiledSyncKernel;
   readonly hasUncacheableNode: boolean;
 }
 
@@ -71,6 +89,7 @@ interface WorkingGraph {
   readonly cseMergedNodeIds: Map<string, string>;
   readonly eliminatedNodeIds: string[];
   readonly loweredNodes: Map<string, string>;
+  readonly regionTargetByExit: LoweringPassResult["regionTargetByExit"];
 }
 
 const PLAN_CACHE = new WeakMap<ComputeGraphSpec, Map<string, PhysicalExecutionPlan>>();
@@ -439,11 +458,12 @@ function nextChainStep(
   return edge.from === cur.id && (edge.port ?? "default") === "default" ? nextNode : undefined;
 }
 
-function buildLinearFusedOrder(
+function buildLinearFusedOrder<TContext>(
   order: readonly PhysicalNodePlan[],
   edges: readonly ComputeEdgeSpec[],
   consumerCounts: ReadonlyMap<string, number>,
   outputNodeId: string,
+  registry: ComputeOperatorLookup<TContext>,
 ): { order: PhysicalNodePlan[]; absorbedIds: Set<string> } {
   const byId = new Map(order.map((n) => [n.id, n]));
   const outgoingTarget = new Map<string, string>();
@@ -475,18 +495,10 @@ function buildLinearFusedOrder(
       capabilities: last.capabilities,
       kind: "fused_chain",
       fusedSteps: chain,
+      compiledFusedSync: compileFusedChainSyncRunner(chain, registry),
     });
   }
   return { order: nextOrder, absorbedIds };
-}
-
-function selectLoweredTarget(
-  node: ComputeNodeSpec,
-  options: PhysicalPlanOptions,
-): "sqlite_pushdown" | "portable_scan" {
-  if (options.backendTarget === "sqlite") return "sqlite_pushdown";
-  if (options.backendTarget === "portable") return "portable_scan";
-  return node.expression?.pushdownPreferred === false ? "portable_scan" : "sqlite_pushdown";
 }
 
 function buildPhysicalNode<TContext>(
@@ -494,7 +506,9 @@ function buildPhysicalNode<TContext>(
   incoming: readonly ComputeEdgeSpec[],
   registry: ComputeOperatorLookup<TContext>,
   options: PhysicalPlanOptions,
-  loweredNodes: Map<string, string>,
+  regionInfo?: LoweringPassResult["regionTargetByExit"] extends ReadonlyMap<string, infer V>
+    ? V
+    : never,
 ): PhysicalNodePlan {
   const op = resolveNodeOp(node, registry, options);
   const subgraphPlan = node.subgraph
@@ -510,15 +524,17 @@ function buildPhysicalNode<TContext>(
     requiresResourceLock: hasNamedResources(capabilities.resources),
   };
   const contractProp = node.contract ? { contract: node.contract } : {};
-  if (node.expression) {
-    const loweredTarget = selectLoweredTarget(node, options);
-    loweredNodes.set(node.id, loweredTarget);
+  const expression = regionInfo?.expression ?? node.expression;
+  if (regionInfo) {
     return {
       ...base,
       op,
       kind: "lowered_expression",
-      expression: node.expression,
-      loweredTarget,
+      ...(expression ? { expression } : {}),
+      loweredTarget: regionInfo.loweredTarget,
+      ...(regionInfo.regionNodeIds.length > 1
+        ? { loweredRegionNodeIds: regionInfo.regionNodeIds }
+        : {}),
       ...contractProp,
     };
   }
@@ -538,14 +554,25 @@ function buildPhysicalNode<TContext>(
       inlineFn: node.fn,
     };
   }
-  return { ...base, op, kind: "operator", ...contractProp };
+  return {
+    ...base,
+    op,
+    kind: "operator",
+    ...(expression ? { expression } : {}),
+    ...contractProp,
+  };
+}
+
+function backendVersionFor(options: PhysicalPlanOptions): string {
+  return (options.backendRegistry ?? DEFAULT_BACKEND_REGISTRY).versionSignature;
 }
 
 function planCacheKey<TContext>(
   registry: ComputeOperatorLookup<TContext>,
   options: PhysicalPlanOptions,
 ): string {
-  return `${registryInstanceToken(registry)}:${registry.generation}|${options.configIdentity ?? ""}|${canonicalizeComputeValue(options)}`;
+  const backendSig = backendVersionFor(options);
+  return `${registryInstanceToken(registry)}:${registry.generation}|${backendSig}|${options.configIdentity ?? ""}|${canonicalizeComputeValue(options)}`;
 }
 
 /** Transform and compile a logical ComputeGraphSpec into a cached PhysicalExecutionPlan. */
@@ -567,13 +594,35 @@ export function compileComputeGraph<TContext = unknown>(
 
   const cse = runCsePass(spec.id, spec.nodes, spec.edges, spec.output, registry, options);
   const dce = runDcePass(cse.nodes, cse.edges, cse.output, registry, options);
+  const preLowerById = indexNodes(dce.nodes);
+  const preLowerGraph = indexAndValidateEdges(spec.id, dce.nodes, dce.edges, preLowerById);
+  const lowering = runBackendLoweringPass(
+    {
+      specId: spec.id,
+      nodes: dce.nodes,
+      edges: dce.edges,
+      output: cse.output,
+      nodeById: preLowerById,
+      incoming: preLowerGraph.incoming,
+      outgoing: preLowerGraph.outgoing,
+      backendTarget: options.backendTarget,
+      enableRegionLowering: options.enableRegionLowering !== false,
+      resolveOp: (n) => resolveNodeOp(n, registry, options),
+      resolveCaps: (n, resolved) => resolveNodeCapabilities(n, resolved, registry),
+    },
+    {
+      backendRegistry: options.backendRegistry,
+      costRatioThreshold: options.costRatioThreshold,
+    },
+  );
   const work: WorkingGraph = {
-    nodes: dce.nodes,
-    edges: dce.edges,
+    nodes: lowering.nodes,
+    edges: lowering.edges,
     output: cse.output,
     cseMergedNodeIds: cse.merged,
     eliminatedNodeIds: dce.eliminated,
-    loweredNodes: new Map(),
+    loweredNodes: lowering.loweredNodes,
+    regionTargetByExit: lowering.regionTargetByExit,
   };
 
   const nodeById = indexNodes(work.nodes);
@@ -592,7 +641,7 @@ export function compileComputeGraph<TContext = unknown>(
       incoming.get(node.id) ?? [],
       registry,
       options,
-      work.loweredNodes,
+      work.regionTargetByExit.get(node.id),
     );
     physicalById.set(node.id, planNode);
   }
@@ -604,7 +653,13 @@ export function compileComputeGraph<TContext = unknown>(
   let finalEdges = work.edges;
   let finalOutgoing = outgoing;
   if (options.enableLinearFusion) {
-    const fused = buildLinearFusedOrder(physicalOrder, work.edges, consumerCounts, work.output);
+    const fused = buildLinearFusedOrder(
+      physicalOrder,
+      work.edges,
+      consumerCounts,
+      work.output,
+      registry,
+    );
     if (fused.absorbedIds.size > 0) {
       physicalOrder = fused.order;
       finalEdges = physicalOrder.flatMap((n) => n.incoming);
@@ -619,9 +674,10 @@ export function compileComputeGraph<TContext = unknown>(
     }
   }
 
-  const plan: PhysicalExecutionPlan = {
+  const basePlan = {
     logicalGraphId: spec.id,
     configIdentity: options.configIdentity,
+    backendVersionSignature: backendVersionFor(options),
     outputNodeId: work.output,
     order: physicalOrder,
     waves: physicalWaves,
@@ -635,6 +691,12 @@ export function compileComputeGraph<TContext = unknown>(
     hasUncacheableNode: physicalOrder.some(
       (n) => !n.capabilities.cacheable || n.capabilities.effect !== "pure",
     ),
+  };
+  const syncKernel =
+    options.enableSyncKernel !== false ? compileSyncPlanKernel(basePlan, registry) : undefined;
+  const plan: PhysicalExecutionPlan = {
+    ...basePlan,
+    ...(syncKernel ? { syncKernel } : {}),
   };
 
   if (!byOptions) {
@@ -657,12 +719,14 @@ export function explainComputePlan(plan: PhysicalExecutionPlan): {
     cacheable: boolean;
     parallelSafe: boolean;
     loweredTarget?: string;
+    loweredRegionNodeIds?: readonly string[];
     fusedCount?: number;
   }>;
   eliminatedNodeIds: readonly string[];
   cseMergedNodeIds: Record<string, string>;
   loweredNodes: Record<string, string>;
   waveCount: number;
+  syncKernelCompiled: boolean;
 } {
   return {
     graphId: plan.logicalGraphId,
@@ -675,11 +739,13 @@ export function explainComputePlan(plan: PhysicalExecutionPlan): {
       cacheable: node.capabilities.cacheable,
       parallelSafe: node.capabilities.parallelSafe,
       ...(node.loweredTarget ? { loweredTarget: node.loweredTarget } : {}),
+      ...(node.loweredRegionNodeIds ? { loweredRegionNodeIds: node.loweredRegionNodeIds } : {}),
       ...(node.fusedSteps ? { fusedCount: node.fusedSteps.length } : {}),
     })),
     eliminatedNodeIds: plan.eliminatedNodeIds,
     cseMergedNodeIds: Object.fromEntries(plan.cseMergedNodeIds),
     loweredNodes: Object.fromEntries(plan.loweredNodes),
     waveCount: plan.waves.length,
+    syncKernelCompiled: Boolean(plan.syncKernel),
   };
 }
