@@ -2,7 +2,14 @@ import type { ComputeOperator } from "../compute-graph.ts";
 import { eventDateIndexText, normalize } from "../memory-normalization.ts";
 import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import { searchTerms } from "../store/search-ranking.ts";
-import type { RerankCandidate, RerankContext, ScoredCandidateId } from "./piecewise-rerank.ts";
+import {
+  compareScored,
+  getRerankCandidateIndex,
+  inputScored,
+  numParam,
+  type RerankCandidate,
+  type RerankContext,
+} from "./rerank-types.ts";
 
 const CONCEPT_STOP_WORDS = new Set([
   "the",
@@ -66,30 +73,6 @@ const CONCEPT_STOP_WORDS = new Set([
   "told",
   "asked",
 ]);
-
-function compareScored(left: ScoredCandidateId, right: ScoredCandidateId): number {
-  return right.score - left.score || (left.id < right.id ? -1 : Number(left.id > right.id));
-}
-
-function inputScored(
-  inputs: Readonly<Record<string, unknown>>,
-  candidates: readonly RerankCandidate[],
-): ScoredCandidateId[] {
-  const raw = inputs.default;
-  if (Array.isArray(raw)) return raw as ScoredCandidateId[];
-  return candidates
-    .map((candidate) => ({ id: candidate.id, score: candidate.combinedScore }))
-    .sort(compareScored);
-}
-
-function numParam(
-  params: Readonly<Record<string, unknown>>,
-  key: string,
-  fallback: number,
-): number {
-  const value = params[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
 
 function fieldTokens(text: string): string[] {
   if (!text) return [];
@@ -253,7 +236,7 @@ export const bm25fFieldScoreOperator: ComputeOperator<RerankContext> = (
   const cfg = resolveBm25fParams(params);
   const poolSize = Math.max(2, Math.floor(numParam(params, "poolSize", 200)));
   const poolEntries = base.slice(0, poolSize);
-  const byId = new Map(context.candidates.map((c) => [c.id, c]));
+  const { byId } = getRerankCandidateIndex(context.candidates);
   const poolCandidates = poolEntries.flatMap((entry) => {
     const candidate = byId.get(entry.id);
     return candidate ? [candidate] : [];
@@ -268,23 +251,16 @@ export const bm25fFieldScoreOperator: ComputeOperator<RerankContext> = (
   return [...reorderedPool, ...base.slice(poolSize)];
 };
 
-function candidateEventDay(candidate: RerankCandidate): string | null {
-  if (!candidate.eventTime) return null;
-  const ms = Date.parse(candidate.eventTime);
-  return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : null;
-}
-
 /** Boost candidates co-occurring on the same calendar event day as top-ranked anchors. */
 export const temporalPivotOperator: ComputeOperator<RerankContext> = (inputs, context, params) => {
   const base = inputScored(inputs, context.candidates);
   const weight = numParam(params, "weight", 0.14);
   const anchorTopK = Math.max(1, Math.floor(numParam(params, "anchorTopK", 5)));
-  const byId = new Map(context.candidates.map((c) => [c.id, c]));
+  const dayById = getRerankCandidateIndex(context.candidates).eventDays();
   const dayVotes = new Map<string, number>();
 
   for (let i = 0; i < Math.min(anchorTopK, base.length); i += 1) {
-    const candidate = byId.get(base[i]!.id);
-    const day = candidate ? candidateEventDay(candidate) : null;
+    const day = dayById.get(base[i]!.id);
     if (!day) continue;
     dayVotes.set(day, (dayVotes.get(day) ?? 0) + 1 / (60 + i + 1));
   }
@@ -297,8 +273,7 @@ export const temporalPivotOperator: ComputeOperator<RerankContext> = (inputs, co
 
   return base
     .map((entry) => {
-      const candidate = byId.get(entry.id);
-      const day = candidate ? candidateEventDay(candidate) : null;
+      const day = dayById.get(entry.id);
       const rank = day ? dayRank.get(day) : undefined;
       const boost = rank === undefined ? 0 : weight / (1 + 0.25 * rank);
       return { id: entry.id, score: entry.score + boost };
@@ -364,7 +339,7 @@ export const lineagePivotOperator: ComputeOperator<RerankContext> = (inputs, con
   const base = inputScored(inputs, context.candidates);
   const weight = numParam(params, "weight", 0.16);
   const anchorTopK = Math.max(1, Math.floor(numParam(params, "anchorTopK", 5)));
-  const byId = new Map(context.candidates.map((c) => [c.id, c]));
+  const { byId } = getRerankCandidateIndex(context.candidates);
 
   const stateHeat = new Map<string, number>();
   const predicateHeat = new Map<string, number>();
@@ -479,14 +454,15 @@ function chronoGroupKey(
 
 function collectChronoBuckets(
   candidates: readonly RerankCandidate[],
+  timestampMs: ReadonlyMap<string, number | null>,
   sessionKeyOf: (candidate: RerankCandidate) => string,
 ): Map<string, Map<number, string[]>> {
   const buckets = new Map<string, Map<number, string[]>>();
   for (const candidate of candidates) {
     const group = chronoGroupKey(candidate, sessionKeyOf);
     if (!group) continue;
-    const ms = Date.parse(candidate.eventTime ?? candidate.createdAt ?? "");
-    if (!Number.isFinite(ms)) continue;
+    const ms = timestampMs.get(candidate.id);
+    if (ms === null || ms === undefined) continue;
     let byMs = buckets.get(group);
     if (!byMs) {
       byMs = new Map<number, string[]>();
@@ -501,10 +477,11 @@ function collectChronoBuckets(
 
 function deriveChronoStepPositions(
   candidates: readonly RerankCandidate[],
+  timestampMs: ReadonlyMap<string, number | null>,
   sessionKeyOf: (candidate: RerankCandidate) => string,
 ): Map<string, { group: string; stepIdx: number }> {
   const positions = new Map<string, { group: string; stepIdx: number }>();
-  for (const [group, byMs] of collectChronoBuckets(candidates, sessionKeyOf)) {
+  for (const [group, byMs] of collectChronoBuckets(candidates, timestampMs, sessionKeyOf)) {
     if (byMs.size < 2) continue;
     const orderedSteps = [...byMs.entries()].sort((left, right) => left[0] - right[0]);
     for (let stepIdx = 0; stepIdx < orderedSteps.length; stepIdx += 1) {
@@ -543,7 +520,8 @@ export const chronoSequencePivotOperator: ComputeOperator<RerankContext> = (
   const anchorTopK = Math.max(1, Math.floor(numParam(params, "anchorTopK", 5)));
   const maxSteps = Math.max(1, Math.floor(numParam(params, "maxSteps", 2)));
   const sessionKeyOf = context.sessionKeyOf ?? defaultTurnSessionKey;
-  const positions = deriveChronoStepPositions(context.candidates, sessionKeyOf);
+  const { timestampMs } = getRerankCandidateIndex(context.candidates);
+  const positions = deriveChronoStepPositions(context.candidates, timestampMs, sessionKeyOf);
   if (!positions.size) return base;
 
   const anchorsByGroup = new Map<string, Array<{ stepIdx: number; vote: number }>>();

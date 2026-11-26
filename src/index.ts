@@ -136,8 +136,21 @@ export {
   materializeBoundGraph,
   type ConfigLayer,
   type NmgLayerConfig,
+  type OptimizationPolicy,
+  type OptimizationPolicyOverride,
   type SubgraphOverrideSpec,
 } from "./core/capability-config.ts";
+export {
+  ComputeBackendRegistry,
+  DEFAULT_BACKEND_REGISTRY,
+  JS_V8_BACKEND_ADAPTER,
+  PORTABLE_BACKEND_ADAPTER,
+  SQLITE_BACKEND_ADAPTER,
+  type ComputeBackendAdapter,
+  type ComputeBackendCapabilities,
+  type ComputeLoweringRule,
+  type LoweredRegionCandidate,
+} from "./core/compute-graph.ts";
 export {
   loadSharedL1Config,
   resolveEffectiveNmgConfig,

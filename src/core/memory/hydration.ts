@@ -18,9 +18,14 @@ import type {
   MemoryEntity,
   MemoryEntityQuery,
   MemoryHybridPage,
+  MemoryLexicalSearchQuery,
+  MemoryOrderedGetQuery,
   MemoryReadView,
   MemoryRelationalProjectionPage,
   MemoryRelationalProjectionQuery,
+  MemoryRelationalTopologyPage,
+  MemoryUserProfilePage,
+  MemoryUserProfileQuery,
   MemoryVectorCandidate,
   MemoryVectorQuery,
   RelationalMemoryNeighbor,
@@ -85,6 +90,13 @@ export interface MemorySnapshotPort {
   readonly projectMemories?: (
     query: MemoryRelationalProjectionQuery,
   ) => MemoryRelationalProjectionPage;
+  readonly projectMemoriesWithTopology?: (
+    query: MemoryRelationalProjectionQuery & { includeExplicitEdges?: boolean },
+  ) => MemoryRelationalTopologyPage;
+  readonly queryUserProfile?: (query: MemoryUserProfileQuery) => MemoryUserProfilePage;
+  readonly profileEvidenceLinks?: (evidenceIds: readonly string[]) => Map<string, string[]>;
+  readonly lexicalSearchPage?: (query: MemoryLexicalSearchQuery) => MemorySearchResult[];
+  readonly orderedGetPage?: (query: MemoryOrderedGetQuery) => MemorySearchResult[];
   readonly hybridCandidates?: (
     query: MemoryEntityQuery & { text: string },
     semantic: MemoryVectorQuery,
@@ -129,6 +141,26 @@ export function createSnapshotPort(
       : {}),
     ...(backend.projectMemories
       ? { projectMemories: (query) => backend.projectMemories!(view, query) }
+      : {}),
+    ...(backend.projectMemoriesWithTopology
+      ? {
+          projectMemoriesWithTopology: (query) => backend.projectMemoriesWithTopology!(view, query),
+        }
+      : {}),
+    ...(backend.queryUserProfile
+      ? { queryUserProfile: (query) => backend.queryUserProfile!(view, query) }
+      : {}),
+    ...(backend.profileEvidenceLinks
+      ? {
+          profileEvidenceLinks: (evidenceIds) =>
+            backend.profileEvidenceLinks!(view, evidenceIds, now),
+        }
+      : {}),
+    ...(backend.lexicalSearchPage
+      ? { lexicalSearchPage: (query) => backend.lexicalSearchPage!(view, query) }
+      : {}),
+    ...(backend.orderedGetPage
+      ? { orderedGetPage: (query) => backend.orderedGetPage!(view, query) }
       : {}),
     ...(backend.hybridCandidates
       ? { hybridCandidates: (query, semantic) => backend.hybridCandidates!(view, query, semantic) }

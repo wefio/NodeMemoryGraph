@@ -135,6 +135,7 @@ export interface MemoryRelationalProjectionQuery {
   nodeIds?: readonly string[];
   stateKey?: string;
   memoryType?: MemoryType;
+  memoryTypes?: readonly MemoryType[];
   statuses?: readonly MemoryStatus[];
   evidenceId?: string;
   relationTypes?: readonly NodeRelationType[];
@@ -155,6 +156,57 @@ export interface MemoryRelationalProjectionPage {
   hasMore: boolean;
 }
 
+export interface MemoryRelationalTopologyPage extends MemoryRelationalProjectionPage {
+  nodes: MemoryNode[];
+  explicitRelations: NodeRelation[];
+}
+
+export interface MemoryUserProfileQuery {
+  text: string;
+  list: boolean;
+  limit: number;
+  scope?: MemoryScope;
+  excludeScope?: MemoryScope;
+  nodeName?: string;
+  nodeIds?: readonly string[];
+  eventTimeFrom?: string;
+  eventTimeTo?: string;
+  sessionId?: string;
+  sourceActor?: MemoryActor;
+  maxTier?: 0 | 1 | 2 | 3;
+  now: string;
+}
+
+export interface MemoryUserProfilePage {
+  results: MemorySearchResult[];
+  profileItems: NonNullable<MemoryContext["userProfile"]>;
+}
+
+export interface MemoryLexicalSearchQuery {
+  text: string;
+  baseQuery: MemoryEntityQuery;
+  includeHistorical?: boolean;
+  sourceActor?: MemoryActor;
+  nodeName?: string;
+  eventTimeFrom?: string;
+  eventTimeTo?: string;
+  maxTier?: 0 | 1 | 2 | 3;
+  limit: number;
+  now: string;
+}
+
+export interface MemoryOrderedGetQuery {
+  ids: readonly string[];
+  sessionId?: string;
+  scope?: MemoryScope;
+  includeHistorical?: boolean;
+  sourceActor?: MemoryActor;
+  maxTier?: 0 | 1 | 2 | 3;
+  eventTimeFrom?: string;
+  eventTimeTo?: string;
+  now: string;
+}
+
 export interface RelationalMemoryNeighbor {
   entity: Extract<MemoryEntity, { kind: "memory" }>;
   reason: "memory_relation" | "same_state" | "same_event_day";
@@ -173,6 +225,18 @@ export interface MemoryBackend {
     view: MemoryReadView,
     query: MemoryRelationalProjectionQuery,
   ): MemoryRelationalProjectionPage;
+  projectMemoriesWithTopology?(
+    view: MemoryReadView,
+    query: MemoryRelationalProjectionQuery & { includeExplicitEdges?: boolean },
+  ): MemoryRelationalTopologyPage;
+  queryUserProfile?(view: MemoryReadView, query: MemoryUserProfileQuery): MemoryUserProfilePage;
+  profileEvidenceLinks?(
+    view: MemoryReadView,
+    evidenceIds: readonly string[],
+    now: string,
+  ): Map<string, string[]>;
+  lexicalSearchPage?(view: MemoryReadView, query: MemoryLexicalSearchQuery): MemorySearchResult[];
+  orderedGetPage?(view: MemoryReadView, query: MemoryOrderedGetQuery): MemorySearchResult[];
   relationalNeighbors?(
     view: MemoryReadView,
     anchor: MemoryRecord,

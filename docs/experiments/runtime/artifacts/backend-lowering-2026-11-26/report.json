@@ -1,0 +1,570 @@
+{
+  "measuredAt": "2026-11-26T12:56:03.122Z",
+  "environment": {
+    "node": "v26.13.0",
+    "platform": "win32",
+    "arch": "x64",
+    "cpuCount": 20,
+    "cpuModel": "12th Gen Intel(R) Core(TM) i7-12700H",
+    "powerTelemetryAvailable": false
+  },
+  "compile": {
+    "coldProjectCompileMedianUs": 148.5,
+    "warmPlanCacheHitUs": 22.039
+  },
+  "jsV8": {
+    "piecewiseRerank": {
+      "baseline": {
+        "runs": 250,
+        "wallMs": 116.442,
+        "p50Ms": 0.444,
+        "p95Ms": 0.696,
+        "opsPerSec": 2147.001,
+        "cpuMs": 141,
+        "heapDeltaMb": 4.488
+      },
+      "syncKernel": {
+        "runs": 250,
+        "wallMs": 109.263,
+        "p50Ms": 0.421,
+        "p95Ms": 0.65,
+        "opsPerSec": 2288.064,
+        "cpuMs": 188,
+        "heapDeltaMb": 1.809
+      },
+      "speedupRatio": 1.066
+    },
+    "httpDiamond": {
+      "baseline": {
+        "runs": 3000,
+        "wallMs": 64.272,
+        "opsPerSec": 46676.842
+      },
+      "syncKernel": {
+        "runs": 3000,
+        "wallMs": 60.927,
+        "opsPerSec": 49239.334
+      },
+      "speedupRatio": 1.055
+    },
+    "opaqueFallback5kMs": 74.208
+  },
+  "scales": [
+    {
+      "corpusCount": 50,
+      "parityVerified": true,
+      "httpReturned": 10,
+      "latencies": {
+        "projectGraph": {
+          "lowered": {
+            "iterations": 25,
+            "wallMs": 59.062,
+            "p50Ms": 2.28,
+            "p95Ms": 3.249,
+            "opsPerSec": 423.285,
+            "cpuMs": 62,
+            "heapDeltaMb": 0.041
+          },
+          "portable": {
+            "iterations": 25,
+            "wallMs": 75.585,
+            "p50Ms": 3.08,
+            "p95Ms": 3.745,
+            "opsPerSec": 330.751,
+            "cpuMs": 79,
+            "heapDeltaMb": 1.224
+          }
+        },
+        "userProfile": {
+          "lowered": {
+            "iterations": 25,
+            "wallMs": 37.245,
+            "p50Ms": 1.486,
+            "p95Ms": 2.063,
+            "opsPerSec": 671.224,
+            "cpuMs": 31,
+            "heapDeltaMb": 2.589
+          },
+          "portable": {
+            "iterations": 25,
+            "wallMs": 27.867,
+            "p50Ms": 1.029,
+            "p95Ms": 1.625,
+            "opsPerSec": 897.135,
+            "cpuMs": 16,
+            "heapDeltaMb": -4.94
+          }
+        },
+        "lexicalSearch": {
+          "lowered": {
+            "iterations": 25,
+            "wallMs": 45.077,
+            "p50Ms": 1.859,
+            "p95Ms": 2.373,
+            "opsPerSec": 554.61,
+            "cpuMs": 46,
+            "heapDeltaMb": -2.485
+          },
+          "portable": {
+            "iterations": 25,
+            "wallMs": 56.23,
+            "p50Ms": 2.137,
+            "p95Ms": 3.65,
+            "opsPerSec": 444.604,
+            "cpuMs": 78,
+            "heapDeltaMb": 2.29
+          }
+        },
+        "getWithProfileLinks": {
+          "lowered": {
+            "iterations": 25,
+            "wallMs": 44.263,
+            "p50Ms": 1.785,
+            "p95Ms": 1.975,
+            "opsPerSec": 564.811,
+            "cpuMs": 63,
+            "heapDeltaMb": 3.091
+          },
+          "portable": {
+            "iterations": 25,
+            "wallMs": 38.001,
+            "p50Ms": 1.334,
+            "p95Ms": 2.094,
+            "opsPerSec": 657.87,
+            "cpuMs": 47,
+            "heapDeltaMb": -4.443
+          }
+        }
+      },
+      "counts": {
+        "projectGraph": {
+          "lowered": {
+            "prepareCount": 7,
+            "scannedEntities": 0
+          },
+          "portable": {
+            "prepareCount": 8,
+            "scannedEntities": 58
+          }
+        },
+        "userProfile": {
+          "lowered": {
+            "prepareCount": 10,
+            "scannedEntities": 0
+          },
+          "portable": {
+            "prepareCount": 7,
+            "scannedEntities": 8
+          }
+        },
+        "lexicalSearch": {
+          "lowered": {
+            "prepareCount": 9,
+            "scannedEntities": 0
+          },
+          "portable": {
+            "prepareCount": 9,
+            "scannedEntities": 65
+          }
+        },
+        "getWithProfileLinks": {
+          "lowered": {
+            "prepareCount": 10,
+            "scannedEntities": 0
+          },
+          "portable": {
+            "prepareCount": 10,
+            "scannedEntities": 15
+          }
+        }
+      }
+    },
+    {
+      "corpusCount": 250,
+      "parityVerified": true,
+      "httpReturned": 10,
+      "latencies": {
+        "projectGraph": {
+          "lowered": {
+            "iterations": 25,
+            "wallMs": 104.965,
+            "p50Ms": 4.105,
+            "p95Ms": 5.337,
+            "opsPerSec": 238.176,
+            "cpuMs": 110,
+            "heapDeltaMb": 0.19
+          },
+          "portable": {
+            "iterations": 25,
+            "wallMs": 185.064,
+            "p50Ms": 7.385,
+            "p95Ms": 8.576,
+            "opsPerSec": 135.089,
+            "cpuMs": 188,
+            "heapDeltaMb": 2.77
+          }
+        },
+        "userProfile": {
+          "lowered": {
+            "iterations": 25,
+            "wallMs": 43.036,
+            "p50Ms": 1.643,
+            "p95Ms": 2.315,
+            "opsPerSec": 580.913,
+            "cpuMs": 47,
+            "heapDeltaMb": -10.221
+          },
+          "portable": {
+            "iterations": 25,
+            "wallMs": 27.221,
+            "p50Ms": 1.121,
+            "p95Ms": 1.351,
+            "opsPerSec": 918.409,
+            "cpuMs": 47,
+            "heapDeltaMb": 5.182
+          }
+        },
+        "lexicalSearch": {
+          "lowered": {
+            "iterations": 25,
+            "wallMs": 75.86,
+            "p50Ms": 2.971,
+            "p95Ms": 3.334,
+            "opsPerSec": 329.556,
+            "cpuMs": 78,
+            "heapDeltaMb": 4.808
+          },
+          "portable": {
+            "iterations": 25,
+            "wallMs": 144.798,
+            "p50Ms": 5.752,
+            "p95Ms": 6.677,
+            "opsPerSec": 172.655,
+            "cpuMs": 157,
+            "heapDeltaMb": -1.971
+          }
+        },
+        "getWithProfileLinks": {
+          "lowered": {
+            "iterations": 25,
+            "wallMs": 47.207,
+            "p50Ms": 1.914,
+            "p95Ms": 2.166,
+            "opsPerSec": 529.58,
+            "cpuMs": 47,
+            "heapDeltaMb": 2.875
+          },
+          "portable": {
+            "iterations": 25,
+            "wallMs": 51.626,
+            "p50Ms": 1.959,
+            "p95Ms": 2.34,
+            "opsPerSec": 484.25,
+            "cpuMs": 62,
+            "heapDeltaMb": -12.588
+          }
+        }
+      },
+      "counts": {
+        "projectGraph": {
+          "lowered": {
+            "prepareCount": 7,
+            "scannedEntities": 0
+          },
+          "portable": {
+            "prepareCount": 8,
+            "scannedEntities": 266
+          }
+        },
+        "userProfile": {
+          "lowered": {
+            "prepareCount": 10,
+            "scannedEntities": 0
+          },
+          "portable": {
+            "prepareCount": 7,
+            "scannedEntities": 27
+          }
+        },
+        "lexicalSearch": {
+          "lowered": {
+            "prepareCount": 9,
+            "scannedEntities": 0
+          },
+          "portable": {
+            "prepareCount": 9,
+            "scannedEntities": 263
+          }
+        },
+        "getWithProfileLinks": {
+          "lowered": {
+            "prepareCount": 10,
+            "scannedEntities": 0
+          },
+          "portable": {
+            "prepareCount": 10,
+            "scannedEntities": 15
+          }
+        }
+      }
+    },
+    {
+      "corpusCount": 1000,
+      "parityVerified": true,
+      "httpReturned": 10,
+      "latencies": {
+        "projectGraph": {
+          "lowered": {
+            "iterations": 15,
+            "wallMs": 68.423,
+            "p50Ms": 4.665,
+            "p95Ms": 6.006,
+            "opsPerSec": 219.223,
+            "cpuMs": 78,
+            "heapDeltaMb": -6.729
+          },
+          "portable": {
+            "iterations": 15,
+            "wallMs": 357.643,
+            "p50Ms": 23.676,
+            "p95Ms": 30.389,
+            "opsPerSec": 41.941,
+            "cpuMs": 360,
+            "heapDeltaMb": 16.384
+          }
+        },
+        "userProfile": {
+          "lowered": {
+            "iterations": 15,
+            "wallMs": 39.052,
+            "p50Ms": 2.736,
+            "p95Ms": 3.273,
+            "opsPerSec": 384.107,
+            "cpuMs": 31,
+            "heapDeltaMb": 7.798
+          },
+          "portable": {
+            "iterations": 15,
+            "wallMs": 32.009,
+            "p50Ms": 1.99,
+            "p95Ms": 4.117,
+            "opsPerSec": 468.618,
+            "cpuMs": 31,
+            "heapDeltaMb": -23.897
+          }
+        },
+        "lexicalSearch": {
+          "lowered": {
+            "iterations": 15,
+            "wallMs": 92.258,
+            "p50Ms": 5.965,
+            "p95Ms": 8.76,
+            "opsPerSec": 162.587,
+            "cpuMs": 94,
+            "heapDeltaMb": 2.843
+          },
+          "portable": {
+            "iterations": 15,
+            "wallMs": 211.362,
+            "p50Ms": 14.114,
+            "p95Ms": 16.08,
+            "opsPerSec": 70.968,
+            "cpuMs": 234,
+            "heapDeltaMb": 4.579
+          }
+        },
+        "getWithProfileLinks": {
+          "lowered": {
+            "iterations": 15,
+            "wallMs": 31.874,
+            "p50Ms": 2.245,
+            "p95Ms": 2.82,
+            "opsPerSec": 470.597,
+            "cpuMs": 31,
+            "heapDeltaMb": 1.718
+          },
+          "portable": {
+            "iterations": 15,
+            "wallMs": 26.823,
+            "p50Ms": 1.849,
+            "p95Ms": 2.354,
+            "opsPerSec": 559.219,
+            "cpuMs": 16,
+            "heapDeltaMb": 1.809
+          }
+        }
+      },
+      "counts": {
+        "projectGraph": {
+          "lowered": {
+            "prepareCount": 7,
+            "scannedEntities": 0
+          },
+          "portable": {
+            "prepareCount": 14,
+            "scannedEntities": 1066
+          }
+        },
+        "userProfile": {
+          "lowered": {
+            "prepareCount": 10,
+            "scannedEntities": 0
+          },
+          "portable": {
+            "prepareCount": 7,
+            "scannedEntities": 69
+          }
+        },
+        "lexicalSearch": {
+          "lowered": {
+            "prepareCount": 9,
+            "scannedEntities": 0
+          },
+          "portable": {
+            "prepareCount": 9,
+            "scannedEntities": 588
+          }
+        },
+        "getWithProfileLinks": {
+          "lowered": {
+            "prepareCount": 10,
+            "scannedEntities": 0
+          },
+          "portable": {
+            "prepareCount": 10,
+            "scannedEntities": 15
+          }
+        }
+      }
+    },
+    {
+      "corpusCount": 2500,
+      "parityVerified": true,
+      "httpReturned": 10,
+      "latencies": {
+        "projectGraph": {
+          "lowered": {
+            "iterations": 15,
+            "wallMs": 60.73,
+            "p50Ms": 4.223,
+            "p95Ms": 4.84,
+            "opsPerSec": 246.994,
+            "cpuMs": 63,
+            "heapDeltaMb": -0.822
+          },
+          "portable": {
+            "iterations": 15,
+            "wallMs": 756.265,
+            "p50Ms": 49.932,
+            "p95Ms": 59.785,
+            "opsPerSec": 19.834,
+            "cpuMs": 781,
+            "heapDeltaMb": 19.583
+          }
+        },
+        "userProfile": {
+          "lowered": {
+            "iterations": 15,
+            "wallMs": 58.429,
+            "p50Ms": 4.002,
+            "p95Ms": 5.529,
+            "opsPerSec": 256.722,
+            "cpuMs": 63,
+            "heapDeltaMb": -14.746
+          },
+          "portable": {
+            "iterations": 15,
+            "wallMs": 30.492,
+            "p50Ms": 1.979,
+            "p95Ms": 2.436,
+            "opsPerSec": 491.932,
+            "cpuMs": 31,
+            "heapDeltaMb": 16.566
+          }
+        },
+        "lexicalSearch": {
+          "lowered": {
+            "iterations": 15,
+            "wallMs": 168.489,
+            "p50Ms": 10.777,
+            "p95Ms": 14.744,
+            "opsPerSec": 89.027,
+            "cpuMs": 156,
+            "heapDeltaMb": -28.744
+          },
+          "portable": {
+            "iterations": 15,
+            "wallMs": 274.655,
+            "p50Ms": 18.074,
+            "p95Ms": 24.7,
+            "opsPerSec": 54.614,
+            "cpuMs": 250,
+            "heapDeltaMb": 5.372
+          }
+        },
+        "getWithProfileLinks": {
+          "lowered": {
+            "iterations": 15,
+            "wallMs": 26.282,
+            "p50Ms": 1.658,
+            "p95Ms": 2.426,
+            "opsPerSec": 570.728,
+            "cpuMs": 15,
+            "heapDeltaMb": 1.706
+          },
+          "portable": {
+            "iterations": 15,
+            "wallMs": 24.438,
+            "p50Ms": 1.559,
+            "p95Ms": 1.939,
+            "opsPerSec": 613.798,
+            "cpuMs": 31,
+            "heapDeltaMb": 1.777
+          }
+        }
+      },
+      "counts": {
+        "projectGraph": {
+          "lowered": {
+            "prepareCount": 7,
+            "scannedEntities": 0
+          },
+          "portable": {
+            "prepareCount": 28,
+            "scannedEntities": 2640
+          }
+        },
+        "userProfile": {
+          "lowered": {
+            "prepareCount": 10,
+            "scannedEntities": 0
+          },
+          "portable": {
+            "prepareCount": 7,
+            "scannedEntities": 145
+          }
+        },
+        "lexicalSearch": {
+          "lowered": {
+            "prepareCount": 9,
+            "scannedEntities": 0
+          },
+          "portable": {
+            "prepareCount": 9,
+            "scannedEntities": 688
+          }
+        },
+        "getWithProfileLinks": {
+          "lowered": {
+            "prepareCount": 10,
+            "scannedEntities": 0
+          },
+          "portable": {
+            "prepareCount": 10,
+            "scannedEntities": 15
+          }
+        }
+      }
+    }
+  ]
+}

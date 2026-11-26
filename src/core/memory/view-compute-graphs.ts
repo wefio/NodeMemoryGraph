@@ -5,6 +5,7 @@ import {
   type ComputeGraphSpec,
   type ComputeMemoCache,
   type PhysicalPlanOptions,
+  type RelationalQueryExpr,
 } from "../compute-graph.ts";
 import { eventWindowEnd, eventWindowStart } from "../event-time.ts";
 import { normalizeStatement } from "../memory-normalization.ts";
@@ -121,6 +122,19 @@ async function attachProfileEvidenceLinks(
   port: MemorySnapshotPort,
   results: readonly MemorySearchResult[],
 ): Promise<void> {
+  if (port.profileEvidenceLinks) {
+    const byEvidence = port.profileEvidenceLinks(
+      results.flatMap(({ evidenceRecords }) => evidenceRecords.map(({ id }) => id)),
+    );
+    for (const result of results) {
+      const links = result.evidenceRecords.flatMap(({ id }) => {
+        const profileMemoryIds = byEvidence.get(id);
+        return profileMemoryIds?.length ? [{ evidenceId: id, profileMemoryIds }] : [];
+      });
+      if (links.length) result.profileEvidence = links;
+    }
+    return;
+  }
   const byEvidence = new Map(
     results.flatMap(({ evidenceRecords }) =>
       evidenceRecords.map(({ id }): [string, string[]] => [id, []]),
@@ -232,6 +246,67 @@ async function buildExpandedNeighborhood(
   };
 }
 
+function matchesSourceSession(memory: MemoryRecord, sourceSessionId: string | undefined): boolean {
+  if (sourceSessionId === undefined) return true;
+  if (memory.sourceSessionId === sourceSessionId || memory.sessionId === sourceSessionId) {
+    return true;
+  }
+  return (
+    memory.markers.find((m) => m.kind === "aml_session")?.attributes?.session_id === sourceSessionId
+  );
+}
+
+function matchesBasicProjectionMeta(
+  memory: MemoryRecord,
+  options: GraphProjectionOptions,
+): boolean {
+  if (memory.tier > (options.maxTier ?? 3)) return false;
+  if (options.memoryType && memory.memoryType !== options.memoryType) return false;
+  if (options.statuses?.length && !options.statuses.includes(memory.status)) return false;
+  if (options.evidenceId && !memory.evidenceIds.includes(options.evidenceId)) return false;
+  if (options.sourceActor !== undefined && memory.sourceActor !== options.sourceActor) return false;
+  return true;
+}
+
+function matchesPortableProjectionFilter(
+  memory: MemoryRecord,
+  options: GraphProjectionOptions,
+  now: string,
+  relationMemoryIds: ReadonlySet<string> | null,
+): boolean {
+  return (
+    searchableMemory(memory, options, now, Boolean(options.includeHistorical)) &&
+    matchesBasicProjectionMeta(memory, options) &&
+    matchesSourceSession(memory, options.sourceSessionId) &&
+    (!relationMemoryIds || relationMemoryIds.has(memory.id))
+  );
+}
+
+function comparePortableProjectionOrder(
+  left: MemoryRecord,
+  right: MemoryRecord,
+  useEventTime: boolean,
+): number {
+  const leftKey = useEventTime ? (left.eventTime ?? "") : left.eventTime || left.createdAt;
+  const rightKey = useEventTime ? (right.eventTime ?? "") : right.eventTime || right.createdAt;
+  if (rightKey !== leftKey) return rightKey < leftKey ? -1 : 1;
+  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+}
+
+async function scanAllEntities(
+  port: MemorySnapshotPort,
+  baseQuery: Omit<MemoryEntityQuery, "limit" | "offset">,
+): Promise<MemoryEntity[]> {
+  const pageLimit = 512;
+  const out: MemoryEntity[] = [];
+  for (let scanOffset = 0; ; scanOffset += pageLimit) {
+    const page = await port.scan({ ...baseQuery, limit: pageLimit, offset: scanOffset });
+    out.push(...page);
+    if (page.length < pageLimit) break;
+  }
+  return out;
+}
+
 async function selectProjectionMemories(
   port: MemorySnapshotPort,
   options: GraphProjectionOptions,
@@ -267,38 +342,47 @@ async function selectProjectionMemories(
     });
     return { limit, offset, options, ...page };
   }
-  const fetchLimit = Math.min(512, limit + 1);
-  const entities = await port.scan({
-    kind: "memory",
-    nodeId: options.nodeId,
-    nodeIds,
-    stateKey: options.stateKey,
-    scope: options.scope,
-    excludeScope: options.excludeScope,
-    sessionId: options.sessionId,
-    eventTimeFrom,
-    eventTimeTo,
-    text: options.text,
-    limit: fetchLimit,
-    offset,
-  });
-  const hasMore = entities.length > limit;
-  const memories = entities
-    .slice(0, limit)
-    .flatMap((entity) =>
-      entity.kind === "memory" &&
-      searchableMemory(entity.value, options, port.now, Boolean(options.includeHistorical)) &&
-      entity.value.tier <= (options.maxTier ?? 3) &&
-      (!options.memoryType || entity.value.memoryType === options.memoryType) &&
-      (!options.statuses?.length || options.statuses.includes(entity.value.status)) &&
-      (!options.evidenceId || entity.value.evidenceIds.includes(options.evidenceId)) &&
-      (!options.sourceSessionId ||
-        entity.value.sourceSessionId === options.sourceSessionId ||
-        entity.value.sessionId === options.sourceSessionId)
+  const allMemories = (
+    await scanAllEntities(port, {
+      kind: "memory",
+      nodeId: options.nodeId,
+      nodeIds,
+      stateKey: options.stateKey,
+      scope: options.scope,
+      excludeScope: options.excludeScope,
+      sessionId: options.sessionId,
+      eventTimeFrom,
+      eventTimeTo,
+      text: options.text,
+    })
+  ).flatMap((entity) => (entity.kind === "memory" ? [entity.value] : []));
+  const consolidatedRelations = (await scanAllEntities(port, { kind: "memoryRelation" })).flatMap(
+    (entity) =>
+      entity.kind === "memoryRelation" && entity.value.status === "consolidated"
         ? [entity.value]
         : [],
-    );
-  return { limit, offset, options, memories, relations: [], hasMore };
+  );
+  const relationTypeFilter = options.relationTypes?.length ? new Set(options.relationTypes) : null;
+  const relationMemoryIds = relationTypeFilter
+    ? new Set(
+        consolidatedRelations
+          .filter((rel) => relationTypeFilter.has(rel.relationType))
+          .flatMap((rel) => [rel.sourceId, rel.targetId]),
+      )
+    : null;
+  const useEventTime = Boolean(eventTimeFrom || eventTimeTo);
+  const filtered = allMemories
+    .filter((memory) =>
+      matchesPortableProjectionFilter(memory, options, port.now, relationMemoryIds),
+    )
+    .sort((left, right) => comparePortableProjectionOrder(left, right, useEventTime));
+  const hasMore = filtered.length > offset + limit;
+  const memories = filtered.slice(offset, offset + limit);
+  const memIds = new Set(memories.map((m) => m.id));
+  const relations = memIds.size
+    ? consolidatedRelations.filter((rel) => memIds.has(rel.sourceId) || memIds.has(rel.targetId))
+    : [];
+  return { limit, offset, options, memories, relations, hasMore };
 }
 
 async function loadProjectionNodeEdges(
@@ -324,6 +408,108 @@ async function loadProjectionNodeEdges(
   return explicitRelations;
 }
 
+async function selectProjectionTopologyViaPushdown(
+  port: MemorySnapshotPort,
+  options: GraphProjectionOptions,
+): Promise<ProjectTopologyState> {
+  const limit = Math.min(512, Math.max(1, Math.floor(options.limit ?? 500)));
+  const offset = Math.max(0, Math.floor(options.offset ?? 0));
+  const eventTimeFrom = eventWindowStart(options.eventTimeFrom) ?? undefined;
+  const eventTimeTo = eventWindowEnd(options.eventTimeTo) ?? undefined;
+  const nodeIds = options.nodeIds ?? (await searchNodeIds(port, options.nodeName));
+  const page = port.projectMemoriesWithTopology!({
+    scope: options.scope,
+    excludeScope: options.excludeScope,
+    sessionId: options.sessionId,
+    sourceSessionId: options.sourceSessionId,
+    nodeId: options.nodeId,
+    nodeIds,
+    stateKey: options.stateKey,
+    memoryType: options.memoryType,
+    statuses: options.statuses,
+    evidenceId: options.evidenceId,
+    relationTypes: options.relationTypes,
+    sourceActor: options.sourceActor,
+    eventTimeFrom,
+    eventTimeTo,
+    includeHistorical: options.includeHistorical,
+    maxTier: options.maxTier,
+    text: options.text,
+    now: port.now,
+    limit,
+    offset,
+    includeExplicitEdges: options.includeExplicitEdges !== false,
+  });
+  return {
+    limit,
+    offset,
+    options,
+    memories: page.memories,
+    relations: page.relations,
+    hasMore: page.hasMore,
+    explicitNodes: new Map(page.nodes.map((node) => [node.id, node])),
+    explicitRelations: page.explicitRelations,
+  };
+}
+
+async function runUserProfilePushdown(
+  port: MemorySnapshotPort,
+  req: UserProfileGraphInput,
+): Promise<MemoryContext> {
+  const limit = searchLimit(req.options.limit);
+  const list = req.text.trim() === "*";
+  const query = normalizeStatement(req.text);
+  const eventTimeFrom = eventWindowStart(req.options.eventTimeFrom) ?? undefined;
+  const eventTimeTo = eventWindowEnd(req.options.eventTimeTo) ?? undefined;
+  const nodeIds = await searchNodeIds(port, req.options.nodeName);
+  if (port.queryUserProfile) {
+    const page = port.queryUserProfile({
+      text: query,
+      list,
+      limit,
+      excludeScope: req.options.excludeScope,
+      nodeName: req.options.nodeName,
+      nodeIds,
+      eventTimeFrom,
+      eventTimeTo,
+      sessionId: req.options.sessionId,
+      sourceActor: req.options.sourceActor,
+      maxTier: req.options.maxTier,
+      now: port.now,
+    });
+    return {
+      results: page.results,
+      relations: [],
+      retrieval: { mode: "lexical", degraded: false },
+      ...(list ? { userProfile: page.profileItems } : {}),
+    };
+  }
+  const normalizedOptions: MemoryQueryOptions = {
+    ...req.options,
+    limit,
+    includeHistorical: false,
+    eventTimeFrom,
+    eventTimeTo,
+  };
+  const rows = await scanProfileCandidates(port, query, list, normalizedOptions);
+  const results = await hydrateCandidates(port, rows.slice(0, limit), normalizedOptions);
+  return {
+    results,
+    relations: [],
+    retrieval: { mode: "lexical", degraded: false },
+    ...(list
+      ? {
+          userProfile: rows.map(({ value: memory }) => ({
+            memoryId: memory.id,
+            memoryType: memory.memoryType,
+            statement: memory.statement,
+            evidenceIds: memory.evidenceIds,
+          })),
+        }
+      : {}),
+  };
+}
+
 function buildViewRegistry(): ComputeRegistry<MemorySnapshotPort> {
   const registry = new ComputeRegistry<MemorySnapshotPort>();
   const readOp = (contract: string) => ({
@@ -338,9 +524,27 @@ function buildViewRegistry(): ComputeRegistry<MemorySnapshotPort> {
 
   registry.register(
     "scan_ordered_get",
-    async (inputs, port): Promise<GetScanState> => {
+    async (inputs, port, params): Promise<GetScanState> => {
       const req = inputs.default as GetGraphInput;
       const graphHops = boundedGraphHops(req.options.graphHops);
+      if (
+        params.$loweredTarget === "sqlite_pushdown" &&
+        port.orderedGetPage &&
+        !req.options.nodeName
+      ) {
+        const results = port.orderedGetPage({
+          ids: req.ids,
+          sessionId: req.options.sessionId,
+          scope: req.options.scope,
+          includeHistorical: req.options.includeHistorical,
+          sourceActor: req.options.sourceActor,
+          maxTier: req.options.maxTier,
+          eventTimeFrom: eventWindowStart(req.options.eventTimeFrom) ?? undefined,
+          eventTimeTo: eventWindowEnd(req.options.eventTimeTo) ?? undefined,
+          now: port.now,
+        });
+        return { results, options: req.options, graphHops };
+      }
       const entities = await port.scan({
         kind: "memory",
         ids: req.ids,
@@ -353,7 +557,10 @@ function buildViewRegistry(): ComputeRegistry<MemorySnapshotPort> {
       results.sort((left, right) => order.get(left.memory.id)! - order.get(right.memory.id)!);
       return { results, options: req.options, graphHops };
     },
-    readOp("memory.candidate_recall"),
+    {
+      ...readOp("memory.candidate_recall"),
+      lowering: { target: "sqlite", exprKind: "relational_query", operation: "ordered_get_page" },
+    },
   );
 
   registry.register(
@@ -405,18 +612,43 @@ function buildViewRegistry(): ComputeRegistry<MemorySnapshotPort> {
     "relational_memory_query",
     async (inputs, port, params): Promise<ProjectSelectionState> => {
       const req = inputs.default as ProjectGraphInput;
-      const usePushdown = params.$loweredTarget !== "portable_scan" && port.hasRelationalPushdown;
+      const usePushdown = params.$loweredTarget === "sqlite_pushdown" && port.hasRelationalPushdown;
       return selectProjectionMemories(port, req.options, usePushdown);
     },
     {
       ...readOp("memory.candidate_recall"),
-      lowering: { target: "sqlite", exprKind: "relational_query" },
+      lowering: { target: "sqlite", exprKind: "relational_query", operation: "project_memories" },
     },
   );
 
   registry.register(
     "load_projection_topology",
-    async (inputs, port): Promise<ProjectTopologyState> => {
+    async (inputs, port, params): Promise<ProjectTopologyState> => {
+      const expr = params.$expression as RelationalQueryExpr | undefined;
+      if (expr?.operation === "project_memories_with_topology") {
+        const req = inputs.default as ProjectGraphInput;
+        const usePushdown =
+          params.$loweredTarget === "sqlite_pushdown" &&
+          typeof port.projectMemoriesWithTopology === "function";
+        if (usePushdown) return selectProjectionTopologyViaPushdown(port, req.options);
+        const fallbackSel = await selectProjectionMemories(
+          port,
+          req.options,
+          params.$loweredTarget === "sqlite_pushdown" && port.hasRelationalPushdown,
+        );
+        const nodeEntities = await readNodesForMemories(port, fallbackSel.memories);
+        const explicitNodes = new Map(
+          nodeEntities.flatMap((row) =>
+            row.kind === "node" ? [[row.value.id, row.value] as const] : [],
+          ),
+        );
+        const explicitRelations = await loadProjectionNodeEdges(
+          port,
+          explicitNodes,
+          fallbackSel.options.includeExplicitEdges !== false,
+        );
+        return { ...fallbackSel, explicitNodes, explicitRelations };
+      }
       const sel = inputs.default as ProjectSelectionState;
       const nodeEntities = await readNodesForMemories(port, sel.memories);
       const explicitNodes = new Map(
@@ -431,7 +663,15 @@ function buildViewRegistry(): ComputeRegistry<MemorySnapshotPort> {
       );
       return { ...sel, explicitNodes, explicitRelations };
     },
-    readOp("memory.neighborhood_expand"),
+    {
+      ...readOp("memory.neighborhood_expand"),
+      lowering: {
+        target: "sqlite",
+        exprKind: "relational_query",
+        operation: "project_memories_with_topology",
+        fusableWithUpstream: ["select_memories", "relational_memory_query"],
+      },
+    },
   );
 
   registry.register(
@@ -484,12 +724,21 @@ function buildViewRegistry(): ComputeRegistry<MemorySnapshotPort> {
       const rows = await scanProfileCandidates(port, query, list, normalizedOptions);
       return { query, list, rows, options: normalizedOptions };
     },
-    readOp("memory.profile_projection"),
+    {
+      ...readOp("memory.profile_projection"),
+      lowering: { target: "sqlite", exprKind: "relational_query", operation: "user_profile_query" },
+    },
   );
 
   registry.register(
     "assemble_user_profile_context",
-    async (inputs, port): Promise<MemoryContext> => {
+    async (inputs, port, params): Promise<MemoryContext> => {
+      const expr = params.$expression as RelationalQueryExpr | undefined;
+      if (expr?.operation === "user_profile_query") {
+        const req = inputs.default as UserProfileGraphInput;
+        if (params.$loweredTarget === "sqlite_pushdown") return runUserProfilePushdown(port, req);
+        return runUserProfilePushdown({ ...port, queryUserProfile: undefined }, req);
+      }
       const state = inputs.default as ProfileScanState;
       const limit = state.options.limit ?? 20;
       const results = await hydrateCandidates(port, state.rows.slice(0, limit), state.options);
@@ -509,7 +758,15 @@ function buildViewRegistry(): ComputeRegistry<MemorySnapshotPort> {
           : {}),
       };
     },
-    readOp("memory.profile_projection"),
+    {
+      ...readOp("memory.profile_projection"),
+      lowering: {
+        target: "sqlite",
+        exprKind: "relational_query",
+        operation: "user_profile_query",
+        fusableWithUpstream: ["candidates", "scan_user_profile_candidates"],
+      },
+    },
   );
 
   return registry;
@@ -520,7 +777,16 @@ export const ENGINE_VIEW_REGISTRY = buildViewRegistry();
 export const DEFAULT_GET_CONTEXT_GRAPH: ComputeGraphSpec = {
   id: "engine-get-context-v1",
   nodes: [
-    { id: "scan", op: "scan_ordered_get", contract: "memory.candidate_recall" },
+    {
+      id: "scan",
+      op: "scan_ordered_get",
+      contract: "memory.candidate_recall",
+      expression: {
+        kind: "relational_query",
+        operation: "ordered_get_page",
+        pushdownPreferred: true,
+      },
+    },
     { id: "assemble", op: "assemble_get_context", contract: "memory.context_assemble" },
   ],
   edges: [
@@ -570,7 +836,16 @@ export const DEFAULT_PROJECT_GRAPH: ComputeGraphSpec = {
 export const DEFAULT_USER_PROFILE_GRAPH: ComputeGraphSpec = {
   id: "engine-user-profile-v1",
   nodes: [
-    { id: "candidates", op: "scan_user_profile_candidates", contract: "memory.profile_projection" },
+    {
+      id: "candidates",
+      op: "scan_user_profile_candidates",
+      contract: "memory.profile_projection",
+      expression: {
+        kind: "relational_query",
+        operation: "user_profile_query",
+        pushdownPreferred: true,
+      },
+    },
     { id: "assemble", op: "assemble_user_profile_context", contract: "memory.profile_projection" },
   ],
   edges: [
@@ -580,12 +855,23 @@ export const DEFAULT_USER_PROFILE_GRAPH: ComputeGraphSpec = {
   output: "assemble",
 };
 
+function withDefaultBackendTarget(
+  port: MemorySnapshotPort,
+  planOptions?: PhysicalPlanOptions,
+): PhysicalPlanOptions {
+  return {
+    backendTarget: port.hasRelationalPushdown ? "sqlite" : "portable",
+    ...planOptions,
+  };
+}
+
 export function executeGetContextGraph(
   input: GetGraphInput,
   port: MemorySnapshotPort,
   spec: ComputeGraphSpec = DEFAULT_GET_CONTEXT_GRAPH,
   registry: ComputeRegistry<MemorySnapshotPort> = ENGINE_VIEW_REGISTRY,
   memo?: ComputeMemoCache,
+  planOptions?: PhysicalPlanOptions,
 ): Promise<MemoryContext> {
   return executeComputeGraph<GetGraphInput, MemoryContext, MemorySnapshotPort>(
     spec,
@@ -593,6 +879,7 @@ export function executeGetContextGraph(
     input,
     port,
     memo,
+    withDefaultBackendTarget(port, planOptions),
   );
 }
 
@@ -602,6 +889,7 @@ export function executeNeighborhoodGraph(
   spec: ComputeGraphSpec = DEFAULT_NEIGHBORHOOD_GRAPH,
   registry: ComputeRegistry<MemorySnapshotPort> = ENGINE_VIEW_REGISTRY,
   memo?: ComputeMemoCache,
+  planOptions?: PhysicalPlanOptions,
 ): Promise<MemoryContext | undefined> {
   return executeComputeGraph<NeighborhoodGraphInput, MemoryContext | undefined, MemorySnapshotPort>(
     spec,
@@ -609,6 +897,7 @@ export function executeNeighborhoodGraph(
     input,
     port,
     memo,
+    withDefaultBackendTarget(port, planOptions),
   );
 }
 
@@ -618,17 +907,15 @@ export function executeProjectGraph(
   spec: ComputeGraphSpec = DEFAULT_PROJECT_GRAPH,
   registry: ComputeRegistry<MemorySnapshotPort> = ENGINE_VIEW_REGISTRY,
   memo?: ComputeMemoCache,
+  planOptions?: PhysicalPlanOptions,
 ): Promise<MemoryGraphProjection> {
-  const planOptions: PhysicalPlanOptions = {
-    backendTarget: port.hasRelationalPushdown ? "sqlite" : "portable",
-  };
   return executeComputeGraph<ProjectGraphInput, MemoryGraphProjection, MemorySnapshotPort>(
     spec,
     registry,
     input,
     port,
     memo,
-    planOptions,
+    withDefaultBackendTarget(port, planOptions),
   );
 }
 
@@ -638,6 +925,7 @@ export function executeUserProfileGraph(
   spec: ComputeGraphSpec = DEFAULT_USER_PROFILE_GRAPH,
   registry: ComputeRegistry<MemorySnapshotPort> = ENGINE_VIEW_REGISTRY,
   memo?: ComputeMemoCache,
+  planOptions?: PhysicalPlanOptions,
 ): Promise<MemoryContext> {
   return executeComputeGraph<UserProfileGraphInput, MemoryContext, MemorySnapshotPort>(
     spec,
@@ -645,5 +933,6 @@ export function executeUserProfileGraph(
     input,
     port,
     memo,
+    withDefaultBackendTarget(port, planOptions),
   );
 }

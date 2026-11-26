@@ -6,6 +6,8 @@ import {
   type ConfigLayer,
   type ConfigProvenanceEntry,
   type NmgLayerConfig,
+  type OptimizationPolicy,
+  type OptimizationPolicyOverride,
   type ResolvedLayerBundle,
   type RuntimePolicyOverride,
   type RuntimePolicy,
@@ -21,6 +23,7 @@ export interface EffectiveAutoRecallPolicy {
 }
 
 export type EffectiveRuntimePolicy = RuntimePolicy;
+export type EffectiveOptimizationPolicy = OptimizationPolicy;
 
 export interface EffectiveParameterConfig {
   readonly autoRecall: EffectiveAutoRecallPolicy;
@@ -49,6 +52,7 @@ export interface EffectiveParameterConfig {
     readonly minimumRetainedConservativeLowerBound: number;
   };
   readonly runtime: EffectiveRuntimePolicy;
+  readonly optimization: EffectiveOptimizationPolicy;
   readonly resultIdentityHash: string;
   readonly provenance: ReadonlyMap<string, ConfigProvenanceEntry>;
   readonly bindingProvenance: ReadonlyMap<string, { layer: ConfigLayer; source: string }>;
@@ -178,12 +182,22 @@ function envRuntimeOverrides(env: NodeJS.ProcessEnv): RuntimePolicyOverride | un
   return profile ? { profile } : undefined;
 }
 
+function envOptimizationOverrides(env: NodeJS.ProcessEnv): OptimizationPolicyOverride | undefined {
+  const backendRaw = env.NMG_OPTIMIZATION_BACKEND?.trim().toLowerCase();
+  const backend =
+    backendRaw === "auto" || backendRaw === "sqlite" || backendRaw === "portable"
+      ? backendRaw
+      : undefined;
+  return backend ? { backend } : undefined;
+}
+
 const MERGE_SECTIONS = [
   "autoRecall",
   "maintenance",
   "stgSync",
   "stgConsolidation",
   "runtime",
+  "optimization",
   "bindings",
 ] as const;
 
@@ -215,6 +229,7 @@ export function loadSharedL1Config(
     stgSync: envStgSyncOverrides(environment),
     stgConsolidation: envStgConsolidationOverrides(environment),
     runtime: envRuntimeOverrides(environment),
+    optimization: envOptimizationOverrides(environment),
   };
   const hasEnv = Object.values(envLayer).some(Boolean);
   return {
@@ -262,6 +277,7 @@ export function resolveParameterBundle(options: ResolveParameterConfigOptions = 
         ),
       },
       runtime: bundle.values.runtime as EffectiveRuntimePolicy,
+      optimization: bundle.values.optimization as EffectiveOptimizationPolicy,
       resultIdentityHash: bundle.resultIdentityHash,
       provenance: bundle.provenance,
       bindingProvenance: bundle.bindingProvenance,

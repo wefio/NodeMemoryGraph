@@ -3,6 +3,7 @@ import { CANONICAL_EVENT_TIME_GLOB } from "../event-time.ts";
 import { normalizeStatement } from "../memory-normalization.ts";
 import { serializeScope } from "../scope.ts";
 import { ftsExpression, surfaceTrigramExpression } from "../store/search-ranking.ts";
+import { USER_PROFILE_SCOPE, userProfileMatch } from "../user-profile.ts";
 import type {
   ClaimOutcomeEvent,
   HistoryRecord,
@@ -15,6 +16,7 @@ import type {
   MemoryRecord,
   MemoryRelationRecord,
   MemoryScope,
+  MemorySearchResult,
   MemoryStatus,
   MemoryStorageState,
   MemoryType,
@@ -28,11 +30,17 @@ import {
   type MemoryCommitReceipt,
   type MemoryEntity,
   type MemoryEntityQuery,
+  type MemoryLexicalSearchQuery,
+  type MemoryOrderedGetQuery,
   type MemoryRelationalProjectionPage,
   type MemoryRelationalProjectionQuery,
+  type MemoryRelationalTopologyPage,
+  type MemoryUserProfilePage,
+  type MemoryUserProfileQuery,
   type RelationalMemoryNeighbor,
 } from "./backend.ts";
 import { queryBounds } from "./entity-rows.ts";
+import { unboundMemoryNode } from "./model.ts";
 
 const SURFACE_TRIGRAM_WEIGHT = 0.35;
 
@@ -335,6 +343,10 @@ function buildRelationalWhere(
     clauses.push("m.memory_type = ?");
     bind.push(query.memoryType);
   }
+  if (query.memoryTypes?.length) {
+    clauses.push(`m.memory_type IN (${query.memoryTypes.map(() => "?").join(",")})`);
+    bind.push(...query.memoryTypes);
+  }
   if (query.sourceActor !== undefined) {
     clauses.push("m.source_actor = ?");
     bind.push(query.sourceActor);
@@ -370,32 +382,74 @@ function buildRelationalWhere(
   return { sql: clauses.join(" AND "), bind };
 }
 
+function canonicalUtcInstant(raw: string): string | null {
+  const ms = Date.parse(raw);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+function utcTimestampColumnSql(column: string): string {
+  return `CASE WHEN ${column} GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z' THEN ${column} ELSE strftime('%Y-%m-%dT%H:%M:%fZ', ${column}) END`;
+}
+
+function appendTimestampBound(
+  clauses: string[],
+  bind: (string | number)[],
+  column: string,
+  op: ">" | "<=",
+  nowUtc: string | null,
+): void {
+  if (!nowUtc) {
+    clauses.push(`${column} = ''`);
+    return;
+  }
+  clauses.push(`(${column} = '' OR ${utcTimestampColumnSql(column)} ${op} ?)`);
+  bind.push(nowUtc);
+}
+
+function appendVisibilityClauses(
+  clauses: string[],
+  bind: (string | number)[],
+  options: {
+    readonly maxTier?: number;
+    readonly includeRetained?: boolean;
+    readonly includeHistorical?: boolean;
+    readonly statuses?: readonly MemoryStatus[];
+    readonly now: string;
+  },
+): void {
+  if (options.maxTier !== undefined && options.maxTier < 3) {
+    clauses.push("m.tier <= ?");
+    bind.push(options.maxTier);
+  }
+  if (!options.includeRetained) clauses.push("m.storage_state = ''");
+  clauses.push("m.has_forget = 0");
+  const nowUtc = canonicalUtcInstant(options.now);
+  appendTimestampBound(clauses, bind, "m.expires_at", ">", nowUtc);
+  if (options.statuses?.length) {
+    clauses.push(`m.status IN (${options.statuses.map(() => "?").join(",")})`);
+    bind.push(...options.statuses);
+    return;
+  }
+  if (options.includeHistorical) {
+    clauses.push("m.status <> 'deleted'");
+    return;
+  }
+  clauses.push("m.status = 'active'");
+  appendTimestampBound(clauses, bind, "m.valid_from", "<=", nowUtc);
+  appendTimestampBound(clauses, bind, "m.valid_until", ">", nowUtc);
+}
+
 function appendProjectionVisibility(
   clauses: string[],
   bind: (string | number)[],
   query: MemoryRelationalProjectionQuery,
 ): void {
-  if (query.maxTier !== undefined && query.maxTier < 3) {
-    clauses.push("m.tier <= ?");
-    bind.push(query.maxTier);
-  }
-  clauses.push("m.storage_state = ''");
-  clauses.push("m.has_forget = 0");
-  clauses.push("(m.expires_at = '' OR m.expires_at > ?)");
-  bind.push(query.now);
-  if (query.statuses?.length) {
-    clauses.push(`m.status IN (${query.statuses.map(() => "?").join(",")})`);
-    bind.push(...query.statuses);
-    return;
-  }
-  if (query.includeHistorical) {
-    clauses.push("m.status <> 'deleted'");
-  } else {
-    clauses.push("m.status = 'active'");
-    clauses.push("(m.valid_from = '' OR m.valid_from <= ?)");
-    clauses.push("(m.valid_until = '' OR m.valid_until > ?)");
-    bind.push(query.now, query.now);
-  }
+  appendVisibilityClauses(clauses, bind, {
+    maxTier: query.maxTier,
+    includeHistorical: query.includeHistorical,
+    statuses: query.statuses,
+    now: query.now,
+  });
 }
 
 function buildTextFilterClause(namespace: string, text: string | undefined): SqlFilter | null {
@@ -457,6 +511,367 @@ export function projectRelationalMemories(
 
   const { memories, relations } = hydrateMemoriesFromRows(db, namespace, pageRows);
   return { memories, relations, hasMore };
+}
+
+function loadNodesByIds(
+  db: DatabaseSync,
+  namespace: string,
+  memories: readonly MemoryRecord[],
+): Map<string, MemoryNode> {
+  const nodeIds = [...new Set(memories.map((m) => m.nodeId).filter(Boolean))];
+  const nodesById = new Map<string, MemoryNode>();
+  if (!nodeIds.length) return nodesById;
+  const rows = db
+    .prepare(
+      `SELECT n.* FROM json_each(?) w
+       CROSS JOIN nmg_nodes n ON n.namespace = ? AND n.id = w.value`,
+    )
+    .all(JSON.stringify(nodeIds), namespace) as Array<Record<string, unknown>>;
+  for (const row of rows) {
+    const mapped = mapNodeRow(row);
+    nodesById.set(mapped.id, mapped);
+  }
+  return nodesById;
+}
+
+function loadHistoriesByIds(
+  db: DatabaseSync,
+  namespace: string,
+  memories: readonly MemoryRecord[],
+): Map<string, { history: HistoryRecord; index: number }> {
+  const ids = [...new Set(memories.flatMap((m) => m.evidenceIds))];
+  const histories: HistoryRecord[] = [];
+  for (let offset = 0; offset < ids.length; offset += 512) {
+    const batch = ids.slice(offset, offset + 512);
+    const rows = db
+      .prepare(
+        `SELECT * FROM nmg_sources
+         WHERE namespace = ? AND id IN (SELECT value FROM json_each(?))
+         ORDER BY id`,
+      )
+      .all(namespace, JSON.stringify(batch)) as Array<Record<string, unknown>>;
+    for (const row of rows) histories.push(mapHistoryRow(row));
+  }
+  return new Map(histories.map((history, index) => [history.id, { history, index }]));
+}
+
+function hydrateSearchResultsFromRows(
+  db: DatabaseSync,
+  namespace: string,
+  rows: readonly Record<string, unknown>[],
+  options: { readonly includeNode?: boolean; readonly nodeName?: string },
+): MemorySearchResult[] {
+  if (!rows.length) return [];
+  const { memories } = hydrateMemoriesFromRows(db, namespace, rows);
+  const nodesById = loadNodesByIds(db, namespace, memories);
+  const selected: Array<{ memory: MemoryRecord; node: MemoryNode; score: number }> = [];
+  for (let i = 0; i < memories.length; i += 1) {
+    const memory = memories[i]!;
+    const node = memory.nodeId
+      ? nodesById.get(memory.nodeId)
+      : unboundMemoryNode(memory.residence, memory.createdAt);
+    if (!node) throw new Error("Broken memory references");
+    if (options.nodeName && node.canonicalName !== options.nodeName) continue;
+    const score = 1 / (selected.length + 1);
+    selected.push({ memory, node, score });
+  }
+  if (!selected.length) return [];
+  const byHistoryId = loadHistoriesByIds(
+    db,
+    namespace,
+    selected.map((item) => item.memory),
+  );
+  return selected.map(({ memory, node, score }) => {
+    const evidenceRecords = [...new Set(memory.evidenceIds)]
+      .flatMap((id) => byHistoryId.get(id) ?? [])
+      .sort((left, right) => left.index - right.index)
+      .map(({ history }) => history);
+    const evidence = byHistoryId.get(memory.evidenceId)?.history;
+    if (!evidence || !memory.evidenceIds.includes(evidence.id)) {
+      throw new Error("Broken memory references");
+    }
+    return {
+      memory,
+      node,
+      evidence,
+      evidenceRecords,
+      lexicalScore: score,
+      vectorScore: 0,
+      routeScore: 0,
+      combinedScore: score,
+      recallReason: "lexical_match",
+    };
+  });
+}
+
+/** Single-snapshot SQLite projection + node/edge topology pushdown preserving per-node edge multiplicity. */
+export function projectRelationalMemoriesWithTopology(
+  db: DatabaseSync,
+  namespace: string,
+  query: MemoryRelationalProjectionQuery & { includeExplicitEdges?: boolean },
+): MemoryRelationalTopologyPage {
+  const page = projectRelationalMemories(db, namespace, query);
+  const nodesById = loadNodesByIds(db, namespace, page.memories);
+  const nodes = [...nodesById.values()];
+  if (query.includeExplicitEdges === false || !nodes.length) {
+    return { ...page, nodes, explicitRelations: [] };
+  }
+  const nodeIdsJson = JSON.stringify([...nodesById.keys()]);
+  const edgeRows = db
+    .prepare(
+      `WITH wanted AS (
+         SELECT CAST(w.key AS INTEGER) AS slot, w.value AS node_id
+         FROM json_each(?) w
+       ),
+       incident AS (
+         SELECT w.slot, r.*
+         FROM wanted w
+         CROSS JOIN nmg_memory_relations r INDEXED BY nmg_memory_relations_edge_source
+           ON r.namespace = ? AND r.origin = 'node_edge' AND r.source_id = w.node_id
+         UNION ALL
+         SELECT w.slot, r.*
+         FROM wanted w
+         CROSS JOIN nmg_memory_relations r INDEXED BY nmg_memory_relations_edge_target
+           ON r.namespace = ? AND r.origin = 'node_edge' AND r.target_id = w.node_id AND r.source_id <> w.node_id
+       ),
+       ranked AS (
+         SELECT *, ROW_NUMBER() OVER (PARTITION BY slot ORDER BY id ASC) AS rn
+         FROM incident
+       )
+       SELECT * FROM ranked WHERE rn <= 128 ORDER BY slot ASC, id ASC`,
+    )
+    .all(nodeIdsJson, namespace, namespace) as Array<Record<string, unknown>>;
+  return {
+    ...page,
+    nodes,
+    explicitRelations: edgeRows.map(mapEdgeRow),
+  };
+}
+
+/** Single-pass SQLite pushdown for user-profile scope filtering, trigger ranking, and top-k hydrating. */
+export function readRelationalUserProfile(
+  db: DatabaseSync,
+  namespace: string,
+  query: MemoryUserProfileQuery,
+): MemoryUserProfilePage {
+  const base = buildMemoryQueryFilter(
+    namespace,
+    {
+      scope: USER_PROFILE_SCOPE,
+      excludeScope: query.excludeScope,
+      nodeIds: query.nodeIds,
+      eventTimeFrom: query.eventTimeFrom,
+      eventTimeTo: query.eventTimeTo,
+      sessionId: query.sessionId,
+    },
+    "m",
+  );
+  const clauses = [
+    base.sql,
+    "m.residence = 'ltg'",
+    "m.source_actor = 'user'",
+    "m.truth_status IN ('asserted', 'verified')",
+    "m.memory_type IN ('preference', 'constraint')",
+    `NOT EXISTS (
+      SELECT 1 FROM nmg_memory_markers mk
+      WHERE mk.namespace = m.namespace AND mk.memory_id = m.id
+        AND mk.kind IN ('sensitive', 'external_source')
+    )`,
+  ];
+  const bind: (string | number)[] = [...base.bind];
+  if (query.sourceActor) {
+    clauses.push("m.source_actor = ?");
+    bind.push(query.sourceActor);
+  }
+  if (!query.list) {
+    clauses.push(
+      `EXISTS (
+        SELECT 1 FROM nmg_memory_markers mk
+        WHERE mk.namespace = m.namespace AND mk.memory_id = m.id AND mk.kind = 'recall_trigger'
+      )`,
+    );
+  }
+  appendVisibilityClauses(clauses, bind, { maxTier: query.maxTier, now: query.now });
+
+  const rows = db
+    .prepare(
+      `SELECT ${MEMORY_SELECT_COLUMNS}
+       FROM nmg_memories m
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY m.id ASC`,
+    )
+    .all(...bind) as Array<Record<string, unknown>>;
+  if (!rows.length) return { results: [], profileItems: [] };
+
+  const { memories } = hydrateMemoriesFromRows(db, namespace, rows);
+  const scored: Array<{ memory: MemoryRecord; row: Record<string, unknown>; score: number }> = [];
+  for (let i = 0; i < memories.length; i += 1) {
+    const memory = memories[i]!;
+    const score = query.list ? 1 : userProfileMatch(query.text, memory);
+    if (score) scored.push({ memory, row: rows[i]!, score });
+  }
+  scored.sort((left, right) => right.score - left.score);
+
+  const profileItems = query.list
+    ? scored.map(({ memory }) => ({
+        memoryId: memory.id,
+        memoryType: memory.memoryType,
+        statement: memory.statement,
+        evidenceIds: memory.evidenceIds,
+      }))
+    : [];
+  const topRows = scored.slice(0, query.limit).map((entry) => entry.row);
+  return {
+    results: hydrateSearchResultsFromRows(db, namespace, topRows, { nodeName: query.nodeName }),
+    profileItems,
+  };
+}
+
+/** Single-SQL semi-join resolving active user-profile links for a batch of evidence IDs. */
+export function readRelationalProfileEvidenceLinks(
+  db: DatabaseSync,
+  namespace: string,
+  evidenceIds: readonly string[],
+  now: string,
+): Map<string, string[]> {
+  const result = new Map<string, string[]>();
+  if (!evidenceIds.length) return result;
+  const clauses = [
+    "m.scope = ?",
+    "m.session_id = ''",
+    "m.residence = 'ltg'",
+    "m.source_actor = 'user'",
+    "m.truth_status IN ('asserted', 'verified')",
+    "m.memory_type IN ('preference', 'constraint')",
+    `NOT EXISTS (
+      SELECT 1 FROM nmg_memory_markers mk
+      WHERE mk.namespace = m.namespace AND mk.memory_id = m.id
+        AND mk.kind IN ('sensitive', 'external_source')
+    )`,
+  ];
+  const bind: (string | number)[] = [serializeScope(USER_PROFILE_SCOPE)];
+  appendVisibilityClauses(clauses, bind, { now });
+
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT e.source_id AS evidence_id, m.id AS memory_id
+       FROM json_each(?) w
+       CROSS JOIN nmg_memory_evidence e ON e.namespace = ? AND e.source_id = w.value
+       CROSS JOIN nmg_memories m ON m.namespace = e.namespace AND m.id = e.memory_id
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY m.id ASC`,
+    )
+    .all(JSON.stringify(evidenceIds), namespace, ...bind) as Array<{
+    evidence_id: string;
+    memory_id: string;
+  }>;
+
+  for (const row of rows) {
+    const eid = String(row.evidence_id);
+    const list = result.get(eid) ?? [];
+    list.push(String(row.memory_id));
+    result.set(eid, list);
+  }
+  return result;
+}
+
+/** Indexed FTS5 + visibility + limit pushdown for lexical recall (hydrates only surviving limit rows). */
+export function readRelationalLexicalSearchPage(
+  db: DatabaseSync,
+  namespace: string,
+  query: MemoryLexicalSearchQuery,
+): MemorySearchResult[] {
+  const { limit, offset } = queryBounds(query.baseQuery);
+  const fts = resolveTextFtsJoin(namespace, "memory", query.text);
+  if (fts.emptyFts) return [];
+  const filter = buildMemoryQueryFilter(namespace, query.baseQuery, "m");
+  const visClauses: string[] = [];
+  const visBind: (string | number)[] = [];
+  if (query.sourceActor !== undefined) {
+    visClauses.push("m.source_actor = ?");
+    visBind.push(query.sourceActor);
+  }
+  if (query.nodeName) {
+    visClauses.push(
+      `EXISTS (
+        SELECT 1 FROM nmg_nodes n
+        WHERE n.namespace = m.namespace AND n.id = m.node_id AND n.canonical_name = ?
+      )`,
+    );
+    visBind.push(query.nodeName);
+  }
+  appendVisibilityClauses(visClauses, visBind, {
+    maxTier: query.maxTier,
+    includeHistorical: query.includeHistorical,
+    now: query.now,
+  });
+
+  const from = fts.fromSql
+    ? `${fts.fromSql} CROSS JOIN nmg_memories m ON m.namespace = ? AND m.id = fts_id`
+    : "nmg_memories m";
+  const allBind = [
+    ...(fts.fromSql ? [...fts.bind, namespace] : []),
+    ...filter.bind,
+    ...visBind,
+    Math.min(limit, query.limit),
+    offset,
+  ];
+  const order = fts.fromSql ? "fts_rank, m.rowid DESC, m.id" : "m.id";
+  const rows = db
+    .prepare(
+      `SELECT ${MEMORY_SELECT_COLUMNS}
+       FROM ${from}
+       WHERE ${filter.sql} AND ${visClauses.join(" AND ")}
+       ORDER BY ${order}
+       LIMIT ? OFFSET ?`,
+    )
+    .all(...allBind) as Array<Record<string, unknown>>;
+  return hydrateSearchResultsFromRows(db, namespace, rows, {});
+}
+
+/** Single-snapshot SQL pushdown for ordered batch get with visibility filters and caller ID order. */
+export function readRelationalOrderedGetPage(
+  db: DatabaseSync,
+  namespace: string,
+  query: MemoryOrderedGetQuery,
+): MemorySearchResult[] {
+  if (!query.ids.length) return [];
+  const filter = buildMemoryQueryFilter(
+    namespace,
+    {
+      ids: query.ids,
+      scope: query.scope,
+      sessionId: query.sessionId,
+      eventTimeFrom: query.eventTimeFrom,
+      eventTimeTo: query.eventTimeTo,
+      limit: 512,
+    },
+    "m",
+  );
+  const clauses = [filter.sql];
+  const bind: (string | number)[] = [...filter.bind];
+  if (query.sourceActor !== undefined) {
+    clauses.push("m.source_actor = ?");
+    bind.push(query.sourceActor);
+  }
+  appendVisibilityClauses(clauses, bind, {
+    maxTier: query.maxTier,
+    includeRetained: true,
+    includeHistorical: query.includeHistorical,
+    now: query.now,
+  });
+  const rows = db
+    .prepare(
+      `SELECT ${MEMORY_SELECT_COLUMNS}
+       FROM nmg_memories m
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY m.id ASC LIMIT 512`,
+    )
+    .all(...bind) as Array<Record<string, unknown>>;
+  const hydrated = hydrateSearchResultsFromRows(db, namespace, rows, {});
+  const order = new Map(query.ids.map((id, idx) => [id, idx]));
+  hydrated.sort((left, right) => order.get(left.memory.id)! - order.get(right.memory.id)!);
+  return hydrated;
 }
 
 function appendUniqueNeighbor(

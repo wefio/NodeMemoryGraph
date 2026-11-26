@@ -6,7 +6,6 @@ import {
   type ComputeGraphSpec,
 } from "../compute-graph.ts";
 import { normalize } from "../memory-normalization.ts";
-import type { MemoryMarker } from "../types.ts";
 import { defineLocalWorkerOperator } from "../runtime/worker-pool.ts";
 import { getRuntimeScheduler } from "../runtime/scheduler.ts";
 import {
@@ -18,34 +17,18 @@ import {
   turnPivotOperator,
 } from "./bm25f-neighborhoods.ts";
 import { incrementalBm25ScoreOperator } from "./incremental-bm25.ts";
+import {
+  baseScored,
+  compareScored,
+  getRerankCandidateIndex,
+  inputScored,
+  numParam,
+  type RerankCandidate,
+  type RerankContext,
+  type ScoredCandidateId,
+} from "./rerank-types.ts";
 
-export interface RerankCandidate {
-  readonly id: string;
-  readonly statement: string;
-  readonly combinedScore: number;
-  readonly eventTime: string | null;
-  readonly createdAt?: string;
-  readonly sessionId: string | null;
-  readonly nodeId: string;
-  readonly evidenceId?: string;
-  readonly turnOrdinal?: number | null;
-  readonly markers?: readonly MemoryMarker[];
-  readonly stateKey?: string | null;
-  readonly predicateKey?: string | null;
-  readonly supersedesId?: string | null;
-  readonly relatedMemoryIds?: readonly string[];
-}
-
-export interface ScoredCandidateId {
-  readonly id: string;
-  readonly score: number;
-}
-
-export interface RerankContext {
-  readonly queryText: string;
-  readonly candidates: readonly RerankCandidate[];
-  readonly sessionKeyOf?: (candidate: RerankCandidate) => string;
-}
+export type { RerankCandidate, RerankContext, ScoredCandidateId } from "./rerank-types.ts";
 
 const DATE_QUERY_RE =
   /\b(?:when|what date|what day|which day|what year|what month|how long)\b|哪一天|哪天|什么时候|啥时候|几号|哪年|哪个月|多久/i;
@@ -116,34 +99,6 @@ const DEDUP_STOP_WORDS = new Set([
   "such",
 ]);
 
-function compareScored(left: ScoredCandidateId, right: ScoredCandidateId): number {
-  return right.score - left.score || (left.id < right.id ? -1 : Number(left.id > right.id));
-}
-
-function baseScored(candidates: readonly RerankCandidate[]): ScoredCandidateId[] {
-  return candidates
-    .map((candidate) => ({ id: candidate.id, score: candidate.combinedScore }))
-    .sort(compareScored);
-}
-
-function inputScored(
-  inputs: Readonly<Record<string, unknown>>,
-  candidates: readonly RerankCandidate[],
-): ScoredCandidateId[] {
-  const raw = inputs.default;
-  if (Array.isArray(raw)) return raw as ScoredCandidateId[];
-  return baseScored(candidates);
-}
-
-function numParam(
-  params: Readonly<Record<string, unknown>>,
-  key: string,
-  fallback: number,
-): number {
-  const value = params[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
 function tokenizeForDedup(text: string): Set<string> {
   const tokens = normalize(text).match(/[\p{L}\p{N}_-]{2,}/gu) ?? [];
   return new Set(tokens.filter((token) => !DEDUP_STOP_WORDS.has(token) && !/^\d+$/.test(token)));
@@ -160,45 +115,18 @@ function jaccardSet(left: ReadonlySet<string>, right: ReadonlySet<string>): numb
   return union === 0 ? 0 : intersection / union;
 }
 
-function timestampMs(candidate: RerankCandidate): number | null {
-  const raw = candidate.eventTime ?? candidate.createdAt;
-  if (!raw) return null;
-  const parsed = Date.parse(raw);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function maxTimestampMs(candidates: readonly RerankCandidate[]): number {
-  let maxMs = 0;
-  for (const candidate of candidates) {
-    const ms = timestampMs(candidate);
-    if (ms !== null && ms > maxMs) maxMs = ms;
-  }
-  return maxMs;
-}
-
-function maxTurnOrdinal(candidates: readonly RerankCandidate[]): number {
-  let maxOrd = 0;
-  for (const candidate of candidates) {
-    if (
-      typeof candidate.turnOrdinal === "number" &&
-      Number.isFinite(candidate.turnOrdinal) &&
-      candidate.turnOrdinal > maxOrd
-    ) {
-      maxOrd = candidate.turnOrdinal;
-    }
-  }
-  return maxOrd;
-}
-
 function recencyBoostDelta(
   candidate: RerankCandidate | undefined,
+  ms: number | null | undefined,
   maxMs: number,
   maxOrd: number,
   weight: number,
 ): number {
   if (!candidate) return 0;
-  const ms = maxMs > 0 ? timestampMs(candidate) : null;
-  const timeBoost = ms === null ? 0 : weight / (1 + Math.max(0, (maxMs - ms) / 86_400_000) / 90);
+  const timeBoost =
+    ms === null || ms === undefined
+      ? 0
+      : weight / (1 + Math.max(0, (maxMs - ms) / 86_400_000) / 90);
   const ordTieBreak =
     maxOrd > 0 &&
     typeof candidate.turnOrdinal === "number" &&
@@ -315,7 +243,7 @@ function buildRerankRegistry(): ComputeRegistry<RerankContext> {
       const isNum = NUM_QUERY_RE.test(context.queryText);
       if (!isDate && !isNum) return base;
       const weight = numParam(params, "weight", 0.12);
-      const byId = new Map(context.candidates.map((candidate) => [candidate.id, candidate]));
+      const { byId } = getRerankCandidateIndex(context.candidates);
       return base
         .map((entry) => {
           const statement = byId.get(entry.id)?.statement ?? "";
@@ -333,14 +261,19 @@ function buildRerankRegistry(): ComputeRegistry<RerankContext> {
     (inputs, context, params) => {
       const base = inputScored(inputs, context.candidates);
       if (PAST_CONSTRAINT_RE.test(context.queryText)) return base;
-      const maxMs = maxTimestampMs(context.candidates);
-      const maxOrd = maxTurnOrdinal(context.candidates);
-      if (maxMs <= 0 && maxOrd <= 0) return base;
+      const idx = getRerankCandidateIndex(context.candidates);
+      if (idx.maxTimestampMs <= 0 && idx.maxTurnOrdinal <= 0) return base;
       const weight = numParam(params, "weight", 0.12);
-      const byId = new Map(context.candidates.map((candidate) => [candidate.id, candidate]));
       return base
         .map((entry) => {
-          const delta = recencyBoostDelta(byId.get(entry.id), maxMs, maxOrd, weight);
+          const ms = idx.maxTimestampMs > 0 ? idx.timestampMs.get(entry.id) : null;
+          const delta = recencyBoostDelta(
+            idx.byId.get(entry.id),
+            ms,
+            idx.maxTimestampMs,
+            idx.maxTurnOrdinal,
+            weight,
+          );
           return delta > 0 ? { id: entry.id, score: entry.score + delta } : entry;
         })
         .sort(compareScored);
@@ -356,7 +289,7 @@ function buildRerankRegistry(): ComputeRegistry<RerankContext> {
       const limit = Math.max(1, Math.floor(numParam(params, "limit", 25)));
       const jaccardThresh = numParam(params, "jaccardThresh", 0.6);
       const dupPenalty = numParam(params, "dupPenalty", 0.5);
-      const byId = new Map(context.candidates.map((candidate) => [candidate.id, candidate]));
+      const { byId } = getRerankCandidateIndex(context.candidates);
       const pool = base.slice(0, poolSize);
       const tokenSets = pool.map((entry) => tokenizeForDedup(byId.get(entry.id)?.statement ?? ""));
       const used = new Uint8Array(pool.length);
@@ -380,7 +313,7 @@ function buildRerankRegistry(): ComputeRegistry<RerankContext> {
     (inputs, context, params) => {
       const base = inputScored(inputs, context.candidates);
       const weight = numParam(params, "weight", 0.2);
-      const byId = new Map(context.candidates.map((candidate) => [candidate.id, candidate]));
+      const { byId } = getRerankCandidateIndex(context.candidates);
       const sessionKeyOf = context.sessionKeyOf ?? defaultSessionKey;
       const sRank = sessionRankMap(base, byId, sessionKeyOf);
       return base

@@ -56,6 +56,9 @@ export {
   type ComputeRegisterOptions,
   type ComputeResourceProfile,
   type ComputeStateStamp,
+  type PurePipelineExpr,
+  type RelationalOperationKind,
+  type RelationalQueryExpr,
   type ResolvedOperatorCapabilities,
   type StructuredComputeExpr,
 } from "./compute-contracts.ts";
@@ -68,6 +71,27 @@ export {
   type PhysicalPlanOptions,
   type PhysicalWaveGroup,
 } from "./compute-planner.ts";
+
+export {
+  ComputeBackendRegistry,
+  DEFAULT_BACKEND_REGISTRY,
+  JS_V8_BACKEND_ADAPTER,
+  PORTABLE_BACKEND_ADAPTER,
+  SQLITE_BACKEND_ADAPTER,
+  compileFusedChainSyncRunner,
+  compileSyncPlanKernel,
+  isLegalConvexRegion,
+  runBackendLoweringPass,
+  shouldApplyLowering,
+  type CompiledSyncKernel,
+  type ComputeBackendAdapter,
+  type ComputeBackendCapabilities,
+  type ComputeLoweringRule,
+  type LoweredRegionCandidate,
+  type LoweredTargetKind,
+  type LoweringMatchContext,
+  type LoweringPassResult,
+} from "./compute-lowering.ts";
 
 export type ComputeOperator<TContext = unknown> = ComputeOperatorFn<TContext>;
 
@@ -389,9 +413,11 @@ function physicalPlanSignature<TContext>(
                 )
                 .join("+")
             : registry.getSignature(child.op);
-    return `${child.id}:${child.op}:${childOpSig}:${canonicalizeComputeValue(child.params)}:${canonicalizeComputeValue(child.incoming)}`;
+    return `${child.id}:${child.op}:${childOpSig}:${child.loweredTarget ?? ""}:${canonicalizeComputeValue(child.expression ?? null)}:${canonicalizeComputeValue(child.loweredRegionNodeIds ?? null)}:${canonicalizeComputeValue(child.params)}:${canonicalizeComputeValue(child.incoming)}`;
   });
-  return sha256Hex(`${plan.logicalGraphId}|${parts.join(";")}|${plan.outputNodeId}`);
+  return sha256Hex(
+    `${plan.logicalGraphId}|${plan.backendVersionSignature ?? ""}|${parts.join(";")}|${plan.outputNodeId}`,
+  );
 }
 
 export function computeNodeSignature<TContext>(
@@ -424,7 +450,7 @@ export function computeNodeSignature<TContext>(
               .join("+")
           : registry.getSignature(node.op);
   return sha256Hex(
-    `${node.op}|${opSig}|${contextSig}|${canonicalizeComputeValue(node.params)}|${upstream}`,
+    `${node.op}|${opSig}|${node.loweredTarget ?? ""}|${canonicalizeComputeValue(node.expression ?? null)}|${canonicalizeComputeValue(node.loweredRegionNodeIds ?? null)}|${contextSig}|${canonicalizeComputeValue(node.params)}|${upstream}`,
   );
 }
 
@@ -516,6 +542,7 @@ function invokeNodeSync<TContext>(
       cacheable ? memo : undefined,
     );
   }
+  if (node.compiledFusedSync) return node.compiledFusedSync(inputs, context);
   if (node.fusedSteps) return invokeFusedChainSync(node.fusedSteps, registry, inputs, context);
   const fn = node.inlineFn ?? registry.get(node.op);
   return fn(inputs, context, resolvedNodeParams(node));
@@ -622,6 +649,9 @@ function runSyncPlan<TIn, TOut, TContext>(
   memo?: ComputeMemoCache,
   diagnostics?: ComputeExecutionDiagnostics,
 ): TOut {
+  if (!memo && !diagnostics && plan.syncKernel) {
+    return plan.syncKernel(input, context) as TOut;
+  }
   if (diagnostics) diagnostics.plan = plan;
   const outputs = new Map<string, unknown>([[INPUT_NODE_ID, input]]);
   const remaining = new Map<string, number>(plan.consumerCounts);

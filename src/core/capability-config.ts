@@ -5,6 +5,7 @@ import type { ComputeGraphSpec, ComputeNodeSpec } from "./compute-contracts.ts";
 export type ConfigLayer = "L0" | "L1" | "L2";
 export type RuntimePowerProfile = "eco" | "balanced" | "performance";
 export type SchedulingObjective = "latency" | "throughput";
+export type OptimizationBackendChoice = "auto" | "sqlite" | "portable";
 
 export class PolicyViolationError extends Error {
   readonly contractId: string;
@@ -46,6 +47,16 @@ export interface RuntimePolicyOverride {
 export type RuntimePolicy = Required<Omit<RuntimePolicyOverride, "backgroundCpuBudgetMs">> &
   Pick<RuntimePolicyOverride, "backgroundCpuBudgetMs">;
 
+export interface OptimizationPolicyOverride {
+  readonly backend?: OptimizationBackendChoice;
+  readonly enableRegionLowering?: boolean;
+  readonly enableLinearFusion?: boolean;
+  readonly enableSyncKernel?: boolean;
+  readonly costRatioThreshold?: number;
+}
+
+export type OptimizationPolicy = Required<OptimizationPolicyOverride>;
+
 export interface NmgLayerConfig {
   readonly schemaVersion?: 1;
   readonly allowAlgorithmicOverrides?: boolean;
@@ -83,6 +94,7 @@ export interface NmgLayerConfig {
     readonly minimumRetainedConservativeLowerBound?: number;
   };
   readonly runtime?: RuntimePolicyOverride;
+  readonly optimization?: OptimizationPolicyOverride;
   readonly bindings?: Readonly<Record<string, SubgraphOverrideSpec>>;
 }
 
@@ -366,6 +378,44 @@ export const L0_PARAMETER_SCHEMA: readonly ParameterSchemaEntry[] = [
     affectsResult: false,
     summary: "Anti-starvation wait ceiling promoting queued background tasks.",
   },
+  {
+    path: "optimization.backend",
+    kind: "enum",
+    default: "auto",
+    values: ["auto", "sqlite", "portable"],
+    affectsResult: false,
+    summary: "Backend lowering preference (auto selects SQLite pushdown when supported).",
+  },
+  {
+    path: "optimization.enableRegionLowering",
+    kind: "boolean",
+    default: true,
+    affectsResult: false,
+    summary: "Allow backend adapters to collapse convex subgraph regions into native calls.",
+  },
+  {
+    path: "optimization.enableLinearFusion",
+    kind: "boolean",
+    default: true,
+    affectsResult: false,
+    summary: "Fuse consecutive pure synchronous JS operators into a single physical step.",
+  },
+  {
+    path: "optimization.enableSyncKernel",
+    kind: "boolean",
+    default: true,
+    affectsResult: false,
+    summary: "Compile lock-free synchronous compute graphs into a slot-indexed V8 kernel.",
+  },
+  {
+    path: "optimization.costRatioThreshold",
+    kind: "number",
+    default: 1.0,
+    min: 0.1,
+    max: 2.0,
+    affectsResult: false,
+    summary: "Maximum lowered-to-baseline cost ratio permitted before skipping backend delegation.",
+  },
 ] as const;
 
 const SCHEMA_BY_PATH = new Map(L0_PARAMETER_SCHEMA.map((entry) => [entry.path, entry]));
@@ -564,6 +614,7 @@ const PARAMETER_SECTIONS = [
   "stgSync",
   "stgConsolidation",
   "runtime",
+  "optimization",
 ] as const;
 
 const LAYER_KEYS = new Set<string>([

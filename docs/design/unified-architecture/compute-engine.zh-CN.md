@@ -25,8 +25,16 @@ flowchart TB
 
 - **逻辑计算图（`ComputeGraphSpec`）**：使用 `src/core/compute-contracts.ts` 中的领域契约表达计算需求与数据流，不固化具体后端查询或执行顺序优化。
 - `resolveEffectiveNmgConfig` 绑定 L0 公共默认值与已注册图配方、L1 共享配置、L2 宿主覆盖。`bindMemoryEngineConfig` 向引擎提供检索、视图、投影、写入和生命周期图。HTTP 子句融合、写入预处理和画像也读取同一份有效配置。能力绑定保留来源并参与结果身份。未获准的语义变体触发 `PolicyViolationError`。各层都按同一份声明式 schema 校验：未知分区、未知参数或类型不符会直接失败，不再静默沿用 L0 默认值。
-- `PhysicalExecutionPlan` 解析 `$contract`、下推结构化表达式、消除可合并或无用节点，并可融合不持有命名资源的纯同步链。规划器输出去重后的父节点计数、副作用顺序边和消费者计数。计划缓存区分图和注册表身份、注册表代数及语义配置。
-- `executeComputeGraph` 将每个异步计划交给 `UnifiedRuntimeScheduler.executePlan`，子图递归进入同一就绪循环。`evaluateSyncComputeGraph` 保留同步拓扑执行，普通无 memo 调用无需排队或哈希。两条路径共享算子、输入、缓存签名和输出生命周期规则。
+- `PhysicalExecutionPlan` 解析 `$contract`，经由 `ComputeBackendRegistry`（`src/core/compute-lowering.ts`）将合格逻辑区域委托给对应后端，消除冗余或无用节点，并将合格的纯同步链与 DAG 编译为 V8 固定槽位闭包。`PLAN_CACHE` 按图身份、`ComputeRegistry` 实例令牌与代数、活跃后端适配器版本签名以及语义配置缓存物理计划。
+- `executeComputeGraph` 将每个异步计划交给 `UnifiedRuntimeScheduler.executePlan`，子图递归进入同一就绪循环。`evaluateSyncComputeGraph` 在未传 memo 缓存与诊断器时走预编译的 `syncKernel` 快路径，其余情形回退至同步拓扑解释循环。两条路径共享算子、输入、缓存签名和输出生命周期规则。
+
+## 后端优化委托与降级转换
+
+`ComputeBackendRegistry`（`src/core/compute-lowering.ts`）将声明式后端能力（`supportedExprKinds`、`supportedOperations`、`boundaryConversionCostMs`）与匹配规则（`SQLITE_BACKEND_ADAPTER` `relational-v2`、`PORTABLE_BACKEND_ADAPTER` `portable-v1`、`JS_V8_BACKEND_ADAPTER` `v8-slot-v1`）从公共规划器分离：
+
+- **凸区域校验与成本门控**：`isLegalConvexRegion` 校验单出口支配、DAG 凸性、无外部重入环及副作用／锁安全；`shouldApplyLowering` 仅在降级与转换成本之和不超过 `estimatedBaselineMs * optimization.costRatioThreshold` 时才委托。
+- **SQLite 下推与便携等义回退**：合格算子与区域降级为 `src/core/memory/sqlite-relational.ts` 的单快照查询（`project_memories_with_topology`、`user_profile_query`、`lexical_search_page`、`ordered_get_page`、`profileEvidenceLinks` 与 UTC 偏移时间戳比较），其余情况经 `MemorySnapshotPort` 等义回退至 `portable_scan`。
+- **JS/V8 同步优化**：`compileSyncPlanKernel` 将无锁纯同步 DAG 编译为固定槽位闭包，`compileFusedChainSyncRunner` 预绑定线性 `fused_chain`（无动态 `new Function`），`RerankCandidateIndex` 经 `WeakMap` 复用每批时间戳与索引（[决策记录](../../decisions/implemented/2026-11-26-backend-optimization-delegation-and-lowering.zh-CN.md)）。
 
 ## 运行策略与资源所有权
 
@@ -41,8 +49,13 @@ Node daemon 和 portable RPC 从 `NMG_CONFIG_PATH` 或服务数据目录读取 L
 | `runtime.maxConcurrentBackground` | 限制已准入的后台操作数，包含仍在等待服务 I/O 的操作。前台活跃时可将其收紧到一。 |
 | `runtime.backgroundCpuBudgetMs` | 限制每 100 ms 准入窗口的后台 CPU 毫秒。纯同步片段和 Worker CPU 实测计费，Worker 准入到完成之间保留估计额度。 |
 | `runtime.starvationMaxWaitMs` | 等待超时的后台任务按年龄排序，仍遵守资源和并发约束。 |
+| `optimization.backend` | 选择委托后端目标（`auto`、`sqlite`、`portable`；环境变量 `NMG_OPTIMIZATION_BACKEND`）。 |
+| `optimization.enableRegionLowering` | 启用将相邻关系算子折叠为单快照数据库查询。 |
+| `optimization.enableLinearFusion` | 启用纯无资源同步算子的线性 `fused_chain` 融合。 |
+| `optimization.enableSyncKernel` | 启用面向无锁同步 DAG 的 V8 槽位闭包编译。 |
+| `optimization.costRatioThreshold` | 允许下推的最大 `(lowered + conversion) / baseline` 成本阈值。 |
 
-物理策略独立于结果身份。`maintenance` 和 `stgSync` 保留兼容解析。维护及项目操作由对应的显式入口管理，基于声明反馈的 STG 合并使用独立的 `stgConsolidation`。
+物理策略独立于 `resultIdentityHash`，`PLAN_CACHE` 与 `ComputeMemoCache` 纳入活跃后端适配器版本及下推目标。`maintenance` 和 `stgSync` 保留兼容解析；声明驱动的 STG 合并使用 `stgConsolidation`。
 
 就绪节点按前后台队列和关键路径排序。读写冲突的节点等待完整资源集合，期间不持有部分锁或执行槽。已获取的锁保留到操作实际完成，包括已经对调用者超时的写入。图失败会取消未启动的节点，等待已启动分支结束后再通知调用者关闭快照。动态嵌套任务如果在父任务持有命名锁时请求命名资源，会在准入时失败。普通子图由子节点自行申请资源。写计划状态属于单次变更，持久写入由存储层修订号检查和回执重放仲裁。
 

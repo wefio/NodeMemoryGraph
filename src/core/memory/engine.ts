@@ -1,7 +1,12 @@
-import type { RuntimePolicy } from "../capability-config.ts";
+import type { OptimizationPolicy, RuntimePolicy } from "../capability-config.ts";
 import { withRuntimePolicy, type UnifiedRuntimeScheduler } from "../runtime/scheduler.ts";
 import { randomUUID } from "node:crypto";
-import type { ComputeGraphSpec, ComputeMemoCache, ComputeRegistry } from "../compute-graph.ts";
+import type {
+  ComputeGraphSpec,
+  ComputeMemoCache,
+  ComputeRegistry,
+  PhysicalPlanOptions,
+} from "../compute-graph.ts";
 import type { ExactLookupAnchor } from "../store/search-ranking.ts";
 import { MemoryWriteRejected } from "../write-policy.ts";
 import type {
@@ -81,6 +86,7 @@ export interface MemoryEngineGraphOptions {
   readonly configIdentity?: string;
   readonly configResolver?: () => MemoryEngineGraphOptions;
   readonly runtime?: RuntimePolicy;
+  readonly optimization?: OptimizationPolicy;
   readonly scheduler?: UnifiedRuntimeScheduler;
   readonly getGraph?: ComputeGraphSpec;
   readonly neighborhoodGraph?: ComputeGraphSpec;
@@ -95,6 +101,33 @@ export interface MemoryEngineGraphOptions {
 interface PlannedResult<T> {
   result: T;
   ids: string[];
+}
+
+function resolveEnginePlanOptions(
+  port: MemorySnapshotPort,
+  graphs: MemoryEngineGraphOptions,
+): PhysicalPlanOptions {
+  const opt = graphs.optimization;
+  const backendTarget =
+    opt?.backend === "portable"
+      ? "portable"
+      : opt?.backend === "sqlite"
+        ? "sqlite"
+        : port.hasRelationalPushdown
+          ? "sqlite"
+          : "portable";
+  return {
+    backendTarget,
+    ...(opt
+      ? {
+          enableRegionLowering: opt.enableRegionLowering,
+          enableLinearFusion: opt.enableLinearFusion,
+          enableSyncKernel: opt.enableSyncKernel,
+          costRatioThreshold: opt.costRatioThreshold,
+        }
+      : {}),
+    ...(graphs.configIdentity ? { configIdentity: graphs.configIdentity } : {}),
+  };
 }
 
 /** Memory business orchestrator delegating recall, view, projection, and write-plan compute to ComputeGraphs. */
@@ -161,6 +194,8 @@ export class MemoryEngine {
         port,
         graphs.getGraph ?? DEFAULT_GET_CONTEXT_GRAPH,
         graphs.viewRegistry ?? ENGINE_VIEW_REGISTRY,
+        undefined,
+        resolveEnginePlanOptions(port, graphs),
       ),
     );
   }
@@ -176,6 +211,8 @@ export class MemoryEngine {
         port,
         graphs.neighborhoodGraph ?? DEFAULT_NEIGHBORHOOD_GRAPH,
         graphs.viewRegistry ?? ENGINE_VIEW_REGISTRY,
+        undefined,
+        resolveEnginePlanOptions(port, graphs),
       ),
     );
   }
@@ -203,6 +240,8 @@ export class MemoryEngine {
         port,
         graphs.projectGraph ?? DEFAULT_PROJECT_GRAPH,
         graphs.viewRegistry ?? ENGINE_VIEW_REGISTRY,
+        undefined,
+        resolveEnginePlanOptions(port, graphs),
       ),
     );
   }
@@ -215,6 +254,8 @@ export class MemoryEngine {
         port,
         graphs.userProfileGraph ?? DEFAULT_USER_PROFILE_GRAPH,
         graphs.viewRegistry ?? ENGINE_VIEW_REGISTRY,
+        undefined,
+        resolveEnginePlanOptions(port, graphs),
       ),
     );
   }
@@ -226,30 +267,39 @@ export class MemoryEngine {
     readonly limit?: number;
     readonly now?: string;
   }): Promise<MemoryRecord[]> {
-    return this.withSnapshot(async (port) => {
+    return this.withSnapshot(async (port, _view, graphs) => {
       const effectiveNow = options.now ?? port.now;
-      if (port.projectMemories) {
+      if (port.projectMemories && graphs.optimization?.backend !== "portable") {
         const limit = options.limit ?? 200;
-        const pages = options.memoryTypes.map((memoryType) =>
-          port.projectMemories!({
-            sourceActor: options.sourceActor,
-            memoryType,
-            now: effectiveNow,
-            limit,
-            offset: 0,
-          }),
-        );
-        return pages.flatMap((page) => page.memories);
+        const page = port.projectMemories({
+          sourceActor: options.sourceActor,
+          memoryTypes: options.memoryTypes,
+          now: effectiveNow,
+          limit,
+          offset: 0,
+        });
+        return page.memories;
       }
-      const entities = await port.scan({ kind: "memory", limit: 1000 });
+      const entities = await port.scan({
+        kind: "memory",
+        limit: Math.min(512, Math.max(1, options.limit ?? 512)),
+      });
       const types = new Set(options.memoryTypes);
-      return entities.flatMap((entity) =>
-        entity.kind === "memory" &&
-        types.has(entity.value.memoryType) &&
-        (!options.sourceActor || entity.value.sourceActor === options.sourceActor)
-          ? [entity.value]
-          : [],
-      );
+      return entities
+        .flatMap((entity) =>
+          entity.kind === "memory" &&
+          types.has(entity.value.memoryType) &&
+          (!options.sourceActor || entity.value.sourceActor === options.sourceActor) &&
+          visibleMemory(entity.value, undefined, effectiveNow) &&
+          !entity.value.storageState
+            ? [entity.value]
+            : [],
+        )
+        .sort(
+          (a, b) =>
+            (b.eventTime || b.createdAt).localeCompare(a.eventTime || a.createdAt) ||
+            a.id.localeCompare(b.id),
+        );
     });
   }
 
@@ -511,9 +561,7 @@ export class MemoryEngine {
         options.rerankGraph === undefined && graphs.rerankGraph !== undefined
           ? { ...options, rerankGraph: graphs.rerankGraph }
           : options;
-      const planOptions = graphs.configIdentity
-        ? { configIdentity: graphs.configIdentity }
-        : undefined;
+      const planOptions = resolveEnginePlanOptions(port, graphs);
       return executeEngineSearchGraph(
         { text, options: effectiveOptions, callerNow: port.now, semantic, exact },
         port,

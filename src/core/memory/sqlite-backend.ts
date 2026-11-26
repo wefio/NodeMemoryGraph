@@ -10,15 +10,20 @@ import type {
   MemoryEntity,
   MemoryEntityQuery,
   MemoryHybridPage,
+  MemoryLexicalSearchQuery,
+  MemoryOrderedGetQuery,
   MemoryReadView,
   MemoryRelationalProjectionPage,
   MemoryRelationalProjectionQuery,
+  MemoryRelationalTopologyPage,
+  MemoryUserProfilePage,
+  MemoryUserProfileQuery,
   MemoryVectorCandidate,
   MemoryVectorQuery,
   RelationalMemoryNeighbor,
   SourceNeighbor,
 } from "./backend.ts";
-import type { HistoryRecord, MemoryRecord } from "../types.ts";
+import type { HistoryRecord, MemoryRecord, MemorySearchResult } from "../types.ts";
 import { validateCommit } from "./entity-rows.ts";
 import { graphImportRequest } from "./graph-import.ts";
 import { readLegacyClaimRows, readLegacyMemoryRows } from "../store/legacy-memory-snapshot.ts";
@@ -53,10 +58,15 @@ import { ensureAuthoritativeRelationalSchema } from "./sqlite-entity-migration.t
 import { writeRelationalCommit } from "./sqlite-relational-writes.ts";
 import {
   projectRelationalMemories,
+  projectRelationalMemoriesWithTopology,
   readRelationalCounts,
   readRelationalLexicalMemoryPage,
+  readRelationalLexicalSearchPage,
   readRelationalMemoryNeighbors,
+  readRelationalOrderedGetPage,
+  readRelationalProfileEvidenceLinks,
   readRelationalReceipt,
+  readRelationalUserProfile,
   readSourceTurnMetadata,
   scanRelational,
   scanRelationalBatch,
@@ -177,6 +187,33 @@ export class SqliteMemoryBackend implements MemoryBackend {
     query: MemoryRelationalProjectionQuery,
   ): MemoryRelationalProjectionPage {
     return projectRelationalMemories(this.reader(view), this.namespace, query);
+  }
+
+  projectMemoriesWithTopology(
+    view: MemoryReadView,
+    query: MemoryRelationalProjectionQuery & { includeExplicitEdges?: boolean },
+  ): MemoryRelationalTopologyPage {
+    return projectRelationalMemoriesWithTopology(this.reader(view), this.namespace, query);
+  }
+
+  queryUserProfile(view: MemoryReadView, query: MemoryUserProfileQuery): MemoryUserProfilePage {
+    return readRelationalUserProfile(this.reader(view), this.namespace, query);
+  }
+
+  profileEvidenceLinks(
+    view: MemoryReadView,
+    evidenceIds: readonly string[],
+    now: string,
+  ): Map<string, string[]> {
+    return readRelationalProfileEvidenceLinks(this.reader(view), this.namespace, evidenceIds, now);
+  }
+
+  lexicalSearchPage(view: MemoryReadView, query: MemoryLexicalSearchQuery): MemorySearchResult[] {
+    return readRelationalLexicalSearchPage(this.reader(view), this.namespace, query);
+  }
+
+  orderedGetPage(view: MemoryReadView, query: MemoryOrderedGetQuery): MemorySearchResult[] {
+    return readRelationalOrderedGetPage(this.reader(view), this.namespace, query);
   }
 
   relationalNeighbors(

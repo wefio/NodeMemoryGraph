@@ -25,8 +25,16 @@ flowchart TB
 
 - **Logical graph (`ComputeGraphSpec`):** expresses typed dataflow and domain contracts (`src/core/compute-contracts.ts`) without binding concrete storage queries or execution order tricks.
 - `resolveEffectiveNmgConfig` binds L0 public defaults and registered graph recipes, L1 shared configuration, and L2 host overrides. `bindMemoryEngineConfig` supplies search, views, projection, write and lifecycle graphs to the engine. HTTP service options use the same resolved configuration for clause fusion, preprocessing and profile rendering. Bindings carry provenance and contribute to result identity. Unapproved semantic variants raise `PolicyViolationError`. Every layer is validated against the same declared schema: an unknown section, an unknown parameter, or a value of the wrong type fails closed instead of silently keeping the L0 default.
-- `PhysicalExecutionPlan` resolves `$contract`, lowers structured expressions, eliminates eligible common or dead nodes, and can fuse linear synchronous pure chains without named resources. The planner emits unique-parent readiness counts, effect-order dependencies and consumer counts. Plans are keyed by graph and registry identity, registry generation, and semantic options.
-- `executeComputeGraph` submits every asynchronous plan to `UnifiedRuntimeScheduler.executePlan`. Child plans recursively enter the same dependency loop. `evaluateSyncComputeGraph` retains a synchronous topological loop with no queue or hashing for ordinary calls without memoization. Both use common operator, input, memo-signature and output-lifetime rules.
+- `PhysicalExecutionPlan` resolves `$contract`, delegates eligible logical regions through `ComputeBackendRegistry` (`src/core/compute-lowering.ts`), eliminates common or dead nodes, and compiles eligible pure synchronous chains and DAGs into V8 slot-indexed closures. `PLAN_CACHE` keys compiled plans on graph identity, `ComputeRegistry` identity and generation, active backend adapter version signatures, and semantic options.
+- `executeComputeGraph` submits every asynchronous plan to `UnifiedRuntimeScheduler.executePlan`. Child plans recursively enter the same dependency loop. `evaluateSyncComputeGraph` uses compiled `syncKernel` fast paths when no memo cache or diagnostics are attached, and falls back to the ordinary synchronous loop otherwise. Both use common operator, input, memo-signature and output-lifetime rules.
+
+## Backend optimization delegation and lowering
+
+`ComputeBackendRegistry` (`src/core/compute-lowering.ts`) separates backend capabilities, conversion rules, and lowering targets (`SQLITE_BACKEND_ADAPTER` `relational-v2`, `PORTABLE_BACKEND_ADAPTER` `portable-v1`, `JS_V8_BACKEND_ADAPTER` `v8-slot-v1`) from core planning:
+
+- **Convexity and cost gating:** `isLegalConvexRegion` checks single-exit dominance, DAG convexity, and effect/lock safety; `shouldApplyLowering` delegates when lowered plus conversion cost clears `estimatedBaselineMs * optimization.costRatioThreshold`.
+- **SQLite pushdowns and parity:** Regions lower into indexed SQL queries (`project_memories_with_topology`, `user_profile_query`, `lexical_search_page`, `ordered_get_page`, `profileEvidenceLinks`, UTC-normalized timestamps) in `src/core/memory/sqlite-relational.ts`, falling back identically to `portable_scan`.
+- **JS/V8 kernels:** `compileSyncPlanKernel` compiles lock-free sync DAGs into fixed-slot closures, `compileFusedChainSyncRunner` binds linear `fused_chain` steps without `new Function`, and `RerankCandidateIndex` caches per-batch indices behind a `WeakMap` ([decision](../../decisions/implemented/2026-11-26-backend-optimization-delegation-and-lowering.md)).
 
 ## Runtime policy and resource ownership
 
@@ -41,8 +49,13 @@ Node daemon and portable RPC paths resolve L1 from `NMG_CONFIG_PATH` or the serv
 | `runtime.maxConcurrentBackground` | Caps admitted background operations, including outstanding provider I/O. Foreground work can reduce the cap to one. |
 | `runtime.backgroundCpuBudgetMs` | Caps the profile CPU allowance per 100 ms admission window. Inline slices and measured Worker CPU charge the budget. Worker admission reserves estimated CPU until settlement. |
 | `runtime.starvationMaxWaitMs` | Ages waiting background tasks while retaining resource and concurrency limits. |
+| `optimization.backend` | Backend delegation target (`auto`, `sqlite`, `portable`; env `NMG_OPTIMIZATION_BACKEND`). |
+| `optimization.enableRegionLowering` | Collapses adjacent relational nodes into single-snapshot backend queries. |
+| `optimization.enableLinearFusion` | Merges pure resource-free sync chains into `fused_chain`. |
+| `optimization.enableSyncKernel` | Compiles lock-free sync DAGs into V8 slot closures. |
+| `optimization.costRatioThreshold` | Maximum `(lowered + conversion) / baseline` cost ratio to delegate. |
 
-Physical runtime policies are excluded from result identity. `maintenance` and `stgSync` still parse for compatibility with existing consumers. The engine's explicit maintenance actions and project operations own those lifecycles. Claim-driven STG consolidation consumes its separate `stgConsolidation` policy.
+Physical runtime and optimization policies sit outside `resultIdentityHash`, while `PLAN_CACHE` and `ComputeMemoCache` track backend adapter versions and lowered targets. `maintenance` and `stgSync` stay parsed for compatibility; claim-driven STG consolidation uses `stgConsolidation`.
 
 Ready nodes compete by foreground lane and critical-path rank. A conflicting read/write resource set waits without a partial lock or execution slot. The runtime holds acquired locks through actual settlement, including a timed-out write, and aborts queued siblings on failure. Graph completion drains started siblings before the caller closes its snapshot. A dynamic nested task declaring a lock while its parent holds named resources fails at admission. Ordinary child plans acquire their own resources. Write-plan state belongs to each mutation and durable writer arbitration remains with revision-checked commit and receipt replay.
 
@@ -94,9 +107,6 @@ Production memory paths execute registered compute graphs through narrow ports (
 
 ## Operator onboarding and extension boundaries
 
-When adding or evaluating memory algorithms:
-
 1. Check `MEMORY_COMPUTE_CONTRACTS` in `src/core/compute-contracts.ts` before adding a new operator so compatible contracts share callers and intermediate results.
-2. Separate **engineering optimizations** (semantics-preserving transforms such as CSE, DCE, SQL predicate pushdown, and `fused_chain` linear fusion, validated by exact output equivalence and latency/memory deltas) from **algorithmic experiments** (semantics-changing scorers or recall branches evaluated over frozen benchmarks and `findParetoOptimalGraphs`).
-3. Retire superseded implementations once callers migrate rather than retaining parallel production paths.
-4. Keep external lowering lightweight: structured `relational_query` expressions lower directly to `SqliteMemoryBackend.projectMemories` SQL pushdown or portable `scan` fallback, and pure linear sync JS chains lower via `enableLinearFusion` for V8 inline execution without introducing external compiler toolchains.
+2. Separate **engineering optimizations** (semantics-preserving transforms validated by exact equivalence and latency/memory deltas) from **algorithmic experiments** (evaluated over frozen benchmarks and `findParetoOptimalGraphs`).
+3. Retire superseded implementations once callers migrate rather than retaining parallel paths, and keep lowering lightweight via declarative backend rules and V8 slot closures without external compiler toolchains.
