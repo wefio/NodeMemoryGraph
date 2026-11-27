@@ -2,8 +2,10 @@
 
 [中文](2026-08-24-external-embedding-container.zh-CN.md) · [Terms used](2026-08-24-external-embedding-container.terms.yaml)
 
-**Status:** implemented  
+**Status:** archived
 **Approved:** unrecorded
+**Superseded by:** [retire unmaintained Docker packaging](../implemented/2026-11-26-retire-docker-packaging.md)
+**Archived:** 2026-11-26
 
 ## Problem
 
@@ -42,3 +44,6 @@ The recommended integration base is `nmg:external`; the self-contained BGE image
 remains available as a convenience. The external target requires explicit
 provider configuration for semantic retrieval, but lexical FTS remains usable
 without it. Python benchmark helpers are intentionally outside that runtime.
+
+On `2026-11-26`, this container setup was archived and removed because NMG
+targets native `node:sqlite`, local HTTP, and edge WASM SQLite execution.

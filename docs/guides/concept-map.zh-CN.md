@@ -48,6 +48,10 @@ flowchart LR
 | 维护与巩固 | 确定性索引维护，加上有证据门控的语义晋升或拓扑 proposal | 写入成本必须有界，重复检索不能制造“事实” | [增量存储与索引维护](../design/design/incremental-storage-and-index-maintenance.md#incremental-storage-and-index-maintenance-1) |
 | 可学习控制器 | 在硬预算内可选地学习 allocate、fold 和 rerank 的数值策略 | 可利用自然结果改进控制，但无需让记忆图本身可微 | [可学习路由与最小可微查询图](../design/design/learnable-routing-and-differentiable-query-graphs.md#learnable-routing-and-minimal-differentiable-query-graphs-1) |
 | Lab | 通过显式 lease 使用的 reasoning workspace、graph reasoner 等可选能力 | 实验机制可以被使用，但不能静默成为默认行为 | [会话推理工作区与压缩检查点](../design/design/session-reasoning-workspace-and-compaction-checkpoint.md#session-reasoning-workspace-and-compaction-checkpoint-1) |
+| `ComputeGraphSpec` | 基于领域契约编排检索、重排、投影、画像和写入算子的声明式 DAG | 将业务计算配方从具体存储查询和调度细节中解耦 | [统一记忆计算引擎](../design/unified-architecture/compute-engine.zh-CN.md) |
+| 三级能力配置（`L0`/`L1`/`L2`） | `L0` 默认值与契约校验、共享 `L1` `<dataDir>/nmg.config.json` 及最小 `L2` 宿主覆盖 | 跨宿主统一策略和子图绑定，无需改源码重编译或复制阈值 | [统一记忆计算引擎](../design/unified-architecture/compute-engine.zh-CN.md) |
+| `ComputeBackendRegistry` | 声明式后端能力与凸区域降级规则（SQLite 关系下推、V8 同步槽位核、便携回退） | 在成本比门控与等价边界下将计算委托给成熟数据库和优化后的 JS 执行路径 | [后端优化委托](../design/unified-architecture/compute-engine.zh-CN.md#后端优化委托与降级转换) |
+| `UnifiedRuntimeScheduler` | 带命名资源锁、主机负载治理与工作池放置的事件驱动异步 DAG 调度器 | 消除全波次等待卡顿并维护前后台延迟及 CPU 预算隔离 | [运行策略与资源所有权](../design/unified-architecture/compute-engine.zh-CN.md#运行策略与资源所有权) |
 
 STG、LTG、AG 不是三份同类数据库。STG 和 LTG 是语义驻留层；AG 是驻内存的会话工作图，投影冻结有预算的选择，不等于整个活图。
 
