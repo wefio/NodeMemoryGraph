@@ -2,8 +2,10 @@
 
 [English](2026-08-24-external-embedding-container.md) · [术语](2026-08-24-external-embedding-container.terms.yaml)
 
-**Status:** implemented  
+**Status:** archived
 **Approved:** unrecorded
+**Superseded by:** [退役未维护的 Docker 打包配置](../implemented/2026-11-26-retire-docker-packaging.zh-CN.md)
+**Archived:** 2026-11-26
 
 ## 问题
 
@@ -27,3 +29,5 @@
 ## 后果
 
 推荐的集成基础镜像是 `nmg:external`，自包含 BGE 镜像继续作为便利选择。external target 若要语义检索需要显式配置 provider，但无配置时仍可使用 FTS。Python benchmark 辅助工具有意不放入该运行镜像。
+
+自 `2026-11-26` 起，NMG 转向原生 `node:sqlite`、本地 HTTP 与边缘 WASM SQLite 运行路径，本容器配置已正式归档退役。

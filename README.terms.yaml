@@ -6,7 +6,7 @@ terms:
       The single shared surface that Pi, Claude MCP and DSH use for compact search, exact evidence, remember follow-up, Task Board output, redaction and logical-chain projection; adapters keep only native tool schemas, lifecycle hooks, transport fallback, genuinely host-only actions.
       Pi、Claude MCP 和 DSH 共用的单一共享面，承载紧凑检索、精确证据、remember 后续、任务板输出、脱敏与逻辑链投影；adapter 只保留原生工具 schema、生命周期钩子、传输回退、真正的宿主专属动作。
     owner: README.md
-    anchor: Try it
+    anchor: Integrations
     status: canonical
   - term: honest boundary
     aliases: [诚实的边界]
@@ -14,7 +14,7 @@ terms:
       The README's statement that integrations require setup and memory retrieval and truth are not guaranteed; it is a scope statement, not a readiness guarantee.
       README 说明集成需要配置，且不保证记忆一定被找回或一定为真；它是范围声明，不是就绪度保证。
     owner: README.md
-    anchor: Node Memory Graph (NMG)
+    anchor: Security boundary
     status: canonical
 references:
   - Active Graph
